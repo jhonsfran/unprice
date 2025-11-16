@@ -14,7 +14,7 @@ jobs:
       run:
         working-directory: internal/analytics
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Tinybird CLI
         if: steps.should-deploy.outputs.skip != '1'
