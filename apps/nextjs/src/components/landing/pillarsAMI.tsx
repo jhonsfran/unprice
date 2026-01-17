@@ -5,38 +5,38 @@ import { BarChart, Code, DollarSign, TrendingUp } from "lucide-react"
 import { useRef } from "react"
 import { AnimatedBeamDemo } from "./animated-beam-demo"
 
-const PillarsOfAMI = [
+const PillarsOfPriceOps = [
   {
-    title: "Adaptive Stack",
+    title: "Adaptive Revenue Engine",
     icon: <BarChart className="h-5 w-5" />,
     description:
-      "Implement any pricing model — usage-based, seat-based, feature-based, hybrid — in real-time. React to market shifts, customer signals, or product changes with data, no guesswork.",
+      "Launch any model—usage-based, seat-based, or hybrid—in real-time. Stop guessing and start reacting to market signals instantly.",
     practice: "Pricing is a product surface. Treat it like one.",
   },
   {
-    title: "Growth Autonomy",
+    title: "Engineering Independence",
     icon: <TrendingUp className="h-5 w-5" />,
     description:
-      "Pricing should be owned by growth teams — not trapped in backlogs. You should be able to run experiments at the ease of a click, no engineering effort.",
-    practice: "Pricing logic belongs to business teams. Not JIRA tickets.",
+      "Pricing belongs to Growth, not JIRA. Run experiments and change plans with a click, without wasting a single dev hour.",
+    practice: "Pricing logic belongs to business teams. Not backlogs.",
   },
   {
-    title: "Billing Autonomy",
+    title: "Vendor Freedom",
     icon: <DollarSign className="h-5 w-5" />,
     description:
-      "Never be held hostage by your payment provider again. Swap Stripe for Paddle, crypto, or your own gateway.",
+      "Don't be held hostage by Stripe or Paddle. Swap providers or run multiple gateways without touching your app code.",
     practice: "Payments are infrastructure, not dependencies.",
   },
   {
-    title: "Open Source",
+    title: "Transparent Standard",
     icon: <Code className="h-5 w-5" />,
     description:
-      "Open isn’t just a license. It’s a belief system. The future of monetization must be open.",
-    practice: "We believe the future of monetization must be open, auditable, and programmable",
+      "Monetization is too critical to be a black box. Our AGPL-core ensures your revenue logic is always transparent, auditable, and yours to keep.",
+    practice: "Your revenue engine should be auditable and programmable.",
   },
 ]
 
-export default function PillarsAMI() {
+export default function PillarsPriceOps() {
   const sectionRef = useRef(null)
   const isInView = useInView(sectionRef, { once: true, margin: "-100px" })
 
@@ -77,68 +77,42 @@ export default function PillarsAMI() {
         id="benefits-title"
         className="inline-block py-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-5xl"
       >
-        The Solution: AMI
+        The Solution: PriceOps
       </motion.h2>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        Unprice is not a pricing tool. It’s the foundation of a new category:{" "}
-        <b>Adaptive Monetization Infrastructure</b> — a framework built to make pricing effortless
-        and scalable as your product evolves. We believe pricing is the most overlooked growth lever
-        in SaaS. It’s time to change that — with systems, not guesswork.
+        Unprice is the foundation of a new category: <b>PriceOps Infrastructure</b>. It’s the
+        abstraction layer that transforms pricing from a "hardcoded nightmare" into your sharpest
+        growth engine.
         <br />
         <br />
-        <b>What is AMI?</b>
+        <b>What is PriceOps?</b>
         <br />
-        AMI is foundational infrastructure designed to give you the tools and processes to handle
-        pricing like a billion-dollar business, right from day one. It’s the abstraction layer that
-        transforms pricing from a backend configuration into a core growth engine.
+        PriceOps is the methodology of treating pricing as a dynamic product feature rather than a
+        static configuration. It gives you the power to handle pricing like a billion-dollar SaaS,
+        right from day one.
         <br />
         <br />
-        <b>Why AMI Matters?</b>
-        <br />
-        <ul className="my-4 list-disc pl-10">
-          <li>
-            <span className="font-semibold">Dynamic, Not Static:</span> Kill static pricing. AMI
-            enables you to build a monetization system that learns and adapts as quickly as your
-            product and your market.
-          </li>
-          <li>
-            <span className="font-semibold">Continuous Learning:</span> AMI doesn't just set prices
-            — it continuously collects data, tests, and optimizes. Your pricing evolves in real
-            time, keeping you ahead of the competition.
-          </li>
-          <li>
-            <span className="font-semibold">Segment-Aware:</span> Easily tailor pricing for
-            different customer segments, geographies, or use cases—without engineering bottlenecks
-            or risky manual changes.
-          </li>
-          <li>
-            <span className="font-semibold">Seamless Integration:</span> AMI fits into your existing
-            stack, letting you experiment, iterate, and deploy new pricing models without disrupting
-            your product or your customers.
-          </li>
-        </ul>
-        <br />
-        <b>The AMI Advantage</b>
+        <b>Why PriceOps Matters?</b>
         <br />
         <ul className="my-4 list-disc pl-10">
           <li>
-            <span className="font-semibold">Move Fast, Stay Flexible:</span> Launch new pricing
-            experiments in hours, not months.
+            <span className="font-semibold">Zero Engineering Latency:</span> Launch new experiments
+            in minutes. If you have an idea for a new plan at 10 AM, it should be live by 10:05 AM.
           </li>
           <li>
-            <span className="font-semibold">Unlock Growth:</span> Capture more value from every
-            customer, every segment, every feature.
+            <span className="font-semibold">Hyper-Segmentation:</span> Tailor pricing for different
+            segments, regions, or AI usage patterns without breaking your codebase.
           </li>
           <li>
-            <span className="font-semibold">Future-Proof Your Monetization:</span> As your product
-            and market change, your pricing keeps pace.
+            <span className="font-semibold">Value-Based Capture:</span> Automatically track usage
+            and charge for the actual value you deliver, increasing LTV and reducing churn.
           </li>
         </ul>
         <br />
-        Stop treating pricing as an afterthought
+        Stop treating pricing as an afterthought.
         <br />
         <br />
-        <b>The future of pricing is here.</b>
+        <b>The future of SaaS is Adaptive.</b>
       </motion.div>
 
       <motion.div variants={itemVariants} className="my-28 flex justify-center">
@@ -149,7 +123,7 @@ export default function PillarsAMI() {
         variants={itemVariants}
         className="mt-8 grid grid-cols-4 gap-x-10 gap-y-8 sm:mt-12 sm:gap-y-10"
       >
-        {PillarsOfAMI.map((pillar) => (
+        {PillarsOfPriceOps.map((pillar) => (
           <div key={pillar.title} className="col-span-4 sm:col-span-2 lg:col-span-1">
             <dt className="flex items-center gap-2 font-semibold text-primary-text">
               {pillar.icon}

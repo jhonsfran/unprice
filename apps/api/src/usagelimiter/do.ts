@@ -106,12 +106,14 @@ export class DurableObjectUsagelimiter extends Server {
     const cloudflareCacheStore =
       env.CLOUDFLARE_ZONE_ID &&
       env.CLOUDFLARE_API_TOKEN &&
+      env.CLOUDFLARE_CACHE_DOMAIN &&
       env.CLOUDFLARE_ZONE_ID !== "" &&
-      env.CLOUDFLARE_API_TOKEN !== ""
+      env.CLOUDFLARE_API_TOKEN !== "" &&
+      env.CLOUDFLARE_CACHE_DOMAIN !== ""
         ? new CloudflareStore({
             cloudflareApiKey: env.CLOUDFLARE_API_TOKEN,
             zoneId: env.CLOUDFLARE_ZONE_ID,
-            domain: "cache.unprice.dev",
+            domain: env.CLOUDFLARE_CACHE_DOMAIN,
             cacheBuster: "v2",
           })
         : undefined
@@ -228,7 +230,9 @@ export class DurableObjectUsagelimiter extends Server {
     projectId: string
     now: number
   }): Promise<Result<CurrentUsage, BaseError>> {
-    return await this.entitlementService.getCurrentUsage(data)
+    return await this.entitlementService.getCurrentUsage({
+      ...data,
+    })
   }
 
   public async resetEntitlements(params: {
@@ -298,7 +302,22 @@ export class DurableObjectUsagelimiter extends Server {
         deniedReason: "ENTITLEMENT_ERROR",
       }
     } finally {
-      this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+      this.ctx.waitUntil(
+        (async () => {
+          try {
+            await Promise.all([
+              this.metrics.flush().catch((err: Error) => {
+                this.logger.error("Failed to flush metrics in DO", { error: err.message })
+              }),
+              this.logger.flush().catch((err: Error) => {
+                console.error("Failed to flush logger in DO", err)
+              }),
+            ])
+          } catch (error) {
+            console.error("Error during background flush in DO", error)
+          }
+        })()
+      )
     }
   }
 
@@ -324,7 +343,22 @@ export class DurableObjectUsagelimiter extends Server {
         allowed: false,
       }
     } finally {
-      this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+      this.ctx.waitUntil(
+        (async () => {
+          try {
+            await Promise.all([
+              this.metrics.flush().catch((err: Error) => {
+                this.logger.error("Failed to flush metrics in DO", { error: err.message })
+              }),
+              this.logger.flush().catch((err: Error) => {
+                console.error("Failed to flush logger in DO", err)
+              }),
+            ])
+          } catch (error) {
+            console.error("Error during background flush in DO", error)
+          }
+        })()
+      )
     }
   }
 
@@ -357,7 +391,22 @@ export class DurableObjectUsagelimiter extends Server {
   // when a websocket connection is closed
   onClose(): void | Promise<void> {
     // flush the metrics and logs
-    this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          await Promise.all([
+            this.metrics.flush().catch((err: Error) => {
+              this.logger.error("Failed to flush metrics in DO onClose", { error: err.message })
+            }),
+            this.logger.flush().catch((err: Error) => {
+              console.error("Failed to flush logger in DO onClose", err)
+            }),
+          ])
+        } catch (error) {
+          console.error("Error during background flush in DO onClose", error)
+        }
+      })()
+    )
   }
 
   // websocket message handler
@@ -370,6 +419,21 @@ export class DurableObjectUsagelimiter extends Server {
     // flush the usage records
     await this.entitlementService.flush()
     // flush the metrics and logs
-    this.ctx.waitUntil(Promise.all([this.metrics.flush(), this.logger.flush()]))
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          await Promise.all([
+            this.metrics.flush().catch((err: Error) => {
+              this.logger.error("Failed to flush metrics in DO onAlarm", { error: err.message })
+            }),
+            this.logger.flush().catch((err: Error) => {
+              console.error("Failed to flush logger in DO onAlarm", err)
+            }),
+          ])
+        } catch (error) {
+          console.error("Error during background flush in DO onAlarm", error)
+        }
+      })()
+    )
   }
 }

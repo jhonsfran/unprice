@@ -28,7 +28,7 @@ const features = [
   {
     Icon: FileTextIcon,
     name: "Plan iteration",
-    description: "Version plans, migrate customers, packaging features and more.",
+    description: "Version plans, migrate customers, and packaging features with PriceOps.",
     href: `${DOCS_DOMAIN}/features/plans`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-1",
@@ -61,7 +61,7 @@ const features = [
     Icon: BellIcon,
     name: "Any pricing model",
     description: "Report usage, metering, usage-based pricing, etc.",
-    href: `${DOCS_DOMAIN}/features/pricing`,
+    href: `${DOCS_DOMAIN}concepts/pricing/overview`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-2",
     background: (

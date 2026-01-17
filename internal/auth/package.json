@@ -26,7 +26,7 @@
     "@t3-oss/env-core": "^0.12.0",
     "@unprice/api": "workspace:^",
     "@unprice/config": "workspace:^",
-    "@unprice/db": "^0.1.0",
+    "@unprice/db": "workspace:^",
     "@unprice/error": "workspace:^",
     "@unprice/analytics": "workspace:^",
     "bcryptjs": "^3.0.2",
@@ -38,7 +38,7 @@
   "devDependencies": {
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
-    "@unprice/tsconfig": "^0.1.0",
+    "@unprice/tsconfig": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.3.3"

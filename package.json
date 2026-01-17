@@ -6,7 +6,7 @@
   },
   "workspaces": ["apps/*", "packages/*"],
   "engineStrict": true,
-  "packageManager": "pnpm@8.15.4",
+  "packageManager": "pnpm@10.28.0",
   "scripts": {
     "build": "turbo run build",
     "clean": "git clean -xdf node_modules dist .next && rm -rf node_modules",
@@ -24,6 +24,7 @@
     "manypkg:fix": "pnpm manypkg fix",
     "commit": "cz",
     "bump-versions": "pnpm changeset version && pnpm install",
+    "release": "pnpm build && pnpm changeset publish",
     "prepare": "husky",
     "preinstall": "npx only-allow pnpm"
   },

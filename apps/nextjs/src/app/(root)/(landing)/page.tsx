@@ -1,4 +1,4 @@
-import AMI from "~/components/landing/ami"
+import PriceOpsSection from "~/components/landing/ami"
 import CodeExample from "~/components/landing/code-example"
 import Cta from "~/components/landing/cta"
 import { Features } from "~/components/landing/features"
@@ -11,7 +11,7 @@ export default function Home() {
   return (
     <main className="flex flex-col overflow-hidden pb-28">
       <Hero />
-      <AMI />
+      <PriceOpsSection />
       <Features />
       <CodeExample />
       {/* <Testimonials /> */}

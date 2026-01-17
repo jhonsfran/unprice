@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { subscriptionStatusSchema } from "@unprice/db/validators"
 import * as HttpStatusCodes from "stoker/http-status-codes"
@@ -16,6 +17,7 @@ export const route = createRoute({
   summary: "update ACL",
   description: "Update the ACL for a customer",
   method: "post",
+  hide: env.NODE_ENV === "production",
   tags,
   request: {
     body: jsonContentRequired(

@@ -1,4 +1,5 @@
 import type { Context } from "hono"
+import { endTime, startTime } from "hono/timing"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
@@ -12,12 +13,16 @@ import type { HonoEnv } from "~/hono/env"
 export const bouncer = async (c: Context<HonoEnv>, customerId: string, projectId: string) => {
   const { usagelimiter } = c.get("services")
 
+  startTime(c, "bouncer")
+
   // Check access control list in cache (Edge-cached, ~0-10ms latency)
   const acl = await usagelimiter.getAccessControlList({
     customerId,
     projectId,
     now: Date.now(),
   })
+
+  endTime(c, "bouncer")
 
   if (acl?.customerDisabled) {
     throw new UnpriceApiError({

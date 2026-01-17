@@ -1,40 +1,53 @@
-# Unprice
+# Unprice: The PriceOps Infrastructure for SaaS
 
-> **Warning**
-> This is an alpha version of the product, I would really appreciate your feedback.
+[![GitHub stars](https://img.shields.io/github/stars/jhonsfran1165/unprice?style=social)](https://github.com/jhonsfran1165/unprice)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![License: Commercial](https://img.shields.io/badge/License-Commercial-gold.svg)](LICENSE#L665)
+
+
+> **"Your product is smart, but your pricing is hardcoded."**
 >
-> Feel free to leave feature suggestions.
+> Unprice is the open-source PriceOps infrastructure that decouples your revenue from your codebase. Built for transparency, performance, and growth.
 
-## Your product is smart, but your pricing is dumb.
+## The Problem: The "Black Box" of Revenue
 
-The open-source adaptive monetization infrastructure. Built for SaaS founders who refuse to let static plans strangle their growth. Unprice lets you monetize like a billion-dollar company from day one — without the engineering overhead.
+Most SaaS billing tools are black boxes. You send them your events, and they tell you how much to charge. You have zero visibility into the logic, and zero control over the infrastructure that powers your most critical business asset: **Your Revenue.**
 
-Burn your static pricing. Build revenue machines now.
+## The Solution: Open & Reciprocal PriceOps
 
-## Description
+Unprice is dual-licensed under **AGPL-3.0** and a **Commercial License**.
 
-SaaS pricing was built for a world that no longer exists. Three tiers, feature gating, quarterly pricing reviews. That worked when AI wasn't a thing and buyers behaved predictably.
+### Why AGPL? Transparency & Fairness.
+We believe the infrastructure that handles your money should be **fully transparent and auditable.**
+- **No Hidden Logic**: See exactly how every cent is calculated.
+- **Reciprocal Innovation**: Improvements to the core engine benefit the entire community.
+- **No Vendor Lock-in**: You own the code. You own the data. You own your destiny.
 
-That world is gone.
+*Note: For businesses that cannot or will not open-source their modifications, we offer a **Commercial License** that grants full proprietary freedom and dedicated support.*
 
-Today, your users expect personalized value. Your product ships changes daily. But you're still pricing like it's 2010 — Static plans, gut feelings, spreadsheets pretending to be strategy.
+## Core Features
 
-We believe pricing is the most neglected growth lever in SaaS.
+- **Edge-Native Entitlements**: Check customer permissions at the edge with <100ms latency.
+- **High-Volume Metering**: Process 100k+ events/sec for real-time usage tracking.
+- **Vendor Freedom**: Decouple from Stripe/Paddle. Swap providers without touching your app code.
+- **Atomic Consistency**: Built for mission-critical revenue. Never miss a cent.
+- **Dual-Licensed for Growth**: Start with the transparent AGPL core, scale with a commercial license when you're ready.
 
+## Tech Stack
 
-## Tech Stack & Features
-- Nextjs v14
-- Nextauth v5
-- Drizzle ORM
-- Fully Edge support
-- TRPC
-- Hono API
-- ShadcnUI
-- Postgresql
-- Multitenant support with multi projects
-- Monorepo
-- React query
-- Stripe
-- Resend (optional)
-- Tynibird (optional)
-- SWR cache
+Unprice is built for performance and scale:
+- **Next.js 14** (App Router)
+- **Hono API** & **tRPC**
+- **Drizzle ORM** & **PostgreSQL**
+- **Edge Runtime** support
+- **ShadcnUI** & **Tailwind CSS**
+- **Stripe** integration
+- **Tinybird** (Optional for high-scale analytics)
+
+## Getting Started
+
+[Visit our documentation](https://docs.unprice.dev) for a 5-minute quickstart guide.
+
+---
+
+*Unprice is currently in Alpha. We would love your feedback and feature suggestions.*

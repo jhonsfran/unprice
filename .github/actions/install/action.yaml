@@ -19,7 +19,7 @@ runs:
       uses: pnpm/action-setup@v4
       if: ${{ inputs.ts == 'true' }}
       with:
-        version: 8.15.4
+        version: 10.28.0
         run_install: false
 
     - uses: actions/setup-python@v5
@@ -33,7 +33,7 @@ runs:
       uses: actions/setup-node@v4
       if: ${{ inputs.ts == 'true' }}
       with:
-        node-version: 20.11.1
+        node-version: 20.17.0
         cache: 'pnpm'
 
     - name: Get pnpm store directory

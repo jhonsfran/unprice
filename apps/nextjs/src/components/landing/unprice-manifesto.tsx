@@ -23,39 +23,40 @@ interface SectionData {
 // Define sections with precise geometric positions
 const sections: Record<SectionKey, SectionData> = {
   growth: {
-    title: "Growth Autonomy",
+    title: "PriceOps Autonomy",
     icon: <TrendingUp className="h-full w-full p-3" />,
     description:
-      "Your engineering team should be decoupled from your marketing and growth team. Imagine running pricing experiments at the ease of a click, no engineering effort.",
+      "Your engineering team should be decoupled from your growth strategy. Launch experiments at the click of a button, with zero dev effort.",
     color: "bg-background-background",
     position: {
       angle: 270, // Top (270 degrees from right horizontal)
     },
   },
   billing: {
-    title: "Sovereign Billing",
+    title: "Sovereign Revenue",
     icon: <DollarSign className="h-full w-full p-3" />,
     description:
-      "Billing providers should be decoupled from your app. Imagine being able to run multiple plans for multiple providers. Adaptive monetization requires the flexibility to change payment provider without too much effort.",
+      "Decouple billing providers from your app code. Swap Stripe for Paddle or run multiple gateways without a single deployment.",
     color: "bg-background-background",
     position: {
       angle: 30, // Bottom left (30 degrees from right horizontal)
     },
   },
   data: {
-    title: "Adaptive Stack",
+    title: "Adaptive Engine",
     icon: <BarChart className="h-full w-full p-3" />,
     description:
-      "Data driven is no longer enough. You need an adaptive tech stack allows you to adapt your pricing and plans to your customers.",
+      "Data-driven is just the start. You need an adaptive layer that evolves your pricing in real-time based on customer value.",
     color: "bg-background-background",
     position: {
       angle: 150, // Bottom right (150 degrees from right horizontal)
     },
   },
   opensource: {
-    title: "Open Source",
+    title: "Transparent & Reciprocal",
     icon: <Code className="h-full w-full p-3" />,
-    description: "Of course all this is powered by open source software. You should own the code.",
+    description:
+      "Monetization is too critical for black boxes. We use a reciprocal open-source license to ensure transparency and innovation remain at the core of your revenue engine.",
     color: "bg-background-background",
     position: {
       angle: 0, // Center (not used for positioning)
@@ -270,7 +271,7 @@ export function UnpriceManifesto() {
               transition={{ duration: 0.5, delay: 0.6 }}
               className="text-background-text text-sm"
             >
-              better pricing for SaaS
+              the PriceOps Infrastructure
             </motion.div>
           </motion.div>
 
@@ -517,7 +518,7 @@ export function UnpriceManifesto() {
           animate={{ opacity: animationPhase >= 3 ? 1 : 0 }}
           transition={{ duration: 0.5, delay: 1 }}
         >
-          <p className="text-sm">Adaptive monetization infrastructure principles</p>
+          <p className="text-sm">PriceOps infrastructure principles</p>
         </motion.div>
       </div>
     </TooltipProvider>

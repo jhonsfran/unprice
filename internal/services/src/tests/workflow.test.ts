@@ -139,6 +139,11 @@ describe("Golden Scenario - Customer Journey", () => {
         set: vi.fn(),
         remove: vi.fn(),
       },
+      negativeEntitlements: {
+        get: vi.fn().mockResolvedValue({ val: null }),
+        set: vi.fn(),
+        remove: vi.fn(),
+      },
     } as unknown as Cache
 
     // Mock Database with enough functionality for the workflow

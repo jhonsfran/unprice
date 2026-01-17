@@ -5,7 +5,7 @@
   "colors": {
     "primary": "#ab6400",
     "light": "#ffc53d",
-    "dark": "#ab6400"
+    "dark": "#ffc53d"
   },
   "favicon": "/favicon.ico",
   "api": {
@@ -53,6 +53,8 @@
                 "pages": [
                   "concepts/pricing/overview",
                   "concepts/pricing/plans",
+                  "concepts/pricing/feature-types",
+                  "concepts/pricing/usage-metering",
                   "concepts/pricing/entitlements"
                 ]
               }
@@ -87,10 +89,7 @@
           },
           {
             "group": "Endpoints",
-            "openapi": {
-              "source": "/api-reference/openapi.json",
-              "directory": "api-reference"
-            }
+            "openapi": "openapi.json"
           }
         ]
       },
@@ -109,7 +108,6 @@
                     "group": "Customers",
                     "pages": [
                       "libraries/ts/sdk/customers/signup",
-                      "libraries/ts/sdk/customers/get-active-phase",
                       "libraries/ts/sdk/customers/get-subscription",
                       "libraries/ts/sdk/customers/get-entitlements",
                       "libraries/ts/sdk/customers/reset-entitlements",
@@ -117,7 +115,8 @@
                       "libraries/ts/sdk/customers/create-payment-method",
                       "libraries/ts/sdk/customers/can",
                       "libraries/ts/sdk/customers/get-usage",
-                      "libraries/ts/sdk/customers/report-usage"
+                      "libraries/ts/sdk/customers/report-usage",
+                      "libraries/ts/sdk/customers/update-acl"
                     ]
                   },
                   {
@@ -173,18 +172,17 @@
     "links": [
       {
         "label": "Support",
-        "href": "mailto:jhonsfran@gmail.com"
+        "href": "mailto:seb@unprice.dev"
       },
       {
         "label": "Manifesto",
         "href": "https://unprice.dev/manifesto"
+      },
+      {
+        "label": "Dashboard",
+        "href": "https://app.unprice.dev"
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.unprice.dev"
-    }
+    ]
   },
   "footer": {
     "socials": {

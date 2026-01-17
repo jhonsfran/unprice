@@ -1,61 +1,46 @@
 ---
-title: Plans
-description: "How pricing works"
-
+title: Plans & Versions
+description: "Managing the lifecycle of your product pricing."
 ---
 
-Many products today are delivered as a service, with a tiered pricing model based on access to the service ("seats"), a measure of consumption of some aspect of the service ("metering"), or some combination of these.
+Plans and Plan Versions are the primary objects you interact with in Unprice to define your offering.
 
-Unprice follows the PriceOps methodology for pricing model definition and implementation that supports iteration, safety, and organizational alignment.
+## Plans: The Identity
+A **Plan** represents a specific product offering (e.g., "Startup Plan", "Enterprise Plan"). It acts as a container for your features and their pricing history.
 
-## What is Unprice?
+Key properties of a Plan:
+- **Name**: The display name of the plan.
+- **Slug**: A unique identifier used in the API and SDK.
+- **Enterprise**: A flag to indicate if this is a custom enterprise plan.
 
-Unprice is a layer between your App and payment providers that lets you handle subscription, billing, customers and pricing out of the box. We take care of tracking usage and veryfing if customers have access to features, all that with an easy to use SDK. Offering you an analytics Dashboard to get insights.
+## Plan Versions: The Logic
+Every time you want to change the price of a plan or add/remove a feature, you create a new **Plan Version**. This is the core of the PriceOps workflow.
 
-<Frame caption="unprice overview">
-  <img src="/images/unprice-overview.png"/>
-</Frame>
+### Why use Versions?
+1. **Immutability**: Once a version is published, it cannot be changed. This guarantees that customers subscribed to that version will always have the same billing logic.
+2. **Scheduled Changes**: You can prepare a new version in advance and publish it when ready.
+3. **A/B Testing**: You can have multiple versions of the same plan active simultaneously to test different pricing strategies.
 
-## Why you should use Unprice?
+### Version Lifecycle
+- **Draft**: The version is being configured. It's not visible to customers.
+- **Published**: The version is active and can be used for new subscriptions.
+- **Archived**: The version is no longer available for new subscriptions, but existing customers on this version remain unaffected.
 
-As matter of fact you shouldn't, if you don't want to prepare for the upcoming market change in pricing for software as a service, you can continue with the old paradigm. Unprice is the by product of putting some foundational principles in practice to move from static monetization to adaptive monetivation. We explain more in detail in our [manifesto](https://unprice.dev/manifesto). You could follow those principles to build your own stack.
+## Configuration Details
 
-## Isn't this just a wrapper for Stripe?
+When configuring a Plan Version, you define:
 
-Yes, you are absolutly right. Unprice has an interface to communicate with different payment providers, not only Stripe. The main value you get from Unprice is the iteration on prices, the ability to change payment providers and the analytics insights. The idea is not let you vendor lock and adapt quickly to pricing changes.
+### Billing Configuration
+- **Interval**: How often the customer is billed (e.g., monthly, yearly).
+- **Currency**: The currency for all prices in this version (e.g., USD, EUR).
+- **Trial Period**: Optional number of days for a free trial.
 
+### Feature Assignment
+For each feature included in the version, you specify:
+- **Price**: The cost based on the feature type (Flat, Tier, etc.).
+- **Limit**: Optional hard limit on usage.
+- **Reset Logic**: When the usage counter should reset (usually at the start of the billing cycle).
 
-## New to Unprice?
-
-Start using Unprice with your existing project, or start from scratch.
-
-<CardGroup cols={2}>
-  <Card
-    title="Quickstart"
-    icon="bolt-lightning"
-    href="/quickstart/onboarding-plan"
-  >
-    Get started with Unprice.
-  </Card>
-  <Card
-    title="Features"
-    icon="list"
-    href="/apis/introduction"
-  >
-    Learn how to use API Keys to protect, and scale your APIs
-  </Card>
-</CardGroup>
-
-
-## Join the community
-
-Join the Unprice community to ask questions, discuss best practices, and share tips.
-
-<CardGroup cols={3}>
-  <Card title="Discord" icon="discord" href="https://unprice.com/discord" />
-  <Card
-    title="GitHub"
-    icon="github"
-    href="https://github.com/jhonsfran1165/unprice"
-  ></Card>
-</CardGroup>
+<Note>
+  Unprice handles the complexity of "legacy" pricing automatically. If you increase the price of your "Pro" plan by creating a new version, your existing customers remain on the old version until you explicitly choose to migrate them.
+</Note>

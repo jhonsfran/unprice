@@ -1297,10 +1297,10 @@ export class CustomerService {
             })
           )
         })
-
-      // Invalidate the ACL cache so the next request fetches the disabled status
-      this.waitUntil(this.invalidateAccessControlList(customerId, projectId))
     })
+
+    // Invalidate the ACL cache so the next request fetches the disabled status
+    await this.invalidateAccessControlList(customerId, projectId)
 
     return Ok({
       success: true,

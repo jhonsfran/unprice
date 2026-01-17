@@ -1,38 +1,30 @@
 ---
 title: Welcome to Unprice
-description: "Better pricing for saas"
+description: "PriceOps Infrastructure for SaaS."
 mode: wide
 ---
 
-The open-source adaptive monetization infrastructure. Built for SaaS founders who refuse to let static plans strangle their growth.
+**Stop hardcoding your revenue.** Unprice is the open-source PriceOps infrastructure that decouples your pricing models, limits, and entitlements from your application code.
+
+## The 3-Second Value
+- **Decouple**: Move plans, tiers, and limits from code to a dynamic dashboard.
+- **Independence**: Launch new pricing experiments without a single JIRA ticket or deployment.
+- **Adaptive Models**: Built-in support for Usage-based, Tiered, and Hybrid pricing with automated capture.
 
 ## What is Unprice?
 
-Unprice is a layer between your App and payment providers that lets you handle subscription, billing, customers and pricing out of the box. We take care of tracking usage and veryfing if customers have access to features, all that with an easy to use SDK. Offering you an analytics Dashboard to get insights from your customers and how pricing strategies impact your metrics.
+Unprice acts as an intelligent PriceOps layer between your App and payment providers (like Stripe). We handle the complexity of:
+1. **Usage Metering**: Aggregating consumption across any period or scope.
+2. **Entitlements**: Real-time verification of what a customer can actually do.
+3. **Adaptive Revenue**: Automated proration, invoicing, and cross-provider management.
 
-<Frame caption="unprice overview">
-  <img src="/images/unprice-overview.png"/>
+<Frame caption="Unprice architecture overview">
+  <img src="/images/unprice-overview.png" alt="Unprice architecture overview"/>
 </Frame>
 
-## Why you should use Unprice?
+## Why PriceOps?
 
-As matter of fact you shouldn't, if you don't want to prepare for the upcoming market change in pricing for software as a service, you can continue with the old paradigm. Unprice is the by product of putting some foundational principles in practice to move from static monetization to adaptive monetivation. We explain more in detail in our [manifesto](https://unprice.dev/manifesto). You could follow those principles to build your own stack.
-
-If you decide to use Unprice you will have:
-
-1. A single source of truth programmatically drives the customer purchase flow, billing, and feature delivery.
-2. Separation of Ownership: changes in one area do not require tightly-coupled changes in any other area. Meaining when Marketing or growth change prices you don't need engineering efforts.
-3. Pricing plans can be added without changing application code, or affecting existing customers. We follow and append only model to push new versions of pricing.
-
-
-## Isn't this just a wrapper for Stripe?
-
-Yes, you are partially right. Unprice has an interface to communicate with different payment providers, not only Stripe. The main value you get from Unprice is the iteration on prices, the ability to change payment providers and the analytics insights with minimal engineering effort. The idea is not let you vendor lock and adapt quickly to market changes.
-
-
-## New to Unprice?
-
-Start using Unprice with your existing project, or start from scratch.
+Most SaaS billing is static and brittle. Changing a price requires engineering effort, testing, and deployment. Unprice follows the **PriceOps** methodology, allowing Growth teams to own the pricing strategy while Engineering focuses on the core product.
 
 <CardGroup cols={2}>
   <Card
@@ -40,17 +32,16 @@ Start using Unprice with your existing project, or start from scratch.
     icon="bolt-lightning"
     href="/quickstart/onboarding-plan"
   >
-    Get started with Unprice.
+    Go from zero to PriceOps in under 5 minutes.
   </Card>
   <Card
-    title="Features"
-    icon="list"
-    href="/apis/introduction"
+    title="Core Concepts"
+    icon="book-open"
+    href="/concepts/pricing/overview"
   >
-    Learn how to use API Keys to protect, and scale your APIs
+    Learn about PriceOps, Feature Types, and Usage Metering.
   </Card>
 </CardGroup>
-
 
 ## Join the community
 

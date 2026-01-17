@@ -13,7 +13,6 @@ import { ApiProjectService } from "~/project"
 import { UsageLimiterService } from "~/usagelimiter/service"
 
 import { SubscriptionService } from "@unprice/services/subscriptions"
-import { endTime, startTime } from "hono/timing"
 import { NoopUsageLimiter } from "~/usagelimiter/noop"
 
 /**
@@ -51,6 +50,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const requestId = newId("request")
     const requestStartedAt = Date.now()
     const performanceStart = performance.now()
+    // start a new timer
 
     c.set("isolateId", isolateId)
     c.set("isolateCreatedAt", isolateCreatedAt)
@@ -62,8 +62,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.res.headers.set("unprice-request-id", requestId)
 
     const emitMetrics = c.env.EMIT_METRICS_LOGS.toString() === "true"
-    // start a new timer
-    startTime(c, "initLogger")
 
     const logger = emitMetrics
       ? new AxiomLogger({
@@ -115,11 +113,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
           },
         })
 
-    endTime(c, "initLogger")
-
-    // start a new timer
-    startTime(c, "initMetrics")
-
     const metrics = emitMetrics
       ? new LogdrainMetrics({
           requestId,
@@ -131,11 +124,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
           continent: stats.continent,
         })
       : new NoopMetrics()
-
-    endTime(c, "initMetrics")
-
-    // start a new timer
-    startTime(c, "initCache")
 
     const cacheService = new CacheService(
       {
@@ -149,12 +137,14 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const cloudflareCacheStore =
       c.env.CLOUDFLARE_ZONE_ID &&
       c.env.CLOUDFLARE_API_TOKEN &&
+      c.env.CLOUDFLARE_CACHE_DOMAIN &&
       c.env.CLOUDFLARE_ZONE_ID !== "" &&
-      c.env.CLOUDFLARE_API_TOKEN !== ""
+      c.env.CLOUDFLARE_API_TOKEN !== "" &&
+      c.env.CLOUDFLARE_CACHE_DOMAIN !== ""
         ? new CloudflareStore({
             cloudflareApiKey: c.env.CLOUDFLARE_API_TOKEN,
             zoneId: c.env.CLOUDFLARE_ZONE_ID,
-            domain: "cache.unprice.dev",
+            domain: c.env.CLOUDFLARE_CACHE_DOMAIN,
             cacheBuster: "v2",
           })
         : undefined
@@ -171,11 +161,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     const cache = cacheService.getCache()
 
-    endTime(c, "initCache")
-
-    // start a new timer
-    startTime(c, "initDb")
-
     const db = createConnection({
       env: c.env.NODE_ENV,
       primaryDatabaseUrl: c.env.DATABASE_URL,
@@ -185,22 +170,12 @@ export function init(): MiddlewareHandler<HonoEnv> {
       singleton: false,
     })
 
-    endTime(c, "initDb")
-
-    // start a new timer
-    startTime(c, "initAnalytics")
-
     const analytics = new Analytics({
       emit: c.env.EMIT_ANALYTICS.toString() === "true",
       tinybirdToken: c.env.TINYBIRD_TOKEN,
       tinybirdUrl: c.env.TINYBIRD_URL,
       logger,
     })
-
-    endTime(c, "initAnalytics")
-
-    // start a new timer
-    startTime(c, "initCustomer")
 
     const customer = new CustomerService({
       logger,
@@ -212,11 +187,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       db,
     })
 
-    endTime(c, "initCustomer")
-
-    // start a new timer
-    startTime(c, "initSubscription")
-
     const subscription = new SubscriptionService({
       logger,
       analytics,
@@ -226,10 +196,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
       metrics,
     })
-
-    endTime(c, "initSubscription")
-    // start a new timer
-    startTime(c, "initUsageLimiter")
 
     const usageLimiterService = c.env.usagelimit
       ? new UsageLimiterService({
@@ -249,11 +215,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
         })
       : new NoopUsageLimiter()
 
-    endTime(c, "initUsageLimiter")
-
-    // start a new timer
-    startTime(c, "initProject")
-
     const project = new ApiProjectService({
       cache,
       analytics,
@@ -265,11 +226,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       requestId,
     })
 
-    endTime(c, "initProject")
-
-    // start a new timer
-    startTime(c, "initApikey")
-
     const apikey = new ApiKeysService({
       cache,
       analytics,
@@ -280,8 +236,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
       hashCache,
     })
-
-    endTime(c, "initApikey")
 
     c.set("services", {
       version: "1.0.0",

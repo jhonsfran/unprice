@@ -1,61 +1,67 @@
 ---
 title: Entitlements
-description: "How pricing works"
-
+description: "How pricing translates into customer access."
 ---
 
-Many products today are delivered as a service, with a tiered pricing model based on access to the service ("seats"), a measure of consumption of some aspect of the service ("metering"), or some combination of these.
+**Entitlements** are the bridge between your pricing models and your application's logic. They represent what a customer is allowed to do based on their active subscription.
 
-Unprice follows the PriceOps methodology for pricing model definition and implementation that supports iteration, safety, and organizational alignment.
+## The Entitlement Flow
 
-## What is Unprice?
+1. **Subscription**: A customer subscribes to a specific **Plan Version**.
+2. **Entitlements Generated**: Unprice automatically extracts the features and limits from that Plan Version and assigns them to the customer as entitlements.
+3. **Verification**: Your application uses the Unprice SDK to check if a customer has the required entitlement before performing an action.
 
-Unprice is a layer between your App and payment providers that lets you handle subscription, billing, customers and pricing out of the box. We take care of tracking usage and veryfing if customers have access to features, all that with an easy to use SDK. Offering you an analytics Dashboard to get insights.
+## Features vs. Entitlements
 
-<Frame caption="unprice overview">
-  <img src="/images/unprice-overview.png"/>
-</Frame>
+It's helpful to think of the distinction this way:
+- **Features** are what you *sell*.
+- **Entitlements** are what the customer *has*.
 
-## Why you should use Unprice?
+For example, if you have a feature called "Monthly Exports" with a limit of 100, a subscribed customer has an **Entitlement** to perform "Monthly Exports" with a remaining balance of 100.
 
-As matter of fact you shouldn't, if you don't want to prepare for the upcoming market change in pricing for software as a service, you can continue with the old paradigm. Unprice is the by product of putting some foundational principles in practice to move from static monetization to adaptive monetivation. We explain more in detail in our [manifesto](https://unprice.dev/manifesto). You could follow those principles to build your own stack.
+## Types of Checks
 
-## Isn't this just a wrapper for Stripe?
+Using the Unprice SDK, you can perform different types of entitlement checks:
 
-Yes, you are absolutly right. Unprice has an interface to communicate with different payment providers, not only Stripe. The main value you get from Unprice is the iteration on prices, the ability to change payment providers and the analytics insights. The idea is not let you vendor lock and adapt quickly to pricing changes.
+### 1. Access & Usage Check (Can)
+Check if a customer has access to a feature, and optionally check if they have enough balance for a specific amount of usage.
 
+**Why check usage in `can`?**
+Checking usage *before* performing an action (and before reporting it) allows you to fail gracefully without creating negative usage or partial transactions if the customer is over their limit.
 
-## New to Unprice?
+```typescript
+const { result, error } = await unprice.customers.can({
+  customerId: "cust_123",
+  featureSlug: "ai-generations",
+  usage: 5 // Check if customer can consume 5 units
+});
 
-Start using Unprice with your existing project, or start from scratch.
+if (result?.allowed) {
+  // 1. Perform the expensive operation
+  // 2. Then report the usage (see below)
+}
+```
 
-<CardGroup cols={2}>
-  <Card
-    title="Quickstart"
-    icon="bolt-lightning"
-    href="/quickstart/onboarding-plan"
-  >
-    Get started with Unprice.
-  </Card>
-  <Card
-    title="Features"
-    icon="list"
-    href="/apis/introduction"
-  >
-    Learn how to use API Keys to protect, and scale your APIs
-  </Card>
-</CardGroup>
+### 2. Report & Verify (Atomic)
+Report usage and verify access in a single atomic call. This is the most common way to track metered features.
 
+```typescript
+const { result, error } = await unprice.customers.reportUsage({
+  customerId: "cust_123",
+  featureSlug: "api-requests",
+  usage: 30,
+  idempotenceKey: "unique-uuid-here"
+});
 
-## Join the community
+if (result?.allowed) {
+  // Process the request
+} else {
+  // Return "Limit reached" error
+}
+```
 
-Join the Unprice community to ask questions, discuss best practices, and share tips.
+## Benefits of the Entitlement System
 
-<CardGroup cols={3}>
-  <Card title="Discord" icon="discord" href="https://unprice.com/discord" />
-  <Card
-    title="GitHub"
-    icon="github"
-    href="https://github.com/jhonsfran1165/unprice"
-  ></Card>
-</CardGroup>
+- **Decoupling**: Your code doesn't need to know about "Gold" or "Silver" plans. It only needs to know if the customer can perform a specific action.
+- **Real-time Updates**: If a customer upgrades their plan, their entitlements are updated instantly across all your services.
+- **Grace Periods**: Unprice allows you to configure "overage" strategies, letting customers exceed their limits while you notify them to upgrade.

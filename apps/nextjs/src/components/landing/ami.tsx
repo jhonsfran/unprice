@@ -5,7 +5,7 @@ import { motion, useInView } from "framer-motion"
 import Link from "next/link"
 import { useRef } from "react"
 
-export default function AMI() {
+export default function PriceOpsSection() {
   const sectionRef = useRef(null)
   const isInView = useInView(sectionRef, { once: true, margin: "-100px" })
 
@@ -46,25 +46,25 @@ export default function AMI() {
         id="features-title"
         className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
-        Adaptive Monetization Infrastructure
+        PriceOps Infrastructure
       </motion.h2>
       <motion.div variants={itemVariants} className="mt-6 text-justify text-lg">
         SaaS pricing was built for a world that no longer exists. Three tiers, feature gating,
         quarterly pricing reviews.
         <br />
         <br />
-        That world is gone.
+        That world is over.
         <br />
         <br />
         Today, your users expect personalized value. Your product ships changes daily. But you're
-        still pricing like it's 2010 — Static plans, gut feelings, spreadsheets pretending to be
-        strategy.
+        still pricing like it's 2010 — Static plans, gut feelings, and hardcoded logic.
         <br />
         <br />
-        We believe pricing is the most neglected growth lever in SaaS.
+        We believe pricing is the most neglected growth lever in SaaS. It's time to stop waiting on
+        engineering and start iterating on revenue.
         <div className="mt-10 flex justify-end">
           <Link href={`${BASE_URL}/manifesto`}>
-            <Button variant="outline">Read more</Button>
+            <Button variant="outline">Read the Manifesto</Button>
           </Link>
         </div>
       </motion.div>

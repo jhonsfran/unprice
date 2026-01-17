@@ -1,0 +1,59 @@
+---
+title: "Update ACL"
+description: "Update the Access Control List (ACL) for a customer"
+---
+
+The `updateACL` method allows you to manually override access controls for a specific customer. This is useful for manually disabling a customer, marking a limit as reached, or updating their subscription status outside of the standard flow.
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.customers.updateACL({
+  customerId: "cus_1234567890",
+  updates: {
+    customerDisabled: true,
+    customerUsageLimitReached: false
+  }
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log("ACL updated successfully");
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="customerId" type="string" required>
+    The ID of the customer to update access for
+</ParamField>
+
+<ParamField body="updates" type="object" required>
+    The updates to apply to the customer's access control
+
+    <Expandable title="properties">
+        <ParamField body="customerDisabled" type="boolean">
+            Whether to manually disable the customer's access to all features.
+        </ParamField>
+        <ParamField body="customerUsageLimitReached" type="boolean">
+            Whether to manually flag that the customer has reached their usage limit.
+        </ParamField>
+        <ParamField body="subscriptionStatus" type="string">
+            Manually update the subscription status. Possible values: `active`, `trialing`, `canceled`, `expired`, `past_due`.
+        </ParamField>
+    </Expandable>
+</ParamField>
+
+## Response
+
+Returns an empty object `{}` on success.

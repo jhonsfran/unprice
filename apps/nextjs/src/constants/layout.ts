@@ -5,20 +5,29 @@ export const navItems = [
   {
     href: `${BASE_URL}/manifesto`,
     title: "Manifesto",
+    isMarketing: true,
+  },
+  {
+    href: "https://unprice.userjot.com/",
+    title: "Feedback",
+    target: "_blank",
+    isMarketing: false,
   },
   {
     href: `${DOCS_DOMAIN}/docs`,
     title: "Docs",
+    isMarketing: true,
   },
   {
     href: `${PRICING_DOMAIN}/`,
     title: "Pricing",
+    isMarketing: true,
   },
-] satisfies { href: string; title: string }[]
+] satisfies { href: string; title: string; target?: string; isMarketing?: boolean }[]
 
 export const siteConfig: SiteConfig = {
   name: "Unprice",
-  description: "Adaptive monetization infrastructure. Better pricing for SaaS.",
+  description: "PriceOps infrastructure for SaaS. Stop hardcoding your revenue.",
   links: {
     twitter: "https://github.com/jhonsfran1165/unprice",
     github: "https://github.com/jhonsfran1165/unprice",

@@ -2,7 +2,7 @@ import { Pool, neonConfig } from "@neondatabase/serverless"
 import { FEATURE_SLUGS } from "@unprice/config"
 import * as schema from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless"
 import ws from "ws"
 
@@ -29,7 +29,7 @@ async function main() {
     .insert(schema.users)
     .values({
       id: newId("user"),
-      email: "jhonsfran@gmail.com",
+      email: "seb@unprice.dev",
       name: "sebastian franco",
       emailVerified: new Date(),
       image: "",
@@ -143,7 +143,12 @@ async function main() {
 
   // get user's email
   let unpriceOwner = await db.query.customers.findFirst({
-    where: (fields, operators) => operators.eq(fields.email, "jhonsfran@gmail.com"),
+    where: (fields, operators) =>
+      and(
+        operators.eq(fields.email, "seb@unprice.dev"),
+        operators.eq(fields.projectId, project.id),
+        operators.eq(fields.isMain, true)
+      ),
   })
 
   if (!unpriceOwner) {
@@ -154,7 +159,24 @@ async function main() {
         name: "unprice",
         projectId: project.id,
         email: user.email,
+        timezone: "UTC",
+        defaultCurrency: "EUR",
+        isMain: true,
       })
+      .returning()
+      .then((customer) => customer[0])
+  } else {
+    // update
+    unpriceOwner = await db
+      .update(schema.customers)
+      .set({
+        timezone: "UTC",
+        defaultCurrency: "EUR",
+        isMain: true,
+        email: user.email,
+        name: user.name ?? user.email,
+      })
+      .where(eq(schema.customers.id, unpriceOwner.id))
       .returning()
       .then((customer) => customer[0])
   }
@@ -173,11 +195,11 @@ async function main() {
     .values(
       Object.values(FEATURE_SLUGS).map((feature) => ({
         id: newId("feature"),
-        slug: feature,
-        title: feature,
-        description: feature,
+        slug: feature.SLUG,
+        title: feature.TITLE,
+        description: feature.DESCRIPTION,
         projectId: project.id,
-        unit: "units",
+        unit: feature.UNIT,
       }))
     )
     .onConflictDoNothing()

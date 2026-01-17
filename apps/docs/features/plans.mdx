@@ -1,64 +1,37 @@
 ---
-title: 'Create Plan'
-description: 'Create your first Plan'
+title: 'Plans'
+description: 'How to create and manage plans in the Unprice Dashboard.'
 ---
 
-## 1. Create your Unprice account
+The Plans section is where you define your product offerings and their pricing models.
 
-The first step to using Unprice is to create an account. You can do this by visiting [app.unprice.dev](https://app.unprice.dev) or by clicking the Dashboard button in the top right of your screen.
+## 1. Creating a Plan
+Navigate to the **Plans** tab in your dashboard and click "New Plan". You'll need to provide:
+- **Name**: The name of the plan (e.g., "Scale").
+- **Slug**: A unique identifier for your SDK calls (e.g., `scale`).
+- **Description**: A brief summary of what this plan includes.
 
-<Frame caption="Create your account">
-  <img src="/images/login.png" alt="Sign Up Page for Unprice"/>
+## 2. Defining Features
+Once a plan is created, you can assign features to it. For each feature, you must select its pricing type:
+- **Flat**: Fixed price.
+- **Tier**: Volume or Graduated pricing.
+- **Usage**: Consumption-based.
+- **Package**: Bundle pricing.
+
+## 3. Managing Versions
+Every plan in Unprice uses versioning. When you want to change a price or add a feature:
+1. Create a **New Version** of your plan.
+2. Configure the new pricing and limits.
+3. **Publish** the version to make it available for new subscriptions.
+
+<Info>
+  Existing customers will remain on their current version until you choose to migrate them, providing a safe way to iterate on pricing.
+</Info>
+
+## 4. Plan Settings
+- **Enterprise Plan**: Mark plans as enterprise to hide them from public listings and handle custom pricing.
+- **Default Plan**: Set a default plan for new signups.
+
+<Frame caption="Creating a new plan version in the Unprice Dashboard">
+  <img src="/images/create-plan-version.png" alt="Plan Version Editor"/>
 </Frame>
-
-## 2. Create your workspace name
-
-Create your workspaces, picking the right plan for your case.
-
-<Frame caption="Choose how to use Unprice">
-  <img src="/images/create-workspace.png" alt="Choose Unprice usage"/>
-</Frame>
-
-## 3. Create your first Project
-
-Next we will get you to create your first Project.
-
-<Frame caption="Create your Project">
-  <img src="/images/workspace-home.png" alt="Create Project"/>
-</Frame>
-
-&nbsp;
-
-<Frame>
-  <img src="/images/create-project.png" alt="Create Project"/>
-</Frame>
-
-## 4. Create plan versions
-
-You can create a plan for packaging your features. Every plan has different versions.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 4. Create features and Versions
-
-Next we will show you the basics of how to use Unprice. You can skip this step if you like, but we recommend you follow along.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 4. Follow the Unprice tutorial
-
-Next we will show you the basics of how to use Unprice. You can skip this step if you like, but we recommend you follow along.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 5. Next Steps
-
-You should get to know our [API reference](/api-reference/authentication), as you can add additonal fields to your request when issuing a key.
-
-You can also check out the [Features](/apis/features/ratelimiting) section for more information on how to use Unprice.

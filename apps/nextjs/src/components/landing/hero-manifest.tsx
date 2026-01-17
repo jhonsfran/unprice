@@ -43,7 +43,7 @@ export default function HeroManifest() {
           className="inline-block p-2 font-bold text-2xl text-background-textContrast tracking-tighter sm:text-6xl md:text-7xl"
           variants={itemVariants}
         >
-          <Balancer>Adaptive Monetization Infrastructure (AMI)</Balancer>
+          <Balancer>PriceOps Infrastructure</Balancer>
         </motion.h1>
         <motion.p
           className="mt-20 max-w-2xl px-4 text-center text-background-text text-lg md:px-0"
@@ -59,7 +59,7 @@ export default function HeroManifest() {
           <br />
           Today, your users expect personalized value. Your product ships changes daily. Your market
           is fragmented, dynamic, and ruthless. But you're still pricing like it's 2010 — Static
-          plans. Gut feelings. Spreadsheets pretending to be strategy.
+          plans. Gut feelings. Hardcoded logic.
           <br />
           <br />
           Static pricing isn’t just outdated. It’s revenue suicide.

@@ -1,0 +1,55 @@
+---
+title: Feature Types
+description: "The 4 core pricing models supported by Unprice."
+---
+
+In Unprice, every feature assigned to a plan must have a specific pricing type. This determines how the customer is billed for that specific functionality.
+
+## 1. Flat Pricing
+Flat pricing is the simplest model. A fixed fee is charged for the feature, regardless of usage.
+
+- **Example**: "SSO Support" for $50/month.
+- **When to use**: For premium features that are either "on" or "off".
+
+## 2. Tiered Pricing
+Tiered pricing allows you to charge different rates based on the volume of usage. Unprice supports two modes:
+
+### Volume Pricing
+The price of all units is determined by the highest tier reached.
+- **Example**:
+  - 1-100 units: $10 per unit
+  - 101+ units: $8 per unit
+  - If a customer uses 150 units, they pay $8 for *all* 150 units ($1,200).
+
+### Graduated Pricing
+Units are priced progressively as usage increases through the tiers.
+- **Example**:
+  - 1-100 units: $10 per unit
+  - 101+ units: $8 per unit
+  - If a customer uses 150 units, they pay $10 for the first 100 units and $8 for the remaining 50 ($1,000 + $400 = $1,400).
+
+## 3. Usage-Based Pricing
+Usage pricing is consumption-based. It can be configured in three ways:
+
+- **Unit**: A simple per-unit price (e.g., $0.01 per API request).
+- **Tier**: Using either Volume or Graduated tiers for consumption.
+- **Package**: Billing in groups of units (e.g., $10 per 1,000 requests).
+
+## 4. Package Pricing
+Package pricing bills in fixed bundles. Unlike Usage-Based Package pricing, this is typically used for fixed allotments.
+
+- **Example**: "5 User Seats" bundle for $20.
+- **Logic**: If a customer needs 7 seats, they must buy 2 packages (total $40), covering up to 10 seats.
+
+## Comparison Table
+
+| Type | Billing Logic | Common Use Case |
+| :--- | :--- | :--- |
+| **Flat** | Fixed amount | Add-ons, premium support |
+| **Tier** | Scale-based | SaaS subscriptions with user levels |
+| **Usage** | Pay-as-you-go | API calls, bandwidth, storage |
+| **Package** | Bundled units | User seats, credits |
+
+<Tip>
+  You can mix and match these types within a single plan. For example, a "Pro" plan might have a **Flat** base fee, a **Tiered** number of users, and **Usage-based** API requests.
+</Tip>

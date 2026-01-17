@@ -21,12 +21,12 @@
   "author": "Sebastian Franco",
   "license": "AGPL-3.0",
   "devDependencies": {
-    "@unprice/tsconfig": "^0.1.0",
+    "@unprice/tsconfig": "workspace:*",
     "@types/node": "20.11.24",
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "@unprice/error": "^0.1.0",
+    "@unprice/error": "workspace:^",
     "@t3-oss/env-core": "^0.12.0",
     "zod": "^3.24.2"
   }

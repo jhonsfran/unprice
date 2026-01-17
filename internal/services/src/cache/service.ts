@@ -86,13 +86,18 @@ export class CacheService {
       }),
       accessControlList: new Namespace<CacheNamespaces["accessControlList"]>(this.context, {
         ...defaultOpts,
-        fresh: 1000 * 60 * 5, // Consider them "fresh" for 5 minutes
+        fresh: 1000 * 60 * 1, // Consider them "fresh" for 1 minute
         stale: 1000 * 60 * 60, // Use old data for 1 hour while fetching new data in background
       }),
       customerEntitlements: new Namespace<CacheNamespaces["customerEntitlements"]>(this.context, {
         ...defaultOpts,
         fresh: 1000 * 60 * 60 * 24, // 24 hours
         stale: 1000 * 60 * 60 * 1, // 1 hour
+      }),
+      negativeEntitlements: new Namespace<CacheNamespaces["negativeEntitlements"]>(this.context, {
+        ...defaultOpts,
+        fresh: 1000 * 60, // 1 minute
+        stale: 1000 * 60, // 1 minute
       }),
       customerSubscription: new Namespace<CacheNamespaces["customerSubscription"]>(this.context, {
         ...defaultOpts,

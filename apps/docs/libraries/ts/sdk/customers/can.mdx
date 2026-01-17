@@ -30,7 +30,7 @@ console.log(result);
 <ResponseExample>
 ```json
 {
-  "success": true,
+  "allowed": true,
   "message": "Feature is available",
   "deniedReason": null,
   "cacheHit": false,
@@ -53,9 +53,13 @@ console.log(result);
     Additional metadata to consider when checking access. This can include information like the action being performed or the user's location
 </ParamField>
 
+<ParamField body="usage" type="number">
+    The amount of usage to check for. If provided, Unprice will verify if the customer has enough remaining balance to consume this amount without actually reporting it.
+</ParamField>
+
 ## Response
 
-<ResponseField name="success" type="boolean" required>
+<ResponseField name="allowed" type="boolean" required>
     Whether the customer can use the feature
 </ResponseField>
 

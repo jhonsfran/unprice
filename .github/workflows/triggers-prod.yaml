@@ -31,6 +31,9 @@ jobs:
           ts: "true"
           python: "false"
 
+      - name: 🏗️ Build workspace dependencies
+        run: pnpm build --filter='@unprice/jobs...'
+
       - name: 🚀 Deploy Trigger.dev (prod)
         working-directory: internal/jobs
         env:

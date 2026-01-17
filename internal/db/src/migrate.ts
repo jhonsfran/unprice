@@ -24,7 +24,7 @@ async function main() {
 
   let userExists = await db.query.users
     .findFirst({
-      where: (fields, operators) => operators.eq(fields.email, "jhonsfran@gmail.com"),
+      where: (fields, operators) => operators.eq(fields.email, "seb@unprice.dev"),
     })
     .then((user) => user ?? null)
 
@@ -34,7 +34,7 @@ async function main() {
       .insert(schema.users)
       .values({
         id: newId("user"),
-        email: "jhonsfran@gmail.com",
+        email: "seb@unprice.dev",
         name: "sebastian franco",
         emailVerified: new Date(),
         image: "https://avatars.githubusercontent.com/u/28306808?v=4",
@@ -160,7 +160,7 @@ async function main() {
 
   // get user's email
   let unpriceOwner = await db.query.customers.findFirst({
-    where: (fields, operators) => operators.eq(fields.email, "jhonsfran@gmail.com"),
+    where: (fields, operators) => operators.eq(fields.email, "seb@unprice.dev"),
   })
 
   if (!unpriceOwner) {

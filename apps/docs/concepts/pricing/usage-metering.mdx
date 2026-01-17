@@ -1,0 +1,68 @@
+---
+title: Usage Metering
+description: "How Unprice tracks and aggregates consumption."
+---
+
+Usage Metering is the engine that powers consumption-based pricing in Unprice. It provides a deterministic way to track, aggregate, and verify usage across different billing cycles.
+
+## How it Works
+
+When you report usage via the SDK, Unprice uses a **Usage Meter** to evaluate the transaction. The meter is responsible for:
+
+1. **Aggregation**: Combining multiple usage events into a single value based on a mathematical rule.
+2. **Cycle Management**: Automatically resetting usage counters at the start of each billing period.
+3. **Verification**: Determining if a request should be allowed based on the remaining capacity and the configured overage strategy.
+
+## Accumulation Scopes
+
+Usage meters support two accumulation scopes, allowing you to track consumption over different time horizons:
+
+### 1. Period-Based Accumulation
+Usage is tracked within a specific billing or reset cycle. The counter automatically resets to zero (or the configured initial value) at the start of each new period.
+- **Example**: "10,000 API Requests per month".
+- **Use Case**: Monthly quotas, monthly credits, recurring limits.
+
+### 2. Lifetime (Total) Accumulation
+Usage is tracked continuously and never resets. The meter accumulates every event ever reported for the customer.
+- **Example**: "First 1,000,000 tokens free (total)".
+- **Use Case**: Free trial buckets, total storage limits, lifetime credit balances.
+
+## Aggregation Methods
+
+Unprice supports several aggregation behaviors across both scopes:
+
+| Method | Behavior | Scope | Use Case |
+| :--- | :--- | :--- | :--- |
+| **Sum** | Adds all values | Period | Monthly bandwidth, API calls |
+| **Sum All** | Adds all values | Lifetime | Total storage uploaded |
+| **Count** | Increments by 1 | Period | Number of emails sent this month |
+| **Count All** | Increments by 1 | Lifetime | Total number of users created |
+| **Max** | Highest value | Period | Peak concurrent users |
+| **Max All** | Highest value | Lifetime | All-time peak usage |
+| **Last** | Most recent value | Period | Current number of active projects |
+
+## Overage Strategies
+
+Not all limits are created equal. Unprice allows you to define how to handle usage that exceeds the plan's capacity:
+
+### 1. Strict (None)
+The request is denied if the customer doesn't have enough tokens remaining.
+- **Best for**: Hard limits like "Maximum 5 Projects".
+
+### 2. Last Call
+Allows one final request to pass as long as the customer has at least *some* balance left (even if the request cost exceeds the balance).
+- **Best for**: Preventing a bad user experience when a customer is just over their limit.
+
+### 3. Soft Limit (Always Allow)
+Always allows the usage and tracks the overage. You can then use this data to penalize or auto-upgrade the customer.
+- **Best for**: Pay-as-you-go models where you want to bill for overages at the end of the month.
+
+## Reset Cycles & Anchors
+
+Usage meters are aware of time boundaries. You can configure:
+- **Reset Interval**: How often the meter resets (e.g., every 1 month, every 1 year).
+- **Billing Anchor**: The specific day the cycle starts (e.g., the day the customer signed up, or the 1st of every month).
+
+<Tip>
+  Unprice uses a deterministic algorithm for cycle calculation, ensuring that usage is always attributed to the correct billing period, even if your application server's clock slightly drifts.
+</Tip>

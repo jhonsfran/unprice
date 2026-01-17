@@ -6,6 +6,7 @@ import { Fragment, Suspense } from "react"
 import Flags from "~/components/layout/flags"
 import Header from "~/components/layout/header"
 import { Logo } from "~/components/layout/logo"
+import { UserJotWrapper } from "~/components/userjot"
 import { unprice } from "~/lib/unprice"
 import { HydrateClient, prefetch, trpc } from "~/trpc/server"
 import { ProjectSwitcher } from "../../_components/project-switcher"
@@ -43,10 +44,10 @@ export default async function Page(props: {
 
   let isMain = false
   let customerId = ""
+  const session = await getSession()
+  const user = session?.user
 
   if (isSlug(workspaceSlug)) {
-    const session = await getSession()
-
     // prefetch data for the workspace and project
     prefetch(
       trpc.workspaces.listWorkspacesByActiveUser.queryOptions(undefined, {
@@ -86,6 +87,18 @@ export default async function Page(props: {
   if ((!workspaceSlug || isNonWorkspaceRoute) && (!projectSlug || !isSlug(projectSlug))) {
     return (
       <Header className="px-4">
+        <UserJotWrapper
+          user={
+            user
+              ? {
+                  id: user.id,
+                  email: user.email,
+                  firstName: user.name ?? "",
+                  avatar: user.image ?? "",
+                }
+              : null
+          }
+        />
         <UpdateClientCookie workspaceSlug={workspaceSlug} projectSlug={projectSlug} />
         <Logo className="size-6 text-lg" />
       </Header>
@@ -94,6 +107,18 @@ export default async function Page(props: {
 
   return (
     <Header>
+      <UserJotWrapper
+        user={
+          user
+            ? {
+                id: user.id,
+                email: user.email,
+                firstName: user.name ?? "",
+                avatar: user.image ?? "",
+              }
+            : null
+        }
+      />
       <UpdateClientCookie workspaceSlug={workspaceSlug} projectSlug={projectSlug} />
       <HydrateClient>
         <Fragment>

@@ -82,12 +82,15 @@ export async function resolveContextProjectId(
   defaultProjectId: string,
   customerId: string
 ) {
+  startTime(c, "resolveContextProjectId")
+
   const unPriceCustomerId = c.get("unPriceCustomerId")
 
   // If the request is for the customer ID linked to this workspace (self-reflection)
   if (unPriceCustomerId && customerId === unPriceCustomerId) {
     // If we have the main project ID configured, use it directly (Zero Latency)
     if (c.env.MAIN_PROJECT_ID) {
+      endTime(c, "resolveContextProjectId")
       return c.env.MAIN_PROJECT_ID
     }
 
@@ -96,9 +99,12 @@ export async function resolveContextProjectId(
     const { val } = await customer.getCustomer(customerId)
 
     if (val) {
+      endTime(c, "resolveContextProjectId")
       return val.projectId
     }
   }
+
+  endTime(c, "resolveContextProjectId")
 
   return defaultProjectId
 }

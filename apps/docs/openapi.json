@@ -1,5 +1,5 @@
 {
-  "openapi": "3.1.0",
+  "openapi": "3.0.3",
   "info": {
     "title": "Unprice API",
     "version": "1.0.0"
@@ -8,14 +8,6 @@
     {
       "url": "https://api.unprice.dev",
       "description": "Production"
-    },
-    {
-      "url": "http://localhost:8787",
-      "description": "Development"
-    },
-    {
-      "url": "https://preview-api.unprice.dev",
-      "description": "Preview"
     }
   ],
   "x-speakeasy-retries": {
@@ -692,6 +684,11 @@
                       "action": "create",
                       "country": "US"
                     }
+                  },
+                  "usage": {
+                    "type": "number",
+                    "description": "The usage to check feature access for",
+                    "example": 100
                   }
                 },
                 "required": ["customerId", "featureSlug"]
@@ -2564,6 +2561,141 @@
                     }
                   },
                   "required": ["success"]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/customer/updateACL": {
+      "post": {
+        "operationId": "customers.updateACL",
+        "summary": "update ACL",
+        "description": "Update the ACL for a customer",
+        "tags": ["customer"],
+        "requestBody": {
+          "description": "The updates to the ACL",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customerId": {
+                    "type": "string",
+                    "description": "The customer ID",
+                    "example": "cus_1H7KQFLr7RepUyQBKdnvY"
+                  },
+                  "updates": {
+                    "type": "object",
+                    "properties": {
+                      "customerUsageLimitReached": {
+                        "type": "boolean"
+                      },
+                      "customerDisabled": {
+                        "type": "boolean"
+                      },
+                      "subscriptionStatus": {
+                        "type": "string",
+                        "enum": ["active", "trialing", "canceled", "expired", "past_due"]
+                      }
+                    }
+                  }
+                },
+                "required": ["customerId", "updates"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The result of the update ACL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
                 }
               }
             }
@@ -5595,252 +5727,6 @@
                     }
                   },
                   "required": ["planVersions"]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrBadRequest"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrUnauthorized"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrForbidden"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrNotFound"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "This response is sent when a request conflicts with the current state of the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrConflict"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrPreconditionFailed"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrTooManyRequests"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server has encountered a situation it does not know how to handle.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrInternalServerError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/paymentProvider/stripe/signUp/{sessionId}/{projectId}": {
-      "get": {
-        "summary": "stripe sign up",
-        "description": "This endpoint is called by stripe after the customer has signed up. No webhook is needed.",
-        "tags": ["paymentProvider"],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "The project id the customer is signing up for",
-              "example": "1234567890"
-            },
-            "required": true,
-            "name": "projectId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "The stripe session generated by the sign up process",
-              "example": "cs_live_a1b2c3d4e5f6g7h8i9j0"
-            },
-            "required": true,
-            "name": "sessionId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect",
-            "headers": {
-              "Location": {
-                "description": "URL to redirect to",
-                "schema": {
-                  "type": "string",
-                  "format": "uri"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrBadRequest"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrUnauthorized"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrForbidden"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrNotFound"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "This response is sent when a request conflicts with the current state of the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrConflict"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrPreconditionFailed"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrTooManyRequests"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "The server has encountered a situation it does not know how to handle.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrInternalServerError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/paymentProvider/stripe/setup/{sessionId}/{projectId}": {
-      "get": {
-        "summary": "stripe setup",
-        "description": "This endpoint is called by stripe after the customer setup a payment method. No webhook is needed.",
-        "tags": ["paymentProvider"],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "description": "The project id the customer is signing up for",
-              "example": "1234567890"
-            },
-            "required": true,
-            "name": "projectId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "description": "The stripe session generated by the sign up process",
-              "example": "cs_live_a1b2c3d4e5f6g7h8i9j0"
-            },
-            "required": true,
-            "name": "sessionId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "302": {
-            "description": "Redirect",
-            "headers": {
-              "Location": {
-                "description": "URL to redirect to",
-                "schema": {
-                  "type": "string",
-                  "format": "uri"
                 }
               }
             }

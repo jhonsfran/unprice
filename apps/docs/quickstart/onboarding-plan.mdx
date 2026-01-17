@@ -1,47 +1,81 @@
 ---
-title: 'Create Plan'
-description: 'Create your first Plan'
+title: "Quickstart"
+description: "Go from zero to monetized in under 5 minutes."
 ---
 
-## Overview
+Integration with Unprice is designed to be seamless. Follow these steps to start managing your pricing.
 
-A plan is a representation of a package in the SaaS world. Creating your first plan in Unprice, involves creating an account and setting up your first project. The following video shows how to set up your project and publish your first plan.
+## 1. Configure your Model
+Pricing in Unprice is decoupled from your code. You define your model in the dashboard first.
 
-<AccordionGroup>
-  <Accordion title="Create account & project">
-    Sign up into [Unprice](https://app.unprice.dev)
-  </Accordion>
-  <Accordion title="Set up your plan">
-    A plan represent a package of features that you are offering. Every plan can have multiple versions so you can iterate on different features for the same plan.
-  </Accordion>
-  <Accordion title="Create a new plan version">
-    A plan version represent a version of the plan with different configurations, like billing frequency, payment provider, currency, etc. Once a plan version is published, customer can subscribe to it. Plan versions are append only, meaning after they are published you can't change them. See why [here](/a)
-  </Accordion>
-  <Accordion title="Add Features">
-    Every plan version contains a set of features that you can configure according to your needs. Flat features, usage based features or quatity based features and more.
-  </Accordion>
-  <Accordion title="Review & publish">
-    Review the pricing card and publish the new plan version.
-  </Accordion>
-</AccordionGroup>
+1. **Create a Plan**: Give it a name like "Pro" and a slug like `pro`.
+2. **Create a Plan Version**: Plans are versioned so you can safely iterate.
+3. **Add Features**: Define what you are selling (e.g., "API Requests") and choose a pricing type (Flat, Tiered, or Usage-based).
+4. **Publish**: Once published, your version is ready to accept subscriptions.
 
-### Create your first plan - Tutorial
+## 2. Install & Initialize
+Install our type-safe SDK and initialize it with your Project API Key.
 
-<Frame>
-  <iframe
-    width="900"
-    height="500"
-    src="https://www.youtube.com/embed/4KzFe50RQkQ"
-    title="YouTube video player"
-    frameBorder="0"
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-    allowFullScreen
-  ></iframe>
-</Frame>
+<CodeGroup>
+```bash npm
+npm install @unprice/api
+```
+```bash pnpm
+pnpm add @unprice/api
+```
+</CodeGroup>
 
+```typescript
+import { Unprice } from "@unprice/api";
 
-### Next Steps
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN // Found in your Project Settings
+});
+```
 
-You should get to know our [API reference](/api-reference/authentication) or the [Typescript SDK](/libraries/ts/sdk/overview) to start integrate with your product.
+## 3. Verify Access (Entitlements)
+Before performing an action, check if the customer has access and if they have enough balance for the specific operation.
 
-You can also check out the [Features](/apis/features/ratelimiting) section for more information on how to use Unprice.
+```typescript
+const { result } = await unprice.customers.can({
+  customerId: "cust_123",
+  featureSlug: "ai-generations",
+  usage: 5 // Check if they can consume 5 units right now
+});
+
+if (result?.allowed) {
+  // 1. Perform your operation...
+
+  // 2. Then report the usage to update their balance
+  await unprice.customers.reportUsage({
+    customerId: "cust_123",
+    featureSlug: "ai-generations",
+    usage: 5,
+    idempotenceKey: "unique-id-for-this-request"
+  });
+}
+```
+
+## 4. Subscribe a Customer
+Subscribe a customer to your latest plan version in a single call. Unprice handles the checkout redirect and provider linking.
+
+```typescript
+const { result } = await unprice.customers.signUp({
+  email: "user@example.com",
+  planSlug: "pro", // Subscribes them to the latest version of 'pro'
+  successUrl: "https://yourapp.com/dashboard",
+  cancelUrl: "https://yourapp.com/pricing"
+});
+
+// Redirect the user to the checkout URL provided in result.url
+```
+
+## Next Steps
+<CardGroup cols={2}>
+  <Card title="Feature Types" icon="list-check" href="/concepts/pricing/feature-types">
+    Deep dive into Flat, Tiered, Usage, and Package models.
+  </Card>
+  <Card title="Usage Metering" icon="gauge" href="/concepts/pricing/usage-metering">
+    Learn how aggregation and reset cycles work.
+  </Card>
+</CardGroup>

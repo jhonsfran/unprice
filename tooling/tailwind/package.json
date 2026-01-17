@@ -28,7 +28,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
-    "@unprice/tsconfig": "0.1.0",
+    "@unprice/tsconfig": "workspace:*",
     "typescript": "^5.3.3"
   }
 }

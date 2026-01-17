@@ -3,7 +3,7 @@ import { MainNav } from "~/components/layout/main-nav"
 import { SearchTool } from "./search"
 import ThemeToggle from "./theme-toggle"
 
-export default function Header({
+export default async function Header({
   children,
   className,
   isUnprice = true,

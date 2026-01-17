@@ -26,7 +26,9 @@ export const env = createEnv({
   },
   runtimeEnv: process.env,
   clientPrefix: "NEXT_PUBLIC_",
-  client: {},
+  client: {
+    NEXT_PUBLIC_USERJOT_ID: z.string().describe("The UserJot ID"),
+  },
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
   extends: [authEnv, stripeEnv, trpcEnv, dbEnv],
   onValidationError: (issues: readonly StandardSchemaV1.Issue[]) => {

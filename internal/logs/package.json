@@ -12,7 +12,7 @@
   },
   "license": "AGPL-3.0",
   "devDependencies": {
-    "@unprice/tsconfig": "0.1.0",
+    "@unprice/tsconfig": "workspace:*",
     "@types/node": "20.11.24",
     "typescript": "^5.3.3"
   },

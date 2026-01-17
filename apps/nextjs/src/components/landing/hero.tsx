@@ -71,7 +71,7 @@ export default function Hero() {
           {isMounted && (
             <WordRotate
               className="italic"
-              words={["dumb", "slow", "static", "rigid"]}
+              words={["hardcoded", "brittle", "static", "manual"]}
               shadowColor={theme === "dark" ? "white" : "black"}
             />
           )}
@@ -83,12 +83,13 @@ export default function Hero() {
       >
         <br />
         <br />
-        The open-source adaptive monetization infrastructure. Built for SaaS founders who refuse to
-        let static plans strangle their growth. From flat rates to smart revenue — unlock adaptive
-        pricing without the headaches.
+        <b>The PriceOps Infrastructure for SaaS.</b> Stop letting your engineering backlog dictate
+        your pricing strategy. Decouple your revenue from your codebase and launch new plans in
+        minutes, not months.
         <br />
         <br />
-        Implement and iterate any pricing model you want, without the fear of losing customers.
+        Ship usage-based, tiered, or hybrid pricing with a single integration. No more "billing
+        JIRAs."
       </motion.p>
       <motion.div
         className="mt-8 flex w-full flex-col justify-center gap-3 px-3 align-middle sm:flex-row"

@@ -54,7 +54,22 @@ export function metrics(): MiddlewareHandler<HonoEnv> {
       }
 
       // flush metrics and logger
-      c.executionCtx.waitUntil(Promise.all([metrics.flush(), logger.flush()]))
+      c.executionCtx.waitUntil(
+        (async () => {
+          try {
+            await Promise.all([
+              metrics.flush().catch((err: Error) => {
+                logger.error("Failed to flush metrics", { error: err.message })
+              }),
+              logger.flush().catch((err: Error) => {
+                console.error("Failed to flush logger", err)
+              }),
+            ])
+          } catch (error) {
+            console.error("Error during background flush", error)
+          }
+        })()
+      )
     }
   }
 }

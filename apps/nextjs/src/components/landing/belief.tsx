@@ -51,35 +51,35 @@ export default function Belief() {
       </motion.h2>
       <motion.div variants={itemVariants} className="mt-6 max-w-prose space-y-4">
         <p className="text-justify text-lg leading-8">
-          We believe SaaS founders, AI app builders, and their customers deserve full control over
-          how value is captured and delivered.
+          We believe SaaS founders and AI builders deserve full control over how they capture the
+          value they create.
           <br />
           <br />
-          Static plans, vendor lock-in, and engineering bottlenecks? Those are relics of the past.
-          Adaptive Monetization is your weapon. Open source is your armor.
+          Static plans, vendor lock-in, and engineering bottlenecks are relics of a world that no
+          longer exists. PriceOps is your weapon. Transparency is your armor.
           <br />
           <br />
           We’re not here to tweak pricing around the edges.
           <br />
-          We’re here to reinvent the entire monetization stack — from the ground up.
+          We’re here to reinvent the entire monetization stack from the ground up.
           <br />
           <br />
           You don’t need Stripe’s permission to innovate.
           <br />
-          You don’t need another pricing consultant to tell you what you already know.
+          You don’t need a pricing consultant to guess your tiers.
           <br />
-          You don’t need to rely on guesswork or gut feelings.
+          You don’t need to wait for a developer to change a number.
           <br />
           <br />
-          You need Adaptive Monetization — built on your terms, at your pace and at any scale.
+          You need PriceOps — built on your terms, with fully transparent code and at any scale.
           <br />
           <br />
           <span className="font-bold italic">
-            We believe pricing is the most neglected growth lever in SaaS. It’s time to change that.
+            Pricing is the most neglected growth lever in SaaS. We're here to change that.
           </span>
           <br />
           <br />
-          <span className="font-bold italic">Unprice, better pricing for SaaS.</span>
+          <span className="font-bold italic">Unprice, the PriceOps Infrastructure.</span>
         </p>
       </motion.div>
       <motion.div

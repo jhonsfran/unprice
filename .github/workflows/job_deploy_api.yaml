@@ -87,11 +87,12 @@ jobs:
           workingDirectory: "apps/api"
           # Pass secrets to Worker
           secrets: |
-            CLOUDFLARE_API_TOKEN
             TINYBIRD_TOKEN
             TINYBIRD_URL
             AUTH_SECRET
             CLOUDFLARE_ZONE_ID
+            CLOUDFLARE_CACHE_DOMAIN
+            CLOUDFLARE_API_TOKEN
             DATABASE_URL
             DATABASE_READ1_URL
             DATABASE_READ2_URL
@@ -112,6 +113,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ env.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ env.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_CACHE_DOMAIN: ${{ env.CLOUDFLARE_CACHE_DOMAIN }}
           TINYBIRD_TOKEN: ${{ env.TINYBIRD_TOKEN }}
           TINYBIRD_URL: ${{ env.TINYBIRD_URL }}
           AUTH_SECRET: ${{ env.AUTH_SECRET }}

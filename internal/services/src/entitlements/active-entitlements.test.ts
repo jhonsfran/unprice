@@ -114,6 +114,11 @@ describe("EntitlementService - Active Entitlements & Cycle Changes", () => {
         get: vi.fn(),
         remove: vi.fn(),
       },
+      negativeEntitlements: {
+        get: vi.fn().mockResolvedValue({ val: null }),
+        set: vi.fn(),
+        remove: vi.fn(),
+      },
     } as unknown as Cache
 
     mockMetrics = {} as unknown as Metrics

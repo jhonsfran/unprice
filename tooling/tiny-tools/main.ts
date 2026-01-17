@@ -111,7 +111,7 @@ async function generateData(customerId: string, async?: boolean) {
 async function main() {
   // const customerFree = "cus_1MeUjVxFbv8DP9X7f1UW9"
   // const customerPro = "cus_11Sb5A8HkjB6AeG4QS9WM4"
-  const customerFree = "cus_11Sk2vvuLVtSeG2ovdFz8m"
+  const customerFree = "cus_11Sb5A8HkjB6AeG4QS9WM4"
   // const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
   // PRO plan

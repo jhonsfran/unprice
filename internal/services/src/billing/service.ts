@@ -2687,11 +2687,6 @@ export class BillingService {
     // Waterfall attribution per priority from highest to lowest
     const sortedGrants = [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
     for (const grant of sortedGrants) {
-      // For usage features, break early if all usage is attributed
-      if (isUsageFeature && remainingUsage <= 0) {
-        break
-      }
-
       // Process grant and calculate price
       const grantResult = this.processGrant({
         grant,
@@ -2769,10 +2764,12 @@ export class BillingService {
     customerId,
     projectId,
     now = Date.now(),
+    usageOverrides,
   }: {
     customerId: string
     projectId: string
     now?: number
+    usageOverrides?: Map<string, number>
   }): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
     const result: ComputeCurrentUsageResult[] = []
 
@@ -2868,7 +2865,7 @@ export class BillingService {
       })
 
       // Collect usage features for batch fetching
-      if (entitlement.featureType !== "flat") {
+      if (entitlement.featureType !== "flat" && !usageOverrides?.has(featureSlug)) {
         usageFeaturesToFetch.push({
           featureSlug,
           aggregationMethod: entitlement.aggregationMethod,
@@ -2882,6 +2879,20 @@ export class BillingService {
     // Batch fetch usage data for all usage features
     // Group by billing window to make optimal queries
     const usageDataByWindow = new Map<string, { featureSlug: string; usage: number }[]>()
+
+    // Add usage overrides to the window map as if they were fetched
+    if (usageOverrides) {
+      for (const [featureSlug, usage] of usageOverrides.entries()) {
+        const metadata = featureMetadata.get(featureSlug)
+        if (!metadata) continue
+
+        const windowKey = `${metadata.billingStartAt}-${metadata.billingEndAt}`
+        if (!usageDataByWindow.has(windowKey)) {
+          usageDataByWindow.set(windowKey, [])
+        }
+        usageDataByWindow.get(windowKey)!.push({ featureSlug, usage })
+      }
+    }
 
     if (usageFeaturesToFetch.length > 0) {
       // Group features by billing window to minimize queries

@@ -1,64 +1,28 @@
 ---
-title: 'Create Plan'
-description: 'Create your first Plan'
+title: 'Subscriptions'
+description: 'Manage customer subscriptions and billing cycles.'
 ---
 
-## 1. Create your Unprice account
+Subscriptions represent the relationship between a customer and a specific plan version.
 
-The first step to using Unprice is to create an account. You can do this by visiting [app.unprice.dev](https://app.unprice.dev) or by clicking the Dashboard button in the top right of your screen.
+## 1. Creating Subscriptions
+Most subscriptions are created via the SDK when a customer signs up, but you can also manage them manually in the Dashboard:
+- **Assign a Plan Version**: Choose the specific version the customer should be on.
+- **Billing Cycle**: Unprice automatically tracks the start and end of the billing period.
 
-<Frame caption="Create your account">
-  <img src="/images/login.png" alt="Sign Up Page for Unprice"/>
+## 2. Managing Subscription Life Cycle
+- **Upgrades & Downgrades**: When a customer changes plans, Unprice calculates the proration automatically.
+- **Cancellations**: Subscriptions can be canceled immediately or at the end of the current period.
+- **Renewals**: Managed automatically based on the plan version configuration.
+
+## 3. Usage & Limits
+For each subscription, you can view the real-time usage of all metered features:
+- **Current Usage**: See exactly how much a customer has consumed in the current cycle.
+- **Remaining Balance**: Monitor how close a customer is to their limits.
+
+<Frame caption="Viewing subscription details and usage tracking">
+  <img src="/images/subscription-detail.png" alt="Subscription Management"/>
 </Frame>
 
-## 2. Create your workspace name
-
-Create your workspaces, picking the right plan for your case.
-
-<Frame caption="Choose how to use Unprice">
-  <img src="/images/create-workspace.png" alt="Choose Unprice usage"/>
-</Frame>
-
-## 3. Create your first Project
-
-Next we will get you to create your first Project.
-
-<Frame caption="Create your Project">
-  <img src="/images/workspace-home.png" alt="Create Project"/>
-</Frame>
-
-&nbsp;
-
-<Frame>
-  <img src="/images/create-project.png" alt="Create Project"/>
-</Frame>
-
-## 4. Create plan versions
-
-You can create a plan for packaging your features. Every plan has different versions.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 4. Create features and Versions
-
-Next we will show you the basics of how to use Unprice. You can skip this step if you like, but we recommend you follow along.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 4. Follow the Unprice tutorial
-
-Next we will show you the basics of how to use Unprice. You can skip this step if you like, but we recommend you follow along.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 5. Next Steps
-
-You should get to know our [API reference](/api-reference/authentication), as you can add additonal fields to your request when issuing a key.
-
-You can also check out the [Features](/apis/features/ratelimiting) section for more information on how to use Unprice.
+## 4. Invoicing
+Unprice generates internal records for every billing event, which are then synced to your payment provider (like Stripe) for actual payment collection.

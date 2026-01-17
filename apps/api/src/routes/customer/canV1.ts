@@ -9,7 +9,6 @@ import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { bouncer } from "~/util/bouncer"
 import { reportUsageEvents } from "~/util/reportUsageEvents"
 const tags = ["customer"]
 
@@ -78,8 +77,9 @@ export const registerCanV1 = (app: App) =>
 
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
-    // check if the customer is blocked
-    await bouncer(c, customerId, projectId)
+    // bouncer is explicitly ignored here because we don't want to hurt latency on the verification path
+    // also it makes sense to let customer verify the feature so their service continue working
+    // event if that means some overage usage
 
     // start a new timer
     startTime(c, "can")

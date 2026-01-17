@@ -677,7 +677,8 @@ export function TierFormField({
                   )
 
                   append({
-                    firstUnit: lastUnitValue === null ? firstUnitValue + 2 : lastUnitValue + 1,
+                    firstUnit:
+                      lastUnitValue === null ? firstUnitValue + 2 : (lastUnitValue ?? 0) + 1,
                     lastUnit: null,
                     unitPrice: {
                       displayAmount: "0.00",

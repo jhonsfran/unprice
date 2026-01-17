@@ -16,14 +16,14 @@ export default function HeaderMarketing() {
     >
       <div className="flex h-14 w-full items-center space-x-8 sm:justify-between sm:space-x-0">
         <div className="flex items-center justify-start">
-          <Logo />{" "}
-          <Badge variant="secondary" className="ml-2">
+          <Logo size="md" />{" "}
+          <Badge variant="outline" className="mt-1 ml-2">
             alpha
           </Badge>
         </div>
 
         <div className="flex flex-1 items-center justify-end space-x-2">
-          <MainNav />
+          <MainNav isMarketing={true} />
           <div className="ml-auto flex items-center pl-8">
             <Link
               href={`${APP_DOMAIN}`}

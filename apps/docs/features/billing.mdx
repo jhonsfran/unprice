@@ -1,64 +1,26 @@
 ---
-title: 'Create Plan'
-description: 'Create your first Plan'
+title: 'Billing'
+description: 'Handling payments, taxes, and invoicing.'
 ---
 
-## 1. Create your Unprice account
+Unprice simplifies the complex world of billing by acting as an intelligent orchestration layer.
 
-The first step to using Unprice is to create an account. You can do this by visiting [app.unprice.dev](https://app.unprice.dev) or by clicking the Dashboard button in the top right of your screen.
+## 1. Multi-Provider Support
+Unprice is designed to work with multiple payment providers. While Stripe is the primary integration, the architecture allows for switching or using multiple providers simultaneously.
 
-<Frame caption="Create your account">
-  <img src="/images/login.png" alt="Sign Up Page for Unprice"/>
+## 2. Automated Billing Cycles
+- **Anniversary Billing**: Customers are billed on the same day they signed up each month.
+- **Calendar Billing**: All customers are billed on a specific day of the month (e.g., the 1st).
+- **One-time Charges**: Support for non-recurring fees and add-ons.
+
+## 3. Proration & Credits
+One of the most complex parts of billing is handled automatically by Unprice:
+- **Upgrades**: Credit is applied for the unused portion of the old plan towards the new plan.
+- **Credit Grants**: Issue credits that automatically get applied to future invoices.
+
+## 4. Payment Methods
+Manage customer payment methods securely. Unprice stores the provider-specific references (like Stripe payment method IDs) so you never have to handle sensitive card data directly.
+
+<Frame caption="Billing configuration and payment provider settings">
+  <img src="/images/billing-settings.png" alt="Billing Management"/>
 </Frame>
-
-## 2. Create your workspace name
-
-Create your workspaces, picking the right plan for your case.
-
-<Frame caption="Choose how to use Unprice">
-  <img src="/images/create-workspace.png" alt="Choose Unprice usage"/>
-</Frame>
-
-## 3. Create your first Project
-
-Next we will get you to create your first Project.
-
-<Frame caption="Create your Project">
-  <img src="/images/workspace-home.png" alt="Create Project"/>
-</Frame>
-
-&nbsp;
-
-<Frame>
-  <img src="/images/create-project.png" alt="Create Project"/>
-</Frame>
-
-## 4. Create plan versions
-
-You can create a plan for packaging your features. Every plan has different versions.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 4. Create features and Versions
-
-Next we will show you the basics of how to use Unprice. You can skip this step if you like, but we recommend you follow along.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 4. Follow the Unprice tutorial
-
-Next we will show you the basics of how to use Unprice. You can skip this step if you like, but we recommend you follow along.
-
-<Frame caption="Follow the Unprice tutorial">
-  <img src="/images/create-root-key.png" alt="Unprice tutorial"/>
-</Frame>
-
-## 5. Next Steps
-
-You should get to know our [API reference](/api-reference/authentication), as you can add additonal fields to your request when issuing a key.
-
-You can also check out the [Features](/apis/features/ratelimiting) section for more information on how to use Unprice.

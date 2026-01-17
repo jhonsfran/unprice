@@ -116,6 +116,20 @@ describe("EntitlementService - verify", () => {
         get: vi.fn(),
         remove: vi.fn(),
       },
+      customerEntitlements: {
+        swr: vi.fn().mockImplementation(async (_key, fetcher) => {
+          const val = await fetcher()
+          return { val, fresh: true }
+        }),
+        set: vi.fn(),
+        get: vi.fn(),
+        remove: vi.fn(),
+      },
+      negativeEntitlements: {
+        get: vi.fn().mockResolvedValue({ val: null }),
+        set: vi.fn(),
+        remove: vi.fn(),
+      },
     } as unknown as Cache
 
     // Mock Metrics
@@ -382,7 +396,22 @@ describe("EntitlementService - reportUsage", () => {
     mockCache = {
       customerEntitlement: {
         swr: vi.fn().mockImplementation(async (_key, fetcher) => {
-          return await fetcher()
+          const val = await fetcher()
+          return { val, fresh: true }
+        }),
+        set: vi.fn(),
+        get: vi.fn(),
+        remove: vi.fn(),
+      },
+      negativeEntitlements: {
+        get: vi.fn().mockResolvedValue({ val: null }),
+        set: vi.fn(),
+        remove: vi.fn(),
+      },
+      customerEntitlements: {
+        swr: vi.fn().mockImplementation(async (_key, fetcher) => {
+          const val = await fetcher()
+          return { val, fresh: true }
         }),
         set: vi.fn(),
         get: vi.fn(),

@@ -1,63 +1,52 @@
 ---
-title: Overview
-description: "How pricing works"
-
+title: Pricing Overview
+description: "The philosophy and methodology behind Unprice pricing models."
 ---
 
-Many products today are delivered as a service, with a tiered pricing model based on access to the service ("seats"), a measure of consumption of some aspect of the service ("metering"), or some combination of these.
+Unprice is built on the core principle of **PriceOps**. Unlike traditional billing systems that treat pricing as a static configuration, Unprice treats pricing as a dynamic, iterative growth lever that should be decoupled from your application code.
 
-The 5 Pillars of PriceOps define a methodology for pricing model definition and implementation that supports iteration, safety, and organizational alignment.
+## The PriceOps Methodology
 
-## What is PriceOps?
+Unprice follows the **PriceOps** methodology—the practice of treating pricing as an agile product surface rather than a backend detail. It allows for:
 
-PriceOps is a methodology that enables iteration and flexibility. It describes a set of implementation properties that facilitate pricing model exploration by effectively managing inherent complexity. Think of this as a set of architecture blueprints and best practices, which can assist in the ongoing development and refinement of your pricing infrastructure.
+- **Rapid Iteration**: Change pricing models, tiers, and limits without touching a single line of application code.
+- **Safety**: Immutable plan versions ensure that existing customers are never accidentally affected by pricing changes.
+- **Organizational Alignment**: Marketing and Growth teams can own the pricing strategy, while Engineering focuses on building features.
 
-PriceOps is not a prescriptive guideline about how any particular product should be priced, or how such a price should be determined. Rather, it is a guideline for how a pricing model must be implemented to maximize flexibility and stability. See [more](https://priceops.org/)
+## Core Concepts
 
-<Frame caption="unprice overview">
-  <img src="/images/unprice-overview.png"/>
-</Frame>
+To understand how Unprice handles pricing, you need to be familiar with three main components:
 
-###
+### 1. Features
+Features are the building blocks of your product. A feature could be anything from "API Requests" to "SSO Support" or "Project Storage". Each feature has a specific **type** that defines how it's priced.
 
-As matter of fact you shouldn't, if you don't want to prepare for the upcoming market change in pricing for software as a service, you can continue with the old paradigm. Unprice is the by product of putting some foundational principles in practice to move from static monetization to adaptive monetivation. We explain more in detail in our [manifesto](https://unprice.dev/manifesto). You could follow those principles to build your own stack.
+### 2. Plans
+A Plan is a collection of features offered together as a package. A plan itself doesn't have a price; instead, the pricing is defined in its **Versions**.
 
-## Isn't this just a wrapper for Stripe?
+### 3. Plan Versions
+Plan Versions are immutable snapshots of a plan at a specific point in time. They define the specific costs, limits, and configurations for each feature. When you want to change your pricing, you create a new Plan Version and publish it.
 
-Yes, you are absolutly right. Unprice has an interface to communicate with different payment providers, not only Stripe. The main value you get from Unprice is the iteration on prices, the ability to change payment providers and the analytics insights. The idea is not let you vendor lock and adapt quickly to pricing changes.
+## How Calculation Works
 
+Unprice automatically calculates the total price for a customer based on their subscribed Plan Version and their current usage. It handles:
 
-## New to Unprice?
-
-Start using Unprice with your existing project, or start from scratch.
+- **Proration**: Automatically calculating partial costs when a customer upgrades, downgrades, or changes their plan mid-cycle.
+- **Multi-currency**: Native support for different currencies and rounding rules.
+- **Complex Models**: Seamlessly mixing flat fees, tiered consumption, and package-based bundles.
 
 <CardGroup cols={2}>
   <Card
-    title="Quickstart"
-    icon="bolt-lightning"
-    href="/quickstart/onboarding-plan"
+    title="Feature Types"
+    icon="list-check"
+    href="/concepts/pricing/feature-types"
   >
-    Get started with Unprice.
+    Learn about the 4 core pricing types: Flat, Tier, Usage, and Package.
   </Card>
   <Card
-    title="Features"
-    icon="list"
-    href="/apis/introduction"
+    title="Plans & Versions"
+    icon="copy"
+    href="/concepts/pricing/plans"
   >
-    Learn how to use API Keys to protect, and scale your APIs
+    Understand how to manage plans and iterate with versions.
   </Card>
-</CardGroup>
-
-
-## Join the community
-
-Join the Unprice community to ask questions, discuss best practices, and share tips.
-
-<CardGroup cols={3}>
-  <Card title="Discord" icon="discord" href="https://unprice.com/discord" />
-  <Card
-    title="GitHub"
-    icon="github"
-    href="https://github.com/jhonsfran1165/unprice"
-  ></Card>
 </CardGroup>

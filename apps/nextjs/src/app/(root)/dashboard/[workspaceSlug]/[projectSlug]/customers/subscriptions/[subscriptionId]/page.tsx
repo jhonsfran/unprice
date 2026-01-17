@@ -31,7 +31,7 @@ export default async function EditSubscriptionPage({
           <CardHeader className="px-0 pt-0">
             <CardTitle className="flex items-center justify-between font-primary font-semibold text-2xl text-foreground tracking-tight">
               Edit Subscription
-              <CodeApiSheet defaultMethod="getActivePhase">
+              <CodeApiSheet defaultMethod="getSubscription">
                 <Button variant={"outline"}>
                   <Code className="mr-2 h-4 w-4" />
                   API

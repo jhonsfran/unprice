@@ -27,7 +27,7 @@ export default function Cta() {
                 id="cta-title"
                 className="inline-block bg-clip-text p-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-6xl"
               >
-                Unprice, better pricing for SaaS.
+                Unprice, the PriceOps Infrastructure.
               </h3>
               <p className="mx-auto mt-4 max-w-2xl text-background-text text-lg">
                 <Balancer>
@@ -55,7 +55,7 @@ export default function Cta() {
             >
               Not sure where to start?{" "}
               <a
-                href="mailto:jhonsfran@gmail.com"
+                href="mailto:seb@unprice.dev"
                 className="font-semibold text-primary-textContrast hover:text-primary-textContrast/80"
               >
                 Talk to me
