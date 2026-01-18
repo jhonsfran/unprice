@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     if: "!contains(github.head_ref, 'renovate/') || !contains(github.head_ref, 'main')"
     steps:
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@v1.0.15
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
           client-secret: ${{ secrets.MACHINE_IDENTITY_CLIENT_SECRET }}

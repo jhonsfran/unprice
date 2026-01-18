@@ -20,7 +20,7 @@ jobs:
         if: steps.should-deploy.outputs.skip != '1'
         run: curl https://tinybird.co | sh
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@v1.0.15
         name: Pull secrets from Infisical
         if: steps.should-deploy.outputs.skip != '1'
         with:
