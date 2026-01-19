@@ -19,7 +19,7 @@ runs:
       uses: pnpm/action-setup@v4
       if: ${{ inputs.ts == 'true' }}
       with:
-        version: 8.15.4
+        version: 10.28.1
         run_install: false
 
     - uses: actions/setup-python@v5
