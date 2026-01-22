@@ -16,7 +16,7 @@ jobs:
         ports:
           - 7181:7181
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Tinybird CLI
         run: curl https://tinybird.co | sh
