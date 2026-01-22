@@ -202,7 +202,7 @@ jobs:
         continue-on-error: true
         run: npx turbo-ignore -d apps/auth-proxy
 
-      - uses: amondnet/vercel-action@v25.2.0 #deploy
+      - uses: amondnet/vercel-action@v41.1.4 #deploy
         name: Deploy Unprice auth to Vercel
         id: deploy-auth
         # if turbo-ignore fails,that means there are no changes in the auth-proxy folder
@@ -271,7 +271,7 @@ jobs:
         run: npx turbo-ignore -d apps/auth-proxy
 
       # deploy preview unprice to vercel
-      - uses: amondnet/vercel-action@v25.2.0 #deploy
+      - uses: amondnet/vercel-action@v41.1.4 #deploy
         name: Deploy Preview Unprice to Vercel
         id: deploy-unprice
         with:
