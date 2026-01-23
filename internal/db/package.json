@@ -56,6 +56,6 @@
     "@unprice/tsconfig": "workspace:*",
     "drizzle-kit": "^0.30.5",
     "typescript": "^5.3.3",
-    "vitest": "^2.0.5"
+    "vitest": "^4.0.18"
   }
 }
