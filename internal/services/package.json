@@ -30,7 +30,7 @@
     "test:file": "NODE_ENV=test SKIP_ENV_VALIDATION=true VERCEL_ENV=test vitest run \"$@\""
   },
   "dependencies": {
-    "@t3-oss/env-core": "^0.12.0",
+    "@t3-oss/env-core": "^0.13.10",
     "@unkey/cache": "^1.5.0",
     "@unprice/analytics": "workspace:^",
     "@unprice/api": "workspace:^",
@@ -41,18 +41,18 @@
     "@unprice/logs": "workspace:^",
     "@unprice/metrics": "workspace:^",
     "@unprice/stripe": "workspace:^",
-    "@upstash/redis": "^1.35.3",
-    "date-fns": "^3.3.1",
+    "@upstash/redis": "^1.36.1",
+    "date-fns": "^3.6.0",
     "date-fns-tz": "^3.2.0",
-    "p-limit": "^7.1.1",
+    "p-limit": "^7.2.0",
     "ulid": "^3.0.2",
-    "xstate": "^5.21.0",
-    "zod": "^3.24.2"
+    "xstate": "^5.26.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@unprice/tsconfig": "workspace:*",
     "fast-check": "^4.5.3",
-    "typescript": "^5.3.3",
-    "vitest": "^2.0.5"
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
   }
 }

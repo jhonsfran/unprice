@@ -16,8 +16,8 @@
     "./schedules": "./src/trigger/schedules/index.ts"
   },
   "dependencies": {
-    "@infisical/sdk": "^3.0.4",
-    "@t3-oss/env-core": "^0.12.0",
+    "@infisical/sdk": "^3.0.91",
+    "@t3-oss/env-core": "^0.13.10",
     "@trigger.dev/build": "^3.3.17",
     "@trigger.dev/sdk": "3.3.17",
     "@unprice/db": "workspace:^",
@@ -26,13 +26,13 @@
     "@unprice/services": "workspace:^",
     "@unprice/analytics": "workspace:^",
     "@unprice/api": "workspace:^",
-    "date-fns": "^3.3.1",
+    "date-fns": "^3.6.0",
     "trigger.dev": "3.3.17",
-    "zod": "^3.24.2"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@unprice/tsconfig": "workspace:*",
-    "typescript": "^5.3.3",
-    "tsx": "^4.7.2"
+    "typescript": "^5.9.3",
+    "tsx": "^4.21.0"
   }
 }
