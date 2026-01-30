@@ -22,3 +22,6 @@ SCHEMA >
 ENGINE MergeTree
 ENGINE_PARTITION_KEY toYYYYMM(timestamp)
 ENGINE_SORTING_KEY project_id, plan_version_id, feature_id
+
+FORWARD_QUERY > 
+  SELECT id, project_id, plan_version_id, feature_id, feature_type, config, metadata, aggregation_method, default_quantity, limit, timestamp
