@@ -20,4 +20,9 @@ export interface Metrics {
    * setColo sets the colo of the metrics
    */
   setColo(colo: string): void
+
+  /**
+   * getColo gets the colo of the metrics
+   */
+  getColo(): string
 }

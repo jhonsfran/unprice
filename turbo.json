@@ -6,7 +6,9 @@
     "EMIT_METRICS_LOGS",
     "TRPC_LOGGER",
     "DRIZZLE_LOG",
-    "EMIT_ANALYTICS"
+    "EMIT_ANALYTICS",
+    "VERCEL_DEPLOYMENT_ID",
+    "VERCEL_REGION"
   ],
   "tasks": {
     "install": {

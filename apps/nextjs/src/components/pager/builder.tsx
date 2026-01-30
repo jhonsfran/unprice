@@ -38,11 +38,6 @@ export default function PageBuilderConfig({ page }: { page: Page }) {
         })
         initialValuesRef.current = lastSavedValuesRef.current
       },
-      onError: (error) => {
-        toast.error("Failed to save configuration", {
-          description: error.message,
-        })
-      },
     })
   )
 

@@ -67,26 +67,12 @@ export class ConsoleLogger implements Logger {
             : "\x1b[35m"
   }
 
-  public log(
-    level: "debug" | "info" | "warn" | "error" | "fatal",
-    message: string,
-    fields?: Fields
-  ): void {
+  public emit(level: "debug" | "info" | "warn" | "error", message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
     // don't show colored output in production mode because it's not readable
     const coloredOutput = this.environment !== "production"
     const color = this.getColor(level)
-
-    this.console(
-      coloredOutput ? `${color}%s\x1b[0m` : "",
-      level,
-      "-",
-      this.marshal(level, message, fields)
-    )
-  }
-
-  public emit(message: string, fields?: Fields): void {
-    this.console(this.marshal("info", message, fields))
+    this.console(coloredOutput ? `${color}%s\x1b[0m` : "", level, "-", message, fields)
   }
 
   public info(message: string, fields?: Fields): void {

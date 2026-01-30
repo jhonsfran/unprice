@@ -52,9 +52,35 @@ const _config: Record<string, ToastConfig> = config
 
 type ToastAction = keyof typeof config
 
-export function toastAction(action: ToastAction, message?: string) {
+/**
+ * Truncates a message to a maximum of 3 lines for display
+ */
+function truncateMessage(message: string, maxLines = 3): string {
+  const lines = message.split("\n")
+  if (lines.length <= maxLines) {
+    return message
+  }
+  return `${lines.slice(0, maxLines).join("\n")}...`
+}
+
+export function toastAction(
+  action: ToastAction,
+  message?: string,
+  options?: { requestId?: string }
+) {
   const { title, type, ...rest } = _config[action]!
-  const props = { ...rest, description: message }
+  const props = { ...rest, description: truncateMessage(message ?? "", 3) }
+
+  if (options?.requestId) {
+    props.action = {
+      label: "Copy Error",
+      onClick: async (event) => {
+        event?.preventDefault?.() // keeps toast open if supported
+        await navigator.clipboard.writeText(`Request ID: ${options.requestId}\n\n${message ?? ""}`)
+        toast.success("Error copied to clipboard")
+      },
+    }
+  }
 
   if (type === "default") return toast(title, props)
   if (type === "success") return toast.success(title, props)

@@ -2,7 +2,6 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch"
 
 import { auth } from "@unprice/auth/server"
 import { createTRPCContext } from "@unprice/trpc"
-import { initObservability } from "@unprice/trpc"
 import { edgeRouter } from "@unprice/trpc/router/edge"
 import { geolocation } from "@vercel/functions"
 import { CorsOptions, setCorsHeaders } from "../../../_enableCors"
@@ -10,8 +9,6 @@ import { CorsOptions, setCorsHeaders } from "../../../_enableCors"
 export const runtime = "edge"
 export const preferredRegion = ["fra1"]
 export const maxDuration = 10 // 10 seconds
-
-initObservability()
 
 const handler = auth(async (req) => {
   // when we use the middleware to rewrite the request, the path doesn't include the /api prefix

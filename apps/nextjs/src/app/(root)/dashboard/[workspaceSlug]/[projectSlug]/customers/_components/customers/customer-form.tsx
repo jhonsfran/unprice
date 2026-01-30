@@ -82,9 +82,7 @@ export function CustomerForm({
 
         router.refresh()
       },
-      onError: (error) => {
-        toast.error(error.message)
-      },
+      onError: (_error) => {},
     })
   )
 
@@ -95,23 +93,26 @@ export function CustomerForm({
         form.reset()
         router.refresh()
       },
-      onError: (error) => {
-        toast.error(error.message)
-      },
     })
   )
 
   const onSubmitForm = async (data: InsertCustomer) => {
-    if (!defaultValues.id) {
-      await createCustomer.mutateAsync(data)
-    }
+    try {
+      if (!defaultValues.id) {
+        await createCustomer.mutateAsync(data)
+      }
 
-    if (defaultValues.id && defaultValues.projectId) {
-      await updateCustomer.mutateAsync({
-        ...data,
-        id: defaultValues.id,
-        active: data.active ?? false,
-      })
+      if (defaultValues.id && defaultValues.projectId) {
+        await updateCustomer.mutateAsync({
+          ...data,
+          id: defaultValues.id,
+          active: data.active ?? false,
+        })
+      }
+    } catch {
+      // Error is already handled by the global mutationCache.onError handler
+      // We just need to catch it here to prevent unhandled promise rejection
+      // The toast with error details (including request ID) is already shown
     }
   }
 

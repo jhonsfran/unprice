@@ -223,7 +223,7 @@ export default async function DomainPage({
       ) : (
         <HeaderMarketing />
       )}
-      <main className="container mx-auto space-y-24 px-4 py-16">
+      <main className="container mx-auto mt-20 px-4 py-16">
         <PricingTable plans={plans} popularPlan="PRO" title={page.title} subtitle={page.copy} />
         <FeatureComparison plans={plans} />
         <Faqs faqs={page.faqs ?? []} />

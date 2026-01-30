@@ -1,5 +1,6 @@
 import { type Connection, Server } from "partyserver"
 
+import { env } from "cloudflare:workers"
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
@@ -12,13 +13,19 @@ import type {
   VerifyRequest,
 } from "@unprice/db/validators"
 import type { BaseError, Result } from "@unprice/error"
-import { AxiomLogger, ConsoleLogger, type Logger, WideEvent } from "@unprice/logging"
+import {
+  AxiomLogger,
+  ConsoleLogger,
+  type Logger,
+  type WideEventLogger,
+  createWideEventHelpers,
+  createWideEventLogger,
+} from "@unprice/logging"
 import { CacheService } from "@unprice/services/cache"
 import type { DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import type { Env } from "~/env"
-import { getCurrentEvent, initObservability, runInContext } from "~/util/observability"
 import { SqliteDOStorageProvider } from "./sqlite-do-provider"
 
 // colo never change after the object is created
@@ -52,8 +59,6 @@ export class DurableObjectUsagelimiter extends Server {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env)
-
-    initObservability()
 
     // set a revalidation period of 5 secs for development
     if (env.VERCEL_ENV === "development") {
@@ -290,55 +295,59 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   public async verify(data: VerifyRequest): Promise<VerificationResult> {
-    const wideEvent = new WideEvent(
-      this.logger,
-      {
-        requestId: data.requestId,
-        timestamp: new Date().toISOString(),
-        infra: {
-          platform: "cloudflare",
-          durableObjectId: this.ctx.id.toString() as string,
-        },
-        geo: {
-          colo: (await this.getConfig()).colo,
-        },
-        business: {
-          operation: "verify",
-          ...data,
-        },
-      },
-      this.SAMPLE_RATE
-    )
+    const wideEventLogger = createWideEventLogger({
+      "service.name": "usagelimiter",
+      "service.version": env.VERSION,
+      "service.environment": env.NODE_ENV as
+        | "production"
+        | "staging"
+        | "development"
+        | "preview"
+        | "test",
+      sampleRate: this.SAMPLE_RATE,
+      emitter: (level, message, event) => this.logger.emit(level, message, event),
+    })
 
-    return await runInContext(wideEvent, async () => {
+    const wideEventHelpers = createWideEventHelpers(wideEventLogger)
+
+    return await wideEventLogger.runAsync(async () => {
       try {
         // set the request id for the metrics and logs
         this.logger.x(data.requestId)
         this.metrics.x(data.requestId)
+        wideEventLogger.add("request.id", data.requestId) // We don't need to generate a new id for the DO request
+        wideEventLogger.add("request.timestamp", new Date().toISOString())
+        wideEventHelpers.addParentRequestId(data.requestId) // Link to parent
+        wideEventHelpers.addCloud({
+          platform: "cloudflare",
+          durable_object_id: this.ctx.id.toString(),
+          region: this.metrics.getColo(),
+        })
+        wideEventLogger.add("usagelimiter.operation", "verify")
+        wideEventLogger.add("usagelimiter.input", data)
         // All logic handled internally!
-        const result = await this.entitlementService.verify(data)
-        wideEvent.add("result", result)
+        const result = await this.entitlementService.verify(data, wideEventLogger)
+        wideEventLogger.add("usagelimiter.result", result)
         // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(data.flushTime)
+        await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
 
         return result
       } catch (error) {
         const err = error as Error
-        wideEvent.add("error", err.message)
-        wideEvent.add("outcome", "error")
+        wideEventLogger.addError(err)
         return {
           allowed: false,
           message: err.message,
           deniedReason: "ENTITLEMENT_ERROR",
         }
       } finally {
-        wideEvent.add("duration", performance.now() - data.performanceStart)
+        wideEventLogger.add("request.duration", performance.now() - data.performanceStart)
         this.ctx.waitUntil(
           (async () => {
             try {
               await Promise.all([
                 // only log if the event should be sampled
-                wideEvent.log(),
+                wideEventLogger.emit(),
                 this.metrics.flush().catch((err: Error) => {
                   console.error("Failed to flush metrics in DO", err)
                 }),
@@ -356,43 +365,47 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
-    const wideEvent = new WideEvent(
-      this.logger,
-      {
-        service: "durable-object",
-        requestId: data.requestId,
-        timestamp: new Date().toISOString(),
-        infra: {
-          platform: "cloudflare",
-          durableObjectId: this.ctx.id.toString() as string,
-        },
-        geo: {
-          colo: (await this.getConfig()).colo,
-        },
-        business: {
-          operation: "reportUsage",
-          ...data,
-        },
-      },
-      this.SAMPLE_RATE
-    )
+    const wideEventLogger = createWideEventLogger({
+      "service.name": "usagelimiter",
+      "service.version": env.VERSION,
+      "service.environment": env.NODE_ENV as
+        | "production"
+        | "staging"
+        | "development"
+        | "preview"
+        | "test",
+      sampleRate: this.SAMPLE_RATE,
+      emitter: (level, message, event) => this.logger.emit(level, message, event),
+    })
 
-    return await runInContext(wideEvent, async () => {
+    const wideEventHelpers = createWideEventHelpers(wideEventLogger)
+
+    return await wideEventLogger.runAsync(async () => {
       try {
         // set the request id for the metrics and logs
         this.logger.x(data.requestId)
         this.metrics.x(data.requestId)
 
-        const result = await this.entitlementService.reportUsage(data)
-        wideEvent.add("result", result)
+        wideEventLogger.add("request.id", data.requestId)
+        wideEventLogger.add("request.timestamp", new Date().toISOString())
+        wideEventHelpers.addParentRequestId(data.requestId)
+        wideEventHelpers.addCloud({
+          platform: "cloudflare",
+          durable_object_id: this.ctx.id.toString(),
+          region: this.metrics.getColo(),
+        })
+        wideEventLogger.add("usagelimiter.operation", "reportUsage")
+        wideEventLogger.add("usagelimiter.input", data)
+
+        const result = await this.entitlementService.reportUsage(data, wideEventLogger)
+        wideEventLogger.add("usagelimiter.result", result)
         // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(data.flushTime)
+        await this.ensureAlarmIsSet(wideEventLogger, data.flushTime)
 
         return result
       } catch (error) {
         const err = error as Error
-        wideEvent.add("error", err.message)
-        wideEvent.add("outcome", "error")
+        wideEventLogger.addError(err)
 
         return {
           message: error instanceof Error ? error.message : "unknown error",
@@ -400,14 +413,14 @@ export class DurableObjectUsagelimiter extends Server {
         }
       } finally {
         data.performanceStart &&
-          wideEvent.add("duration", performance.now() - data.performanceStart)
+          wideEventLogger.add("request.duration", performance.now() - data.performanceStart)
 
         this.ctx.waitUntil(
           (async () => {
             try {
               await Promise.all([
                 // only log if the event should be sampled
-                wideEvent.log(),
+                wideEventLogger.emit(),
                 this.metrics.flush().catch((err: Error) => {
                   console.error("Failed to flush metrics in DO", err)
                 }),
@@ -425,7 +438,10 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   // ensure the alarm is set to flush the usage records and verifications
-  private async ensureAlarmIsSet(flushTime?: number): Promise<void> {
+  private async ensureAlarmIsSet(
+    wideEventLogger: WideEventLogger,
+    flushTime?: number
+  ): Promise<void> {
     const alarm = await this.ctx.storage.getAlarm()
     const now = Date.now()
 
@@ -433,10 +449,7 @@ export class DurableObjectUsagelimiter extends Server {
     const flushSec = Math.min(Math.max(flushTime ?? this.TTL_ANALYTICS / 1000, 5), 30 * 60)
     const nextAlarm = now + flushSec * 1000
 
-    const wideEvent = getCurrentEvent()
-    wideEvent?.add("durableObject", {
-      nextAlarm,
-    })
+    wideEventLogger.add("usagelimiter.next_alarm", nextAlarm)
 
     if (!alarm) this.ctx.storage.setAlarm(nextAlarm)
     else if (alarm < now) {

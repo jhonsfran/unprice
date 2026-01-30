@@ -56,7 +56,7 @@ export default function Hero() {
   return (
     <m.section
       aria-labelledby="hero-title"
-      className="flex min-h-screen flex-col items-center justify-center text-center sm:mt-20"
+      className="mt-20 flex min-h-screen flex-col items-center justify-center text-center"
       variants={containerVariants}
       initial="hidden"
       animate="visible"

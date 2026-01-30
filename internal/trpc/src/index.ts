@@ -9,4 +9,3 @@ export { t } from "./trpc"
 
 export { createInnerTRPCContext, createTRPCContext, createCallerFactory }
 export type { Context }
-export { initObservability } from "./observability"

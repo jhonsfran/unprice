@@ -1,44 +1,20 @@
 import type { MiddlewareHandler } from "hono"
-import { getCurrentEvent } from "~/util/observability"
 import type { HonoEnv } from "../hono/env"
 
 export function obs(): MiddlewareHandler<HonoEnv> {
   return async (c, next) => {
     const { metrics, logger } = c.get("services")
     const start = c.get("performanceStart")
-    const isolateId = c.get("isolateId")
     const isolateLifetime = Date.now() - c.get("isolateCreatedAt")
-    const stats = c.get("stats")
-    const requestId = c.get("requestId")
 
-    // Finalize wide event with status and duration
-    const wideEvent = getCurrentEvent()
+    // Get the wide event logger from context (request-scoped)
+    const wideEventLogger = c.get("wideEventLogger")
 
     try {
       await next()
     } catch (e) {
-      wideEvent?.addContext({
-        requestId,
-        infra: {
-          platform: "cloudflare",
-          isolateId,
-          isolateLifetime,
-        },
-        geo: {
-          colo: stats.colo,
-          country: stats.country,
-          continent: stats.continent,
-          city: stats.city,
-          region: stats.region,
-          ip: stats.ip,
-        },
-      })
-
-      wideEvent?.add("error", {
-        errorType: e instanceof Error ? e.name : undefined,
-        errorMessage: e instanceof Error ? e.message : undefined,
-      })
-      wideEvent?.add("outcome", "error")
+      wideEventLogger.add("cloud.isolate_lifetime", isolateLifetime)
+      wideEventLogger.addError(e)
       throw e
     } finally {
       const status = c.res.status
@@ -46,16 +22,15 @@ export function obs(): MiddlewareHandler<HonoEnv> {
       c.res.headers.append("Unprice-Latency", `service=${duration}ms`)
       c.res.headers.append("Unprice-Version", c.env.VERSION)
 
-      wideEvent?.add("outcome", status >= 400 ? "error" : "success")
-      wideEvent?.add("duration", duration)
-      wideEvent?.add("status", status)
+      wideEventLogger.add("request.status", status)
+      wideEventLogger.add("request.duration", duration)
 
       // flush metrics and logger
       c.executionCtx.waitUntil(
         (async () => {
           try {
             await Promise.all([
-              wideEvent?.log(),
+              wideEventLogger.emit(),
               metrics.flush().catch((err: Error) => {
                 console.error("Failed to flush metrics", { error: err.message })
               }),

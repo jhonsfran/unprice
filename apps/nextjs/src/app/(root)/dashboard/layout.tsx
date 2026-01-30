@@ -22,11 +22,7 @@ export default async function DashboardLayout({
   const userJotOptions = {
     widget: true,
     theme: "auto",
-    position: "right",
-  }
-
-  if (process.env.NODE_ENV === "development") {
-    userJotOptions.position = "left"
+    position: process.env.NODE_ENV === "development" ? "left" : "right",
   }
 
   return (

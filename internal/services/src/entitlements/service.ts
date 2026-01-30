@@ -24,7 +24,12 @@ import {
   calculateWaterfallPrice,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import {
+  type Logger,
+  type WideEventHelpers,
+  type WideEventLogger,
+  createWideEventHelpers,
+} from "@unprice/logging"
 import { format, subMinutes } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { BillingService } from "../billing"
@@ -37,7 +42,6 @@ import { GrantsManager } from "./grants"
 import type { UnPriceEntitlementStorage } from "./storage-provider"
 
 import { customers, entitlements, subscriptions } from "@unprice/db/schema"
-import { obs } from "@unprice/logging"
 import { ulid } from "ulid"
 import { CustomerService } from "../customers/service"
 import { UsageMeter } from "./usage-meter"
@@ -63,6 +67,7 @@ export class EntitlementService {
   private readonly cache: Cache
   private readonly metrics: Metrics
   private readonly customerService: CustomerService
+  private readonly wideEventHelpers: WideEventHelpers
 
   constructor(opts: {
     db: Database
@@ -73,6 +78,7 @@ export class EntitlementService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    wideEventLogger?: WideEventLogger | null
     config?: {
       revalidateInterval?: number // How often to check for version changes
     }
@@ -90,6 +96,7 @@ export class EntitlementService {
     this.waitUntil = opts.waitUntil
     this.cache = opts.cache
     this.metrics = opts.metrics
+    this.wideEventHelpers = createWideEventHelpers(opts.wideEventLogger)
     this.customerService = new CustomerService({
       db: opts.db,
       logger: opts.logger,
@@ -101,6 +108,18 @@ export class EntitlementService {
   }
 
   /**
+   * Helper to add structured entitlement context to wide events.
+   * Groups everything under "entitlements" key for clear identification in logs.
+   * Keeps only essential information for debugging.
+   */
+  private addEntitlementContext(
+    context: Parameters<WideEventHelpers["addEntitlement"]>[0],
+    helpers?: WideEventHelpers
+  ) {
+    ;(helpers ?? this.wideEventHelpers).addEntitlement(context)
+  }
+
+  /**
    * Safely rounds a number to 2 decimal places
    * Handles edge cases like NaN, Infinity, null, and undefined
    */
@@ -108,10 +127,6 @@ export class EntitlementService {
     if (value === null || value === undefined) {
       return undefined
     }
-    if (!Number.isFinite(value)) {
-      return undefined
-    }
-    return Math.round(value * 100) / 100
   }
 
   private getUsageMeter(validatedState: EntitlementState): UsageMeter {
@@ -134,15 +149,10 @@ export class EntitlementService {
    * Check if usage is allowed (low latency)
    * Handles cache miss and revalidation internally (single network call)
    */
-  async verify(params: VerifyRequest): Promise<VerificationResult> {
-    // Add business context once at the start
-    obs.add("business", {
-      operation: "verify",
-      customerId: params.customerId,
-      projectId: params.projectId,
-      featureSlug: params.featureSlug,
-    })
+  async verify(params: VerifyRequest, logger?: WideEventLogger): Promise<VerificationResult> {
+    const helpers = logger ? createWideEventHelpers(logger) : undefined
 
+    // Add business context once at the start
     const { err: stateErr, val: state } = await this.getStateWithRevalidation({
       customerId: params.customerId,
       projectId: params.projectId,
@@ -151,6 +161,13 @@ export class EntitlementService {
     })
 
     if (stateErr) {
+      this.addEntitlementContext(
+        {
+          allowed: false,
+          denied_reason: "ENTITLEMENT_ERROR",
+        },
+        helpers
+      )
       return {
         allowed: false,
         message: stateErr.message,
@@ -158,12 +175,15 @@ export class EntitlementService {
       }
     }
 
-    obs.add("entitlement", {
-      state: state,
-      stateErr: stateErr,
-    })
-
     if (!state) {
+      this.addEntitlementContext(
+        {
+          allowed: false,
+          denied_reason: "ENTITLEMENT_NOT_FOUND",
+          state_found: false,
+        },
+        helpers
+      )
       const latency = performance.now() - params.performanceStart
       this.waitUntil(
         this.storage.insertVerification({
@@ -238,13 +258,19 @@ export class EntitlementService {
       verifyResult.deniedReason === "LIMIT_EXCEEDED" &&
       validatedState.metadata?.blockCustomer === true
 
-    obs.add("entitlement", {
-      shouldBlockCustomer,
-      meterResult,
-      verifyResult,
-    })
-
     await this.storage.set({ state: { ...validatedState, meter: meterResult } })
+
+    this.addEntitlementContext(
+      {
+        allowed: verifyResult.allowed,
+        denied_reason: verifyResult.deniedReason,
+        feature_type: validatedState.featureType,
+        limit: validatedState.limit ?? undefined,
+        usage: Number(meterResult.usage),
+        remaining: verifyResult.remaining,
+      },
+      helpers
+    )
 
     this.waitUntil(
       this.customerService.updateAccessControlList({
@@ -310,11 +336,10 @@ export class EntitlementService {
     })
 
     if (err) {
-      this.logger.error("Failed to calculate cost and rate", {
+      // Log pricing calculation errors (private helper - caller handles response)
+      this.logger.warn("calculateCostAndRate failed", {
         error: err.message,
-        customerId: state.customerId,
-        projectId: state.projectId,
-        featureSlug: state.featureSlug,
+        errorType: err.name,
       })
       return {}
     }
@@ -345,14 +370,11 @@ export class EntitlementService {
    * Report usage with priority-based consumption
    * Handles revalidation internally (single network call)
    */
-  async reportUsage(params: ReportUsageRequest): Promise<ReportUsageResult> {
-    // Add business context once at the start
-    obs.add("business", {
-      operation: "reportUsage",
-      customerId: params.customerId,
-      projectId: params.projectId,
-      featureSlug: params.featureSlug,
-    })
+  async reportUsage(
+    params: ReportUsageRequest,
+    logger?: WideEventLogger
+  ): Promise<ReportUsageResult> {
+    const helpers = logger ? createWideEventHelpers(logger) : undefined
 
     const { err: stateErr, val: state } = await this.getStateWithRevalidation({
       customerId: params.customerId,
@@ -361,12 +383,14 @@ export class EntitlementService {
       now: params.timestamp,
     })
 
-    obs.add("entitlement", {
-      state: state,
-      stateErr: stateErr,
-    })
-
     if (stateErr) {
+      this.addEntitlementContext(
+        {
+          allowed: false,
+          denied_reason: "ENTITLEMENT_ERROR",
+        },
+        helpers
+      )
       return {
         allowed: false,
         message: stateErr.message,
@@ -376,6 +400,14 @@ export class EntitlementService {
     }
 
     if (!state) {
+      this.addEntitlementContext(
+        {
+          allowed: false,
+          denied_reason: "ENTITLEMENT_NOT_FOUND",
+          state_found: false,
+        },
+        helpers
+      )
       return {
         allowed: false,
         message: "No entitlement found for the given customer, project and feature",
@@ -400,22 +432,7 @@ export class EntitlementService {
 
     const usageMeter = this.getUsageMeter(validatedState)
 
-    const { val: keyExists, err: keyCheckErr } = await this.storage.hasIdempotenceKey(
-      params.idempotenceKey
-    )
-
-    obs.add("entitlement", {
-      keyExists,
-      keyCheckErr,
-      idempotenceKey: params.idempotenceKey,
-    })
-
-    if (keyCheckErr) {
-      this.logger.error("Failed to check idempotence key", {
-        error: keyCheckErr.message,
-        idempotenceKey: params.idempotenceKey,
-      })
-    }
+    const { val: keyExists } = await this.storage.hasIdempotenceKey(params.idempotenceKey)
 
     if (keyExists) {
       const meterResult = usageMeter.toPersist()
@@ -425,11 +442,17 @@ export class EntitlementService {
         usage: Number(meterResult.usage),
       })
 
-      obs.add("entitlement", {
-        cost,
-        meterResult,
-        alreadyRecorded: true,
-      })
+      this.addEntitlementContext(
+        {
+          allowed: true,
+          key_exists: true,
+          already_recorded: true,
+          cost,
+          usage: Number(meterResult.usage),
+          limit: validatedState.limit ?? undefined,
+        },
+        helpers
+      )
 
       return {
         allowed: true,
@@ -444,11 +467,6 @@ export class EntitlementService {
 
     const consumeResult = usageMeter.consume(params.usage, params.timestamp)
     const meterResult = usageMeter.toPersist()
-
-    obs.add("entitlement", {
-      consumeResult,
-      meterResult,
-    })
 
     await this.storage.set({
       state: {
@@ -506,11 +524,21 @@ export class EntitlementService {
       consumeResult.deniedReason === "LIMIT_EXCEEDED" &&
       validatedState.metadata?.blockCustomer === true
 
-    obs.add("entitlement", {
-      shouldBlockCustomer,
-      consumeResult,
-      meterResult,
-    })
+    this.addEntitlementContext(
+      {
+        allowed: consumeResult.allowed,
+        denied_reason: consumeResult.deniedReason,
+        feature_type: validatedState.featureType,
+        limit: validatedState.limit ?? undefined,
+        usage: Number(meterResult.usage),
+        remaining: consumeResult.remaining,
+        cost: this.calculateCostAndRate({
+          state: validatedState,
+          usage: Number(meterResult.usage),
+        }).cost,
+      },
+      helpers
+    )
 
     if (
       shouldBlockCustomer ||
@@ -522,6 +550,7 @@ export class EntitlementService {
           projectId: params.projectId,
           updates: {
             customerUsageLimitReached: shouldBlockCustomer,
+            // check if we need to block the customer because of negative usage (refund)
           },
         })
       )
@@ -590,20 +619,13 @@ export class EntitlementService {
     }
   }): Promise<Result<MinimalEntitlement[], FetchError | UnPriceEntitlementError>> {
     // Add business context once at the start
-    obs.add("business", {
+    this.wideEventHelpers.addBusiness({
       operation: "getActiveEntitlements",
-      customerId,
-      projectId,
+      customer_id: customerId,
+      project_id: projectId,
     })
 
     const cacheKey = `${projectId}:${customerId}`
-
-    if (opts?.skipCache) {
-      this.logger.debug("skipping cache for getActiveEntitlements and loading from DB", {
-        customerId,
-        projectId,
-      })
-    }
 
     // first try to get the entitlement from cache, if not found try to get it from DO,
     const { val, err } = opts?.skipCache
@@ -634,15 +656,7 @@ export class EntitlementService {
                 projectId,
               })
             ),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch entitlements data from cache, retrying...", {
-              customerId: customerId,
-              projectId: projectId,
-              method: "getActiveEntitlementsFromDB",
-              attempt,
-              error: err.message,
-            })
-          }
+          () => {}
         )
 
     if (err) {
@@ -667,15 +681,6 @@ export class EntitlementService {
       if (isNegative) {
         return Ok([])
       }
-
-      this.logger.debug("Lazy computing entitlements", {
-        customerId,
-        projectId,
-      })
-
-      obs.add("entitlement", {
-        lazyComputing: true,
-      })
 
       const computeResult = await this.grantsManager.computeGrantsForCustomer({
         customerId,
@@ -735,11 +740,11 @@ export class EntitlementService {
     const snapshot: Readonly<EntitlementState> = { ...state }
 
     // Add business context once at the start (this runs in background, needs its own context)
-    obs.add("business", {
+    this.wideEventHelpers.addBusiness({
       operation: "reconcileFeatureUsage",
-      customerId: snapshot.customerId,
-      projectId: snapshot.projectId,
-      featureSlug: snapshot.featureSlug,
+      customer_id: snapshot.customerId,
+      project_id: snapshot.projectId,
+      feature_slug: snapshot.featureSlug,
     })
 
     const config = AGGREGATION_CONFIG[snapshot.aggregationMethod]
@@ -804,13 +809,6 @@ export class EntitlementService {
         })
       : null
 
-    obs.add("entitlement", {
-      watermarkCycleWindow: watermarkCycleWindow?.start,
-      currentCycleWindow: currentCycleWindow?.start,
-      aggregationMethod: snapshot.aggregationMethod,
-      featureType: snapshot.featureType,
-    })
-
     // avoid reconcile if there was a change in the cycle window
     if (
       watermarkCycleWindow &&
@@ -833,11 +831,6 @@ export class EntitlementService {
     const effectiveAt = watermarkCycleWindow?.start ?? snapshot.effectiveAt
     const lastReconciledId = meter.lastReconciledId
     const beforeRecordId = ulid(watermark) // ulid is more reliable than timestamp
-
-    obs.add("entitlement", {
-      lastReconciledId,
-      beforeRecordId,
-    })
 
     // Only reconcile if we have at least 5 minutes of settled time
     // in the current cycle window
@@ -873,11 +866,6 @@ export class EntitlementService {
     // if the last reconciled id is empty we can't reconcile.
     // this means something went wrong in the initialization of the meter or the entiltment was used for the first time.
     if (lastReconciledId === "") {
-      obs.add("entitlement", {
-        lastReconciledId,
-        lastReconciledIdEmpty: true,
-      })
-
       this.logger.warn("skipping reconcile, the last reconciled id is empty", {
         lastReconciledId,
         featureSlug: snapshot.featureSlug,
@@ -908,11 +896,6 @@ export class EntitlementService {
         featureSlug: snapshot.featureSlug,
       }),
     ])
-
-    obs.add("entitlement", {
-      analyticsResult,
-      entitlementResult,
-    })
 
     if (entitlementResult.err) {
       this.logger.error("Failed to get entitlement state", {
@@ -1058,16 +1041,6 @@ export class EntitlementService {
       }
     )
 
-    obs.add("entitlement", {
-      meter: {
-        usage: analyticsResult?.usage,
-        lastRecordId: analyticsResult?.lastRecordId,
-        beforeRecordId: beforeRecordId,
-        afterRecordId: afterRecordId,
-        watermarkCycleWindow: watermarkCycleWindow?.start,
-      },
-    })
-
     if (analyticsErr) {
       // No analytics data yet or error, return error
       return Err(
@@ -1125,10 +1098,10 @@ export class EntitlementService {
 
     // cache miss - load from cache
     if (!cached) {
-      obs.add("entitlement", {
-        cacheMiss: true,
+      this.addEntitlementContext({
+        state_found: false,
+        cache_hit: false,
       })
-      this.logger.debug("Cache miss, loading from DB", params)
 
       // get the entitlement from cache
       const { val, err } = await this.getActiveEntitlement({
@@ -1161,12 +1134,9 @@ export class EntitlementService {
     // if already experied we need to reload the entitlement - expensive operation
     // this don't happen often, entitlement are open ended most of the time
     if (cached.expiresAt && params.now >= cached.expiresAt) {
-      obs.add("entitlement", {
-        expiresAt: cached.expiresAt,
-        now: params.now,
-        recompute: true,
+      this.addEntitlementContext({
+        revalidation_required: true,
       })
-      this.logger.debug("Current cycle ended, recomputing grants", params)
 
       try {
         // at expiration we need to recompute the grants because the end date has been reached
@@ -1227,11 +1197,10 @@ export class EntitlementService {
 
     // Cache hit - no cycle boundary crossed, check if we need to revalidate
     if (params.now >= cached.nextRevalidateAt || !cached.meter) {
-      obs.add("entitlement", {
-        revalidate: true,
-        nextRevalidateAt: cached.nextRevalidateAt,
+      this.addEntitlementContext({
+        revalidation_required: true,
+        cache_hit: true,
       })
-      this.logger.debug("Revalidation time, checking version", params)
 
       let entitlementState: EntitlementState | undefined = undefined
 
@@ -1268,12 +1237,6 @@ export class EntitlementService {
         // if found let's check if the version mismatch or snapshot updated - reload
         // entitlement was recomputed with changes in grants
         if (entitlement.version !== cached.version) {
-          this.logger.info("Version mismatch detected, reloading from DB", {
-            ...params,
-            cachedVersion: cached.version,
-            dbVersion: entitlement.version,
-          })
-
           // reload the entitlement from DB
           const { val: entitlementFromDB, err } = await this.getActiveEntitlement({
             ...params,
@@ -1340,6 +1303,10 @@ export class EntitlementService {
       }
     }
 
+    this.addEntitlementContext({
+      state_found: true,
+      cache_hit: true,
+    })
     return Ok(cached)
   }
 
@@ -1459,12 +1426,6 @@ export class EntitlementService {
           subscriptionStatus,
         }
 
-        this.logger.debug("getAccessControlList check", {
-          customerId,
-          projectId,
-          ...result,
-        })
-
         return result
       }
     )
@@ -1507,9 +1468,7 @@ export class EntitlementService {
         ),
     })
 
-    if (!entitlement) return null
-
-    return entitlement
+    return entitlement ?? null
   }
 
   /**
@@ -1560,14 +1519,6 @@ export class EntitlementService {
       featureSlug,
     })
 
-    if (opts?.skipCache) {
-      this.logger.debug("skipping cache for getActiveEntitlement and loading from DB", {
-        customerId,
-        projectId,
-        featureSlug,
-      })
-    }
-
     // 1. Try to get the entitlement from cache, if not found try to get it from DB
     const { val, err } = opts?.skipCache
       ? await wrapResult(
@@ -1600,16 +1551,7 @@ export class EntitlementService {
                 featureSlug,
               })
             ),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch entitlement data from cache, retrying...", {
-              customerId: customerId,
-              featureSlug,
-              projectId: projectId,
-              method: "getActiveEntitlementFromDB",
-              attempt,
-              error: err.message,
-            })
-          }
+          () => {}
         )
 
     if (err) {
@@ -1627,20 +1569,15 @@ export class EntitlementService {
     // 2. LAZY COMPUTATION: If missing or forcing revalidation, compute from grants
     if (!entitlement) {
       const negativeCacheKey = `negative:${projectId}:${customerId}:${featureSlug}`
-      const { val: isNegative } = opts?.skipCache
-        ? { val: false }
-        : await this.cache.negativeEntitlements.get(negativeCacheKey)
+      let isNegative = false
+      if (!opts?.skipCache) {
+        const result = await this.cache.negativeEntitlements.get(negativeCacheKey)
+        isNegative = result.val === true
+      }
 
       if (isNegative) {
         return Ok(null)
       }
-
-      this.logger.info("Lazy computing entitlement", {
-        customerId,
-        featureSlug,
-        projectId,
-        reason: !entitlement ? "missing" : "revalidate",
-      })
 
       const computeResult = await this.grantsManager.computeGrantsForCustomer({
         customerId,
@@ -1655,8 +1592,8 @@ export class EntitlementService {
       entitlement = computeResult.val.find((e) => e.featureSlug === featureSlug) ?? null
 
       // Update cache with the freshly computed entitlement
-      if (entitlement) {
-        this.waitUntil(this.cache.customerEntitlement.set(cacheKey, entitlement))
+      if (entitlement !== null) {
+        this.waitUntil(this.cache.customerEntitlement.set(cacheKey, entitlement!))
       } else {
         this.waitUntil(this.cache.negativeEntitlements.set(negativeCacheKey, true))
       }
@@ -1774,13 +1711,6 @@ export class EntitlementService {
   > {
     const cacheKey = `${projectId}:${customerId}`
 
-    if (opts?.skipCache) {
-      this.logger.debug("skipping cache for getActiveEntitlement and loading from DB", {
-        customerId,
-        projectId,
-      })
-    }
-
     // first try to get the entitlement from cache, if not found try to get it from DO,
     const { val, err } = opts?.skipCache
       ? await wrapResult(
@@ -1812,15 +1742,7 @@ export class EntitlementService {
                 now: opts?.now ?? Date.now(),
               })
             ),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch usage data from cache, retrying...", {
-              customerId: customerId,
-              projectId: projectId,
-              method: "_getCurrentUsage",
-              attempt,
-              error: err.message,
-            })
-          }
+          () => {}
         )
 
     if (err) {

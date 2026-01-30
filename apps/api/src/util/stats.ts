@@ -24,7 +24,7 @@ export const getStats = (c: Context): Stats => {
     c.req.header("CF-Connecting-IP")
   const userAgent = c.req.header("User-Agent") || undefined
   const ua = new UAParser(userAgent).getResult()
-  const unpriceRequestSource = c.req.header("Unprice-Request-Source")
+  const unpriceRequestSource = c.req.header("Unprice-Request-Source") || "Unknown"
 
   return {
     ip:

@@ -12,9 +12,9 @@ export default async function ProjectPaymentSettingsPage() {
       <CardHeader>
         <div className="flex flex-row items-center justify-between">
           <div className="flex flex-col space-y-1.5">
-            <CardTitle>Stripe configuration</CardTitle>
+            <CardTitle>Stripe Privider</CardTitle>
             <CardDescription>
-              Configure the API key for connection to your stripe account
+              Connect your Stripe account to enable payments for your project
             </CardDescription>
           </div>
         </div>

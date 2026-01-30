@@ -22,6 +22,7 @@ declare namespace Cloudflare {
 		DATABASE_READ1_URL?: string;
 		DATABASE_URL: string;
 		CLOUDFLARE_CACHE_DOMAIN: string;
+		VERSION: string;
 	}
 }
 interface Env extends Cloudflare.Env {}
@@ -29,7 +30,9 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ENCRYPTION_KEY" | "AXIOM_API_TOKEN" | "AUTH_SECRET" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "CLOUDFLARE_ZONE_ID" | "TINYBIRD_URL" | "EMIT_METRICS_LOGS" | "TINYBIRD_TOKEN" | "NODE_ENV" | "CLOUDFLARE_API_TOKEN" | "DRIZZLE_LOG" | "UPSTASH_REDIS_REST_TOKEN" | "DATABASE_READ2_URL" | "VERCEL_ENV" | "EMIT_ANALYTICS" | "DATABASE_READ1_URL" | "DATABASE_URL" | "CLOUDFLARE_CACHE_DOMAIN">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ENCRYPTION_KEY" | "AXIOM_API_TOKEN" | "AUTH_SECRET" | "AXIOM_DATASET" |
+    "VERSION" |
+    "UPSTASH_REDIS_REST_URL" | "CLOUDFLARE_ZONE_ID" | "TINYBIRD_URL" | "EMIT_METRICS_LOGS" | "TINYBIRD_TOKEN" | "NODE_ENV" | "CLOUDFLARE_API_TOKEN" | "DRIZZLE_LOG" | "UPSTASH_REDIS_REST_TOKEN" | "DATABASE_READ2_URL" | "VERCEL_ENV" | "EMIT_ANALYTICS" | "DATABASE_READ1_URL" | "DATABASE_URL" | "CLOUDFLARE_CACHE_DOMAIN">> {}
 }
 declare module "*.sql" {
 	const value: string;

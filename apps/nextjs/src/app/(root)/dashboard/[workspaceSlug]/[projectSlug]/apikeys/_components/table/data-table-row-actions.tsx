@@ -33,9 +33,6 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
       onSuccess: () => {
         router.refresh()
       },
-      onError: (error) => {
-        toast.error(error.message)
-      },
     })
   )
 
@@ -43,9 +40,6 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     trpc.apikeys.roll.mutationOptions({
       onSuccess: () => {
         router.refresh()
-      },
-      onError: (error) => {
-        toast.error(error.message)
       },
     })
   )

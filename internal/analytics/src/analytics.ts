@@ -692,7 +692,11 @@ export class Analytics {
       .then((usage) => usage.data ?? [])
       .catch((error) => {
         this.logger.error("Error getting features usage cursor", {
-          error: JSON.stringify(error),
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+            type: error instanceof Error ? error.name : undefined,
+            stack: error instanceof Error ? error.stack : undefined,
+          },
           customerId,
           projectId,
           featureSlug: feature.featureSlug,

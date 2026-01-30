@@ -14,5 +14,9 @@ export class NoopMetrics implements Metrics {
     return
   }
 
+  public getColo(): string {
+    return "UNK"
+  }
+
   public async flush(): Promise<void> {}
 }

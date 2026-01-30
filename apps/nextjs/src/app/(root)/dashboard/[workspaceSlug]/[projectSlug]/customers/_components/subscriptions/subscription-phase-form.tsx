@@ -61,9 +61,6 @@ export function SubscriptionPhaseForm({
       onSuccess: () => {
         toastAction("success")
       },
-      onError: (error) => {
-        toastAction("error", error.message)
-      },
     })
   )
 
@@ -71,9 +68,6 @@ export function SubscriptionPhaseForm({
     trpc.subscriptions.updatePhase.mutationOptions({
       onSuccess: () => {
         toastAction("success")
-      },
-      onError: (error) => {
-        toastAction("error", error.message)
       },
     })
   )

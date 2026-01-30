@@ -17,7 +17,6 @@ SCHEMA >
     `aggregation_method` LowCardinality(String) `json:$.aggregation_method`,
     `default_quantity` Nullable(Int32) `json:$.default_quantity`,
     `limit` Nullable(Int32) `json:$.limit`,
-    `hidden` UInt8 `json:$.hidden`,
     `timestamp` DateTime64(3) `json:$.timestamp`,
 
 ENGINE MergeTree

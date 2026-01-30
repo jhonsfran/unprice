@@ -65,17 +65,9 @@ export class AxiomLogger implements Logger {
     }).toString()
   }
 
-  public log(level: typeof this.logLevel, message: string, fields?: Fields): void {
-    if (level === "off") return
-    this.client[level](this.marshal(level, message, fields), {
-      ...this.defaultFields,
-      ...fields,
-    })
-  }
-
-  public emit(message: string, fields?: Fields): void {
+  public emit(level: "debug" | "info" | "warn" | "error", message: string, fields?: Fields): void {
     if (this.logLevel === "off") return
-    this.client.info(message, {
+    this.client[level](message, {
       ...this.defaultFields,
       ...fields,
     })
@@ -88,6 +80,7 @@ export class AxiomLogger implements Logger {
       ...fields,
     })
   }
+
   public info(message: string, fields?: Fields): void {
     if (!["debug", "info"].includes(this.logLevel)) return
     this.client.info(this.marshal("info", message, fields), {

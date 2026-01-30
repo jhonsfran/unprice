@@ -1,5 +1,6 @@
 export * from "./interface"
 export * from "./console"
 export * from "./axiom"
-export * from "./wide-event"
-export * from "./observability"
+export * from "./wide-events"
+export * from "./wide-event-helpers"
+export type { WideEventInput } from "@unprice/logs"

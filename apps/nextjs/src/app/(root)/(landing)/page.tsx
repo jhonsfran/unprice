@@ -17,7 +17,7 @@ export default function Home() {
   return (
     <LazyMotionWrapper>
       <main className="flex flex-col overflow-hidden">
-        <Hero />{" "}
+        <Hero />
         <PricingHero
           headline="Test out unprice now."
           description="Notice how 1,000,000 events transform into one perfect invoice. Experience the clarity of the metering engine below."
@@ -28,8 +28,8 @@ export default function Home() {
         <Features />
         <FeaturesApp />
         <Global />
-        <LogoCloud />
         <CodeExample />
+        <LogoCloud />
         <Cta />
       </main>
     </LazyMotionWrapper>

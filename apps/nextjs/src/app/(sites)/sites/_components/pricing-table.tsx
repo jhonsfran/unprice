@@ -89,10 +89,7 @@ export function PricingTable({
   return (
     <motion.div
       aria-labelledby="hero-title"
-      className={cn(
-        "mt-32 flex flex-col items-center justify-center text-center sm:mt-40",
-        className
-      )}
+      className={cn("flex flex-col items-center justify-center text-center", className)}
       variants={containerVariants}
       initial="hidden"
       animate="visible"

@@ -201,7 +201,11 @@ export class GrantsManager {
       })
     } catch (error) {
       this.logger.error("Error getting grants for customer", {
-        error: error instanceof Error ? error.message : String(error),
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          type: error instanceof Error ? error.name : undefined,
+          stack: error instanceof Error ? error.stack : undefined,
+        },
         customerId,
         projectId,
       })
@@ -262,7 +266,11 @@ export class GrantsManager {
         .returning()
         .catch((error) => {
           this.logger.error("Error creating grants", {
-            error: error instanceof Error ? error.message : String(error),
+            error: {
+              message: error instanceof Error ? error.message : String(error),
+              type: error instanceof Error ? error.name : undefined,
+              stack: error instanceof Error ? error.stack : undefined,
+            },
             grantId: newGrant.id,
           })
 
@@ -283,7 +291,11 @@ export class GrantsManager {
       return Ok(insertedGrants)
     } catch (error) {
       this.logger.error("Error creating grants", {
-        error: error instanceof Error ? error.message : String(error),
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          type: error instanceof Error ? error.name : undefined,
+          stack: error instanceof Error ? error.stack : undefined,
+        },
         grantId: newGrant.id,
       })
 
@@ -355,7 +367,11 @@ export class GrantsManager {
 
       if (createGrantResult.err) {
         this.logger.error("Failed to renew grant", {
-          error: createGrantResult.err.message,
+          error: {
+            message: createGrantResult.err.message,
+            type: createGrantResult.err.name,
+            stack: createGrantResult.err.stack,
+          },
           grantId: grant.id,
           subjectId: grant.subjectId,
         })
@@ -460,7 +476,11 @@ export class GrantsManager {
       return Ok(computedEntitlements)
     } catch (error) {
       this.logger.error("Error computing entitlements for customer", {
-        error: error instanceof Error ? error.message : String(error),
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+          type: error instanceof Error ? error.name : undefined,
+          stack: error instanceof Error ? error.stack : undefined,
+        },
         customerId,
         projectId,
       })
@@ -701,7 +721,11 @@ export class GrantsManager {
       .returning()
       .catch((error) => {
         this.logger.error(`Error computeEntitlementFromGrants: ${error.message}`, {
-          error: JSON.stringify(error),
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+            type: error instanceof Error ? error.name : undefined,
+            stack: error instanceof Error ? error.stack : undefined,
+          },
           entitlementId: entitlementData.id,
         })
         return null

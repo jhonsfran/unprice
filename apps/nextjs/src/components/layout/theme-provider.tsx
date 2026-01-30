@@ -10,6 +10,12 @@ export const ToasterProvider = () => {
   const { theme } = useTheme()
 
   return (
-    <Toaster theme={theme as ToasterProps["theme"]} richColors closeButton position="bottom-left" />
+    <Toaster
+      theme={theme as ToasterProps["theme"]}
+      richColors
+      closeButton
+      position="bottom-left"
+      className="pointer-events-auto"
+    />
   )
 }

@@ -1,4 +1,4 @@
-import type { Logger } from "@unprice/logging"
+import type { Fields, Logger } from "@unprice/logging"
 import { Log, type LogSchema } from "@unprice/logs"
 import type { Metric } from "@unprice/metrics"
 import type { Metrics } from "./interface"
@@ -79,16 +79,19 @@ export class LogdrainMetrics implements Metrics {
     })
 
     // colo is important to keep track of the location
-    this.logger.emit(log.toString(), {
-      ...metric,
+    this.logger.emit("info", log.toString(), {
       colo: this.colo,
       country: this.country,
       continent: this.continent,
-    })
+    } as Fields)
   }
 
   public setColo(colo: string): void {
     this.colo = colo
+  }
+
+  public getColo(): string {
+    return this.colo ?? "UNK"
   }
 
   public async flush(): Promise<void> {

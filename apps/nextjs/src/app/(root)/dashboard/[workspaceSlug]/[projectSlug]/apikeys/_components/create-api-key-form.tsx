@@ -27,7 +27,7 @@ import { useParams, useSearchParams } from "next/navigation"
 import { revalidateAppPath } from "~/actions/revalidate"
 import { CopyButton } from "~/components/copy-button"
 import { SubmitButton } from "~/components/submit-button"
-import { toast, toastAction } from "~/lib/toast"
+import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
@@ -67,9 +67,6 @@ export default function CreateApiKeyForm(props: {
       onSuccess: (data) => {
         toastAction("success")
         setKey(data.apikey.key ?? null)
-      },
-      onError: (error) => {
-        toast.error(error.message)
       },
     })
   )

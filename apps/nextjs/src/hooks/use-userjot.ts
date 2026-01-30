@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react"
+"use client"
+
+import { useCallback, useEffect, useState } from "react"
 
 export interface UserJotUser {
   id: string
@@ -6,69 +8,95 @@ export interface UserJotUser {
   firstName?: string
   lastName?: string
   avatar?: string
-  signature?: string
+  signature?: string // Critical for the 401 error
+}
+
+declare global {
+  interface Window {
+    uj?: {
+      init: (projectId: string) => void
+      identify: (user: UserJotUser) => void
+      showWidget: (options?: { section?: string }) => void
+      hideWidget: () => void
+      setTheme: (theme: string) => void
+      getWidgetState: () => { isOpen: boolean }
+    }
+  }
 }
 
 export function useUserJot() {
   const [isOpen, setIsOpen] = useState(false)
   const [isReady, setIsReady] = useState(false)
 
+  // Robust check for script readiness
   useEffect(() => {
-    const checkReady = () => {
-      // @ts-ignore
-      if (window.uj && typeof window.uj.getWidgetState === "function") {
+    let intervalId: NodeJS.Timeout
+
+    const check = () => {
+      // Check if window.uj exists and has the critical identify method
+      if (window.uj && typeof window.uj.identify === "function") {
         setIsReady(true)
         return true
       }
       return false
     }
 
-    if (checkReady()) return
-
-    const handleReady = () => setIsReady(true)
-    window.addEventListener("uj:ready", handleReady)
-    return () => window.removeEventListener("uj:ready", handleReady)
-  }, [])
-
-  const userJotOptions = {
-    widget: true,
-    theme: "auto",
-    position: "right",
-  }
-
-  if (process.env.NODE_ENV === "development") {
-    userJotOptions.position = "left"
-  }
-
-  // wait for the script to load and then initialize the userjot
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // @ts-ignore - window.uj is global from the script
-      setIsOpen(window.uj?.getWidgetState?.()?.isOpen ?? false)
-    }, 500)
-    return () => clearInterval(interval)
-  }, [])
-
-  const show = (section?: "feedback" | "roadmap" | "updates") =>
-    // biome-ignore lint/suspicious/noExplicitAny: window.uj is global from the script
-    (window as any).uj?.showWidget({ section })
-
-  const hide = () =>
-    // biome-ignore lint/suspicious/noExplicitAny: window.uj is global from the script
-    (window as any).uj?.hideWidget()
-
-  const identify = (user: UserJotUser | null) =>
-    // biome-ignore lint/suspicious/noExplicitAny: window.uj is global from the script
-    (window as any).uj?.identify(user)
-
-  const setTheme = (theme: string) => {
-    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    if (typeof window !== "undefined" && (window as any).uj) {
-      const valetTheme = theme === "system" ? "auto" : theme
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      ;(window as any).uj.setTheme(valetTheme)
+    // Check immediately, then poll if not ready
+    if (!check()) {
+      intervalId = setInterval(() => {
+        if (check()) clearInterval(intervalId)
+      }, 100)
     }
-  }
+
+    // Also listen for the official ready event
+    const handleReady = () => {
+      check()
+      if (intervalId) clearInterval(intervalId)
+    }
+
+    window.addEventListener("uj:ready", handleReady)
+
+    return () => {
+      if (intervalId) clearInterval(intervalId)
+      window.removeEventListener("uj:ready", handleReady)
+    }
+  }, [])
+
+  // Poll for widget open/close state (optional, but good for UI sync)
+  useEffect(() => {
+    if (!isReady) return
+
+    const interval = setInterval(() => {
+      setIsOpen(window.uj?.getWidgetState()?.isOpen ?? false)
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [isReady])
+
+  // Wrap methods in useCallback to prevent re-renders
+  const show = useCallback(
+    (section?: "feedback" | "roadmap" | "updates") => window.uj?.showWidget({ section }),
+    []
+  )
+
+  const hide = useCallback(() => window.uj?.hideWidget(), [])
+
+  const identify = useCallback((user: UserJotUser | null) => {
+    if (user && window.uj) {
+      // Debug log for production (remove once fixed)
+      if (process.env.NODE_ENV === "production" && !user.signature) {
+        console.error("UserJot Error: Missing signature for user", user.id)
+      }
+      window.uj.identify(user)
+    }
+  }, [])
+
+  const setTheme = useCallback((theme: string) => {
+    if (window.uj) {
+      const val = theme === "system" ? "auto" : theme
+      window.uj.setTheme(val)
+    }
+  }, [])
 
   return { isOpen, isReady, show, hide, identify, setTheme }
 }

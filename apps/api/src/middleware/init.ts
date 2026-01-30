@@ -2,7 +2,12 @@ import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
-import { AxiomLogger, ConsoleLogger } from "@unprice/logging"
+import {
+  AxiomLogger,
+  ConsoleLogger,
+  createWideEventHelpers,
+  createWideEventLogger,
+} from "@unprice/logging"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { CustomerService } from "@unprice/services/customers"
@@ -12,10 +17,8 @@ import type { HonoEnv } from "~/hono/env"
 import { ApiProjectService } from "~/project"
 import { UsageLimiterService } from "~/usagelimiter/service"
 
-import { WideEvent } from "@unprice/logging"
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { NoopUsageLimiter } from "~/usagelimiter/noop"
-import { runInContext } from "~/util/observability"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -118,21 +121,19 @@ export function init(): MiddlewareHandler<HonoEnv> {
           },
         })
 
-    // Initialize wide event with infrastructure and geo context, following required shape
-    const wideEvent = new WideEvent(
-      logger,
-      {
-        requestId,
-        timestamp: new Date().toISOString(),
-        infra: {
-          platform: "cloudflare",
-          isolateId,
-        },
-        method: c.req.method,
-        path: c.req.path,
-      },
-      c.env.NODE_ENV === "production" ? 0.1 : 1
-    )
+    const wideEventLogger = createWideEventLogger({
+      "service.name": "api",
+      "service.version": c.env.VERSION,
+      "service.environment": c.env.NODE_ENV,
+      sampleRate: c.env.NODE_ENV === "production" ? 0.1 : 1,
+      emitter: (level, message, event) => logger.emit(level, message, event),
+    })
+
+    const wideEventHelpers = createWideEventHelpers(wideEventLogger)
+
+    // Pass wideEventLogger through context for request-scoped access
+    c.set("wideEventLogger", wideEventLogger)
+    c.set("wideEventHelpers", wideEventHelpers)
 
     const metrics = emitMetrics
       ? new LogdrainMetrics({
@@ -271,18 +272,44 @@ export function init(): MiddlewareHandler<HonoEnv> {
       apikey,
       db,
       customer,
+      wideEventHelpers,
     })
 
-    // emit the init event
-    metrics.emit({
-      metric: "metric.init",
-      duration: performance.now() - performanceStart,
-    })
+    // Run within the wide event context so add() and emit() see the same store
+    await wideEventLogger.runAsync(async () => {
+      wideEventLogger.addMany({
+        request: {
+          id: requestId,
+          timestamp: new Date().toISOString(),
+          method: c.req.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS",
+          path: c.req.path,
+          referer: c.req.header("referer"),
+          host: c.req.header("host"),
+          protocol: c.req.header("protocol") as "http" | "https" | undefined,
+          query: JSON.stringify(c.req.query()),
+        },
+        cloud: {
+          platform: "cloudflare",
+          isolate_id: isolateId,
+          region: stats.region,
+        },
+        geo: {
+          colo: stats.colo,
+          country: stats.country,
+          continent: stats.continent,
+          city: stats.city,
+          region: stats.region,
+          ip: stats.ip,
+          ua: stats.ua,
+          source: stats.source,
+        },
+      })
 
-    // Run within the wide event context
-    // This ensures all downstream code has access to the wide event via getWideEvent()
-    // The context is automatically cleaned up after the request completes
-    await runInContext(wideEvent, async () => {
+      metrics.emit({
+        metric: "metric.init",
+        duration: performance.now() - performanceStart,
+      })
+
       await next()
     })
   }

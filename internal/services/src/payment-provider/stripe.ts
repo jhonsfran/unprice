@@ -247,7 +247,11 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       const e = error as Error
 
       this.logger.error("Error listing payment methods", {
-        error: e,
+        error: {
+          type: e.name,
+          message: e.message,
+          stack: e.stack,
+        },
         ...opts,
       })
 

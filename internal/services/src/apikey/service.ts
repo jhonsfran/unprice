@@ -219,7 +219,11 @@ export class ApiKeysService {
 
       if (result.err) {
         this.logger.error("Error verifying apikey after retrying without cache", {
-          error: result.err,
+          error: {
+            type: result.err.name,
+            message: result.err.message,
+            stack: result.err.stack,
+          },
         })
 
         return result

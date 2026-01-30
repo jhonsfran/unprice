@@ -22,7 +22,7 @@ export const exists = protectedWorkspaceProcedure
     if (!result.success) {
       throw new TRPCError({
         code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan ${result.deniedReason}`,
+        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
       })
     }
 

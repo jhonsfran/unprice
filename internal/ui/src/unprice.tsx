@@ -24,10 +24,10 @@ export default function UnpriceLogo({
     sm: { px: 24, text: 16, gap: 4 },
 
     // md: Gap reduced 8px -> 5px (The critical fix)
-    md: { px: 32, text: 20, gap: 5 },
+    md: { px: 32, text: 24, gap: 5 },
 
     // lg: Gap reduced 10px -> 8px
-    lg: { px: 48, text: 32, gap: 8 },
+    lg: { px: 48, text: 38, gap: 8 },
 
     // xl: Gap reduced 12px -> 10px
     xl: { px: 64, text: 48, gap: 10 },

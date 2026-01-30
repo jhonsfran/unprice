@@ -36,7 +36,8 @@ export const createQueryClient = () =>
         const msg =
           meta.mapMessage instanceof Function ? meta.mapMessage(err) : getErrorMessage(err)
         if (err instanceof TRPCClientError) {
-          toastAction("error", err.message)
+          const requestId = err.data?.requestId
+          toastAction("error", msg, { requestId })
         } else {
           toastAction("error-contact", msg)
         }

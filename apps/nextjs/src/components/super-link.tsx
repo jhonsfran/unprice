@@ -1,6 +1,7 @@
 // See https://typeofweb.hashnode.dev/nextjs-prefetch-onmouseenter for a detailed explanation and more code
 // See it in action: https://demo.yournextstore.com
 "use client"
+
 import { cn, focusRing } from "@unprice/ui/utils"
 import Link from "next/link"
 import { useRouter } from "next/navigation"

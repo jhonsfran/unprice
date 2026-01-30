@@ -1,9 +1,6 @@
 import { metricSchema } from "@unprice/metrics"
 import { z } from "zod"
-
-export const logContext = z.object({
-  requestId: z.string(),
-})
+export * from "./wide-event"
 
 export const logSchema = z.discriminatedUnion("type", [
   z.object({

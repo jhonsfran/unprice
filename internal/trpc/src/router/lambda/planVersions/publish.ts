@@ -40,7 +40,7 @@ export const publish = protectedProjectProcedure
     if (!result.success) {
       throw new TRPCError({
         code: "UNAUTHORIZED",
-        message: `This feature is not available on your current plan ${result.deniedReason}`,
+        message: `This feature is not available on your current plan${result.deniedReason ? `: ${result.deniedReason}` : ""}`,
       })
     }
 
@@ -84,11 +84,6 @@ export const publish = protectedProjectProcedure
     })
 
     if (err) {
-      opts.ctx.logger.error("Error calculating price plan", {
-        error: err,
-        planVersionId: planVersionData.id,
-      })
-
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error calculating price plan",
