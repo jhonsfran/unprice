@@ -127,6 +127,10 @@ export class EntitlementService {
     if (value === null || value === undefined) {
       return undefined
     }
+    if (!Number.isFinite(value)) {
+      return undefined
+    }
+    return Math.round(value * 100) / 100
   }
 
   private getUsageMeter(validatedState: EntitlementState): UsageMeter {
@@ -926,7 +930,8 @@ export class EntitlementService {
 
     // analytics usage and last record id
     const analyticsUsage = Number(analyticsResult.val.usage ?? 0) // Total from analytics
-    const analyticsLastRecordId = analyticsResult.val.lastRecordId ?? beforeRecordId
+    // Use || instead of ?? to also handle empty strings from analytics when there's no usage data yet
+    const analyticsLastRecordId = analyticsResult.val.lastRecordId || beforeRecordId
 
     // EPSILON is the tolerance for the drift
     const EPSILON = 0.001
@@ -1054,7 +1059,8 @@ export class EntitlementService {
     }
 
     const usage = analyticsResult.usage ?? 0 // Total from effectiveAt to watermark
-    const lastRecordId = analyticsResult.lastRecordId ?? beforeRecordId
+    // Use || instead of ?? to also handle empty strings from analytics when there's no usage data yet
+    const lastRecordId = analyticsResult.lastRecordId || beforeRecordId
 
     // initialize entitlement state
     return Ok({
