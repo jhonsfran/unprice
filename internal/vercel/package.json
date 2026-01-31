@@ -22,12 +22,12 @@
   "license": "AGPL-3.0",
   "devDependencies": {
     "@unprice/tsconfig": "workspace:*",
-    "@types/node": "20.11.24",
-    "typescript": "^5.3.3"
+    "@types/node": "20.19.30",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@unprice/error": "workspace:^",
-    "@t3-oss/env-core": "^0.12.0",
-    "zod": "^3.24.2"
+    "@t3-oss/env-core": "^0.13.10",
+    "zod": "^3.25.76"
   }
 }
