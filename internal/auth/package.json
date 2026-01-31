@@ -21,26 +21,26 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auth/core": "^0.34.1",
-    "@auth/drizzle-adapter": "1.8.0",
-    "@t3-oss/env-core": "^0.12.0",
+    "@auth/core": "^0.34.3",
+    "@auth/drizzle-adapter": "1.11.1",
+    "@t3-oss/env-core": "^0.13.10",
     "@unprice/api": "workspace:^",
     "@unprice/config": "workspace:^",
     "@unprice/db": "workspace:^",
     "@unprice/error": "workspace:^",
     "@unprice/analytics": "workspace:^",
-    "bcryptjs": "^3.0.2",
+    "bcryptjs": "^3.0.3",
     "encoding": "^0.1.13",
-    "next": "14.2.32",
-    "next-auth": "5.0.0-beta.20",
-    "zod": "^3.24.2"
+    "next": "14.2.35",
+    "next-auth": "5.0.0-beta.30",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^18.3.27",
+    "@types/react-dom": "^18.3.7",
     "@unprice/tsconfig": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "typescript": "^5.3.3"
+    "typescript": "^5.9.3"
   }
 }

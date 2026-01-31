@@ -2,11 +2,11 @@
   "name": "unprice",
   "private": true,
   "engines": {
-    "node": "20.x"
+    "node": "20.20.0"
   },
   "workspaces": ["apps/*", "packages/*"],
   "engineStrict": true,
-  "packageManager": "pnpm@10.28.0",
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "build": "turbo run build",
     "clean": "git clean -xdf node_modules dist .next && rm -rf node_modules",
@@ -30,17 +30,17 @@
   },
   "dependencies": {
     "@biomejs/biome": "1.9.4",
-    "@changesets/cli": "^2.27.7",
-    "@manypkg/cli": "^0.21.2",
-    "@turbo/gen": "^1.12.4",
-    "@types/node": "20.11.24",
+    "@changesets/cli": "^2.29.8",
+    "@manypkg/cli": "^0.25.1",
+    "@turbo/gen": "^1.13.4",
+    "@types/node": "20.19.30",
     "cross-env": "^7.0.3",
     "cz-conventional-changelog": "^3.3.0",
-    "husky": "^9.1.4",
-    "knip": "^5.17.4",
-    "lint-staged": "^15.2.9",
-    "turbo": "2.3.3",
-    "typescript": "^5.3.3"
+    "husky": "^9.1.7",
+    "knip": "^5.82.1",
+    "lint-staged": "^15.5.2",
+    "turbo": "2.8.1",
+    "typescript": "^5.9.3"
   },
   "lint-staged": {
     "*": ["pnpm validate"]
