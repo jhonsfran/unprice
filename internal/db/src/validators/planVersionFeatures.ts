@@ -1,4 +1,4 @@
-import * as currencies from "@dinero.js/currencies"
+import * as currencies from "dinero.js/currencies"
 import { dinero } from "dinero.js"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import * as z from "zod"
