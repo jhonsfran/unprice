@@ -1,4 +1,4 @@
-import * as currencies from "@dinero.js/currencies"
+import * as currencies from "dinero.js/currencies"
 import { type Interval, prepareInterval, statsSchema } from "@unprice/analytics"
 import { currencySymbol } from "@unprice/db/utils"
 import { calculateFlatPricePlan } from "@unprice/db/validators"

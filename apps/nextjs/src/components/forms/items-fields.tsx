@@ -1,5 +1,5 @@
 "use client"
-import * as currencies from "@dinero.js/currencies"
+import * as currencies from "dinero.js/currencies"
 import { AnimatePresence, motion } from "framer-motion"
 import { ChevronDown, LayoutGrid, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
