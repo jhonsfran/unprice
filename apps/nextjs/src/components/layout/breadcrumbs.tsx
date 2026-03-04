@@ -34,7 +34,7 @@ export default function BreadcrumbsApp(props: {
   return (
     <Breadcrumb className={cn("flex h-[36px] w-full items-center", props.className)}>
       <BreadcrumbList>
-        {breadcrumbs.length > 2 ? (
+        {breadcrumbs.length >= 2 ? (
           <Fragment>
             <BreadcrumbItem className="border-primary">
               <BreadcrumbPage>

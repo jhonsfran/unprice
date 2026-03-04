@@ -4452,7 +4452,7 @@ export interface operations {
            * @description The project ID to scope realtime access
            * @example project_1H7KQFLr7RepUyQBKdnvY
            */
-          projectId: string
+          projectId?: string
         }
       }
     }

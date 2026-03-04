@@ -1,7 +1,7 @@
 import type { Unprice, UnpriceOptions } from "@unprice/api"
 import type { PropsWithChildren } from "react"
 
-export type UnpriceProviderProps = PropsWithChildren<{
+export type UnpriceClientProviderProps = PropsWithChildren<{
   /**
    * Either provide a pre-configured client instance
    */

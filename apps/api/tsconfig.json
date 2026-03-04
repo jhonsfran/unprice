@@ -14,5 +14,5 @@
     }
   },
   "include": ["drizzle.config.ts", "src", "drizzle", "worker-configuration.d.ts"],
-  "exclude": ["node_modules", ".wrangler", "dist", ".turbo"]
+  "exclude": ["node_modules", ".wrangler", "dist", ".turbo", "src/**/*.test.ts"]
 }

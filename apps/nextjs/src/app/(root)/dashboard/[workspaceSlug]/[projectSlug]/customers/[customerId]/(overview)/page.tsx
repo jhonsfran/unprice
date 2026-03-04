@@ -1,4 +1,3 @@
-import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Code } from "lucide-react"
@@ -10,65 +9,6 @@ import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
 import { RealtimePanel } from "../_components/realtime/realtime-panel"
-
-type CustomerUsageResult = NonNullable<RouterOutputs["customers"]["getUsage"]["usage"]>
-type CustomerUsageFeature = CustomerUsageResult["groups"][number]["features"][number]
-
-function buildRealtimeCycleUsageRows(usageData?: CustomerUsageResult | null) {
-  if (!usageData) {
-    return []
-  }
-
-  const rows: Array<{
-    featureSlug: string
-    currentUsage: number
-    limit: number | null
-    limitType: "hard" | "soft" | "none"
-    featureType: CustomerUsageFeature["type"]
-  }> = []
-
-  for (const group of usageData.groups) {
-    for (const feature of group.features) {
-      if (feature.type === "usage") {
-        const limit =
-          typeof feature.usageBar.limit === "number" && feature.usageBar.limit > 0
-            ? feature.usageBar.limit
-            : null
-        rows.push({
-          featureSlug: feature.id,
-          currentUsage: feature.usageBar.current,
-          limit,
-          limitType: feature.usageBar.limitType,
-          featureType: feature.type,
-        })
-        continue
-      }
-
-      if (feature.type === "tiered") {
-        const tieredMax = feature.tieredDisplay.tiers.find((t) => t.isActive)?.max
-        const limit = typeof tieredMax === "number" && tieredMax > 0 ? tieredMax : null
-        rows.push({
-          featureSlug: feature.id,
-          currentUsage: feature.tieredDisplay.currentUsage,
-          limit,
-          limitType: "none",
-          featureType: feature.type,
-        })
-        continue
-      }
-
-      rows.push({
-        featureSlug: feature.id,
-        currentUsage: 0,
-        limit: null,
-        limitType: "none",
-        featureType: feature.type,
-      })
-    }
-  }
-
-  return rows
-}
 
 export default async function CustomerUsagePage({
   params,
@@ -90,36 +30,12 @@ export default async function CustomerUsagePage({
     notFound()
   }
 
-  const realtimeTicket = await api.analytics.getRealtimeTicket({
-    customerId,
-  })
-
-  const currentSubscription =
-    [...customer.subscriptions]
-      .filter((subscription) => subscription.active)
-      .sort(
-        (a, b) =>
-          (b.currentCycleStartAt ?? b.createdAtM ?? 0) -
-          (a.currentCycleStartAt ?? a.createdAtM ?? 0)
-      )[0] ??
-    [...customer.subscriptions].sort(
-      (a, b) =>
-        (b.currentCycleStartAt ?? b.createdAtM ?? 0) - (a.currentCycleStartAt ?? a.createdAtM ?? 0)
-    )[0]
-
-  const [
-    { entitlements: entitlementResult },
-    { subscription: subscriptionResult },
-    { usage: customerUsageResult },
-  ] = await Promise.all([
-    api.customers.getEntitlements({ customerId: customer.id }),
-    api.customers.getSubscription({ customerId: customer.id }),
-    api.customers.getUsage({ customerId: customer.id }),
-  ])
-
-  const currentPhase = subscriptionResult?.activePhase ?? null
-  const entitlementSlugs = entitlementResult?.map((entitlement) => entitlement.featureSlug) ?? []
-  const cycleFeatureUsageRows = buildRealtimeCycleUsageRows(customerUsageResult)
+  const realtimeTicketPromise = api.analytics
+    .getRealtimeTicket({
+      customerId,
+    })
+    .catch(() => null)
+  const realtimeTicket = await realtimeTicketPromise
 
   return (
     <DashboardShell
@@ -160,18 +76,9 @@ export default async function CustomerUsagePage({
       <RealtimePanel
         customerId={customer.id}
         projectId={customer.projectId}
-        realtimeTicket={realtimeTicket.ticket}
-        realtimeTicketExpiresAt={realtimeTicket.expiresAt}
+        realtimeTicket={realtimeTicket?.ticket ?? null}
+        realtimeTicketExpiresAt={realtimeTicket?.expiresAt ?? null}
         runtimeEnv={process.env.NEXT_PUBLIC_APP_ENV ?? "development"}
-        currentPlanSlug={currentSubscription?.planSlug ?? null}
-        currentCycleStartAt={currentSubscription?.currentCycleStartAt ?? null}
-        currentCycleEndAt={currentSubscription?.currentCycleEndAt ?? null}
-        cycleTimezone={currentSubscription?.timezone ?? null}
-        entitlementSlugs={currentPhase ? entitlementSlugs : []}
-        cycleFeatureUsageRows={cycleFeatureUsageRows}
-        currentPhaseBillingPeriod={
-          currentPhase?.planVersion?.billingConfig.billingInterval ?? "No active phase"
-        }
       />
     </DashboardShell>
   )

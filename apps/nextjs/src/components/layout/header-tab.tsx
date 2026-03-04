@@ -19,8 +19,13 @@ export default function HeaderTab({
   id?: string
 }) {
   return (
-    <div className={cn("flex w-full items-center justify-between px-0", className)}>
-      <div className="space-y-2">
+    <div
+      className={cn(
+        "flex w-full flex-col items-center justify-between space-y-6 px-0 md:flex-row md:space-y-0",
+        className
+      )}
+    >
+      <div className="mr-auto space-y-2">
         <div className="flex items-center space-x-2">
           <Typography variant="h3">{title}</Typography>
           {label && (
@@ -53,7 +58,7 @@ export default function HeaderTab({
           </Typography>
         )}
       </div>
-      <div>{action}</div>
+      <div className="ml-auto">{action}</div>
     </div>
   )
 }

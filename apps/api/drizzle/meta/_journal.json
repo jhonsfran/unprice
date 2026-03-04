@@ -8,6 +8,27 @@
       "when": 1771264840314,
       "tag": "0000_cynical_puff_adder",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1772200000000,
+      "tag": "0001_sturdy_storage_kernel",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1772201000000,
+      "tag": "0002_direct_metadata_buffer",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1772302000000,
+      "tag": "0003_ack_seq_cursor_model",
+      "breakpoints": true
     }
   ]
 }

@@ -49,6 +49,7 @@
     "@unprice/error": "workspace:^",
     "@unprice/lakehouse": "workspace:^",
     "@unprice/logging": "workspace:^",
+    "@unprice/react": "workspace:^",
     "@unprice/stripe": "workspace:^",
     "@unprice/trpc": "workspace:^",
     "@unprice/ui": "workspace:^",

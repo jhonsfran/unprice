@@ -105,7 +105,6 @@
     "**/tsconfig.tsbuildinfo": true,
     "**/.venv": true,
     "**/.venv-workers": true,
-    "**/.wrangler": true,
     "**/__pycache__": true,
     "**/python_modules/**": true,
     "**/lakenv/**": true

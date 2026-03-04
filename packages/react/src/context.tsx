@@ -2,15 +2,15 @@
 
 import { Unprice } from "@unprice/api"
 import { createContext, useContext, useEffect, useState } from "react"
-import type { UnpriceContextType, UnpriceProviderProps } from "./types"
+import type { UnpriceClientProviderProps, UnpriceContextType } from "./types"
 
 const UnpriceContext = createContext<UnpriceContextType | undefined>(undefined)
 
-export function UnpriceProvider({
+export function UnpriceClientProvider({
   children,
   client: providedClient,
   options,
-}: UnpriceProviderProps) {
+}: UnpriceClientProviderProps) {
   const [state, setState] = useState<UnpriceContextType>(() => {
     if (providedClient) {
       return {
@@ -41,11 +41,11 @@ export function UnpriceProvider({
   return <UnpriceContext.Provider value={state}>{children}</UnpriceContext.Provider>
 }
 
-export function useUnpriceContext() {
+export function useUnpriceClient() {
   const context = useContext(UnpriceContext)
 
   if (!context) {
-    throw new Error("useUnpriceContext must be used within a UnpriceProvider")
+    throw new Error("useUnpriceClient must be used within UnpriceProvider or UnpriceClientProvider")
   }
 
   return context

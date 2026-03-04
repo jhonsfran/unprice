@@ -1,7 +1,7 @@
 {
   "name": "@unprice/api",
   "private": false,
-  "version": "0.1.2",
+  "version": "0.1.5",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -30,6 +30,6 @@
     "openapi-typescript": "7.0.0-next.7",
     "tsup": "^8.4.0",
     "typescript": "^5.3.3",
-    "vitest": "^2.0.5"
+    "vitest": "^2.1.9"
   }
 }

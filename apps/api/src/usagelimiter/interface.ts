@@ -69,7 +69,83 @@ export const bufferMetricsWindowSecondsSchema = z.union([
   z.literal(604800),
 ])
 
+export const subscriptionStatusSchema = z.union([
+  z.literal("active"),
+  z.literal("trialing"),
+  z.literal("canceled"),
+  z.literal("expired"),
+  z.literal("past_due"),
+])
+
+export const realtimeSnapshotFeatureSchema = z.object({
+  featureSlug: z.string(),
+  featureType: z.union([
+    z.literal("flat"),
+    z.literal("tiered"),
+    z.literal("usage"),
+    z.literal("package"),
+  ]),
+  usage: z.number().nullable(),
+  limit: z.number().nullable(),
+  limitType: z.union([z.literal("hard"), z.literal("soft"), z.literal("none")]),
+  effectiveAt: z.number().nullable(),
+  expiresAt: z.number().nullable(),
+})
+
+export const realtimeSnapshotSubscriptionSchema = z.object({
+  status: subscriptionStatusSchema.nullable(),
+  planSlug: z.string().nullable(),
+  billingInterval: z.string().nullable(),
+  phaseStartAt: z.number().nullable(),
+  phaseEndAt: z.number().nullable(),
+  cycleStartAt: z.number().nullable(),
+  cycleEndAt: z.number().nullable(),
+  timezone: z.string().nullable(),
+})
+
+export const realtimeSnapshotEntitlementSchema = z.object({
+  id: z.string(),
+  featureSlug: z.string(),
+  effectiveAt: z.number(),
+  expiresAt: z.number().nullable(),
+})
+
+export const realtimeSnapshotStateSchema = z.object({
+  customerId: z.string(),
+  projectId: z.string(),
+  subscriptionStatus: subscriptionStatusSchema.nullable(),
+  entitlements: z.array(realtimeSnapshotEntitlementSchema),
+  features: z.array(realtimeSnapshotFeatureSchema),
+  subscription: realtimeSnapshotSubscriptionSchema.nullable().optional(),
+  usageByFeature: z.record(z.string(), z.number()),
+  metrics: bufferMetricsResponseSchema,
+  asOf: z.number(),
+  stateVersion: z.string(),
+})
+
+export const realtimeSnapshotMessageSchema = z.object({
+  type: z.literal("snapshot"),
+  version: z.number().int().optional(),
+  source: z.literal("durable_object"),
+  metrics: bufferMetricsResponseSchema,
+  usageByFeature: z.record(z.string(), z.number()).optional(),
+  state: realtimeSnapshotStateSchema.optional(),
+})
+
+export const realtimeSnapshotErrorMessageSchema = z.object({
+  type: z.literal("snapshot_error"),
+  code: z.union([
+    z.literal("TOKEN_EXPIRED"),
+    z.literal("UNAUTHORIZED"),
+    z.literal("FORBIDDEN"),
+    z.literal("INTERNAL"),
+  ]),
+  message: z.string().optional(),
+})
+
 export type BufferMetricsResponse = z.infer<typeof bufferMetricsResponseSchema>
+export type RealtimeSnapshotState = z.infer<typeof realtimeSnapshotStateSchema>
+export type RealtimeSnapshotMessage = z.infer<typeof realtimeSnapshotMessageSchema>
 
 export interface UsageLimiter {
   /**

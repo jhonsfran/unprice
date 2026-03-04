@@ -45,6 +45,9 @@ export const usageRecords = pgTableProject(
     rate_amount: numeric(),
     rate_currency: text(),
     entitlement_id: text().notNull(),
+    // Internal monotonic sequence for delivery checkpoints.
+    seq: integer().notNull().default(0),
+    meta_id: text().notNull().default("0"),
     // 0 = not deleted, 1 = deleted
     deleted: integer().notNull().default(0),
     // first-class analytics columns
@@ -57,6 +60,7 @@ export const usageRecords = pgTableProject(
     // Indexes for common queries
     index("usage_records_feature_idx").on(table.feature_slug),
     index("usage_records_timestamp_idx").on(table.timestamp),
+    unique("usage_records_seq_idx").on(table.seq),
     unique("usage_idempotence_key_idx").on(table.idempotence_key),
   ]
 )
@@ -74,17 +78,52 @@ export const verifications = pgTableProject(
     feature_slug: text().notNull(),
     customer_id: text().notNull(),
     metadata: text(),
+    meta_id: text().notNull().default("0"),
     usage: numeric(),
     remaining: numeric(),
     entitlement_id: text().notNull(),
     allowed: integer().notNull().default(0),
+    // Internal monotonic sequence for delivery checkpoints.
+    seq: integer().notNull().default(0),
     // first-class analytics columns
     country: text().default("UNK"),
     region: text().default("UNK"),
     action: text(),
     key_id: text(),
   },
-  (table) => [index("verifications_feature_idx").on(table.feature_slug)]
+  (table) => [
+    index("verifications_feature_idx").on(table.feature_slug),
+    unique("verifications_seq_idx").on(table.seq),
+  ]
+)
+
+export const deliverySequences = pgTableProject(
+  "delivery_sequences",
+  {
+    stream: text().primaryKey(),
+    current_seq: integer().notNull(),
+    updated_at: integer().notNull(),
+  },
+  (table) => [index("delivery_sequences_updated_idx").on(table.updated_at)]
+)
+
+export const metadataRecords = pgTableProject(
+  "metadata_records",
+  {
+    id: text("id").notNull(),
+    payload: text().notNull(),
+    project_id: text().notNull(),
+    customer_id: text().notNull(),
+    timestamp: integer().notNull(),
+    created_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.id, table.project_id, table.customer_id],
+    }),
+    index("metadata_records_timestamp_idx").on(table.timestamp),
+    index("metadata_records_project_idx").on(table.project_id, table.customer_id),
+  ]
 )
 
 export const usageAggregates = pgTableProject(
@@ -139,5 +178,38 @@ export const reportUsageAggregates = pgTableProject(
       columns: [table.bucket_start, table.bucket_size_seconds, table.feature_slug],
     }),
     index("report_usage_aggregates_bucket_idx").on(table.bucket_size_seconds, table.bucket_start),
+  ]
+)
+
+export const stateObjects = pgTableProject(
+  "state_objects",
+  {
+    collection: text().notNull(),
+    key: text().notNull(),
+    payload: text().notNull(),
+    version: integer().notNull().default(1),
+    updated_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.collection, table.key],
+    }),
+    index("state_objects_collection_updated_idx").on(table.collection, table.updated_at),
+  ]
+)
+
+export const dedupeKeys = pgTableProject(
+  "dedupe_keys",
+  {
+    scope: text().notNull(),
+    event_date: text().notNull(),
+    id: text().notNull(),
+    created_at: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.scope, table.event_date, table.id],
+    }),
+    index("dedupe_keys_scope_date_idx").on(table.scope, table.event_date),
   ]
 )

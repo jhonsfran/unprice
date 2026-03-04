@@ -43,6 +43,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       RL_FREE_6000_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),
       CLOUDFLARE_API_TOKEN: z.string().optional(),
+      CLOUDFLARE_ACCOUNT_ID: z.string(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
       PIPELINE_USAGE: cloudflarePipeline,
       PIPELINE_VERIFICATIONS: cloudflarePipeline,

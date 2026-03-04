@@ -10,10 +10,13 @@
     "dev": "sh dev.sh",
     "dev:wrangler": "wrangler dev src/index.ts -e dev",
     "start": "wrangler dev -e dev",
+    "test": "vitest run",
+    "test:file": "vitest run \"$@\"",
     "gentypes": "wrangler types",
     "clean": "rm -rf .turbo node_modules dist .wrangler",
     "db:generate": "drizzle-kit generate",
-    "type-check": "pnpm exec wrangler types && pnpm exec tsc --noEmit"
+    "type-check": "pnpm exec tsc --noEmit",
+    "type-check:full": "pnpm exec wrangler types && pnpm exec tsc --noEmit"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250121.0",
@@ -21,6 +24,7 @@
     "@unprice/tsconfig": "workspace:^",
     "drizzle-kit": "^0.30.5",
     "typescript": "^5.3.3",
+    "vitest": "^2.1.9",
     "wrangler": "4.67.0"
   },
   "dependencies": {
@@ -41,7 +45,7 @@
     "drizzle-orm": "^0.44.5",
     "hono": "^4.7.4",
     "hono-party": "^0.0.6",
-    "partyserver": "^0.0.65",
+    "partyserver": "^0.3.1",
     "stoker": "^1.4.2",
     "ua-parser-js": "^2.0.3",
     "xxhash-wasm": "^1.1.0",

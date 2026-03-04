@@ -7,8 +7,7 @@ export const getConfig = protectedProjectProcedure
   .input(selectPaymentProviderConfigSchema.pick({ paymentProvider: true }))
   .output(z.object({ paymentProviderConfig: selectPaymentProviderConfigSchema.optional() }))
   .mutation(async (opts) => {
-    // only owner and admin can cancel a subscription
-    opts.ctx.verifyRole(["OWNER", "ADMIN"])
+    opts.ctx.verifyRole(["OWNER", "ADMIN", "MEMBER"])
 
     const { paymentProvider } = opts.input
     const projectId = opts.ctx.project.id

@@ -23,6 +23,7 @@ export const getRealtimeTicket = protectedProjectProcedure
       where: (table, { and, eq }) => and(eq(table.id, customerId), eq(table.projectId, project.id)),
       columns: {
         id: true,
+        projectId: true,
       },
     })
 
@@ -34,8 +35,8 @@ export const getRealtimeTicket = protectedProjectProcedure
     }
 
     const { result, error } = await unprice.analytics.getRealtimeTicket({
-      customerId,
-      projectId: project.id,
+      customerId: customer.id,
+      projectId: customer.projectId,
     })
 
     if (error || !result) {
