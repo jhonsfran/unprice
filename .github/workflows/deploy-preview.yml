@@ -62,7 +62,7 @@ jobs:
 
       - name: Create Neon Branch
         id: create-branch
-        uses: neondatabase/create-branch-action@v5
+        uses: neondatabase/create-branch-action@v6
         with:
           project_id: ${{ env.NEON_PROJECT_ID }}
           parent: main
