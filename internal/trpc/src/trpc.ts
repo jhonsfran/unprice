@@ -11,16 +11,13 @@ import { COOKIES_APP } from "@unprice/config"
 import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import {
-  AxiomLogger,
-  ConsoleLogger,
-  type Logger,
-  type WideEventHelpers,
-  type WideEventInput,
+  type AppLogger,
   type WideEventLogger,
-  createWideEventHelpers,
-  createWideEventLogger,
-} from "@unprice/logging"
-import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
+  createDrain,
+  createStandaloneRequestLogger,
+  emitWideEvent,
+} from "@unprice/observability"
+import { shouldEmitMetrics } from "@unprice/observability/env"
 import type { CacheNamespaces } from "@unprice/services/cache"
 import { CacheService, createRedis } from "@unprice/services/cache"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
@@ -36,6 +33,12 @@ import { workspaceGuard } from "./utils/workspace-guard"
 
 // this is a cache between request executions
 const hashCache = new Map()
+const drain = createDrain({
+  environment: env.APP_ENV,
+  token: env.AXIOM_API_TOKEN,
+  dataset: env.AXIOM_DATASET,
+})
+
 /**
  * 1. CONTEXT
  *
@@ -45,33 +48,6 @@ const hashCache = new Map()
  * processing a request
  *
  */
-/** Payload for the wide event, populated at context creation and applied when the procedure runs inside runAsync */
-export interface WideEventRequestPayload {
-  request: {
-    id: string
-    timestamp: string
-    method: string
-    path: string
-    referer?: string
-    host?: string
-    port?: string
-    protocol?: string
-    headers?: string
-    query?: string
-  }
-  cloud: { platform: string; region: string }
-  geo: {
-    colo: string
-    country: string
-    continent: string
-    city: string
-    ip: string
-    ua: string
-    source: string
-  }
-  business: { user_id: string }
-}
-
 export interface CreateContextOptions {
   headers: Headers
   session: Session | null
@@ -79,7 +55,7 @@ export interface CreateContextOptions {
   activeWorkspaceSlug: string
   activeProjectSlug: string
   requestId: string
-  logger: Logger
+  logger: AppLogger
   metrics: Metrics
   cache: C<CacheNamespaces>
   // pass this in the context so we can migrate easily to other providers
@@ -92,10 +68,7 @@ export interface CreateContextOptions {
     city: string
     ip: string
   }
-  wideEventLogger: WideEventLogger
-  wideEventHelpers: WideEventHelpers
-  /** Passed to the procedure so it can addMany once inside runAsync (addMany is a no-op outside a run context) */
-  wideEventRequestPayload: WideEventRequestPayload
+  requestLogger: WideEventLogger
 }
 
 /**
@@ -130,6 +103,8 @@ export const createTRPCContext = async (opts: {
   headers: Headers
   session: Session | null
   req?: NextAuthRequest
+  logger?: AppLogger
+  requestLogger?: WideEventLogger
   opts?: {
     continent: string
     country: string
@@ -161,34 +136,36 @@ export const createTRPCContext = async (opts: {
     "unknown"
   const source = opts.headers.get("unprice-request-source") || opts.opts?.source || "unknown"
   const pathname = opts.req?.nextUrl.pathname ?? opts.opts?.pathname ?? "unknown"
-  const method = opts.req?.method ?? opts.opts?.method ?? "unknown"
+  const methodHeader = opts.req?.method ?? opts.opts?.method ?? "GET"
+  const method =
+    methodHeader === "GET" ||
+    methodHeader === "POST" ||
+    methodHeader === "PUT" ||
+    methodHeader === "PATCH" ||
+    methodHeader === "DELETE" ||
+    methodHeader === "OPTIONS"
+      ? methodHeader
+      : "GET"
+  const portHeader = opts.headers.get("x-forwarded-port") ?? opts.headers.get("port")
+  const port =
+    portHeader && /^[0-9]+$/.test(portHeader) ? Number.parseInt(portHeader, 10) : undefined
+  const protocolHeader = opts.headers.get("x-forwarded-proto") ?? opts.headers.get("protocol")
+  const protocol =
+    protocolHeader === "http" || protocolHeader === "https" ? protocolHeader : undefined
 
-  const emitLogsToBackend = shouldEmitLogsToBackend(env)
   const emitMetrics = shouldEmitMetrics(env)
-
-  const logger = emitLogsToBackend
-    ? new AxiomLogger({
-        apiKey: env.AXIOM_API_TOKEN,
-        requestId,
-        defaultFields: {
-          path: pathname,
-          version: env.VERCEL_DEPLOYMENT_ID ?? "unknown",
-        },
-        dataset: env.AXIOM_DATASET,
-        environment: env.NODE_ENV,
-        service: "trpc",
-        logLevel: env.APP_ENV === "production" ? "warn" : "info",
-      })
-    : new ConsoleLogger({
-        requestId,
-        environment: env.NODE_ENV,
-        logLevel: env.APP_ENV === "production" ? "warn" : "info",
-        service: "trpc",
-        defaultFields: {
-          path: pathname,
-          version: env.VERCEL_DEPLOYMENT_ID ?? "unknown",
-        },
-      })
+  const fallbackLogger = createStandaloneRequestLogger(
+    {
+      method,
+      path: pathname,
+      requestId,
+    },
+    {
+      flush: drain?.flush,
+    }
+  )
+  const requestLogger = opts.requestLogger ?? fallbackLogger.requestLogger
+  const logger = opts.logger ?? fallbackLogger.logger
 
   const metrics: Metrics = emitMetrics
     ? new LogdrainMetrics({
@@ -236,24 +213,7 @@ export const createTRPCContext = async (opts: {
   const activeProjectSlug =
     opts.req?.cookies.get(COOKIES_APP.PROJECT)?.value ?? opts.headers.get(COOKIES_APP.PROJECT) ?? ""
 
-  const wideEventLogger = createWideEventLogger({
-    "service.name": "trpc",
-    "service.version": env.VERCEL_DEPLOYMENT_ID ?? "unknown",
-    "service.environment": env.APP_ENV as
-      | "production"
-      | "staging"
-      | "development"
-      | "test"
-      | "preview",
-    sampleRate: env.NODE_ENV === "production" ? 0.1 : 1,
-    emitter: (level, message, event) => logger.emit(level, message, event),
-  })
-
-  const wideEventHelpers = createWideEventHelpers(wideEventLogger)
-
-  // addMany is a no-op outside a run() context; we pass this payload so the procedure can
-  // add it when it starts runAsync (that's when the wide-event context is active)
-  const wideEventRequestPayload: WideEventRequestPayload = {
+  logger.set({
     request: {
       id: requestId,
       timestamp: new Date().toISOString(),
@@ -261,8 +221,8 @@ export const createTRPCContext = async (opts: {
       path: pathname,
       referer: opts.headers.get("referer") ?? undefined,
       host: opts.headers.get("host") ?? undefined,
-      port: opts.headers.get("port") ?? undefined,
-      protocol: opts.headers.get("protocol") ?? undefined,
+      port,
+      protocol,
       query: opts.req?.nextUrl.search ? opts.req.nextUrl.search.replace(/^\?/, "") : undefined,
     },
     cloud: {
@@ -281,7 +241,7 @@ export const createTRPCContext = async (opts: {
     business: {
       user_id: userId,
     },
-  }
+  })
 
   return createInnerTRPCContext({
     session,
@@ -293,9 +253,7 @@ export const createTRPCContext = async (opts: {
     logger,
     metrics,
     cache,
-    wideEventLogger,
-    wideEventHelpers,
-    wideEventRequestPayload,
+    requestLogger,
     waitUntil, // abstracted to allow migration to other providers
     hashCache,
     geolocation: {
@@ -375,51 +333,76 @@ export const mergeRouters = t.mergeRouters
  * can still access user session data if they are logged in
  */
 export const publicProcedure = t.procedure.use(async ({ ctx, next, path }) => {
-  return await ctx.wideEventLogger.runAsync(async () => {
-    const start = performance.now()
+  const start = performance.now()
+  let status = 200
 
-    // Add request/cloud/geo/business into the wide event now that we're inside runAsync.
-    // addMany is a no-op when called outside a run context (e.g. in createTRPCContext).
-    ctx.wideEventLogger.addMany(ctx.wideEventRequestPayload as unknown as WideEventInput)
-    // Enrich with procedure name
-    ctx.wideEventHelpers.addBusiness({ operation: path })
-    ctx.wideEventHelpers.addRoute(`/trpc/${path}`)
-
-    try {
-      const result = await next()
-      // 4. Capture Success or Error
-      if (result.ok) {
-        ctx.wideEventLogger.add("request.status", 200)
-      } else {
-        // tRPC errors are returned in result.error, not thrown
-        const error = result.error
-        const status = getHttpStatus(error.code)
-        ctx.wideEventLogger.add("request.status", status)
-        ctx.wideEventHelpers.addTrpcErrorCode(error.code)
-        ctx.wideEventLogger.addError(error)
-      }
-
-      return result
-    } catch (err) {
-      // 5. Capture Error Details (TRPC Errors or standard Errors)
-      if (err instanceof TRPCError) {
-        ctx.wideEventLogger.add("request.status", getHttpStatus(err.code))
-        ctx.wideEventHelpers.addTrpcErrorCode(err.code)
-        ctx.wideEventLogger.addError(err)
-      } else {
-        ctx.wideEventLogger.add("request.status", 500)
-        ctx.wideEventLogger.addError(err)
-      }
-      throw err
-    } finally {
-      ctx.wideEventLogger.add("request.duration", performance.now() - start)
-
-      // flush the wide event
-      ctx.waitUntil(
-        Promise.all([ctx.wideEventLogger.emit(), ctx.metrics.flush(), ctx.logger.flush()])
-      )
-    }
+  ctx.logger.set({
+    business: {
+      operation: path,
+    },
+    request: {
+      route: `/trpc/${path}`,
+    },
   })
+
+  try {
+    const result = await next()
+
+    if (!result.ok) {
+      status = getHttpStatus(result.error.code)
+      ctx.logger.set({
+        error: {
+          trpc_code: result.error.code,
+        },
+      })
+      ctx.logger.error(result.error)
+    }
+
+    return result
+  } catch (err) {
+    if (err instanceof TRPCError) {
+      status = getHttpStatus(err.code)
+      ctx.logger.set({
+        error: {
+          trpc_code: err.code,
+        },
+      })
+      ctx.logger.error(err)
+    } else {
+      status = 500
+      ctx.logger.error(err instanceof Error ? err : String(err))
+    }
+    throw err
+  } finally {
+    const duration = performance.now() - start
+    ctx.logger.set({
+      request: {
+        duration,
+        route: `/trpc/${path}`,
+        status,
+      },
+      duration,
+      status,
+    })
+
+    ctx.waitUntil(
+      Promise.all([
+        Promise.resolve(
+          emitWideEvent(ctx.requestLogger, {
+            request: {
+              duration,
+              route: `/trpc/${path}`,
+              status,
+            },
+            duration,
+            status,
+          })
+        ),
+        ctx.metrics.flush(),
+        ctx.logger.flush(),
+      ])
+    )
+  }
 })
 
 /**
@@ -435,8 +418,11 @@ export const protectedProcedure = publicProcedure.use(({ ctx, next }) => {
     throw new TRPCError({ code: "BAD_REQUEST", message: "User email not found in session" })
   }
 
-  // Enrich wide event
-  ctx.wideEventHelpers.addBusiness({ user_id: ctx.session.user.id })
+  ctx.logger.set({
+    business: {
+      user_id: ctx.session.user.id,
+    },
+  })
 
   return next({
     ctx: {
@@ -462,8 +448,11 @@ export const protectedWorkspaceProcedure = protectedProcedure.use(
       ctx,
     })
 
-    // Enrich wide event
-    ctx.wideEventHelpers.addBusiness({ workspace_id: data.workspace.id })
+    ctx.logger.set({
+      business: {
+        workspace_id: data.workspace.id,
+      },
+    })
 
     return next({
       ctx: {
@@ -487,13 +476,14 @@ export const protectedProjectProcedure = protectedProcedure.use(
       ctx,
     })
 
-    // Enrich wide event
-    ctx.wideEventHelpers.addBusiness({
-      project_id: data.project.id,
-      is_internal: data.project.isInternal ?? undefined,
-      is_main: data.project.isMain ?? undefined,
-      workspace_id: data.project.workspaceId,
-      unprice_customer_id: data.project.workspace.unPriceCustomerId ?? undefined,
+    ctx.logger.set({
+      business: {
+        project_id: data.project.id,
+        is_internal: data.project.isInternal ?? undefined,
+        is_main: data.project.isMain ?? undefined,
+        workspace_id: data.project.workspaceId,
+        unprice_customer_id: data.project.workspace.unPriceCustomerId ?? undefined,
+      },
     })
 
     return next({

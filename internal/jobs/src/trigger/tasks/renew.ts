@@ -34,24 +34,33 @@ export const renewTask = task({
       },
     })
 
-    const subscriptionService = new SubscriptionService(context)
+    let status = 200
 
-    const renewResult = await subscriptionService.renewSubscription({
-      subscriptionId,
-      projectId,
-      now,
-    })
+    try {
+      const subscriptionService = new SubscriptionService(context)
 
-    if (renewResult.err) {
-      throw renewResult.err
-    }
+      const renewResult = await subscriptionService.renewSubscription({
+        subscriptionId,
+        projectId,
+        now,
+      })
 
-    return {
-      status: renewResult.val.status,
-      subscriptionId,
-      projectId,
-      customerId,
-      now,
+      if (renewResult.err) {
+        throw renewResult.err
+      }
+
+      return {
+        status: renewResult.val.status,
+        subscriptionId,
+        projectId,
+        customerId,
+        now,
+      }
+    } catch (error) {
+      status = 500
+      throw error
+    } finally {
+      await context.flushLogs(status)
     }
   },
 })

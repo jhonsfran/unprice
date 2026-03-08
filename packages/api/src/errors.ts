@@ -203,7 +203,7 @@ export interface paths {
                 metrics: string
                 /**
                  * @description The name of the connected logger service
-                 * @example AxiomLogger or ConsoleLogger
+                 * @example evlog
                  */
                 logger: string
                 /** @description The name of the connected ratelimit service */

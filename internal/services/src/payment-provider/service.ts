@@ -1,6 +1,6 @@
 import type { PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, type Result } from "@unprice/error"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type { Stripe } from "@unprice/stripe"
 import type { UnPricePaymentProviderError } from "./errors"
 import type {
@@ -28,18 +28,15 @@ export class PaymentProviderService implements PaymentProviderInterface {
   private readonly stripe?: StripePaymentProvider
   private readonly sandbox?: SandboxPaymentProvider
   private readonly providerCustomerId?: string
-  private readonly wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     token: string
     providerCustomerId?: string
     logger: Logger
     paymentProvider: PaymentProvider
-    wideEventHelpers?: WideEventHelpers
   }) {
     this.logger = opts.logger
     this.paymentProvider = opts.paymentProvider
-    this.wideEventHelpers = opts.wideEventHelpers
 
     switch (this.paymentProvider) {
       case "stripe": {

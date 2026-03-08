@@ -2,11 +2,11 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { currencies, dinero } from "@unprice/db/utils"
 import { Ok } from "@unprice/error"
-import { type Logger, createWideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
+import { createClock, createMockEntitlementState } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -24,9 +24,6 @@ describe("EntitlementService - Flat Features", () => {
   const customerId = "cust_123"
   const projectId = "proj_123"
   const featureSlug = "flat-feature"
-
-  const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
-
   const mockEntitlementState = createMockEntitlementState({
     id: "ent_flat",
     customerId,
@@ -58,6 +55,7 @@ describe("EntitlementService - Flat Features", () => {
     clock.set(now)
 
     mockLogger = {
+      set: vi.fn(),
       debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
@@ -135,7 +133,6 @@ describe("EntitlementService - Flat Features", () => {
       waitUntil: (p) => p,
       cache: mockCache,
       metrics: mockMetrics,
-      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 

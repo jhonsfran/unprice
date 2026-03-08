@@ -1,13 +1,21 @@
-import type { Fields, Logger } from "@unprice/logging"
-import type { LogSchema } from "@unprice/logs"
+import type { Logger } from "@unprice/logs"
 import type { Metric } from "@unprice/metrics"
 import type { Metrics } from "./interface"
 
+type LogdrainEnvironment = "development" | "test" | "production" | "preview"
+type LogdrainLogger = Logger & {
+  emit(
+    level: "debug" | "info" | "warn" | "error",
+    message: string,
+    fields?: Record<string, unknown>
+  ): void
+}
+
 export class LogdrainMetrics implements Metrics {
   private requestId: string
-  private readonly logger: Logger
-  private readonly environment: LogSchema["environment"]
-  private readonly service: LogSchema["service"]
+  private readonly logger: LogdrainLogger
+  private readonly environment: LogdrainEnvironment
+  private readonly service: string
   private colo?: string
   private country?: string
   private continent?: string
@@ -16,9 +24,9 @@ export class LogdrainMetrics implements Metrics {
 
   constructor(opts: {
     requestId: string
-    logger: Logger
-    environment: LogSchema["environment"]
-    service: LogSchema["service"]
+    logger: LogdrainLogger
+    environment: LogdrainEnvironment
+    service: string
     colo?: string
     country?: string
     continent?: string
@@ -49,7 +57,7 @@ export class LogdrainMetrics implements Metrics {
       continent: this.continent,
       durableObjectId: this.durableObjectId,
       "log.type": "metric",
-    } as Fields
+    } as Record<string, unknown>
 
     this.logger.emit("info", metric.metric, payload)
   }

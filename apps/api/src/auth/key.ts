@@ -18,7 +18,6 @@ const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set(["/v1/customer/verify"])
 export async function keyAuth(c: Context<HonoEnv>) {
   const authHeader = c.req.header("authorization")?.trim()
   const authorization = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim()
-  const wideEventHelpers = c.get("wideEventHelpers")
 
   if (!authorization) {
     throw new UnpriceApiError({ code: "UNAUTHORIZED", message: "key required" })
@@ -105,12 +104,14 @@ export async function keyAuth(c: Context<HonoEnv>) {
   c.set("projectId", key.project.id)
   c.set("unPriceCustomerId", key.project.workspace.unPriceCustomerId)
 
-  wideEventHelpers.addBusiness({
-    project_id: key.project.id,
-    workspace_id: key.project.workspaceId,
-    is_main: key.project.isMain ?? false,
-    is_internal: key.project.isInternal ?? false,
-    unprice_customer_id: key.project.workspace.unPriceCustomerId,
+  logger.set({
+    business: {
+      project_id: key.project.id,
+      workspace_id: key.project.workspaceId,
+      is_main: key.project.isMain ?? false,
+      is_internal: key.project.isInternal ?? false,
+      unprice_customer_id: key.project.workspace.unPriceCustomerId,
+    },
   })
 
   // Evaluate rate-limit after key verification so we can tag metrics with real workspace context.
@@ -126,7 +127,6 @@ export async function keyAuth(c: Context<HonoEnv>) {
         limiter: c.env.RL_FREE_6000_60s,
       })
     } catch (rateLimitError) {
-      wideEventHelpers.addError(rateLimitError)
       logger.error("apikey rate limit check failed", {
         path: requestPath,
         workspaceId: key.project.workspaceId,
@@ -138,7 +138,11 @@ export async function keyAuth(c: Context<HonoEnv>) {
 
   // skip for internal and main projects
   if (isRateLimited) {
-    wideEventHelpers.addRateLimited(true)
+    logger.set({
+      request: {
+        rate_limited: true,
+      },
+    })
     throw new UnpriceApiError({ code: "RATE_LIMITED", message: "apikey rate limit exceeded" })
   }
 
@@ -188,7 +192,7 @@ export async function resolveContextProjectId(
   defaultProjectId: string,
   customerId: string
 ) {
-  const wideEventHelpers = c.get("wideEventHelpers")
+  const { logger } = c.get("services")
   startTime(c, "resolveContextProjectId")
 
   const unPriceCustomerId = c.get("unPriceCustomerId")
@@ -198,7 +202,11 @@ export async function resolveContextProjectId(
     // Fast path: use env to avoid DB lookup.
     if (c.env.MAIN_PROJECT_ID) {
       endTime(c, "resolveContextProjectId")
-      wideEventHelpers.addBusiness({ project_id: c.env.MAIN_PROJECT_ID })
+      logger.set({
+        business: {
+          project_id: c.env.MAIN_PROJECT_ID,
+        },
+      })
       return c.env.MAIN_PROJECT_ID
     }
 
@@ -208,13 +216,21 @@ export async function resolveContextProjectId(
 
     if (val) {
       endTime(c, "resolveContextProjectId")
-      wideEventHelpers.addBusiness({ project_id: val.projectId })
+      logger.set({
+        business: {
+          project_id: val.projectId,
+        },
+      })
       return val.projectId
     }
   }
 
   // Normal case: third-party customer; use the project from the request context.
-  wideEventHelpers.addBusiness({ project_id: defaultProjectId })
+  logger.set({
+    business: {
+      project_id: defaultProjectId,
+    },
+  })
   endTime(c, "resolveContextProjectId")
 
   return defaultProjectId

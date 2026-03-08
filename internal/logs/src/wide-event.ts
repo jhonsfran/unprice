@@ -4,14 +4,8 @@ import { z } from "zod"
 // NESTED SCHEMAS (Source of truth)
 // ============================================
 
-export const ServiceSchema = z.object({
-  name: z.string(),
-  version: z.string(),
-  environment: z.enum(["production", "staging", "development", "preview", "test"]),
-})
-
 export const RequestSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string(),
   parent_id: z.string().optional(),
   rate_limited: z.boolean().optional(),
   timestamp: z.string().datetime(),
@@ -127,7 +121,6 @@ export const CustomerSchema = z.object({
 
 export const WideEventNestedSchema = z.object({
   log: LogMetadataSchema.optional(),
-  service: ServiceSchema,
   request: RequestSchema.partial(),
   business: BusinessSchema.optional(),
   error: ErrorSchema.optional(),
@@ -170,7 +163,7 @@ type FlattenToObject<T> = UnionToIntersection<Flatten<T>>
 // EXPORTED TYPES
 // ============================================
 
-// All known flattened attributes: "service.name", "request.method", etc.
+// All known flattened attributes: "request.method", "business.project_id", etc.
 export type WideEventAttributes = FlattenToObject<WideEventNested>
 
 // Keys of known attributes
@@ -182,10 +175,11 @@ export type WideEventInput = {
 }
 
 export type LockType = NonNullable<z.infer<typeof LockSchema>["type"]>
+export type ServiceEnvironment = "production" | "staging" | "development" | "preview" | "test"
 
-// Final emitted event
+// Final emitted event emitted by evlog.
 export type WideEvent = Partial<WideEventAttributes> & {
-  "service.name": string
-  "service.version": string
-  "service.environment": z.infer<typeof ServiceSchema>["environment"]
+  service: string
+  environment: ServiceEnvironment
+  version?: string
 }

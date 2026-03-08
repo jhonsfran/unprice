@@ -1,3 +1,4 @@
+import { log } from "evlog"
 import { partyserverMiddleware } from "hono-party"
 import { cors } from "hono/cors"
 import { type Env, createRuntimeEnv } from "~/env"
@@ -27,10 +28,10 @@ import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
 import { registerGetFeaturesV1 } from "./routes/project/getFeaturesV1"
 
 import { env } from "cloudflare:workers"
-import { ConsoleLogger } from "@unprice/logging"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
 import { obs } from "~/middleware/obs"
+import { apiEvlog } from "~/observability"
 import { registerGetRealtimeTicketV1 } from "./routes/analitycs/getRealtimeTicketV1"
 import { registerGetRealtimeUsageV1 } from "./routes/analitycs/getRealtimeUsageV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
@@ -42,6 +43,7 @@ const app = newApp()
 app.use(timing())
 app.use(serveEmojiFavicon("◎"))
 app.use("*", cors())
+app.use("*", apiEvlog)
 app.use("*", init())
 app.use("*", obs())
 
@@ -68,7 +70,7 @@ const resolvePartyAndRoomFromPath = (pathname: string) => {
 app.use(
   "/broadcast/**",
   partyserverMiddleware({
-    onError: (error) => console.error(error),
+    onError: (error) => log.error({ message: "Partyserver websocket error", error }),
     options: {
       prefix: "broadcast",
       onBeforeConnect: async (req) => {
@@ -161,11 +163,10 @@ const handler = {
 
       return app.fetch(req, parsedEnv, executionCtx)
     } catch (error) {
-      new ConsoleLogger({
-        requestId: "",
-        environment: env.NODE_ENV,
-        service: "api",
-      }).fatal(`BAD_ENVIRONMENT: ${error instanceof Error ? error.message : "Unknown error"}`)
+      log.error({
+        code: "BAD_ENVIRONMENT",
+        error: error instanceof Error ? error : new Error(String(error ?? "Unknown error")),
+      })
       return Response.json(
         {
           code: "BAD_ENVIRONMENT",

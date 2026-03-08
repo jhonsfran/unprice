@@ -1,5 +1,5 @@
 import type { Database } from "@unprice/db"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import * as fc from "fast-check"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { GrantsManager } from "./grants"
@@ -61,6 +61,7 @@ describe("GrantsManager", () => {
     vi.clearAllMocks()
 
     mockLogger = {
+      set: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),
     } as unknown as Logger

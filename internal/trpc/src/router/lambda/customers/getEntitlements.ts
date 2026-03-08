@@ -27,7 +27,7 @@ export const getEntitlements = protectedProjectProcedure
     })
 
     if (error) {
-      opts.ctx.wideEventHelpers.addError(error)
+      opts.ctx.logger.error(error)
     }
 
     return {

@@ -9,24 +9,14 @@ import type { NextAuthConfig } from "next-auth"
 import { cookies } from "next/headers"
 import { db } from "./db"
 import { env } from "./env"
+import { authLogger } from "./logger"
 import { createUser } from "./utils"
 
 const useSecureCookies = env.APP_ENV === "production"
-const log = console // TODO: create a logger for this
 
 export const authConfig: NextAuthConfig = {
   trustHost: Boolean(env.APP_ENV) || env.NODE_ENV === "development",
-  logger: {
-    debug: (message, metadata) => log.debug(message, { metadata }),
-    error: (error) => log.error(error),
-    warn: (message) => {
-      if (message.includes("experimental-webauthn")) {
-        // don't spam the console with this
-        return
-      }
-      log.warn(message)
-    },
-  },
+  logger: authLogger,
   redirectProxyUrl: env.AUTH_REDIRECT_PROXY_URL,
   session: {
     strategy: "jwt",
@@ -81,6 +71,7 @@ export const authConfig: NextAuthConfig = {
       })
 
       if (err) {
+        authLogger.error(err)
         throw err
       }
 

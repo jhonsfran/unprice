@@ -5,7 +5,7 @@ import {
 import type { Currency } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
 import { Err, FetchError, Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { Stripe } from "@unprice/stripe"
 import { UnPricePaymentProviderError } from "./errors"
 import type {

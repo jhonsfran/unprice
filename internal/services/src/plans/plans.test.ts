@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
@@ -38,6 +38,7 @@ describe("PlanService listPlanVersions enterprise filter", () => {
     } as unknown as Database
 
     const logger = {
+      set: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),
       debug: vi.fn(),

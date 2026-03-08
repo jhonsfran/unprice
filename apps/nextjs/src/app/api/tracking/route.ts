@@ -1,11 +1,13 @@
 import { schemaPageHit, schemaPlanClick } from "@unprice/analytics"
 import { analytics } from "@unprice/analytics/client"
 import { EU_COUNTRY_CODES } from "@unprice/analytics/utils"
+import type { Logger } from "@unprice/logs"
 import { geolocation, ipAddress } from "@vercel/functions"
 import { type NextRequest, userAgent } from "next/server"
 import { z } from "zod"
 import { env } from "~/env"
 import { detectBot, getDomainWithoutWWW } from "~/lib/domains"
+import { getRequestLoggers, withEvlog } from "~/lib/evlog"
 import { LOCALHOST_GEO_DATA, LOCALHOST_IP } from "~/lib/localhost"
 import { setCorsHeaders } from "../_enableCors"
 
@@ -20,6 +22,7 @@ export const maxDuration = 10
  */
 const trackPageHit = async (
   req: NextRequest,
+  logger: Logger,
   payload: {
     session_id: string
     page_id: string
@@ -36,8 +39,7 @@ const trackPageHit = async (
     const parsedPayload = schemaPageHit.safeParse(payload)
 
     if (!parsedPayload.success) {
-      // TODO: send to bug reporting
-      console.error(parsedPayload.error)
+      logger.error(parsedPayload.error)
       return `Invalid payload: ${JSON.stringify(parsedPayload.error)}`
     }
 
@@ -105,8 +107,7 @@ const trackPageHit = async (
     const response = await analytics.ingestPageEvents(event)
     return response
   } catch (error) {
-    // TODO: send to bug reporting
-    console.error(error)
+    logger.error(error instanceof Error ? error : String(error))
     return `Error: ${JSON.stringify(error)}`
   }
 }
@@ -119,7 +120,14 @@ const bodySchema = z.object({
 })
 
 // TODO: protect this route with a credentials/rate-limit to prevent abuse
-export async function POST(req: NextRequest) {
+export const POST = withEvlog(async (req: NextRequest) => {
+  const requestId =
+    req.headers.get("unprice-request-id") ||
+    req.headers.get("x-request-id") ||
+    req.headers.get("x-vercel-id") ||
+    "unknown"
+  const { logger } = getRequestLoggers(requestId)
+
   // don't track HEAD requests to avoid non-user traffic from inflating click count
   if (req.method === "HEAD") {
     return new Response(JSON.stringify({ error: "Invalid method" }), { status: 400 })
@@ -137,7 +145,7 @@ export async function POST(req: NextRequest) {
 
   switch (parsedBody.data.action) {
     case "page_hit": {
-      const result = await trackPageHit(req, {
+      const result = await trackPageHit(req, logger, {
         session_id: parsedBody.data.session_id,
         project_id: parsedBody.data.project_id,
         ...payload,
@@ -153,6 +161,7 @@ export async function POST(req: NextRequest) {
       const parsedPayload = schemaPlanClick.safeParse(payload)
 
       if (!parsedPayload.success) {
+        logger.error(parsedPayload.error)
         return new Response(JSON.stringify({ error: parsedPayload.error.message }), { status: 400 })
       }
 
@@ -176,4 +185,4 @@ export async function POST(req: NextRequest) {
       return response
     }
   }
-}
+})

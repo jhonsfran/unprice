@@ -2,11 +2,11 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
-import { type Logger, createWideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
+import { createClock, createMockEntitlementState } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -70,14 +70,12 @@ describe("EntitlementService - Reset Cycles", () => {
       planType: "recurring",
     },
   })
-
-  const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
-
   beforeEach(async () => {
     vi.clearAllMocks()
     _clock = createClock(jan1)
 
     mockLogger = {
+      set: vi.fn(),
       debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
@@ -149,7 +147,6 @@ describe("EntitlementService - Reset Cycles", () => {
       waitUntil: vi.fn((promise) => promise),
       cache: mockCache,
       metrics: mockMetrics,
-      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 

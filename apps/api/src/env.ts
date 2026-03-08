@@ -2,7 +2,7 @@ import type { Pipeline } from "cloudflare:pipelines"
 import { type StandardSchemaV1, createEnv } from "@t3-oss/env-core"
 import { env as envAnalytics } from "@unprice/analytics/env"
 import { env as envDb } from "@unprice/db/env"
-import { env as envLogging } from "@unprice/logging/env"
+import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
 import type { DurableObjectUsagelimiter } from "~/usagelimiter/do"
@@ -43,6 +43,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       RL_FREE_6000_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),
       CLOUDFLARE_API_TOKEN: z.string().optional(),
+      CLOUDFLARE_ACCOUNT_ID: z.string(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
       PIPELINE_USAGE: cloudflarePipeline,
       PIPELINE_VERIFICATIONS: cloudflarePipeline,
@@ -53,7 +54,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,
-    extends: [envServices, envDb, envAnalytics, envLogging],
+    extends: [envServices, envDb, envAnalytics, envObservability],
     skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
     onValidationError: (issues: readonly StandardSchemaV1.Issue[]) => {
       throw new Error(`Invalid environment variables in API: ${JSON.stringify(issues, null, 2)}`)

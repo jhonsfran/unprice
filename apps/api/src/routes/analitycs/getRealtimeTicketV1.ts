@@ -2,7 +2,7 @@ import { createRoute } from "@hono/zod-openapi"
 import * as HttpStatusCodes from "stoker/http-status-codes"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { createRealtimeTicket } from "~/auth/ticket"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -25,10 +25,13 @@ export const route = createRoute({
           description: "The customer ID to scope realtime access",
           example: "cus_1H7KQFLr7RepUyQBKdnvY",
         }),
-        projectId: z.string().openapi({
-          description: "The project ID to scope realtime access",
-          example: "project_1H7KQFLr7RepUyQBKdnvY",
-        }),
+        projectId: z
+          .string()
+          .openapi({
+            description: "The project ID to scope realtime access",
+            example: "project_1H7KQFLr7RepUyQBKdnvY",
+          })
+          .optional(),
       }),
       "Realtime ticket request payload"
     ),
@@ -63,14 +66,12 @@ export const registerGetRealtimeTicketV1 = (app: App) =>
     const key = await keyAuth(c)
 
     const isMain = key.project.workspace.isMain
-    const projectID = isMain ? (projectId ? projectId : key.projectId) : key.projectId
 
-    if (!isMain && projectID !== projectId) {
-      throw new UnpriceApiError({
-        code: "FORBIDDEN",
-        message: "You are not allowed to access this app analytics.",
-      })
-    }
+    const finalProjectId = validateIsAllowedToAccessProject({
+      isMain,
+      key,
+      requestedProjectId: projectId ?? key.project.id,
+    })
 
     const { customer } = c.get("services")
     const { err: customerErr, val: customerData } = await customer.getCustomer(customerId)
@@ -96,7 +97,7 @@ export const registerGetRealtimeTicketV1 = (app: App) =>
     const expiresInSeconds = 3600
     const ticket = await createRealtimeTicket({
       secret: c.env.AUTH_SECRET,
-      projectId,
+      projectId: finalProjectId,
       customerId,
       expiresInSeconds,
     })
@@ -105,7 +106,7 @@ export const registerGetRealtimeTicketV1 = (app: App) =>
       {
         ticket,
         expiresAt: Date.now() + expiresInSeconds * 1000,
-        projectId,
+        projectId: finalProjectId,
         customerId,
       },
       HttpStatusCodes.OK

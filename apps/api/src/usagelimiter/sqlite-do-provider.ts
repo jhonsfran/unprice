@@ -2,27 +2,28 @@ import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/
 import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import {
+  LAKEHOUSE_INTERNAL_METADATA_KEYS,
   type LakehouseCursorState,
   type LakehouseEntitlementSnapshotEvent,
   type LakehouseJsonValue,
+  type LakehouseMetadataEvent,
   type LakehouseService,
+  type LakehouseUsageEvent,
+  type LakehouseVerificationEvent,
   getLakehouseSourceCurrentVersion,
 } from "@unprice/lakehouse"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import {
   type UnPriceEntitlementStorage,
   UnPriceEntitlementStorageError,
 } from "@unprice/services/entitlements"
-import { desc, sql } from "drizzle-orm"
+import { inArray, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import xxhash, { type XXHashAPI } from "xxhash-wasm"
 import { type UsageRecord, type Verification, schema } from "~/db/types"
-import {
-  buildLakehouseMetadataProcessingResult,
-  buildLakehousePreparedPayload,
-  toEventDate,
-} from "~/lakehouse/pipeline"
+import { SqliteDurableObjectKernel } from "~/durable-object/sqlite-kernel"
+import { toEventDate } from "~/lakehouse/pipeline"
 import migrations from "../../drizzle/migrations"
 
 // Constants
@@ -47,10 +48,22 @@ const FIVE_MIN_AGGREGATE_RETENTION_SECONDS = WINDOW_60_MIN
 const HOUR_AGGREGATE_RETENTION_SECONDS = WINDOW_1_DAY
 const DAY_AGGREGATE_RETENTION_SECONDS = WINDOW_7_DAYS
 const STATE_KEY_PREFIX = "state:"
-const SEEN_META_PREFIX = "seen_meta_"
-const SEEN_SNAPSHOT_PREFIX = "seen_snapshot_"
-const CURSOR_KEY = "cursor_state"
+const STATE_COLLECTION_ENTITLEMENT = "entitlement"
+const STATE_COLLECTION_CURSOR = "cursor"
+const CURSOR_STATE_KEY = "cursor_state"
+const DEDUPE_SCOPE_METADATA = "metadata"
+const DEDUPE_SCOPE_SNAPSHOT = "snapshot"
+const DELIVERY_STREAM_USAGE = "usage"
+const DELIVERY_STREAM_VERIFICATION = "verification"
+const USAGE_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("usage")
+const VERIFICATION_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("verification")
+const METADATA_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("metadata")
 const ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("entitlement_snapshot")
+const INTERNAL_METADATA_KEYS = new Set<string>(LAKEHOUSE_INTERNAL_METADATA_KEYS)
+const EMPTY_LAKEHOUSE_CURSOR_STATE: LakehouseCursorState = {
+  lastR2UsageId: null,
+  lastR2VerificationId: null,
+}
 
 // Type guard for EntitlementState
 function isEntitlementState(value: unknown): value is EntitlementState {
@@ -60,6 +73,19 @@ function isEntitlementState(value: unknown): value is EntitlementState {
     typeof obj.customerId === "string" &&
     typeof obj.projectId === "string" &&
     typeof obj.featureSlug === "string"
+  )
+}
+
+function isCursorState(value: unknown): value is CursorState {
+  if (!value || typeof value !== "object") return false
+  const obj = value as Record<string, unknown>
+  const isNullableNumber = (entry: unknown): boolean => entry === null || typeof entry === "number"
+
+  return (
+    isNullableNumber(obj.lastTinybirdUsageSeq) &&
+    isNullableNumber(obj.lastR2UsageSeq) &&
+    isNullableNumber(obj.lastTinybirdVerificationSeq) &&
+    isNullableNumber(obj.lastR2VerificationSeq)
   )
 }
 
@@ -83,27 +109,55 @@ function normalizeJsonValue(value: unknown): LakehouseJsonValue {
   return null
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
+function toStableMetadataJson(metadata: Record<string, unknown> | null): string {
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return "{}"
+  }
+
+  const sortedKeys = Object.keys(metadata).sort()
+  const normalized: Record<string, unknown> = {}
+  for (const key of sortedKeys) {
+    normalized[key] = metadata[key]
+  }
+
+  return JSON.stringify(normalized)
+}
+
 // Batch result type for type safety
-interface BatchResult<T, ID> {
+interface BatchResult<T> {
   records: T[]
-  firstId: ID | null
-  lastId: ID | null
+  firstSeq: number | null
+  lastSeq: number | null
 }
 
 // Processed record with metadata for internal use
 interface CursorState {
-  lastTinybirdUsageId: string | null
-  lastR2UsageId: string | null
-  lastTinybirdVerificationId: number | null
-  lastR2VerificationId: number | null
+  lastTinybirdUsageSeq: number | null
+  lastR2UsageSeq: number | null
+  lastTinybirdVerificationSeq: number | null
+  lastR2VerificationSeq: number | null
 }
 
-type LakehouseMetadataProcessingResult = Awaited<
-  ReturnType<typeof buildLakehouseMetadataProcessingResult>
->
-type LakehousePreparedPayload = ReturnType<typeof buildLakehousePreparedPayload>
-type ProcessedUsageRecords = LakehouseMetadataProcessingResult["usageRecords"]
-type ProcessedVerificationRecords = LakehouseMetadataProcessingResult["verificationRecords"]
+interface LakehousePreparedPayload {
+  cursorState: LakehouseCursorState
+  usageRecords: LakehouseUsageEvent[]
+  verificationRecords: LakehouseVerificationEvent[]
+  metadataRecords: LakehouseMetadataEvent[]
+}
+
+interface FlushSummary {
+  usage: { count: number; lastId: string | null }
+  verification: { count: number; lastId: string | null }
+}
+
+interface EntitlementSnapshotBuildResult {
+  snapshots: LakehouseEntitlementSnapshotEvent[]
+  emittedSnapshotIds: Set<string>
+}
 
 export interface FlushPressureStats {
   pendingUsageRecords: number
@@ -128,6 +182,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly storage: DurableObjectStorage
   private readonly state: DurableObjectState
+  private readonly doKernel: SqliteDurableObjectKernel
   private readonly analytics: Analytics
   private readonly logger: Logger
   private readonly lakehouseService: LakehouseService
@@ -136,14 +191,15 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   private stateCache = new Map<string, EntitlementState>()
   private initialized = false
   private cursors: CursorState = {
-    lastTinybirdUsageId: null,
-    lastR2UsageId: null,
-    lastTinybirdVerificationId: null,
-    lastR2VerificationId: null,
+    lastTinybirdUsageSeq: null,
+    lastR2UsageSeq: null,
+    lastTinybirdVerificationSeq: null,
+    lastR2VerificationSeq: null,
   }
 
   // Lazily initialized xxhash instance (WASM module)
   private xxhashInstance: XXHashAPI | null = null
+  private inFlightFlush: Promise<Result<FlushSummary, UnPriceEntitlementStorageError>> | null = null
 
   constructor(args: {
     storage: DurableObjectStorage
@@ -158,6 +214,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     this.logger = args.logger
     this.lakehouseService = args.lakehouseService
     this.db = drizzle(args.storage, { schema, logger: false })
+    this.doKernel = new SqliteDurableObjectKernel(this.db)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -187,25 +244,140 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   }
 
   private async loadStateCache(): Promise<void> {
-    const entries = await this.storage.list({ prefix: STATE_KEY_PREFIX })
+    const entries = await this.doKernel.listObjects(STATE_COLLECTION_ENTITLEMENT)
+
     this.stateCache.clear()
 
-    for (const [key, value] of entries) {
-      if (isEntitlementState(value)) {
-        this.stateCache.set(key, value)
+    for (const entry of entries) {
+      try {
+        const value = JSON.parse(entry.payload) as unknown
+        if (isEntitlementState(value)) {
+          this.stateCache.set(entry.key, value)
+        }
+      } catch {
+        this.logger.warn("Failed to parse entitlement state payload", { key: entry.key })
       }
     }
   }
 
   private async loadCursors(): Promise<void> {
-    const stored = await this.storage.get<CursorState>(CURSOR_KEY)
-    if (stored) {
-      this.cursors = stored
+    const payload = await this.doKernel.getObject(STATE_COLLECTION_CURSOR, CURSOR_STATE_KEY)
+    if (!payload) {
+      return
+    }
+
+    try {
+      const value = JSON.parse(payload) as unknown
+      if (isCursorState(value)) {
+        this.cursors = value
+      }
+    } catch {
+      this.logger.warn("Failed to parse cursor state payload")
     }
   }
 
   private async saveCursors(): Promise<void> {
-    await this.storage.put(CURSOR_KEY, this.cursors)
+    await this.doKernel.putObject({
+      collection: STATE_COLLECTION_CURSOR,
+      key: CURSOR_STATE_KEY,
+      payload: JSON.stringify(this.cursors),
+    })
+  }
+
+  private resetInMemoryCursors(): void {
+    this.cursors = {
+      lastTinybirdUsageSeq: null,
+      lastR2UsageSeq: null,
+      lastTinybirdVerificationSeq: null,
+      lastR2VerificationSeq: null,
+    }
+  }
+
+  private buildMetadataPayload(metadata: unknown): string {
+    if (!isRecord(metadata)) {
+      return "{}"
+    }
+
+    const tagEntries = Object.entries(metadata).filter(
+      ([key, value]) => !INTERNAL_METADATA_KEYS.has(key) && value !== undefined
+    )
+
+    if (tagEntries.length === 0) {
+      return "{}"
+    }
+
+    return toStableMetadataJson(Object.fromEntries(tagEntries))
+  }
+
+  private async ensureMetadataRecord(params: {
+    metadata: unknown
+    projectId: string
+    customerId: string
+    timestamp: number
+  }): Promise<string> {
+    const payload = this.buildMetadataPayload(params.metadata)
+    if (payload === "{}") {
+      return "0"
+    }
+
+    const metaId = await this.computeMetadataIdentity({
+      payload,
+      projectId: params.projectId,
+      customerId: params.customerId,
+    })
+
+    await this.db
+      .insert(schema.metadataRecords)
+      .values({
+        id: metaId,
+        payload,
+        project_id: params.projectId,
+        customer_id: params.customerId,
+        timestamp: params.timestamp,
+        created_at: Date.now(),
+      })
+      .onConflictDoNothing()
+
+    return metaId
+  }
+
+  private async computeMetadataIdentity(params: {
+    payload: string
+    projectId: string
+    customerId: string
+  }): Promise<string> {
+    const hasher = await this.getXxhash()
+    return hasher
+      .h64(`${params.projectId}\u0000${params.customerId}\u0000${params.payload}`)
+      .toString()
+  }
+
+  private async nextDeliverySeq(
+    stream: typeof DELIVERY_STREAM_USAGE | typeof DELIVERY_STREAM_VERIFICATION
+  ): Promise<number> {
+    const now = Date.now()
+    const result = await this.db
+      .insert(schema.deliverySequences)
+      .values({
+        stream,
+        current_seq: 1,
+        updated_at: now,
+      })
+      .onConflictDoUpdate({
+        target: schema.deliverySequences.stream,
+        set: {
+          current_seq: sql`${schema.deliverySequences.current_seq} + 1`,
+          updated_at: now,
+        },
+      })
+      .returning({ seq: schema.deliverySequences.current_seq })
+
+    const seq = result[0]?.seq
+    if (!seq || !Number.isInteger(seq) || seq <= 0) {
+      throw new Error(`Failed to allocate delivery sequence for stream ${stream}`)
+    }
+
+    return seq
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -225,11 +397,19 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       const cached = this.stateCache.get(key)
       if (cached) return Ok(cached)
 
-      // Fall back to storage
-      const value = await this.storage.get(key)
-      if (value && isEntitlementState(value)) {
-        this.stateCache.set(key, value)
-        return Ok(value)
+      const payload = await this.doKernel.getObject(STATE_COLLECTION_ENTITLEMENT, key)
+      if (!payload) {
+        return Ok(null)
+      }
+
+      try {
+        const value = JSON.parse(payload) as unknown
+        if (isEntitlementState(value)) {
+          this.stateCache.set(key, value)
+          return Ok(value)
+        }
+      } catch {
+        this.logger.warn("Failed to parse entitlement state payload", { key })
       }
 
       return Ok(null)
@@ -241,12 +421,17 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   async getAll(): Promise<Result<EntitlementState[], UnPriceEntitlementStorageError>> {
     try {
       this.assertInitialized()
-      const entries = await this.storage.list({ prefix: STATE_KEY_PREFIX })
+      const entries = await this.doKernel.listObjects(STATE_COLLECTION_ENTITLEMENT)
       const nextCache = new Map<string, EntitlementState>()
 
-      for (const [key, value] of entries) {
-        if (isEntitlementState(value)) {
-          nextCache.set(key, value)
+      for (const entry of entries) {
+        try {
+          const value = JSON.parse(entry.payload) as unknown
+          if (isEntitlementState(value)) {
+            nextCache.set(entry.key, value)
+          }
+        } catch {
+          this.logger.warn("Failed to parse entitlement state payload", { key: entry.key })
         }
       }
 
@@ -268,7 +453,11 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         featureSlug: params.state.featureSlug,
       })
 
-      await this.storage.put(key, params.state)
+      await this.doKernel.putObject({
+        collection: STATE_COLLECTION_ENTITLEMENT,
+        key,
+        payload: JSON.stringify(params.state),
+      })
       this.stateCache.set(key, params.state)
 
       return Ok(undefined)
@@ -286,7 +475,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       this.assertInitialized()
       const key = this.makeKey(params)
 
-      await this.storage.delete(key)
+      await this.doKernel.deleteObject(STATE_COLLECTION_ENTITLEMENT, key)
       this.stateCache.delete(key)
 
       return Ok(undefined)
@@ -301,6 +490,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         this.assertInitialized()
         await this.storage.deleteAll()
         this.stateCache.clear()
+        this.resetInMemoryCursors()
         await migrate(this.db, migrations)
         return Ok(undefined)
       } catch (error) {
@@ -336,11 +526,19 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
       this.assertInitialized()
+      const seq = await this.nextDeliverySeq(DELIVERY_STREAM_USAGE)
+      const metaId = await this.ensureMetadataRecord({
+        metadata: record.metadata ?? null,
+        projectId: record.project_id,
+        customerId: record.customer_id,
+        timestamp: record.timestamp,
+      })
 
       const inserted = await this.db
         .insert(schema.usageRecords)
         .values({
           id: record.id,
+          seq,
           customer_id: record.customer_id,
           feature_slug: record.feature_slug,
           usage: String(record.usage),
@@ -351,6 +549,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
           rate_amount: record.rate_amount != null ? String(record.rate_amount) : null,
           rate_currency: record.rate_currency ?? null,
           entitlement_id: record.entitlement_id,
+          meta_id: metaId,
           deleted: record.deleted ?? 0,
           idempotence_key: record.idempotence_key,
           request_id: record.request_id,
@@ -392,8 +591,16 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   ): Promise<Result<void, UnPriceEntitlementStorageError>> {
     try {
       this.assertInitialized()
+      const seq = await this.nextDeliverySeq(DELIVERY_STREAM_VERIFICATION)
+      const metaId = await this.ensureMetadataRecord({
+        metadata: record.metadata ?? null,
+        projectId: record.project_id,
+        customerId: record.customer_id,
+        timestamp: record.timestamp,
+      })
 
       await this.db.insert(schema.verifications).values({
+        seq,
         customer_id: record.customer_id,
         feature_slug: record.feature_slug,
         project_id: record.project_id,
@@ -404,6 +611,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         latency: record.latency != null ? String(record.latency) : "0",
         allowed: record.allowed,
         metadata: record.metadata ? JSON.stringify(record.metadata) : null,
+        meta_id: metaId,
         usage: record.usage != null ? String(record.usage) : null,
         remaining: record.remaining != null ? String(record.remaining) : null,
         entitlement_id: record.entitlement_id,
@@ -457,154 +665,302 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // Flush & Reset
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async flush(): Promise<
-    Result<
-      {
-        usage: { count: number; lastId: string | null }
-        verification: { count: number; lastId: string | null }
-      },
-      UnPriceEntitlementStorageError
-    >
-  > {
+  async flush(): Promise<Result<FlushSummary, UnPriceEntitlementStorageError>> {
+    if (this.inFlightFlush) {
+      this.logger.debug("Flush already in progress, waiting for existing run")
+      return this.inFlightFlush
+    }
+
+    const flushPromise = this.flushInternal().finally(() => {
+      this.inFlightFlush = null
+    })
+
+    this.inFlightFlush = flushPromise
+    return flushPromise
+  }
+
+  private async flushInternal(): Promise<Result<FlushSummary, UnPriceEntitlementStorageError>> {
     try {
       this.assertInitialized()
 
-      // 1. Fetch batches
-      const usageBatch = await this.fetchUsageBatch()
-      const verificationBatch = await this.fetchVerificationBatch()
+      const [usageBatch, verificationBatch] = await Promise.all([
+        this.fetchUsageBatch(),
+        this.fetchVerificationBatch(),
+      ])
 
-      // 2. Process metadata/tag payloads for lakehouse sinks
-      const todayKey = this.getTodayKey()
-      const seenMetaSet = await this.getSeenMetaSet(todayKey)
-      const processed = await buildLakehouseMetadataProcessingResult({
-        usageRecords: usageBatch.records,
-        verificationRecords: verificationBatch.records,
+      const usageForTinybird = this.filterUsageRecordsAfterCursor(
+        usageBatch.records,
+        this.cursors.lastTinybirdUsageSeq
+      )
+      const verificationForTinybird = this.filterVerificationRecordsAfterCursor(
+        verificationBatch.records,
+        this.cursors.lastTinybirdVerificationSeq
+      )
+      const usageForR2 = this.filterUsageRecordsAfterCursor(
+        usageBatch.records,
+        this.cursors.lastR2UsageSeq
+      )
+      const verificationForR2 = this.filterVerificationRecordsAfterCursor(
+        verificationBatch.records,
+        this.cursors.lastR2VerificationSeq
+      )
+
+      const eventDateKey = this.getTodayKey()
+      const seenMetaSet = await this.getSeenMetaSet(eventDateKey)
+      const metadataRefs = this.collectUnseenMetadataRefs({
+        usageRecords: usageForR2,
+        verificationRecords: verificationForR2,
         seenMetaSet,
-        todayKey,
-        hashMetadataJson: async (metadataJson) => {
-          const hasher = await this.getXxhash()
-          return hasher.h64(metadataJson)
-        },
       })
 
-      const lakehouseSnapshotDate = new Date().toISOString().slice(0, 10)
-      const seenSnapshotSet = await this.getSeenSnapshotSet(lakehouseSnapshotDate)
-      const lakehousePrepared = buildLakehousePreparedPayload({
-        processed,
-        cursorState: {
-          lastR2UsageId: this.cursors.lastR2UsageId,
-          lastR2VerificationId: this.cursors.lastR2VerificationId,
-        },
-      })
+      const metadataRows = await this.fetchMetadataRowsByRefs(metadataRefs)
+      if (metadataRows.length < metadataRefs.length) {
+        this.logger.warn("Missing metadata rows for referenced metadata keys", {
+          requested_count: metadataRefs.length,
+          found_count: metadataRows.length,
+          missing_count: metadataRefs.length - metadataRows.length,
+        })
+      }
 
-      const entitlementSnapshots = await this.buildEntitlementSnapshots({
+      const metadataRecords = this.buildLakehouseMetadataRecords(metadataRows)
+      const metadataSeenKeys = this.toMetadataSeenKeys(metadataRows)
+
+      const seenSnapshotSet = await this.getSeenSnapshotSet(eventDateKey)
+      const lakehousePrepared: LakehousePreparedPayload = {
+        cursorState: EMPTY_LAKEHOUSE_CURSOR_STATE,
+        usageRecords: this.buildLakehouseUsageRecords(usageForR2),
+        verificationRecords: this.buildLakehouseVerificationRecords(verificationForR2),
+        metadataRecords,
+      }
+
+      const snapshotBuild = await this.buildEntitlementSnapshots({
         prepared: lakehousePrepared,
         seenSnapshotSet,
       })
 
-      // 3. Filter records for each destination based on cursors to avoid double counting
-      const usageForTinybird = processed.usageRecords.filter((r) => {
-        if (!this.cursors.lastTinybirdUsageId) return true
-        return r.record.id > this.cursors.lastTinybirdUsageId
-      })
-
-      const verificationForTinybird = processed.verificationRecords.filter((r) => {
-        if (this.cursors.lastTinybirdVerificationId === null) return true
-        return r.record.id > this.cursors.lastTinybirdVerificationId
-      })
-
-      // 4. Send to destinations in parallel
       const [r2Result, usageResult, verificationResult] = await Promise.all([
-        this.flushToR2(lakehousePrepared, entitlementSnapshots),
+        this.flushToR2(lakehousePrepared, snapshotBuild.snapshots),
         this.ingestUsageToTinybird(usageForTinybird),
         this.ingestVerificationsToTinybird(verificationForTinybird),
       ])
 
-      const allFlushesSucceeded =
-        r2Result.success && usageResult.success && verificationResult.success
+      const failedSinks: string[] = []
+      let cursorsChanged = false
 
-      if (allFlushesSucceeded) {
-        // 5a. Update tinybird cursors first (same filter as the payload that was sent)
-        if (
-          usageForTinybird.length > 0 &&
-          this.cursors.lastTinybirdUsageId !== usageForTinybird[0]!.record.id
-        ) {
-          this.cursors.lastTinybirdUsageId = usageForTinybird[0]!.record.id
+      if (usageForTinybird.length > 0) {
+        if (usageResult.success) {
+          const nextTinybirdUsageSeq = this.getLatestUsageSeq(usageForTinybird)
+          if (
+            nextTinybirdUsageSeq !== null &&
+            this.cursors.lastTinybirdUsageSeq !== nextTinybirdUsageSeq
+          ) {
+            this.cursors.lastTinybirdUsageSeq = nextTinybirdUsageSeq
+            cursorsChanged = true
+          }
+        } else {
+          failedSinks.push("tinybird_usage")
         }
+      }
 
-        if (
-          verificationForTinybird.length > 0 &&
-          this.cursors.lastTinybirdVerificationId !==
-            verificationForTinybird[verificationForTinybird.length - 1]!.record.id
-        ) {
-          this.cursors.lastTinybirdVerificationId =
-            verificationForTinybird[verificationForTinybird.length - 1]!.record.id
+      if (verificationForTinybird.length > 0) {
+        if (verificationResult.success) {
+          const nextTinybirdVerificationSeq = this.getLatestVerificationSeq(verificationForTinybird)
+          if (
+            nextTinybirdVerificationSeq !== null &&
+            this.cursors.lastTinybirdVerificationSeq !== nextTinybirdVerificationSeq
+          ) {
+            this.cursors.lastTinybirdVerificationSeq = nextTinybirdVerificationSeq
+            cursorsChanged = true
+          }
+        } else {
+          failedSinks.push("tinybird_verification")
         }
+      }
 
-        // 5b. Persist sinks that use the same payload and commit once both destinations succeed
-        this.cursors.lastR2UsageId = r2Result.cursorState.lastR2UsageId
-        this.cursors.lastR2VerificationId = r2Result.cursorState.lastR2VerificationId
+      const hasLakehousePayload =
+        lakehousePrepared.usageRecords.length > 0 ||
+        lakehousePrepared.verificationRecords.length > 0 ||
+        lakehousePrepared.metadataRecords.length > 0 ||
+        snapshotBuild.snapshots.length > 0
 
+      if (hasLakehousePayload) {
+        if (r2Result.success) {
+          const nextR2UsageSeq = this.getLatestUsageSeq(usageForR2)
+          if (nextR2UsageSeq !== null && this.cursors.lastR2UsageSeq !== nextR2UsageSeq) {
+            this.cursors.lastR2UsageSeq = nextR2UsageSeq
+            cursorsChanged = true
+          }
+
+          const nextR2VerificationSeq = this.getLatestVerificationSeq(verificationForR2)
+          if (
+            nextR2VerificationSeq !== null &&
+            this.cursors.lastR2VerificationSeq !== nextR2VerificationSeq
+          ) {
+            this.cursors.lastR2VerificationSeq = nextR2VerificationSeq
+            cursorsChanged = true
+          }
+
+          if (metadataSeenKeys.size > 0) {
+            await this.updateSeenMetaSet(eventDateKey, metadataSeenKeys)
+          }
+
+          if (snapshotBuild.emittedSnapshotIds.size > 0) {
+            await this.updateSeenSnapshotSet(eventDateKey, snapshotBuild.emittedSnapshotIds)
+          }
+        } else {
+          failedSinks.push("lakehouse_r2")
+        }
+      }
+
+      if (cursorsChanged) {
         await this.saveCursors()
+      }
 
-        // 6. Update seen metadata/snapshot sets only after a fully successful flush
-        if (processed.uniqueMetadata.length > 0) {
-          await this.updateSeenMetaSet(processed.todayKey, processed.seenMetaSet)
-        }
+      if (this.isUsageBatchSafeToDelete(usageBatch)) {
+        await this.deleteUsageRecordsBatch(usageBatch.firstSeq!, usageBatch.lastSeq!)
+      }
 
-        if (entitlementSnapshots.length > 0) {
-          await this.updateSeenSnapshotSet(lakehouseSnapshotDate, seenSnapshotSet)
-        }
-
-        // 7. Delete records that have been safely persisted to BOTH destinations
-        // For Usage (DESC): We can delete if both cursors have advanced past the batch
-        if (usageBatch.firstId && usageBatch.lastId) {
-          const tbSafe =
-            this.cursors.lastTinybirdUsageId !== null &&
-            usageBatch.firstId !== null &&
-            this.cursors.lastTinybirdUsageId >= usageBatch.firstId
-          const r2Safe =
-            this.cursors.lastR2UsageId !== null &&
-            usageBatch.firstId !== null &&
-            this.cursors.lastR2UsageId >= usageBatch.firstId
-
-          if (tbSafe && r2Safe) {
-            await this.deleteUsageRecordsBatch(usageBatch.firstId, usageBatch.lastId)
-          }
-        }
-
-        // For Verification (ASC): We can delete if both cursors have advanced past the batch
-        if (verificationBatch.firstId !== null && verificationBatch.lastId !== null) {
-          const tbSafe =
-            this.cursors.lastTinybirdVerificationId !== null &&
-            verificationBatch.lastId !== null &&
-            this.cursors.lastTinybirdVerificationId >= verificationBatch.lastId
-          const r2Safe =
-            this.cursors.lastR2VerificationId !== null &&
-            verificationBatch.lastId !== null &&
-            this.cursors.lastR2VerificationId >= verificationBatch.lastId
-
-          if (tbSafe && r2Safe) {
-            await this.deleteVerificationRecordsBatch(
-              verificationBatch.firstId,
-              verificationBatch.lastId
-            )
-          }
-        }
+      if (this.isVerificationBatchSafeToDelete(verificationBatch)) {
+        await this.deleteVerificationRecordsBatch(
+          verificationBatch.firstSeq!,
+          verificationBatch.lastSeq!
+        )
       }
 
       await this.pruneAggregateBuckets(Date.now())
 
-      return Ok({
-        usage: { count: usageBatch.records.length, lastId: usageBatch.lastId },
+      const summary: FlushSummary = {
+        usage: {
+          count: usageBatch.records.length,
+          lastId:
+            usageBatch.records.length > 0
+              ? usageBatch.records[usageBatch.records.length - 1]!.id
+              : null,
+        },
         verification: {
           count: verificationBatch.records.length,
-          lastId: verificationBatch.lastId?.toString() ?? null,
+          lastId:
+            verificationBatch.records.length > 0
+              ? verificationBatch.records[verificationBatch.records.length - 1]!.id.toString()
+              : null,
         },
-      })
+      }
+
+      if (failedSinks.length > 0) {
+        return Err(
+          new UnPriceEntitlementStorageError({
+            message: `flush incomplete: ${failedSinks.join(", ")}`,
+          })
+        )
+      }
+
+      return Ok(summary)
     } catch (error) {
       return this.logAndError("flush", error)
     }
+  }
+
+  private filterUsageRecordsAfterCursor(
+    records: UsageRecord[],
+    cursor: number | null
+  ): UsageRecord[] {
+    if (cursor === null) {
+      return records
+    }
+    return records.filter((record) => record.seq > cursor)
+  }
+
+  private filterVerificationRecordsAfterCursor(
+    records: Verification[],
+    cursor: number | null
+  ): Verification[] {
+    if (cursor === null) {
+      return records
+    }
+    return records.filter((record) => record.seq > cursor)
+  }
+
+  private getLatestUsageSeq(records: UsageRecord[]): number | null {
+    if (records.length === 0) {
+      return null
+    }
+    return records[records.length - 1]!.seq
+  }
+
+  private getLatestVerificationSeq(records: Verification[]): number | null {
+    if (records.length === 0) {
+      return null
+    }
+    return records[records.length - 1]!.seq
+  }
+
+  private collectUnseenMetadataRefs(params: {
+    usageRecords: UsageRecord[]
+    verificationRecords: Verification[]
+    seenMetaSet: Set<string>
+  }): string[] {
+    const requestedMetadataIds = new Set<string>()
+
+    for (const record of params.usageRecords) {
+      const metaId = String(record.meta_id ?? "0")
+      if (metaId === "0") {
+        continue
+      }
+
+      if (!params.seenMetaSet.has(metaId)) {
+        requestedMetadataIds.add(metaId)
+      }
+    }
+
+    for (const record of params.verificationRecords) {
+      const metaId = String(record.meta_id ?? "0")
+      if (metaId === "0") {
+        continue
+      }
+
+      if (!params.seenMetaSet.has(metaId)) {
+        requestedMetadataIds.add(metaId)
+      }
+    }
+
+    return Array.from(requestedMetadataIds)
+  }
+
+  private toMetadataSeenKeys(
+    rows: Array<{ id: string; project_id: string; customer_id: string }>
+  ): Set<string> {
+    return new Set(rows.map((row) => row.id))
+  }
+
+  private isUsageBatchSafeToDelete(batch: BatchResult<UsageRecord>): boolean {
+    if (batch.firstSeq === null || batch.lastSeq === null) {
+      return false
+    }
+
+    // A record is deletable only after both sinks acknowledged past the batch tail.
+    const tinybirdSafe =
+      this.cursors.lastTinybirdUsageSeq !== null &&
+      this.cursors.lastTinybirdUsageSeq >= batch.lastSeq
+    const r2Safe =
+      this.cursors.lastR2UsageSeq !== null && this.cursors.lastR2UsageSeq >= batch.lastSeq
+
+    return tinybirdSafe && r2Safe
+  }
+
+  private isVerificationBatchSafeToDelete(batch: BatchResult<Verification>): boolean {
+    if (batch.firstSeq === null || batch.lastSeq === null) {
+      return false
+    }
+
+    // A record is deletable only after both sinks acknowledged past the batch tail.
+    const tinybirdSafe =
+      this.cursors.lastTinybirdVerificationSeq !== null &&
+      this.cursors.lastTinybirdVerificationSeq >= batch.lastSeq
+    const r2Safe =
+      this.cursors.lastR2VerificationSeq !== null &&
+      this.cursors.lastR2VerificationSeq >= batch.lastSeq
+
+    return tinybirdSafe && r2Safe
   }
 
   async reset(): Promise<Result<void, UnPriceEntitlementStorageError>> {
@@ -643,12 +999,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         this.stateCache.clear()
         await this.storage.deleteAll()
         this.initialized = false
-        this.cursors = {
-          lastTinybirdUsageId: null,
-          lastR2UsageId: null,
-          lastTinybirdVerificationId: null,
-          lastR2VerificationId: null,
-        }
+        this.resetInMemoryCursors()
 
         // Reinitialize
         await migrate(this.db, migrations)
@@ -667,47 +1018,38 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // Batch Fetching
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private async fetchUsageBatch(): Promise<BatchResult<UsageRecord, string>> {
+  private async fetchUsageBatch(): Promise<BatchResult<UsageRecord>> {
     const records = await this.db
       .select()
       .from(schema.usageRecords)
-      .orderBy(desc(schema.usageRecords.id))
+      .orderBy(schema.usageRecords.seq)
       .limit(BATCH_SIZE)
 
     if (records.length === 0) {
-      return { records: [], firstId: null, lastId: null }
+      return { records: [], firstSeq: null, lastSeq: null }
     }
 
-    // Deduplicate by idempotence_key (keep first occurrence)
-    const seen = new Set<string>()
-    const deduplicated = records.filter((r) => {
-      if (seen.has(r.idempotence_key)) return false
-      seen.add(r.idempotence_key)
-      return true
-    })
+    const firstSeq = records[0]?.seq ?? null
+    const lastSeq = records[records.length - 1]?.seq ?? null
 
-    // firstId is highest (DESC order), lastId is lowest
-    const firstId = records[0]?.id ?? null
-    const lastId = records[records.length - 1]?.id ?? null
-
-    return { records: deduplicated, firstId, lastId }
+    return { records, firstSeq, lastSeq }
   }
 
-  private async fetchVerificationBatch(): Promise<BatchResult<Verification, number>> {
+  private async fetchVerificationBatch(): Promise<BatchResult<Verification>> {
     const records = await this.db
       .select()
       .from(schema.verifications)
-      .orderBy(schema.verifications.id)
+      .orderBy(schema.verifications.seq)
       .limit(BATCH_SIZE)
 
     if (records.length === 0) {
-      return { records: [], firstId: null, lastId: null }
+      return { records: [], firstSeq: null, lastSeq: null }
     }
 
-    const firstId = records[0]?.id ?? null
-    const lastId = records[records.length - 1]?.id ?? null
+    const firstSeq = records[0]?.seq ?? null
+    const lastSeq = records[records.length - 1]?.seq ?? null
 
-    return { records, firstId, lastId }
+    return { records, firstSeq, lastSeq }
   }
 
   private async getXxhash(): Promise<XXHashAPI> {
@@ -717,17 +1059,148 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     return this.xxhashInstance
   }
 
+  private buildLakehouseUsageRecords(records: UsageRecord[]): LakehouseUsageEvent[] {
+    return records.map((record) => ({
+      id: String(record.id),
+      event_date: toEventDate(record.timestamp),
+      request_id: String(record.request_id),
+      project_id: String(record.project_id),
+      customer_id: String(record.customer_id),
+      timestamp: Number(record.timestamp),
+      allowed: record.deleted === 0,
+      idempotence_key: String(record.idempotence_key),
+      feature_slug: String(record.feature_slug),
+      usage: Number(record.usage ?? 0),
+      entitlement_id: String(record.entitlement_id),
+      deleted: Number(record.deleted),
+      meta_id: String(record.meta_id ?? "0"),
+      country: String(record.country ?? "UNK"),
+      region: String(record.region ?? "UNK"),
+      action: record.action ? String(record.action) : undefined,
+      key_id: record.key_id ? String(record.key_id) : undefined,
+      unit_of_measure: "unit",
+      cost:
+        record.cost != null && Number.isFinite(Number(record.cost))
+          ? Number(record.cost)
+          : undefined,
+      rate_amount:
+        record.rate_amount != null && Number.isFinite(Number(record.rate_amount))
+          ? Number(record.rate_amount)
+          : undefined,
+      rate_currency: record.rate_currency ? String(record.rate_currency) : undefined,
+      schema_version: Number(USAGE_SCHEMA_VERSION),
+    }))
+  }
+
+  private buildLakehouseVerificationRecords(records: Verification[]): LakehouseVerificationEvent[] {
+    return records.map((record) => ({
+      id: String(record.id),
+      event_date: toEventDate(record.timestamp),
+      project_id: String(record.project_id),
+      denied_reason: record.denied_reason ? String(record.denied_reason) : undefined,
+      allowed: record.allowed === 1,
+      timestamp: Number(record.timestamp),
+      entitlement_id: String(record.entitlement_id),
+      latency: record.latency ? Number(record.latency) : undefined,
+      feature_slug: String(record.feature_slug),
+      customer_id: String(record.customer_id),
+      request_id: String(record.request_id),
+      country: String(record.country ?? "UNK"),
+      region: String(record.region ?? "UNK"),
+      meta_id: String(record.meta_id ?? "0"),
+      action: record.action ? String(record.action) : undefined,
+      key_id: record.key_id ? String(record.key_id) : undefined,
+      usage:
+        record.usage != null && Number.isFinite(Number(record.usage))
+          ? Number(record.usage)
+          : undefined,
+      remaining:
+        record.remaining != null && Number.isFinite(Number(record.remaining))
+          ? Number(record.remaining)
+          : undefined,
+      schema_version: Number(VERIFICATION_SCHEMA_VERSION),
+    }))
+  }
+
+  private async fetchMetadataRowsByRefs(metadataIds: string[]): Promise<
+    Array<{
+      id: string
+      payload: string
+      project_id: string
+      customer_id: string
+      timestamp: number
+    }>
+  > {
+    if (metadataIds.length === 0) {
+      return []
+    }
+
+    const idList = Array.from(new Set(metadataIds))
+    const chunkSize = 300
+    const rowsById = new Map<
+      string,
+      {
+        id: string
+        payload: string
+        project_id: string
+        customer_id: string
+        timestamp: number
+      }
+    >()
+
+    for (let i = 0; i < idList.length; i += chunkSize) {
+      const chunk = idList.slice(i, i + chunkSize)
+      const chunkRows = await this.db
+        .select({
+          id: schema.metadataRecords.id,
+          payload: schema.metadataRecords.payload,
+          project_id: schema.metadataRecords.project_id,
+          customer_id: schema.metadataRecords.customer_id,
+          timestamp: schema.metadataRecords.timestamp,
+        })
+        .from(schema.metadataRecords)
+        .where(inArray(schema.metadataRecords.id, chunk))
+
+      for (const row of chunkRows) {
+        const existing = rowsById.get(row.id)
+        if (!existing || row.timestamp > existing.timestamp) {
+          rowsById.set(row.id, row)
+        }
+      }
+    }
+
+    return Array.from(rowsById.values())
+  }
+
+  private buildLakehouseMetadataRecords(
+    rows: Array<{
+      id: string
+      payload: string
+      project_id: string
+      customer_id: string
+      timestamp: number
+    }>
+  ): LakehouseMetadataEvent[] {
+    return rows.map((row) => ({
+      id: String(row.id),
+      event_date: toEventDate(row.timestamp),
+      project_id: String(row.project_id),
+      customer_id: String(row.customer_id),
+      payload: row.payload,
+      timestamp: Number(row.timestamp),
+      schema_version: Number(METADATA_SCHEMA_VERSION),
+    }))
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Tinybird Ingestion
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private async ingestUsageToTinybird(
-    records: ProcessedUsageRecords
-  ): Promise<{ success: boolean }> {
+  private async ingestUsageToTinybird(records: UsageRecord[]): Promise<{ success: boolean }> {
     if (records.length === 0) return { success: true }
 
     try {
-      const payload = records.map(({ record }) => ({
+      const payload = records.map((record) => ({
         id: record.id,
         timestamp: record.timestamp,
         usage: Number(record.usage ?? 0),
@@ -771,12 +1244,12 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   }
 
   private async ingestVerificationsToTinybird(
-    records: ProcessedVerificationRecords
+    records: Verification[]
   ): Promise<{ success: boolean }> {
     if (records.length === 0) return { success: true }
 
     try {
-      const payload = records.map(({ record, region }) => ({
+      const payload = records.map((record) => ({
         timestamp: record.timestamp,
         latency: record.latency ? Number(record.latency) : 0,
         denied_reason: record.denied_reason ?? undefined,
@@ -785,7 +1258,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         customer_id: record.customer_id,
         feature_slug: record.feature_slug,
         created_at: record.created_at,
-        region,
+        region: record.region ?? "UNK",
       }))
 
       const result = await this.analytics.ingestFeaturesVerification(payload)
@@ -825,24 +1298,22 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   // Record Deletion
   // ─────────────────────────────────────────────────────────────────────────────
 
-  private async deleteUsageRecordsBatch(firstId: string, lastId: string): Promise<number> {
-    // Usage is ordered DESC, so firstId > lastId lexicographically
+  private async deleteUsageRecordsBatch(firstSeq: number, lastSeq: number): Promise<number> {
     const result = await this.db
       .delete(schema.usageRecords)
       .where(
-        sql`${schema.usageRecords.id} >= ${lastId} AND ${schema.usageRecords.id} <= ${firstId}`
+        sql`${schema.usageRecords.seq} >= ${firstSeq} AND ${schema.usageRecords.seq} <= ${lastSeq}`
       )
       .returning({ id: schema.usageRecords.id })
 
     return result.length
   }
 
-  private async deleteVerificationRecordsBatch(firstId: number, lastId: number): Promise<number> {
-    // Verifications ordered ASC, so firstId < lastId
+  private async deleteVerificationRecordsBatch(firstSeq: number, lastSeq: number): Promise<number> {
     const result = await this.db
       .delete(schema.verifications)
       .where(
-        sql`${schema.verifications.id} >= ${firstId} AND ${schema.verifications.id} <= ${lastId}`
+        sql`${schema.verifications.seq} >= ${firstSeq} AND ${schema.verifications.seq} <= ${lastSeq}`
       )
       .returning({ id: schema.verifications.id })
 
@@ -856,7 +1327,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
   private async buildEntitlementSnapshots(params: {
     prepared: LakehousePreparedPayload
     seenSnapshotSet: Set<string>
-  }): Promise<LakehouseEntitlementSnapshotEvent[]> {
+  }): Promise<EntitlementSnapshotBuildResult> {
     const referencedEntitlementIds = new Set<string>()
 
     for (const record of params.prepared.usageRecords) {
@@ -872,7 +1343,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     }
 
     if (referencedEntitlementIds.size === 0) {
-      return []
+      return { snapshots: [], emittedSnapshotIds: new Set() }
     }
 
     const statesResult = await this.getAll()
@@ -880,7 +1351,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       this.logger.warn("Failed to load entitlement states for lakehouse snapshot emission", {
         error: statesResult.err.message,
       })
-      return []
+      return { snapshots: [], emittedSnapshotIds: new Set() }
     }
 
     const stateByEntitlementId = new Map<string, EntitlementState>()
@@ -891,6 +1362,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     }
 
     const snapshots: LakehouseEntitlementSnapshotEvent[] = []
+    const emittedSnapshotIds = new Set<string>()
     const missingStates: string[] = []
 
     for (const entitlementId of referencedEntitlementIds) {
@@ -933,8 +1405,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         metadata: normalizedMetadata,
         schema_version: Number(ENTITLEMENT_SNAPSHOT_SCHEMA_VERSION), // Ensure it's a number (int32)
       })
-
-      params.seenSnapshotSet.add(entitlementId)
+      emittedSnapshotIds.add(entitlementId)
     }
 
     if (missingStates.length > 0) {
@@ -943,13 +1414,13 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
     }
 
-    return snapshots
+    return { snapshots, emittedSnapshotIds }
   }
 
   private async flushToR2(
     prepared: LakehousePreparedPayload,
     entitlementSnapshots: LakehouseEntitlementSnapshotEvent[]
-  ): Promise<{ success: boolean; cursorState: LakehouseCursorState }> {
+  ): Promise<{ success: boolean }> {
     try {
       if (
         prepared.usageRecords.length === 0 &&
@@ -957,7 +1428,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         prepared.metadataRecords.length === 0 &&
         entitlementSnapshots.length === 0
       ) {
-        return { success: true, cursorState: prepared.cursorState }
+        return { success: true }
       }
 
       this.logger.info("Flushing lakehouse payload", {
@@ -965,8 +1436,6 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         verification_records: prepared.verificationRecords.length,
         metadata_records: prepared.metadataRecords.length,
         entitlement_snapshot_records: entitlementSnapshots.length,
-        cursor_lastR2UsageId: prepared.cursorState.lastR2UsageId,
-        cursor_lastR2VerificationId: prepared.cursorState.lastR2VerificationId,
       })
 
       const lakehouseResult = await this.lakehouseService.flushRaw({
@@ -986,16 +1455,10 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
       })
 
       if (!lakehouseResult.success) {
-        this.logger.error("Lakehouse flush returned success=false", {
-          cursor_lastR2UsageId: prepared.cursorState.lastR2UsageId,
-          cursor_lastR2VerificationId: prepared.cursorState.lastR2VerificationId,
-        })
+        this.logger.error("Lakehouse flush returned success=false")
       }
 
-      return {
-        success: lakehouseResult.success,
-        cursorState: lakehouseResult.cursorState,
-      }
+      return { success: lakehouseResult.success }
     } catch (error) {
       this.logger.error("Failed to flush to R2", {
         error: this.errorMessage(error),
@@ -1006,8 +1469,7 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
         metadata_records_count: prepared.metadataRecords.length,
         entitlement_snapshot_records_count: entitlementSnapshots.length,
       })
-      // Don't swallow the error - let it propagate so we can see what's wrong
-      throw error
+      return { success: false }
     }
   }
 
@@ -1019,50 +1481,60 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
     return new Date().toISOString().slice(0, 10)
   }
 
+  private getRetentionCutoffDate(currentDateStr: string): string {
+    const cutoffDate = new Date(`${currentDateStr}T00:00:00.000Z`)
+    const retentionWindowDays = METADATA_RETENTION_DAYS <= 1 ? 0 : METADATA_RETENTION_DAYS - 1
+    cutoffDate.setUTCDate(cutoffDate.getUTCDate() - retentionWindowDays)
+    return cutoffDate.toISOString().slice(0, 10)
+  }
+
   private async getSeenMetaSet(date: string): Promise<Set<string>> {
-    const key = `${SEEN_META_PREFIX}${date}`
-    const stored = await this.storage.get<string[]>(key)
-    return new Set(stored ?? [])
+    return await this.doKernel.getDedupeSet(DEDUPE_SCOPE_METADATA, date)
   }
 
   private async getSeenSnapshotSet(date: string): Promise<Set<string>> {
-    const key = `${SEEN_SNAPSHOT_PREFIX}${date}`
-    const stored = await this.storage.get<string[]>(key)
-    return new Set(stored ?? [])
+    return await this.doKernel.getDedupeSet(DEDUPE_SCOPE_SNAPSHOT, date)
+  }
+
+  private async insertDedupeIds(params: {
+    scope: string
+    date: string
+    ids: Set<string>
+  }): Promise<void> {
+    if (params.ids.size === 0) return
+
+    await this.doKernel.putDedupeIds({
+      scope: params.scope,
+      eventDate: params.date,
+      ids: params.ids,
+      chunkSize: 500,
+    })
   }
 
   private async updateSeenMetaSet(date: string, metaIds: Set<string>): Promise<void> {
-    const key = `${SEEN_META_PREFIX}${date}`
-    await this.storage.put(key, Array.from(metaIds))
+    await this.insertDedupeIds({
+      scope: DEDUPE_SCOPE_METADATA,
+      date,
+      ids: metaIds,
+    })
+
     await this.rotateSeenMetadata(date)
   }
 
   private async updateSeenSnapshotSet(date: string, snapshotIds: Set<string>): Promise<void> {
-    const key = `${SEEN_SNAPSHOT_PREFIX}${date}`
-    await this.storage.put(key, Array.from(snapshotIds))
+    await this.insertDedupeIds({
+      scope: DEDUPE_SCOPE_SNAPSHOT,
+      date,
+      ids: snapshotIds,
+    })
+
     await this.rotateSeenSnapshots(date)
   }
 
   private async rotateSeenMetadata(currentDateStr: string): Promise<void> {
     try {
-      const keys = await this.storage.list({ prefix: SEEN_META_PREFIX })
-      const cutoffDate = new Date(currentDateStr)
-      cutoffDate.setDate(cutoffDate.getDate() - METADATA_RETENTION_DAYS)
-
-      const keysToDelete: string[] = []
-
-      for (const [key] of keys) {
-        const datePart = key.replace(SEEN_META_PREFIX, "")
-        const keyDate = new Date(datePart)
-
-        if (!Number.isNaN(keyDate.getTime()) && keyDate < cutoffDate) {
-          keysToDelete.push(key)
-        }
-      }
-
-      if (keysToDelete.length > 0) {
-        await Promise.all(keysToDelete.map((key) => this.storage.delete(key)))
-      }
+      const cutoffDate = this.getRetentionCutoffDate(currentDateStr)
+      await this.doKernel.rotateDedupe(DEDUPE_SCOPE_METADATA, cutoffDate)
     } catch (error) {
       this.logger.error("Failed to rotate seen metadata", { error: this.errorMessage(error) })
     }
@@ -1070,24 +1542,8 @@ export class SqliteDOStorageProvider implements UnPriceEntitlementStorage {
 
   private async rotateSeenSnapshots(currentDateStr: string): Promise<void> {
     try {
-      const keys = await this.storage.list({ prefix: SEEN_SNAPSHOT_PREFIX })
-      const cutoffDate = new Date(currentDateStr)
-      cutoffDate.setDate(cutoffDate.getDate() - METADATA_RETENTION_DAYS)
-
-      const keysToDelete: string[] = []
-
-      for (const [key] of keys) {
-        const datePart = key.replace(SEEN_SNAPSHOT_PREFIX, "")
-        const keyDate = new Date(datePart)
-
-        if (!Number.isNaN(keyDate.getTime()) && keyDate < cutoffDate) {
-          keysToDelete.push(key)
-        }
-      }
-
-      if (keysToDelete.length > 0) {
-        await Promise.all(keysToDelete.map((key) => this.storage.delete(key)))
-      }
+      const cutoffDate = this.getRetentionCutoffDate(currentDateStr)
+      await this.doKernel.rotateDedupe(DEDUPE_SCOPE_SNAPSHOT, cutoffDate)
     } catch (error) {
       this.logger.error("Failed to rotate seen snapshots", { error: this.errorMessage(error) })
     }

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "dx-expert": {
+      "source": "agustinoberg/dx-expert-skill",
+      "sourceType": "github",
+      "computedHash": "ca9759fec7815a6d53a2a4bd1b74ecc39751e358c19dc0741817ee97d1c00b74"
+    }
+  }
+}

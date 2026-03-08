@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
 import type { Metrics } from "@unprice/services/metrics"
 import { ProjectService } from "@unprice/services/projects"
@@ -15,7 +15,6 @@ export class ApiProjectService {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly projectService: ProjectService
-  private wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     requestId: string
@@ -27,7 +26,6 @@ export class ApiProjectService {
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     db: Database
-    wideEventHelpers?: WideEventHelpers
   }) {
     this.logger = opts.logger
     this.metrics = opts.metrics
@@ -35,7 +33,6 @@ export class ApiProjectService {
     this.cache = opts.cache
     this.db = opts.db
     this.waitUntil = opts.waitUntil
-    this.wideEventHelpers = opts.wideEventHelpers
     this.projectService = new ProjectService({
       logger: this.logger,
       analytics: this.analytics,
@@ -43,18 +40,7 @@ export class ApiProjectService {
       cache: this.cache,
       metrics: this.metrics,
       db: this.db,
-      wideEventHelpers: this.wideEventHelpers,
     })
-  }
-
-  /**
-   * Sets the wide event helpers for request-scoped logging context.
-   * This should be called inside the wideEventLogger.runAsync() context.
-   * Propagates to nested services (projectService).
-   */
-  public setWideEventHelpers(wideEventHelpers: WideEventHelpers) {
-    this.wideEventHelpers = wideEventHelpers
-    this.projectService.setWideEventHelpers(wideEventHelpers)
   }
 
   public async getProjectFeatures(

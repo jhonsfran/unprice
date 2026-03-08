@@ -11,7 +11,7 @@ import {
   calculateFreeUnits,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { retry } from "../utils/retry"

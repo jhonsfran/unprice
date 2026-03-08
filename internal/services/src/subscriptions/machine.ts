@@ -3,7 +3,7 @@ import { type Database, and as dbAnd, eq } from "@unprice/db"
 import { subscriptions } from "@unprice/db/schema"
 import type { Customer, Subscription, SubscriptionStatus } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import {
   type AnyActorRef,
   and,

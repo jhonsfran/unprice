@@ -3,8 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-		"setup": "uv sync",
-		"clean": "rm -rf __pycache__ .venv",
+    "setup": "uv sync",
+    "clean": "rm -rf __pycache__ .venv",
     "deploy": "fly deploy",
     "dev": "uv run uvicorn src.worker:app --reload --host 0.0.0.0 --port 4000",
     "start": "uv run uvicorn src.worker:app --host 0.0.0.0 --port 4000"

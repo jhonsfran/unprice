@@ -1,4 +1,4 @@
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type { SubscriptionContext } from "./types"
 
 /**

@@ -1,33 +1,40 @@
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
-import { createConnection } from "@unprice/db"
+import { type Database, createConnection } from "@unprice/db"
+import { newId } from "@unprice/db/utils"
 import type {
   CurrentUsage,
   EntitlementState,
   MinimalEntitlement,
   ReportUsageRequest,
   ReportUsageResult,
+  SubscriptionStatus,
   VerificationResult,
   VerifyRequest,
 } from "@unprice/db/validators"
 import type { BaseError, Result } from "@unprice/error"
 import {
-  AxiomLogger,
-  ConsoleLogger,
-  type Logger,
+  type AppLogger,
   type WideEventLogger,
-  createWideEventHelpers,
-  createWideEventLogger,
-} from "@unprice/logging"
-import { shouldEmitLogsToBackend, shouldEmitMetrics } from "@unprice/logging/env"
+  createStandaloneRequestLogger,
+  emitWideEvent,
+  runWithRequestLogger,
+} from "@unprice/observability"
+import { shouldEmitMetrics } from "@unprice/observability/env"
 import { CacheService } from "@unprice/services/cache"
-import type { DenyReason } from "@unprice/services/customers"
+import { CustomerService, type DenyReason } from "@unprice/services/customers"
 import { EntitlementService } from "@unprice/services/entitlements"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
-import { type Connection, Server } from "partyserver"
+import { type Connection, type ConnectionContext, Server } from "partyserver"
 import type { Env } from "~/env"
 import { LakehousePipelineService } from "~/lakehouse/pipeline"
+import { apiDrain } from "~/observability"
 import type { BufferMetricsResponse } from "./interface"
+import {
+  type RealtimeConnectionState,
+  shouldCloseRealtimeConnection,
+  shouldExpireRealtimeTail,
+} from "./realtime-connection"
 import { type FlushPressureStats, SqliteDOStorageProvider } from "./sqlite-do-provider"
 
 // colo never change after the object is created
@@ -67,6 +74,52 @@ type UsageResultSummary = {
 }
 
 const METADATA_KEY_SAMPLE_LIMIT = 10
+const SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS = 5_000
+const CONNECTION_TAG_TAIL = "tail"
+const CONNECTION_TAG_ALERTS = "alerts"
+
+type RealtimeSubscriptionSnapshot = {
+  status: SubscriptionStatus | null
+  planSlug: string | null
+  billingInterval: string | null
+  phaseStartAt: number | null
+  phaseEndAt: number | null
+  cycleStartAt: number | null
+  cycleEndAt: number | null
+  timezone: string | null
+}
+
+type RealtimeFeatureSnapshot = {
+  featureSlug: string
+  featureType: "flat" | "tiered" | "usage" | "package"
+  usage: number | null
+  limit: number | null
+  limitType: "hard" | "soft" | "none"
+  effectiveAt: number | null
+  expiresAt: number | null
+}
+
+type RealtimeAlertType = "limit_reached" | "limit_recovered"
+
+type SnapshotRequestMessage = {
+  type: "snapshot_request"
+  windowSeconds?: unknown
+}
+
+type VerifyRequestMessage = {
+  type: "verify_request"
+  requestId?: unknown
+  featureSlug?: unknown
+  usage?: unknown
+  action?: unknown
+  metadata?: unknown
+}
+
+type ResumeTailMessage = {
+  type: "resume_tail"
+}
+
+type RealtimeClientMessage = SnapshotRequestMessage | VerifyRequestMessage | ResumeTailMessage
 
 const summarizeUsageInput = (data: VerifyRequest | ReportUsageRequest): UsageInputSummary => {
   const metadataKeys = data.metadata ? Object.keys(data.metadata) : []
@@ -108,23 +161,154 @@ const summarizeUsageResult = (
   }
 }
 
-const buildUsageByFeature = (params: {
-  states: EntitlementState[]
-  customerId: string
-  projectId: string
-}): Record<string, number> => {
-  const { states, customerId, projectId } = params
+const buildUsageByFeature = (states: EntitlementState[]): Record<string, number> => {
   const usageByFeature: Record<string, number> = {}
 
   for (const state of states) {
-    if (state.customerId !== customerId || state.projectId !== projectId) {
-      continue
-    }
-
     usageByFeature[state.featureSlug] = Number(state.meter.usage ?? 0)
   }
 
   return usageByFeature
+}
+
+const buildRealtimeFeatures = (states: EntitlementState[]): RealtimeFeatureSnapshot[] => {
+  const normalizeFeatureType = (
+    featureType: EntitlementState["featureType"]
+  ): RealtimeFeatureSnapshot["featureType"] => {
+    return featureType === "tier" ? "tiered" : featureType
+  }
+
+  return states.map((state) => {
+    const usage = Number(state.meter.usage ?? 0)
+    const limit = typeof state.limit === "number" ? state.limit : null
+
+    return {
+      featureSlug: state.featureSlug,
+      featureType: normalizeFeatureType(state.featureType),
+      usage: Number.isFinite(usage) ? usage : null,
+      limit,
+      limitType: limit === null ? "none" : "hard",
+      effectiveAt: state.effectiveAt ?? null,
+      expiresAt: state.expiresAt ?? null,
+    }
+  })
+}
+
+const METADATA_MAX_KEYS = 50
+const METADATA_MAX_SIZE_BYTES = 5_000
+
+function normalizeWsAction(action: unknown): string | undefined {
+  if (typeof action !== "string") return undefined
+  const normalized = action.trim().toLowerCase().replace(/\s+/g, "-")
+  return normalized.length > 0 ? normalized : undefined
+}
+
+function normalizeWsMetadata(metadata: unknown): Record<string, string | number | boolean> | null {
+  if (metadata == null) {
+    return null
+  }
+
+  if (typeof metadata !== "object" || Array.isArray(metadata)) {
+    throw new Error("Invalid metadata payload")
+  }
+
+  const entries = Object.entries(metadata).filter(([, value]) => value !== undefined)
+  if (entries.length > METADATA_MAX_KEYS) {
+    throw new Error(`Metadata exceeds ${METADATA_MAX_KEYS} properties`)
+  }
+
+  const normalized: Record<string, string | number | boolean> = {}
+
+  for (const [key, value] of entries) {
+    if (typeof value === "string" || typeof value === "boolean") {
+      normalized[key] = value
+      continue
+    }
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) {
+        throw new Error("Metadata number values must be finite")
+      }
+      normalized[key] = value
+      continue
+    }
+
+    throw new Error("Metadata values must be string, number, or boolean")
+  }
+
+  if (JSON.stringify(normalized).length > METADATA_MAX_SIZE_BYTES) {
+    throw new Error(`Metadata payload too large (max ${METADATA_MAX_SIZE_BYTES} bytes)`)
+  }
+
+  return normalized
+}
+
+function parseRealtimeClientMessage(message: string):
+  | {
+      ok: true
+      value: RealtimeClientMessage
+    }
+  | {
+      ok: false
+      error: string
+    } {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(message)
+  } catch {
+    return {
+      ok: false,
+      error: "Invalid JSON message",
+    }
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {
+      ok: false,
+      error: "Invalid message payload",
+    }
+  }
+
+  const record = parsed as Record<string, unknown>
+  const type = record.type
+
+  if (type === "snapshot_request") {
+    return {
+      ok: true,
+      value: {
+        type: "snapshot_request",
+        windowSeconds: record.windowSeconds,
+      },
+    }
+  }
+
+  if (type === "verify_request") {
+    return {
+      ok: true,
+      value: {
+        type: "verify_request",
+        requestId: record.requestId,
+        featureSlug: record.featureSlug,
+        usage: record.usage,
+        action: record.action,
+        metadata: record.metadata,
+      },
+    }
+  }
+
+  if (type === "resume_tail") {
+    return {
+      ok: true,
+      value: {
+        type: "resume_tail",
+      },
+    }
+  }
+
+  return {
+    ok: false,
+    error: "Unsupported message type",
+  }
 }
 
 // This durable object takes care of handling the usage of every feature per customer.
@@ -134,9 +318,13 @@ export class DurableObjectUsagelimiter extends Server {
   // environment variables
   private readonly _env: Env
   // logger service
-  private logger: Logger
+  private logger: AppLogger
   // entitlement service
   private entitlementService: EntitlementService
+  // customer service
+  private customerService: CustomerService
+  // database connection
+  private readonly db: Database
   // storage provider
   private storage: SqliteDOStorageProvider
   // metrics service
@@ -145,8 +333,10 @@ export class DurableObjectUsagelimiter extends Server {
   private LAST_BROADCAST_MSG = Date.now()
   // debounce delay for the broadcast events
   private readonly DEBOUNCE_DELAY = 1000 * 1 // 1 second (1 per second)
-  // sample rate for the wide event
-  private SAMPLE_RATE = 0.1
+  // max lifetime for a debug WebSocket session (5 minutes)
+  private readonly MAX_DEBUG_SESSION_MS = 5 * 60 * 1000
+  // close abandoned websocket sessions so hibernated sockets do not linger forever
+  private readonly MAX_IDLE_CONNECTION_MS = 5 * 60 * 1000
   private readonly FLUSH_SEC_MIN = 5
   private readonly FLUSH_SEC_MAX = 30 * 60
   private readonly HEARTBEAT_FLUSH_SEC = 60
@@ -160,6 +350,15 @@ export class DurableObjectUsagelimiter extends Server {
     emaOldestAgeSeconds: 0,
     samples: 0,
   }
+  private readonly featureLimitReachedBySlug = new Map<string, boolean>()
+  private subscriptionSnapshotCache: {
+    value: RealtimeSubscriptionSnapshot | null
+    fetchedAt: number
+  } | null = null
+  private entitlementsSnapshotCache: {
+    value: MinimalEntitlement[] | null
+    fetchedAt: number
+  } | null = null
 
   // hibernate the do when no websocket nor connections are active
   static options = {
@@ -167,49 +366,38 @@ export class DurableObjectUsagelimiter extends Server {
   }
 
   constructor(ctx: DurableObjectState, env: Env) {
-    super(ctx, env)
+    super(ctx, env as unknown as Cloudflare.Env)
 
     this._env = env
 
-    if (env.APP_ENV === "development") {
-      this.SAMPLE_RATE = 1
-    }
-
-    if (env.APP_ENV === "preview") {
-      this.SAMPLE_RATE = 0.1
-    }
-
-    const emitLogsToBackend = shouldEmitLogsToBackend(env)
     const emitMetrics = shouldEmitMetrics(env)
+    const { logger } = createStandaloneRequestLogger(
+      {
+        requestId: this.ctx.id.toString(),
+      },
+      {
+        flush: apiDrain?.flush,
+      }
+    )
 
-    this.logger = emitLogsToBackend
-      ? new AxiomLogger({
-          apiKey: env.AXIOM_API_TOKEN,
-          dataset: env.AXIOM_DATASET,
-          requestId: this.ctx.id.toString(),
-          logLevel: env.APP_ENV === "production" ? "warn" : "info",
-          environment: env.NODE_ENV,
-          service: "usagelimiter",
-          defaultFields: {
-            durableObjectId: this.ctx.id.toString(),
-            version: this._env.VERSION,
-          },
-        })
-      : new ConsoleLogger({
-          requestId: this.ctx.id.toString(),
-          service: "usagelimiter",
-          environment: env.NODE_ENV,
-          logLevel: env.APP_ENV === "production" ? "warn" : "info",
-          defaultFields: {
-            durableObjectId: this.ctx.id.toString(),
-            version: this._env.VERSION,
-          },
-        })
+    this.logger = logger
+
+    this.logger.set({
+      requestId: this.ctx.id.toString(),
+      service: "usagelimiter",
+      request: {
+        id: this.ctx.id.toString(),
+      },
+      cloud: {
+        platform: "cloudflare",
+        durable_object_id: this.ctx.id.toString(),
+      },
+    })
 
     this.metrics = emitMetrics
       ? new LogdrainMetrics({
           requestId: this.ctx.id.toString(),
-          environment: env.NODE_ENV,
+          environment: env.APP_ENV,
           logger: this.logger,
           service: "usagelimiter",
           durableObjectId: this.ctx.id.toString(),
@@ -253,7 +441,7 @@ export class DurableObjectUsagelimiter extends Server {
 
     const cache = cacheService.getCache()
 
-    const db = createConnection({
+    this.db = createConnection({
       env: env.NODE_ENV,
       primaryDatabaseUrl: env.DATABASE_URL,
       read1DatabaseUrl: env.DATABASE_READ1_URL,
@@ -307,7 +495,7 @@ export class DurableObjectUsagelimiter extends Server {
 
     // initialize the entitlement service
     this.entitlementService = new EntitlementService({
-      db: db,
+      db: this.db,
       storage: this.storage,
       logger: this.logger,
       analytics: new Analytics({
@@ -327,8 +515,22 @@ export class DurableObjectUsagelimiter extends Server {
       },
     })
 
+    this.customerService = new CustomerService({
+      db: this.db,
+      logger: this.logger,
+      analytics: new Analytics({
+        emit: true,
+        tinybirdToken: env.TINYBIRD_TOKEN,
+        tinybirdUrl: env.TINYBIRD_URL,
+        logger: this.logger,
+      }),
+      waitUntil: (promise) => this.ctx.waitUntil(promise),
+      cache: cache,
+      metrics: this.metrics,
+    })
+
     // set the colo of the do
-    this.setColo()
+    this.ctx.waitUntil(this.setColoSafe())
   }
 
   // set colo for metrics and analytics
@@ -356,10 +558,17 @@ export class DurableObjectUsagelimiter extends Server {
       await this.updateConfig(config)
     }
 
-    // block concurrency while setting the colo
-    await this.ctx.blockConcurrencyWhile(async () => {
-      this.metrics.setColo(config.colo)
-    })
+    this.metrics.setColo(config.colo)
+  }
+
+  private async setColoSafe(): Promise<void> {
+    try {
+      await this.setColo()
+    } catch (error) {
+      this.logger.error("Unexpected error setting colo", {
+        error: error instanceof Error ? error.message : String(error ?? "unknown error"),
+      })
+    }
   }
 
   private async getConfig(): Promise<UsageLimiterConfig> {
@@ -373,6 +582,140 @@ export class DurableObjectUsagelimiter extends Server {
     await this.ctx.storage.put("config", {
       ...config,
     })
+  }
+
+  private createOperationRequestLogger(options: {
+    operation: "verify" | "reportUsage" | "alarm" | "websocket"
+    parentRequestId?: string
+    path: string
+  }): {
+    requestId: string
+    requestLogger: WideEventLogger
+  } {
+    const requestId = newId("request")
+    const { requestLogger } = createStandaloneRequestLogger(
+      {
+        method: "POST",
+        path: options.path,
+        requestId,
+      },
+      {
+        flush: apiDrain?.flush,
+      }
+    )
+
+    requestLogger.set({
+      service: "usagelimiter",
+      request: {
+        id: requestId,
+        parent_id: options.parentRequestId,
+        timestamp: new Date().toISOString(),
+        method: "POST",
+        path: options.path,
+        host: "durable-object",
+        protocol: "https",
+      },
+      cloud: {
+        platform: "cloudflare",
+        durable_object_id: this.ctx.id.toString(),
+        region: this.metrics.getColo(),
+      },
+      usagelimiter: {
+        operation: options.operation,
+      },
+    })
+
+    return {
+      requestId,
+      requestLogger,
+    }
+  }
+
+  private shouldSample(percent: number): boolean {
+    if (percent <= 0) {
+      return false
+    }
+
+    if (percent >= 100) {
+      return true
+    }
+
+    return Math.random() * 100 < percent
+  }
+
+  private shouldKeepOperationWideEvent(status: number, duration: number): boolean {
+    return status >= 400 || duration >= 1000
+  }
+
+  private getOperationWideEventSampleRate(): number {
+    return this._env.APP_ENV === "production" ? 10 : 100
+  }
+
+  private getLifecycleDebugSampleRate(): number {
+    return this._env.APP_ENV === "development" ? 10 : 0
+  }
+
+  private debugLifecycle(message: string, fields?: Record<string, unknown>): void {
+    if (!this.shouldSample(this.getLifecycleDebugSampleRate())) {
+      return
+    }
+
+    this.logger.debug(message, fields)
+  }
+
+  private flushBackground(options?: {
+    phase: "verify" | "reportUsage" | "onAlarm" | "onClose"
+    requestLogger?: WideEventLogger
+    status?: number
+    duration?: number
+  }): void {
+    this.ctx.waitUntil(
+      (async () => {
+        try {
+          if (
+            options?.requestLogger &&
+            typeof options.status === "number" &&
+            typeof options.duration === "number"
+          ) {
+            const shouldKeep = this.shouldKeepOperationWideEvent(options.status, options.duration)
+            const shouldEmit =
+              shouldKeep || this.shouldSample(this.getOperationWideEventSampleRate())
+
+            if (shouldEmit) {
+              emitWideEvent(options.requestLogger, {
+                _forceKeep: true,
+                status: options.status,
+                duration: options.duration,
+                request: {
+                  status: options.status,
+                  duration: options.duration,
+                },
+              })
+            }
+          }
+
+          await Promise.all([
+            this.metrics.flush().catch((err: Error) => {
+              this.logger.emit("error", "Failed to flush metrics", {
+                error: err.message,
+                phase: options?.phase,
+              })
+            }),
+            this.logger.flush().catch((err: Error) => {
+              this.logger.emit("error", "Failed to flush logger", {
+                error: err.message,
+                phase: options?.phase,
+              })
+            }),
+          ])
+        } catch (error) {
+          this.logger.emit("error", "Error during background flush", {
+            error: error instanceof Error ? error.message : String(error ?? "unknown"),
+            phase: options?.phase,
+          })
+        }
+      })()
+    )
   }
 
   public async getCurrentUsage(data: {
@@ -421,6 +764,105 @@ export class DurableObjectUsagelimiter extends Server {
     return await this.storage.getBufferStats(data?.windowSeconds)
   }
 
+  getConnectionTags(_connection: Connection, context: ConnectionContext): string[] {
+    const url = new URL(context.request.url)
+    const wantsTail = url.searchParams.get("tail") !== "0"
+    const wantsAlerts = url.searchParams.get("alerts") !== "0"
+
+    const tags: string[] = []
+    if (wantsTail) {
+      tags.push(CONNECTION_TAG_TAIL)
+    }
+    if (wantsAlerts) {
+      tags.push(CONNECTION_TAG_ALERTS)
+    }
+
+    // Keep at least one channel enabled so important alerts are still delivered.
+    if (tags.length === 0) {
+      tags.push(CONNECTION_TAG_ALERTS)
+    }
+
+    return tags
+  }
+
+  private sendConnectionPayload(
+    connection: Connection<RealtimeConnectionState>,
+    payload: string
+  ): void {
+    try {
+      connection.send(payload)
+      this.touchRealtimeConnection(connection, Date.now())
+    } catch (err) {
+      this.logger.warn("Failed to send live event to connection", {
+        connectionId: connection.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
+      try {
+        connection.close(1011, "Send failed")
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  private hasTailChannel(connection: Connection<RealtimeConnectionState>): boolean {
+    return connection.tags.includes(CONNECTION_TAG_TAIL)
+  }
+
+  private buildRealtimeConnectionState(params: {
+    connection: Connection<RealtimeConnectionState>
+    at: number
+    joinedAt?: number
+    lastActiveAt?: number
+    tailActive?: boolean
+    tailExpiredAt?: number | null
+  }): RealtimeConnectionState {
+    const currentState = params.connection.state
+    const hasExplicitTailExpiredAt = Object.prototype.hasOwnProperty.call(params, "tailExpiredAt")
+
+    return {
+      joinedAt: params.joinedAt ?? currentState?.joinedAt ?? params.at,
+      lastActiveAt: params.lastActiveAt ?? params.at,
+      tailActive:
+        params.tailActive ?? currentState?.tailActive ?? this.hasTailChannel(params.connection),
+      tailExpiredAt: hasExplicitTailExpiredAt
+        ? (params.tailExpiredAt ?? null)
+        : (currentState?.tailExpiredAt ?? null),
+    }
+  }
+
+  private touchRealtimeConnection(
+    connection: Connection<RealtimeConnectionState>,
+    at: number
+  ): void {
+    connection.setState(
+      this.buildRealtimeConnectionState({
+        connection,
+        at,
+      })
+    )
+  }
+
+  private expireTailConnection(connection: Connection<RealtimeConnectionState>, at: number): void {
+    connection.setState(
+      this.buildRealtimeConnectionState({
+        connection,
+        at,
+        tailActive: false,
+        tailExpiredAt: at,
+      })
+    )
+
+    this.sendConnectionPayload(
+      connection,
+      JSON.stringify({
+        type: "tail_expired",
+        timestamp: at,
+        message: "Live tail paused to reduce costs. Alerts remain active.",
+      })
+    )
+  }
+
   // when connected through websocket we can broadcast events to the client
   // realtime events are used to debug events in dashboard
   async broadcastEvents(data: {
@@ -433,58 +875,215 @@ export class DurableObjectUsagelimiter extends Server {
     type: "verify" | "reportUsage"
     success: boolean
   }) {
+    const connections = Array.from(
+      this.getConnections<RealtimeConnectionState>(CONNECTION_TAG_TAIL)
+    )
+
+    // return early if there are no connections
+    if (connections.length === 0) return
+
     const now = Date.now()
 
     // Only broadcast if enough time has passed since last broadcast
-    // defailt 1 per second
-    // this is used to debug events in real time in dashboard
-    if (now - this.LAST_BROADCAST_MSG >= this.DEBOUNCE_DELAY) {
-      // under the hood this validates if there are connections
-      // and sends the event to all of them
-      this.broadcast(JSON.stringify(data))
-      this.LAST_BROADCAST_MSG = now
+    // default 1 per second — used to debug events in real time in dashboard
+    if (now - this.LAST_BROADCAST_MSG < this.DEBOUNCE_DELAY) {
+      return
+    }
+
+    // build payload once
+    const payload = JSON.stringify({
+      ...data,
+      kind: "tail",
+      timestamp: now,
+    })
+
+    for (const conn of connections) {
+      const tailActive = conn.state?.tailActive ?? true
+
+      if (!tailActive) {
+        continue
+      }
+
+      // time-box debug sessions to avoid forgotten tabs running forever
+      if (shouldExpireRealtimeTail(conn.state, now, this.MAX_DEBUG_SESSION_MS)) {
+        this.expireTailConnection(conn, now)
+        continue
+      }
+
+      this.sendConnectionPayload(conn, payload)
+    }
+
+    this.LAST_BROADCAST_MSG = now
+  }
+
+  private buildLimitAlert(data: {
+    featureSlug: string
+    usage?: number
+    limit?: number
+  }): {
+    alertType: RealtimeAlertType
+    featureSlug: string
+    usage: number
+    limit: number
+  } | null {
+    if (
+      typeof data.usage !== "number" ||
+      !Number.isFinite(data.usage) ||
+      typeof data.limit !== "number" ||
+      !Number.isFinite(data.limit) ||
+      data.limit <= 0
+    ) {
+      this.featureLimitReachedBySlug.delete(data.featureSlug)
+      return null
+    }
+
+    const reachedLimit = data.usage >= data.limit
+    const previous = this.featureLimitReachedBySlug.get(data.featureSlug)
+    if (previous === reachedLimit) {
+      return null
+    }
+
+    this.featureLimitReachedBySlug.set(data.featureSlug, reachedLimit)
+
+    // Avoid a recovery event when we have no previous state.
+    if (!reachedLimit && previous === undefined) {
+      return null
+    }
+
+    return {
+      alertType: reachedLimit ? "limit_reached" : "limit_recovered",
+      featureSlug: data.featureSlug,
+      usage: data.usage,
+      limit: data.limit,
+    }
+  }
+
+  private async broadcastAlertEvent(data: {
+    customerId: string
+    featureSlug: string
+    alertType: RealtimeAlertType
+    usage: number
+    limit: number
+    source: "verify" | "reportUsage"
+  }): Promise<void> {
+    const connections = Array.from(
+      this.getConnections<RealtimeConnectionState>(CONNECTION_TAG_ALERTS)
+    )
+    if (connections.length === 0) {
+      return
+    }
+
+    const payload = JSON.stringify({
+      type: "alert",
+      kind: "alert",
+      customerId: data.customerId,
+      featureSlug: data.featureSlug,
+      alertType: data.alertType,
+      usage: data.usage,
+      limit: data.limit,
+      source: data.source,
+      timestamp: Date.now(),
+    })
+
+    for (const connection of connections) {
+      this.sendConnectionPayload(connection, payload)
+    }
+  }
+
+  private countRealtimeConnections(): number {
+    return Array.from(this.getConnections<RealtimeConnectionState>()).length
+  }
+
+  private closeIdleRealtimeConnections(at: number): number {
+    const connections = Array.from(this.getConnections<RealtimeConnectionState>())
+    let closedCount = 0
+
+    for (const connection of connections) {
+      if (shouldCloseRealtimeConnection(connection.state, at, this.MAX_IDLE_CONNECTION_MS)) {
+        closedCount += 1
+
+        try {
+          connection.close(1001, "Idle realtime connection timeout")
+        } catch (error) {
+          this.logger.warn("Failed to close idle realtime connection", {
+            connectionId: connection.id,
+            error: error instanceof Error ? error.message : String(error ?? "unknown error"),
+          })
+        }
+        continue
+      }
+
+      if (
+        this.hasTailChannel(connection) &&
+        shouldExpireRealtimeTail(connection.state, at, this.MAX_DEBUG_SESSION_MS)
+      ) {
+        this.expireTailConnection(connection, at)
+      }
+    }
+
+    return closedCount
+  }
+
+  private async ensureRealtimeCleanupAlarm(): Promise<void> {
+    try {
+      await this.scheduleAlarmWithHeartbeat(this.getHeartbeatFlushSeconds())
+    } catch (error) {
+      this.logger.error("Failed to schedule realtime cleanup alarm", {
+        error: error instanceof Error ? error.message : String(error ?? "unknown error"),
+      })
+    }
+  }
+
+  private async reconcileRealtimeCleanupAlarm(): Promise<void> {
+    try {
+      const connectionCount = this.countRealtimeConnections()
+
+      if (connectionCount > 0) {
+        await this.scheduleAlarmWithHeartbeat(this.getHeartbeatFlushSeconds())
+        return
+      }
+
+      const pressure = await this.getFlushPressureSafe()
+      if (pressure && pressure.pendingTotalRecords === 0) {
+        await this.ctx.storage.deleteAlarm()
+      }
+    } catch (error) {
+      this.logger.error("Failed to reconcile realtime cleanup alarm", {
+        error: error instanceof Error ? error.message : String(error ?? "unknown error"),
+      })
     }
   }
 
   public async verify(data: VerifyRequest): Promise<VerificationResult> {
-    const wideEventLogger = createWideEventLogger({
-      "service.name": "usagelimiter",
-      "service.version": this._env.VERSION,
-      "service.environment": this._env.NODE_ENV as
-        | "production"
-        | "staging"
-        | "development"
-        | "preview"
-        | "test",
-      sampleRate: this.SAMPLE_RATE,
-      emitter: (level, message, event) => this.logger.emit(level, message, event),
+    const { requestId, requestLogger } = this.createOperationRequestLogger({
+      operation: "verify",
+      parentRequestId: data.requestId,
+      path: "/durable-objects/usagelimiter/verify",
+    })
+    let status = 200
+
+    requestLogger.set({
+      business: {
+        customer_id: data.customerId,
+        project_id: data.projectId,
+        feature_slug: data.featureSlug,
+      },
+      usagelimiter: {
+        input: summarizeUsageInput(data),
+      },
     })
 
-    const wideEventHelpers = createWideEventHelpers(wideEventLogger)
+    return await runWithRequestLogger(requestLogger, { requestId }, async () => {
+      this.metrics.x(requestId)
 
-    return await wideEventLogger.runAsync(async () => {
       try {
-        // set the wide event helpers
-        this.entitlementService.setWideEventHelpers(wideEventHelpers)
-
-        // set the request id for the metrics and logs
-        this.logger.x(data.requestId)
-        this.metrics.x(data.requestId)
-        wideEventLogger.add("request.id", data.requestId) // We don't need to generate a new id for the DO request
-        wideEventLogger.add("request.timestamp", new Date().toISOString())
-        wideEventHelpers.addParentRequestId(data.requestId) // Link to parent
-        wideEventHelpers.addCloud({
-          platform: "cloudflare",
-          durable_object_id: this.ctx.id.toString(),
-          region: this.metrics.getColo(),
-        })
-        wideEventLogger.add("usagelimiter.operation", "verify")
-        wideEventLogger.add("usagelimiter.input", summarizeUsageInput(data))
-        // All logic handled internally!
         const result = await this.entitlementService.verify(data)
-        wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
-        // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(wideEventLogger)
+        requestLogger.set({
+          usagelimiter: {
+            result: summarizeUsageResult(result),
+          },
+        })
+        await this.ensureAlarmIsSet(requestLogger)
 
         this.ctx.waitUntil(
           this.broadcastEvents({
@@ -498,79 +1097,86 @@ export class DurableObjectUsagelimiter extends Server {
           })
         )
 
+        const limitAlert = this.buildLimitAlert({
+          featureSlug: data.featureSlug,
+          usage: result.usage,
+          limit: result.limit,
+        })
+        if (limitAlert) {
+          this.ctx.waitUntil(
+            this.broadcastAlertEvent({
+              customerId: data.customerId,
+              featureSlug: limitAlert.featureSlug,
+              alertType: limitAlert.alertType,
+              usage: limitAlert.usage,
+              limit: limitAlert.limit,
+              source: "verify",
+            })
+          )
+        }
+
         return result
       } catch (error) {
-        const err = error as Error
-        wideEventLogger.addError(err)
+        status = 500
+        const err =
+          error instanceof Error ? error : new Error(typeof error === "string" ? error : "unknown")
+        requestLogger.error(err)
         return {
           allowed: false,
           message: err.message,
           deniedReason: "ENTITLEMENT_ERROR",
         }
       } finally {
-        wideEventLogger.add("request.duration", Math.max(0, Date.now() - data.performanceStart))
-        this.ctx.waitUntil(
-          (async () => {
-            try {
-              await Promise.all([
-                // only log if the event should be sampled
-                wideEventLogger.emit(),
-                this.metrics.flush().catch((err: Error) => {
-                  console.error("Failed to flush metrics in DO", err)
-                }),
-                this.logger.flush().catch((err: Error) => {
-                  console.error("Failed to flush logger in DO", err)
-                }),
-              ])
-            } catch (error) {
-              console.error("Error during background flush in DO", error)
-            }
-          })()
-        )
+        const duration = Math.max(0, Date.now() - data.performanceStart)
+        requestLogger.set({
+          status,
+          duration,
+          request: {
+            status,
+            duration,
+          },
+        })
+
+        this.flushBackground({
+          phase: "verify",
+          requestLogger,
+          status,
+          duration,
+        })
       }
     })
   }
 
   public async reportUsage(data: ReportUsageRequest): Promise<ReportUsageResult> {
-    const wideEventLogger = createWideEventLogger({
-      "service.name": "usagelimiter",
-      "service.version": this._env.VERSION,
-      "service.environment": this._env.NODE_ENV as
-        | "production"
-        | "staging"
-        | "development"
-        | "preview"
-        | "test",
-      sampleRate: this.SAMPLE_RATE,
-      emitter: (level, message, event) => this.logger.emit(level, message, event),
+    const { requestId, requestLogger } = this.createOperationRequestLogger({
+      operation: "reportUsage",
+      parentRequestId: data.requestId,
+      path: "/durable-objects/usagelimiter/report-usage",
+    })
+    let status = 200
+
+    requestLogger.set({
+      business: {
+        customer_id: data.customerId,
+        project_id: data.projectId,
+        feature_slug: data.featureSlug,
+      },
+      usagelimiter: {
+        input: summarizeUsageInput(data),
+      },
     })
 
-    const wideEventHelpers = createWideEventHelpers(wideEventLogger)
+    return await runWithRequestLogger(requestLogger, { requestId }, async () => {
+      this.metrics.x(requestId)
 
-    return await wideEventLogger.runAsync(async () => {
       try {
-        // set the wide event helpers
-        this.entitlementService.setWideEventHelpers(wideEventHelpers)
-
-        // set the request id for the metrics and logs
-        this.logger.x(data.requestId)
-        this.metrics.x(data.requestId)
-
-        wideEventLogger.add("request.id", data.requestId)
-        wideEventLogger.add("request.timestamp", new Date().toISOString())
-        wideEventHelpers.addParentRequestId(data.requestId)
-        wideEventHelpers.addCloud({
-          platform: "cloudflare",
-          durable_object_id: this.ctx.id.toString(),
-          region: this.metrics.getColo(),
-        })
-        wideEventLogger.add("usagelimiter.operation", "reportUsage")
-        wideEventLogger.add("usagelimiter.input", summarizeUsageInput(data))
-
         const result = await this.entitlementService.reportUsage(data)
-        wideEventLogger.add("usagelimiter.result", summarizeUsageResult(result))
-        // Set alarm to flush buffers
-        await this.ensureAlarmIsSet(wideEventLogger)
+        requestLogger.set({
+          usagelimiter: {
+            result: summarizeUsageResult(result),
+          },
+        })
+        await this.ensureAlarmIsSet(requestLogger)
 
         this.ctx.waitUntil(
           this.broadcastEvents({
@@ -584,37 +1190,53 @@ export class DurableObjectUsagelimiter extends Server {
           })
         )
 
+        const limitAlert = this.buildLimitAlert({
+          featureSlug: data.featureSlug,
+          usage: result.usage,
+          limit: result.limit,
+        })
+        if (limitAlert) {
+          this.ctx.waitUntil(
+            this.broadcastAlertEvent({
+              customerId: data.customerId,
+              featureSlug: limitAlert.featureSlug,
+              alertType: limitAlert.alertType,
+              usage: limitAlert.usage,
+              limit: limitAlert.limit,
+              source: "reportUsage",
+            })
+          )
+        }
+
         return result
       } catch (error) {
-        const err = error as Error
-        wideEventLogger.addError(err)
+        status = 500
+        const err =
+          error instanceof Error ? error : new Error(typeof error === "string" ? error : "unknown")
+        requestLogger.error(err)
 
         return {
-          message: error instanceof Error ? error.message : "unknown error",
+          message: err.message,
           allowed: false,
         }
       } finally {
-        data.performanceStart &&
-          wideEventLogger.add("request.duration", Math.max(0, Date.now() - data.performanceStart))
+        const duration = data.performanceStart ? Math.max(0, Date.now() - data.performanceStart) : 0
 
-        this.ctx.waitUntil(
-          (async () => {
-            try {
-              await Promise.all([
-                // only log if the event should be sampled
-                wideEventLogger.emit(),
-                this.metrics.flush().catch((err: Error) => {
-                  console.error("Failed to flush metrics in DO", err)
-                }),
-                this.logger.flush().catch((err: Error) => {
-                  console.error("Failed to flush logger in DO", err)
-                }),
-              ])
-            } catch (error) {
-              console.error("Error during background flush in DO", error)
-            }
-          })()
-        )
+        requestLogger.set({
+          status,
+          duration,
+          request: {
+            status,
+            duration,
+          },
+        })
+
+        this.flushBackground({
+          phase: "reportUsage",
+          requestLogger,
+          status,
+          duration,
+        })
       }
     })
   }
@@ -627,13 +1249,21 @@ export class DurableObjectUsagelimiter extends Server {
 
     // Keep healthy alarms untouched so request paths stay lightweight.
     if (currentAlarm !== null && currentAlarm >= now && currentAlarm <= now + heartbeatWindowMs) {
-      wideEventLogger.add("usagelimiter.next_alarm", new Date(currentAlarm).toISOString())
+      wideEventLogger.set({
+        usagelimiter: {
+          next_alarm: new Date(currentAlarm).toISOString(),
+        },
+      })
       return
     }
 
     // The request path only repairs heartbeat scheduling; pressure-based fast retries happen in onAlarm().
     const nextAlarm = await this.scheduleAlarmWithHeartbeat(this.getHeartbeatFlushSeconds())
-    wideEventLogger.add("usagelimiter.next_alarm", new Date(nextAlarm).toISOString())
+    wideEventLogger.set({
+      usagelimiter: {
+        next_alarm: new Date(nextAlarm).toISOString(),
+      },
+    })
   }
 
   private getHeartbeatFlushSeconds(): number {
@@ -759,111 +1389,396 @@ export class DurableObjectUsagelimiter extends Server {
     return val
   }
 
+  private resolveRoomScope(): {
+    projectId: string
+    customerId: string
+  } | null {
+    const roomName = this.name
+    if (!roomName) {
+      return null
+    }
+
+    const roomParts = roomName.split(":")
+    if (roomParts.length < 3) {
+      return null
+    }
+
+    const projectId = roomParts[roomParts.length - 2]
+    const customerId = roomParts[roomParts.length - 1]
+
+    if (!projectId || !customerId) {
+      return null
+    }
+
+    return {
+      projectId,
+      customerId,
+    }
+  }
+
+  private normalizeSnapshotWindowSeconds(value: unknown): 300 | 3600 | 86400 | 604800 | undefined {
+    return value === 300 || value === 3600 || value === 86400 || value === 604800
+      ? value
+      : undefined
+  }
+
+  private async resolveRealtimeSubscriptionSnapshot(params: {
+    customerId: string
+    projectId: string
+  }): Promise<RealtimeSubscriptionSnapshot | null> {
+    const now = Date.now()
+    const cached = this.subscriptionSnapshotCache
+    if (cached && now - cached.fetchedAt < SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS) {
+      return cached.value
+    }
+
+    const result = await this.customerService.getActiveSubscription({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      now,
+      opts: {
+        skipCache: false,
+      },
+    })
+
+    if (result.err) {
+      this.logger.warn("Failed to resolve realtime subscription for snapshot", {
+        customerId: params.customerId,
+        projectId: params.projectId,
+        error: result.err.message,
+      })
+      return cached?.value ?? null
+    }
+
+    const activeSubscription = result.val
+    const activePhase = activeSubscription.activePhase
+    const billingConfig = activePhase?.planVersion?.billingConfig
+    const billingInterval =
+      billingConfig && typeof billingConfig === "object"
+        ? (billingConfig as Record<string, unknown>).billingInterval
+        : null
+
+    const resolved: RealtimeSubscriptionSnapshot = {
+      status: activeSubscription.status ?? null,
+      planSlug: activeSubscription.planSlug ?? null,
+      billingInterval: typeof billingInterval === "string" ? billingInterval : null,
+      phaseStartAt: activePhase?.startAt ?? null,
+      phaseEndAt: activePhase?.endAt ?? null,
+      cycleStartAt: activeSubscription.currentCycleStartAt ?? null,
+      cycleEndAt: activeSubscription.currentCycleEndAt ?? null,
+      timezone: activeSubscription.timezone ?? null,
+    }
+
+    this.subscriptionSnapshotCache = {
+      value: resolved,
+      fetchedAt: now,
+    }
+
+    return resolved
+  }
+
   // websocket events handlers
   onStart(): void | Promise<void> {
-    this.logger.debug("onStart initializing do")
+    this.debugLifecycle("Initializing durable object")
   }
 
   // when a websocket connection is established
-  onConnect(): void | Promise<void> {
-    this.logger.debug("onConnect")
+  onConnect(connection: Connection<RealtimeConnectionState>): void | Promise<void> {
+    this.debugLifecycle("Accepted realtime connection", {
+      connectionId: connection.id,
+      room: this.name,
+    })
+
+    const now = Date.now()
+    const tailEnabled = connection.tags.includes(CONNECTION_TAG_TAIL)
+
+    // initialize channel state for cost controls
+    connection.setState(
+      this.buildRealtimeConnectionState({
+        connection,
+        at: now,
+        joinedAt: now,
+        lastActiveAt: now,
+        tailActive: tailEnabled,
+        tailExpiredAt: null,
+      })
+    )
+
+    this.ctx.waitUntil(this.ensureRealtimeCleanupAlarm())
   }
 
   // when a websocket connection is closed
   onClose(): void | Promise<void> {
-    // flush the metrics and logs
-    this.ctx.waitUntil(
-      (async () => {
-        try {
-          await Promise.all([
-            this.metrics.flush().catch((err: Error) => {
-              console.error("Failed to flush metrics in DO onClose", err)
-            }),
-            this.logger.flush().catch((err: Error) => {
-              console.error("Failed to flush logger in DO onClose", err)
-            }),
-          ])
-        } catch (error) {
-          console.error("Error during background flush in DO onClose", error)
-        }
-      })()
+    this.ctx.waitUntil(this.reconcileRealtimeCleanupAlarm())
+    this.flushBackground({
+      phase: "onClose",
+    })
+  }
+
+  private sendMessage(conn: Connection<RealtimeConnectionState>, payload: Record<string, unknown>) {
+    this.sendConnectionPayload(conn, JSON.stringify(payload))
+  }
+
+  private async handleResumeTailMessage(conn: Connection<RealtimeConnectionState>): Promise<void> {
+    const now = Date.now()
+
+    if (!conn.tags.includes(CONNECTION_TAG_TAIL)) {
+      this.sendMessage(conn, {
+        type: "tail_resume_error",
+        message: "Tail channel is not enabled for this connection",
+      })
+      return
+    }
+
+    conn.setState(
+      this.buildRealtimeConnectionState({
+        connection: conn,
+        at: now,
+        joinedAt: now,
+        lastActiveAt: now,
+        tailActive: true,
+        tailExpiredAt: null,
+      })
     )
+    this.sendMessage(conn, {
+      type: "tail_resumed",
+      timestamp: now,
+    })
+  }
+
+  private async handleSnapshotRequestMessage(
+    conn: Connection<RealtimeConnectionState>,
+    payload: SnapshotRequestMessage
+  ): Promise<void> {
+    const scope = this.resolveRoomScope()
+    if (!scope) {
+      this.sendMessage(conn, {
+        type: "snapshot_error",
+        code: "FORBIDDEN",
+        message: "Invalid realtime room scope",
+      })
+      return
+    }
+
+    const now = Date.now()
+    const [metricsResult, entitlementsResult, allStatesResult, subscription] = await Promise.all([
+      this.getBufferMetrics({
+        windowSeconds: this.normalizeSnapshotWindowSeconds(payload.windowSeconds),
+      }),
+      this.getActiveEntitlements({
+        customerId: scope.customerId,
+        projectId: scope.projectId,
+      }),
+      this.storage.getAll(),
+      this.resolveRealtimeSubscriptionSnapshot({
+        customerId: scope.customerId,
+        projectId: scope.projectId,
+      }),
+    ])
+
+    if (metricsResult.err) {
+      this.sendMessage(conn, {
+        type: "snapshot_error",
+        code: "INTERNAL",
+        message: metricsResult.err.message,
+      })
+      return
+    }
+
+    const cachedEntitlements = this.entitlementsSnapshotCache
+    const canUseCachedEntitlements =
+      cachedEntitlements && now - cachedEntitlements.fetchedAt < SUBSCRIPTION_SNAPSHOT_CACHE_TTL_MS
+    let entitlements = canUseCachedEntitlements ? (cachedEntitlements.value ?? []) : []
+    if (entitlementsResult.err) {
+      this.logger.warn("Failed to resolve active entitlements for snapshot", {
+        customerId: scope.customerId,
+        projectId: scope.projectId,
+        error: entitlementsResult.err.message,
+      })
+    } else {
+      entitlements = entitlementsResult.val
+      this.entitlementsSnapshotCache = {
+        value: entitlements,
+        fetchedAt: now,
+      }
+    }
+
+    const entitlementSlugs = new Set(entitlements.map((entitlement) => entitlement.featureSlug))
+    const hasEntitlementsSource = !entitlementsResult.err || Boolean(canUseCachedEntitlements)
+    let features: RealtimeFeatureSnapshot[] = []
+    let usageByFeature: Record<string, number> = {}
+
+    if (allStatesResult.err) {
+      this.logger.warn("Failed to resolve in-memory usage for snapshot", {
+        customerId: scope.customerId,
+        projectId: scope.projectId,
+        error: allStatesResult.err.message,
+      })
+    } else {
+      const scopedStates = hasEntitlementsSource
+        ? allStatesResult.val.filter((state) => entitlementSlugs.has(state.featureSlug))
+        : allStatesResult.val
+
+      features = buildRealtimeFeatures(scopedStates)
+      usageByFeature = buildUsageByFeature(scopedStates)
+    }
+
+    const snapshotState = {
+      customerId: scope.customerId,
+      projectId: scope.projectId,
+      subscriptionStatus: subscription?.status ?? null,
+      subscription,
+      entitlements,
+      features,
+      usageByFeature,
+      metrics: metricsResult.val,
+      asOf: Date.now(),
+      stateVersion: `${metricsResult.val.newestTimestamp ?? 0}:${metricsResult.val.usageCount}:${metricsResult.val.verificationCount}:${entitlements.length}:${subscription?.cycleStartAt ?? 0}:${subscription?.status ?? "none"}`,
+    }
+
+    this.sendMessage(conn, {
+      type: "snapshot",
+      version: 3,
+      metrics: metricsResult.val,
+      usageByFeature,
+      source: "durable_object",
+      state: snapshotState,
+    })
+  }
+
+  private async handleVerifyRequestMessage(
+    conn: Connection<RealtimeConnectionState>,
+    payload: VerifyRequestMessage
+  ): Promise<void> {
+    const scope = this.resolveRoomScope()
+    const requestId =
+      typeof payload.requestId === "string" && payload.requestId.trim().length > 0
+        ? payload.requestId
+        : crypto.randomUUID()
+
+    if (!scope) {
+      this.sendMessage(conn, {
+        type: "verify_error",
+        requestId,
+        message: "Invalid realtime room scope",
+      })
+      return
+    }
+
+    const featureSlug = typeof payload.featureSlug === "string" ? payload.featureSlug.trim() : ""
+    if (!featureSlug) {
+      this.sendMessage(conn, {
+        type: "verify_error",
+        requestId,
+        message: "featureSlug is required",
+      })
+      return
+    }
+
+    if (
+      typeof payload.usage !== "undefined" &&
+      (typeof payload.usage !== "number" || !Number.isFinite(payload.usage))
+    ) {
+      this.sendMessage(conn, {
+        type: "verify_error",
+        requestId,
+        message: "usage must be a finite number",
+      })
+      return
+    }
+
+    let metadata: Record<string, string | number | boolean> | null
+    try {
+      metadata = normalizeWsMetadata(payload.metadata)
+    } catch (error) {
+      this.sendMessage(conn, {
+        type: "verify_error",
+        requestId,
+        message: error instanceof Error ? error.message : "Invalid metadata payload",
+      })
+      return
+    }
+
+    const performanceStart = Date.now()
+    const usage = typeof payload.usage === "number" ? payload.usage : undefined
+    const verifyRequest: VerifyRequest = {
+      customerId: scope.customerId,
+      projectId: scope.projectId,
+      featureSlug,
+      usage,
+      action: normalizeWsAction(payload.action),
+      metadata,
+      requestId,
+      timestamp: performanceStart,
+      performanceStart,
+    }
+
+    const result = await this.verify(verifyRequest)
+    this.sendMessage(conn, {
+      type: "verify_result",
+      requestId,
+      result,
+    })
   }
 
   // websocket message handler
-  async onMessage(conn: Connection, message: string) {
+  async onMessage(conn: Connection<RealtimeConnectionState>, message: string) {
+    // TODO: we should rate limit this
     try {
-      const parsed = JSON.parse(message) as {
-        type?: "snapshot_request"
-        windowSeconds?: 300 | 3600 | 86400 | 604800
-        customerId?: string
-        projectId?: string
+      this.touchRealtimeConnection(conn, Date.now())
+
+      const parsed = parseRealtimeClientMessage(message)
+      if (!parsed.ok) {
+        this.sendMessage(conn, {
+          type: "message_error",
+          message: parsed.error,
+        })
+        return
       }
 
-      if (parsed.type === "snapshot_request") {
-        const { err, val } = await this.getBufferMetrics({
-          windowSeconds: parsed.windowSeconds,
-        })
-
-        if (err) {
-          conn.send(
-            JSON.stringify({
-              type: "snapshot_error",
-              message: err.message,
-            })
-          )
+      switch (parsed.value.type) {
+        case "resume_tail": {
+          await this.handleResumeTailMessage(conn)
           return
         }
-
-        let usageByFeature: Record<string, number> | undefined
-
-        if (parsed.customerId && parsed.projectId) {
-          const allStatesResult = await this.storage.getAll()
-
-          if (allStatesResult.err) {
-            this.logger.warn("Failed to resolve in-memory usage for snapshot", {
-              customerId: parsed.customerId,
-              projectId: parsed.projectId,
-              error: allStatesResult.err.message,
-            })
-          } else {
-            usageByFeature = buildUsageByFeature({
-              states: allStatesResult.val,
-              customerId: parsed.customerId,
-              projectId: parsed.projectId,
-            })
-          }
+        case "snapshot_request": {
+          await this.handleSnapshotRequestMessage(conn, parsed.value)
+          return
         }
-
-        conn.send(
-          JSON.stringify({
-            type: "snapshot",
-            metrics: val,
-            usageByFeature,
-            source: "durable_object",
-          })
-        )
+        case "verify_request": {
+          await this.handleVerifyRequestMessage(conn, parsed.value)
+          return
+        }
       }
-    } catch (e) {
-      this.logger.error(`onMessage ${message}`, {
-        error: JSON.stringify(e),
+    } catch (error) {
+      this.logger.error("onMessage failed", {
+        error: error instanceof Error ? error.message : "unknown error",
       })
     }
   }
 
   // when the alarm is triggered
   async onAlarm(): Promise<void> {
-    this.logger.debug("Triggering alarm flush")
+    this.debugLifecycle("Running durable object alarm")
 
     const heartbeatFlushSec = this.getHeartbeatFlushSeconds()
     let nextFlushSec = heartbeatFlushSec
+    let pressure: FlushPressureStats | null = null
 
     try {
-      let pressure = await this.getFlushPressureSafe()
+      const now = Date.now()
+      const closedIdleConnections = this.closeIdleRealtimeConnections(now)
+      if (closedIdleConnections > 0) {
+        this.logger.info("Closed idle realtime connections", {
+          closedConnectionCount: closedIdleConnections,
+        })
+      }
+
+      pressure = await this.getFlushPressureSafe()
       const shouldFlush = pressure === null || pressure.pendingTotalRecords > 0
 
       if (!shouldFlush) {
-        this.logger.debug("Skipping alarm flush because buffer is empty")
+        this.debugLifecycle("Skipping alarm flush because buffer is empty")
       } else {
         const flushResult = await this.storage.flush()
         if (flushResult.err) {
@@ -891,11 +1806,25 @@ export class DurableObjectUsagelimiter extends Server {
       })
     } finally {
       try {
-        const nextAlarm = await this.scheduleAlarmWithHeartbeat(nextFlushSec)
-        this.logger.debug("Scheduled alarm heartbeat", {
-          nextAlarm: new Date(nextAlarm).toISOString(),
-          nextFlushSeconds: nextFlushSec,
-        })
+        const connectionCount = this.countRealtimeConnections()
+        const shouldClearAlarm =
+          pressure !== null && pressure.pendingTotalRecords === 0 && connectionCount === 0
+
+        if (shouldClearAlarm) {
+          await this.ctx.storage.deleteAlarm()
+          this.debugLifecycle("Cleared durable object alarm because it is idle", {
+            connectionCount,
+            pendingTotalRecords: pressure?.pendingTotalRecords ?? 0,
+          })
+        } else {
+          const nextAlarm = await this.scheduleAlarmWithHeartbeat(nextFlushSec)
+          this.debugLifecycle("Scheduled alarm heartbeat", {
+            nextAlarm: new Date(nextAlarm).toISOString(),
+            nextFlushSeconds: nextFlushSec,
+            connectionCount,
+            pendingTotalRecords: pressure?.pendingTotalRecords ?? null,
+          })
+        }
       } catch (error) {
         this.logger.error("Failed to schedule alarm heartbeat", {
           error: error instanceof Error ? error.message : "unknown error",
@@ -903,22 +1832,8 @@ export class DurableObjectUsagelimiter extends Server {
       }
     }
 
-    // flush the metrics and logs
-    this.ctx.waitUntil(
-      (async () => {
-        try {
-          await Promise.all([
-            this.metrics.flush().catch((err: Error) => {
-              console.error("Failed to flush metrics in DO onAlarm", err)
-            }),
-            this.logger.flush().catch((err: Error) => {
-              console.error("Failed to flush logger in DO onAlarm", err)
-            }),
-          ])
-        } catch (error) {
-          console.error("Error during background flush in DO onAlarm", error)
-        }
-      })()
-    )
+    this.flushBackground({
+      phase: "onAlarm",
+    })
   }
 }

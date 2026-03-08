@@ -21,11 +21,12 @@
     "@trigger.dev/build": "^3.3.17",
     "@trigger.dev/sdk": "3.3.17",
     "@unprice/db": "workspace:^",
-    "@unprice/logging": "workspace:^",
+    "@unprice/observability": "workspace:^",
     "@unprice/stripe": "workspace:^",
     "@unprice/services": "workspace:^",
     "@unprice/analytics": "workspace:^",
     "@unprice/api": "workspace:^",
+    "evlog": "2.4.1",
     "date-fns": "^3.3.1",
     "trigger.dev": "3.3.17",
     "zod": "^3.24.2"

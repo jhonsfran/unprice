@@ -31,25 +31,33 @@ export const periodTask = task({
       },
     })
 
-    const billingService = new BillingService(context)
+    let status = 200
 
-    // init phase machine
-    const periodResult = await billingService.generateBillingPeriods({
-      subscriptionId,
-      projectId,
-      now,
-    })
+    try {
+      const billingService = new BillingService(context)
 
-    if (periodResult.err) {
-      throw periodResult.err
-    }
+      const periodResult = await billingService.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now,
+      })
 
-    return {
-      cyclesCreated: periodResult.val.cyclesCreated,
-      phasesProcessed: periodResult.val.phasesProcessed,
-      subscriptionId,
-      projectId,
-      now,
+      if (periodResult.err) {
+        throw periodResult.err
+      }
+
+      return {
+        cyclesCreated: periodResult.val.cyclesCreated,
+        phasesProcessed: periodResult.val.phasesProcessed,
+        subscriptionId,
+        projectId,
+        now,
+      }
+    } catch (error) {
+      status = 500
+      throw error
+    } finally {
+      await context.flushLogs(status)
     }
   },
 })

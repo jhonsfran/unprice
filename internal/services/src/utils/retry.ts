@@ -1,5 +1,5 @@
 import type { BaseError, Result } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 
 export type RetryOptions = {
   logger: Logger

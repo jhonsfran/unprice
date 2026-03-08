@@ -8,7 +8,6 @@ import type {
 } from "@unprice/db/validators"
 import type { CurrentUsage } from "@unprice/db/validators"
 import { type BaseError, Ok, type Result } from "@unprice/error"
-import type { WideEventHelpers } from "@unprice/logging"
 import type { CacheNamespaces } from "@unprice/services/cache"
 import type {
   BufferMetricsResponse,
@@ -18,10 +17,6 @@ import type {
 } from "./interface"
 
 export class NoopUsageLimiter implements UsageLimiter {
-  public setWideEventHelpers(_wideEventHelpers?: WideEventHelpers): void {
-    return
-  }
-
   public async resetEntitlements(_params: {
     customerId: string
     projectId: string

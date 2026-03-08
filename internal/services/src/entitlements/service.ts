@@ -24,7 +24,7 @@ import {
   calculateWaterfallPrice,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger, WideEventInput } from "@unprice/logs"
 import { format, subMinutes } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { BillingService } from "../billing"
@@ -62,7 +62,6 @@ export class EntitlementService {
   private readonly cache: Cache
   private readonly metrics: Metrics
   private readonly customerService: CustomerService
-  private wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     db: Database
@@ -73,7 +72,6 @@ export class EntitlementService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
-    wideEventHelpers?: WideEventHelpers
     config?: {
       revalidateInterval?: number // How often to check for version changes
     }
@@ -91,7 +89,6 @@ export class EntitlementService {
     this.waitUntil = opts.waitUntil
     this.cache = opts.cache
     this.metrics = opts.metrics
-    this.wideEventHelpers = opts.wideEventHelpers
     this.customerService = new CustomerService({
       db: opts.db,
       logger: opts.logger,
@@ -99,13 +96,11 @@ export class EntitlementService {
       waitUntil: opts.waitUntil,
       cache: opts.cache,
       metrics: opts.metrics,
-      wideEventHelpers: opts.wideEventHelpers,
     })
   }
 
-  // this is needed because of rpc in do
-  public setWideEventHelpers(wideEventHelpers?: WideEventHelpers) {
-    this.wideEventHelpers = wideEventHelpers
+  private addBusinessContext(context: WideEventInput["business"]) {
+    this.logger.set({ business: context })
   }
 
   /**
@@ -113,8 +108,8 @@ export class EntitlementService {
    * Groups everything under "entitlements" key for clear identification in logs.
    * Keeps only essential information for debugging.
    */
-  private addEntitlementContext(context: Parameters<WideEventHelpers["addEntitlement"]>[0]) {
-    this.wideEventHelpers?.addEntitlement(context)
+  private addEntitlementContext(context: WideEventInput["entitlements"]) {
+    this.logger.set({ entitlements: context })
   }
 
   /**
@@ -625,7 +620,7 @@ export class EntitlementService {
     }
   }): Promise<Result<MinimalEntitlement[], FetchError | UnPriceEntitlementError>> {
     // Add business context once at the start
-    this.wideEventHelpers?.addBusiness({
+    this.addBusinessContext({
       operation: "getActiveEntitlements",
       customer_id: customerId,
       project_id: projectId,
@@ -777,7 +772,7 @@ export class EntitlementService {
     const snapshot: Readonly<EntitlementState> = { ...state }
 
     // Add business context once at the start (this runs in background, needs its own context)
-    this.wideEventHelpers?.addBusiness({
+    this.addBusinessContext({
       operation: "reconcileFeatureUsage",
       customer_id: snapshot.customerId,
       project_id: snapshot.projectId,
@@ -2108,7 +2103,6 @@ export class EntitlementService {
       waitUntil: this.waitUntil,
       cache: this.cache,
       metrics: this.metrics,
-      wideEventHelpers: this.wideEventHelpers,
     })
 
     const result = await billingService.estimatePriceCurrentUsage({

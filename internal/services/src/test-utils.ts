@@ -1,5 +1,4 @@
 import type { EntitlementState, Grant } from "@unprice/db/validators"
-import { createWideEventLogger } from "@unprice/logging"
 
 /**
  * Creates a virtual clock for deterministic time-based testing.
@@ -15,22 +14,6 @@ export const createClock = (initialTime: number) => {
       currentTime = time
     },
   }
-}
-
-export const createMockWideEventLogger = (
-  serviceName: string,
-  serviceVersion: string,
-  serviceEnvironment: "production" | "staging" | "development" | "preview" | "test"
-) => {
-  const mockWideEventLogger = createWideEventLogger({
-    "service.name": serviceName,
-    "service.version": serviceVersion,
-    "service.environment": serviceEnvironment,
-    sampleRate: 1,
-    emitter: (level, message, event) => console.info(JSON.stringify({ level, message, event })),
-  })
-
-  return mockWideEventLogger
 }
 
 /**

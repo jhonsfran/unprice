@@ -15,7 +15,7 @@ import {
   getLakehouseSourceCurrentVersion,
   getLakehouseSourceEventZodSchema,
 } from "@unprice/lakehouse"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type { UsageRecord, Verification } from "~/db/types"
 
 type IndexedSource = "usage" | "verification" | "metadata" | "entitlement_snapshot"
@@ -77,10 +77,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
-function toVerificationCursorValue(value: string): number | null {
+function parseVerificationCursorValue(value: string): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || !Number.isInteger(parsed)) {
-    return null
+    throw new Error(`Invalid verification id: ${value}`)
   }
   return parsed
 }
@@ -383,10 +383,7 @@ export class LakehousePipelineService implements LakehouseService {
         if (params.cursorState.lastR2VerificationId === null) {
           return true
         }
-        const cursorValue = toVerificationCursorValue(record.id)
-        if (cursorValue === null) {
-          return false
-        }
+        const cursorValue = parseVerificationCursorValue(record.id)
         return cursorValue > params.cursorState.lastR2VerificationId
       })
 
@@ -447,10 +444,7 @@ export class LakehousePipelineService implements LakehouseService {
       const nextVerificationId =
         newVerificationRecords.length > 0
           ? newVerificationRecords.reduce((max, item) => {
-              const parsed = toVerificationCursorValue(item.id)
-              if (parsed === null) {
-                return max
-              }
+              const parsed = parseVerificationCursorValue(item.id)
               return parsed > max ? parsed : max
             }, params.cursorState.lastR2VerificationId ?? 0)
           : params.cursorState.lastR2VerificationId
@@ -510,13 +504,17 @@ export class LakehousePipelineService implements LakehouseService {
         Array.from(rejectReasons.entries()).sort(([a], [b]) => a.localeCompare(b))
       )
 
-      this.logger.warn("Lakehouse records rejected by strict schema validation", {
+      this.logger.error("Lakehouse records rejected by strict schema validation", {
         source,
         total: records.length,
         accepted: accepted.length,
         rejected: rejectedCount,
         reasons: JSON.stringify(sortedReasons),
       })
+
+      throw new Error(
+        `Lakehouse ${source} payload failed schema validation with ${rejectedCount} rejected records`
+      )
     }
 
     this.logger.debug("Lakehouse records canonicalized", {

@@ -25,7 +25,7 @@ export const getUsage = protectedProjectProcedure
     })
 
     if (error) {
-      opts.ctx.wideEventHelpers.addError(error)
+      opts.ctx.logger.error(error)
     }
     return {
       usage: result ?? null,

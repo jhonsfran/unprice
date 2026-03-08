@@ -2,11 +2,11 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
-import { type Logger, createWideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createMockWideEventLogger } from "../test-utils"
+import {} from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -93,6 +93,7 @@ describe("EntitlementService - Multiple Grants", () => {
     vi.clearAllMocks()
 
     mockLogger = {
+      set: vi.fn(),
       debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
@@ -156,9 +157,6 @@ describe("EntitlementService - Multiple Grants", () => {
       analytics: mockAnalytics,
     })
     await mockStorage.initialize()
-
-    const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
-
     service = new EntitlementService({
       db: mockDb,
       storage: mockStorage,
@@ -167,7 +165,6 @@ describe("EntitlementService - Multiple Grants", () => {
       waitUntil: vi.fn((promise) => promise),
       cache: mockCache,
       metrics: mockMetrics,
-      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 

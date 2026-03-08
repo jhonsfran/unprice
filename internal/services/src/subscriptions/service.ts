@@ -14,13 +14,14 @@ import {
   getAnchor,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
+import { toErrorContext } from "../utils/log-context"
 import { unprice } from "../utils/unprice"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
@@ -38,7 +39,6 @@ export class SubscriptionService {
   private customerService: CustomerService
   private billingService: BillingService
   private grantService: GrantsManager
-  private wideEventHelpers?: WideEventHelpers
 
   constructor({
     db,
@@ -47,7 +47,6 @@ export class SubscriptionService {
     waitUntil,
     cache,
     metrics,
-    wideEventHelpers,
   }: {
     db: Database
     logger: Logger
@@ -56,7 +55,6 @@ export class SubscriptionService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
-    wideEventHelpers?: WideEventHelpers
   }) {
     this.db = db
     this.logger = logger
@@ -71,7 +69,6 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
-      wideEventHelpers,
     })
     this.billingService = new BillingService({
       db,
@@ -80,26 +77,23 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
-      wideEventHelpers,
     })
 
     this.grantService = new GrantsManager({
       db: db ?? this.db,
       logger: this.logger,
     })
-
-    this.wideEventHelpers = wideEventHelpers
   }
 
-  /**
-   * Sets the wide event helpers for request-scoped logging context.
-   * This should be called inside the wideEventLogger.runAsync() context.
-   * Propagates to nested services (customerService, billingService).
-   */
-  public setWideEventHelpers(wideEventHelpers?: WideEventHelpers) {
-    this.wideEventHelpers = wideEventHelpers
-    this.customerService.setWideEventHelpers(wideEventHelpers)
-    this.billingService.setWideEventHelpers(wideEventHelpers)
+  private setLockContext(context: {
+    type?: "metric" | "normal" | "wide_event"
+    resource?: string
+    action?: string
+    acquired?: boolean
+    ttl_ms?: number
+    max_hold_ms?: number
+  }) {
+    this.logger.set({ lock: context })
   }
 
   private validatePhasesAction({
@@ -418,7 +412,7 @@ export class SubscriptionService {
       })
 
       if (err) {
-        this.wideEventHelpers?.addError(err)
+        this.logger.set({ error: toErrorContext(err) })
         return Err(
           new UnPriceSubscriptionError({
             message: err.message,
@@ -987,7 +981,7 @@ export class SubscriptionService {
         staleTakeoverMs: 120_000,
         ownerStaleMs: ttlMs,
       })
-      this.wideEventHelpers?.addLock({
+      this.setLockContext({
         type: "normal",
         resource: "subscription",
         action: "acquire",
@@ -1017,7 +1011,7 @@ export class SubscriptionService {
             if (stopped) return
             const elapsed = Date.now() - startedAt
             if (elapsed > maxHoldMs) {
-              this.wideEventHelpers?.addLock({
+              this.setLockContext({
                 type: "normal",
                 resource: "subscription",
                 action: "heartbeat_stopped",
@@ -1038,7 +1032,7 @@ export class SubscriptionService {
             try {
               const ok = await lock.extend({ ttlMs })
               if (!ok) {
-                this.wideEventHelpers?.addLock({
+                this.setLockContext({
                   type: "normal",
                   resource: "subscription",
                   action: "extend",
@@ -1051,7 +1045,7 @@ export class SubscriptionService {
                 })
               }
             } catch (e) {
-              this.wideEventHelpers?.addLock({
+              this.setLockContext({
                 type: "normal",
                 resource: "subscription",
                 action: "extend_error",

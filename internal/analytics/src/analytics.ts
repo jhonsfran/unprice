@@ -1,6 +1,6 @@
 import { NoopTinybird, Tinybird } from "@jhonsfran/zod-bird"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import { UnPriceAnalyticsError } from "./errors"
 import {
@@ -18,7 +18,6 @@ export class Analytics {
   public readonly writeClient: Tinybird | NoopTinybird
   public readonly isNoop: boolean
   private readonly logger: Logger
-  private wideEventHelpers?: WideEventHelpers
 
   constructor(opts: {
     logger: Logger
@@ -29,10 +28,8 @@ export class Analytics {
       url: string
       token: string
     }
-    wideEventHelpers?: WideEventHelpers
   }) {
     this.logger = opts.logger
-    this.wideEventHelpers = opts.wideEventHelpers
     this.readClient =
       opts.tinybirdToken && opts.emit
         ? new Tinybird({ token: opts.tinybirdToken, baseUrl: opts.tinybirdUrl })
@@ -49,15 +46,6 @@ export class Analytics {
 
     this.isNoop = this.writeClient instanceof NoopTinybird
   }
-
-  /**
-   * Sets the wide event helpers for request-scoped logging context.
-   * This should be called inside the wideEventLogger.runAsync() context.
-   */
-  public setWideEventHelpers(wideEventHelpers: WideEventHelpers) {
-    this.wideEventHelpers = wideEventHelpers
-  }
-
   public get ingestSdkTelemetry() {
     return this.writeClient.buildIngestEndpoint({
       datasource: "sdk_telemetry",
@@ -507,7 +495,6 @@ export class Analytics {
     })
       .then((usage) => usage.data ?? [])
       .catch((error) => {
-        console.error(error)
         this.logger.error(`Error getBillingUsage:${error.message}`, {
           customerId,
           projectId,

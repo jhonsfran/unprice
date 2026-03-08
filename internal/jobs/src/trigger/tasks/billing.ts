@@ -34,23 +34,32 @@ export const billingTask = task({
       },
     })
 
-    const billingService = new BillingService(context)
-    const billingResult = await billingService.billingInvoice({
-      projectId,
-      subscriptionId,
-      invoiceId,
-      now,
-    })
+    let status = 200
 
-    if (billingResult.err) {
-      throw billingResult.err
-    }
+    try {
+      const billingService = new BillingService(context)
+      const billingResult = await billingService.billingInvoice({
+        projectId,
+        subscriptionId,
+        invoiceId,
+        now,
+      })
 
-    return {
-      status: billingResult.val.status,
-      subscriptionId,
-      projectId,
-      now,
+      if (billingResult.err) {
+        throw billingResult.err
+      }
+
+      return {
+        status: billingResult.val.status,
+        subscriptionId,
+        projectId,
+        now,
+      }
+    } catch (error) {
+      status = 500
+      throw error
+    } finally {
+      await context.flushLogs(status)
     }
   },
 })

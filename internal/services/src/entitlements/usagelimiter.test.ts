@@ -1,11 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
-import { type Logger, createWideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { createClock, createMockEntitlementState, createMockWideEventLogger } from "../test-utils"
+import { createClock, createMockEntitlementState } from "../test-utils"
 import { MemoryEntitlementStorageProvider } from "./memory-provider"
 import { EntitlementService } from "./service"
 
@@ -23,9 +23,6 @@ describe("EntitlementService - verify", () => {
   const customerId = "cust_123"
   const projectId = "proj_123"
   const featureSlug = "test-feature"
-
-  const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
-
   const mockEntitlementState = createMockEntitlementState({
     id: "ent_123",
     customerId,
@@ -64,6 +61,7 @@ describe("EntitlementService - verify", () => {
 
     // Mock Logger
     mockLogger = {
+      set: vi.fn(),
       debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
@@ -159,7 +157,6 @@ describe("EntitlementService - verify", () => {
       waitUntil: vi.fn(),
       cache: mockCache,
       metrics: mockMetrics,
-      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
   })
 
@@ -361,6 +358,7 @@ describe("EntitlementService - reportUsage", () => {
     clock.set(now)
 
     mockLogger = {
+      set: vi.fn(),
       debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
@@ -381,9 +379,6 @@ describe("EntitlementService - reportUsage", () => {
         return Promise.resolve(Ok({ usage, lastRecordId: "rec_initial" }))
       }),
     } as unknown as Analytics
-
-    const mockWideEventLogger = createMockWideEventLogger("entitlements-test", "0.0.1", "test")
-
     // Mock Database
     mockDb = {
       query: {
@@ -448,7 +443,6 @@ describe("EntitlementService - reportUsage", () => {
       waitUntil: vi.fn((promise) => promise), // Execute immediately for testing
       cache: mockCache,
       metrics: mockMetrics,
-      wideEventHelpers: createWideEventHelpers(mockWideEventLogger),
     })
 
     // biome-ignore lint/suspicious/noExplicitAny: on first call the entitlement is not found in the cache so we need to compute it

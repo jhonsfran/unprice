@@ -2,13 +2,14 @@ import type { Analytics } from "@unprice/analytics"
 import { hashStringSHA256, newId } from "@unprice/db/utils"
 import type { ApiKey, ApiKeyExtended } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
 import type { Metrics } from "@unprice/services/metrics"
 
 import type { Database } from "@unprice/db"
 import { and, eq } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
+import { toErrorContext } from "../utils/log-context"
 import { retry } from "../utils/retry"
 import { UnPriceApiKeyError } from "./errors"
 
@@ -25,7 +26,6 @@ export class ApiKeysService {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly db: Database
-  private wideEventHelpers?: WideEventHelpers
   constructor(opts: {
     cache: Cache
     metrics: Metrics
@@ -35,7 +35,6 @@ export class ApiKeysService {
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
     waitUntil: (promise: Promise<any>) => void
     hashCache: Map<string, string>
-    wideEventHelpers?: WideEventHelpers
   }) {
     this.cache = opts.cache
     this.metrics = opts.metrics
@@ -44,15 +43,6 @@ export class ApiKeysService {
     this.db = opts.db
     this.waitUntil = opts.waitUntil
     this.hashCache = opts.hashCache
-    this.wideEventHelpers = opts.wideEventHelpers
-  }
-
-  /**
-   * Sets the wide event helpers for request-scoped logging context.
-   * This should be called inside the wideEventLogger.runAsync() context.
-   */
-  public setWideEventHelpers(wideEventHelpers: WideEventHelpers) {
-    this.wideEventHelpers = wideEventHelpers
   }
 
   private async hash(key: string): Promise<string> {
@@ -106,7 +96,7 @@ export class ApiKeysService {
         where: (apikey, { eq }) => eq(apikey.hash, keyHash),
       })
       .catch((e) => {
-        this.wideEventHelpers?.addError(e)
+        this.logger.set({ error: toErrorContext(e) })
         this.logger.error(`Error fetching apikey from db: ${e.message}`, {
           error: e,
           keyHash,

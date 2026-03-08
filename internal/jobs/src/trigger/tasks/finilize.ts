@@ -34,23 +34,32 @@ export const finilizeTask = task({
       },
     })
 
-    const billingService = new BillingService(context)
-    const finalizeInvoiceResult = await billingService.finalizeInvoice({
-      projectId,
-      subscriptionId,
-      invoiceId,
-      now,
-    })
+    let status = 200
 
-    if (finalizeInvoiceResult.err) {
-      throw finalizeInvoiceResult.err
-    }
+    try {
+      const billingService = new BillingService(context)
+      const finalizeInvoiceResult = await billingService.finalizeInvoice({
+        projectId,
+        subscriptionId,
+        invoiceId,
+        now,
+      })
 
-    return {
-      status: finalizeInvoiceResult.val.status,
-      subscriptionId,
-      projectId,
-      now,
+      if (finalizeInvoiceResult.err) {
+        throw finalizeInvoiceResult.err
+      }
+
+      return {
+        status: finalizeInvoiceResult.val.status,
+        subscriptionId,
+        projectId,
+        now,
+      }
+    } catch (error) {
+      status = 500
+      throw error
+    } finally {
+      await context.flushLogs(status)
     }
   },
 })

@@ -68,6 +68,8 @@ export interface LakehouseQueryOrderBy {
 export interface LakehouseQuerySpec {
   from: LakehouseQueryTableRef
   select: LakehouseQueryProjection[]
+  /** When true, emits SELECT DISTINCT to deduplicate result rows. */
+  distinct?: boolean
   joins?: LakehouseQueryJoin[]
   where?: LakehouseQueryFilter[]
   groupBy?: LakehouseQueryColumnRef[]
@@ -279,7 +281,10 @@ export function buildLakehouseQuery(spec: LakehouseQuerySpec): BuiltLakehouseQue
     })
     .join(", ")
 
-  const sqlParts = [`SELECT ${selectSql}`, `FROM ${quoteTableRef(from.table, from.alias)}`]
+  const sqlParts = [
+    spec.distinct ? `SELECT DISTINCT ${selectSql}` : `SELECT ${selectSql}`,
+    `FROM ${quoteTableRef(from.table, from.alias)}`,
+  ]
 
   for (const join of joins) {
     const resolvedJoin = tableAliases.get(join.alias ?? join.table)

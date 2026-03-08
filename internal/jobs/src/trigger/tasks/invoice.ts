@@ -31,22 +31,30 @@ export const invoiceTask = task({
       },
     })
 
-    const subscriptionService = new SubscriptionService(context)
+    let status = 200
 
-    // init phase machine
-    const invoiceResult = await subscriptionService.invoiceSubscription({
-      subscriptionId,
-      projectId,
-      now,
-    })
+    try {
+      const subscriptionService = new SubscriptionService(context)
 
-    if (invoiceResult.err) {
-      throw invoiceResult.err
-    }
+      const invoiceResult = await subscriptionService.invoiceSubscription({
+        subscriptionId,
+        projectId,
+        now,
+      })
 
-    return {
-      status: invoiceResult.val.status,
-      subscriptionId,
+      if (invoiceResult.err) {
+        throw invoiceResult.err
+      }
+
+      return {
+        status: invoiceResult.val.status,
+        subscriptionId,
+      }
+    } catch (error) {
+      status = 500
+      throw error
+    } finally {
+      await context.flushLogs(status)
     }
   },
 })

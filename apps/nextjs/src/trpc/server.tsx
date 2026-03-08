@@ -11,27 +11,34 @@ import { createCallerFactory, createTRPCContext } from "@unprice/trpc"
 import { appRouter } from "@unprice/trpc/routes"
 import { cookies, headers } from "next/headers"
 import { cache } from "react"
+import { getRequestLoggers, withEvlog } from "~/lib/evlog"
 import { createQueryClient } from "./shared"
 
 /**
  * This wraps the `createTRPCContext` helper and provides the required context for the tRPC API when
  * handling a tRPC call from a React Server Component.
  */
-const createContext = cache(async () => {
-  const heads = new Headers(headers())
-  const activeWorkspaceSlug = cookies().get(COOKIES_APP.WORKSPACE)?.value ?? ""
-  const activeProjectSlug = cookies().get(COOKIES_APP.PROJECT)?.value ?? ""
+const createContext = cache(
+  withEvlog(async () => {
+    const heads = new Headers(headers())
+    const activeWorkspaceSlug = cookies().get(COOKIES_APP.WORKSPACE)?.value ?? ""
+    const activeProjectSlug = cookies().get(COOKIES_APP.PROJECT)?.value ?? ""
+    const requestId = newId("request")
+    const { logger, requestLogger } = getRequestLoggers(requestId)
 
-  heads.set("unprice-request-source", "rsc")
-  heads.set(COOKIES_APP.WORKSPACE, activeWorkspaceSlug)
-  heads.set(COOKIES_APP.PROJECT, activeProjectSlug)
-  heads.set("unprice-request-id", newId("request"))
+    heads.set("unprice-request-source", "rsc")
+    heads.set(COOKIES_APP.WORKSPACE, activeWorkspaceSlug)
+    heads.set(COOKIES_APP.PROJECT, activeProjectSlug)
+    heads.set("unprice-request-id", requestId)
 
-  return createTRPCContext({
-    session: await getSession(),
-    headers: heads,
+    return createTRPCContext({
+      session: await getSession(),
+      headers: heads,
+      logger,
+      requestLogger,
+    })
   })
-})
+)
 
 /**
  * Create a stable getter for the query client that

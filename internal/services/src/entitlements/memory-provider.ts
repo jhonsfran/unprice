@@ -1,7 +1,7 @@
 import type { Analytics, AnalyticsUsage, AnalyticsVerification } from "@unprice/analytics"
 import type { EntitlementState } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { UnPriceEntitlementStorageError } from "./errors"
 import type { UnPriceEntitlementStorage } from "./storage-provider"
 

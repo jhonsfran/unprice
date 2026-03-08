@@ -8,14 +8,14 @@ export function obs(): MiddlewareHandler<HonoEnv> {
     const requestId = c.get("requestId")
     const isolateLifetime = Date.now() - c.get("isolateCreatedAt")
 
-    // Get the wide event logger from context (request-scoped)
-    const wideEventLogger = c.get("wideEventLogger")
-
     try {
       await next()
     } catch (e) {
-      wideEventLogger.add("cloud.isolate_lifetime", isolateLifetime)
-      wideEventLogger.addError(e)
+      logger.set({
+        cloud: {
+          isolate_lifetime: isolateLifetime,
+        },
+      })
       throw e
     } finally {
       const status = c.res.status
@@ -24,29 +24,38 @@ export function obs(): MiddlewareHandler<HonoEnv> {
       c.res.headers.append("Unprice-Latency", `service=${duration}ms`)
       c.res.headers.append("Unprice-Version", c.env.VERSION)
 
-      wideEventLogger.add("request.status", status)
-      wideEventLogger.add("request.duration", duration)
+      logger.set({
+        request: {
+          status,
+          duration,
+        },
+        cloud: {
+          isolate_lifetime: isolateLifetime,
+        },
+      })
 
-      // flush metrics and logger with a timeout so waitUntil completes within
-      // Cloudflare's allowed post-response window and we avoid cancellation warnings
-      const FLUSH_TIMEOUT_MS = 10_000 // 10 seconds
+      // Give the outer evlog middleware a tick to emit the request event before flushing the drain.
+      const FLUSH_TIMEOUT_MS = 10_000
       c.executionCtx.waitUntil(
         (async () => {
           try {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+
             await Promise.race([
               Promise.all([
-                wideEventLogger.emit(),
                 metrics.flush().catch((err: Error) => {
-                  console.error("Failed to flush metrics", { error: err.message })
+                  logger.emit("error", "Failed to flush metrics", { error: err.message })
                 }),
                 logger.flush().catch((err: Error) => {
-                  console.error("Failed to flush logger", { error: err.message })
+                  logger.emit("error", "Failed to flush logger", { error: err.message })
                 }),
               ]),
               new Promise<void>((resolve) => setTimeout(() => resolve(), FLUSH_TIMEOUT_MS)),
             ])
           } catch (error) {
-            console.error("Error during background flush", error)
+            logger.emit("error", "Error during background flush", {
+              error: error instanceof Error ? error.message : String(error ?? "unknown"),
+            })
           }
         })()
       )

@@ -1,4 +1,5 @@
 import { createEnv } from "@t3-oss/env-core"
+import { env as observabilityEnv } from "@unprice/observability/env"
 import { z } from "zod"
 
 export const env = createEnv({
@@ -16,6 +17,7 @@ export const env = createEnv({
       process.env.NODE_ENV === "production" ? z.string().min(1) : z.string().min(1).optional(),
   },
   runtimeEnv: process.env,
+  extends: [observabilityEnv],
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
   onValidationError: (issues) => {
     throw new Error(

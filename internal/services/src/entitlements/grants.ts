@@ -17,7 +17,7 @@ import type {
   subscriptionSelectSchema,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
-import type { Logger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type z from "zod"
 import { UnPriceGrantError } from "./errors"
 

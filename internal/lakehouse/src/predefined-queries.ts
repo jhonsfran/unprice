@@ -9,6 +9,7 @@ const metadataRawQuery = buildInlineLakehouseQuery({
 
 const entitlementSnapshotsRawQuery = buildInlineLakehouseQuery({
   from: { table: "entitlement_snapshots" },
+  distinct: true,
   select: [
     { column: "id" },
     { column: "feature_slug" },

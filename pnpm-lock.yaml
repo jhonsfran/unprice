@@ -84,30 +84,33 @@ importers:
       '@unprice/lakehouse':
         specifier: workspace:^
         version: link:../../internal/lakehouse
-      '@unprice/logging':
-        specifier: workspace:^
-        version: link:../../internal/logging
       '@unprice/logs':
         specifier: workspace:^
         version: link:../../internal/logs
       '@unprice/metrics':
         specifier: workspace:^
         version: link:../../internal/metrics
+      '@unprice/observability':
+        specifier: workspace:^
+        version: link:../../internal/observability
       '@unprice/services':
         specifier: workspace:^
         version: link:../../internal/services
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0)
+      evlog:
+        specifier: 2.4.1
+        version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
       hono:
         specifier: ^4.7.4
         version: 4.11.9
       hono-party:
         specifier: ^0.0.6
-        version: 0.0.6(@cloudflare/workers-types@4.20260217.0)(hono@4.11.9)(partyserver@0.0.65(@cloudflare/workers-types@4.20260217.0))
+        version: 0.0.6(@cloudflare/workers-types@4.20260217.0)(hono@4.11.9)(partyserver@0.3.1(@cloudflare/workers-types@4.20260217.0))
       partyserver:
-        specifier: ^0.0.65
-        version: 0.0.65(@cloudflare/workers-types@4.20260217.0)
+        specifier: ^0.3.1
+        version: 0.3.1(@cloudflare/workers-types@4.20260217.0)
       stoker:
         specifier: ^1.4.2
         version: 1.4.3(@asteasolutions/zod-to-openapi@7.3.4(zod@3.25.76))(@hono/zod-openapi@0.19.10(hono@4.11.9)(zod@3.25.76))(hono@4.11.9)(openapi3-ts@4.5.0)
@@ -136,6 +139,9 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@20.11.24)(terser@5.46.0)
       wrangler:
         specifier: 4.67.0
         version: 4.67.0(@cloudflare/workers-types@4.20260217.0)
@@ -148,6 +154,12 @@ importers:
       '@t3-oss/env-core':
         specifier: ^0.12.0
         version: 0.12.0(typescript@5.9.3)(zod@3.25.76)
+      '@unprice/observability':
+        specifier: workspace:^
+        version: link:../../internal/observability
+      evlog:
+        specifier: 2.4.1
+        version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -163,7 +175,7 @@ importers:
         version: 1.15.5
       nitropack:
         specifier: ^2.10.4
-        version: 2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2)
+        version: 2.13.1(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2)
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
@@ -272,9 +284,15 @@ importers:
       '@unprice/lakehouse':
         specifier: workspace:^
         version: link:../../internal/lakehouse
-      '@unprice/logging':
+      '@unprice/logs':
         specifier: workspace:^
-        version: link:../../internal/logging
+        version: link:../../internal/logs
+      '@unprice/observability':
+        specifier: workspace:^
+        version: link:../../internal/observability
+      '@unprice/react':
+        specifier: workspace:^
+        version: link:../../packages/react
       '@unprice/stripe':
         specifier: workspace:^
         version: link:../../internal/stripe
@@ -326,6 +344,9 @@ importers:
       dinero.js:
         specifier: 2.0.0-alpha.14
         version: 2.0.0-alpha.14
+      evlog:
+        specifier: 2.4.1
+        version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
       flags:
         specifier: ^4.0.2
         version: 4.0.3(@opentelemetry/api@1.9.0)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -465,9 +486,12 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../error
-      '@unprice/logging':
+      '@unprice/logs':
         specifier: workspace:^
-        version: link:../logging
+        version: link:../logs
+      evlog:
+        specifier: 2.4.1
+        version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -511,6 +535,9 @@ importers:
       encoding:
         specifier: ^0.1.13
         version: 0.1.13
+      evlog:
+        specifier: 2.4.1
+        version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
       next:
         specifier: 14.2.32
         version: 14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -720,9 +747,9 @@ importers:
       '@unprice/db':
         specifier: workspace:^
         version: link:../db
-      '@unprice/logging':
+      '@unprice/observability':
         specifier: workspace:^
-        version: link:../logging
+        version: link:../observability
       '@unprice/services':
         specifier: workspace:^
         version: link:../services
@@ -732,6 +759,9 @@ importers:
       date-fns:
         specifier: ^3.3.1
         version: 3.6.0
+      evlog:
+        specifier: 2.4.1
+        version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
       trigger.dev:
         specifier: 3.3.17
         version: 3.3.17(typescript@5.9.3)
@@ -757,31 +787,6 @@ importers:
     devDependencies:
       '@unprice/tsconfig':
         specifier: workspace:^
-        version: link:../../tooling/typescript
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
-
-  internal/logging:
-    dependencies:
-      '@axiomhq/js':
-        specifier: ^1.3.1
-        version: 1.4.0
-      '@axiomhq/logging':
-        specifier: ^0.1.4
-        version: 0.1.7(@axiomhq/js@1.4.0)
-      '@t3-oss/env-core':
-        specifier: ^0.12.0
-        version: 0.12.0(typescript@5.9.3)(zod@3.25.76)
-      '@unprice/logs':
-        specifier: workspace:^
-        version: link:../logs
-      zod:
-        specifier: ^3.24.2
-        version: 3.25.76
-    devDependencies:
-      '@unprice/tsconfig':
-        specifier: workspace:*
         version: link:../../tooling/typescript
       typescript:
         specifier: ^5.3.3
@@ -822,6 +827,34 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  internal/observability:
+    dependencies:
+      '@t3-oss/env-core':
+        specifier: ^0.12.0
+        version: 0.12.0(typescript@5.9.3)(zod@3.25.76)
+      '@unprice/logs':
+        specifier: workspace:^
+        version: link:../logs
+      evlog:
+        specifier: 2.4.1
+        version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@20.11.24)(terser@5.46.0)
+      zod:
+        specifier: ^3.24.2
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: 20.11.24
+        version: 20.11.24
+      '@unprice/tsconfig':
+        specifier: workspace:*
+        version: link:../../tooling/typescript
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
   internal/services:
     dependencies:
       '@t3-oss/env-core':
@@ -845,9 +878,6 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../error
-      '@unprice/logging':
-        specifier: workspace:^
-        version: link:../logging
       '@unprice/logs':
         specifier: workspace:^
         version: link:../logs
@@ -961,15 +991,15 @@ importers:
       '@unprice/lakehouse':
         specifier: workspace:^
         version: link:../lakehouse
-      '@unprice/logging':
-        specifier: workspace:^
-        version: link:../logging
       '@unprice/logs':
         specifier: workspace:^
         version: link:../logs
       '@unprice/metrics':
         specifier: workspace:^
         version: link:../metrics
+      '@unprice/observability':
+        specifier: workspace:^
+        version: link:../observability
       '@unprice/services':
         specifier: workspace:^
         version: link:../services
@@ -1205,17 +1235,17 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
       vitest:
-        specifier: ^2.0.5
+        specifier: ^2.1.9
         version: 2.1.9(@types/node@20.11.24)(terser@5.46.0)
 
   packages/react:
     dependencies:
-      '@tanstack/react-query':
-        specifier: 5.80.3
-        version: 5.80.3(react@18.3.1)
       '@unprice/api':
-        specifier: workspace:^
-        version: link:../api
+        specifier: ^0.1.4
+        version: 0.1.4
+      partysocket:
+        specifier: ^1.1.3
+        version: 1.1.13
     devDependencies:
       '@types/react':
         specifier: ^18.3.1
@@ -1605,19 +1635,6 @@ packages:
   '@aws/lambda-invoke-store@0.2.3':
     resolution: {integrity: sha512-oLvsaPMTBejkkmHhjf09xTgk71mOqyr/409NKhRIL08If7AhVfUsJhVsx386uJaqNd42v9kWamQ9lFbkoC2dYw==}
     engines: {node: '>=18.0.0'}
-
-  '@axiomhq/js@1.4.0':
-    resolution: {integrity: sha512-wC5x1ud/QJMstrjpicATkyY8+ZVWEl4WlXMtA5EZf7hkj0+b191yv4yynLxLEfr/MveXora9m6CWdJq4DsbcAg==}
-    engines: {node: '>=20'}
-
-  '@axiomhq/logging@0.1.7':
-    resolution: {integrity: sha512-CAA7HRcghI2WlqtnTv2iiHwlqBfWLslsLxkFzdZ6i1S1+rJ0HiZPdWGtLBTNU4EmiSRUy9yxwxskJPRyhynXzQ==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      '@axiomhq/js': 1.3.1
-    peerDependenciesMeta:
-      '@axiomhq/js':
-        optional: true
 
   '@babel/code-frame@7.29.0':
     resolution: {integrity: sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw==}
@@ -5888,6 +5905,9 @@ packages:
   '@unkey/error@0.2.0':
     resolution: {integrity: sha512-DFGb4A7SrusZPP0FYuRIF0CO+Gi4etLUAEJ6EKc+TKYmscL0nEJ2Pr38FyX9MvjI4Wx5l35Wc9KsBjMm9Ybh7w==}
 
+  '@unprice/api@0.1.4':
+    resolution: {integrity: sha512-ybfZ3cm+4TpnjlBcJ9MYiFPuh6D+n1THEpcDFCWqHycsAoCctIIFFftHghzrbkwI/qJMFawpeer8TmbYWBvP7g==}
+
   '@upstash/redis@1.36.2':
     resolution: {integrity: sha512-C0Yt8hc12vLaQYRG1fMci8iPrLtnTdbJG0HR5T8vKnvEP/1RdMMblsOJs5/jp0JXZJ1oSzMnQz4J9EVezNpI6A==}
 
@@ -7704,6 +7724,50 @@ packages:
     resolution: {integrity: sha512-CRT1WTyuQoD771GW56XEZFQ/ZoSfWid1alKGDYMmkt2yl8UXrVR4pspqWNEcqKvVIzg6PAltWjxcSSPrboA4iA==}
     engines: {node: '>=18.0.0'}
 
+  evlog@2.4.1:
+    resolution: {integrity: sha512-pz60/pZj/U2IsgiurN0rRGIj4CdNRGCaByLMCslbWWpBbqV5kuE6glD1uCepP+Ld0O2QEK/YmwKvg8z1+1s1BA==}
+    peerDependencies:
+      '@nestjs/common': '>=9.0.0'
+      '@nuxt/kit': ^4.3.1
+      '@sveltejs/kit': '>=2.0.0'
+      elysia: '>=1.0.0'
+      express: '>=4.21.0'
+      fastify: '>=4.0.0'
+      h3: ^1.15.5
+      hono: ''
+      next: '>=16.1.6'
+      nitro: ^3.0.1-alpha.2
+      nitropack: ^2.13.1
+      ofetch: ^1.5.1
+      react: '>=19.2.4'
+    peerDependenciesMeta:
+      '@nestjs/common':
+        optional: true
+      '@nuxt/kit':
+        optional: true
+      '@sveltejs/kit':
+        optional: true
+      elysia:
+        optional: true
+      express:
+        optional: true
+      fastify:
+        optional: true
+      h3:
+        optional: true
+      hono:
+        optional: true
+      next:
+        optional: true
+      nitro:
+        optional: true
+      nitropack:
+        optional: true
+      ofetch:
+        optional: true
+      react:
+        optional: true
+
   evt@2.5.9:
     resolution: {integrity: sha512-GpjX476FSlttEGWHT8BdVMoI8wGXQGbEOtKcP4E+kggg+yJzXBZN2n4x7TS/zPBJ1DZqWI+rguZZApjjzQ0HpA==}
 
@@ -7806,9 +7870,6 @@ packages:
     peerDependenciesMeta:
       picomatch:
         optional: true
-
-  fetch-retry@6.0.0:
-    resolution: {integrity: sha512-BUFj1aMubgib37I3v4q78fYo63Po7t4HUPTpQ6/QE6yK6cIQrP+W43FYToeTEyg5m2Y7eFUtijUuAv/PDlWuag==}
 
   fflate@0.7.4:
     resolution: {integrity: sha512-5u2V/CDW15QM1XbbgS+0DfPxVB+jUKhWEKuuFuHncbk3tEEqzmoXL+2KyOFuKGqOnmdIy0/davWF1CkuwtibCw==}
@@ -9952,8 +10013,8 @@ packages:
     resolution: {integrity: sha512-CiyeOxFT/JZyN5m0z9PfXw4SCBJ6Sygz1Dpl0wqjlhDEGGBP1GnsUVEL0p63hoG1fcj3fHynXi9NYO4nWOL+qQ==}
     engines: {node: '>= 0.8'}
 
-  partyserver@0.0.65:
-    resolution: {integrity: sha512-7Kuwm1vX+p1wSL6gW0/nnehZOXYQWNp7Ywushh6n+90tRjtK303unyonQuWlDvZBM3s9GBaVpQA5x3LZ0CLUHw==}
+  partyserver@0.3.1:
+    resolution: {integrity: sha512-OekxMrGvwjg+DzKqhtBvdnvvR5kBNFCnaR6nInxHQ/Q7Q8wjbmiiCDI8KiLXGTFqIyezbH1W22zMW+GSb6teQA==}
     peerDependencies:
       '@cloudflare/workers-types': ^4.20240729.0
 
@@ -13002,14 +13063,6 @@ snapshots:
       tslib: 2.8.1
 
   '@aws/lambda-invoke-store@0.2.3': {}
-
-  '@axiomhq/js@1.4.0':
-    dependencies:
-      fetch-retry: 6.0.0
-
-  '@axiomhq/logging@0.1.7(@axiomhq/js@1.4.0)':
-    optionalDependencies:
-      '@axiomhq/js': 1.4.0
 
   '@babel/code-frame@7.29.0':
     dependencies:
@@ -17879,6 +17932,8 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
+  '@unprice/api@0.1.4': {}
+
   '@upstash/redis@1.36.2':
     dependencies:
       uncrypto: 0.1.3
@@ -19801,6 +19856,24 @@ snapshots:
     dependencies:
       eventsource-parser: 3.0.6
 
+  evlog@2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1):
+    optionalDependencies:
+      h3: 1.15.5
+      hono: 4.11.9
+      next: 14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      nitropack: 2.13.1(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2)
+      ofetch: 1.5.1
+      react: 18.3.1
+
+  evlog@2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1):
+    optionalDependencies:
+      h3: 1.15.5
+      hono: 4.11.9
+      next: 14.2.32(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      nitropack: 2.13.1(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2)
+      ofetch: 1.5.1
+      react: 18.3.1
+
   evt@2.5.9:
     dependencies:
       minimal-polyfills: 2.2.3
@@ -19952,8 +20025,6 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.3):
     optionalDependencies:
       picomatch: 4.0.3
-
-  fetch-retry@6.0.0: {}
 
   fflate@0.7.4: {}
 
@@ -20610,11 +20681,11 @@ snapshots:
     dependencies:
       parse-passwd: 1.0.0
 
-  hono-party@0.0.6(@cloudflare/workers-types@4.20260217.0)(hono@4.11.9)(partyserver@0.0.65(@cloudflare/workers-types@4.20260217.0)):
+  hono-party@0.0.6(@cloudflare/workers-types@4.20260217.0)(hono@4.11.9)(partyserver@0.3.1(@cloudflare/workers-types@4.20260217.0)):
     dependencies:
       '@cloudflare/workers-types': 4.20260217.0
       hono: 4.11.9
-      partyserver: 0.0.65(@cloudflare/workers-types@4.20260217.0)
+      partyserver: 0.3.1(@cloudflare/workers-types@4.20260217.0)
 
   hono@4.11.9: {}
 
@@ -22214,7 +22285,7 @@ snapshots:
       jsonpath-plus: 10.4.0
       lodash.topath: 4.5.2
 
-  nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2):
+  nitropack@2.13.1(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2):
     dependencies:
       '@cloudflare/kv-asset-handler': 0.4.2
       '@rollup/plugin-alias': 6.0.0(rollup@4.57.1)
@@ -22281,7 +22352,7 @@ snapshots:
       unenv: 2.0.0-rc.24
       unimport: 5.6.0
       unplugin-utils: 0.3.1
-      unstorage: 1.17.4(@upstash/redis@1.36.2)(db0@0.3.4(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0)))(ioredis@5.9.3)
+      unstorage: 1.17.4(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(db0@0.3.4(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0)))(ioredis@5.9.3)
       untyped: 2.0.0
       unwasm: 0.5.3
       youch: 4.1.0-beta.14
@@ -22742,7 +22813,7 @@ snapshots:
 
   parseurl@1.3.3: {}
 
-  partyserver@0.0.65(@cloudflare/workers-types@4.20260217.0):
+  partyserver@0.3.1(@cloudflare/workers-types@4.20260217.0):
     dependencies:
       '@cloudflare/workers-types': 4.20260217.0
       nanoid: 5.1.6
@@ -25151,7 +25222,7 @@ snapshots:
       picomatch: 4.0.3
       webpack-virtual-modules: 0.6.2
 
-  unstorage@1.17.4(@upstash/redis@1.36.2)(db0@0.3.4(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0)))(ioredis@5.9.3):
+  unstorage@1.17.4(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(db0@0.3.4(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0)))(ioredis@5.9.3):
     dependencies:
       anymatch: 3.1.3
       chokidar: 5.0.0
@@ -25163,6 +25234,7 @@ snapshots:
       ufo: 1.6.3
     optionalDependencies:
       '@upstash/redis': 1.36.2
+      '@vercel/functions': 1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8)
       db0: 0.3.4(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))
       ioredis: 5.9.3
 

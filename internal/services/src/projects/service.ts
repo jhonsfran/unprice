@@ -1,10 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import type { Logger, WideEventHelpers } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import type { ProjectFeatureCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { toErrorContext } from "../utils/log-context"
 import { retry } from "../utils/retry"
 import { UnPriceProjectError } from "./errors"
 
@@ -16,7 +17,6 @@ export class ProjectService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
-  private wideEventHelpers?: WideEventHelpers
   constructor({
     db,
     logger,
@@ -24,7 +24,6 @@ export class ProjectService {
     waitUntil,
     cache,
     metrics,
-    wideEventHelpers,
   }: {
     db: Database
     logger: Logger
@@ -33,7 +32,6 @@ export class ProjectService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
-    wideEventHelpers?: WideEventHelpers
   }) {
     this.db = db
     this.logger = logger
@@ -41,15 +39,6 @@ export class ProjectService {
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics
-    this.wideEventHelpers = wideEventHelpers
-  }
-
-  /**
-   * Sets the wide event helpers for request-scoped logging context.
-   * This should be called inside the wideEventLogger.runAsync() context.
-   */
-  public setWideEventHelpers(wideEventHelpers: WideEventHelpers) {
-    this.wideEventHelpers = wideEventHelpers
   }
 
   private async getFeaturesDataProject({
@@ -72,7 +61,7 @@ export class ProjectService {
         where: (feature, { eq }) => eq(feature.projectId, projectId),
       })
       .catch((err) => {
-        this.wideEventHelpers?.addError(err)
+        this.logger.set({ error: toErrorContext(err) })
         throw err
       })
 

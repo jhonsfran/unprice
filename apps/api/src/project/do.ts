@@ -1,4 +1,5 @@
 import type { DenyReason } from "@unprice/services/customers"
+import { log } from "evlog"
 import { Server } from "partyserver"
 
 // for now this is used to broadcast events in realtime but could be used to send alerts or
@@ -34,10 +35,10 @@ export class DurableObjectProject extends Server {
   }
 
   async onConnect() {
-    console.info("connected to project do")
+    log.info({ message: "Connected to project durable object" })
   }
 
   async onClose() {
-    console.info("closed project do")
+    log.info({ message: "Closed project durable object" })
   }
 }

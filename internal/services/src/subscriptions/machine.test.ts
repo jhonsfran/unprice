@@ -8,7 +8,7 @@ import type {
   SubscriptionStatus,
 } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
-import type { ConsoleLogger } from "@unprice/logging"
+import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { CustomerService } from "../customers/service"
@@ -160,7 +160,7 @@ function buildMockSubscription({
 describe("SubscriptionMachine - comprehensive", () => {
   let mockAnalytics: Analytics
   let mockCustomerService: CustomerService
-  let mockLogger: ConsoleLogger
+  let mockLogger: Logger
   let mockDb: Database
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   let dbMockData: Record<string, any>[] = []
@@ -176,13 +176,14 @@ describe("SubscriptionMachine - comprehensive", () => {
     } as unknown as Analytics
 
     mockLogger = {
+      set: vi.fn(),
       debug: vi.fn(),
       emit: vi.fn(),
       info: vi.fn(),
       warn: vi.fn?.() ?? vi.fn(),
       error: vi.fn(),
       flush: vi.fn().mockResolvedValue(undefined),
-    } as unknown as ConsoleLogger
+    } as unknown as Logger
 
     mockCustomerService = {
       syncActiveEntitlementsLastUsage: vi.fn().mockResolvedValue(Ok({})),
