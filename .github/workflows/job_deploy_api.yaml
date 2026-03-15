@@ -55,7 +55,7 @@ jobs:
           op: decode
           in: ${{ secrets.DATABASE_URL_ENCRYPTED }}
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@v1.0.15
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
