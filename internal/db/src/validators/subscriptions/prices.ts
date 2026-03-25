@@ -1,4 +1,4 @@
-import * as currencies from "@dinero.js/currencies"
+import * as currencies from "dinero.js/currencies"
 import type { Dinero } from "dinero.js"
 import { add, dinero, isZero, multiply, toDecimal, trimScale } from "dinero.js"
 import { z } from "zod"

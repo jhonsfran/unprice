@@ -1,4 +1,4 @@
-import * as currencies from "@dinero.js/currencies"
+import * as currencies from "dinero.js/currencies"
 import { type StepComponentProps, useOnboarding } from "@onboardjs/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { Currency, PaymentProvider } from "@unprice/db/validators"

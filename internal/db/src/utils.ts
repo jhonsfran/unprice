@@ -1,4 +1,4 @@
-import * as currencies from "@dinero.js/currencies"
+import * as currencies from "dinero.js/currencies"
 import {
   type Dinero,
   add,
