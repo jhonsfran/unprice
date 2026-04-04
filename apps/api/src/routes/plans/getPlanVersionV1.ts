@@ -1,6 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
 import { getPlanVersionApiResponseSchema } from "@unprice/db/validators"
-import { PlanService } from "@unprice/services/plans"
 import { jsonContent } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
@@ -44,26 +43,17 @@ export type GetPlanVersionResponse = z.infer<
 
 export const registerGetPlanVersionV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { db, cache, analytics, logger, metrics } = c.get("services")
+    const { plans } = c.get("services")
     const { planVersionId } = c.req.valid("param")
 
     // validate the request
     const key = await keyAuth(c)
 
-    const planService = new PlanService({
-      cache,
-      analytics,
-      logger,
-      metrics,
-      waitUntil: c.executionCtx.waitUntil.bind(c.executionCtx),
-      db,
-    })
-
     // main workspace can see all plans
     // TODO: improve this
     const isMain = key.project.workspace.isMain
 
-    const { err, val: planVersionData } = await planService.getPlanVersion({
+    const { err, val: planVersionData } = await plans.getPlanVersion({
       projectId: isMain ? undefined : key.projectId,
       planVersionId,
     })

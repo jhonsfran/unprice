@@ -7,6 +7,7 @@ import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { EntitlementService } from "@unprice/services/entitlements"
 import type { Metrics } from "@unprice/services/metrics"
+import type { PlanService } from "@unprice/services/plans"
 import type { SubscriptionService } from "@unprice/services/subscriptions"
 import type { EvlogVariables } from "evlog/hono"
 import type { Env } from "~/env"
@@ -25,6 +26,7 @@ export type ServiceContext = {
   project: ApiProjectService
   customer: CustomerService
   subscription: SubscriptionService
+  plans: PlanService
   db: Database
 }
 

@@ -5,6 +5,7 @@ import { newId } from "@unprice/db/utils"
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
+import { createServiceContext } from "@unprice/services/context"
 import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
@@ -163,11 +164,25 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
     })
 
+    // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    const waitUntil = (promise: Promise<any>) => c.executionCtx.waitUntil(promise)
+
+    // Build the shared service graph from infrastructure deps.
+    // Phase 1: plans + customers are built via the factory.
+    // Phase 2: subscription, billing, entitlement will follow.
+    const svcCtx = createServiceContext({
+      db,
+      logger,
+      analytics,
+      waitUntil,
+      cache,
+      metrics,
+    })
+
     const customer = new CustomerService({
       logger,
       analytics,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil,
       cache,
       metrics,
       db,
@@ -178,8 +193,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       analytics,
       cache,
       db,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil,
       metrics,
     })
 
@@ -188,8 +202,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       analytics,
       logger,
       metrics,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil,
       db,
       requestId,
     })
@@ -200,8 +213,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       logger,
       metrics,
       db,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil,
       hashCache,
     })
 
@@ -209,8 +221,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       db,
       logger: logger,
       analytics,
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      waitUntil: (promise: Promise<any>) => c.executionCtx.waitUntil(promise),
+      waitUntil,
       cache,
       metrics,
     })
@@ -240,6 +251,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       apikey,
       db,
       customer,
+      plans: svcCtx.plans,
     })
 
     metrics.emit({

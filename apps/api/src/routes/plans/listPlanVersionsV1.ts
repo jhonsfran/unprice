@@ -3,7 +3,6 @@ import { getPlanVersionApiResponseSchema, getPlanVersionListSchema } from "@unpr
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-import { PlanService } from "@unprice/services/plans"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors/http"
@@ -43,7 +42,7 @@ export type GetPlanVersionsRequest = z.infer<
 
 export const registerListPlanVersionsV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { db, cache, analytics, logger, metrics } = c.get("services")
+    const { plans } = c.get("services")
     const {
       onlyPublished,
       onlyEnterprisePlan,
@@ -56,16 +55,7 @@ export const registerListPlanVersionsV1 = (app: App) =>
     // validate the request
     const key = await keyAuth(c)
 
-    const planService = new PlanService({
-      cache,
-      analytics,
-      logger,
-      metrics,
-      waitUntil: c.executionCtx.waitUntil.bind(c.executionCtx),
-      db,
-    })
-
-    const { err, val: planVersionsData } = await planService.listPlanVersions({
+    const { err, val: planVersionsData } = await plans.listPlanVersions({
       projectId: key.projectId,
       query: {
         published: onlyPublished,
