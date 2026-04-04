@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { createTRPCServices } from "../../../utils/services"
+
 
 export const machine = protectedProjectProcedure
   .input(
@@ -14,7 +14,7 @@ export const machine = protectedProjectProcedure
   .output(z.object({ status: z.string() }))
   .mutation(async ({ input, ctx }) => {
     const projectId = ctx.project.id
-    const { billing, subscriptions } = createTRPCServices(ctx)
+    const { billing, subscriptions } = ctx.services
 
     switch (input.event) {
       case "collect_payment": {

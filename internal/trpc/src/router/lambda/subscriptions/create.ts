@@ -3,7 +3,7 @@ import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
 import { protectedProjectProcedure } from "#trpc"
-import { createTRPCServices } from "../../../utils/services"
+
 
 export const create = protectedProjectProcedure
   .input(subscriptionInsertSchema)
@@ -17,7 +17,7 @@ export const create = protectedProjectProcedure
     // only owner and admin can create a subscription
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const { subscriptions } = createTRPCServices(opts.ctx)
+    const { subscriptions } = opts.ctx.services
 
     // create the subscription
     const { err, val } = await subscriptions.createSubscription({

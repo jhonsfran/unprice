@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server"
 import { getPlanVersionApiResponseSchema, getPlanVersionListSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { createTRPCServices } from "../../../utils/services"
+
 
 export const listByActiveProject = protectedProjectProcedure
   .input(getPlanVersionListSchema)
@@ -12,7 +12,7 @@ export const listByActiveProject = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const { plans } = createTRPCServices(opts.ctx)
+    const { plans } = opts.ctx.services
 
     const { err, val: planVersionData } = await plans.listPlanVersions({
       projectId: opts.ctx.project.id,

@@ -4,7 +4,7 @@ import { members, workspaces } from "@unprice/db/schema"
 import { createSlug, newId } from "@unprice/db/utils"
 import type { WorkspaceInsert } from "@unprice/db/validators"
 import type { Context } from "#trpc"
-import { createTRPCServices } from "./services"
+
 import { unprice } from "./unprice"
 
 export const createWorkspace = async ({
@@ -148,7 +148,7 @@ export const signOutCustomer = async ({
 }) => {
   const { customerId, projectId } = input
 
-  const { customers } = createTRPCServices(ctx)
+  const { customers } = ctx.services
 
   const { err, val } = await customers.signOut({
     customerId: customerId,

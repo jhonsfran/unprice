@@ -5,14 +5,14 @@ import {
 } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { createTRPCServices } from "../../../utils/services"
+
 
 export const createPhase = protectedProjectProcedure
   .input(subscriptionPhaseInsertSchema)
   .output(z.object({ phase: subscriptionPhaseSelectSchema }))
   .mutation(async ({ input, ctx }) => {
     const projectId = ctx.project.id
-    const { subscriptions } = createTRPCServices(ctx)
+    const { subscriptions } = ctx.services
 
     const { err, val } = await subscriptions.createPhase({
       input,

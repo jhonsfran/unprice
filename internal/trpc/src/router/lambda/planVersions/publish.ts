@@ -6,7 +6,7 @@ import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
 import { protectedProjectProcedure } from "#trpc"
-import { createTRPCServices } from "../../../utils/services"
+
 
 export const publish = protectedProjectProcedure
   .input(planVersionSelectBaseSchema.partial().required({ id: true }))
@@ -73,7 +73,7 @@ export const publish = protectedProjectProcedure
     const paymentMethodRequired = !isZero(totalPricePlan.dinero)
 
     if (paymentMethodRequired) {
-      const { customers } = createTRPCServices(opts.ctx)
+      const { customers } = opts.ctx.services
 
       const { err: validatePaymentMethodErr } = await customers.getPaymentProvider({
         customerId: workspace.unPriceCustomerId,

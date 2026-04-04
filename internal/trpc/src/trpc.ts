@@ -20,6 +20,7 @@ import {
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import type { CacheNamespaces } from "@unprice/services/cache"
 import { CacheService, createRedis } from "@unprice/services/cache"
+import { type ServiceContext, createServiceContext } from "@unprice/services/context"
 import { LogdrainMetrics, type Metrics, NoopMetrics } from "@unprice/services/metrics"
 import { waitUntil } from "@vercel/functions"
 import { ZodError } from "zod"
@@ -80,18 +81,29 @@ export const createInnerTRPCContext = (
 ): CreateContextOptions & {
   db: Database
   analytics: Analytics
+  services: ServiceContext
 } => {
+  const analytics = new Analytics({
+    tinybirdToken: env.TINYBIRD_TOKEN,
+    tinybirdUrl: env.TINYBIRD_URL,
+    emit: true,
+    logger: opts.logger,
+  })
+
+  const services = createServiceContext({
+    db,
+    logger: opts.logger,
+    analytics,
+    waitUntil: opts.waitUntil,
+    cache: opts.cache,
+    metrics: opts.metrics,
+  })
+
   return {
     ...opts,
     db: db,
-    analytics: new Analytics({
-      tinybirdToken: env.TINYBIRD_TOKEN,
-      tinybirdUrl: env.TINYBIRD_URL,
-      emit: true,
-      logger: opts.logger,
-    }),
-    // INFO: better wait for native support for RLS in Drizzle
-    // txRLS: rls.authTxn(db, opts.session?.user.id),
+    analytics,
+    services,
   }
 }
 

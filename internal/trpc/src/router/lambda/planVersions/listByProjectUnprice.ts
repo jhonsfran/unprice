@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server"
 import { getPlanVersionApiResponseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProcedure } from "#trpc"
-import { createTRPCServices } from "../../../utils/services"
+
 
 // global endpoint, no need to check for feature access
 export const listByProjectUnprice = protectedProcedure
@@ -31,7 +31,7 @@ export const listByProjectUnprice = protectedProcedure
       throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" })
     }
 
-    const { plans } = createTRPCServices(opts.ctx)
+    const { plans } = opts.ctx.services
 
     const { err, val: planVersionData } = await plans.listPlanVersions({
       projectId: mainProject.id,

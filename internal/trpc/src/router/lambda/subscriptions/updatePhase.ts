@@ -2,14 +2,14 @@ import { TRPCError } from "@trpc/server"
 import { subscriptionPhaseSelectSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { createTRPCServices } from "../../../utils/services"
+
 
 export const updatePhase = protectedProjectProcedure
   .input(subscriptionPhaseSelectSchema)
   .output(z.object({ phase: subscriptionPhaseSelectSchema }))
   .mutation(async (opts) => {
     const projectId = opts.ctx.project.id
-    const { subscriptions } = createTRPCServices(opts.ctx)
+    const { subscriptions } = opts.ctx.services
 
     const { err, val } = await subscriptions.updatePhase({
       input: opts.input,
