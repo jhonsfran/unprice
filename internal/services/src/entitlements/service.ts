@@ -606,6 +606,8 @@ export class EntitlementService {
       waitUntil: this.waitUntil,
       cache: this.cache,
       metrics: this.metrics,
+      customerService: this.customerService,
+      grantsManager: this.grantsManager,
     })
 
     const result = await billingService.estimatePriceCurrentUsage({

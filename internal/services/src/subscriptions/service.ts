@@ -102,6 +102,8 @@ export class SubscriptionService {
       waitUntil,
       cache,
       metrics,
+      customerService: this.customerService,
+      grantsManager: new GrantsManager({ db, logger }),
     })
   }
 

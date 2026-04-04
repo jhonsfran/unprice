@@ -64,8 +64,6 @@ async function generateData(customerId: string, useAsyncIngestion = false) {
 
   const { result: entitlements, error } = await unprice.customers.getEntitlements({ customerId })
 
-  console.log(entitlements)
-
   if (error) {
     console.error("Error getting entitlements", error)
     return
@@ -98,10 +96,7 @@ async function generateData(customerId: string, useAsyncIngestion = false) {
       }
 
       const eventSlug = verification.result?.meterConfig?.eventSlug
-      const ingestionProperties = buildIngestionProperties(
-        usage,
-        verification.result?.meterConfig
-      )
+      const ingestionProperties = buildIngestionProperties(usage, verification.result?.meterConfig)
 
       console.info(
         `Verification ${featureSlug}, status: ${verification.result?.status}, allowed: ${verification.result?.allowed} for ${customerId} in ${latency}ms`

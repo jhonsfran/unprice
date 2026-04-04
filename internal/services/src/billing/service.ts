@@ -35,8 +35,8 @@ import type { Logger } from "@unprice/logs"
 import { addDays } from "date-fns"
 import type { z } from "zod"
 import type { Cache } from "../cache"
-import { CustomerService } from "../customers/service"
-import { GrantsManager } from "../entitlements"
+import type { CustomerService } from "../customers/service"
+import type { GrantsManager } from "../entitlements"
 import type { Metrics } from "../metrics"
 import { SubscriptionMachine } from "../subscriptions/machine"
 import { SubscriptionLock } from "../subscriptions/subscriptionLock"
@@ -74,8 +74,8 @@ export class BillingService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
-  private customerService: CustomerService
-  private grantsManager: GrantsManager
+  private readonly customerService: CustomerService
+  private readonly grantsManager: GrantsManager
 
   constructor({
     db,
@@ -84,6 +84,8 @@ export class BillingService {
     waitUntil,
     cache,
     metrics,
+    customerService,
+    grantsManager,
   }: {
     db: Database
     logger: Logger
@@ -92,6 +94,8 @@ export class BillingService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    customerService: CustomerService
+    grantsManager: GrantsManager
   }) {
     this.db = db
     this.logger = logger
@@ -99,18 +103,8 @@ export class BillingService {
     this.cache = cache
     this.metrics = metrics
     this.waitUntil = waitUntil
-    this.customerService = new CustomerService({
-      db,
-      logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-    })
-    this.grantsManager = new GrantsManager({
-      db,
-      logger,
-    })
+    this.customerService = customerService
+    this.grantsManager = grantsManager
   }
 
   private setLockContext(context: {

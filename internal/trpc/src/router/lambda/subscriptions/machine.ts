@@ -1,5 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { BillingService } from "@unprice/services/billing"
+import { CustomerService } from "@unprice/services/customers"
+import { GrantsManager } from "@unprice/services/entitlements"
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -16,8 +18,10 @@ export const machine = protectedProjectProcedure
   .mutation(async ({ input, ctx }) => {
     const projectId = ctx.project.id
 
+    const customerService = new CustomerService(ctx)
+    const grantsManager = new GrantsManager(ctx)
     const subscriptionService = new SubscriptionService(ctx)
-    const billingService = new BillingService(ctx)
+    const billingService = new BillingService({ ...ctx, customerService, grantsManager })
 
     switch (input.event) {
       case "collect_payment": {

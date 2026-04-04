@@ -1,32 +1,28 @@
+import { BillingService } from "./billing/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
+import { GrantsManager } from "./entitlements/grants"
 import { PlanService } from "./plans/service"
 
 /**
  * The fully-wired service graph returned by `createServiceContext`.
  *
- * Services that already exist in the old ServiceContext keep the same
- * property names so migration is incremental. New services (like `plans`)
- * are added here first and then gradually adopted by routes.
- *
- * Phase 2 will add: subscriptions, billing, entitlements — once those
- * services accept injected collaborators instead of creating their own.
+ * Every service here is constructed once and collaborators are injected —
+ * no service creates its own child services.
  */
 export interface ServiceContext {
   customers: CustomerService
+  grantsManager: GrantsManager
+  billing: BillingService
   plans: PlanService
 }
 
 /**
  * Build the domain service graph from infrastructure deps.
  *
- * Every service gets the same shared deps — no service creates its own
- * child services. This is the single composition root for all domain
- * services. Both Hono and tRPC entrypoints should call this.
- *
- * The graph is intentionally flat today. As Phase 2 progresses,
- * services like SubscriptionService will receive `customers` and
- * `billing` as constructor params instead of creating them internally.
+ * This is the single composition root for all domain services.
+ * Construction order matters: leaf services first, then services
+ * that depend on them.
  */
 export function createServiceContext(deps: ServiceDeps): ServiceContext {
   const customers = new CustomerService({
@@ -36,6 +32,22 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
+  })
+
+  const grantsManager = new GrantsManager({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
+  const billing = new BillingService({
+    db: deps.db,
+    logger: deps.logger,
+    analytics: deps.analytics,
+    waitUntil: deps.waitUntil,
+    cache: deps.cache,
+    metrics: deps.metrics,
+    customerService: customers,
+    grantsManager,
   })
 
   const plans = new PlanService({
@@ -49,6 +61,8 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
 
   return {
     customers,
+    grantsManager,
+    billing,
     plans,
   }
 }
