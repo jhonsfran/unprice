@@ -34,10 +34,37 @@ const unprice = new Unprice({
   baseUrl: process.env.UNPRICE_API_URL || "http://localhost:8787",
 })
 
-async function generateData(customerId: string, async?: boolean) {
+function buildIngestionProperties(
+  usage: number,
+  meterConfig:
+    | {
+        aggregationMethod: "sum" | "count" | "max" | "latest"
+        aggregationField?: string
+      }
+    | undefined
+): Record<string, unknown> | null {
+  if (!meterConfig) {
+    return null
+  }
+
+  if (meterConfig.aggregationMethod === "count") {
+    return {}
+  }
+
+  const aggregationField = meterConfig.aggregationField?.trim()
+  if (!aggregationField) {
+    return null
+  }
+
+  return { [aggregationField]: usage }
+}
+
+async function generateData(customerId: string, useAsyncIngestion = false) {
   const now = performance.now()
 
-  const { result: entitlements, error } = await unprice.customers.getEntitlements(customerId)
+  const { result: entitlements, error } = await unprice.customers.getEntitlements({ customerId })
+
+  console.log(entitlements)
 
   if (error) {
     console.error("Error getting entitlements", error)
@@ -53,53 +80,100 @@ async function generateData(customerId: string, async?: boolean) {
     // ramdom usage between -10 and 100 (negative usage is allowed)
     const usage = Math.floor(Math.random() * 200) - 10
     // pick a random feature slug
-    const featureSlug = entitlements[Math.floor(Math.random() * entitlements.length)]?.featureSlug!
+    const featureSlug = entitlements[Math.floor(Math.random() * entitlements.length)]?.featureSlug
 
-    // pick a random feature slug
-    const randomFeatureSlug =
-      entitlements[Math.floor(Math.random() * entitlements.length)]?.featureSlug!
-
-    if (randomFeatureSlug) {
+    if (featureSlug) {
       // verify the usage
-      const nowDate = Date.now()
-      const result = await unprice.customers.verify({
+      const verificationAt = Date.now()
+      const verification = await unprice.customers.verify({
         customerId,
-        featureSlug: randomFeatureSlug,
+        featureSlug,
       })
 
-      const latency = Date.now() - nowDate
-      console.info(`Latency: ${latency}ms`)
+      const latency = Date.now() - verificationAt
 
-      console.info(
-        `Verification ${randomFeatureSlug}, cache hit: ${result.result?.cacheHit} verified for ${customerId} in ${result.result?.latency}ms`
+      if (verification.error) {
+        console.error(`Error verifying ${featureSlug}`, verification.error)
+        continue
+      }
+
+      const eventSlug = verification.result?.meterConfig?.eventSlug
+      const ingestionProperties = buildIngestionProperties(
+        usage,
+        verification.result?.meterConfig
       )
 
-      if (result.result?.allowed) {
-        console.info(`Verification ${randomFeatureSlug} verified for ${customerId}`)
+      console.info(
+        `Verification ${featureSlug}, status: ${verification.result?.status}, allowed: ${verification.result?.allowed} for ${customerId} in ${latency}ms`
+      )
 
-        // report usage
+      if (!eventSlug) {
+        console.error(`No eventSlug found for ${featureSlug}, skipping ingestion`)
+        continue
+      }
+
+      if (!ingestionProperties) {
+        console.error(
+          `Invalid meter config for ${featureSlug}, cannot build ingestion properties`,
+          verification.result?.meterConfig
+        )
+        continue
+      }
+
+      if (verification.result?.allowed) {
+        console.info(`Verification ${featureSlug} verified for ${customerId}`)
+
+        // ingest usage
         // wait 200ms
         await new Promise((resolve) => setTimeout(resolve, 10))
 
-        const result = await unprice.customers.reportUsage({
+        if (useAsyncIngestion) {
+          const result = await unprice.events.ingest({
+            customerId,
+            eventSlug,
+            properties: ingestionProperties,
+            idempotencyKey: randomUUID(),
+          })
+
+          if (result.error) {
+            console.error(`Async ingestion failed for ${eventSlug}`, result.error)
+            continue
+          }
+
+          if (result.result?.accepted) {
+            console.info(`Usage ${usage} async ingested for ${eventSlug}`)
+          } else {
+            console.error(`Usage ${usage} async ingestion was not accepted for ${eventSlug}`)
+          }
+          continue
+        }
+
+        const result = await unprice.events.ingestSync({
           customerId,
+          eventSlug,
           featureSlug,
-          usage,
-          idempotenceKey: randomUUID(),
+          properties: ingestionProperties,
+          idempotencyKey: randomUUID(),
         })
 
+        if (result.error) {
+          console.error(`Sync ingestion failed for ${featureSlug}`, result.error)
+          continue
+        }
+
         if (result.result?.allowed) {
-          console.info(`Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug}`)
+          console.info(`Usage ${usage} sync ingested for ${featureSlug}`)
         } else {
           console.error(
-            `Usage ${usage} ${async ? "async" : "sync"} reported for ${featureSlug} failed`,
+            `Usage ${usage} sync ingestion rejected for ${featureSlug}`,
+            result.result?.rejectionReason,
             result.result?.message
           )
         }
       } else {
         console.error(
-          `Verification for ${randomFeatureSlug} and ${customerId} cannot be used`,
-          result.result?.message
+          `Verification for ${featureSlug} and ${customerId} cannot be used`,
+          verification.result?.message
         )
       }
     }
@@ -111,7 +185,7 @@ async function generateData(customerId: string, async?: boolean) {
 async function main() {
   // const customerFree = "cus_1MeUjVxFbv8DP9X7f1UW9"
   // const customerPro = "cus_11Sb5A8HkjB6AeG4QS9WM4"
-  const customerFree = "cus_11Sb5A8HkjB6AeG4QS9WM4"
+  const customerFree = "cus_11Uy2rEe341EKVni7HyuEx"
   // const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
 
   // PRO plan

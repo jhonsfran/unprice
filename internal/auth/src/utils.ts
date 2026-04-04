@@ -3,8 +3,8 @@ import * as schema from "@unprice/db/schema"
 import * as utils from "@unprice/db/utils"
 import type { User } from "@unprice/db/validators"
 import { BaseError, Err, Ok, type Result, SchemaError } from "@unprice/error"
-import bcrypt from "bcryptjs"
 import { db } from "./db"
+import { hashPassword } from "./password"
 
 export class UnPriceAuthError extends BaseError {
   public readonly retry = false
@@ -36,7 +36,7 @@ export async function createUser({
     return Err(new SchemaError({ message: "Passwords do not match" }))
   }
 
-  const hashedPassword = password ? await bcrypt.hash(password, 10) : null
+  const hashedPassword = password ? await hashPassword(password) : null
 
   try {
     const user = await db

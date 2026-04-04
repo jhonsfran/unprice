@@ -1,14 +1,12 @@
+import path from "node:path"
 import { fileURLToPath } from "node:url"
 import withVercelToolbar from "@vercel/toolbar/plugins/next"
 import { createJiti } from "jiti"
 
 const jiti = createJiti(fileURLToPath(import.meta.url))
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 jiti.import("./src/env")
-
-// import path from "node:path"
-
-// const __dirname = path.resolve()
 
 // import MillionLint from "@million/lint"
 import createMDX from "@next/mdx"
@@ -28,7 +26,7 @@ const nextConfig = {
     "@unprice/config",
     "@unprice/tailwind-config",
   ],
-  // output: "standalone", // use when deploying with docker
+  output: process.env.NEXT_OUTPUT_STANDALONE === "1" ? "standalone" : undefined,
   pageExtensions: ["ts", "tsx", "mdx"],
   images: {
     domains: ["images.unsplash.com"],
@@ -41,6 +39,7 @@ const nextConfig = {
   },
   experimental: {
     turbo: {},
+    outputFileTracingRoot: path.join(__dirname, "../../"),
     // ppr: true, // TODO: activate later
     mdxRs: true,
     optimizePackageImports: [

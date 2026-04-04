@@ -4,12 +4,12 @@ import Google from "@auth/core/providers/google"
 import { DrizzleAdapter } from "@auth/drizzle-adapter"
 import { createWorkspacesByUserQuery } from "@unprice/db/queries"
 import * as schema from "@unprice/db/schema"
-import bcrypt from "bcryptjs"
 import type { NextAuthConfig } from "next-auth"
 import { cookies } from "next/headers"
 import { db } from "./db"
 import { env } from "./env"
 import { authLogger } from "./logger"
+import { verifyPassword } from "./password"
 import { createUser } from "./utils"
 
 const useSecureCookies = env.APP_ENV === "production"
@@ -108,7 +108,7 @@ export const authConfig: NextAuthConfig = {
           throw new Error("Invalid credentials")
         }
 
-        const validPassword = await bcrypt.compare(credentials.password as string, user.password)
+        const validPassword = await verifyPassword(credentials.password as string, user.password)
 
         if (!validPassword) {
           throw new Error("Invalid credentials")

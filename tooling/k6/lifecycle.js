@@ -28,6 +28,7 @@ const SIGNUP_RETRY_BACKOFF_MS = Number(__ENV.SIGNUP_RETRY_BACKOFF_MS || 500)
 
 let vuCustomerId = ""
 let vuEntitlementFeatureSlugs = []
+let vuUsageTargets = []
 
 export const options = {
   stages: [{ duration: "5s", target: 1 }],
@@ -114,12 +115,18 @@ function createSdkClient() {
         })
         return unwrapResponse(response)
       },
-      reportUsage(req) {
-        const response = post("/v1/customer/reportUsage", req, { name: "customer-report-usage" })
-        return unwrapResponse(response)
-      },
       verify(req) {
         const response = post("/v1/customer/verify", req, { name: "customer-verify" })
+        return unwrapResponse(response)
+      },
+    },
+    events: {
+      ingest(req) {
+        const response = post("/v1/events/ingest", req, { name: "events-ingest" })
+        return unwrapResponse(response)
+      },
+      ingestSync(req) {
+        const response = post("/v1/events/ingest/sync", req, { name: "events-ingest-sync" })
         return unwrapResponse(response)
       },
     },
@@ -142,18 +149,43 @@ function uuidV4() {
   })
 }
 
-function classifyReportUsage429(response) {
+function classifyIngestion429(response) {
   const body = parseJson(response)
 
-  if (body?.error?.code === "RATE_LIMITED") {
+  if (body?.error?.code === "RATE_LIMITED" || body?.code === "RATE_LIMITED") {
     return "rate_limited"
   }
 
-  if (body?.deniedReason === "LIMIT_EXCEEDED") {
+  if (body?.deniedReason === "LIMIT_EXCEEDED" || body?.rejectionReason === "LIMIT_EXCEEDED") {
     return "usage_limited"
   }
 
   return "unknown"
+}
+
+function classifySyncIngestionRejection(result) {
+  if (result?.result?.rejectionReason === "LIMIT_EXCEEDED") {
+    return "usage_limited"
+  }
+
+  return "unknown"
+}
+
+function buildIngestionProperties(usageTarget, usageAmount) {
+  if (usageTarget.aggregationMethod === "count") {
+    return {}
+  }
+
+  if (
+    typeof usageTarget.aggregationField === "string" &&
+    usageTarget.aggregationField.trim().length > 0
+  ) {
+    return {
+      [usageTarget.aggregationField]: usageAmount,
+    }
+  }
+
+  return null
 }
 
 function rotateFeatureSlugs(featureSlugs) {
@@ -278,6 +310,56 @@ function resolveEntitlementFeatureSlugs(sdk, customerId) {
   )
 }
 
+function resolveUsageTargets(sdk, customerId, featureSlugs) {
+  const targets = []
+
+  for (const featureSlug of featureSlugs) {
+    let verifyResult = null
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = sdk.customers.verify({ customerId, featureSlug })
+
+      if (result.__response.status === 429) {
+        sleep(PROVISIONING_POLL_MS / 1000)
+        continue
+      }
+
+      const verifyOk = check(result.__response, {
+        "verify status is 200 during usage target resolution": (r) => r.status === 200,
+      })
+
+      if (!verifyOk || result.error) {
+        hardFail(
+          `verify failed while resolving usage targets: status=${result.__response.status} body=${result.__response.body}`
+        )
+      }
+
+      verifyResult = result
+      break
+    }
+
+    const meterConfig = verifyResult?.result?.meterConfig
+    const eventSlug = meterConfig?.eventSlug
+
+    if (typeof eventSlug === "string" && eventSlug.length > 0) {
+      targets.push({
+        featureSlug,
+        eventSlug,
+        aggregationMethod: meterConfig?.aggregationMethod,
+        aggregationField: meterConfig?.aggregationField,
+      })
+    }
+  }
+
+  if (targets.length === 0) {
+    hardFail(
+      "No usage-capable entitlement features found (missing meterConfig.eventSlug). Ensure the selected plan includes usage-metered features."
+    )
+  }
+
+  return targets
+}
+
 function provisionCustomerForVu(sdk) {
   // const resolvedPlanSlug = resolvePlanSlug(sdk)
 
@@ -333,12 +415,14 @@ function provisionCustomerForVu(sdk) {
     }
 
     const entitlementFeatureSlugs = resolveEntitlementFeatureSlugs(sdk, customerId)
+    const usageTargets = resolveUsageTargets(sdk, customerId, entitlementFeatureSlugs)
 
     customersCreated.add(1)
 
     return {
       customerId,
       entitlementFeatureSlugs,
+      usageTargets,
     }
   }
 
@@ -351,60 +435,78 @@ export default function () {
   }
 
   const sdk = createSdkClient()
-  if (!vuCustomerId || vuEntitlementFeatureSlugs.length === 0) {
+  if (!vuCustomerId || vuEntitlementFeatureSlugs.length === 0 || vuUsageTargets.length === 0) {
     const provisioned = provisionCustomerForVu(sdk)
     vuCustomerId = provisioned.customerId
     vuEntitlementFeatureSlugs = provisioned.entitlementFeatureSlugs
+    vuUsageTargets = provisioned.usageTargets
   }
 
   const customerId = vuCustomerId
-  const usageFeatureSlugs = vuEntitlementFeatureSlugs
+  const usageTargets = vuUsageTargets
   const verifyFeatureSlugs = vuEntitlementFeatureSlugs
 
   for (let i = 0; i < USAGE_EVENTS_PER_CUSTOMER; i += 1) {
     const usageAmount = randomUsage(1, 25)
-    const featureCandidates = rotateFeatureSlugs(usageFeatureSlugs)
+    const featureCandidates = rotateFeatureSlugs(usageTargets)
     let eventHandled = false
 
     for (let candidateIndex = 0; candidateIndex < featureCandidates.length; candidateIndex += 1) {
-      const featureSlug = featureCandidates[candidateIndex]
-      const usageResult = sdk.customers.reportUsage({
+      const usageTarget = featureCandidates[candidateIndex]
+      const ingestionProperties = buildIngestionProperties(usageTarget, usageAmount)
+
+      if (!ingestionProperties) {
+        hardFail(
+          `Invalid meter configuration for sync ingestion: featureSlug=${usageTarget.featureSlug} eventSlug=${usageTarget.eventSlug}`
+        )
+      }
+
+      const usageResult = sdk.events.ingestSync({
         customerId,
-        featureSlug,
-        usage: usageAmount,
-        idempotenceKey: uuidV4(),
+        featureSlug: usageTarget.featureSlug,
+        eventSlug: usageTarget.eventSlug,
+        properties: ingestionProperties,
+        idempotencyKey: uuidV4(),
       })
 
       const usageOk = check(usageResult.__response, {
-        "reportUsage status is 200 or 429": (r) => r.status === 200 || r.status === 429,
+        "ingestSync status is 200 or 429": (r) => r.status === 200 || r.status === 429,
       })
 
       if (!usageOk) {
         hardFail(
-          `reportUsage failed: status=${usageResult.__response.status} body=${usageResult.__response.body}`
+          `ingestSync failed: status=${usageResult.__response.status} body=${usageResult.__response.body}`
         )
       }
 
       if (usageResult.__response.status === 200) {
-        if (candidateIndex > 0) {
-          usageEventsRerouted.add(1)
-        }
-        eventHandled = true
-        break
-      }
-
-      const status429Type = classifyReportUsage429(usageResult.__response)
-
-      if (status429Type === "usage_limited") {
-        usageEventsLimitExceeded.add(1)
-
-        if (candidateIndex < featureCandidates.length - 1) {
-          continue
+        if (usageResult.result?.allowed) {
+          if (candidateIndex > 0) {
+            usageEventsRerouted.add(1)
+          }
+          eventHandled = true
+          break
         }
 
-        eventHandled = true
-        break
+        const rejectedType = classifySyncIngestionRejection(usageResult)
+
+        if (rejectedType === "usage_limited") {
+          usageEventsLimitExceeded.add(1)
+
+          if (candidateIndex < featureCandidates.length - 1) {
+            continue
+          }
+
+          eventHandled = true
+          break
+        }
+
+        hardFail(
+          `ingestSync rejected unexpectedly: status=${usageResult.__response.status} body=${usageResult.__response.body}`
+        )
       }
+
+      const status429Type = classifyIngestion429(usageResult.__response)
 
       if (status429Type === "rate_limited") {
         usageEventsRateLimited.add(1)
@@ -414,12 +516,12 @@ export default function () {
       }
 
       hardFail(
-        `reportUsage returned unknown 429 shape: status=${usageResult.__response.status} body=${usageResult.__response.body}`
+        `ingestSync returned unknown 429 shape: status=${usageResult.__response.status} body=${usageResult.__response.body}`
       )
     }
 
     if (!eventHandled) {
-      hardFail("reportUsage event could not be handled by any feature candidate")
+      hardFail("ingestSync usage event could not be handled by any usage target")
     }
 
     usageEventsSent.add(1)
