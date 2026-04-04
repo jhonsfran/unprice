@@ -20,8 +20,8 @@ export const machine = protectedProjectProcedure
 
     const customerService = new CustomerService(ctx)
     const grantsManager = new GrantsManager(ctx)
-    const subscriptionService = new SubscriptionService(ctx)
     const billingService = new BillingService({ ...ctx, customerService, grantsManager })
+    const subscriptionService = new SubscriptionService({ ...ctx, customerService, billingService })
 
     switch (input.event) {
       case "collect_payment": {

@@ -19,7 +19,7 @@ import type { CacheNamespaces, CustomerCache, CustomersProjectCache } from "../c
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderService } from "../payment-provider/service"
-import { SubscriptionService } from "../subscriptions/service"
+import type { SubscriptionService } from "../subscriptions/service"
 import { toErrorContext } from "../utils/log-context"
 import { retry } from "../utils/retry"
 import { UnPriceCustomerError } from "./errors"
@@ -62,6 +62,7 @@ export class CustomerService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
+  private _subscriptionService: SubscriptionService | null
 
   constructor({
     db,
@@ -70,6 +71,7 @@ export class CustomerService {
     waitUntil,
     cache,
     metrics,
+    subscriptionService,
   }: {
     db: Database
     logger: Logger
@@ -78,6 +80,7 @@ export class CustomerService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    subscriptionService?: SubscriptionService
   }) {
     this.db = db
     this.logger = logger
@@ -85,6 +88,27 @@ export class CustomerService {
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics
+    this._subscriptionService = subscriptionService ?? null
+  }
+
+  /**
+   * Set the subscription service after construction.
+   * Used to break the circular dep: Customer ↔ Subscription.
+   * The factory in context.ts creates Customer first, then Subscription
+   * (which receives Customer), then wires Subscription back into Customer.
+   */
+  setSubscriptionService(service: SubscriptionService) {
+    this._subscriptionService = service
+  }
+
+  private getSubscriptionService(): SubscriptionService {
+    if (!this._subscriptionService) {
+      throw new Error(
+        "SubscriptionService not set on CustomerService. " +
+          "Call setSubscriptionService() or pass it in the constructor."
+      )
+    }
+    return this._subscriptionService
   }
 
   /**
@@ -1527,14 +1551,7 @@ export class CustomerService {
           )
         }
 
-        const subscriptionService = new SubscriptionService({
-          logger: this.logger,
-          analytics: this.analytics,
-          waitUntil: this.waitUntil,
-          cache: this.cache,
-          metrics: this.metrics,
-          db: this.db,
-        })
+        const subscriptionService = this.getSubscriptionService()
 
         const { err, val: newSubscription } = await subscriptionService.createSubscription({
           input: {

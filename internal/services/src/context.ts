@@ -2,7 +2,9 @@ import { BillingService } from "./billing/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
 import { GrantsManager } from "./entitlements/grants"
+import { EntitlementService } from "./entitlements/service"
 import { PlanService } from "./plans/service"
+import { SubscriptionService } from "./subscriptions/service"
 
 /**
  * The fully-wired service graph returned by `createServiceContext`.
@@ -14,6 +16,8 @@ export interface ServiceContext {
   customers: CustomerService
   grantsManager: GrantsManager
   billing: BillingService
+  subscriptions: SubscriptionService
+  entitlements: EntitlementService
   plans: PlanService
 }
 
@@ -22,9 +26,11 @@ export interface ServiceContext {
  *
  * This is the single composition root for all domain services.
  * Construction order matters: leaf services first, then services
- * that depend on them.
+ * that depend on them. The Customer ↔ Subscription cycle is resolved
+ * via a post-construction setter.
  */
 export function createServiceContext(deps: ServiceDeps): ServiceContext {
+  // 1. Leaf services (no service deps)
   const customers = new CustomerService({
     db: deps.db,
     logger: deps.logger,
@@ -39,6 +45,16 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     logger: deps.logger,
   })
 
+  const plans = new PlanService({
+    db: deps.db,
+    logger: deps.logger,
+    analytics: deps.analytics,
+    waitUntil: deps.waitUntil,
+    cache: deps.cache,
+    metrics: deps.metrics,
+  })
+
+  // 2. Services with deps on leaves
   const billing = new BillingService({
     db: deps.db,
     logger: deps.logger,
@@ -50,19 +66,38 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     grantsManager,
   })
 
-  const plans = new PlanService({
+  const subscriptions = new SubscriptionService({
     db: deps.db,
     logger: deps.logger,
     analytics: deps.analytics,
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
+    customerService: customers,
+    billingService: billing,
   })
+
+  const entitlements = new EntitlementService({
+    db: deps.db,
+    logger: deps.logger,
+    analytics: deps.analytics,
+    waitUntil: deps.waitUntil,
+    cache: deps.cache,
+    metrics: deps.metrics,
+    customerService: customers,
+    grantsManager,
+    billingService: billing,
+  })
+
+  // 3. Resolve the Customer ↔ Subscription cycle
+  customers.setSubscriptionService(subscriptions)
 
   return {
     customers,
     grantsManager,
     billing,
+    subscriptions,
+    entitlements,
     plans,
   }
 }

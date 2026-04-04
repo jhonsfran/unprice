@@ -284,7 +284,11 @@ describe("Workflow - Billing and Subscriptions", () => {
     const customerService = new CustomerService(serviceDeps)
     const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
     _billingService = new BillingService({ ...serviceDeps, customerService, grantsManager })
-    subscriptionService = new SubscriptionService(serviceDeps)
+    subscriptionService = new SubscriptionService({
+      ...serviceDeps,
+      customerService,
+      billingService: _billingService,
+    })
   })
 
   const captureInsertValues = () => {

@@ -18,9 +18,9 @@ import {
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
-import { BillingService } from "../billing/service"
+import type { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
-import { CustomerService } from "../customers/service"
+import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
 import { toErrorContext } from "../utils/log-context"
@@ -62,8 +62,8 @@ export class SubscriptionService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
-  private customerService: CustomerService
-  private billingService: BillingService
+  private readonly customerService: CustomerService
+  private readonly billingService: BillingService
 
   constructor({
     db,
@@ -72,6 +72,8 @@ export class SubscriptionService {
     waitUntil,
     cache,
     metrics,
+    customerService,
+    billingService,
   }: {
     db: Database
     logger: Logger
@@ -80,6 +82,8 @@ export class SubscriptionService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    customerService: CustomerService
+    billingService: BillingService
   }) {
     this.db = db
     this.logger = logger
@@ -87,24 +91,8 @@ export class SubscriptionService {
     this.cache = cache
     this.metrics = metrics
     this.waitUntil = waitUntil
-    this.customerService = new CustomerService({
-      db,
-      logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-    })
-    this.billingService = new BillingService({
-      db,
-      logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-      customerService: this.customerService,
-      grantsManager: new GrantsManager({ db, logger }),
-    })
+    this.customerService = customerService
+    this.billingService = billingService
   }
 
   private setLockContext(context: {

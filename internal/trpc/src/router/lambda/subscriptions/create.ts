@@ -1,4 +1,7 @@
 import { subscriptionInsertSchema, subscriptionSelectSchema } from "@unprice/db/validators"
+import { BillingService } from "@unprice/services/billing"
+import { CustomerService } from "@unprice/services/customers"
+import { GrantsManager } from "@unprice/services/entitlements"
 import { SubscriptionService } from "@unprice/services/subscriptions"
 import { z } from "zod"
 
@@ -17,7 +20,10 @@ export const create = protectedProjectProcedure
     // only owner and admin can create a subscription
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const subscriptionService = new SubscriptionService(opts.ctx)
+    const customerService = new CustomerService(opts.ctx)
+    const grantsManager = new GrantsManager(opts.ctx)
+    const billingService = new BillingService({ ...opts.ctx, customerService, grantsManager })
+    const subscriptionService = new SubscriptionService({ ...opts.ctx, customerService, billingService })
 
     // create the subscription
     const { err, val } = await subscriptionService.createSubscription({

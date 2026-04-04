@@ -6,15 +6,12 @@ import { shouldEmitMetrics } from "@unprice/observability/env"
 import { ApiKeysService } from "@unprice/services/apikey"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
-import { CustomerService } from "@unprice/services/customers"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { createApiLogger } from "~/observability"
 import { ApiProjectService } from "~/project"
 
-import { EntitlementService, GrantsManager } from "@unprice/services/entitlements"
-import { SubscriptionService } from "@unprice/services/subscriptions"
 import { CloudflareEntitlementWindowClient, CloudflareIdempotencyClient } from "~/ingestion/clients"
 import { IngestionService } from "~/ingestion/service"
 
@@ -168,32 +165,12 @@ export function init(): MiddlewareHandler<HonoEnv> {
     const waitUntil = (promise: Promise<any>) => c.executionCtx.waitUntil(promise)
 
     // Build the shared service graph from infrastructure deps.
-    // Phase 1: plans + customers are built via the factory.
-    // Phase 2: subscription, billing, entitlement will follow.
     const svcCtx = createServiceContext({
       db,
       logger,
       analytics,
       waitUntil,
       cache,
-      metrics,
-    })
-
-    const customer = new CustomerService({
-      logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-      db,
-    })
-
-    const subscription = new SubscriptionService({
-      logger,
-      analytics,
-      cache,
-      db,
-      waitUntil,
       metrics,
     })
 
@@ -217,22 +194,10 @@ export function init(): MiddlewareHandler<HonoEnv> {
       hashCache,
     })
 
-    const entitlement = new EntitlementService({
-      db,
-      logger: logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-    })
-
     const ingestion = new IngestionService({
-      customerService: customer,
+      customerService: svcCtx.customers,
       entitlementWindowClient: new CloudflareEntitlementWindowClient(c.env),
-      grantsManager: new GrantsManager({
-        db,
-        logger,
-      }),
+      grantsManager: svcCtx.grantsManager,
       idempotencyClient: new CloudflareIdempotencyClient(c.env),
       logger,
       pipelineEvents: c.env.PIPELINE_EVENTS,
@@ -240,8 +205,8 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     c.set("services", {
       version: "1.0.0",
-      subscription,
-      entitlement,
+      subscription: svcCtx.subscriptions,
+      entitlement: svcCtx.entitlements,
       analytics,
       ingestion,
       project,
@@ -250,7 +215,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       metrics,
       apikey,
       db,
-      customer,
+      customer: svcCtx.customers,
       plans: svcCtx.plans,
     })
 
