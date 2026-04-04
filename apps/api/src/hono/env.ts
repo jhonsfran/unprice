@@ -14,21 +14,39 @@ import type { Env } from "~/env"
 import type { IngestionService } from "~/ingestion/service"
 import type { ApiProjectService } from "~/project"
 
-export type ServiceContext = {
-  version: string
-  analytics: Analytics
+/**
+ * Infrastructure dependencies — shared runtime primitives.
+ * Routes should prefer domain services over these when possible.
+ */
+export type InfraContext = {
+  db: Database
   cache: Cache
   logger: AppLogger
   metrics: Metrics
-  entitlement: EntitlementService
-  ingestion: IngestionService
-  apikey: ApiKeysService
-  project: ApiProjectService
+  analytics: Analytics
+}
+
+/**
+ * Domain services — business logic, properly wired via createServiceContext.
+ */
+export type DomainServiceContext = {
   customer: CustomerService
   subscription: SubscriptionService
+  entitlement: EntitlementService
   plans: PlanService
-  db: Database
+  ingestion: IngestionService
+  project: ApiProjectService
+  apikey: ApiKeysService
 }
+
+/**
+ * The full service bag set on `c.get("services")`.
+ * Combines infra + domain + metadata.
+ */
+export type ServiceContext = InfraContext &
+  DomainServiceContext & {
+    version: string
+  }
 
 export type HonoEnv = EvlogVariables & {
   Bindings: Env

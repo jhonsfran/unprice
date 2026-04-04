@@ -23,28 +23,32 @@ Incremental migration from nested service construction to flat, injected service
 - [x] Jobs `context.ts` calls `createServiceContext()` — exposes `context.services.*`
 - [x] All 5 job task files (`billing`, `finilize`, `period`, `invoice`, `renew`) use `context.services`
 - [x] `internal/trpc/src/utils/services.ts` — `createTRPCServices(ctx)` helper wrapping factory
-- [x] 6 tRPC subscription procedures use `createTRPCServices` instead of inline wiring
-- [x] 2 tRPC planVersion procedures use `createTRPCServices` instead of `new PlanService`
+- [x] All tRPC subscription procedures (6) use `createTRPCServices`
+- [x] All tRPC planVersion procedures (2) use `createTRPCServices`
 - [x] `init.ts` uses factory for customers, plans, billing, subscriptions, entitlements, grantsManager
+
+### Phase 4 — Remaining tRPC Procedures
+- [x] `trpc/utils/shared.ts` — `signOutCustomer` uses `createTRPCServices`
+- [x] `trpc/router/lambda/planVersions/publish.ts` — uses `createTRPCServices` for CustomerService
+- [x] `trpc/router/lambda/planVersions/listByProjectUnprice.ts` — uses `createTRPCServices`
+
+### Phase 5 — Queue Consumer
+- [x] `apps/api/src/ingestion/queue.ts` — `createQueueServices` now uses `createServiceContext` internally
+- [x] Return type changed from `{ customerService, grantsManager }` to `{ customers, grantsManager }`
+
+### Phase 6 — Context Type Cleanup
+- [x] `HonoEnv` `ServiceContext` split into `InfraContext` + `DomainServiceContext`
+- [x] Clear documentation of which layer each type represents
 
 ## Pending
 
-### Phase 4 — Remaining tRPC Procedures
-- [ ] `trpc/utils/shared.ts:151` — `new CustomerService(ctx)` -> use `createTRPCServices`
-- [ ] `trpc/router/lambda/planVersions/publish.ts:76` — `new CustomerService(...)` -> use factory
-- [ ] `trpc/router/lambda/apikeys/roll.ts:22` — `new ApiKeysService(...)` -> use factory (needs ApiKeysService in context)
-
-### Phase 5 — Context Shape Cleanup
-- [ ] Split `HonoEnv.ServiceContext` into infra (db/cache/logger/metrics) and domain services
-- [ ] Routes should only destructure domain services, not raw infra deps
-- [ ] Remove `db` from route-visible context (routes use services, not raw DB)
+### Remaining Items
+- [ ] `trpc/router/lambda/apikeys/roll.ts` — `new ApiKeysService(...)` needs `hashCache` (cross-request Map), doesn't fit generic factory
 - [ ] Move `plans/create.ts` tRPC raw DB logic into `PlanService.createPlan()` method
-
-### Phase 6 — Queue Consumer
-- [ ] `apps/api/src/ingestion/queue.ts` — replace `createQueueServices` with `createServiceContext`
+- [ ] Consider adding `services` to tRPC context type at `createTRPCContext` level (currently each procedure calls `createTRPCServices`)
 
 ### Not Migrating (Platform-Specific)
-These services depend on Cloudflare-specific bindings and correctly live outside the factory:
+These services depend on platform-specific bindings and correctly live outside the factory:
 - `ApiProjectService` — requires `requestId` (per-request Hono context)
 - `ApiKeysService` — requires `hashCache` (cross-request persistent Map)
 - `IngestionService` — requires Cloudflare DurableObject stubs + Pipeline bindings
@@ -55,10 +59,11 @@ These services depend on Cloudflare-specific bindings and correctly live outside
 - **No base class** — services share `ServiceDeps` type, not inheritance
 - **Circular dep resolution** — `Customer.setSubscriptionService()` setter pattern
 - **`GrantsManager` transaction scoping** — `SubscriptionService.createGrantManager(trx)` stays for tx-bound usage
-- **IngestionService is the gold standard** — it was already correctly injection-based
+- **IngestionService was the gold standard** — it was already correctly injection-based
 - **Platform-specific services stay outside factory** — only pure domain services go in `createServiceContext`
+- **`InfraContext` vs `DomainServiceContext`** — type-level separation in HonoEnv makes the layering explicit
 
-## Files
+## Key Files
 
 | File | Role |
 |---|---|
@@ -67,3 +72,5 @@ These services depend on Cloudflare-specific bindings and correctly live outside
 | `internal/trpc/src/utils/services.ts` | `createTRPCServices` — thin wrapper for tRPC procedures |
 | `internal/jobs/src/trigger/tasks/context.ts` | Jobs composition root, calls `createServiceContext` |
 | `apps/api/src/middleware/init.ts` | Hono composition root, calls factory + adds platform services |
+| `apps/api/src/hono/env.ts` | `InfraContext`, `DomainServiceContext`, `ServiceContext` types |
+| `apps/api/src/ingestion/queue.ts` | Queue consumer composition root, calls `createServiceContext` |

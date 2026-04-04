@@ -3,8 +3,8 @@ import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import type { AppLogger } from "@unprice/observability"
 import { CacheService } from "@unprice/services/cache"
-import { CustomerService } from "@unprice/services/customers"
-import { GrantsManager } from "@unprice/services/entitlements"
+import { createServiceContext } from "@unprice/services/context"
+import type { ServiceContext } from "@unprice/services/context"
 import { NoopMetrics } from "@unprice/services/metrics"
 import type { Env } from "~/env"
 
@@ -12,10 +12,7 @@ export function createQueueServices(params: {
   env: Env
   executionCtx: ExecutionContext
   logger: AppLogger
-}): {
-  customerService: CustomerService
-  grantsManager: GrantsManager
-} {
+}): Pick<ServiceContext, "customers" | "grantsManager"> {
   const db = createConnection({
     env: params.env.APP_ENV,
     primaryDatabaseUrl: params.env.DATABASE_URL,
@@ -57,18 +54,17 @@ export function createQueueServices(params: {
     logger: params.logger,
   })
 
+  const svcCtx = createServiceContext({
+    db,
+    logger: params.logger,
+    analytics,
+    waitUntil,
+    cache,
+    metrics,
+  })
+
   return {
-    customerService: new CustomerService({
-      db,
-      logger: params.logger,
-      analytics,
-      waitUntil,
-      cache,
-      metrics,
-    }),
-    grantsManager: new GrantsManager({
-      db,
-      logger: params.logger,
-    }),
+    customers: svcCtx.customers,
+    grantsManager: svcCtx.grantsManager,
   }
 }

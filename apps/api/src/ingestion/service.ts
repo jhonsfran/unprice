@@ -1090,7 +1090,7 @@ export async function consumeIngestionBatch(
   })
 
   const service = new IngestionService({
-    customerService: services.customerService,
+    customerService: services.customers,
     entitlementWindowClient: new CloudflareEntitlementWindowClient(env),
     grantsManager: services.grantsManager,
     idempotencyClient: new CloudflareIdempotencyClient(env),

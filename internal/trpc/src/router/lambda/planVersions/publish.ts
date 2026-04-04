@@ -5,8 +5,8 @@ import { isZero } from "dinero.js"
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
-import { CustomerService } from "@unprice/services/customers"
 import { protectedProjectProcedure } from "#trpc"
+import { createTRPCServices } from "../../../utils/services"
 
 export const publish = protectedProjectProcedure
   .input(planVersionSelectBaseSchema.partial().required({ id: true }))
@@ -73,16 +73,9 @@ export const publish = protectedProjectProcedure
     const paymentMethodRequired = !isZero(totalPricePlan.dinero)
 
     if (paymentMethodRequired) {
-      const customerService = new CustomerService({
-        db: opts.ctx.db,
-        logger: opts.ctx.logger,
-        analytics: opts.ctx.analytics,
-        waitUntil: opts.ctx.waitUntil,
-        cache: opts.ctx.cache,
-        metrics: opts.ctx.metrics,
-      })
+      const { customers } = createTRPCServices(opts.ctx)
 
-      const { err: validatePaymentMethodErr } = await customerService.getPaymentProvider({
+      const { err: validatePaymentMethodErr } = await customers.getPaymentProvider({
         customerId: workspace.unPriceCustomerId,
         projectId: project.id,
         provider: planVersionData.paymentProvider,
