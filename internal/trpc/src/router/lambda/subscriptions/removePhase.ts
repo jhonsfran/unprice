@@ -1,23 +1,16 @@
 import { TRPCError } from "@trpc/server"
-import { BillingService } from "@unprice/services/billing"
-import { CustomerService } from "@unprice/services/customers"
-import { GrantsManager } from "@unprice/services/entitlements"
-import { SubscriptionService } from "@unprice/services/subscriptions"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { createTRPCServices } from "../../../utils/services"
 
 export const removePhase = protectedProjectProcedure
   .input(z.object({ id: z.string() }))
   .output(z.object({ result: z.boolean() }))
   .mutation(async (opts) => {
     const projectId = opts.ctx.project.id
+    const { subscriptions } = createTRPCServices(opts.ctx)
 
-    const customerService = new CustomerService(opts.ctx)
-    const grantsManager = new GrantsManager(opts.ctx)
-    const billingService = new BillingService({ ...opts.ctx, customerService, grantsManager })
-    const subscriptionService = new SubscriptionService({ ...opts.ctx, customerService, billingService })
-
-    const { err, val } = await subscriptionService.removePhase({
+    const { err, val } = await subscriptions.removePhase({
       phaseId: opts.input.id,
       projectId,
       now: Date.now(),

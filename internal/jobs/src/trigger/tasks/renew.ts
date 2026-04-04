@@ -1,8 +1,4 @@
 import { task } from "@trigger.dev/sdk/v3"
-import { BillingService } from "@unprice/services/billing"
-import { CustomerService } from "@unprice/services/customers"
-import { GrantsManager } from "@unprice/services/entitlements"
-import { SubscriptionService } from "@unprice/services/subscriptions"
 import { createContext } from "./context"
 
 export const renewTask = task({
@@ -40,12 +36,7 @@ export const renewTask = task({
     let status = 200
 
     try {
-      const customerService = new CustomerService(context)
-      const grantsManager = new GrantsManager(context)
-      const billingService = new BillingService({ ...context, customerService, grantsManager })
-      const subscriptionService = new SubscriptionService({ ...context, customerService, billingService })
-
-      const renewResult = await subscriptionService.renewSubscription({
+      const renewResult = await context.services.subscriptions.renewSubscription({
         subscriptionId,
         projectId,
         now,

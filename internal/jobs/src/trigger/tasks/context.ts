@@ -6,6 +6,7 @@ import {
   initObservability,
 } from "@unprice/observability"
 import { CacheService } from "@unprice/services/cache"
+import { createServiceContext } from "@unprice/services/context"
 import { NoopMetrics } from "@unprice/services/metrics"
 import { env } from "../../env"
 import { db } from "../db"
@@ -102,20 +103,28 @@ export const createContext = async ({
     logger: logger,
   })
 
-  return {
+  const metrics = new NoopMetrics()
+  const deps = {
+    db,
+    logger,
+    analytics,
     waitUntil: () => {},
+    cache: cache.getCache(),
+    metrics,
+  }
+
+  const services = createServiceContext(deps)
+
+  return {
+    ...deps,
+    services,
     headers: new Headers(),
     session: null,
     activeWorkspaceSlug: "",
     activeProjectSlug: "",
     ip: "background-jobs",
     requestId: taskId,
-    logger,
     requestLogger,
-    metrics: new NoopMetrics(),
-    cache: cache.getCache(),
-    db: db,
-    analytics,
     flushLogs: async (status = 200) => {
       const duration = Math.max(0, Date.now() - startedAt)
       requestLogger.set({

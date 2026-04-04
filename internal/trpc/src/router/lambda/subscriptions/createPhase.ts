@@ -3,25 +3,18 @@ import {
   subscriptionPhaseInsertSchema,
   subscriptionPhaseSelectSchema,
 } from "@unprice/db/validators"
-import { BillingService } from "@unprice/services/billing"
-import { CustomerService } from "@unprice/services/customers"
-import { GrantsManager } from "@unprice/services/entitlements"
-import { SubscriptionService } from "@unprice/services/subscriptions"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { createTRPCServices } from "../../../utils/services"
 
 export const createPhase = protectedProjectProcedure
   .input(subscriptionPhaseInsertSchema)
   .output(z.object({ phase: subscriptionPhaseSelectSchema }))
   .mutation(async ({ input, ctx }) => {
     const projectId = ctx.project.id
+    const { subscriptions } = createTRPCServices(ctx)
 
-    const customerService = new CustomerService(ctx)
-    const grantsManager = new GrantsManager(ctx)
-    const billingService = new BillingService({ ...ctx, customerService, grantsManager })
-    const subscriptionService = new SubscriptionService({ ...ctx, customerService, billingService })
-
-    const { err, val } = await subscriptionService.createPhase({
+    const { err, val } = await subscriptions.createPhase({
       input,
       projectId,
       now: Date.now(),
