@@ -9,6 +9,7 @@ import { EntitlementService } from "./entitlements/service"
 import { EventService } from "./events/service"
 import { FeatureService } from "./features/service"
 import { PageService } from "./pages/service"
+import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
 import { ProjectService } from "./projects/service"
 import { SubscriptionService } from "./subscriptions/service"
@@ -31,6 +32,7 @@ export interface ServiceContext {
   projects: ProjectService
   workspaces: WorkspaceService
   grantsManager: GrantsManager
+  paymentProviderResolver: PaymentProviderResolver
   billing: BillingService
   subscriptions: SubscriptionService
   entitlements: EntitlementService
@@ -52,6 +54,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     analytics: deps.analytics,
   })
 
+  const paymentProviderResolver = new PaymentProviderResolver({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
   const customers = new CustomerService({
     db: deps.db,
     logger: deps.logger,
@@ -59,6 +66,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
+    paymentProviderResolver,
   })
 
   const grantsManager = new GrantsManager({
@@ -165,6 +173,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     projects,
     workspaces,
     grantsManager,
+    paymentProviderResolver,
     billing,
     subscriptions,
     entitlements,

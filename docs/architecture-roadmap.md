@@ -937,10 +937,13 @@ Apply these rules to every file you touch during P0. Don't do a separate sweep.
     `pnpm --filter @unprice/services test`,
     `pnpm --filter @unprice/trpc typecheck`.
 
-- [ ] **Create PaymentProviderResolver service**
-  - File: `internal/services/src/payment-provider/resolver.ts`
-  - Extract from `CustomerService.getPaymentProviderService()` (lines ~760-785):
-    DB lookup for provider config, token decryption, provider instantiation.
-  - Add to `createServiceContext` factory, inject into `CustomerService`.
-  - Delete `CustomerService.getPaymentProviderService()`.
-  - Verify: `pnpm --filter @unprice/services test` passes.
+- [x] **Create PaymentProviderResolver service**
+  - Added `internal/services/src/payment-provider/resolver.ts`.
+  - Extracted from `CustomerService.getPaymentProvider(...)`:
+    customer lookup, provider config lookup, token decryption, provider instantiation.
+  - Added resolver to `createServiceContext` and injected into `CustomerService`.
+  - `CustomerService.getPaymentProvider(...)` now delegates to resolver.
+  - Validation passed:
+    `pnpm --filter @unprice/services typecheck`,
+    `pnpm --filter @unprice/services test`,
+    `pnpm --filter @unprice/trpc typecheck`.

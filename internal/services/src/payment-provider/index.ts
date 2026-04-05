@@ -1,4 +1,5 @@
 export * from "./errors"
 export * from "./service"
+export * from "./resolver"
 export * from "./stripe"
 export * from "./sandbox"

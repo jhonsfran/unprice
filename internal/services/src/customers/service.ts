@@ -1,7 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, and, count, eq, getTableColumns, ilike, or } from "@unprice/db"
 import { customers, subscriptions } from "@unprice/db/schema"
-import { AesGCM, withDateFilters, withPagination } from "@unprice/db/utils"
+import { withDateFilters, withPagination } from "@unprice/db/utils"
 import type {
   Customer,
   CustomerPaymentMethod,
@@ -10,11 +10,11 @@ import type {
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { env } from "../../env"
 import type { CacheNamespaces, CustomerCache, CustomersProjectCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
-import { PaymentProviderService } from "../payment-provider/service"
+import type { PaymentProviderResolver } from "../payment-provider/resolver"
+import type { PaymentProviderService } from "../payment-provider/service"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceCustomerError } from "./errors"
@@ -25,6 +25,7 @@ export class CustomerService {
   private readonly analytics: Analytics
   private readonly cache: Cache
   private readonly metrics: Metrics
+  private readonly paymentProviderResolver: PaymentProviderResolver
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
 
@@ -35,6 +36,7 @@ export class CustomerService {
     waitUntil,
     cache,
     metrics,
+    paymentProviderResolver,
   }: {
     db: Database
     logger: Logger
@@ -43,6 +45,7 @@ export class CustomerService {
     waitUntil: (promise: Promise<any>) => void
     cache: Cache
     metrics: Metrics
+    paymentProviderResolver: PaymentProviderResolver
   }) {
     this.db = db
     this.logger = logger
@@ -50,6 +53,7 @@ export class CustomerService {
     this.waitUntil = waitUntil
     this.cache = cache
     this.metrics = metrics
+    this.paymentProviderResolver = paymentProviderResolver
   }
 
   /**
@@ -1019,91 +1023,11 @@ export class CustomerService {
     projectId: string
     provider: PaymentProvider
   }): Promise<Result<PaymentProviderService, FetchError | UnPriceCustomerError>> {
-    let customerData: Customer | undefined
-
-    // validate customer if provided
-    if (customerId) {
-      customerData = await this.db.query.customers.findFirst({
-        where: (customer, { and, eq }) => and(eq(customer.id, customerId)),
-      })
-
-      if (!customerData) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_NOT_FOUND",
-            message: "Customer not found",
-          })
-        )
-      }
-    }
-
-    const { err: configErr, val: config } = await wrapResult(
-      this.db.query.paymentProviderConfig.findFirst({
-        where: (config, { and, eq }) =>
-          and(
-            eq(config.projectId, projectId),
-            eq(config.paymentProvider, provider),
-            eq(config.active, true)
-          ),
-      }),
-      (err) =>
-        new FetchError({
-          message: `error getting payment provider config: ${err.message}`,
-          retry: false,
-        })
-    )
-
-    if (configErr) {
-      this.logger.error("error getting payment provider config", {
-        error: toErrorContext(configErr),
-        customerId,
-        projectId,
-        provider,
-      })
-      return Err(configErr)
-    }
-
-    if (!config) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
-          message: "Payment provider config not found or not active",
-        })
-      )
-    }
-
-    const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
-
-    const decryptedKey = await aesGCM.decrypt({
-      iv: config.keyIv,
-      ciphertext: config.key,
+    return this.paymentProviderResolver.resolve({
+      customerId,
+      projectId,
+      provider,
     })
-
-    const providerCustomerId = this.getProviderCustomerId(customerData, provider)
-
-    const paymentProviderService = new PaymentProviderService({
-      providerCustomerId: providerCustomerId,
-      logger: this.logger,
-      paymentProvider: provider,
-      token: decryptedKey,
-    })
-
-    return Ok(paymentProviderService)
-  }
-
-  private getProviderCustomerId(
-    customerData: Customer | undefined,
-    provider: PaymentProvider
-  ): string | undefined {
-    if (provider === "stripe") {
-      return customerData?.stripeCustomerId ?? undefined
-    }
-
-    if (provider === "sandbox") {
-      return customerData?.id ?? undefined
-    }
-
-    return customerData?.stripeCustomerId ?? undefined
   }
 
   /**
