@@ -1,7 +1,6 @@
 import { TRPCError } from "@trpc/server"
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { projectSelectBaseSchema, transferToWorkspaceSchema } from "@unprice/db/validators"
+import { transferToWorkspace as transferToWorkspaceUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
 import { projectWorkspaceGuard } from "#utils"
@@ -26,51 +25,58 @@ export const transferToWorkspace = protectedWorkspaceProcedure
       ctx: opts.ctx,
     })
 
-    if (projectData.isMain) {
+    const { err, val } = await transferToWorkspaceUseCase(
+      {
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+      },
+      {
+        project: {
+          id: projectData.id,
+          isMain: projectData.isMain,
+          workspaceId: projectData.workspaceId,
+        },
+        targetWorkspaceId,
+      }
+    )
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "main_project_conflict") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Cannot transfer main project",
       })
     }
 
-    if (projectData.workspaceId === targetWorkspaceId) {
+    if (val.state === "already_in_target") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Project is already in the target workspace",
       })
     }
 
-    const targetWorkspace = await opts.ctx.db.query.workspaces.findFirst({
-      columns: {
-        id: true,
-        slug: true,
-        unPriceCustomerId: true,
-        isMain: true,
-      },
-      with: {
-        projects: true,
-      },
-      where: (workspace, { eq }) => eq(workspace.id, targetWorkspaceId),
-    })
-
-    if (!targetWorkspace?.id) {
+    if (val.state === "target_workspace_not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "target workspace not found",
       })
     }
 
-    const updatedProject = await opts.ctx.db
-      .update(schema.projects)
-      .set({
-        workspaceId: targetWorkspace.id,
+    if (val.state !== "ok") {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Error transferring project to workspace",
       })
-      .where(eq(schema.projects.id, projectData.id))
-      .returning()
-      .then((res) => res[0] ?? undefined)
+    }
 
     return {
-      project: updatedProject,
-      workspaceSlug: targetWorkspace.slug,
+      project: val.project,
+      workspaceSlug: val.workspaceSlug,
     }
   })

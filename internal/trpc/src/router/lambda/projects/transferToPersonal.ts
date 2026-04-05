@@ -1,7 +1,6 @@
 import { TRPCError } from "@trpc/server"
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { projectSelectBaseSchema, transferToPersonalProjectSchema } from "@unprice/db/validators"
+import { transferToPersonal as transferToPersonalUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
 import { projectWorkspaceGuard } from "#utils"
@@ -28,48 +27,60 @@ export const transferToPersonal = protectedWorkspaceProcedure
       ctx: opts.ctx,
     })
 
-    if (projectData.workspace.isPersonal) {
+    const { err, val } = await transferToPersonalUseCase(
+      {
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+      },
+      {
+        userId,
+        project: {
+          id: projectData.id,
+          isMain: projectData.isMain,
+          workspace: {
+            isPersonal: projectData.workspace.isPersonal,
+          },
+        },
+      }
+    )
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "already_in_personal_workspace") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Project is already in the personal workspace",
       })
     }
 
-    if (projectData.isMain) {
+    if (val.state === "main_project_conflict") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Cannot transfer main project",
       })
     }
 
-    const personalTargetWorkspace = await opts.ctx.db.query.workspaces.findFirst({
-      columns: {
-        id: true,
-        slug: true,
-      },
-      where: (workspace, { eq, and }) =>
-        and(eq(workspace.createdBy, userId), eq(workspace.isPersonal, true)),
-    })
-
-    if (!personalTargetWorkspace?.id) {
+    if (val.state === "personal_workspace_not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "There is no personal workspace for the user",
       })
     }
 
-    // change the workspace for the project to personalTargetWorkspace
-    const updatedProject = await opts.ctx.db
-      .update(schema.projects)
-      .set({
-        workspaceId: personalTargetWorkspace.id,
+    if (val.state !== "ok") {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Error transferring project to personal workspace",
       })
-      .where(eq(schema.projects.id, projectData.id))
-      .returning()
-      .then((res) => res[0] ?? undefined)
+    }
 
     return {
-      project: updatedProject,
-      workspaceSlug: personalTargetWorkspace.slug,
+      project: val.project,
+      workspaceSlug: val.workspaceSlug,
     }
   })

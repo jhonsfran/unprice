@@ -815,10 +815,10 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
     - [ ] `internal/trpc/src/router/lambda/planVersionFeatures/update.ts` -> `simple-crud` -> `service:planVersionFeatures.update`
     - [ ] `internal/trpc/src/router/lambda/planVersions/create.ts` -> `simple-crud` -> `service:planVersions.create`
     - [ ] `internal/trpc/src/router/lambda/planVersions/deactivate.ts` -> `simple-crud` -> `service:planVersions.deactivate`
-    - [ ] `internal/trpc/src/router/lambda/planVersions/duplicate.ts` -> `orchestration` -> `use-case:plan-version/duplicate.ts`
+    - [x] `internal/trpc/src/router/lambda/planVersions/duplicate.ts` -> `orchestration` -> `use-case:plan-version/duplicate.ts`
     - [ ] `internal/trpc/src/router/lambda/planVersions/getById.ts` -> `simple-query` -> `service:planVersions.getById`
     - [ ] `internal/trpc/src/router/lambda/planVersions/listByProjectUnprice.ts` -> `simple-query` -> `service:planVersions.listByProjectUnprice`
-    - [ ] `internal/trpc/src/router/lambda/planVersions/publish.ts` -> `orchestration` -> `use-case:plan-version/publish.ts`
+    - [x] `internal/trpc/src/router/lambda/planVersions/publish.ts` -> `orchestration` -> `use-case:plan-version/publish.ts`
     - [ ] `internal/trpc/src/router/lambda/planVersions/remove.ts` -> `simple-crud` -> `service:planVersions.remove`
     - [ ] `internal/trpc/src/router/lambda/planVersions/update.ts` -> `simple-crud` -> `service:planVersions.update`
     - [ ] `internal/trpc/src/router/lambda/plans/exist.ts` -> `simple-query` -> `service:plans.exist`
@@ -832,8 +832,8 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
     - [ ] `internal/trpc/src/router/lambda/projects/getBySlug.ts` -> `simple-query` -> `service:projects.getBySlug`
     - [ ] `internal/trpc/src/router/lambda/projects/listByActiveWorkspace.ts` -> `simple-query` -> `service:projects.listByActiveWorkspace`
     - [ ] `internal/trpc/src/router/lambda/projects/listByWorkspace.ts` -> `simple-query` -> `service:projects.listByWorkspace`
-    - [ ] `internal/trpc/src/router/lambda/projects/transferToPersonal.ts` -> `orchestration` -> `use-case:project/transfer-to-personal.ts`
-    - [ ] `internal/trpc/src/router/lambda/projects/transferToWorkspace.ts` -> `orchestration` -> `use-case:project/transfer-to-workspace.ts`
+    - [x] `internal/trpc/src/router/lambda/projects/transferToPersonal.ts` -> `orchestration` -> `use-case:project/transfer-to-personal.ts`
+    - [x] `internal/trpc/src/router/lambda/projects/transferToWorkspace.ts` -> `orchestration` -> `use-case:project/transfer-to-workspace.ts`
     - [ ] `internal/trpc/src/router/lambda/projects/update.ts` -> `simple-crud` -> `service:projects.update`
     - [ ] `internal/trpc/src/router/lambda/subscriptions/getById.ts` -> `simple-query` -> `service:subscriptions.getById`
     - [ ] `internal/trpc/src/router/lambda/subscriptions/listByActiveProject.ts` -> `simple-query` -> `service:subscriptions.listByActiveProject`
@@ -842,11 +842,11 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
     - [ ] `internal/trpc/src/router/lambda/workspaces/delete.ts` -> `simple-crud` -> `service:workspaces.delete`
     - [ ] `internal/trpc/src/router/lambda/workspaces/deleteMember.ts` -> `simple-crud` -> `service:workspaces.deleteMember`
     - [ ] `internal/trpc/src/router/lambda/workspaces/getBySlug.ts` -> `simple-query` -> `service:workspaces.getBySlug`
-    - [ ] `internal/trpc/src/router/lambda/workspaces/inviteMember.ts` -> `orchestration` -> `use-case:workspace/invite-member.ts`
+    - [x] `internal/trpc/src/router/lambda/workspaces/inviteMember.ts` -> `orchestration` -> `use-case:workspace/invite-member.ts`
     - [ ] `internal/trpc/src/router/lambda/workspaces/listInvitesByActiveWorkspace.ts` -> `simple-query` -> `service:workspaces.listInvitesByActiveWorkspace`
     - [ ] `internal/trpc/src/router/lambda/workspaces/listMembersByActiveWorkspace.ts` -> `simple-query` -> `service:workspaces.listMembersByActiveWorkspace`
     - [ ] `internal/trpc/src/router/lambda/workspaces/listWorkspacesByActiveUser.ts` -> `simple-query` -> `service:workspaces.listWorkspacesByActiveUser`
-    - [ ] `internal/trpc/src/router/lambda/workspaces/resendInvite.ts` -> `orchestration` -> `use-case:workspace/resend-invite.ts`
+    - [x] `internal/trpc/src/router/lambda/workspaces/resendInvite.ts` -> `orchestration` -> `use-case:workspace/resend-invite.ts`
 
 - [ ] **Migrate simple queries by domain** (one commit per domain):
   - [x] `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug, update
@@ -858,19 +858,24 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
   - [x] `projects/` — getById, getBySlug, listByActiveWorkspace, listByWorkspace
   - [x] `analytics/` — getOverviewStats, getCountryVisits, getBrowserVisits, getPagesOverview, getRealtimeTicket
   - [x] `subscriptions/` — getById, listByActiveProject, listByPlanVersion
-  - [x] `planVersions/` — getById, create, update, duplicate, deactivate, remove, listByProjectUnprice
+  - [x] `planVersions/` — getById, create, update, deactivate, remove, listByProjectUnprice
   - [x] `planVersionFeatures/` — getById, getByPlanVersionId, create, update, remove
   - [x] `events/` — listByActiveProject, update
   - [x] `apikeys/` — listByActiveProject
   - [x] `paymentProvider/` — getConfig
   - [x] `workspaces/` simple CRUD mutations — create, delete, deleteMember
-  - [ ] `workspaces/` orchestration mutations — inviteMember, resendInvite (move to use-cases extraction)
+  - [x] `workspaces/` orchestration mutations — inviteMember, resendInvite (extracted to use-cases)
   - [x] `projects/` simple CRUD mutations — update
-  - [ ] `projects/` orchestration mutations — transferToWorkspace, transferToPersonal (move to use-cases extraction)
+  - [x] `projects/` orchestration mutations — transferToWorkspace, transferToPersonal (extracted to use-cases)
+  - [x] `planVersions/` orchestration mutations — duplicate, publish (extracted to use-cases)
 
-- [ ] **Extract remaining orchestrations to use cases**
-  - After triage, extract each identified orchestration to `use-cases/{domain}/{operation}.ts`
-  - Follow the same pattern established in P0.2
+- [x] **Extract remaining orchestrations to use cases**
+  - [x] `use-cases/workspace/invite-member.ts`
+  - [x] `use-cases/workspace/resend-invite.ts`
+  - [x] `use-cases/project/transfer-to-workspace.ts`
+  - [x] `use-cases/project/transfer-to-personal.ts`
+  - [x] `use-cases/plan-version/duplicate.ts`
+  - [x] `use-cases/plan-version/publish.ts`
 
 - [ ] **Audit `CustomerService.setSubscriptionService()` circular dep**
   - After `customer/sign-up` is a use case, check if `CustomerService` still needs

@@ -1,8 +1,7 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { inviteMembersSchema, invitesSelectBase } from "@unprice/db/validators"
 import { InviteEmail, sendEmail } from "@unprice/email"
+import { inviteMember as inviteMemberUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
 
@@ -20,94 +19,88 @@ export const inviteMember = protectedWorkspaceProcedure
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    // can't invite members if workspace is personal
-    if (workspace.isPersonal) {
+    if (!role) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Role is required",
+      })
+    }
+
+    const { err, val } = await inviteMemberUseCase(
+      {
+        db: opts.ctx.db,
+        cache: opts.ctx.cache,
+        logger: opts.ctx.logger,
+        waitUntil: opts.ctx.waitUntil,
+      },
+      {
+        email,
+        role,
+        name,
+        userId,
+        workspace: {
+          id: workspace.id,
+          slug: workspace.slug,
+          name: workspace.name,
+          isPersonal: workspace.isPersonal,
+        },
+      }
+    )
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "personal_workspace_conflict") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Cannot invite members to personal workspace, please upgrade to invite members",
       })
     }
 
-    const userByEmail = await opts.ctx.db.query.users.findFirst({
-      where: eq(schema.users.email, email),
-    })
-
-    if (userByEmail) {
-      const member = await opts.ctx.db.query.members.findFirst({
-        where: and(
-          eq(schema.members.userId, userByEmail.id),
-          eq(schema.members.workspaceId, workspace.id)
-        ),
+    if (val.state === "already_member") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "User is already a member of the workspace",
       })
-
-      if (member) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "User is already a member of the workspace",
-        })
-      }
-
-      await opts.ctx.db
-        .insert(schema.members)
-        .values({
-          userId: userByEmail.id,
-          workspaceId: workspace.id,
-          role: role,
-        })
-        .returning()
-
-      opts.ctx.waitUntil(
-        Promise.all([
-          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.id}:${userByEmail.id}`),
-          opts.ctx.cache.workspaceGuard.remove(
-            `workspace-guard:${workspace.slug}:${userByEmail.id}`
-          ),
-        ])
-      )
-
-      return {
-        invite: undefined,
-      }
     }
 
-    const user = await opts.ctx.db.query.users.findFirst({
-      where: eq(schema.users.id, userId),
-    })
-
-    if (!user) {
+    if (val.state === "inviter_not_found") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "User not found",
       })
     }
 
-    const memberInvited = await opts.ctx.db
-      .insert(schema.invites)
-      .values({
-        email: email,
-        workspaceId: workspace.id,
-        role: role,
-        name: name,
-        invitedBy: userId,
+    if (val.state === "member_added") {
+      return {
+        invite: undefined,
+      }
+    }
+
+    if (val.state !== "invite_created") {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Error inviting workspace member",
       })
-      .returning()
-      .then((res) => {
-        return res[0]
-      })
+    }
 
     opts.ctx.waitUntil(
       sendEmail({
         subject: "You're invited to join Unprice",
         to: [email],
         react: InviteEmail({
-          inviterName: user.name ?? user.email,
-          inviteeName: name,
+          inviterName: val.inviterName,
+          inviteeName: val.inviteeName ?? email,
           workspaceName: workspace.name,
         }),
       })
     )
 
     return {
-      invite: memberInvited,
+      invite: val.invite,
     }
   })

@@ -1,8 +1,7 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { invitesSelectBase } from "@unprice/db/validators"
 import { InviteEmail, sendEmail } from "@unprice/email"
+import { resendInvite as resendInviteUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
 
@@ -19,25 +18,46 @@ export const resendInvite = protectedWorkspaceProcedure
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    // can't invite members if workspace is personal
-    if (workspace.isPersonal) {
+    const { err, val } = await resendInviteUseCase(
+      {
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+      },
+      {
+        email,
+        workspace: {
+          id: workspace.id,
+          name: workspace.name,
+          isPersonal: workspace.isPersonal,
+        },
+      }
+    )
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "personal_workspace_conflict") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Cannot resend invites to personal workspace, please upgrade to invite members",
       })
     }
 
-    const invite = await opts.ctx.db.query.invites.findFirst({
-      where: and(eq(schema.invites.email, email), eq(schema.invites.workspaceId, workspace.id)),
-      with: {
-        invitedBy: true,
-      },
-    })
-
-    if (!invite) {
+    if (val.state === "invite_not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "Invite not found",
+      })
+    }
+
+    if (val.state !== "ok") {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Error resending invite",
       })
     }
 
@@ -46,8 +66,8 @@ export const resendInvite = protectedWorkspaceProcedure
         subject: "You're invited to join Unprice",
         to: [email],
         react: InviteEmail({
-          inviterName: invite.invitedBy.name ?? invite.invitedBy.email,
-          inviteeName: invite.name,
+          inviterName: val.inviterName,
+          inviteeName: val.inviteeName ?? email,
           workspaceName: workspace.name,
         }),
       })

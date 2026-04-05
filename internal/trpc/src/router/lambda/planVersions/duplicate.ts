@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { planVersionSelectBaseSchema } from "@unprice/db/validators"
+import { duplicatePlanVersion } from "@unprice/services/use-cases"
 import { z } from "zod"
 
 import { protectedProjectProcedure } from "#trpc"
@@ -18,15 +19,20 @@ export const duplicate = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const { plans } = opts.ctx.services
 
     // only owner and admin can duplicate a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const { err, val } = await plans.duplicatePlanVersionRecord({
-      projectId: project.id,
-      id,
-    })
+    const { err, val } = await duplicatePlanVersion(
+      {
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+      },
+      {
+        id,
+        projectId: project.id,
+      }
+    )
 
     if (err) {
       throw new TRPCError({
@@ -46,6 +52,13 @@ export const duplicate = protectedProjectProcedure
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "default plan can't have a required payment method",
+      })
+    }
+
+    if (val.state === "duplicate_error") {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Error duplicating version",
       })
     }
 
