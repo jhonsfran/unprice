@@ -1021,7 +1021,7 @@ export class BillingService {
         this.logger.error("Error finalizing invoice", {
           invoiceId: openInvoiceData.id,
           projectId: openInvoiceData.projectId,
-          error: error instanceof Error ? error.message : "unknown error",
+          error: toErrorContext(error),
         })
         tx.rollback()
         throw error

@@ -6,6 +6,7 @@ import type { Logger } from "@unprice/logs"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import type { CustomerService } from "../customers/service"
+import { toErrorContext } from "../utils/log-context"
 import type { SubscriptionContext } from "./types"
 
 export async function loadSubscription(payload: {
@@ -431,7 +432,7 @@ export async function invoiceSubscription({
               phaseId: phase.id,
               statementStartAt: statementStartAt,
               statementEndAt: statementEndAt,
-              error: error instanceof Error ? error.message : "unknown error",
+              error: toErrorContext(error),
             })
             throw error
           })
@@ -511,7 +512,7 @@ export async function invoiceSubscription({
               phaseId: phase.id,
               statementStartAt: statementStartAt,
               statementEndAt: statementEndAt,
-              error: error instanceof Error ? error.message : "unknown error",
+              error: toErrorContext(error),
             })
             throw error
           })
@@ -549,7 +550,7 @@ export async function invoiceSubscription({
           phaseId: phase.id,
           statementStartAt: statementStartAt,
           statementEndAt: statementEndAt,
-          error: error instanceof Error ? error.message : "unknown error",
+          error: toErrorContext(error),
         })
 
         tx.rollback()

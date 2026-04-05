@@ -250,7 +250,7 @@ export class ApiKeysService {
             this.logger.warn("Failed to fetch key data, retrying... getApiKey", {
               hash: keyHash,
               attempt,
-              error: err.message,
+              error: toErrorContext(err),
             })
           }
         )
@@ -292,7 +292,7 @@ export class ApiKeysService {
         }
       ).catch(async (err) => {
         this.logger.error(`verify error, retrying without cache, ${err.message}`, {
-          error: err.message,
+          error: toErrorContext(err),
         })
 
         await this.cache.apiKeyByHash.remove(await this.hash(req.key))

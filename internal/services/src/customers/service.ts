@@ -185,7 +185,7 @@ export class CustomerService {
               {
                 projectId: projectId,
                 attempt,
-                error: err.message,
+                error: toErrorContext(err),
               }
             )
           }
@@ -292,7 +292,7 @@ export class CustomerService {
             this.logger.warn("Failed to fetch getCustomerData data from cache, retrying...", {
               customerId: customerId,
               attempt,
-              error: err.message,
+              error: toErrorContext(err),
             })
           }
         )
@@ -360,7 +360,7 @@ export class CustomerService {
                 projectId,
                 externalId,
                 attempt,
-                error: err.message,
+                error: toErrorContext(err),
               }
             )
           }
@@ -904,7 +904,7 @@ export class CustomerService {
               {
                 customerId: customerId,
                 attempt,
-                error: err.message,
+                error: toErrorContext(err),
               }
             )
           }
@@ -1333,7 +1333,7 @@ export class CustomerService {
             this.logger.warn("Failed to fetch payment methods data from cache, retrying...", {
               customerId: customerId,
               attempt,
-              error: err.message,
+              error: toErrorContext(err),
             })
           }
         )

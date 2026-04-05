@@ -12,6 +12,7 @@ import type { CacheNamespaces } from "../cache/namespaces"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
+import { toErrorContext } from "../utils/log-context"
 import { retry } from "../utils/retry"
 import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./errors"
 import type { GrantsManager } from "./grants"
@@ -278,7 +279,7 @@ export class EntitlementService {
           this.logger.error("Failed to get current usage", {
             customerId,
             projectId,
-            error: usageErr.message,
+            error: toErrorContext(usageErr),
           })
           return null
         }
@@ -335,7 +336,7 @@ export class EntitlementService {
       this.logger.error("Failed to check if customer is blocked", {
         customerId,
         projectId,
-        error: aclErr.message,
+        error: toErrorContext(aclErr),
       })
       return null
     }

@@ -896,8 +896,10 @@ Apply these rules to every file you touch during P0. Don't do a separate sweep.
 - [ ] **Adopt `toErrorContext()` in all service files**
   - Currently only 5 of 12 files use it. When you touch a service file, replace
     `{ error: err.message }` with `{ error: toErrorContext(err) }` in all logger calls.
-  - Progress: standardized in `billing/service.ts`, `plans/service.ts`, and
-    `subscriptions/service.ts`.
+  - Progress: standardized in `billing/service.ts`, `plans/service.ts`,
+    `subscriptions/service.ts`, `customers/service.ts`, `apikey/service.ts`,
+    `entitlements/service.ts`, `subscriptions/invokes.ts`, and
+    `payment-provider/stripe.ts`.
 
 - [x] **Add `UnPricePlanError`**
   - `internal/services/src/plans/errors.ts` already contains `UnPricePlanError`
