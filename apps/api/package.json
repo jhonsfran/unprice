@@ -30,7 +30,6 @@
     "wrangler": "4.67.0"
   },
   "dependencies": {
-    "@auth/core": "^0.34.1",
     "@hono/zod-openapi": "^0.19.2",
     "@scalar/hono-api-reference": "^0.7.2",
     "@t3-oss/env-core": "^0.12.0",
@@ -41,7 +40,6 @@
     "@unprice/error": "workspace:^",
     "@unprice/lakehouse": "workspace:^",
     "@unprice/logs": "workspace:^",
-    "@unprice/metrics": "workspace:^",
     "@unprice/observability": "workspace:^",
     "@unprice/services": "workspace:^",
     "drizzle-orm": "^0.44.5",

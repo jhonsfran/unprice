@@ -17,7 +17,6 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "@unprice/metrics": "workspace:^",
     "zod": "^3.24.2"
   }
 }

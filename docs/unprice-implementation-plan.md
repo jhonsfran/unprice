@@ -1,1320 +1,779 @@
-# Unprice Unified Billing — Implementation Plan
+# Unprice Unified Billing — Refined Implementation Plan
 
-> This plan is designed to be executed by an agent, one phase per PR, one commit
-> per todo item. Commit hooks handle validation and linting. If a commit fails
-> hooks or tests, fix it before moving on. If the plan conflicts with what the
-> code actually does, stop and ask for clarification.
+> This plan is designed to be executed by an agent, one phase per PR, one
+> commit per todo item when practical. If a commit fails hooks or tests, fix it
+> before moving on. If the plan conflicts with what the code actually does,
+> update the plan before continuing.
 
 ## Progress Tracking
 
-**After completing each numbered item (e.g., 1.1, 1.2, ...), mark it as done
-by prepending `[x]` to the item title in this document and commit it.**
+**After completing each numbered item (for example `1.1`, `1.2`), mark it as
+completed by prepending `[x]` to the item title in this document and commit the
+change.**
 
 Example:
 ```
-Before: **1.1 — Create RatingService skeleton with error class**
-After:  **[x] 1.1 — Create RatingService skeleton with error class**
+Before: **1.1 — Create RatingService shell**
+After:  **[x] 1.1 — Create RatingService shell**
 ```
 
-This makes the plan a living document. The next agent (or you) can pick up
-exactly where work stopped.
+This keeps the plan usable as a living handoff document.
 
 ---
 
-## Conventions
+## Current-Code Conventions
 
-Before starting any phase, internalize these patterns from the codebase:
+Before starting any phase, align with the code that exists today.
 
 **Service structure:**
 ```
 internal/services/src/[service-name]/
-  ├── service.ts      — class with constructor({ deps }) and Result<T, E> methods
-  ├── errors.ts       — class extending BaseError from @unprice/error
-  ├── index.ts        — re-exports: export * from "./errors"; export * from "./service"
-  └── [name].test.ts  — vitest tests
+  ├── service.ts
+  ├── errors.ts
+  ├── index.ts
+  └── *.test.ts
 ```
 
-**Composition root:** `internal/services/src/context.ts` — `createServiceContext(deps)`.
-All services are created here in dependency order. Leaf services first, then services
-that depend on them.
+**Composition root:** [internal/services/src/context.ts](/Users/jhonsfran/repos/unprice/internal/services/src/context.ts)
+Build services in dependency order inside `createServiceContext(deps)`.
 
-**Infrastructure deps:** `internal/services/src/deps.ts` — `ServiceDeps` interface.
-Every service receives `{ db, logger, ... }` from this.
+**Shared infrastructure deps:** [internal/services/src/deps.ts](/Users/jhonsfran/repos/unprice/internal/services/src/deps.ts)
+The current shared contract is `ServiceDeps = { db, logger, analytics, waitUntil, cache, metrics }`.
+Use that shape as the baseline for new services.
 
-**Result pattern:** All public methods return `Promise<Result<T, CustomError>>`.
-Use `Ok(val)` and `Err(new CustomError({ message }))` from `@unprice/error`.
+**DB schema barrel:** [internal/db/src/schema.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema.ts)
+Tables live under `internal/db/src/schema/` and are re-exported from `schema.ts`.
 
-**Schema pattern:** Tables in `internal/db/src/schema/[table].ts`, use `pgTableProject()`,
-export from `internal/db/src/schema.ts`. Validators in `internal/db/src/validators/`.
+**DB validator barrel:** [internal/db/src/validators.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators.ts)
+Do not export from a non-existent `internal/db/src/validators/index.ts`.
 
-**Test pattern:** vitest with `vi.fn()` mocks. Tests live next to implementation.
-Name: `[service].test.ts`. Use `describe/it/expect`.
+**Use-case barrel:** [internal/services/src/use-cases/index.ts](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/index.ts)
+Use cases are async functions and should be re-exported here.
 
-**Use-case pattern:** When an operation coordinates multiple services (e.g.,
-sign-up creates a customer then a subscription then provisions grants), it lives
-as an **async function** in `internal/services/src/use-cases/[domain]/[name].ts`.
+**Current pricing seam:** [internal/services/src/billing/service.ts](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts)
+`BillingService.calculateFeaturePrice()` already encapsulates most of the pricing logic that should be extracted and reused. Do not create a second pricing algorithm unless behavior intentionally changes.
 
-Use-case function signature:
-```typescript
-export async function useCaseName(
-  deps: {
-    services: Pick<ServiceContext, "service1" | "service2">
-    db: Database
-    logger: Logger
-    analytics: Analytics
-    waitUntil: (promise: Promise<any>) => void
-  },
-  input: InputType,
-): Promise<Result<OutputType, ErrorType>>
+**Current provider seam:** [internal/services/src/payment-provider/resolver.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/resolver.ts)
+This class already resolves provider config, decrypts provider secrets, and derives the provider customer id. Prefer evolving this seam instead of bypassing it.
+
+**Current source-of-truth reminders:**
+- `plan_versions.paymentProvider` is the current provider source of truth.
+- `customers.stripeCustomerId` is still actively read and written.
+- sync ingestion currently requires `customerId` in the request body.
+- `EntitlementWindowDO.apply()` currently returns only `{ allowed, deniedReason, message }`.
+
+**Migration command:**
+From `internal/db/`, use the package script in [internal/db/package.json](/Users/jhonsfran/repos/unprice/internal/db/package.json):
+```bash
+pnpm generate
 ```
-
-Key rules for use cases:
-- **Use `Pick<ServiceContext, ...>`** to declare only the services needed
-- **Pass `db: tx`** to service calls when atomicity is required (transaction)
-- **Use `waitUntil()`** for background/fire-and-forget operations (analytics, cache)
-- **Barrel-export** from `internal/services/src/use-cases/index.ts`
-- **Never create services inside a use case** — receive them via deps
-
-Reference files:
-- `internal/services/src/use-cases/customer/sign-up.ts` (complex multi-service orchestration)
-- `internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts` (payment flow completion)
-- `internal/services/src/use-cases/index.ts` (barrel exports)
 
 ---
 
-## Phase 1: Extract RatingService
+## Architectural Rules For This Plan
 
-> **PR title:** `feat: extract RatingService from BillingService`
+1. Extract shared logic before adding new behavior.
+2. Prefer dual-read and dual-write migrations over big-bang replacements.
+3. Do not mark ledger entries settled until some existing runtime path can actually consume that settlement state.
+4. Do not introduce a second pricing implementation for incremental usage.
+5. Keep new types near the service layer unless they are truly DB-facing types.
+6. Preserve existing Stripe callback routes until generic provider flows reach parity.
+
+---
+
+## Phase 1: Extract Pricing Core And RatingService
+
+> **PR title:** `feat: extract pricing core into RatingService`
 >
-> **Goal:** Create a standalone `RatingService` that can rate usage events
-> without requiring an invoice or subscription. This decouples rating from
-> billing and enables all downstream phases.
+> **Goal:** Move shared pricing logic out of `BillingService` so invoice pricing
+> and future incremental usage pricing both rely on the same implementation.
 >
 > **Branch:** `feat/rating-service`
 
 ### Commits
 
-**1.1 — Create RatingService skeleton with error class**
+**1.1 — Create rating module shell**
 
-Create `internal/services/src/rating/` directory with:
-
-- `errors.ts` — `UnPriceRatingError` extending `BaseError<{ context?: Record<string, unknown> }>`.
-  Follow the exact pattern from `internal/services/src/billing/errors.ts`.
-
-- `service.ts` — `RatingService` class with constructor taking:
-  ```typescript
-  constructor({
-    db,
-    logger,
-    analytics,
-    grantsManager,
-  }: {
-    db: Database
-    logger: Logger
-    analytics: Analytics
-    grantsManager: GrantsManager
-  })
-  ```
-  No methods yet, just the class shell.
-
-- `index.ts` — barrel exports for errors and service.
-
-Files to read first:
-- `internal/services/src/billing/errors.ts` (error pattern)
-- `internal/services/src/deps.ts` (ServiceDeps type)
-
-**1.2 — Define RatedCharge type**
-
-In `internal/db/src/validators/`, create `rating.ts` with:
-
-```typescript
-export interface RatedCharge {
-  sourceType: "usage_event" | "billing_period" | "one_time"
-  sourceId: string
-  customerId: string
-  projectId: string
-  featureSlug: string
-  quantity: number
-  usage: number
-  amountAtomic: number       // cents
-  currency: string
-  unitAmountAtomic: number
-  prorate: number            // 0-1
-  grantId?: string | null
-  included: number
-  limit: number | null
-  isTrial: boolean
-  cycleStartAt: number
-  cycleEndAt: number
-  traceId?: string
-  metadata?: Record<string, unknown>
-}
-```
-
-Export from `internal/db/src/validators/index.ts`.
-
-Files to read first:
-- `internal/db/src/validators/shared.ts` (see how types are exported)
-- `internal/db/src/validators/index.ts` (barrel exports)
-
-**1.3 — Implement `rateIncrementalUsage` method**
-
-This method rates a single usage event using the DO's running total to compute
-marginal cost. It does NOT query Tinybird — it uses `currentUsage` passed from
-the DO.
-
-Add to `RatingService`:
-
-```typescript
-async rateIncrementalUsage(input: {
-  customerId: string
-  projectId: string
-  featureSlug: string
-  quantity: number         // delta from DO Fact
-  currentUsage: number     // value_after - delta from DO
-  timestamp: number
-  traceId?: string
-  metadata?: Record<string, unknown>
-}): Promise<Result<RatedCharge, UnPriceRatingError>>
-```
-
-Implementation:
-1. Call `this.grantsManager.getGrantsForCustomer({ customerId, projectId, now: timestamp })`
-2. Filter grants for the feature slug
-3. Call `this.grantsManager.computeEntitlementState({ grants, customerId, projectId })`
-4. Compute marginal price: `calculatePricePerFeature(config, featureType, currentUsage + quantity)` minus `calculatePricePerFeature(config, featureType, currentUsage)`
-5. Return `Ok(ratedCharge)` with the marginal cost
-
-Files to read first:
-- `internal/services/src/billing/service.ts` lines 1034-1233 (`_computeInvoiceItems` — the logic to extract)
-- `internal/services/src/entitlements/grants.ts` lines 464-609 (`getGrantsForCustomer`)
-- `internal/db/src/validators/subscriptions/prices.ts` (`calculatePricePerFeature`, `calculateTierPrice`)
-
-**1.4 — Implement `rateBillingPeriod` method**
-
-This method rates a batch of features for a subscription billing period. It
-queries Tinybird for the authoritative total usage.
-
-Add to `RatingService`:
-
-```typescript
-async rateBillingPeriod(input: {
-  customerId: string
-  projectId: string
-  features: Array<{
-    featureSlug: string
-    featureType: FeatureType
-    config: z.infer<typeof configFeatureSchema>
-    subscriptionItemId: string
-    cycleStartAt: number
-    cycleEndAt: number
-    prorate: number
-  }>
-  now: number
-}): Promise<Result<RatedCharge[], UnPriceRatingError>>
-```
-
-Implementation: Extract the core logic from `BillingService._computeInvoiceItems`
-(lines 1034-1233) and `BillingService.calculateFeaturePrice`. The key steps:
-
-1. Call `grantsManager.getGrantsForCustomer()`
-2. Group grants by feature slug
-3. For each feature, compute entitlement state
-4. Batch fetch usage from `this.analytics.getUsageBillingFeatures()`
-5. Call `calculateWaterfallPrice` or `calculatePricePerFeature` per feature
-6. Return `RatedCharge[]`
-
-This is extraction, not new logic. The computation must produce identical
-results to the current `_computeInvoiceItems`.
-
-Files to read first:
-- `internal/services/src/billing/service.ts` lines 1034-1300 (the full `_computeInvoiceItems`)
-- `internal/services/src/billing/service.ts` lines 2363-2605 (`calculateFeaturePrice`)
-- `internal/analytics/src/analytics.ts` lines 296-378 (`getUsageBillingFeatures`)
-
-**1.5 — Register RatingService in context.ts**
-
-- Add `RatingService` to the `ServiceContext` interface as `rating: RatingService`
-- Create it in `createServiceContext()` at the leaf level (depends on grantsManager + analytics)
-- Add export to `internal/services/package.json` exports map: `"./rating": "./src/rating/index.ts"`
-
-Files to modify:
-- `internal/services/src/context.ts`
-- `internal/services/package.json`
-
-**1.6 — Write unit tests for RatingService**
-
-Create `internal/services/src/rating/rating.test.ts`:
-
-- Test `rateIncrementalUsage` with flat pricing (simplest case)
-- Test `rateIncrementalUsage` with graduated tiered pricing, verifying marginal
-  cost is correct when crossing a tier boundary
-- Test `rateIncrementalUsage` with volume tiered pricing, verifying the tier
-  repricing delta
-- Test `rateIncrementalUsage` with package pricing
-- Test `rateIncrementalUsage` when grants are missing (should return error)
-- Test `rateBillingPeriod` with mocked analytics returning usage data
-
-Mock `grantsManager` and `analytics` using `vi.fn()`. Follow the pattern in
-`internal/services/src/plans/plans.test.ts`.
-
-For tiered pricing tests, use concrete tier configs from
-`internal/db/src/validators/subscriptions/prices.test.ts` as reference — those
-tests already validate `calculateTierPrice` behavior.
-
-Files to read first:
-- `internal/services/src/plans/plans.test.ts` (test pattern)
-- `internal/db/src/validators/subscriptions/prices.test.ts` (pricing test data)
-
-**1.7 — Wire BillingService to use RatingService for `_finalizeInvoice`**
-
-- Add `ratingService: RatingService` to `BillingService` constructor deps
-- Update `createServiceContext()` — pass `rating` to `billing`
-- In `_finalizeInvoice`, replace the inline `_computeInvoiceItems` call with
-  `this.ratingService.rateBillingPeriod()` and map the `RatedCharge[]` results
-  to update invoice items
-
-The invoice item update logic stays in BillingService. Only the computation
-moves to RatingService. Verify that existing billing tests still pass.
-
-Files to modify:
-- `internal/services/src/billing/service.ts`
-- `internal/services/src/context.ts`
-
----
-
-## Phase 2: Add Ledger
-
-> **PR title:** `feat: add ledger service with append-only entries`
->
-> **Goal:** Create `ledger_entries` table and `LedgerService` as an
-> append-only financial log between rating and settlement.
->
-> **Branch:** `feat/ledger-service`
-
-### Commits
-
-**2.1 — Create ledger schema tables**
-
-Add `internal/db/src/schema/ledger.ts`:
-
-- `ledgers` table: `{ id, projectId, customerId, currency, ...timestamps }`
-  with unique constraint on `(projectId, customerId, currency)`
-- `ledger_entries` table: `{ id, projectId, ledgerId, entryType, sourceType, sourceId, amountAtomic, currency, balanceAfter, featureSlug, customerId, description, settlementId, settledAt, metadata, createdAt }`
-  with index on unsettled entries (`WHERE settlement_id IS NULL`)
-- Define relations: `ledger → entries`, `ledger → customer`
-- Export from `internal/db/src/schema.ts`
-
-Use `pgTableProject()`, `cuid()`, `timestamps`, `projectID` helpers following
-the pattern in `internal/db/src/schema/invoices.ts`.
-
-`entryType` should be a new pgEnum: `ledger_entry_type` with values
-`['debit', 'credit', 'reversal', 'settlement']`.
-`sourceType` should be a new pgEnum: `ledger_source_type` with values
-`['usage_event', 'billing_period', 'manual', 'wallet_topup', 'refund', 'adjustment']`.
-
-Add them in `internal/db/src/schema/enums.ts`.
-
-Files to read first:
-- `internal/db/src/schema/invoices.ts` (table pattern)
-- `internal/db/src/schema/enums.ts` (enum pattern)
-- `internal/db/src/schema.ts` (export barrel)
-
-**2.2 — Generate Drizzle migration**
-
-Run `pnpm drizzle-kit generate` (or the project's migration command) from
-`internal/db/`. Verify the generated SQL creates the correct tables and
-indexes. Do NOT edit migrations by hand.
-
-Read the project's `package.json` scripts to find the exact migration command.
-
-Files to read first:
-- `internal/db/package.json` (scripts section)
-
-**2.3 — Create ledger validators**
-
-Add `internal/db/src/validators/ledger.ts`:
-
-- `ledgerSelectSchema` using `createSelectSchema(schema.ledgers)`
-- `ledgerEntrySelectSchema` using `createSelectSchema(schema.ledgerEntries)`
-- `ledgerEntryInsertSchema` using `createInsertSchema(schema.ledgerEntries)`
-- Export types: `LedgerEntry`, `Ledger`
-
-Export from `internal/db/src/validators/index.ts`.
-
-Files to read first:
-- `internal/db/src/validators/customer.ts` (validator pattern)
-
-**2.4 — Create LedgerService skeleton with error class**
-
-Create `internal/services/src/ledger/`:
-
-- `errors.ts` — `UnPriceLedgerError`
-- `service.ts` — `LedgerService` class with constructor:
-  ```typescript
-  constructor({ db, logger }: { db: Database; logger: Logger })
-  ```
+Create `internal/services/src/rating/` with:
+- `errors.ts` — `UnPriceRatingError`
+- `service.ts` — `RatingService`
+- `types.ts` — service-layer types such as `RatedCharge`
 - `index.ts` — barrel exports
 
-**2.5 — Implement `postDebit` method**
-
-```typescript
-async postDebit(charge: RatedCharge): Promise<Result<LedgerEntry, UnPriceLedgerError>>
-```
-
-Implementation:
-1. Wrap in `this.db.transaction()`
-2. Ensure ledger exists for `(projectId, customerId, currency)` — upsert with `onConflictDoNothing`
-3. Get current balance: query last entry by `ledgerId` ordered by `createdAt DESC`
-4. Insert new entry: `{ entryType: "debit", amountAtomic: charge.amountAtomic, balanceAfter: currentBalance + charge.amountAtomic, ... }`
-5. Return `Ok(entry)`
+Notes:
+- Keep `RatedCharge` in the service layer, not in `@unprice/db/validators`.
+- Match the current error pattern from [internal/services/src/billing/errors.ts](/Users/jhonsfran/repos/unprice/internal/services/src/billing/errors.ts).
 
 Files to read first:
-- `internal/services/src/billing/service.ts` lines 894-1029 (transaction pattern)
+- [internal/services/src/billing/errors.ts](/Users/jhonsfran/repos/unprice/internal/services/src/billing/errors.ts)
+- [internal/services/src/deps.ts](/Users/jhonsfran/repos/unprice/internal/services/src/deps.ts)
 
-**2.6 — Implement `postCredit` method**
+**1.2 — Extract shared pricing helpers from BillingService**
 
-```typescript
-async postCredit(input: {
-  projectId: string
-  customerId: string
-  amountAtomic: number
-  currency: string
-  sourceType: string
-  sourceId: string
-  description: string
-}): Promise<Result<LedgerEntry, UnPriceLedgerError>>
-```
+Move the reusable pricing helpers out of `BillingService` into `RatingService`
+or a rating-local helper module.
 
-Same pattern as postDebit but `entryType: "credit"` and amount stored as
-negative (credits reduce balance).
+Target logic to extract first:
+- billing window calculation
+- usage resolution helpers
+- grant proration helpers
+- waterfall attribution inputs
+- the body of `calculateFeaturePrice()`
 
-**2.7 — Implement `getUnsettledBalance` and `markSettled` methods**
+Important constraint:
+- This step must preserve existing behavior exactly.
+- `BillingService` should delegate to the extracted logic rather than maintain a fork.
 
-```typescript
-async getUnsettledBalance(input: {
-  projectId: string
-  customerId: string
-}): Promise<Result<{ balance: number; entries: LedgerEntry[] }, UnPriceLedgerError>>
+Files to read first:
+- [internal/services/src/billing/service.ts#L2363](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L2363)
+- [internal/services/src/entitlements/grants.ts#L464](/Users/jhonsfran/repos/unprice/internal/services/src/entitlements/grants.ts#L464)
+- [internal/db/src/validators/subscriptions/prices.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/subscriptions/prices.ts)
 
-async markSettled(input: {
-  entryIds: string[]
-  settlementId: string
-}): Promise<Result<void, UnPriceLedgerError>>
-```
+**1.3 — Register RatingService in the service graph**
 
-`getUnsettledBalance`: query entries where `settlementId IS NULL`, sum `amountAtomic`.
-`markSettled`: update entries, set `settlementId` and `settledAt: Date.now()`.
+- Add `rating: RatingService` to `ServiceContext`
+- Construct it in [internal/services/src/context.ts](/Users/jhonsfran/repos/unprice/internal/services/src/context.ts)
+- Export it from [internal/services/package.json](/Users/jhonsfran/repos/unprice/internal/services/package.json)
 
-**2.8 — Register LedgerService in context.ts**
+**1.4 — Make BillingService delegate pricing to RatingService**
 
-- Add to `ServiceContext` interface as `ledger: LedgerService`
-- Create at leaf level (depends only on `db`, `logger`)
-- Add export to `internal/services/package.json`
+Update `BillingService` to call the extracted pricing core for:
+- `_computeInvoiceItems`
+- `estimatePriceCurrentUsage`
+- any other direct `calculateFeaturePrice()` call sites
 
-**2.9 — Write unit tests for LedgerService**
+Important constraint:
+- Keep the invoice-item update logic in `BillingService`.
+- This step is about extracting computation, not changing the invoice persistence flow.
 
-Create `internal/services/src/ledger/ledger.test.ts`:
+Files to read first:
+- [internal/services/src/billing/service.ts#L1034](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L1034)
+- [internal/services/src/billing/service.ts#L2778](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L2778)
 
-- Test `postDebit` creates entry with correct balance
-- Test `postDebit` sequential entries maintain running balance
-- Test `postCredit` creates negative amount entry, reduces balance
-- Test `getUnsettledBalance` returns only entries with no settlementId
-- Test `markSettled` sets settlementId and settledAt on entries
-- Test `postDebit` with no existing ledger auto-creates one
+**1.5 — Add `rateBillingPeriod()` as a thin wrapper over the extracted pricing core**
 
-Mock `db` with `vi.fn()` for queries. Follow existing test patterns.
+Implement `rateBillingPeriod()` only after the shared pricing core exists.
 
-**2.10 — Wire BillingService to post ledger entries after rating**
+Requirements:
+- It must reuse the same extracted logic already used by `BillingService`.
+- It should return a service-layer `RatedCharge[]` projection.
+- It must not introduce a second usage-fetching or grant-resolution algorithm.
 
-In `BillingService._finalizeInvoice`, after calling `ratingService.rateBillingPeriod()`
-and updating invoice items, add:
+**1.6 — Add `rateIncrementalUsage()` using the same pricing core**
 
-```typescript
-for (const charge of ratedCharges) {
-  await this.ledgerService.postDebit(charge)
-}
-```
+Implement incremental usage rating only after extraction is complete.
 
-Add `ledgerService: LedgerService` to BillingService constructor. Update
-`createServiceContext()`.
+Requirements:
+- Resolve grants through `GrantsManager`
+- Reuse the extracted pricing behavior for usage-based features
+- Do not implement this as a standalone "new total minus old total" shortcut unless it matches the extracted pricing logic for all supported configurations
+- Explicitly validate behavior for tiered, package, and proration-sensitive cases
 
-This is additive — the existing invoice flow continues working. The ledger
-entries are written alongside the invoice items.
+**1.7 — Write unit tests for RatingService and delegated BillingService behavior**
+
+Add tests for:
+- extracted pricing parity with current invoice behavior
+- incremental flat pricing
+- incremental tier boundary behavior
+- package pricing
+- missing grants / empty-grant behavior
+- `BillingService` continuing to produce the same invoice item totals through delegation
+
+Files to read first:
+- [internal/services/src/plans/plans.test.ts](/Users/jhonsfran/repos/unprice/internal/services/src/plans/plans.test.ts)
+- [internal/db/src/validators/subscriptions/prices.test.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/subscriptions/prices.test.ts)
 
 ---
 
-## Phase 3: Provider Schema Changes
+## Phase 2: Provider Mapping Foundation
 
-> **PR title:** `feat: provider-agnostic schema (customer_provider_ids, apikey_customers)`
+> **PR title:** `feat: add provider mapping foundation`
 >
-> **Goal:** Decouple customer records from Stripe-specific fields. Add tables
-> for multi-provider customer mapping and API-key-to-customer linking.
+> **Goal:** Introduce provider-agnostic storage without breaking the current
+> Stripe-backed customer and callback flows.
 >
-> **Branch:** `feat/provider-schema`
+> **Branch:** `feat/provider-mapping-foundation`
 
 ### Commits
 
-**3.1 — Create `customer_provider_ids` table**
+**2.1 — Add `customer_provider_ids` table**
 
-Add to `internal/db/src/schema/customers.ts` (or new file `providerMapping.ts`):
+Create a provider mapping table for external customer ids.
 
-```typescript
-export const customerProviderIds = pgTableProject("customer_provider_ids", {
-  ...projectID,
-  ...timestamps,
-  customerId: cuid("customer_id").notNull(),
-  provider: paymentProviderEnum("provider").notNull(),
-  providerCustomerId: text("provider_customer_id").notNull(),
-}, (table) => ({
-  primary: primaryKey({ columns: [table.id, table.projectId], name: "customer_provider_ids_pkey" }),
-  uniqueCustomerProvider: uniqueIndex("cpid_customer_provider_idx")
-    .on(table.projectId, table.customerId, table.provider),
-  uniqueProviderCustomer: uniqueIndex("cpid_provider_customer_idx")
-    .on(table.projectId, table.provider, table.providerCustomerId),
-  customerfk: foreignKey({
-    columns: [table.customerId, table.projectId],
-    foreignColumns: [customers.id, customers.projectId],
-    name: "cpid_customer_fkey",
-  }).onDelete("cascade"),
-}))
+Requirements:
+- one row per `(projectId, customerId, provider)`
+- unique lookup by `(projectId, provider, providerCustomerId)`
+- foreign key back to `customers`
+- export from [internal/db/src/schema.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema.ts)
+
+**2.2 — Add `apikey_customers` table**
+
+Create a mapping table between API keys and customers.
+
+Requirements:
+- unique lookup by `(projectId, apikeyId)`
+- foreign keys to `apikeys` and `customers`
+- export from the schema barrel
+
+**2.3 — Add webhook event storage**
+
+Create `webhook_events` for idempotent provider webhook processing.
+
+Requirements:
+- unique lookup by `(projectId, provider, providerEventId)`
+- `status` enum with at least `pending`, `processed`, `failed`
+- payload and error storage for replay/debugging
+
+**2.4 — Extend payment provider config for webhook verification**
+
+Current provider config stores only the encrypted API key.
+Before the webhook phase, add storage for webhook verification secrets.
+
+Important constraint:
+- Keep encryption handling aligned with the existing provider secret flow.
+- If a second encrypted secret is added, document exactly how it is read and decrypted.
+
+Files to read first:
+- [internal/db/src/schema/paymentConfig.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema/paymentConfig.ts)
+- [internal/db/src/validators/paymentConfig.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/paymentConfig.ts)
+
+**2.5 — Add validators and export them from the real barrel**
+
+Add validators for:
+- `customer_provider_ids`
+- `apikey_customers`
+- `webhook_events`
+
+Export from:
+- [internal/db/src/validators.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators.ts)
+
+**2.6 — Add `paymentProvider` snapshot to `subscription_phases` as additive state**
+
+If this denormalized column is needed, add it as a snapshot field only.
+
+Important constraint:
+- Do not switch all readers immediately.
+- `plan_versions.paymentProvider` remains the source of truth until all runtime readers are migrated.
+
+Files to read first:
+- [internal/db/src/schema/planVersions.ts#L73](/Users/jhonsfran/repos/unprice/internal/db/src/schema/planVersions.ts#L73)
+- [internal/db/src/schema/subscriptions.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema/subscriptions.ts)
+
+**2.7 — Generate migration with the project script**
+
+From `internal/db/`, run:
+```bash
+pnpm generate
 ```
 
-Export from schema barrel. Add relations.
+Do not edit the generated SQL by hand unless there is a repo-specific migration policy requiring it.
 
-**3.2 — Create `apikey_customers` table**
+**2.8 — Add dual-read and dual-write migration notes to the plan implementation**
 
-Add `internal/db/src/schema/apikeyCustomers.ts`:
+This phase is not complete until the rollout strategy is explicit:
+- continue reading `customers.stripeCustomerId` during transition
+- write to both legacy Stripe fields and `customer_provider_ids`
+- backfill existing Stripe customer ids into the new mapping table
+- only remove legacy reads after all callbacks and resolver paths are migrated
 
-```typescript
-export const apikeyCustomers = pgTableProject("apikey_customers", {
-  ...projectID,
-  ...timestamps,
-  apikeyId: cuid("apikey_id").notNull(),
-  customerId: cuid("customer_id").notNull(),
-}, (table) => ({
-  primary: primaryKey({ columns: [table.id, table.projectId], name: "apikey_customers_pkey" }),
-  uniqueApikey: uniqueIndex("akc_apikey_idx").on(table.projectId, table.apikeyId),
-  apikeyfk: foreignKey({
-    columns: [table.apikeyId, table.projectId],
-    foreignColumns: [apikeys.id, apikeys.projectId],
-    name: "akc_apikey_fkey",
-  }).onDelete("cascade"),
-  customerfk: foreignKey({
-    columns: [table.customerId, table.projectId],
-    foreignColumns: [customers.id, customers.projectId],
-    name: "akc_customer_fkey",
-  }).onDelete("cascade"),
-}))
-```
-
-Export from schema barrel. Add relations to apikeys and customers.
-
-**3.3 — Add `paymentProvider` to `subscription_phases`**
-
-Add column:
-```typescript
-paymentProvider: paymentProviderEnum("payment_provider").notNull().default("stripe"),
-```
-
-to the `subscriptionPhases` table in `internal/db/src/schema/subscriptions.ts`.
-
-**3.4 — Generate migration**
-
-Run migration generation. The migration should:
-- CREATE `customer_provider_ids` table
-- CREATE `apikey_customers` table
-- ALTER `subscription_phases` ADD COLUMN `payment_provider`
-
-**3.5 — Create validators for new tables**
-
-- `internal/db/src/validators/providerMapping.ts` — select/insert schemas
-  for `customerProviderIds`
-- `internal/db/src/validators/apikeyCustomers.ts` — select/insert schemas
-  for `apikeyCustomers`
-- Export from validators barrel
-
-**3.6 — Add `webhook_events` table**
-
-Add `internal/db/src/schema/webhookEvents.ts`:
-
-Table: `{ id, projectId, provider, providerEventId, eventType, status, payload, error, createdAt, processedAt }`
-Unique constraint on `(projectId, provider, providerEventId)`.
-Status enum: `['pending', 'processed', 'failed']`.
-
-Export from schema barrel. Generate migration.
-
-**3.7 — Write tests validating schema constraints**
-
-Create `internal/db/src/validators/providerMapping.test.ts`:
-
-- Test `customerProviderIdsInsertSchema` validates required fields
-- Test `apikeyCustomersInsertSchema` validates required fields
-- Test that validators reject invalid data
+Files to read first:
+- [internal/services/src/payment-provider/resolver.ts#L106](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/resolver.ts#L106)
+- [internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts#L160](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts#L160)
+- [internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts#L132](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts#L132)
 
 ---
 
-## Phase 4: PaymentCollector Interface
+## Phase 3: Payment Collector Transition
 
-> **PR title:** `feat: replace PaymentProviderInterface with PaymentCollector`
+> **PR title:** `feat: normalize payment collection interface`
 >
-> **Goal:** Create a smaller, provider-agnostic payment collection interface.
-> Rewrite StripePaymentProvider as StripeCollector. Delete the old switch router.
+> **Goal:** Introduce a provider-agnostic collector abstraction while preserving
+> the current resolver responsibilities and Stripe routes until parity is proven.
 >
 > **Branch:** `feat/payment-collector`
 
 ### Commits
 
-**4.1 — Define PaymentCollector interface and normalized types**
+**3.1 — Define collector interface and normalized types**
 
-Create `internal/services/src/payment-provider/collector.ts`:
+Create a provider-agnostic collector contract under `internal/services/src/payment-provider/`.
 
-- `PaymentCollector` interface with 8 methods: `ensureCustomer`, `setupPaymentMethod`,
-  `listPaymentMethods`, `createInvoice`, `collectPayment`, `getPaymentStatus`,
-  `parseWebhook`, and `capabilities` property
-- Normalized types: `SetupResult`, `NormalizedPaymentMethod`,
-  `NormalizedPaymentResult`, `NormalizedWebhookEvent`, `ProviderCapabilities`
-- `CollectorError` extending BaseError
-
-No Stripe types anywhere in this file. All types are provider-agnostic.
+Requirements:
+- no Stripe-specific types in the public collector interface
+- normalized invoice, payment method, and webhook event types
+- clear capability flags where provider behavior differs
 
 Files to read first:
-- `internal/services/src/payment-provider/interface.ts` (current interface — note what to simplify)
+- [internal/services/src/payment-provider/interface.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/interface.ts)
 
-**4.2 — Implement StripeCollector**
+**3.2 — Implement Stripe and Sandbox collectors as adapters**
 
-Create `internal/services/src/payment-provider/stripe-collector.ts`:
-
-Implements `PaymentCollector`. Constructor takes `{ token, providerCustomerId, logger }`.
-
-Map existing `StripePaymentProvider` methods to the new interface:
-- `ensureCustomer` — new (creates Stripe customer if not exists)
-- `setupPaymentMethod` — wraps current `createSession` in setup mode
-- `listPaymentMethods` — wraps current `listPaymentMethods`
-- `createInvoice` — wraps current `createInvoice` + `addInvoiceItem` (single call with all items)
-- `collectPayment` — wraps current `collectPayment`
-- `getPaymentStatus` — wraps current `getStatusInvoice`
-- `parseWebhook` — new (Stripe signature verification + event normalization)
-- `capabilities` — `{ supportsAutoCharge: true, supportsSendInvoice: true, supportsRefunds: true, supportsWebhooks: true, supportedCurrencies: ["USD", "EUR", ...], settlementType: "fiat" }`
+Adapt the existing provider implementations instead of rewriting behavior from scratch.
 
 Files to read first:
-- `internal/services/src/payment-provider/stripe.ts` (existing implementation to wrap)
+- [internal/services/src/payment-provider/stripe.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/stripe.ts)
+- [internal/services/src/payment-provider/sandbox.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/sandbox.ts)
 
-**4.3 — Implement SandboxCollector**
+**3.3 — Evolve `PaymentProviderResolver` instead of bypassing it**
 
-Create `internal/services/src/payment-provider/sandbox-collector.ts`:
+Keep the resolver responsible for:
+- loading provider config
+- decrypting secrets
+- resolving provider customer ids
+- returning the normalized collector implementation
 
-Thin implementation returning mock data. Follow the pattern from
-`internal/services/src/payment-provider/sandbox.ts`.
-
-**4.4 — Create `resolveCollector` factory function**
-
-Create `internal/services/src/payment-provider/resolve.ts`:
-
-```typescript
-export function resolveCollector(
-  provider: PaymentProvider,
-  token: string,
-  providerCustomerId: string | undefined,
-  logger: Logger,
-): PaymentCollector {
-  switch (provider) {
-    case "stripe":
-      return new StripeCollector({ token, providerCustomerId, logger })
-    case "sandbox":
-      return new SandboxCollector({ providerCustomerId, logger })
-    default:
-      throw new Error(`Unknown payment provider: ${provider}`)
-  }
-}
-```
-
-**4.5 — Update CustomerService to use `customer_provider_ids` table**
-
-In `CustomerService`, add method:
-
-```typescript
-async getPaymentCollector(input: {
-  customerId?: string
-  projectId: string
-  provider: PaymentProvider
-}): Promise<Result<PaymentCollector, ...>>
-```
-
-This method:
-1. Queries `paymentProviderConfig` for the API key (existing logic)
-2. Queries `customerProviderIds` for the provider customer mapping (new table)
-3. Calls `resolveCollector()` with the resolved data
-
-Files to modify:
-- `internal/services/src/customers/service.ts`
-
-**4.6 — Update BillingService._upsertPaymentProviderInvoice to use PaymentCollector**
-
-Replace the current provider calls in `_upsertPaymentProviderInvoice`
-(billing/service.ts:1372+) to use the new `PaymentCollector.createInvoice()`
-with all items in a single call.
-
-Files to modify:
-- `internal/services/src/billing/service.ts`
-
-**4.7 — Create `completeProviderSetup` use case (replaces Stripe-specific callbacks)**
-
-Create `internal/services/src/use-cases/payment-provider/complete-provider-setup.ts`:
-
-This replaces the Stripe-specific `completeStripeSignUp` and `completeStripeSetup`
-use cases with a generic provider-agnostic version.
-
-```typescript
-type CompleteProviderSetupDeps = {
-  services: Pick<ServiceContext, "customers" | "subscriptions">
-  db: Database
-  logger: Logger
-  analytics: Analytics
-  waitUntil: (promise: Promise<any>) => void
-}
-
-type CompleteProviderSetupInput = {
-  projectId: string
-  provider: PaymentProvider
-  providerSessionData: Record<string, string>  // query params from callback
-  customerSessionId: string
-}
-
-export async function completeProviderSetup(
-  deps: CompleteProviderSetupDeps,
-  input: CompleteProviderSetupInput,
-): Promise<Result<{ customerId: string; subscriptionId: string }, ...>>
-```
-
-Coordination:
-1. Resolve collector via `resolveCollector(provider, ...)`
-2. Call collector-specific session retrieval (each collector knows its callback format)
-3. Insert into `customer_provider_ids` (store the provider customer mapping)
-4. Find the pending customer session in DB
-5. If subscription was pending: activate it via `deps.services.subscriptions`
-6. Fire analytics event via `deps.waitUntil()`
-
-This is used by a new generic callback route: `GET /v1/checkout/complete/:provider`
-that replaces the existing `/v1/paymentProvider/stripe/signUp/...` and
-`/v1/paymentProvider/stripe/setup/...` routes.
-
-Export from `internal/services/src/use-cases/index.ts`.
+Important constraint:
+- Do not move secret decryption or config lookup into random call sites.
 
 Files to read first:
-- `internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts` (current implementation to generalize)
-- `internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts`
+- [internal/services/src/payment-provider/resolver.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/resolver.ts)
 
-**4.8 — Write tests for StripeCollector, SandboxCollector, and completeProviderSetup**
+**3.4 — Update CustomerService to return the normalized collector**
 
-Create `internal/services/src/payment-provider/collector.test.ts`:
+Migrate `CustomerService.getPaymentProvider()` toward a normalized collector API.
 
-- Test SandboxCollector returns expected mock values for all methods
-- Test `resolveCollector` returns correct implementation per provider
-- Test StripeCollector.createInvoice builds correct Stripe API call shape
-  (mock the Stripe SDK client)
+Requirements:
+- dual-read provider customer ids from the new mapping table and the legacy Stripe field during rollout
+- keep current call sites working while the migration is in progress
 
-Create `internal/services/src/use-cases/payment-provider/complete-provider-setup.test.ts`:
+Files to read first:
+- [internal/services/src/customers/service.ts#L1127](/Users/jhonsfran/repos/unprice/internal/services/src/customers/service.ts#L1127)
 
-- Test with sandbox provider: resolves session, stores mapping, activates subscription
-- Test with missing customer session: returns error
-- Test idempotency: calling twice with same session doesn't duplicate
+**3.5 — Migrate BillingService provider calls without shrinking behavior prematurely**
+
+Move BillingService to the new collector abstraction while preserving the current provider invoice reconciliation flow.
+
+Important constraint:
+- Do not force everything into a single `createInvoice(items)` call if that would remove the existing `getInvoice` / `addInvoiceItem` / `updateInvoiceItem` reconciliation path.
+- Preserve current invoice verification behavior.
+
+Files to read first:
+- [internal/services/src/billing/service.ts#L1428](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L1428)
+
+**3.6 — Add generic provider callback use case without deleting Stripe routes yet**
+
+Create a provider-agnostic callback completion use case.
+
+Requirements:
+- reuse the normalized collector
+- write provider mappings through `customer_provider_ids`
+- continue dual-writing any legacy Stripe fields during transition
+- keep existing Stripe routes alive until the generic route has test parity
+
+Files to read first:
+- [internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts)
+- [internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts)
+- [apps/api/src/routes/paymentProvider/stripeSignUpV1.ts](/Users/jhonsfran/repos/unprice/apps/api/src/routes/paymentProvider/stripeSignUpV1.ts)
+- [apps/api/src/routes/paymentProvider/stripeSetupV1.ts](/Users/jhonsfran/repos/unprice/apps/api/src/routes/paymentProvider/stripeSetupV1.ts)
+
+**3.7 — Write tests for resolver, collectors, and generic callback parity**
+
+Add tests for:
+- resolver dual-read behavior
+- Stripe collector invoice and payment method calls
+- Sandbox collector behavior
+- generic callback idempotency
+- migration parity with current Stripe callback behavior
 
 ---
 
-## Phase 5: Settlement Router
+## Phase 4: Add Idempotent Ledger Foundation
 
-> **PR title:** `feat: add settlement router (wallet, subscription, one_time)`
+> **PR title:** `feat: add idempotent ledger foundation`
 >
-> **Goal:** Create a thin dispatch layer that settles ledger entries via one
-> of three funding sources. Design the type for `threshold_invoice` but don't
-> implement it.
+> **Goal:** Introduce append-only ledger storage that is safe under retries and
+> can serve as the accounting layer between rating and settlement.
 >
-> **Branch:** `feat/settlement-router`
+> **Branch:** `feat/ledger-foundation`
 
 ### Commits
 
-**5.1 — Define FundingSource and SettlementResult types**
+**4.1 — Add ledger schema**
 
-Create `internal/services/src/settlement/types.ts`:
+Add `ledgers` and `ledger_entries` tables.
 
-```typescript
-export type FundingSource =
-  | { kind: "wallet"; walletId: string }
-  | { kind: "subscription"; subscriptionId: string; phaseId: string }
-  | { kind: "one_time" }
-  | { kind: "threshold_invoice"; thresholdCents: number }  // designed, not implemented
+Requirements:
+- one ledger per `(projectId, customerId, currency)`
+- append-only entries
+- settlement metadata
+- source identity metadata for idempotency
 
-export interface SettlementResult {
-  settled: boolean
-  amount: number
-  remainder?: number
-  reason?: string
-}
-```
+Important constraint:
+- The schema must support deterministic deduplication of retried postings.
+- Do not rely on callers to "just not retry".
 
-**5.2 — Create SettlementRouter skeleton with error class**
+**4.2 — Add ledger enums and validators**
 
-Create `internal/services/src/settlement/`:
+Add enums and validator exports for ledger rows.
 
-- `errors.ts` — `UnPriceSettlementError`
-- `service.ts` — `SettlementRouter` class with constructor:
-  ```typescript
-  constructor({
-    db,
-    logger,
-    ledger,
-  }: {
-    db: Database
-    logger: Logger
-    ledger: LedgerService
-  })
-  ```
-- `index.ts` — barrel exports
+Export through the real schema and validator barrels.
 
-**5.3 — Implement `settle` dispatch method**
+**4.3 — Create LedgerService shell**
 
-```typescript
-async settle(input: {
-  projectId: string
-  customerId: string
-  funding: FundingSource
-}): Promise<Result<SettlementResult, UnPriceSettlementError>>
-```
+Create `internal/services/src/ledger/` with:
+- `errors.ts`
+- `service.ts`
+- `index.ts`
+- tests
 
-Implementation:
-1. Call `this.ledger.getUnsettledBalance()` — if balance <= 0, return settled
-2. Switch on `input.funding.kind`:
-   - `"wallet"` → call `this.settleFromWallet()`
-   - `"subscription"` → call `this.attachToSubscription()`
-   - `"one_time"` → call `this.settleOneTime()`
-   - `"threshold_invoice"` → throw "not implemented"
+**4.4 — Implement idempotent `postDebit()` and `postCredit()`**
 
-**5.4 — Implement `settleFromWallet` (wallet debit via ledger credit)**
+Requirements:
+- deterministic source identity, for example a `sourceType + sourceId` pair
+- retries must not create duplicate financial entries
+- running balance must be derived in a transaction
 
-For now, this posts a credit entry to the ledger to offset the debits. The
-actual WalletDO integration comes in Phase 7. The ledger-based settlement
-is sufficient for the accounting side.
+Important constraint:
+- Billing currently retries invoice finalization in failure scenarios, so ledger posting must tolerate repeated attempts.
 
-```typescript
-private async settleFromWallet(
-  unsettled: { balance: number; entries: LedgerEntry[] },
-  funding: Extract<FundingSource, { kind: "wallet" }>,
-): Promise<Result<SettlementResult, UnPriceSettlementError>>
-```
+Files to read first:
+- [internal/services/src/billing/service.ts#L1632](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L1632)
 
-1. Post a credit entry: `this.ledger.postCredit({ sourceType: "wallet_debit", ... })`
-2. Mark original entries as settled: `this.ledger.markSettled({ entryIds, settlementId })`
-3. Return `{ settled: true, amount }`
+**4.5 — Implement `getUnsettledBalance()` and `markSettled()`**
 
-**5.5 — Implement `attachToSubscription`**
+Add read and state-transition methods for unsettled ledger entries.
 
-This attaches unsettled charges to the next subscription invoice. It marks
-them as settled with a reference to the subscription.
+Important constraint:
+- `markSettled()` should be reserved for flows that already have a real downstream consumer or confirmed payment result.
 
-```typescript
-private async attachToSubscription(
-  unsettled: { balance: number; entries: LedgerEntry[] },
-  funding: Extract<FundingSource, { kind: "subscription" }>,
-): Promise<Result<SettlementResult, UnPriceSettlementError>>
-```
+**4.6 — Register LedgerService in the service graph**
 
-1. Mark entries as settled with `settlementId` referencing the subscription
-2. The entries will be picked up at next invoice finalization
-3. Return `{ settled: true, amount }`
+- add it to `ServiceContext`
+- construct it in [internal/services/src/context.ts](/Users/jhonsfran/repos/unprice/internal/services/src/context.ts)
+- export it from [internal/services/package.json](/Users/jhonsfran/repos/unprice/internal/services/package.json)
 
-**5.6 — Implement `settleOneTime`**
+**4.7 — Post invoice-backed debits from BillingService using deterministic source ids**
 
-This creates a one-time charge. For now, it just marks entries as settled —
-the actual provider collection will be wired when the webhook pipeline exists.
+When wiring the ledger into billing:
+- use stable source ids, tied to invoice and item identity
+- avoid duplicate posting on retries
+- skip zero-value debits unless there is a strong accounting reason to persist them
 
-**5.7 — Implement `resolveFundingSource` helper**
+Important constraint:
+- This phase only writes debits that correspond to known internal billing artifacts.
 
-```typescript
-async resolveFundingSource(
-  customerId: string,
-  projectId: string,
-): Promise<FundingSource>
-```
+**4.8 — Write unit tests for retry safety and running balances**
 
-1. Check for active subscription → return `{ kind: "subscription" }`
-2. Default to `{ kind: "one_time" }`
-   (Wallet check added in Phase 7 when WalletDO exists)
+Add tests for:
+- sequential balances
+- idempotent reposting with the same source identity
+- unsettled balance reads
+- settlement marking
+- auto-creation of missing ledgers
 
-**5.8 — Register in context.ts**
+---
 
-- Add `settlement: SettlementRouter` to ServiceContext
-- Create after `ledger` (depends on LedgerService)
-- Add export to package.json
+## Phase 5: Make Billing Consume Ledger Entries Before General Settlement
 
-**5.9 — Write tests for SettlementRouter**
+> **PR title:** `feat: consume unsettled ledger charges in billing`
+>
+> **Goal:** Add the missing bridge between ledger debits and actual invoice or
+> collection behavior. Without this phase, a settlement router would create a
+> dead end.
+>
+> **Branch:** `feat/ledger-consumption`
 
-Create `internal/services/src/settlement/settlement.test.ts`:
+### Commits
 
-- Test `settle` with wallet funding posts credit and marks settled
-- Test `settle` with subscription funding marks settled with subscription ref
-- Test `settle` with one_time funding marks settled
-- Test `settle` with zero balance returns immediately
-- Test `settle` with threshold_invoice throws not implemented
-- Test `resolveFundingSource` returns subscription when active, one_time otherwise
+**5.1 — Define how subscription-backed ledger debits become invoice lines**
+
+Introduce a clear mapping from unsettled ledger entries to invoice items.
+
+Requirements:
+- deterministic linkage between ledger entries and invoice lines
+- ability to trace an invoice line back to the ledger source
+- no duplicate attachment across retries
+
+**5.2 — Teach BillingService to include unsettled subscription-backed ledger debits**
+
+Before any generic settlement router is added, BillingService must be able to:
+- discover eligible unsettled ledger entries
+- turn them into invoiceable items
+- persist linkage metadata
+
+Important constraint:
+- Entries should only be marked settled after the invoice linkage is safely persisted.
+
+**5.3 — Define one-time collection state without prematurely settling entries**
+
+For one-time charges:
+- create a pending collection record or equivalent linkage state
+- do not mark ledger entries settled before payment success exists
+
+**5.4 — Add wallet settlement only if it is immediate and reversible**
+
+Wallet-backed settlement is the only path that can safely post a balancing credit and mark entries settled in one phase, because it is an internal funding source.
+
+If wallet infrastructure does not exist yet, keep wallet support behind an explicit later dependency.
+
+**5.5 — Only now add a SettlementService / SettlementRouter**
+
+After billing consumption exists, add the settlement orchestration layer.
+
+Routing rules:
+- `wallet`: immediate internal credit + settlement marking
+- `subscription`: leave entries billable by the subscription invoice flow until consumed
+- `one_time`: leave entries pending collection until payment succeeds
+- `threshold_invoice`: design only, no implementation required
+
+Important constraint:
+- Do not implement subscription and one-time settlement as "just mark entries settled".
+
+**5.6 — Write tests around consumption and settlement semantics**
+
+Add tests for:
+- unsettled debits appearing on the next invoice exactly once
+- wallet-backed settlement posting a balancing credit
+- one-time flows remaining pending before payment success
+- subscription flows remaining consumable by billing before final settlement
 
 ---
 
 ## Phase 6: Webhook Pipeline
 
-> **PR title:** `feat: add webhook pipeline with normalized event processing`
+> **PR title:** `feat: add provider webhook pipeline`
 >
-> **Goal:** Add a generic webhook endpoint that parses provider-specific
-> events and writes results to the ledger.
+> **Goal:** Add provider webhook handling only after provider mapping, webhook
+> secret storage, ledger, and settlement semantics are in place.
 >
 > **Branch:** `feat/webhook-pipeline`
 
 ### Commits
 
-**6.1 — Add webhook route skeleton**
+**6.1 — Add generic webhook route skeleton**
 
-Create `apps/api/src/routes/webhooks/providerWebhookV1.ts`:
+Create a generic provider webhook route under `apps/api/src/routes/`.
 
-- Route: `POST /v1/webhooks/:provider/:projectId`
-- Parse raw body and headers
-- Resolve collector for the provider
-- Call `collector.parseWebhook()`
+Requirements:
+- parse raw body and headers
+- resolve the normalized collector through the existing provider resolver seam
+- verify signatures using stored webhook secrets
 
-Files to read first:
-- `apps/api/src/routes/events/ingestEventsV1.ts` (route pattern)
-- `apps/api/src/hono/env.ts` (env bindings)
+**6.2 — Implement idempotent event persistence with `webhook_events`**
 
-**6.2 — Implement idempotent event processing loop**
-
-In the webhook route handler:
-
-1. For each normalized event from `parseWebhook()`:
-   - Check `webhookEvents` table for existing `(projectId, provider, providerEventId)`
-   - If `status === "processed"`, skip
-   - Process event based on type
-   - Insert into `webhookEvents` with `status: "processed"`
+For each normalized event:
+- insert or load by `(projectId, provider, providerEventId)`
+- skip already processed events
+- preserve payload and failure context for replay/debugging
 
 **6.3 — Create `processWebhookEvent` use case**
 
-Create `internal/services/src/use-cases/webhook/process-event.ts`:
+Use a dedicated use case for invoice, ledger, and subscription-machine coordination.
 
-This use case coordinates multiple services when processing a webhook event.
-It is a use case (not inline route logic) because it touches invoices, the
-ledger, and optionally the subscription machine.
-
-```typescript
-type ProcessWebhookEventDeps = {
-  services: Pick<ServiceContext, "billing" | "subscriptions" | "ledger">
-  db: Database
-  logger: Logger
-}
-
-type ProcessWebhookEventInput = {
-  event: NormalizedWebhookEvent
-  projectId: string
-}
-
-export async function processWebhookEvent(
-  deps: ProcessWebhookEventDeps,
-  input: ProcessWebhookEventInput,
-): Promise<Result<{ processed: boolean }, UnPriceWebhookError>>
-```
-
-Dispatches on `event.type`:
-
-- `"payment.succeeded"`: find invoice → update status to `"paid"` →
-  `deps.services.ledger.postCredit()` (settlement confirmation entry) →
-  if subscription-backed, call subscription machine `reportInvoiceSuccess`
-- `"payment.failed"`: update invoice payment attempts →
-  if subscription-backed, call subscription machine `reportPaymentFailure`
-- `"payment_method.expired"`: log warning, optionally notify
-- `"dispute.created"`: flag invoice, post reversal to ledger
-
-Export from `internal/services/src/use-cases/index.ts`.
+Requirements:
+- `payment.succeeded` updates invoice state and settles the right ledger entries
+- `payment.failed` updates invoice/payment attempt state and reports machine failure
+- dispute/refund paths use reversal-style ledger entries when appropriate
 
 Files to read first:
-- `internal/services/src/use-cases/customer/sign-up.ts` (use-case pattern)
-- `internal/services/src/billing/service.ts` lines 308-356 (`billingInvoice` — how it calls the machine)
+- [internal/services/src/billing/service.ts#L340](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L340)
+- [internal/services/src/subscriptions/machine.ts](/Users/jhonsfran/repos/unprice/internal/services/src/subscriptions/machine.ts)
 
-**6.4 — Implement `payment.succeeded` inside the use case**
+**6.4 — Implement Stripe webhook parsing in the collector**
 
-In `processWebhookEvent`:
+Requirements:
+- verify signatures correctly
+- normalize supported Stripe event types
+- return provider-agnostic webhook events to the route/use-case layer
 
-1. Find invoice by `providerInvoiceId` in `invoices` table
-2. Update invoice: `status: "paid"`, `paidAt: event.data.paidAt`
-3. Post ledger settlement entry: `ledgerService.postCredit({ sourceType: "settlement", ... })`
-4. Mark related ledger entries as settled: `ledgerService.markSettled()`
-5. If invoice has `subscriptionId`, report success to subscription machine
+**6.5 — Register the route after parity tests pass**
 
-**6.5 — Implement `payment.failed` inside the use case**
+Wire the route into [apps/api/src/index.ts](/Users/jhonsfran/repos/unprice/apps/api/src/index.ts) only after:
+- signature verification works
+- idempotency is covered by tests
+- success/failure invoice transitions are covered by tests
 
-Update invoice payment attempts. If subscription-backed, call
-`SubscriptionMachine.reportPaymentFailure` to trigger state transition.
+**6.6 — Write tests for replay safety and ledger reconciliation**
 
-**6.6 — Implement Stripe webhook parsing in StripeCollector**
-
-Implement `parseWebhook()` in StripeCollector:
-
-1. Verify signature using `stripe.webhooks.constructEvent(body, sig, secret)`
-2. Map Stripe event types to normalized types:
-   - `invoice.payment_succeeded` → `payment.succeeded`
-   - `invoice.payment_failed` → `payment.failed`
-   - `customer.source.expiring` → `payment_method.expired`
-   - `charge.dispute.created` → `dispute.created`
-3. Return `NormalizedWebhookEvent[]`
-
-**6.7 — Register webhook route and wire the use case**
-
-Add route to the Hono app router. The route handler:
-1. Parses raw body + headers
-2. Resolves collector
-3. Calls `collector.parseWebhook()`
-4. For each event, checks idempotency in `webhook_events` table
-5. Calls `processWebhookEvent(deps, { event, projectId })`
-6. Marks event as processed in `webhook_events`
-
-Wire provider config lookup for webhook signing secrets.
-
-Files to read first:
-- `apps/api/src/routes/` (how routes are registered)
-
-**6.8 — Write tests for webhook processing and processWebhookEvent use case**
-
-- Test idempotency: same event processed twice, second is skipped
-- Test `payment.succeeded` updates invoice and posts ledger entry
-- Test `payment.failed` updates invoice attempts
-- Test StripeCollector.parseWebhook with valid Stripe payload
-- Test StripeCollector.parseWebhook rejects invalid signature
+Add tests for:
+- duplicate webhook delivery
+- successful payment settling ledger entries
+- failed payment updating invoice attempts / state transitions
+- invalid signatures being rejected
 
 ---
 
-## Phase 7: Agent Billing Flow
+## Phase 7: Agent Billing Contract And Runtime Flow
 
-> **PR title:** `feat: agent billing via API key with wallet support`
+> **PR title:** `feat: add agent billing flow`
 >
-> **Goal:** Wire the complete agent billing flow: API key → customer resolution,
-> manual grants, wallet-based settlement, and the TraceAggregationDO.
+> **Goal:** Support API-key-backed customer billing, but only after the API and
+> ingestion contracts are extended to make that possible.
 >
 > **Branch:** `feat/agent-billing`
 
 ### Commits
 
-**7.1 — Add customer resolution from API key**
+**7.1 — Add `apikey_customers` service methods and tRPC mutation**
 
-In `ApiKeysService` (or `CustomerService`), add:
+Implement:
+- API key to customer resolution
+- API key to customer linking
 
-```typescript
-async resolveCustomerFromApiKey(input: {
-  apikeyId: string
-  projectId: string
-}): Promise<Result<{ customerId: string }, ...>>
-```
-
-Queries `apikeyCustomers` table. Returns the linked customer ID.
-
-Files to modify:
-- `internal/services/src/apikey/service.ts` or `internal/services/src/customers/service.ts`
-
-**7.2 — Add API key → customer linking endpoint**
-
-If tRPC routes exist for apikeys, add a `linkCustomer` mutation that inserts
-into `apikey_customers`. If not, add the method to `ApiKeysService`.
+Use the existing tRPC apikey router surface as the first integration point.
 
 Files to read first:
-- `internal/trpc/src/router/` (existing tRPC route patterns)
+- `internal/trpc/src/router/lambda/apikeys/`
+- [internal/services/src/apikey/service.ts](/Users/jhonsfran/repos/unprice/internal/services/src/apikey/service.ts)
 
-**7.3 — Add manual grant creation for agents**
+**7.2 — Keep manual grants as a verification step, not a speculative refactor**
 
-Verify that the existing `GrantsManager.createGrant()` supports:
-- `subjectType: "customer"` with no subscription
-- `type: "manual"`
-- A `featurePlanVersionId` for pricing/meter config
-
-If the current implementation requires a subscription context, remove that
-requirement for manual grants. The grant should only need `subjectType`,
-`subjectId`, `featurePlanVersionId`, `limit`, `effectiveAt`, `expiresAt`.
+The current `GrantsManager.createGrant()` already supports `type: "manual"`.
+This step should verify and test agent provisioning scenarios instead of assuming a subscription dependency that does not currently exist.
 
 Files to read first:
-- `internal/services/src/entitlements/grants.ts` (`createGrant` method)
+- [internal/services/src/entitlements/grants.ts#L837](/Users/jhonsfran/repos/unprice/internal/services/src/entitlements/grants.ts#L837)
 
-**7.4 — Update IngestionService sync path to support API key → customer**
+**7.3 — Extend the sync ingestion API contract to support API-key-only resolution**
 
-In the sync ingestion endpoint, before calling `ingestFeatureSync`, resolve
-the customer from the API key if no `customerId` is provided directly.
+Before wiring agent billing into ingestion:
+- make `customerId` optional for the sync ingestion route if API-key-backed resolution is intended
+- resolve the customer from `apikey_customers` when the request omits `customerId`
+- update `resolveContextProjectId()` and request validation accordingly
 
-The existing auth middleware already resolves the API key. Add customer
-resolution as an optional step when the caller is an API key (agent) rather
-than a direct customer.
-
-Files to read first:
-- `apps/api/src/routes/events/ingestEventsSyncV1.ts`
-- `apps/api/src/middleware/` (auth middleware)
-
-**7.5 — Create `reportAgentUsage` use case**
-
-Create `internal/services/src/use-cases/agent/report-usage.ts`:
-
-This is the main cross-service coordination for agent billing. It touches
-rating, ledger, and settlement after the DO meter update succeeds.
-
-```typescript
-type ReportAgentUsageDeps = {
-  services: Pick<ServiceContext, "rating" | "ledger" | "settlement">
-  logger: Logger
-}
-
-type ReportAgentUsageInput = {
-  customerId: string
-  projectId: string
-  featureSlug: string
-  delta: number           // from DO Fact.delta
-  valueAfter: number      // from DO Fact.valueAfter
-  timestamp: number
-  traceId?: string
-  metadata?: Record<string, unknown>
-}
-
-export async function reportAgentUsage(
-  deps: ReportAgentUsageDeps,
-  input: ReportAgentUsageInput,
-): Promise<Result<{
-  charged: number
-  currency: string
-  settled: boolean
-  fundingKind: string
-}, UnPriceAgentUsageError>>
-```
-
-Coordination:
-1. Rate: `deps.services.rating.rateIncrementalUsage({ quantity: input.delta, currentUsage: input.valueAfter - input.delta, ... })`
-2. Ledger: `deps.services.ledger.postDebit(charge)`
-3. Settle: `deps.services.settlement.resolveFundingSource(customerId, projectId)` then `deps.services.settlement.settle({ funding })`
-4. Return charged amount, settlement status
-
-No transaction needed — each step is independent and idempotent (the DO already
-committed the meter update, and the ledger is append-only).
-
-Export from `internal/services/src/use-cases/index.ts`.
+Important constraint:
+- This is an API contract change, not just an internal service tweak.
 
 Files to read first:
-- `internal/services/src/use-cases/customer/sign-up.ts` (use-case deps pattern)
+- [apps/api/src/routes/events/ingestEventsSyncV1.ts](/Users/jhonsfran/repos/unprice/apps/api/src/routes/events/ingestEventsSyncV1.ts)
+- [apps/api/src/auth/key.ts#L191](/Users/jhonsfran/repos/unprice/apps/api/src/auth/key.ts#L191)
+- [apps/api/src/routes/events/ingestEventsV1.ts#L26](/Users/jhonsfran/repos/unprice/apps/api/src/routes/events/ingestEventsV1.ts#L26)
 
-**7.6 — Wire `reportAgentUsage` into sync ingestion path**
+**7.4 — Extend the entitlement-window contract to expose billing facts if needed**
 
-In the sync ingestion path (`apps/api/src/ingestion/service.ts`), after the
-EntitlementWindowDO returns a successful `apply()` with `{ delta, valueAfter }`:
+`reportAgentUsage()` cannot be wired as originally proposed until the DO/service path exposes enough information, such as `delta` and `valueAfter`.
 
-```typescript
-// After DO apply succeeds and returns facts:
-const fact = facts[0]
-if (fact) {
-  await reportAgentUsage(
-    { services: { rating, ledger, settlement }, logger },
-    {
-      customerId,
-      projectId,
-      featureSlug,
-      delta: fact.delta,
-      valueAfter: fact.valueAfter,
-      timestamp,
-    },
-  )
-}
-```
-
-The use case handles all the cross-service coordination. The ingestion service
-just calls it after the meter update.
-
-This is additive — the existing sync path continues working. The use case call
-happens after the successful meter update.
-
-Files to modify:
-- `apps/api/src/ingestion/service.ts` (sync processing path)
-
-**7.7 — Create `provisionAgentCustomer` use case**
-
-Create `internal/services/src/use-cases/agent/provision-customer.ts`:
-
-This use case coordinates the setup of an agent customer: links API key to
-customer, creates manual grants, and optionally tops up a wallet.
-
-```typescript
-type ProvisionAgentCustomerDeps = {
-  services: Pick<ServiceContext, "apikeys" | "customers" | "grantsManager" | "ledger">
-  db: Database
-  logger: Logger
-}
-
-type ProvisionAgentCustomerInput = {
-  projectId: string
-  apikeyId: string
-  customer: { email: string; name: string }
-  grants: Array<{
-    featurePlanVersionId: string
-    limit: number
-    expiresInDays: number
-  }>
-  walletTopUpCents?: number
-  currency?: string
-}
-
-export async function provisionAgentCustomer(
-  deps: ProvisionAgentCustomerDeps,
-  input: ProvisionAgentCustomerInput,
-): Promise<Result<{ customerId: string }, ...>>
-```
-
-Coordination (inside transaction for atomicity):
-1. Create or find customer via `deps.db` insert/upsert
-2. Link API key → customer in `apikey_customers`
-3. For each grant config, call `deps.services.grantsManager.createGrant({
-   subjectType: "customer", subjectId: customerId, type: "manual", ... })`
-4. If `walletTopUpCents`, call `deps.services.ledger.postCredit({
-   sourceType: "wallet_topup", ... })`
-
-Export from `internal/services/src/use-cases/index.ts`.
-
-This is the admin/dashboard use case for setting up agent customers.
-
-**7.8 — Create TraceAggregationDO skeleton**
-
-Create `apps/api/src/ingestion/TraceAggregationDO.ts`:
-
-- Durable Object with SQLite storage (same pattern as EntitlementWindowDO)
-- Tables: `trace_events` (collected events), `trace_state` (running totals per feature)
-- `apply(event)` method: stores event, updates running total for its feature slug
-- `complete()` method: aggregates all events by feature slug, returns aggregated events
+Requirements:
+- decide whether that data should come from `EntitlementWindowDO.apply()` directly or from another stable interface
+- update the service contract and tests first
+- only then wire downstream rating and ledger posting
 
 Files to read first:
-- `apps/api/src/ingestion/EntitlementWindowDO.ts` (DO pattern to follow exactly)
-- `apps/api/src/ingestion/db/schema.ts` (DO SQLite schema pattern)
+- [apps/api/src/ingestion/EntitlementWindowDO.ts#L121](/Users/jhonsfran/repos/unprice/apps/api/src/ingestion/EntitlementWindowDO.ts#L121)
+- [internal/services/src/ingestion/service.ts#L768](/Users/jhonsfran/repos/unprice/internal/services/src/ingestion/service.ts#L768)
 
-**7.9 — Add trace routing in IngestionService**
+**7.5 — Add `reportAgentUsage` use case after the contract exists**
 
-In the ingestion service, before the normal processing path:
+Once the ingestion contract provides enough facts:
+- rate the incremental usage through `RatingService`
+- post idempotent ledger debits
+- resolve funding strategy
+- settle only through the semantics established in Phase 5
 
-1. Check if event has `traceId` in properties
-2. If yes and event slug is NOT `__trace_complete`:
-   - Route to TraceAggregationDO keyed by `trace:{appEnv}:{projectId}:{customerId}:{traceId}`
-   - DO accumulates the event, returns `{ accepted: true }`
-   - Skip normal EntitlementWindowDO processing for this event
-3. If yes and event slug IS `__trace_complete`:
-   - Call TraceAggregationDO.complete()
-   - For each aggregated result, emit back through `ingestFeatureSync()`
-4. If no traceId, proceed with normal path
+Important constraint:
+- this use case is downstream of the ingestion contract change, not a prerequisite for it
 
-**7.10 — Add alarm-based timeout for TraceAggregationDO**
+**7.6 — Wire `reportAgentUsage` into the sync ingestion path**
 
-Set an alarm (e.g., 5 minutes) on first event. If `__trace_complete` hasn't
-arrived by alarm time, trigger `complete()` automatically and emit aggregated
-events. Then self-destruct (delete all storage).
+Only after `customerId` resolution and metering-fact output are both available.
 
-Follow the alarm pattern from EntitlementWindowDO (lines 294-374).
+Important constraint:
+- do not insert speculative calls into the ingestion path before the data contract is real
 
-**7.11 — Write tests for use cases and integration**
+**7.7 — Add `provisionAgentCustomer` use case**
 
-Create `internal/services/src/use-cases/agent/report-usage.test.ts`:
+Coordinate:
+- customer creation or lookup
+- api key linking
+- manual grant creation
+- optional wallet top-up, if wallet infrastructure exists by then
 
-- Test: `reportAgentUsage` rates, posts debit, and settles
-- Test: `reportAgentUsage` with zero-cost event (within free tier) posts $0 debit
-- Test: `reportAgentUsage` propagates rating error when no grants found
+**7.8 — Write tests for the full agent-billing path**
 
-Create `internal/services/src/use-cases/agent/provision-customer.test.ts`:
+Add tests for:
+- API key to customer resolution
+- provisioning with manual grants
+- sync ingestion with API-key-only customer resolution
+- incremental rating and ledger posting after metering facts are available
 
-- Test: `provisionAgentCustomer` creates customer, links apikey, creates grants
-- Test: `provisionAgentCustomer` with wallet top-up posts credit to ledger
-- Test: `provisionAgentCustomer` rolls back on grant creation failure (transaction)
+---
 
-Create `apps/api/src/ingestion/trace-aggregation.test.ts`:
+## Phase 8: Trace Aggregation DO (Optional Extension)
 
-- Test: TraceAggregationDO collects events and emits aggregated result on complete
-- Test: TraceAggregationDO fires on timeout when no complete signal
-- Test: TraceAggregationDO aggregates multiple features from same trace
-- Test: duplicate events (same idempotency key) are deduplicated
+> **PR title:** `feat: add trace aggregation durable object`
+>
+> **Goal:** Aggregate trace-scoped usage events before billing them. This is a
+> useful extension, but it is not required to land the pricing, provider,
+> ledger, and agent-billing foundations above.
+>
+> **Branch:** `feat/trace-aggregation`
+
+### Commits
+
+**8.1 — Create TraceAggregationDO skeleton**
+
+Follow the Durable Object and SQLite patterns used by [apps/api/src/ingestion/EntitlementWindowDO.ts](/Users/jhonsfran/repos/unprice/apps/api/src/ingestion/EntitlementWindowDO.ts).
+
+**8.2 — Add trace routing in ingestion**
+
+Requirements:
+- detect trace-scoped events
+- buffer them under a stable trace key
+- complete explicitly or on timeout
+- re-emit aggregated results through the normal ingestion path
+
+**8.3 — Add alarm-based timeout and cleanup**
+
+Mirror the existing alarm and self-destruction patterns where appropriate.
+
+**8.4 — Add integration tests**
+
+Add tests for:
+- explicit completion
+- timeout completion
+- multi-feature aggregation
+- duplicate event handling
 
 ---
 
 ## Phase Summary
 
 ```
-Phase 1: Extract RatingService ──��───── (7 commits, 1 PR)
-  Decouples rating from billing. Pure extraction + new incremental method.
-  Tests: unit tests for flat/tiered/volume/package pricing.
+Phase 1: Extract Pricing Core And RatingService
+  First remove duplication risk. Make BillingService and incremental usage rating
+  share one pricing implementation.
 
-Phase 2: Add Ledger ─────────────────── (10 commits, 1 PR)
-  Append-only financial log in Postgres. Wired to billing.
-  Tests: unit tests for debit/credit/balance/settlement.
+Phase 2: Provider Mapping Foundation
+  Add provider/customer mapping, API-key/customer mapping, webhook event storage,
+  and webhook-secret support with dual-read and dual-write migration rules.
 
-Phase 3: Provider Schema Changes ────── (7 commits, 1 PR)
-  New tables: customer_provider_ids, apikey_customers, webhook_events.
-  paymentProvider moves to subscription_phases.
-  Tests: validator tests.
+Phase 3: Payment Collector Transition
+  Normalize the payment interface by evolving the existing resolver seam instead
+  of bypassing it. Keep Stripe callback routes until parity is proven.
 
-Phase 4: PaymentCollector Interface ──── (8 commits, 1 PR)
-  New interface replaces old. StripeCollector + SandboxCollector.
-  BillingService uses new interface.
-  Use case: completeProviderSetup (generic checkout callback).
-  Tests: collector + use case tests.
+Phase 4: Add Idempotent Ledger Foundation
+  Add retry-safe ledger storage and deterministic posting semantics.
 
-Phase 5: Settlement Router ──────────── (9 commits, 1 PR)
-  Dispatches to wallet/subscription/one_time.
-  threshold_invoice designed, not implemented.
-  Tests: settlement unit tests.
+Phase 5: Make Billing Consume Ledger Entries Before General Settlement
+  Add the missing runtime path that turns ledger debits into invoiceable or
+  collectable work. Only then introduce a generic settlement router.
 
-Phase 6: Webhook Pipeline ──────────── (8 commits, 1 PR)
-  Generic webhook endpoint with idempotent processing.
-  Use case: processWebhookEvent (coordinates invoice + ledger + sub machine).
-  Stripe webhook parsing. Ledger reconciliation.
-  Tests: idempotency + use case + event processing tests.
+Phase 6: Webhook Pipeline
+  Add signature verification, event idempotency, invoice transitions, and ledger
+  reconciliation.
 
-Phase 7: Agent Billing Flow ─���───────── (11 commits, 1 PR)
-  API key → customer, manual grants, TraceAggregationDO.
-  Use cases: reportAgentUsage (rating + ledger + settlement),
-             provisionAgentCustomer (setup apikey + grants + wallet).
-  Rating + ledger + settlement wired to sync ingestion.
-  Tests: use case unit tests + DO integration tests.
+Phase 7: Agent Billing Contract And Runtime Flow
+  Extend the API and ingestion contracts first, then wire agent usage into
+  rating, ledger, and settlement.
+
+Phase 8: Trace Aggregation DO (Optional Extension)
+  Add trace-scoped aggregation after the main billing foundations are stable.
 ```
 
-**Parallel tracks:** Phases 1-2 can run in parallel with Phase 3.
-Phase 4 depends on Phase 3. Phases 5 and 6 depend on 2+4.
-Phase 7 depends on all previous phases.
+## Dependencies
 
-**Total: ~60 commits across 7 PRs.**
+1. Phase 1 is a prerequisite for safe incremental usage rating.
+2. Phase 2 is a prerequisite for Phases 3 and 6.
+3. Phase 3 depends on Phase 2.
+4. Phase 4 depends on Phase 1.
+5. Phase 5 depends on Phase 4.
+6. Phase 6 depends on Phases 2, 3, 4, and 5.
+7. Phase 7 depends on Phases 1, 2, 4, and 5, and partially on Phase 6 if one-time settlement is provider-backed.
+8. Phase 8 depends on Phase 7 only if trace aggregation is part of the agent-billing path.
 
----
+## Non-Goals For The First Pass
 
-## Use Cases Summary
-
-These are the cross-service coordination points implemented as use-case
-functions (not service methods) following the `use-cases/` pattern:
-
-| Use Case | Phase | Coordinates | Location |
-|----------|-------|-------------|----------|
-| `completeProviderSetup` | 4 | collector + customers + subscriptions | `use-cases/payment-provider/complete-provider-setup.ts` |
-| `processWebhookEvent` | 6 | billing + ledger + subscriptions | `use-cases/webhook/process-event.ts` |
-| `reportAgentUsage` | 7 | rating + ledger + settlement | `use-cases/agent/report-usage.ts` |
-| `provisionAgentCustomer` | 7 | apikeys + customers + grants + ledger | `use-cases/agent/provision-customer.ts` |
-
-Each use case:
-- Takes `deps: { services: Pick<ServiceContext, ...>, db, logger, ... }`
-- Returns `Promise<Result<T, E>>`
-- Is barrel-exported from `use-cases/index.ts`
-- Has its own test file
-
----
-
-## Validation Checkpoints
-
-After each phase, verify:
-
-1. `pnpm typecheck` passes (or the project's type-checking command)
-2. `pnpm test` passes for the affected packages
-3. Existing billing tests still pass (regression check)
-4. New tests pass
-5. No circular dependencies in service graph
-
-If any check fails, fix before proceeding to the next phase.
-
-If the plan describes code that doesn't match reality (e.g., a method doesn't
-exist, a table has different columns, a pattern is different), **stop and ask
-for clarification** before improvising.
+- removing `customers.stripeCustomerId` in the same PR that introduces provider mappings
+- deleting Stripe callback routes before generic-provider parity exists
+- marking subscription-backed or one-time ledger entries settled before there is a consumer for them
+- introducing a second standalone pricing algorithm for incremental usage

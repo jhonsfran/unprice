@@ -30,7 +30,7 @@
     "with-infisical-prod": "infisical run --env=prod --path=/ --recursive --",
     "typecheck": "turbo run typecheck",
     "wh": "pnpm dlx webhookthing@latest",
-    "knip": "knip --include files,dependencies",
+    "knip": "knip --use-tsconfig-files --include files,dependencies",
     "test": "cross-env SKIP_ENV_VALIDATION=1 NODE_ENV=test turbo run test",
     "fmt:fix": "pnpm biome format . --write && pnpm biome check .  --write --unsafe ",
     "fmt": "pnpm biome format . && pnpm biome check .",
