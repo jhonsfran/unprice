@@ -508,9 +508,6 @@ importers:
       '@unprice/analytics':
         specifier: workspace:^
         version: link:../analytics
-      '@unprice/api':
-        specifier: workspace:^
-        version: link:../../packages/api
       '@unprice/config':
         specifier: workspace:^
         version: link:../config
@@ -520,9 +517,6 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../error
-      bcryptjs:
-        specifier: ^3.0.2
-        version: 3.0.3
       encoding:
         specifier: ^0.1.13
         version: 0.1.13
@@ -557,6 +551,9 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.33)(terser@5.46.0)
 
   internal/config:
     dependencies:
@@ -848,6 +845,9 @@ importers:
 
   internal/services:
     dependencies:
+      '@dinero.js/currencies':
+        specifier: 2.0.0-alpha.14
+        version: 2.0.0-alpha.14
       '@t3-oss/env-core':
         specifier: ^0.12.0
         version: 0.12.0(typescript@5.9.3)(zod@3.25.76)
@@ -887,6 +887,9 @@ importers:
       date-fns-tz:
         specifier: ^3.2.0
         version: 3.2.0(date-fns@3.6.0)
+      dinero.js:
+        specifier: 2.0.0-alpha.14
+        version: 2.0.0-alpha.14
       p-limit:
         specifier: ^7.1.1
         version: 7.3.0
@@ -6357,10 +6360,6 @@ packages:
   basic-ftp@5.1.0:
     resolution: {integrity: sha512-RkaJzeJKDbaDWTIPiJwubyljaEPwpVWkm9Rt5h9Nd6h7tEXTJ3VB4qxdZBioV7JO5yLUaOKwz7vDOzlncUsegw==}
     engines: {node: '>=10.0.0'}
-
-  bcryptjs@3.0.3:
-    resolution: {integrity: sha512-GlF5wPWnSa/X5LKM1o0wz0suXIINz1iHRLvTS+sLyi7XPbe5ycmYI3DlZqVGZZtDgl4DmasFg7gOB3JYbphV5g==}
-    hasBin: true
 
   better-opn@3.0.2:
     resolution: {integrity: sha512-aVNobHnJqLiUelTaHat9DZ1qM2w0C0Eym4LPI/3JxOnSokGVdsl1T1kN7TFvsEAD8G47A6VKQ0TVHqbBnYMJlQ==}
@@ -18314,8 +18313,6 @@ snapshots:
   baseline-browser-mapping@2.9.19: {}
 
   basic-ftp@5.1.0: {}
-
-  bcryptjs@3.0.3: {}
 
   better-opn@3.0.2:
     dependencies:

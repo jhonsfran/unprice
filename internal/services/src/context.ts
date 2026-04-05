@@ -1,3 +1,4 @@
+import { AnalyticsService } from "./analytics/service"
 import { BillingService } from "./billing/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
@@ -18,6 +19,7 @@ import { WorkspaceService } from "./workspaces/service"
  * no service creates its own child services.
  */
 export interface ServiceContext {
+  analytics: AnalyticsService
   customers: CustomerService
   domains: DomainService
   features: FeatureService
@@ -41,6 +43,12 @@ export interface ServiceContext {
  */
 export function createServiceContext(deps: ServiceDeps): ServiceContext {
   // 1. Leaf services (no service deps)
+  const analytics = new AnalyticsService({
+    db: deps.db,
+    logger: deps.logger,
+    analytics: deps.analytics,
+  })
+
   const customers = new CustomerService({
     db: deps.db,
     logger: deps.logger,
@@ -132,6 +140,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   customers.setSubscriptionService(subscriptions)
 
   return {
+    analytics,
     customers,
     domains,
     features,

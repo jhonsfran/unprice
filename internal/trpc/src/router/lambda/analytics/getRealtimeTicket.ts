@@ -18,14 +18,19 @@ export const getRealtimeTicket = protectedProjectProcedure
   .mutation(async (opts) => {
     const { customerId } = opts.input
     const { project } = opts.ctx
+    const { analytics } = opts.ctx.services
 
-    const customer = await opts.ctx.db.query.customers.findFirst({
-      where: (table, { and, eq }) => and(eq(table.id, customerId), eq(table.projectId, project.id)),
-      columns: {
-        id: true,
-        projectId: true,
-      },
+    const { err: customerErr, val: customer } = await analytics.getRealtimeTicketCustomer({
+      customerId,
+      projectId: project.id,
     })
+
+    if (customerErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: customerErr.message,
+      })
+    }
 
     if (!customer) {
       throw new TRPCError({
