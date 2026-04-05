@@ -5,6 +5,7 @@ import type { ServiceDeps } from "./deps"
 import { DomainService } from "./domains/service"
 import { GrantsManager } from "./entitlements/grants"
 import { EntitlementService } from "./entitlements/service"
+import { EventService } from "./events/service"
 import { FeatureService } from "./features/service"
 import { PageService } from "./pages/service"
 import { PlanService } from "./plans/service"
@@ -22,6 +23,7 @@ export interface ServiceContext {
   analytics: AnalyticsService
   customers: CustomerService
   domains: DomainService
+  events: EventService
   features: FeatureService
   pages: PageService
   projects: ProjectService
@@ -78,6 +80,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   const domains = new DomainService({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
+  const events = new EventService({
     db: deps.db,
     logger: deps.logger,
   })
@@ -143,6 +150,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     analytics,
     customers,
     domains,
+    events,
     features,
     pages,
     projects,

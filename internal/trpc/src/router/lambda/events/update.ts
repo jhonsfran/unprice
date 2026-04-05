@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { eventSelectBaseSchema, eventUpdateBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -11,6 +9,7 @@ export const update = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id, name, availableProperties } = opts.input
     const project = opts.ctx.project
+    const { events: eventService } = opts.ctx.services
     const hasAvailableProperties = Object.prototype.hasOwnProperty.call(
       opts.input,
       "availableProperties"
@@ -18,42 +17,27 @@ export const update = protectedProjectProcedure
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const existingEvent = await opts.ctx.db.query.events.findFirst({
-      where: (event, { eq, and }) => and(eq(event.id, id), eq(event.projectId, project.id)),
+    const { err, val } = await eventService.updateEvent({
+      projectId: project.id,
+      id,
+      name,
+      availableProperties,
+      hasAvailableProperties,
     })
 
-    if (!existingEvent?.id) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "Event not found",
       })
     }
 
-    const nextAvailableProperties = hasAvailableProperties
-      ? Array.from(
-          new Set([...(existingEvent.availableProperties ?? []), ...(availableProperties ?? [])])
-        )
-      : undefined
-
-    const event = await opts.ctx.db
-      .update(schema.events)
-      .set({
-        ...(name && { name }),
-        ...(hasAvailableProperties && {
-          availableProperties: nextAvailableProperties?.length ? nextAvailableProperties : null,
-        }),
-        updatedAtM: Date.now(),
-      })
-      .where(and(eq(schema.events.id, id), eq(schema.events.projectId, project.id)))
-      .returning()
-      .then((rows) => rows[0])
-
-    if (!event) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Error updating event",
-      })
-    }
-
-    return { event }
+    return { event: val.event }
   })

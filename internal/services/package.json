@@ -13,6 +13,7 @@
     "./customers": "./src/customers/index.ts",
     "./analytics": "./src/analytics/index.ts",
     "./domains": "./src/domains/index.ts",
+    "./events": "./src/events/index.ts",
     "./features": "./src/features/index.ts",
     "./pages": "./src/pages/index.ts",
     "./workspaces": "./src/workspaces/index.ts",
