@@ -924,6 +924,45 @@ Apply these rules to every file you touch during P0. Don't do a separate sweep.
   - Only log `warn/error` for unexpected failures (DB connection lost, cache unavailable).
   - Removed expected-path not-found warn/error logs in `subscriptions/invokes.ts`.
 
+### P0.6 — API app parity (ingestion/project/payment callbacks)
+
+Apply the same thin-adapter architecture in `apps/api` for ingestion and project paths,
+including adjacent payment callback routes.
+
+- [x] **P0.6.1 — Roadmap checkpoint + execution discipline**
+  - Added this section and explicit checkpoint flow for API parity work.
+  - Required flow for each checkpoint:
+    1. implement the checkpoint scope only
+    2. run validation hooks
+    3. fix validation issues
+    4. commit before moving to the next checkpoint
+  - Core validation hooks per checkpoint:
+    - `pnpm --filter api test`
+    - `pnpm --filter @unprice/services test`
+    - `pnpm --filter api typecheck` (or `npx tsc --noEmit -p apps/api/tsconfig.json`)
+
+- [ ] **P0.6.2 — Project composition-root migration**
+  - Remove `ApiProjectService` usage from API service bag and Hono env typing.
+  - Use `svcCtx.projects` from `createServiceContext` directly in `apps/api/src/middleware/init.ts`.
+  - Update project route adapter to call `ProjectService.getProjectFeatures` and map `Result` errors.
+  - Verify with checkpoint hooks and commit.
+
+- [ ] **P0.6.3 — Ingestion factory consolidation**
+  - Introduce a shared ingestion service factory used by both HTTP init wiring and queue consumer.
+  - Keep ingestion HTTP routes as thin adapters (auth, validation, queueing only).
+  - Keep orchestration in `IngestionService`.
+  - Add/update tests for shared ingestion wiring.
+  - Verify with checkpoint hooks and commit.
+
+- [ ] **P0.6.4 — Payment callback use-cases + thin routes**
+  - Extract Stripe callback orchestration into:
+    - `internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts`
+    - `internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts`
+  - Keep routes limited to request parsing, rate-limit, invoking use-case, and redirect response.
+  - Remove route-level DB queries/mutations and `db` threading from callbacks.
+  - Add/update tests to preserve behavior (not found/conflict/success redirects).
+  - Verify with checkpoint hooks and commit.
+
 ### P2 — Cross-cutting cleanup (after P0 is stable)
 
 - [x] **Extract cache.swr + retry into reusable wrapper**
