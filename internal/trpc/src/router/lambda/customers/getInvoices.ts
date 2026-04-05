@@ -3,32 +3,35 @@ import { customerSelectSchema, subscriptionInvoiceSelectSchema } from "@unprice/
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
+const getInvoicesOutputSchema = z.object({
+  customer: customerSelectSchema.extend({
+    invoices: subscriptionInvoiceSelectSchema.array(),
+  }),
+})
+
 export const getInvoices = protectedProjectProcedure
   .input(
     z.object({
       customerId: z.string(),
     })
   )
-  .output(
-    z.object({
-      customer: customerSelectSchema.extend({
-        invoices: subscriptionInvoiceSelectSchema.array(),
-      }),
-    })
-  )
+  .output(getInvoicesOutputSchema)
   .query(async (opts) => {
     const { customerId } = opts.input
     const { project } = opts.ctx
+    const { customers } = opts.ctx.services
 
-    const customerWithSubscriptions = await opts.ctx.db.query.customers.findFirst({
-      with: {
-        invoices: {
-          orderBy: (table, { desc }) => [desc(table.dueAt)],
-        },
-      },
-      where: (table, { eq, and }) => and(eq(table.id, customerId), eq(table.projectId, project.id)),
-      orderBy: (table, { desc }) => [desc(table.createdAtM)],
+    const { err, val: customerWithSubscriptions } = await customers.getCustomerInvoices({
+      customerId,
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!customerWithSubscriptions) {
       throw new TRPCError({
@@ -37,7 +40,7 @@ export const getInvoices = protectedProjectProcedure
       })
     }
 
-    return {
+    return getInvoicesOutputSchema.parse({
       customer: customerWithSubscriptions,
-    }
+    })
   })

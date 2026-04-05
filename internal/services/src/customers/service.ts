@@ -1,7 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, eq } from "@unprice/db"
+import { type Database, and, count, eq, getTableColumns, ilike, or } from "@unprice/db"
 import { customers, subscriptions } from "@unprice/db/schema"
-import { AesGCM } from "@unprice/db/utils"
+import { AesGCM, withDateFilters, withPagination } from "@unprice/db/utils"
 import type {
   Customer,
   CustomerPaymentMethod,
@@ -466,6 +466,290 @@ export class CustomerService {
     }
 
     return Ok({ customerId: val.id, projectId: val.projectId })
+  }
+
+  public async customerExistsByEmail({
+    projectId,
+    email,
+  }: {
+    projectId: string
+    email: string
+  }): Promise<Result<boolean, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        columns: {
+          id: true,
+        },
+        where: (customer, { eq, and }) =>
+          and(eq(customer.projectId, projectId), eq(customer.email, email)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error checking customer existence by email: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error checking customer existence by email", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(Boolean(val))
+  }
+
+  public async getCustomerByEmail({
+    projectId,
+    email,
+  }: {
+    projectId: string
+    email: string
+  }): Promise<Result<Customer | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        where: (customer, { eq, and }) =>
+          and(eq(customer.projectId, projectId), eq(customer.email, email)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer by email: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting customer by email", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as Customer | null) ?? null)
+  }
+
+  public async getCustomerSubscriptions({
+    customerId,
+    projectId,
+    now,
+  }: {
+    customerId: string
+    projectId: string
+    now: number
+  }): Promise<Result<unknown | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        with: {
+          subscriptions: {
+            with: {
+              customer: true,
+              phases: {
+                where: (table, { and, gte, lte, isNull, or }) =>
+                  and(lte(table.startAt, now), or(isNull(table.endAt), gte(table.endAt, now))),
+                orderBy: (table, { desc }) => [desc(table.startAt)],
+                limit: 1,
+              },
+            },
+          },
+          invoices: {
+            orderBy: (table, { desc }) => [desc(table.dueAt)],
+          },
+        },
+        where: (table, { eq, and }) =>
+          and(eq(table.id, customerId), eq(table.projectId, projectId)),
+        orderBy: (table, { desc }) => [desc(table.createdAtM)],
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer subscriptions: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting customer subscriptions", {
+        error: toErrorContext(err),
+        customerId,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val ?? null)
+  }
+
+  public async getCustomerInvoices({
+    customerId,
+    projectId,
+  }: {
+    customerId: string
+    projectId: string
+  }): Promise<Result<unknown | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        with: {
+          invoices: {
+            orderBy: (table, { desc }) => [desc(table.dueAt)],
+          },
+        },
+        where: (table, { eq, and }) =>
+          and(eq(table.id, customerId), eq(table.projectId, projectId)),
+        orderBy: (table, { desc }) => [desc(table.createdAtM)],
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer invoices: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting customer invoices", {
+        error: toErrorContext(err),
+        customerId,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val ?? null)
+  }
+
+  public async getInvoiceById({
+    invoiceId,
+    customerId,
+    projectId,
+  }: {
+    invoiceId: string
+    customerId: string
+    projectId: string
+  }): Promise<Result<unknown | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.invoices.findFirst({
+        with: {
+          customer: true,
+          subscription: true,
+          invoiceItems: {
+            with: {
+              featurePlanVersion: {
+                with: {
+                  planVersion: {
+                    with: {
+                      plan: true,
+                    },
+                  },
+                  feature: true,
+                },
+              },
+              billingPeriod: true,
+            },
+          },
+        },
+        where: (table, { eq, and }) =>
+          and(
+            eq(table.id, invoiceId),
+            eq(table.customerId, customerId),
+            eq(table.projectId, projectId)
+          ),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting invoice by id: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting invoice by id", {
+        error: toErrorContext(err),
+        customerId,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val ?? null)
+  }
+
+  public async listCustomersByProject({
+    projectId,
+    page,
+    pageSize,
+    search,
+    from,
+    to,
+  }: {
+    projectId: string
+    page: number
+    pageSize: number
+    search?: string
+    from?: number
+    to?: number
+  }): Promise<Result<{ customers: Customer[]; pageCount: number }, FetchError>> {
+    const columns = getTableColumns(customers)
+    const filter = `%${search ?? ""}%`
+    const expressions = [
+      search ? or(ilike(columns.name, filter), ilike(columns.email, filter)) : undefined,
+      eq(columns.projectId, projectId),
+      eq(columns.isMain, false),
+    ]
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const query = tx.select().from(customers).$dynamic()
+        const whereQuery = withDateFilters<Customer>(
+          expressions,
+          columns.createdAtM,
+          from ?? null,
+          to ?? null
+        )
+
+        const data = await withPagination(
+          query,
+          whereQuery,
+          [
+            {
+              column: columns.createdAtM,
+              order: "desc",
+            },
+          ],
+          page,
+          pageSize
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(customers)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        return {
+          customers: data as Customer[],
+          pageCount: Math.ceil(total / pageSize),
+        }
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing customers by project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error listing customers by project", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val)
   }
 
   /**

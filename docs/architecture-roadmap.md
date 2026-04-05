@@ -850,7 +850,7 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
 
 - [ ] **Migrate simple queries by domain** (one commit per domain):
   - [x] `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug
-  - `customers/` — getById, getByEmail, exist, getSubscriptions, getInvoices, getInvoiceById, listByActiveProject
+  - [x] `customers/` — getById, getByEmail, exist, getSubscriptions, getInvoices, getInvoiceById, listByActiveProject
   - `features/` — getById, getBySlug, searchBy, listByActiveProject, exist
   - `pages/` — getById, getByDomain, listByActiveProject, update
   - `workspaces/` — getBySlug, listMembersByActiveWorkspace, listInvitesByActiveWorkspace, listWorkspacesByActiveUser

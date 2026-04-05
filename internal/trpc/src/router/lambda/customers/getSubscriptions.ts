@@ -8,56 +8,45 @@ import {
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
+const getSubscriptionsOutputSchema = z.object({
+  customer: customerSelectSchema
+    .extend({
+      subscriptions: subscriptionSelectSchema
+        .extend({
+          customer: customerSelectSchema,
+          phases: subscriptionPhaseSelectSchema.array(),
+        })
+        .array(),
+    })
+    .extend({
+      invoices: subscriptionInvoiceSelectSchema.array(),
+    }),
+})
+
 export const getSubscriptions = protectedProjectProcedure
   .input(
     z.object({
       customerId: z.string(),
     })
   )
-  .output(
-    z.object({
-      customer: customerSelectSchema
-        .extend({
-          subscriptions: subscriptionSelectSchema
-            .extend({
-              customer: customerSelectSchema,
-              phases: subscriptionPhaseSelectSchema.array(),
-            })
-            .array(),
-        })
-        .extend({
-          invoices: subscriptionInvoiceSelectSchema.array(),
-        }),
-    })
-  )
+  .output(getSubscriptionsOutputSchema)
   .query(async (opts) => {
     const { customerId } = opts.input
     const { project } = opts.ctx
+    const { customers } = opts.ctx.services
 
-    const customerWithSubscriptions = await opts.ctx.db.query.customers.findFirst({
-      with: {
-        subscriptions: {
-          with: {
-            customer: true,
-            phases: {
-              // get the active phase, and the start and end date is between now and the end date
-              where: (table, { and, gte, lte, isNull, or }) =>
-                and(
-                  lte(table.startAt, Date.now()),
-                  or(isNull(table.endAt), gte(table.endAt, Date.now()))
-                ),
-              orderBy: (table, { desc }) => [desc(table.startAt)],
-              limit: 1,
-            },
-          },
-        },
-        invoices: {
-          orderBy: (table, { desc }) => [desc(table.dueAt)],
-        },
-      },
-      where: (table, { eq, and }) => and(eq(table.id, customerId), eq(table.projectId, project.id)),
-      orderBy: (table, { desc }) => [desc(table.createdAtM)],
+    const { err, val: customerWithSubscriptions } = await customers.getCustomerSubscriptions({
+      customerId,
+      projectId: project.id,
+      now: Date.now(),
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!customerWithSubscriptions) {
       throw new TRPCError({
@@ -66,7 +55,7 @@ export const getSubscriptions = protectedProjectProcedure
       })
     }
 
-    return {
+    return getSubscriptionsOutputSchema.parse({
       customer: customerWithSubscriptions,
-    }
+    })
   })

@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 
 import { customerSelectSchema } from "@unprice/db/validators"
@@ -9,16 +10,21 @@ export const exist = protectedProjectProcedure
   .mutation(async (opts) => {
     const { email } = opts.input
     const project = opts.ctx.project
+    const { customers } = opts.ctx.services
 
-    const customerData = await opts.ctx.db.query.customers.findFirst({
-      columns: {
-        id: true,
-      },
-      where: (customer, { eq, and }) =>
-        and(eq(customer.projectId, project.id), eq(customer.email, email)),
+    const { err, val: exists } = await customers.customerExistsByEmail({
+      projectId: project.id,
+      email,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      exist: !!customerData,
+      exist: exists,
     }
   })

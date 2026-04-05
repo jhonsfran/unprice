@@ -10,11 +10,19 @@ export const getByEmail = protectedProjectProcedure
   .query(async (opts) => {
     const { email } = opts.input
     const project = opts.ctx.project
+    const { customers } = opts.ctx.services
 
-    const customerData = await opts.ctx.db.query.customers.findFirst({
-      where: (customer, { eq, and }) =>
-        and(eq(customer.projectId, project.id), eq(customer.email, email)),
+    const { err, val: customerData } = await customers.getCustomerByEmail({
+      projectId: project.id,
+      email,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!customerData) {
       throw new TRPCError({

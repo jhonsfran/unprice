@@ -13,6 +13,26 @@ import {
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
+const getInvoiceByIdOutputSchema = z.object({
+  invoice: subscriptionInvoiceSelectSchema.extend({
+    customer: customerSelectSchema,
+    subscription: subscriptionSelectSchema,
+    invoiceItems: invoiceItemSelectSchema
+      .extend({
+        billingPeriod: selectBillingPeriodSchema.nullable(),
+        featurePlanVersion: planVersionFeatureSelectBaseSchema
+          .extend({
+            feature: featureSelectBaseSchema,
+            planVersion: planVersionSelectBaseSchema.extend({
+              plan: planSelectBaseSchema,
+            }),
+          })
+          .nullable(),
+      })
+      .array(),
+  }),
+})
+
 export const getInvoiceById = protectedProjectProcedure
   .input(
     z.object({
@@ -20,58 +40,24 @@ export const getInvoiceById = protectedProjectProcedure
       customerId: z.string(),
     })
   )
-  .output(
-    z.object({
-      invoice: subscriptionInvoiceSelectSchema.extend({
-        customer: customerSelectSchema,
-        subscription: subscriptionSelectSchema,
-        invoiceItems: invoiceItemSelectSchema
-          .extend({
-            billingPeriod: selectBillingPeriodSchema.nullable(),
-            featurePlanVersion: planVersionFeatureSelectBaseSchema
-              .extend({
-                feature: featureSelectBaseSchema,
-                planVersion: planVersionSelectBaseSchema.extend({
-                  plan: planSelectBaseSchema,
-                }),
-              })
-              .nullable(),
-          })
-          .array(),
-      }),
-    })
-  )
+  .output(getInvoiceByIdOutputSchema)
   .query(async (opts) => {
     const { invoiceId, customerId } = opts.input
     const { project } = opts.ctx
+    const { customers } = opts.ctx.services
 
-    const invoice = await opts.ctx.db.query.invoices.findFirst({
-      with: {
-        customer: true,
-        subscription: true,
-        invoiceItems: {
-          with: {
-            featurePlanVersion: {
-              with: {
-                planVersion: {
-                  with: {
-                    plan: true,
-                  },
-                },
-                feature: true,
-              },
-            },
-            billingPeriod: true,
-          },
-        },
-      },
-      where: (table, { eq, and }) =>
-        and(
-          eq(table.id, invoiceId),
-          eq(table.customerId, customerId),
-          eq(table.projectId, project.id)
-        ),
+    const { err, val: invoice } = await customers.getInvoiceById({
+      invoiceId,
+      customerId,
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!invoice) {
       throw new TRPCError({
@@ -80,7 +66,7 @@ export const getInvoiceById = protectedProjectProcedure
       })
     }
 
-    return {
-      invoice: invoice,
-    }
+    return getInvoiceByIdOutputSchema.parse({
+      invoice,
+    })
   })
