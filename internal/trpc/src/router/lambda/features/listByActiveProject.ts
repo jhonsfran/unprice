@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -7,11 +8,18 @@ export const listByActiveProject = protectedProjectProcedure
   .output(z.object({ features: z.array(featureSelectBaseSchema) }))
   .query(async (opts) => {
     const project = opts.ctx.project
+    const { features: featureService } = opts.ctx.services
 
-    const features = await opts.ctx.db.query.features.findMany({
-      where: (feature, { eq }) => eq(feature.projectId, project.id),
-      orderBy: (feature, { desc }) => [desc(feature.createdAtM)],
+    const { err, val: features } = await featureService.listFeaturesByProject({
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     return {
       features: features,

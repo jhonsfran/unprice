@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -11,17 +12,19 @@ export const searchBy = protectedProjectProcedure
   .query(async (opts) => {
     const { search } = opts.input
     const project = opts.ctx.project
+    const { features: featureService } = opts.ctx.services
 
-    const filter = `%${search}%`
-
-    const features = await opts.ctx.db.query.features.findMany({
-      where: (feature, { eq, and, or, ilike }) =>
-        and(
-          eq(feature.projectId, project.id),
-          or(ilike(feature.slug, filter), ilike(feature.title, filter))
-        ),
-      orderBy: (feature, { desc }) => [desc(feature.updatedAtM), desc(feature.title)],
+    const { err, val: features } = await featureService.searchFeaturesByProject({
+      projectId: project.id,
+      search,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     return {
       features: features,

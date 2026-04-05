@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -8,20 +9,21 @@ export const getBySlug = protectedProjectProcedure
   .query(async (opts) => {
     const { slug } = opts.input
     const project = opts.ctx.project
+    const { features } = opts.ctx.services
 
-    const feature = await opts.ctx.db.query.features.findFirst({
-      with: {
-        project: {
-          columns: {
-            slug: true,
-          },
-        },
-      },
-      where: (feature, { eq, and }) =>
-        and(eq(feature.projectId, project.id), eq(feature.slug, slug)),
+    const { err, val: feature } = await features.getFeatureBySlug({
+      projectId: project.id,
+      slug,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      feature: feature,
+      feature: feature ?? undefined,
     }
   })

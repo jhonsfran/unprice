@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -7,16 +8,21 @@ export const exist = protectedProjectProcedure
   .mutation(async (opts) => {
     const { slug } = opts.input
     const project = opts.ctx.project
+    const { features } = opts.ctx.services
 
-    const feature = await opts.ctx.db.query.features.findFirst({
-      columns: {
-        id: true,
-      },
-      where: (feature, { eq, and }) =>
-        and(eq(feature.projectId, project.id), eq(feature.slug, slug)),
+    const { err, val: exists } = await features.featureExistsBySlug({
+      projectId: project.id,
+      slug,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      exist: !!feature,
+      exist: exists,
     }
   })

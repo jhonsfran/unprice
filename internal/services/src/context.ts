@@ -3,6 +3,7 @@ import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
 import { GrantsManager } from "./entitlements/grants"
 import { EntitlementService } from "./entitlements/service"
+import { FeatureService } from "./features/service"
 import { PlanService } from "./plans/service"
 import { SubscriptionService } from "./subscriptions/service"
 
@@ -14,6 +15,7 @@ import { SubscriptionService } from "./subscriptions/service"
  */
 export interface ServiceContext {
   customers: CustomerService
+  features: FeatureService
   grantsManager: GrantsManager
   billing: BillingService
   subscriptions: SubscriptionService
@@ -52,6 +54,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     waitUntil: deps.waitUntil,
     cache: deps.cache,
     metrics: deps.metrics,
+  })
+
+  const features = new FeatureService({
+    db: deps.db,
+    logger: deps.logger,
   })
 
   // 2. Services with deps on leaves
@@ -94,6 +101,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
 
   return {
     customers,
+    features,
     grantsManager,
     billing,
     subscriptions,
