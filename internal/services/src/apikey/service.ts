@@ -7,7 +7,7 @@ import type { Cache } from "@unprice/services/cache"
 import type { Metrics } from "@unprice/services/metrics"
 
 import type { Database } from "@unprice/db"
-import { and, count, eq, getTableColumns, ilike } from "@unprice/db"
+import { and, count, eq, getTableColumns, ilike, inArray, isNull } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
 import { withDateFilters, withPagination } from "@unprice/db/utils"
 import { cachedQuery } from "../utils/cached-query"
@@ -114,6 +114,108 @@ export class ApiKeysService {
     return Ok({
       apikeys: val.data as ApiKey[],
       pageCount,
+    })
+  }
+
+  public async createApiKey({
+    projectId,
+    isRoot,
+    name,
+    expiresAt,
+  }: {
+    projectId: string
+    isRoot: boolean
+    name: string
+    expiresAt?: number | null
+  }): Promise<Result<ApiKey & { key: string }, FetchError>> {
+    const apiKey = newId("apikey_key")
+    const apiKeyId = newId("apikey")
+    const apiKeyHash = await hashStringSHA256(apiKey)
+
+    const { val, err } = await wrapResult(
+      this.db
+        .insert(apikeys)
+        .values({
+          id: apiKeyId,
+          name,
+          hash: apiKeyHash,
+          expiresAt,
+          projectId,
+          isRoot,
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error creating api key: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating api key", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Failed to create API key",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      ...(val as ApiKey),
+      key: apiKey,
+    })
+  }
+
+  public async revokeApiKeys({
+    projectId,
+    ids,
+  }: {
+    projectId: string
+    ids: string[]
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; numRevoked: number }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(apikeys)
+        .set({ revokedAt: Date.now(), updatedAtM: Date.now() })
+        .where(
+          and(inArray(apikeys.id, ids), eq(apikeys.projectId, projectId), isNull(apikeys.revokedAt))
+        )
+        .returning(),
+      (error) =>
+        new FetchError({
+          message: `error revoking api keys: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error revoking api keys", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    if (val.length === 0) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    this.waitUntil(Promise.all(val.map((apikey) => this.cache.apiKeyByHash.remove(apikey.hash))))
+
+    return Ok({
+      state: "ok",
+      numRevoked: val.length,
     })
   }
 

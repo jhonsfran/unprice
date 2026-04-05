@@ -7,7 +7,8 @@ import {
   prepareInterval,
   type statsSchema,
 } from "@unprice/analytics"
-import type { Database } from "@unprice/db"
+import { type Database, and, between, count, eq } from "@unprice/db"
+import { features, plans, subscriptions, versions } from "@unprice/db/schema"
 import { currencySymbol } from "@unprice/db/utils"
 import { calculateFlatPricePlan } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
@@ -41,6 +42,107 @@ export class AnalyticsService {
     this.db = db
     this.logger = logger
     this.analytics = analytics
+  }
+
+  public async getPlansStats({
+    projectId,
+    interval,
+  }: {
+    projectId: string
+    interval: Interval
+  }): Promise<Result<OverviewStats, FetchError>> {
+    const preparedInterval = prepareInterval(interval)
+
+    const { val, err } = await wrapResult(
+      Promise.all([
+        this.db
+          .select({
+            count: count(),
+          })
+          .from(plans)
+          .where(
+            and(
+              eq(plans.projectId, projectId),
+              between(plans.createdAtM, preparedInterval.start, preparedInterval.end)
+            )
+          )
+          .then((rows) => rows[0] ?? { count: 0 }),
+        this.db
+          .select({
+            count: count(),
+          })
+          .from(subscriptions)
+          .where(
+            and(
+              eq(subscriptions.projectId, projectId),
+              between(subscriptions.createdAtM, preparedInterval.start, preparedInterval.end)
+            )
+          )
+          .then((rows) => rows[0] ?? { count: 0 }),
+        this.db
+          .select({
+            count: count(),
+          })
+          .from(versions)
+          .where(
+            and(
+              eq(versions.projectId, projectId),
+              between(versions.createdAtM, preparedInterval.start, preparedInterval.end)
+            )
+          )
+          .then((rows) => rows[0] ?? { count: 0 }),
+        this.db
+          .select({
+            count: count(),
+          })
+          .from(features)
+          .where(
+            and(
+              eq(features.projectId, projectId),
+              between(features.createdAtM, preparedInterval.start, preparedInterval.end)
+            )
+          )
+          .then((rows) => rows[0] ?? { count: 0 }),
+      ]),
+      (error) =>
+        new FetchError({
+          message: `failed to fetch plans stats: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("failed to fetch plans stats", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    const [totalPlans, totalSubscriptions, totalPlanVersions, totalFeatures] = val
+
+    return Ok({
+      totalPlans: {
+        total: totalPlans?.count ?? 0,
+        title: "Total Plans",
+        description: `created in the last ${preparedInterval.label}`,
+      },
+      totalSubscriptions: {
+        total: totalSubscriptions?.count ?? 0,
+        title: "Total Subscriptions",
+        description: `created in the last ${preparedInterval.label}`,
+      },
+      totalPlanVersions: {
+        total: totalPlanVersions?.count ?? 0,
+        title: "Total Plan Versions",
+        description: `created in the last ${preparedInterval.label}`,
+      },
+      totalFeatures: {
+        total: totalFeatures?.count ?? 0,
+        title: "Total Features",
+        description: `created in the last ${preparedInterval.label}`,
+      },
+    } as OverviewStats)
   }
 
   public async getOverviewStats({

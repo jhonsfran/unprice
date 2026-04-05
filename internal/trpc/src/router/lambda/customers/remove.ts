@@ -1,8 +1,6 @@
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import { customers } from "@unprice/db/schema"
 import { customerSelectSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -20,22 +18,29 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const { project } = opts.ctx
+    const { customers } = opts.ctx.services
     const _unPriceCustomerId = project.workspace.unPriceCustomerId
 
-    const deletedCustomer = await opts.ctx.db
-      .delete(customers)
-      .where(and(eq(customers.projectId, project.id), eq(customers.id, id)))
-      .returning()
-      .then((re) => re[0])
+    const { val, err } = await customers.removeCustomerRecord({
+      projectId: project.id,
+      id,
+    })
 
-    if (!deletedCustomer) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error deleting customer",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Customer not found",
       })
     }
 
     return {
-      customer: deletedCustomer,
+      customer: val.customer,
     }
   })

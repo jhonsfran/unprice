@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { workspaceSelectBase } from "@unprice/db/validators"
 import { protectedWorkspaceProcedure } from "#trpc"
 
@@ -10,22 +8,28 @@ export const rename = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { name } = opts.input
     const workspace = opts.ctx.workspace
+    const { workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const workspaceRenamed = await opts.ctx.db
-      .update(schema.workspaces)
-      .set({ name })
-      .where(eq(schema.workspaces.id, workspace.id))
-      .returning()
-      .then((wk) => wk[0] ?? undefined)
+    const { val, err } = await workspaces.renameWorkspaceRecord({
+      workspaceId: workspace.id,
+      name,
+    })
 
-    if (!workspaceRenamed) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error updating workspace",
+        message: err.message,
       })
     }
 
-    return workspaceRenamed
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Workspace not found",
+      })
+    }
+
+    return val.workspace
   })

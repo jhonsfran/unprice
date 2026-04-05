@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { invitesSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -12,24 +10,31 @@ export const changeRoleInvite = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { email, role } = opts.input
     const workspace = opts.ctx.workspace
+    const { workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const invite = await opts.ctx.db
-      .update(schema.invites)
-      .set({ role })
-      .where(and(eq(schema.invites.workspaceId, workspace.id), eq(schema.invites.email, email)))
-      .returning()
-      .then((wk) => wk[0] ?? undefined)
+    const { val, err } = await workspaces.changeInviteRole({
+      workspaceId: workspace.id,
+      email,
+      role,
+    })
 
-    if (!invite) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error updating role for invite",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Invite not found",
       })
     }
 
     return {
-      invite: invite,
+      invite: val.invite,
     }
   })

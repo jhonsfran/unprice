@@ -14,7 +14,7 @@ import type { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
-import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./errors"
+import { UnPriceEntitlementError } from "./errors"
 import type { GrantsManager } from "./grants"
 
 import { customers, subscriptions } from "@unprice/db/schema"
@@ -336,9 +336,7 @@ export class EntitlementService {
       skipCache?: boolean // skip cache to force revalidation
       now?: number
     }
-  }): Promise<
-    Result<CurrentUsage, UnPriceEntitlementError | UnPriceEntitlementStorageError | FetchError>
-  > {
+  }): Promise<Result<CurrentUsage, UnPriceEntitlementError | FetchError>> {
     const cacheKey = `${projectId}:${customerId}`
 
     // first try to get the entitlement from cache, if not found try to get it from DO,

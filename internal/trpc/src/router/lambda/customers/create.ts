@@ -1,8 +1,6 @@
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
-import { customers } from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
 import { customerInsertBaseSchema, customerSelectSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -21,38 +19,28 @@ export const create = protectedProjectProcedure
       externalId,
     } = opts.input
     const { project } = opts.ctx
-
-    const _unPriceCustomerId = project.workspace.unPriceCustomerId
+    const { customers } = opts.ctx.services
 
     // remove ip from geolocation
     const { ip, ...geolocation } = opts.ctx.geolocation
     const metadataWithGeolocation = metadata ? { ...metadata, ...geolocation } : geolocation
 
-    const customerId = newId("customer")
+    const { val: customerData, err } = await customers.createCustomerRecord({
+      projectId: project.id,
+      description,
+      name,
+      email,
+      metadata: metadataWithGeolocation,
+      defaultCurrency,
+      stripeCustomerId,
+      timezone,
+      externalId,
+    })
 
-    // TODO: check what happens when the currency changes?
-    const customerData = await opts.ctx.db
-      .insert(customers)
-      .values({
-        id: customerId,
-        name,
-        email,
-        projectId: project.id,
-        description,
-        timezone: timezone || "UTC",
-        active: true,
-        ...(metadataWithGeolocation && { metadata: metadataWithGeolocation }),
-        ...(externalId && { externalId }),
-        ...(defaultCurrency && { defaultCurrency }),
-        ...(stripeCustomerId && { stripeCustomerId }),
-      })
-      .returning()
-      .then((data) => data[0])
-
-    if (!customerData) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error creating customer",
+        message: err.message,
       })
     }
 

@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { projectSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -19,25 +17,37 @@ export const deleteProject = protectedProjectProcedure
   )
   .mutation(async (opts) => {
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { projects } = opts.ctx.services
 
     // only owner can delete a project
     opts.ctx.verifyRole(["OWNER"])
 
-    if (project.isMain) {
+    const { val, err } = await projects.deleteProjectRecord({
+      projectId: project.id,
+    })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "main_project_conflict") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Cannot delete main project",
       })
     }
 
-    const deletedProject = await opts.ctx.db
-      .delete(schema.projects)
-      .where(eq(schema.projects.id, project.id))
-      .returning()
-      .then((res) => res[0] ?? undefined)
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Project not found",
+      })
+    }
 
-    if (!deletedProject?.id) {
+    if (val.state !== "ok") {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error deleting project",
@@ -45,6 +55,6 @@ export const deleteProject = protectedProjectProcedure
     }
 
     return {
-      project: deletedProject,
+      project: val.project,
     }
   })

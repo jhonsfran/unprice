@@ -1,5 +1,5 @@
-import { eq } from "@unprice/db"
-import { users } from "@unprice/db/schema"
+import { TRPCError } from "@trpc/server"
+import { setOnboardingCompleted as setOnboardingCompletedUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedProcedure } from "#trpc"
 
@@ -10,10 +10,23 @@ export const setOnboardingCompleted = protectedProcedure
     const { onboardingCompleted } = opts.input
     const userId = opts.ctx.userId
 
-    await opts.ctx.db
-      .update(users)
-      .set({ onboardingCompleted, onboardingCompletedAt: new Date() })
-      .where(eq(users.id, userId))
+    const { err } = await setOnboardingCompletedUseCase(
+      {
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+      },
+      {
+        userId,
+        onboardingCompleted,
+      }
+    )
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     return {
       success: true,

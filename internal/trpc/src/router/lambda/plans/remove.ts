@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq, sql } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { planSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -12,22 +10,22 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { plans } = opts.ctx.services
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const countVersionsPlan = await opts.ctx.db
-      .select({ count: sql<number>`count(*)` })
-      .from(schema.versions)
-      .where(
-        and(
-          eq(schema.versions.projectId, project.id),
-          eq(schema.versions.planId, id),
-          eq(schema.versions.status, "published")
-        )
-      )
-      .then((res) => res[0]?.count ?? 0)
+    const { val, err } = await plans.removePlanRecord({
+      projectId: project.id,
+      id,
+    })
 
-    if (countVersionsPlan > 0) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "published_conflict") {
       throw new TRPCError({
         code: "CONFLICT",
         message:
@@ -35,13 +33,14 @@ export const remove = protectedProjectProcedure
       })
     }
 
-    const deletedPlan = await opts.ctx.db
-      .delete(schema.plans)
-      .where(and(eq(schema.plans.projectId, project.id), eq(schema.plans.id, id)))
-      .returning()
-      .then((data) => data[0])
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Plan not found",
+      })
+    }
 
-    if (!deletedPlan) {
+    if (val.state !== "ok") {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error deleting plan",
@@ -49,6 +48,6 @@ export const remove = protectedProjectProcedure
     }
 
     return {
-      plan: deletedPlan,
+      plan: val.plan,
     }
   })

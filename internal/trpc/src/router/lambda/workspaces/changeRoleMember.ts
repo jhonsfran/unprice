@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { membersSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -12,33 +10,38 @@ export const changeRoleMember = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { userId, role } = opts.input
     const workspace = opts.ctx.workspace
+    const { workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const member = await opts.ctx.db
-      .update(schema.members)
-      .set({ role })
-      .where(and(eq(schema.members.workspaceId, workspace.id), eq(schema.members.userId, userId)))
-      .returning()
-      .then((wk) => wk[0] ?? undefined)
+    const { val, err } = await workspaces.changeMemberRole({
+      workspaceId: workspace.id,
+      userId,
+      role,
+    })
 
-    if (member) {
-      opts.ctx.waitUntil(
-        Promise.all([
-          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.id}:${userId}`),
-          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.slug}:${userId}`),
-        ])
-      )
-    }
-
-    if (!member) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error updating role for member",
+        message: err.message,
       })
     }
 
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Member not found",
+      })
+    }
+
+    opts.ctx.waitUntil(
+      Promise.all([
+        opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.id}:${userId}`),
+        opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.slug}:${userId}`),
+      ])
+    )
+
     return {
-      member: member,
+      member: val.member,
     }
   })

@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { invitesSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
@@ -19,23 +17,30 @@ export const deleteInvite = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { email } = opts.input
     const workspace = opts.ctx.workspace
+    const { workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER"])
 
-    const deletedInvite = await opts.ctx.db
-      .delete(schema.invites)
-      .where(and(eq(schema.invites.email, email), eq(schema.invites.workspaceId, workspace.id)))
-      .returning()
-      .then((inv) => inv[0] ?? undefined)
+    const { val, err } = await workspaces.deleteInvite({
+      workspaceId: workspace.id,
+      email,
+    })
 
-    if (!deletedInvite) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error deleting invite",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Invite not found",
       })
     }
 
     return {
-      invite: deletedInvite,
+      invite: val.invite,
     }
   })

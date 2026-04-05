@@ -1,6 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
+import { createSlug, newId } from "@unprice/db/utils"
 import type {
   PaymentProvider,
   PaymentProviderConfig,
@@ -373,6 +374,129 @@ export class ProjectService {
         workspace,
       }))
     )
+  }
+
+  public async createProjectRecord({
+    workspaceId,
+    workspaceIsInternal,
+    name,
+    url,
+    defaultCurrency,
+    timezone,
+    contactEmail,
+  }: {
+    workspaceId: string
+    workspaceIsInternal: boolean
+    name: Project["name"]
+    url?: Project["url"]
+    defaultCurrency: Project["defaultCurrency"]
+    timezone: Project["timezone"]
+    contactEmail?: Project["contactEmail"]
+  }): Promise<Result<Project, FetchError>> {
+    const projectId = newId("project")
+    const projectSlug = createSlug()
+
+    const { val, err } = await wrapResult(
+      this.db
+        .insert(schema.projects)
+        .values({
+          id: projectId,
+          workspaceId,
+          name,
+          slug: projectSlug,
+          url,
+          defaultCurrency,
+          timezone,
+          isMain: false,
+          isInternal: workspaceIsInternal,
+          contactEmail: contactEmail ?? "",
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error creating project record: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating project record", {
+        error: toErrorContext(err),
+        workspaceId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error creating project",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok(val as Project)
+  }
+
+  public async deleteProjectRecord({
+    projectId,
+  }: {
+    projectId: string
+  }): Promise<
+    Result<
+      { state: "not_found" | "main_project_conflict" } | { state: "ok"; project: Project },
+      FetchError
+    >
+  > {
+    const project = await this.db.query.projects.findFirst({
+      where: eq(schema.projects.id, projectId),
+    })
+
+    if (!project?.id) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    if (project.isMain) {
+      return Ok({
+        state: "main_project_conflict",
+      })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(schema.projects)
+        .where(eq(schema.projects.id, projectId))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error deleting project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error deleting project", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      project: val as Project,
+    })
   }
 
   public async updateProjectRecord({

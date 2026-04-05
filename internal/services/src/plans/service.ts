@@ -501,6 +501,67 @@ export class PlanService {
     return Ok((val as Plan | null) ?? null)
   }
 
+  public async removePlanRecord({
+    projectId,
+    id,
+  }: {
+    projectId: string
+    id: string
+  }): Promise<
+    Result<{ state: "not_found" | "published_conflict" } | { state: "ok"; plan: Plan }, FetchError>
+  > {
+    const countPublishedVersions = await this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(schema.versions)
+      .where(
+        and(
+          eq(schema.versions.projectId, projectId),
+          eq(schema.versions.planId, id),
+          eq(schema.versions.status, "published")
+        )
+      )
+      .then((res) => res[0]?.count ?? 0)
+
+    if (countPublishedVersions > 0) {
+      return Ok({
+        state: "published_conflict",
+      })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(schema.plans)
+        .where(and(eq(schema.plans.projectId, projectId), eq(schema.plans.id, id)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error removing plan: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error removing plan", {
+        error: toErrorContext(err),
+        projectId,
+        planId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      plan: val as Plan,
+    })
+  }
+
   public async updatePlanRecord({
     projectId,
     id,

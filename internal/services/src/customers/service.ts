@@ -1,7 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, and, count, eq, getTableColumns, ilike, or } from "@unprice/db"
 import { customers, subscriptions } from "@unprice/db/schema"
-import { withDateFilters, withPagination } from "@unprice/db/utils"
+import { newId, withDateFilters, withPagination } from "@unprice/db/utils"
 import type {
   Customer,
   CustomerPaymentMethod,
@@ -825,6 +825,116 @@ export class CustomerService {
     }
 
     return Ok(val)
+  }
+
+  public async createCustomerRecord({
+    projectId,
+    description,
+    name,
+    email,
+    metadata,
+    defaultCurrency,
+    stripeCustomerId,
+    timezone,
+    externalId,
+  }: {
+    projectId: string
+    description?: Customer["description"]
+    name?: Customer["name"]
+    email: Customer["email"]
+    metadata?: Customer["metadata"]
+    defaultCurrency?: Customer["defaultCurrency"]
+    stripeCustomerId?: Customer["stripeCustomerId"]
+    timezone?: Customer["timezone"]
+    externalId?: Customer["externalId"]
+  }): Promise<Result<Customer, FetchError>> {
+    const customerId = newId("customer")
+
+    const { val, err } = await wrapResult(
+      this.db
+        .insert(customers)
+        .values({
+          id: customerId,
+          name: name ?? "",
+          email,
+          projectId,
+          description,
+          timezone: timezone || "UTC",
+          active: true,
+          ...(metadata && { metadata }),
+          ...(externalId && { externalId }),
+          ...(defaultCurrency && { defaultCurrency }),
+          ...(stripeCustomerId && { stripeCustomerId }),
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error creating customer: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating customer", {
+        error: toErrorContext(err),
+        projectId,
+        email,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error creating customer",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok(val as Customer)
+  }
+
+  public async removeCustomerRecord({
+    projectId,
+    id,
+  }: {
+    projectId: string
+    id: string
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; customer: Customer }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(customers)
+        .where(and(eq(customers.projectId, projectId), eq(customers.id, id)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error deleting customer: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error deleting customer", {
+        error: toErrorContext(err),
+        projectId,
+        customerId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      customer: val as Customer,
+    })
   }
 
   /**

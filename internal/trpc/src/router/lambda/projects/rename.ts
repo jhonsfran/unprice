@@ -1,5 +1,4 @@
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
+import { TRPCError } from "@trpc/server"
 import { projectSelectBaseSchema, renameProjectSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -14,21 +13,31 @@ export const rename = protectedProjectProcedure
   .mutation(async (opts) => {
     const { name } = opts.input
     const project = opts.ctx.project
-    const _workspace = project.workspace
+    const { projects } = opts.ctx.services
 
     // only owner and admin can rename a project
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const projectRenamed = await opts.ctx.db
-      .update(schema.projects)
-      .set({
-        name,
+    const { val, err } = await projects.updateProjectRecord({
+      id: project.id,
+      name,
+    })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
       })
-      .where(eq(schema.projects.id, project.id))
-      .returning()
-      .then((res) => res[0] ?? undefined)
+    }
+
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Project not found",
+      })
+    }
 
     return {
-      project: projectRenamed,
+      project: val.project,
     }
   })

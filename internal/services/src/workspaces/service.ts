@@ -289,6 +289,180 @@ export class WorkspaceService {
     return Ok(val as WorkspaceInvite[])
   }
 
+  public async changeInviteRole({
+    workspaceId,
+    email,
+    role,
+  }: {
+    workspaceId: string
+    email: string
+    role: Member["role"]
+  }): Promise<
+    Result<{ state: "not_found" } | { state: "ok"; invite: WorkspaceInvite }, FetchError>
+  > {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(schema.invites)
+        .set({ role })
+        .where(and(eq(schema.invites.workspaceId, workspaceId), eq(schema.invites.email, email)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error updating invite role: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating invite role", {
+        error: toErrorContext(err),
+        workspaceId,
+        email,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      invite: val as WorkspaceInvite,
+    })
+  }
+
+  public async changeMemberRole({
+    workspaceId,
+    userId,
+    role,
+  }: {
+    workspaceId: string
+    userId: string
+    role: Member["role"]
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; member: Member }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(schema.members)
+        .set({ role })
+        .where(and(eq(schema.members.workspaceId, workspaceId), eq(schema.members.userId, userId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error updating member role: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating member role", {
+        error: toErrorContext(err),
+        workspaceId,
+        userId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      member: val as Member,
+    })
+  }
+
+  public async deleteInvite({
+    workspaceId,
+    email,
+  }: {
+    workspaceId: string
+    email: string
+  }): Promise<
+    Result<{ state: "not_found" } | { state: "ok"; invite: WorkspaceInvite }, FetchError>
+  > {
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(schema.invites)
+        .where(and(eq(schema.invites.email, email), eq(schema.invites.workspaceId, workspaceId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error deleting invite: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error deleting invite", {
+        error: toErrorContext(err),
+        workspaceId,
+        email,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      invite: val as WorkspaceInvite,
+    })
+  }
+
+  public async renameWorkspaceRecord({
+    workspaceId,
+    name,
+  }: {
+    workspaceId: string
+    name: Workspace["name"]
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; workspace: Workspace }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(schema.workspaces)
+        .set({ name })
+        .where(eq(schema.workspaces.id, workspaceId))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error renaming workspace: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error renaming workspace", {
+        error: toErrorContext(err),
+        workspaceId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      workspace: val as Workspace,
+    })
+  }
+
   public async removeWorkspaceMember({
     workspaceId,
     userId,

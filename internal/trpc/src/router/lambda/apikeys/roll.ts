@@ -1,6 +1,5 @@
 import { TRPCError } from "@trpc/server"
 import { selectApiKeySchema } from "@unprice/db/validators"
-import { ApiKeysService } from "@unprice/services/apikey"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -16,20 +15,11 @@ export const roll = protectedProjectProcedure
   .mutation(async (opts) => {
     const { hashKey } = opts.input
     const _project = opts.ctx.project
+    const { apikeys } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const apikeyService = new ApiKeysService({
-      cache: opts.ctx.cache,
-      metrics: opts.ctx.metrics,
-      analytics: opts.ctx.analytics,
-      logger: opts.ctx.logger,
-      db: opts.ctx.db,
-      waitUntil: opts.ctx.waitUntil,
-      hashCache: opts.ctx.hashCache,
-    })
-
-    const { val: newApiKey, err: newApiKeyErr } = await apikeyService.rollApiKey({
+    const { val: newApiKey, err: newApiKeyErr } = await apikeys.rollApiKey({
       keyHash: hashKey,
     })
 
