@@ -885,24 +885,23 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
 
 Apply these rules to every file you touch during P0. Don't do a separate sweep.
 
-- [ ] **Fix `throw err` re-throws in catch blocks**
-  - There are 17 across services. When you touch a service file during P0, fix its
-    re-throws: replace `throw err` with `return Err(new FetchError({ message: err.message }))`.
-  - Files: `billing/service.ts` (2), `customers/service.ts` (2), `subscriptions/service.ts` (2),
-    `subscriptions/invokes.ts` (4), `entitlements/grants.ts` (1), `plans/service.ts` (3),
-    `projects/service.ts` (1), `utils/retry.ts` (1)
+- [x] **Fix `throw err` re-throws in catch blocks**
+  - Legacy inventory listed 17 potential sites; after P0 refactors, service catch-block
+    `throw err` re-throws are removed.
+  - The remaining utility helper in `utils/retry.ts` now throws a fresh error after
+    retry exhaustion (no direct `throw err` re-throw).
   - Rule: public methods return `Result`, never throw. Private methods may throw only
     for programmer errors (assertion failures, invariant violations).
 
 - [ ] **Adopt `toErrorContext()` in all service files**
   - Currently only 5 of 12 files use it. When you touch a service file, replace
     `{ error: err.message }` with `{ error: toErrorContext(err) }` in all logger calls.
+  - Progress: standardized in `billing/service.ts`, `plans/service.ts`, and
+    `subscriptions/service.ts`.
 
-- [ ] **Add `UnPricePlanError`**
-  - File: `internal/services/src/plans/errors.ts` (create if not exists)
-  - Plans currently use generic `FetchError`. Create `UnPricePlanError` following the
-    pattern in `customers/errors.ts`.
-  - Create custom Errors for the rest of the services and follow the same pattern.
+- [x] **Add `UnPricePlanError`**
+  - `internal/services/src/plans/errors.ts` already contains `UnPricePlanError`
+    following the same pattern used in `customers/errors.ts`.
 
 ### P0.5 — Logging standardization (do alongside P0.2/P0.3)
 

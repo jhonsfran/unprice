@@ -352,7 +352,7 @@ export class PlanService {
             this.logger.warn("Failed to fetch list of plans data from cache, retrying...", {
               projectId,
               attempt,
-              error: err.message,
+              error: toErrorContext(err),
             })
           }
         )
@@ -423,7 +423,7 @@ export class PlanService {
             this.logger.warn("Failed to fetch plan version data from cache, retrying...", {
               projectId,
               attempt,
-              error: err.message,
+              error: toErrorContext(err),
             })
           }
         )

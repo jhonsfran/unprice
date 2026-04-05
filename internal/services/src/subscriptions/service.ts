@@ -1675,7 +1675,7 @@ export class SubscriptionService {
                 ttl_ms: ttlMs,
               })
               this.logger.error("subscription lock heartbeat extend failed", {
-                error: e instanceof Error ? e.message : String(e),
+                error: toErrorContext(e),
                 subscriptionId,
                 projectId,
               })

@@ -58,5 +58,9 @@ export function retry<T>(
       err = e as Error
     }
   }
-  throw err
+  if (!err) {
+    throw new Error("retry attempts exhausted")
+  }
+
+  throw new Error(err.message)
 }
