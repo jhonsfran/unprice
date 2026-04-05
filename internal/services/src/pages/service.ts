@@ -1,5 +1,6 @@
 import { type Database, and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
+import { createSlug, newId } from "@unprice/db/utils"
 import type { Page } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -18,6 +19,201 @@ export class PageService {
   }) {
     this.db = db
     this.logger = logger
+  }
+
+  public async createPageRecord({
+    projectId,
+    name,
+    subdomain,
+    customDomain,
+    description,
+  }: {
+    projectId: string
+    name?: Page["name"]
+    subdomain?: Page["subdomain"]
+    customDomain?: Page["customDomain"]
+    description?: Page["description"]
+  }): Promise<Result<Page, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .insert(schema.pages)
+        .values({
+          id: newId("page"),
+          slug: createSlug(),
+          name: name ?? "",
+          projectId,
+          description,
+          subdomain: subdomain ?? "",
+          customDomain: customDomain || null,
+          faqs: [],
+          colorPalette: {
+            primary: "#000000",
+          },
+          selectedPlans: [],
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error creating page: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating page", {
+        error: toErrorContext(err),
+        projectId,
+        subdomain,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "error creating page",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok(val as Page)
+  }
+
+  public async publishPageRecord({
+    projectId,
+    pageId,
+  }: {
+    projectId: string
+    pageId: string
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; page: Page }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(schema.pages)
+        .set({
+          published: true,
+        })
+        .where(and(eq(schema.pages.projectId, projectId), eq(schema.pages.id, pageId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error publishing page: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error publishing page", {
+        error: toErrorContext(err),
+        projectId,
+        pageId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      page: val as Page,
+    })
+  }
+
+  public async removePageRecord({
+    projectId,
+    pageId,
+  }: {
+    projectId: string
+    pageId: string
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; page: Page }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(schema.pages)
+        .where(and(eq(schema.pages.projectId, projectId), eq(schema.pages.id, pageId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error removing page: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error removing page", {
+        error: toErrorContext(err),
+        projectId,
+        pageId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      page: val as Page,
+    })
+  }
+
+  public async uploadPageLogoByName({
+    projectId,
+    name,
+    logo,
+    logoType,
+  }: {
+    projectId: string
+    name: string
+    logo: string
+    logoType: string
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; page: Page }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(schema.pages)
+        .set({
+          logo,
+          logoType,
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(schema.pages.projectId, projectId), eq(schema.pages.name, name)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error uploading page logo: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error uploading page logo", {
+        error: toErrorContext(err),
+        projectId,
+        name,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      page: val as Page,
+    })
   }
 
   public async getPageById({

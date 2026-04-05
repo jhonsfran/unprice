@@ -1,5 +1,4 @@
-import { and, eq } from "@unprice/db"
-import { domains } from "@unprice/db/schema"
+import { TRPCError } from "@trpc/server"
 import {
   type DomainVerificationStatusProps,
   domainVerificationStatusSchema,
@@ -20,7 +19,8 @@ export const verify = protectedWorkspaceProcedure
   )
   .query(async (opts) => {
     let status: DomainVerificationStatusProps = "Valid Configuration"
-    const _workspace = opts.ctx.workspace
+    const workspace = opts.ctx.workspace
+    const { domains } = opts.ctx.services
 
     const vercel = new Vercel({
       accessToken: env.VERCEL_TOKEN,
@@ -53,14 +53,18 @@ export const verify = protectedWorkspaceProcedure
       status = "Invalid Configuration"
     }
 
-    await opts.ctx.db
-      .update(domains)
-      .set({
-        verified: status === "Valid Configuration",
+    const { err } = await domains.setDomainVerifiedStatus({
+      workspaceId: workspace.id,
+      name: opts.input.domain,
+      verified: status === "Valid Configuration",
+    })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
       })
-      .where(
-        and(eq(domains.name, opts.input.domain), eq(domains.workspaceId, opts.ctx.workspace.id))
-      )
+    }
 
     return {
       status,

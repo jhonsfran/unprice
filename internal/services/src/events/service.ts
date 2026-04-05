@@ -1,5 +1,6 @@
 import { type Database, and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
+import { newId } from "@unprice/db/utils"
 import type { Event } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -18,6 +19,57 @@ export class EventService {
   }) {
     this.db = db
     this.logger = logger
+  }
+
+  public async createEvent({
+    projectId,
+    name,
+    slug,
+    availableProperties,
+  }: {
+    projectId: string
+    name: Event["name"]
+    slug: Event["slug"]
+    availableProperties?: Event["availableProperties"]
+  }): Promise<Result<Event, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .insert(schema.events)
+        .values({
+          id: newId("event"),
+          projectId,
+          name,
+          slug,
+          availableProperties: availableProperties?.length ? availableProperties : null,
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error creating event: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating event", {
+        error: toErrorContext(err),
+        projectId,
+        slug,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "error creating event",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok(val as Event)
   }
 
   public async listEventsByProject({

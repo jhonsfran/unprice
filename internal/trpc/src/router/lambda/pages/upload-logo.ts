@@ -1,5 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import * as schema from "@unprice/db/schema"
 import { pageSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -18,37 +17,32 @@ export const uploadLogo = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
-    // Store the base64 string directly
     const logo = opts.input.file
     const type = opts.input.type
+    const { pages } = opts.ctx.services
 
-    const pageData = await opts.ctx.db
-      .update(schema.pages)
-      .set({
-        logo,
-        logoType: type,
-      })
-      .returning()
-      .catch((err) => {
-        opts.ctx.logger.error(err)
+    const { val, err } = await pages.uploadPageLogoByName({
+      projectId: opts.ctx.project.id,
+      name: opts.input.name,
+      logo,
+      logoType: type,
+    })
 
-        throw new TRPCError({
-          code: "INTERNAL_SERVER_ERROR",
-          message: "Failed to update logo",
-        })
-      })
-      .then((pageData) => {
-        return pageData[0]
-      })
-
-    if (!pageData?.id) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "error updating logo",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Page not found",
       })
     }
 
     return {
-      page: pageData,
+      page: val.page,
     }
   })

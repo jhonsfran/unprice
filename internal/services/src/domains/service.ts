@@ -214,4 +214,39 @@ export class DomainService {
 
     return Ok((val as Domain | null) ?? null)
   }
+
+  public async setDomainVerifiedStatus({
+    workspaceId,
+    name,
+    verified,
+  }: {
+    workspaceId: string
+    name: string
+    verified: boolean
+  }): Promise<Result<void, FetchError>> {
+    const { err } = await wrapResult(
+      this.db
+        .update(domainsTable)
+        .set({
+          verified,
+        })
+        .where(and(eq(domainsTable.name, name), eq(domainsTable.workspaceId, workspaceId))),
+      (error) =>
+        new FetchError({
+          message: `error setting domain verification status: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error setting domain verification status", {
+        error: toErrorContext(err),
+        workspaceId,
+        name,
+      })
+      return Err(err)
+    }
+
+    return Ok(undefined)
+  }
 }

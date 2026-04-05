@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { pageSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -11,28 +9,31 @@ export const publish = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { pages } = opts.ctx.services
 
     // only owner can publish a page
     opts.ctx.verifyRole(["OWNER"])
 
-    const publishedPage = await opts.ctx.db
-      .update(schema.pages)
-      .set({
-        published: true,
-      })
-      .where(and(eq(schema.pages.projectId, project.id), eq(schema.pages.id, id)))
-      .returning()
-      .then((data) => data[0])
+    const { val, err } = await pages.publishPageRecord({
+      projectId: project.id,
+      pageId: id,
+    })
 
-    if (!publishedPage) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error publishing page",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Page not found",
       })
     }
 
     return {
-      page: publishedPage,
+      page: val.page,
     }
   })

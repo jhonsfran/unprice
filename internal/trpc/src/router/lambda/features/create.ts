@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import * as schema from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
 import { featureInsertBaseSchema, featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -11,26 +9,21 @@ export const create = protectedProjectProcedure
   .mutation(async (opts) => {
     const { description, slug, title, unitOfMeasure, meterConfig } = opts.input
     const project = opts.ctx.project
+    const { features } = opts.ctx.services
 
-    const featureId = newId("feature")
-    const featureData = await opts.ctx.db
-      .insert(schema.features)
-      .values({
-        id: featureId,
-        slug,
-        title,
-        projectId: project.id,
-        description,
-        unitOfMeasure,
-        meterConfig: meterConfig ?? null,
-      })
-      .returning()
-      .then((data) => data[0])
+    const { val: featureData, err } = await features.createFeatureRecord({
+      projectId: project.id,
+      slug,
+      title,
+      description,
+      unitOfMeasure,
+      meterConfig,
+    })
 
-    if (!featureData) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error creating feature",
+        message: err.message,
       })
     }
 

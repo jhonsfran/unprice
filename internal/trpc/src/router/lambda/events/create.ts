@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import * as schema from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
 import { eventInsertBaseSchema, eventSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -11,25 +9,21 @@ export const create = protectedProjectProcedure
   .mutation(async (opts) => {
     const { name, slug, availableProperties } = opts.input
     const project = opts.ctx.project
+    const { events: eventService } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const event = await opts.ctx.db
-      .insert(schema.events)
-      .values({
-        id: newId("event"),
-        projectId: project.id,
-        name,
-        slug,
-        availableProperties: availableProperties?.length ? availableProperties : null,
-      })
-      .returning()
-      .then((rows) => rows[0])
+    const { val: event, err } = await eventService.createEvent({
+      projectId: project.id,
+      name,
+      slug,
+      availableProperties,
+    })
 
-    if (!event) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error creating event",
+        message: err.message,
       })
     }
 

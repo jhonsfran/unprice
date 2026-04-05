@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -11,21 +9,28 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
+    const { features } = opts.ctx.services
 
-    const deletedFeature = await opts.ctx.db
-      .delete(schema.features)
-      .where(and(eq(schema.features.projectId, project.id), eq(schema.features.id, id)))
-      .returning()
-      .then((data) => data[0])
+    const { val, err } = await features.removeFeatureById({
+      projectId: project.id,
+      id,
+    })
 
-    if (!deletedFeature) {
+    if (err) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: "Error deleting feature",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Feature not found",
       })
     }
 
     return {
-      feature: deletedFeature,
+      feature: val.feature,
     }
   })

@@ -1,5 +1,6 @@
 import { type Database, and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
+import { newId } from "@unprice/db/utils"
 import type { Feature } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -18,6 +19,104 @@ export class FeatureService {
   }) {
     this.db = db
     this.logger = logger
+  }
+
+  public async createFeatureRecord({
+    projectId,
+    slug,
+    title,
+    description,
+    unitOfMeasure,
+    meterConfig,
+  }: {
+    projectId: string
+    slug: Feature["slug"]
+    title: Feature["title"]
+    description?: Feature["description"]
+    unitOfMeasure?: Feature["unitOfMeasure"]
+    meterConfig?: Feature["meterConfig"]
+  }): Promise<Result<Feature, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .insert(schema.features)
+        .values({
+          id: newId("feature"),
+          slug,
+          title,
+          projectId,
+          description,
+          unitOfMeasure,
+          meterConfig: meterConfig ?? null,
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error creating feature record: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating feature record", {
+        error: toErrorContext(err),
+        projectId,
+        slug,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error creating feature",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok(val as Feature)
+  }
+
+  public async removeFeatureById({
+    projectId,
+    id,
+  }: {
+    projectId: string
+    id: string
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; feature: Feature }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(schema.features)
+        .where(and(eq(schema.features.projectId, projectId), eq(schema.features.id, id)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error removing feature: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error removing feature", {
+        error: toErrorContext(err),
+        projectId,
+        featureId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    return Ok({
+      state: "ok",
+      feature: val as Feature,
+    })
   }
 
   public async featureExistsBySlug({
