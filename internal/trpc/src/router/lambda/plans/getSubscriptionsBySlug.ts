@@ -1,8 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 
-import { and, desc, eq, getTableColumns } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import {
   customerSelectSchema,
   planSelectBaseSchema,
@@ -27,12 +25,21 @@ export const getSubscriptionsBySlug = protectedProjectProcedure
   .query(async (opts) => {
     const { slug } = opts.input
     const project = opts.ctx.project
-    const customerColumns = getTableColumns(schema.customers)
-    const _workspace = opts.ctx.project.workspace
+    const { plans } = opts.ctx.services
 
-    const plan = await opts.ctx.db.query.plans.findFirst({
-      where: (plan, { eq, and }) => and(eq(plan.slug, slug), eq(plan.projectId, project.id)),
+    const { err, val } = await plans.getPlanSubscriptionsBySlug({
+      slug,
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    const { plan, subscriptions } = val
 
     if (!plan) {
       throw new TRPCError({
@@ -41,61 +48,9 @@ export const getSubscriptionsBySlug = protectedProjectProcedure
       })
     }
 
-    const planWithSubscriptions = await opts.ctx.db
-      .selectDistinctOn([schema.subscriptions.id], {
-        subscriptions: schema.subscriptions,
-        customer: customerColumns,
-      })
-      .from(schema.plans)
-      .innerJoin(
-        schema.versions,
-        and(
-          eq(schema.versions.planId, schema.plans.id),
-          eq(schema.versions.projectId, schema.plans.projectId)
-        )
-      )
-      .innerJoin(
-        schema.subscriptionPhases,
-        and(
-          eq(schema.versions.id, schema.subscriptionPhases.planVersionId),
-          eq(schema.versions.projectId, schema.subscriptionPhases.projectId)
-        )
-      )
-      .innerJoin(
-        schema.subscriptions,
-        and(
-          eq(schema.subscriptions.id, schema.subscriptionPhases.subscriptionId),
-          eq(schema.subscriptions.projectId, schema.subscriptionPhases.projectId)
-        )
-      )
-      .innerJoin(
-        schema.customers,
-        and(
-          eq(schema.customers.id, schema.subscriptions.customerId),
-          eq(schema.customers.projectId, schema.subscriptions.projectId)
-        )
-      )
-      .where(and(eq(schema.plans.slug, slug), eq(schema.plans.projectId, project.id)))
-      .orderBy(() => [desc(schema.subscriptions.id)])
-
-    if (!planWithSubscriptions || !planWithSubscriptions.length) {
-      return {
-        plan: plan,
-        project: project,
-        subscriptions: [],
-      }
-    }
-
-    const subscriptions = planWithSubscriptions.map((data) => {
-      return {
-        ...data.subscriptions,
-        customer: data.customer,
-      }
-    })
-
     return {
-      plan: plan,
-      project: project,
-      subscriptions: subscriptions,
+      plan,
+      project,
+      subscriptions,
     }
   })

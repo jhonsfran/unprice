@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -11,19 +12,22 @@ export const exist = protectedProjectProcedure
   .mutation(async (opts) => {
     const { slug, id } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { plans } = opts.ctx.services
 
-    const plan = await opts.ctx.db.query.plans.findFirst({
-      columns: {
-        id: true,
-      },
-      where: (plan, { eq, and }) =>
-        id
-          ? and(eq(plan.projectId, project.id), eq(plan.id, id))
-          : and(eq(plan.projectId, project.id), eq(plan.slug, slug)),
+    const { err, val: exists } = await plans.planExists({
+      slug,
+      id,
+      projectId: project.id,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      exist: !!plan,
+      exist: exists,
     }
   })

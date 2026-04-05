@@ -25,44 +25,19 @@ export const getVersionsBySlug = protectedProjectProcedure
   .query(async (opts) => {
     const { slug } = opts.input
     const project = opts.ctx.project
+    const { plans } = opts.ctx.services
 
-    const _workspace = opts.ctx.project.workspace
+    const { err, val: planWithVersions } = await plans.getPlanWithVersionsBySlug({
+      slug,
+      projectId: project.id,
+    })
 
-    // TODO: better rewrite this query to use joins instead of subqueries
-    const planWithVersions = await opts.ctx.db.query.plans
-      .findFirst({
-        with: {
-          versions: {
-            orderBy: (version, { desc }) => [desc(version.createdAtM)],
-            with: {
-              phases: {
-                columns: {
-                  id: true,
-                  subscriptionId: true,
-                },
-              },
-              plan: {
-                columns: {
-                  defaultPlan: true,
-                },
-              },
-            },
-          },
-        },
-        where: (plan, { eq, and }) => and(eq(plan.slug, slug), eq(plan.projectId, project.id)),
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
       })
-      .then((plans) => {
-        return (
-          plans && {
-            ...plans,
-            versions: plans.versions.map((version) => ({
-              ...version,
-              // TODO: fix this, we should count the number of subscriptions per plan version
-              subscriptions: version.phases.length,
-            })),
-          }
-        )
-      })
+    }
 
     if (!planWithVersions) {
       throw new TRPCError({

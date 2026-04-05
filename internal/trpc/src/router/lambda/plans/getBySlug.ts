@@ -13,11 +13,19 @@ export const getBySlug = protectedProjectProcedure
   .query(async (opts) => {
     const { slug } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { plans } = opts.ctx.services
 
-    const plan = await opts.ctx.db.query.plans.findFirst({
-      where: (plan, { eq, and }) => and(eq(plan.slug, slug), eq(plan.projectId, project.id)),
+    const { err, val: plan } = await plans.getPlanBySlug({
+      slug,
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!plan) {
       throw new TRPCError({

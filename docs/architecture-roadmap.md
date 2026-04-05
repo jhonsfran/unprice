@@ -849,7 +849,7 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
     - [ ] `internal/trpc/src/router/lambda/workspaces/resendInvite.ts` -> `orchestration` -> `use-case:workspace/resend-invite.ts`
 
 - [ ] **Migrate simple queries by domain** (one commit per domain):
-  - `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug
+  - [x] `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug
   - `customers/` — getById, getByEmail, exist, getSubscriptions, getInvoices, getInvoiceById, listByActiveProject
   - `features/` — getById, getBySlug, searchBy, listByActiveProject, exist
   - `pages/` — getById, getByDomain, listByActiveProject, update

@@ -1,12 +1,17 @@
 import type { Analytics } from "@unprice/analytics"
-import type { Database } from "@unprice/db"
+import { type Database, and, desc, eq, getTableColumns } from "@unprice/db"
+import * as schema from "@unprice/db/schema"
 import { nFormatter } from "@unprice/db/utils"
 import {
   type BillingInterval,
   type Currency,
+  type Customer,
   type Plan,
+  type PlanVersion,
   type PlanVersionApi,
   type PlanVersionExtended,
+  type Project,
+  type Subscription,
   calculateFlatPricePlan,
   calculateFreeUnits,
 } from "@unprice/db/validators"
@@ -14,6 +19,7 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { toErrorContext } from "../utils/log-context"
 import { retry } from "../utils/retry"
 
 export class PlanService {
@@ -163,30 +169,26 @@ export class PlanService {
   }): Promise<PlanVersionApi | null> {
     const start = performance.now()
 
-    const planVersionData = await this.db.query.versions
-      .findFirst({
-        with: {
-          plan: true,
-          planFeatures: {
-            with: {
-              feature: true,
-            },
-            orderBy(fields, operators) {
-              return operators.asc(fields.order)
-            },
+    const planVersionData = await this.db.query.versions.findFirst({
+      with: {
+        plan: true,
+        planFeatures: {
+          with: {
+            feature: true,
+          },
+          orderBy(fields, operators) {
+            return operators.asc(fields.order)
           },
         },
-        where: (version, { and, eq }) =>
-          and(
-            projectId ? eq(version.projectId, projectId) : undefined,
-            eq(version.id, planVersionId),
-            eq(version.active, true),
-            eq(version.status, "published")
-          ),
-      })
-      .catch((err) => {
-        throw err
-      })
+      },
+      where: (version, { and, eq }) =>
+        and(
+          projectId ? eq(version.projectId, projectId) : undefined,
+          eq(version.id, planVersionId),
+          eq(version.active, true),
+          eq(version.status, "published")
+        ),
+    })
 
     const end = performance.now()
 
@@ -260,9 +262,6 @@ export class PlanService {
         }
 
         return data
-      })
-      .catch((err) => {
-        throw err
       })
 
     const end = performance.now()
@@ -353,7 +352,7 @@ export class PlanService {
 
     if (err) {
       this.logger.error("error getting list of plans", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -424,7 +423,7 @@ export class PlanService {
 
     if (err) {
       this.logger.error("error getting plan version", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -441,5 +440,357 @@ export class PlanService {
     }
 
     return Ok(val)
+  }
+
+  public async getPlanById({
+    id,
+    projectId,
+  }: {
+    id: string
+    projectId: string
+  }): Promise<Result<(Plan & { versions: PlanVersion[]; project: Project }) | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.plans.findFirst({
+        with: {
+          versions: {
+            orderBy: (version, { desc }) => [desc(version.createdAtM)],
+          },
+          project: true,
+        },
+        where: (plan, { eq, and }) => and(eq(plan.id, id), eq(plan.projectId, projectId)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting plan by id: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan by id", {
+        error: toErrorContext(err),
+        planId: id,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as (Plan & { versions: PlanVersion[]; project: Project }) | null) ?? null)
+  }
+
+  public async getPlanBySlug({
+    slug,
+    projectId,
+  }: {
+    slug: string
+    projectId: string
+  }): Promise<Result<Plan | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.plans.findFirst({
+        where: (plan, { eq, and }) => and(eq(plan.slug, slug), eq(plan.projectId, projectId)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting plan by slug: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan by slug", {
+        error: toErrorContext(err),
+        slug,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as Plan | null) ?? null)
+  }
+
+  public async listPlansByProject({
+    projectId,
+    fromDate,
+    toDate,
+    published,
+    active,
+  }: {
+    projectId: string
+    fromDate?: number
+    toDate?: number
+    published?: boolean
+    active?: boolean
+  }): Promise<
+    Result<
+      Array<
+        Plan & {
+          versions: Array<Pick<PlanVersion, "id" | "status" | "title" | "currency" | "version">>
+        }
+      >,
+      FetchError
+    >
+  > {
+    const needsPublished = published === undefined || published
+    const needsActive = active === undefined || active
+
+    const { val, err } = await wrapResult(
+      this.db.query.plans.findMany({
+        with: {
+          versions: {
+            where: (version, { eq }) =>
+              needsPublished ? eq(version.status, "published") : undefined,
+            orderBy: (version, { asc }) => [asc(version.version)],
+            columns: {
+              status: true,
+              id: true,
+              title: true,
+              currency: true,
+              version: true,
+            },
+          },
+        },
+        where: (plan, { eq, and, between, gte, lte }) =>
+          and(
+            eq(plan.projectId, projectId),
+            fromDate && toDate ? between(plan.createdAtM, fromDate, toDate) : undefined,
+            fromDate ? gte(plan.createdAtM, fromDate) : undefined,
+            toDate ? lte(plan.createdAtM, toDate) : undefined,
+            needsActive ? eq(plan.active, true) : undefined
+          ),
+        orderBy: (plan, { asc }) => [asc(plan.createdAtM)],
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing plans by project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error listing plans by project", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(
+      (val as Array<
+        Plan & {
+          versions: Array<Pick<PlanVersion, "id" | "status" | "title" | "currency" | "version">>
+        }
+      >) ?? []
+    )
+  }
+
+  public async planExists({
+    slug,
+    id,
+    projectId,
+  }: {
+    slug: string
+    id?: string
+    projectId: string
+  }): Promise<Result<boolean, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.plans.findFirst({
+        columns: {
+          id: true,
+        },
+        where: (plan, { eq, and }) =>
+          id
+            ? and(eq(plan.projectId, projectId), eq(plan.id, id))
+            : and(eq(plan.projectId, projectId), eq(plan.slug, slug)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error checking plan exists: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error checking plan exists", {
+        error: toErrorContext(err),
+        projectId,
+        slug,
+      })
+      return Err(err)
+    }
+
+    return Ok(Boolean(val))
+  }
+
+  public async getPlanWithVersionsBySlug({
+    slug,
+    projectId,
+  }: {
+    slug: string
+    projectId: string
+  }): Promise<
+    Result<
+      | (Plan & {
+          versions: Array<
+            PlanVersion & {
+              subscriptions: number
+              plan: Pick<Plan, "defaultPlan">
+            }
+          >
+        })
+      | null,
+      FetchError
+    >
+  > {
+    const { val, err } = await wrapResult(
+      this.db.query.plans
+        .findFirst({
+          with: {
+            versions: {
+              orderBy: (version, { desc }) => [desc(version.createdAtM)],
+              with: {
+                phases: {
+                  columns: {
+                    id: true,
+                    subscriptionId: true,
+                  },
+                },
+                plan: {
+                  columns: {
+                    defaultPlan: true,
+                  },
+                },
+              },
+            },
+          },
+          where: (plan, { eq, and }) => and(eq(plan.slug, slug), eq(plan.projectId, projectId)),
+        })
+        .then((plan) => {
+          if (!plan) {
+            return null
+          }
+
+          return {
+            ...plan,
+            versions: plan.versions.map((version) => ({
+              ...version,
+              subscriptions: version.phases.length,
+            })),
+          }
+        }),
+      (error) =>
+        new FetchError({
+          message: `error getting plan versions by slug: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan versions by slug", {
+        error: toErrorContext(err),
+        projectId,
+        slug,
+      })
+      return Err(err)
+    }
+
+    return Ok(
+      (val as
+        | (Plan & {
+            versions: Array<
+              PlanVersion & {
+                subscriptions: number
+                plan: Pick<Plan, "defaultPlan">
+              }
+            >
+          })
+        | null) ?? null
+    )
+  }
+
+  public async getPlanSubscriptionsBySlug({
+    slug,
+    projectId,
+  }: {
+    slug: string
+    projectId: string
+  }): Promise<
+    Result<
+      {
+        plan: Plan | null
+        subscriptions: Array<Subscription & { customer: Customer }>
+      },
+      FetchError
+    >
+  > {
+    const customerColumns = getTableColumns(schema.customers)
+
+    const { val, err } = await wrapResult(
+      Promise.all([
+        this.db.query.plans.findFirst({
+          where: (plan, { eq, and }) => and(eq(plan.slug, slug), eq(plan.projectId, projectId)),
+        }),
+        this.db
+          .selectDistinctOn([schema.subscriptions.id], {
+            subscriptions: schema.subscriptions,
+            customer: customerColumns,
+          })
+          .from(schema.plans)
+          .innerJoin(
+            schema.versions,
+            and(
+              eq(schema.versions.planId, schema.plans.id),
+              eq(schema.versions.projectId, schema.plans.projectId)
+            )
+          )
+          .innerJoin(
+            schema.subscriptionPhases,
+            and(
+              eq(schema.versions.id, schema.subscriptionPhases.planVersionId),
+              eq(schema.versions.projectId, schema.subscriptionPhases.projectId)
+            )
+          )
+          .innerJoin(
+            schema.subscriptions,
+            and(
+              eq(schema.subscriptions.id, schema.subscriptionPhases.subscriptionId),
+              eq(schema.subscriptions.projectId, schema.subscriptionPhases.projectId)
+            )
+          )
+          .innerJoin(
+            schema.customers,
+            and(
+              eq(schema.customers.id, schema.subscriptions.customerId),
+              eq(schema.customers.projectId, schema.subscriptions.projectId)
+            )
+          )
+          .where(and(eq(schema.plans.slug, slug), eq(schema.plans.projectId, projectId)))
+          .orderBy(() => [desc(schema.subscriptions.id)]),
+      ]),
+      (error) =>
+        new FetchError({
+          message: `error getting plan subscriptions by slug: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan subscriptions by slug", {
+        error: toErrorContext(err),
+        projectId,
+        slug,
+      })
+      return Err(err)
+    }
+
+    const [plan, rows] = val
+    const subscriptions = rows.map((data) => ({
+      ...data.subscriptions,
+      customer: data.customer,
+    }))
+
+    return Ok({
+      plan: (plan as Plan | null) ?? null,
+      subscriptions: subscriptions as Array<Subscription & { customer: Customer }>,
+    })
   }
 }

@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { planSelectBaseSchema, planVersionSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -32,37 +33,22 @@ export const listByActiveProject = protectedProjectProcedure
   .query(async (opts) => {
     const { fromDate, toDate, published, active } = opts.input
     const project = opts.ctx.project
+    const { plans: plansService } = opts.ctx.services
 
-    const needsPublished = published === undefined || published
-    const needsActive = active === undefined || active
-
-    const plans = await opts.ctx.db.query.plans.findMany({
-      with: {
-        versions: {
-          where: (version, { eq }) =>
-            // get published versions by default, only get unpublished versions if the user wants it
-            needsPublished ? eq(version.status, "published") : undefined,
-          orderBy: (version, { asc }) => [asc(version.version)],
-          columns: {
-            status: true,
-            id: true,
-            title: true,
-            currency: true,
-            version: true,
-          },
-        },
-      },
-      where: (plan, { eq, and, between, gte, lte }) =>
-        and(
-          eq(plan.projectId, project.id),
-          fromDate && toDate ? between(plan.createdAtM, fromDate, toDate) : undefined,
-          fromDate ? gte(plan.createdAtM, fromDate) : undefined,
-          toDate ? lte(plan.createdAtM, toDate) : undefined,
-          // get active versions by default, only get inactive versions if the user wants it
-          needsActive ? eq(plan.active, true) : undefined
-        ),
-      orderBy: (plan, { asc }) => [asc(plan.createdAtM)],
+    const { err, val: plans } = await plansService.listPlansByProject({
+      projectId: project.id,
+      fromDate,
+      toDate,
+      published,
+      active,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     return {
       plans,

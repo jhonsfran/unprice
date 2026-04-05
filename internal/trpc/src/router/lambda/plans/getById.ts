@@ -20,17 +20,19 @@ export const getById = protectedProjectProcedure
   .query(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { plans } = opts.ctx.services
 
-    const plan = await opts.ctx.db.query.plans.findFirst({
-      with: {
-        versions: {
-          orderBy: (version, { desc }) => [desc(version.createdAtM)],
-        },
-        project: true,
-      },
-      where: (plan, { eq, and }) => and(eq(plan.id, id), eq(plan.projectId, project.id)),
+    const { err, val: plan } = await plans.getPlanById({
+      id,
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!plan) {
       throw new TRPCError({
