@@ -859,7 +859,7 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
   - [x] `analytics/` — getOverviewStats, getCountryVisits, getBrowserVisits, getPagesOverview, getRealtimeTicket
   - [x] `subscriptions/` — getById, listByActiveProject, listByPlanVersion
   - [x] `planVersions/` — getById, create, update, duplicate, deactivate, remove
-  - `planVersionFeatures/` — getById, getByPlanVersionId, create, update, remove
+  - [x] `planVersionFeatures/` — getById, getByPlanVersionId, create, update, remove
   - `events/` — listByActiveProject, update
   - `apikeys/` — listByActiveProject
   - `workspaces/` mutations — create, delete, deleteMember, inviteMember, resendInvite

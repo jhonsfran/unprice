@@ -1,8 +1,5 @@
 import { TRPCError } from "@trpc/server"
-import * as schema from "@unprice/db/schema"
-import * as utils from "@unprice/db/utils"
 import {
-  getAnchor,
   planVersionFeatureDragDropSchema,
   planVersionFeatureInsertBaseSchema,
 } from "@unprice/db/validators"
@@ -34,132 +31,79 @@ export const create = protectedProjectProcedure
       meterConfig,
     } = opts.input
     const project = opts.ctx.project
-
-    const _workspace = project.workspace
+    const { plans } = opts.ctx.services
 
     // only owner and admin can create a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const planVersionData = await opts.ctx.db.query.versions.findFirst({
-      where: (version, { eq, and }) =>
-        and(eq(version.id, planVersionId), eq(version.projectId, project.id)),
+    const { err, val } = await plans.createPlanVersionFeatureRecord({
+      projectId: project.id,
+      featureId,
+      planVersionId,
+      featureType,
+      config: config!,
+      metadata,
+      order,
+      defaultQuantity,
+      limit,
+      billingConfig,
+      resetConfig,
+      type,
+      unitOfMeasure,
+      meterConfig,
+      hasMeterConfigOverride,
     })
 
-    if (!planVersionData?.id) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "plan_version_not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "version of the plan not found",
       })
     }
 
-    // if published we should not allow to add a feature
-    if (planVersionData.status === "published") {
+    if (val.state === "plan_version_published") {
       throw new TRPCError({
         code: "CONFLICT",
         message: "Cannot add a feature to a published version",
       })
     }
 
-    const featureData = await opts.ctx.db.query.features.findFirst({
-      where: (feature, { eq, and }) =>
-        and(eq(feature.id, featureId), eq(feature.projectId, project.id)),
-    })
-
-    if (!featureData?.id) {
+    if (val.state === "feature_not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "feature not found",
       })
     }
 
-    const planVersionFeatureId = utils.newId("feature_version")
-
-    // only usage items can have a different billing config but the billing anchor should be the same as the plan version billing config
-    const billingConfigCreate =
-      featureType === "usage" ? billingConfig : planVersionData.billingConfig
-
-    const meterConfigSnapshot =
-      featureType !== "usage"
-        ? null
-        : hasMeterConfigOverride
-          ? (meterConfig ?? null)
-          : (featureData.meterConfig ?? null)
-
-    if (featureType === "usage" && !meterConfigSnapshot) {
+    if (val.state === "usage_meter_config_required") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Usage features require meterConfig or a default feature meterConfig",
       })
     }
 
-    const resetConfigCreate = billingConfigCreate.name === resetConfig?.name ? null : resetConfig
-
-    if (resetConfigCreate) {
-      try {
-        getAnchor(Date.now(), resetConfigCreate.resetInterval, resetConfigCreate.resetAnchor)
-      } catch (error) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Invalid reset configuration: ${error instanceof Error ? error.message : "invalid reset anchor"}`,
-        })
-      }
+    if (val.state === "invalid_reset_config") {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Invalid reset configuration: invalid reset anchor",
+      })
     }
 
-    const planVersionFeatureCreated = await opts.ctx.db
-      .insert(schema.planVersionFeatures)
-      .values({
-        id: planVersionFeatureId,
-        featureId: featureData.id,
-        projectId: project.id,
-        planVersionId: planVersionData.id,
-        unitOfMeasure: unitOfMeasure ?? featureData.unitOfMeasure ?? "units",
-        // for now we use the same billing config as the plan version
-        billingConfig: {
-          ...billingConfigCreate,
-          billingAnchor: planVersionData.billingConfig.billingAnchor,
-        },
-        featureType,
-        config: config!,
-        metadata,
-        order: order ?? "1024",
-        defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
-        limit: limit === 0 ? null : limit,
-        // by default reset config is the same as the billing config
-        // when null the system will reset given the aggregation method
-        resetConfig: resetConfigCreate,
-        type,
-        meterConfig: meterConfigSnapshot,
-      })
-      .returning()
-      .then((re) => re[0])
-
-    if (!planVersionFeatureCreated?.id) {
+    if (val.state !== "ok") {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error creating feature for this version",
       })
     }
 
-    const planVersionFeatureData = await opts.ctx.db.query.planVersionFeatures.findFirst({
-      with: {
-        planVersion: true,
-        feature: true,
-      },
-      where: (planVersionFeature, { and, eq }) =>
-        and(
-          eq(planVersionFeature.id, planVersionFeatureCreated.id),
-          eq(planVersionFeature.projectId, project.id)
-        ),
-    })
-
-    if (!planVersionFeatureData?.id) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Error fetching the created feature",
-      })
-    }
-
     return {
-      planVersionFeature: planVersionFeatureData,
+      planVersionFeature: val.planVersionFeature,
     }
   })

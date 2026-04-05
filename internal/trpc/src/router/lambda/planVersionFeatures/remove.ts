@@ -1,8 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { planVersionFeatureSelectBaseSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -18,45 +16,38 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const _workspace = project.workspace
+    const { plans } = opts.ctx.services
 
     // only owner and admin can delete a feature
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const planVersionFeatureData = await opts.ctx.db.query.planVersionFeatures.findFirst({
-      with: {
-        planVersion: true,
-      },
-      where: (featureVersion, { and, eq }) =>
-        and(eq(featureVersion.id, id), eq(featureVersion.projectId, project.id)),
+    const { err, val } = await plans.removePlanVersionFeatureRecord({
+      projectId: project.id,
+      id,
     })
 
-    if (!planVersionFeatureData?.id) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "feature version not found",
       })
     }
 
-    if (planVersionFeatureData.planVersion.status === "published") {
+    if (val.state === "published_conflict") {
       throw new TRPCError({
         code: "CONFLICT",
         message: "Cannot delete a feature from a published version",
       })
     }
 
-    const deletedPlanVersion = await opts.ctx.db
-      .delete(schema.planVersionFeatures)
-      .where(
-        and(
-          eq(schema.planVersionFeatures.projectId, project.id),
-          eq(schema.planVersionFeatures.id, planVersionFeatureData.id)
-        )
-      )
-      .returning()
-      .then((data) => data[0])
-
-    if (!deletedPlanVersion?.id) {
+    if (val.state !== "ok") {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error deleting feature",
@@ -64,6 +55,6 @@ export const remove = protectedProjectProcedure
     }
 
     return {
-      plan: deletedPlanVersion,
+      plan: val.planVersionFeature,
     }
   })

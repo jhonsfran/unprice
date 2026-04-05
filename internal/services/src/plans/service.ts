@@ -6,10 +6,12 @@ import {
   type BillingInterval,
   type Currency,
   type Customer,
+  type Feature,
   type Plan,
   type PlanVersion,
   type PlanVersionApi,
   type PlanVersionExtended,
+  type PlanVersionFeature,
   type Project,
   type Subscription,
   calculateFlatPricePlan,
@@ -18,6 +20,7 @@ import {
   configPackageSchema,
   configTierSchema,
   configUsageSchema,
+  getAnchor,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -1646,6 +1649,602 @@ export class PlanService {
     return Ok({
       state: "ok",
       planVersion: val as PlanVersion,
+    })
+  }
+
+  public async getPlanVersionFeatureByIdDetailed({
+    id,
+    projectId,
+  }: {
+    id: string
+    projectId: string
+  }): Promise<
+    Result<
+      | (PlanVersionFeature & {
+          planVersion: PlanVersion
+          feature: Feature
+        })
+      | null,
+      FetchError
+    >
+  > {
+    const { val, err } = await wrapResult(
+      this.db.query.planVersionFeatures.findFirst({
+        with: {
+          planVersion: true,
+          feature: true,
+        },
+        where: (planVersionFeature, { and, eq }) =>
+          and(eq(planVersionFeature.id, id), eq(planVersionFeature.projectId, projectId)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting plan version feature by id: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan version feature by id", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionFeatureId: id,
+      })
+      return Err(err)
+    }
+
+    return Ok(
+      (val as (PlanVersionFeature & { planVersion: PlanVersion; feature: Feature }) | null) ?? null
+    )
+  }
+
+  public async listPlanVersionFeaturesByPlanVersionId({
+    planVersionId,
+    projectId,
+  }: {
+    planVersionId: string
+    projectId: string
+  }): Promise<
+    Result<
+      | { state: "plan_version_not_found" }
+      | {
+          state: "ok"
+          planVersionFeatures: Array<
+            PlanVersionFeature & {
+              planVersion: Pick<PlanVersion, "id">
+              feature: Feature
+            }
+          >
+        },
+      FetchError
+    >
+  > {
+    const planVersionData = await this.db.query.versions.findFirst({
+      where: (version, { and, eq }) =>
+        and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
+    })
+
+    if (!planVersionData?.id) {
+      return Ok({ state: "plan_version_not_found" })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db.query.planVersionFeatures.findMany({
+        with: {
+          planVersion: {
+            columns: {
+              id: true,
+            },
+          },
+          feature: true,
+        },
+        where: (planVersionFeature, { and, eq }) =>
+          and(
+            eq(planVersionFeature.planVersionId, planVersionId),
+            eq(planVersionFeature.projectId, projectId)
+          ),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing plan version features by plan version id: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error listing plan version features by plan version id", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId,
+      })
+      return Err(err)
+    }
+
+    return Ok({
+      state: "ok",
+      planVersionFeatures:
+        (val as Array<
+          PlanVersionFeature & {
+            planVersion: Pick<PlanVersion, "id">
+            feature: Feature
+          }
+        >) ?? [],
+    })
+  }
+
+  public async createPlanVersionFeatureRecord({
+    projectId,
+    featureId,
+    planVersionId,
+    featureType,
+    config,
+    metadata,
+    order,
+    defaultQuantity,
+    limit,
+    billingConfig,
+    resetConfig,
+    type,
+    unitOfMeasure,
+    meterConfig,
+    hasMeterConfigOverride,
+  }: {
+    projectId: string
+    featureId: string
+    planVersionId: string
+    featureType: PlanVersionFeature["featureType"]
+    config: PlanVersionFeature["config"]
+    metadata?: PlanVersionFeature["metadata"]
+    order?: PlanVersionFeature["order"]
+    defaultQuantity?: PlanVersionFeature["defaultQuantity"]
+    limit?: PlanVersionFeature["limit"]
+    billingConfig: PlanVersionFeature["billingConfig"]
+    resetConfig?: PlanVersionFeature["resetConfig"]
+    type?: PlanVersionFeature["type"]
+    unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
+    meterConfig?: PlanVersionFeature["meterConfig"]
+    hasMeterConfigOverride: boolean
+  }): Promise<
+    Result<
+      | {
+          state:
+            | "plan_version_not_found"
+            | "plan_version_published"
+            | "feature_not_found"
+            | "usage_meter_config_required"
+            | "invalid_reset_config"
+        }
+      | {
+          state: "ok"
+          planVersionFeature: PlanVersionFeature & {
+            planVersion: PlanVersion
+            feature: Feature
+          }
+        },
+      FetchError
+    >
+  > {
+    const planVersionData = await this.db.query.versions.findFirst({
+      where: (version, { eq, and }) =>
+        and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
+    })
+
+    if (!planVersionData?.id) {
+      return Ok({
+        state: "plan_version_not_found",
+      })
+    }
+
+    if (planVersionData.status === "published") {
+      return Ok({
+        state: "plan_version_published",
+      })
+    }
+
+    const featureData = await this.db.query.features.findFirst({
+      where: (feature, { eq, and }) =>
+        and(eq(feature.id, featureId), eq(feature.projectId, projectId)),
+    })
+
+    if (!featureData?.id) {
+      return Ok({
+        state: "feature_not_found",
+      })
+    }
+
+    const planVersionFeatureId = newId("feature_version")
+
+    const billingConfigCreate =
+      featureType === "usage" ? billingConfig : planVersionData.billingConfig
+
+    const meterConfigSnapshot =
+      featureType !== "usage"
+        ? null
+        : hasMeterConfigOverride
+          ? (meterConfig ?? null)
+          : (featureData.meterConfig ?? null)
+
+    if (featureType === "usage" && !meterConfigSnapshot) {
+      return Ok({
+        state: "usage_meter_config_required",
+      })
+    }
+
+    const resetConfigCreate = billingConfigCreate.name === resetConfig?.name ? null : resetConfig
+
+    if (resetConfigCreate) {
+      try {
+        getAnchor(Date.now(), resetConfigCreate.resetInterval, resetConfigCreate.resetAnchor)
+      } catch {
+        return Ok({
+          state: "invalid_reset_config",
+        })
+      }
+    }
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const planVersionFeatureCreated = await tx
+          .insert(schema.planVersionFeatures)
+          .values({
+            id: planVersionFeatureId,
+            featureId: featureData.id,
+            projectId,
+            planVersionId: planVersionData.id,
+            unitOfMeasure: unitOfMeasure ?? featureData.unitOfMeasure ?? "units",
+            billingConfig: {
+              ...billingConfigCreate,
+              billingAnchor: planVersionData.billingConfig.billingAnchor,
+            },
+            featureType,
+            config,
+            metadata,
+            order: Number(order ?? 1024),
+            defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
+            limit: limit === 0 ? null : limit,
+            resetConfig: resetConfigCreate,
+            type: type ?? "feature",
+            meterConfig: meterConfigSnapshot,
+          })
+          .returning()
+          .then((rows) => rows[0] ?? null)
+
+        if (!planVersionFeatureCreated?.id) {
+          return null
+        }
+
+        return tx.query.planVersionFeatures.findFirst({
+          with: {
+            planVersion: true,
+            feature: true,
+          },
+          where: (planVersionFeature, { and, eq }) =>
+            and(
+              eq(planVersionFeature.id, planVersionFeatureCreated.id),
+              eq(planVersionFeature.projectId, projectId)
+            ),
+        })
+      }),
+      (error) =>
+        new FetchError({
+          message: `error creating plan version feature: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating plan version feature", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId,
+        featureId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error creating feature for this version",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      planVersionFeature: val as PlanVersionFeature & {
+        planVersion: PlanVersion
+        feature: Feature
+      },
+    })
+  }
+
+  public async updatePlanVersionFeatureRecord({
+    projectId,
+    id,
+    planVersionId,
+    featureId,
+    featureType,
+    config,
+    metadata,
+    order,
+    defaultQuantity,
+    limit,
+    billingConfig,
+    resetConfig,
+    type,
+    unitOfMeasure,
+    meterConfig,
+    hasMeterConfigOverride,
+  }: {
+    projectId: string
+    id: string
+    planVersionId: string
+    featureId?: PlanVersionFeature["featureId"]
+    featureType?: PlanVersionFeature["featureType"]
+    config?: PlanVersionFeature["config"]
+    metadata?: PlanVersionFeature["metadata"]
+    order?: PlanVersionFeature["order"]
+    defaultQuantity?: PlanVersionFeature["defaultQuantity"]
+    limit?: PlanVersionFeature["limit"]
+    billingConfig?: PlanVersionFeature["billingConfig"]
+    resetConfig?: PlanVersionFeature["resetConfig"]
+    type?: PlanVersionFeature["type"]
+    unitOfMeasure?: PlanVersionFeature["unitOfMeasure"]
+    meterConfig?: PlanVersionFeature["meterConfig"]
+    hasMeterConfigOverride: boolean
+  }): Promise<
+    Result<
+      | {
+          state:
+            | "plan_version_feature_not_found"
+            | "plan_version_not_found"
+            | "plan_version_published"
+            | "usage_meter_config_required"
+            | "invalid_reset_config"
+        }
+      | {
+          state: "ok"
+          planVersionFeature: PlanVersionFeature & {
+            planVersion: PlanVersion
+            feature: Feature
+          }
+        },
+      FetchError
+    >
+  > {
+    const existingPlanVersionFeature = await this.db.query.planVersionFeatures.findFirst({
+      with: {
+        feature: true,
+      },
+      where: (planVersionFeature, { and, eq }) =>
+        and(eq(planVersionFeature.id, id), eq(planVersionFeature.projectId, projectId)),
+    })
+
+    if (!existingPlanVersionFeature?.id) {
+      return Ok({
+        state: "plan_version_feature_not_found",
+      })
+    }
+
+    const planVersionData = await this.db.query.versions.findFirst({
+      where: (version, { and, eq }) =>
+        and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
+    })
+
+    if (!planVersionData?.id) {
+      return Ok({
+        state: "plan_version_not_found",
+      })
+    }
+
+    if (planVersionData.status === "published") {
+      return Ok({
+        state: "plan_version_published",
+      })
+    }
+
+    const featureTypeUpdate = featureType ?? existingPlanVersionFeature.featureType
+    const billingConfigUpdate =
+      featureTypeUpdate === "usage" ? billingConfig : planVersionData.billingConfig
+
+    const featureData = existingPlanVersionFeature.feature
+    const unitOfMeasureUpdate =
+      unitOfMeasure ?? existingPlanVersionFeature.feature.unitOfMeasure ?? "units"
+
+    const shouldUpdateMeterConfig =
+      hasMeterConfigOverride || featureId !== undefined || featureType !== undefined
+
+    const meterConfigUpdate =
+      featureTypeUpdate !== "usage"
+        ? null
+        : hasMeterConfigOverride
+          ? (meterConfig ?? null)
+          : featureData !== undefined
+            ? (featureData.meterConfig ?? null)
+            : (existingPlanVersionFeature.meterConfig ?? null)
+
+    if (featureTypeUpdate === "usage" && shouldUpdateMeterConfig && !meterConfigUpdate) {
+      return Ok({
+        state: "usage_meter_config_required",
+      })
+    }
+
+    if (resetConfig) {
+      try {
+        getAnchor(Date.now(), resetConfig.resetInterval, resetConfig.resetAnchor)
+      } catch {
+        return Ok({
+          state: "invalid_reset_config",
+        })
+      }
+    }
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const planVersionFeatureUpdated = await tx
+          .update(schema.planVersionFeatures)
+          .set({
+            ...(planVersionId && { planVersionId }),
+            ...(featureId && { featureId }),
+            ...(featureType && { featureType }),
+            ...(config && { config }),
+            ...(metadata && { metadata: { ...planVersionData.metadata, ...metadata } }),
+            ...(order && { order }),
+            ...(unitOfMeasureUpdate !== undefined && { unitOfMeasure: unitOfMeasureUpdate }),
+            ...(defaultQuantity !== undefined && {
+              defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
+            }),
+            ...(limit !== undefined && { limit: limit === 0 ? null : limit }),
+            ...(shouldUpdateMeterConfig && {
+              meterConfig: meterConfigUpdate,
+            }),
+            ...(billingConfigUpdate && {
+              billingConfig: {
+                ...billingConfigUpdate,
+                billingAnchor: planVersionData.billingConfig.billingAnchor,
+              },
+            }),
+            ...(resetConfig && { resetConfig }),
+            ...(type && { type }),
+            updatedAtM: Date.now(),
+          })
+          .where(
+            and(
+              eq(schema.planVersionFeatures.id, id),
+              eq(schema.planVersionFeatures.projectId, projectId)
+            )
+          )
+          .returning()
+          .then((rows) => rows[0] ?? null)
+
+        if (!planVersionFeatureUpdated?.id) {
+          return null
+        }
+
+        return tx.query.planVersionFeatures.findFirst({
+          with: {
+            planVersion: true,
+            feature: true,
+          },
+          where: (planVersionFeature, { and, eq }) =>
+            and(
+              eq(planVersionFeature.id, planVersionFeatureUpdated.id),
+              eq(planVersionFeature.projectId, projectId)
+            ),
+        })
+      }),
+      (error) =>
+        new FetchError({
+          message: `error updating plan version feature: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating plan version feature", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionFeatureId: id,
+        planVersionId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error updating version feature",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      planVersionFeature: val as PlanVersionFeature & {
+        planVersion: PlanVersion
+        feature: Feature
+      },
+    })
+  }
+
+  public async removePlanVersionFeatureRecord({
+    projectId,
+    id,
+  }: {
+    projectId: string
+    id: string
+  }): Promise<
+    Result<
+      | { state: "not_found" | "published_conflict" }
+      | {
+          state: "ok"
+          planVersionFeature: PlanVersionFeature
+        },
+      FetchError
+    >
+  > {
+    const planVersionFeatureData = await this.db.query.planVersionFeatures.findFirst({
+      with: {
+        planVersion: true,
+      },
+      where: (featureVersion, { and, eq }) =>
+        and(eq(featureVersion.id, id), eq(featureVersion.projectId, projectId)),
+    })
+
+    if (!planVersionFeatureData?.id) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    if (planVersionFeatureData.planVersion.status === "published") {
+      return Ok({
+        state: "published_conflict",
+      })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(schema.planVersionFeatures)
+        .where(
+          and(
+            eq(schema.planVersionFeatures.projectId, projectId),
+            eq(schema.planVersionFeatures.id, id)
+          )
+        )
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error removing plan version feature: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error removing plan version feature", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionFeatureId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error deleting feature",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      planVersionFeature: val as PlanVersionFeature,
     })
   }
 }
