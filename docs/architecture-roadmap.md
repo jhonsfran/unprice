@@ -4,6 +4,8 @@
 > predictable, repeatable pattern to follow when building features, fixing bugs,
 > or refactoring code.
 
+Canonical architecture source of truth: [ADR-0001: Canonical Backend Architecture Boundaries](/Users/jhonsfran/repos/unprice/docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md)
+
 ---
 
 ## Foundation Already Built
