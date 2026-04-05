@@ -1,6 +1,7 @@
 import { BillingService } from "./billing/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
+import { DomainService } from "./domains/service"
 import { GrantsManager } from "./entitlements/grants"
 import { EntitlementService } from "./entitlements/service"
 import { FeatureService } from "./features/service"
@@ -17,6 +18,7 @@ import { WorkspaceService } from "./workspaces/service"
  */
 export interface ServiceContext {
   customers: CustomerService
+  domains: DomainService
   features: FeatureService
   pages: PageService
   workspaces: WorkspaceService
@@ -61,6 +63,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   const features = new FeatureService({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
+  const domains = new DomainService({
     db: deps.db,
     logger: deps.logger,
   })
@@ -115,6 +122,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
 
   return {
     customers,
+    domains,
     features,
     pages,
     workspaces,

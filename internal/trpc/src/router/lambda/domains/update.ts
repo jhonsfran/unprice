@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import { domains } from "@unprice/db/schema"
 import { domainSelectBaseSchema, domainUpdateBaseSchema } from "@unprice/db/validators"
 import { Vercel } from "@unprice/vercel"
 import { z } from "zod"
@@ -13,12 +11,21 @@ export const update = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const workspace = opts.ctx.workspace
     const { id, name: domain } = opts.input
+    const { domains } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const oldDomain = await opts.ctx.db.query.domains.findFirst({
-      where: (d, { eq, and }) => and(eq(d.id, id), eq(d.workspaceId, workspace.id)),
+    const { err: oldDomainErr, val: oldDomain } = await domains.getDomainById({
+      domainId: id,
+      workspaceId: workspace.id,
     })
+
+    if (oldDomainErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: oldDomainErr.message,
+      })
+    }
 
     if (!oldDomain) {
       throw new TRPCError({
@@ -31,9 +38,16 @@ export const update = protectedWorkspaceProcedure
       return { domain: oldDomain }
     }
 
-    const newDomainExist = await opts.ctx.db.query.domains.findFirst({
-      where: (d, { eq }) => eq(d.name, domain),
+    const { err: existsErr, val: newDomainExist } = await domains.domainExistsByName({
+      name: domain,
     })
+
+    if (existsErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: existsErr.message,
+      })
+    }
 
     if (newDomainExist) {
       throw new TRPCError({
@@ -68,14 +82,18 @@ export const update = protectedWorkspaceProcedure
       })
     }
 
-    const updateDomain = await opts.ctx.db
-      .update(domains)
-      .set({
-        name: domain,
+    const { err: updateErr, val: updateDomain } = await domains.updateDomainName({
+      domainId: id,
+      workspaceId: workspace.id,
+      name: domain,
+    })
+
+    if (updateErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: updateErr.message,
       })
-      .where(and(eq(domains.id, id), eq(domains.workspaceId, workspace.id)))
-      .returning()
-      .then((res) => res[0])
+    }
 
     if (!updateDomain) {
       throw new TRPCError({

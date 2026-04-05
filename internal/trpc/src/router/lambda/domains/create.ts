@@ -1,5 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { domains } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import { domainCreateBaseSchema, domainSelectBaseSchema } from "@unprice/db/validators"
 import { Vercel } from "@unprice/vercel"
@@ -13,12 +12,20 @@ export const create = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const workspace = opts.ctx.workspace
     const domain = opts.input.name
+    const { domains } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const domainExist = await opts.ctx.db.query.domains.findFirst({
-      where: (d, { eq }) => eq(d.name, domain),
+    const { err: domainExistsErr, val: domainExist } = await domains.domainExistsByName({
+      name: domain,
     })
+
+    if (domainExistsErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: domainExistsErr.message,
+      })
+    }
 
     if (domainExist) {
       throw new TRPCError({
@@ -52,16 +59,19 @@ export const create = protectedWorkspaceProcedure
 
     const domainId = newId("domain")
 
-    const domainData = await opts.ctx.db
-      .insert(domains)
-      .values({
-        id: domainId,
-        name: domainVercel.name,
-        apexName: domainVercel.apexName,
-        workspaceId: workspace.id,
+    const { err: createErr, val: domainData } = await domains.createDomain({
+      domainId,
+      name: domainVercel.name,
+      apexName: domainVercel.apexName,
+      workspaceId: workspace.id,
+    })
+
+    if (createErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: createErr.message,
       })
-      .returning()
-      .then((res) => res[0])
+    }
 
     if (!domainData) {
       throw new TRPCError({

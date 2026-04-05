@@ -854,7 +854,7 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
   - [x] `features/` — getById, getBySlug, searchBy, listByActiveProject, exist
   - [x] `pages/` — getById, getByDomain, listByActiveProject, update
   - [x] `workspaces/` — getBySlug, listMembersByActiveWorkspace, listInvitesByActiveWorkspace, listWorkspacesByActiveUser
-  - `domains/` — exists, getAllByActiveWorkspace, create, update, remove
+  - [x] `domains/` — exists, getAllByActiveWorkspace, create, update, remove
   - `projects/` — getById, getBySlug, listByActiveWorkspace, listByWorkspace
   - `analytics/` — getOverviewStats, getCountryVisits, getBrowserVisits, getPagesOverview, getRealtimeTicket
   - `subscriptions/` — getById, listByActiveProject, listByPlanVersion

@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { eq } from "@unprice/db"
-import { domains } from "@unprice/db/schema"
 import { domainSelectBaseSchema } from "@unprice/db/validators"
 import { Vercel } from "@unprice/vercel"
 import { z } from "zod"
@@ -16,13 +14,22 @@ export const remove = protectedWorkspaceProcedure
   )
   .mutation(async (opts) => {
     const workspace = opts.ctx.workspace
+    const { domains } = opts.ctx.services
 
     // only owner can remove a domain
     opts.ctx.verifyRole(["OWNER"])
 
-    const domain = await opts.ctx.db.query.domains.findFirst({
-      where: (d, { eq, and }) => and(eq(d.id, opts.input.id), eq(d.workspaceId, workspace.id)),
+    const { err: domainErr, val: domain } = await domains.getDomainById({
+      domainId: opts.input.id,
+      workspaceId: workspace.id,
     })
+
+    if (domainErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: domainErr.message,
+      })
+    }
 
     if (!domain) {
       throw new TRPCError({
@@ -50,13 +57,18 @@ export const remove = protectedWorkspaceProcedure
       })
     }
 
-    const deletedDomain = await opts.ctx.db
-      .delete(domains)
-      .where(eq(domains.id, domain.id))
-      .returning()
-      .then((res) => res[0])
+    const { err: deleteErr, val: deletedDomain } = await domains.removeDomainById({
+      domainId: domain.id,
+    })
+
+    if (deleteErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: deleteErr.message,
+      })
+    }
 
     return {
-      domain: deletedDomain,
+      domain: deletedDomain ?? undefined,
     }
   })

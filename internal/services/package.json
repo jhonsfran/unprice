@@ -11,6 +11,7 @@
     "./plans": "./src/plans/index.ts",
     "./subscriptions": "./src/subscriptions/index.ts",
     "./customers": "./src/customers/index.ts",
+    "./domains": "./src/domains/index.ts",
     "./features": "./src/features/index.ts",
     "./pages": "./src/pages/index.ts",
     "./workspaces": "./src/workspaces/index.ts",

@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
 
@@ -5,13 +6,20 @@ export const exists = protectedWorkspaceProcedure
   .input(z.object({ domain: z.string() }))
   .output(z.object({ exist: z.boolean() }))
   .mutation(async (opts) => {
-    const _workspace = opts.ctx.workspace
+    const { domains } = opts.ctx.services
 
-    const domain = await opts.ctx.db.query.domains.findFirst({
-      where: (d, { eq }) => eq(d.name, opts.input.domain),
+    const { err, val: exists } = await domains.domainExistsByName({
+      name: opts.input.domain,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      exist: !!domain,
+      exist: exists,
     }
   })
