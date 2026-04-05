@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { planVersionSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -17,39 +15,38 @@ export const remove = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { plans } = opts.ctx.services
 
     // only owner and admin can delete a plan version
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const planVersionData = await opts.ctx.db.query.versions.findFirst({
-      where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, project.id)),
+    const { err, val } = await plans.removePlanVersionRecord({
+      projectId: project.id,
+      id,
     })
 
-    if (!planVersionData?.id) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "version not found",
       })
     }
 
-    // TODO: should we allow to delete a published version when there is no subscription?
-    if (planVersionData?.status === "published") {
+    if (val.state === "published_conflict") {
       throw new TRPCError({
         code: "CONFLICT",
         message: "Cannot delete a published version, deactivate it instead",
       })
     }
 
-    const deletedPlanVersion = await opts.ctx.db
-      .delete(schema.versions)
-      .where(
-        and(eq(schema.versions.projectId, project.id), eq(schema.versions.id, planVersionData.id))
-      )
-      .returning()
-      .then((data) => data[0])
-
-    if (!deletedPlanVersion?.id) {
+    if (val.state !== "ok") {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error deleting version",
@@ -57,6 +54,6 @@ export const remove = protectedProjectProcedure
     }
 
     return {
-      planVersion: deletedPlanVersion,
+      planVersion: val.planVersion,
     }
   })

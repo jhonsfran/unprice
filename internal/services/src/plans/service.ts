@@ -1,7 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, desc, eq, getTableColumns } from "@unprice/db"
+import { type Database, and, desc, eq, getTableColumns, sql } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import { nFormatter } from "@unprice/db/utils"
+import { nFormatter, newId } from "@unprice/db/utils"
 import {
   type BillingInterval,
   type Currency,
@@ -14,6 +14,10 @@ import {
   type Subscription,
   calculateFlatPricePlan,
   calculateFreeUnits,
+  configFlatSchema,
+  configPackageSchema,
+  configTierSchema,
+  configUsageSchema,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -791,6 +795,857 @@ export class PlanService {
     return Ok({
       plan: (plan as Plan | null) ?? null,
       subscriptions: subscriptions as Array<Subscription & { customer: Customer }>,
+    })
+  }
+
+  public async getPlanByIdRecord({
+    planId,
+    projectId,
+  }: {
+    planId: string
+    projectId: string
+  }): Promise<Result<Plan | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.plans.findFirst({
+        where: (plan, { eq, and }) => and(eq(plan.id, planId), eq(plan.projectId, projectId)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting plan by id: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan by id", {
+        error: toErrorContext(err),
+        projectId,
+        planId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as Plan | null) ?? null)
+  }
+
+  public async getPlanVersionByIdRecord({
+    planVersionId,
+    projectId,
+  }: {
+    planVersionId: string
+    projectId: string
+  }): Promise<Result<PlanVersion | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.versions.findFirst({
+        where: (version, { and, eq }) =>
+          and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting plan version by id: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan version by id", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as PlanVersion | null) ?? null)
+  }
+
+  public async getPlanVersionByIdDetailed({
+    planVersionId,
+    projectId,
+  }: {
+    planVersionId: string
+    projectId: string
+  }): Promise<
+    Result<
+      | (PlanVersion & {
+          plan: Plan
+          planFeatures: Array<unknown>
+        })
+      | null,
+      FetchError
+    >
+  > {
+    const { val, err } = await wrapResult(
+      this.db.query.versions.findFirst({
+        with: {
+          plan: true,
+          planFeatures: {
+            with: {
+              feature: true,
+            },
+            orderBy(fields, operators) {
+              return operators.asc(fields.order)
+            },
+          },
+        },
+        where: (version, { and, eq }) =>
+          and(eq(version.projectId, projectId), eq(version.id, planVersionId)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting plan version by id with details: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan version by id with details", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as (PlanVersion & { plan: Plan; planFeatures: Array<unknown> }) | null) ?? null)
+  }
+
+  public async getPlanVersionByIdForDuplication({
+    planVersionId,
+    projectId,
+  }: {
+    planVersionId: string
+    projectId: string
+  }): Promise<
+    Result<
+      | (PlanVersion & {
+          planFeatures: Array<unknown>
+          plan: Plan
+        })
+      | null,
+      FetchError
+    >
+  > {
+    const { val, err } = await wrapResult(
+      this.db.query.versions.findFirst({
+        where: (version, { and, eq }) =>
+          and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
+        with: {
+          planFeatures: true,
+          plan: true,
+        },
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting plan version for duplication: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting plan version for duplication", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as (PlanVersion & { planFeatures: Array<unknown>; plan: Plan }) | null) ?? null)
+  }
+
+  public async createPlanVersionRecord({
+    projectId,
+    planId,
+    metadata,
+    description,
+    currency,
+    billingConfig,
+    gracePeriod,
+    title,
+    tags,
+    whenToBill,
+    status,
+    paymentProvider,
+    trialUnits,
+    autoRenew,
+  }: {
+    projectId: string
+    planId: string
+    metadata: PlanVersion["metadata"]
+    description: PlanVersion["description"]
+    currency: PlanVersion["currency"]
+    billingConfig: Omit<NonNullable<PlanVersion["billingConfig"]>, "billingAnchor"> & {
+      billingAnchor?: number | "dayOfCreation"
+    }
+    gracePeriod?: PlanVersion["gracePeriod"]
+    title: PlanVersion["title"]
+    tags: PlanVersion["tags"]
+    whenToBill: PlanVersion["whenToBill"]
+    status?: PlanVersion["status"]
+    paymentProvider: PlanVersion["paymentProvider"]
+    trialUnits?: PlanVersion["trialUnits"]
+    autoRenew?: PlanVersion["autoRenew"]
+  }): Promise<
+    Result<{ state: "plan_not_found" } | { state: "ok"; planVersion: PlanVersion }, FetchError>
+  > {
+    const planData = await this.db.query.plans.findFirst({
+      where: (plan, { eq, and }) => and(eq(plan.id, planId), eq(plan.projectId, projectId)),
+    })
+
+    if (!planData?.id) {
+      return Ok({ state: "plan_not_found" })
+    }
+
+    const planVersionId = newId("plan_version")
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const countVersionsPlan = await tx
+          .select({ count: sql<number>`count(*)` })
+          .from(schema.versions)
+          .where(and(eq(schema.versions.projectId, projectId), eq(schema.versions.planId, planId)))
+          .then((res) => res[0]?.count ?? 0)
+
+        return tx
+          .insert(schema.versions)
+          .values({
+            id: planVersionId,
+            planId,
+            projectId,
+            description,
+            title,
+            tags: tags ?? [],
+            status: status ?? "draft",
+            paymentProvider,
+            currency,
+            autoRenew,
+            billingConfig: {
+              ...billingConfig,
+              billingAnchor: billingConfig.billingAnchor ?? "dayOfCreation",
+            },
+            trialUnits: trialUnits ?? 0,
+            gracePeriod: gracePeriod ?? 0,
+            whenToBill,
+            metadata,
+            version: Number(countVersionsPlan) + 1,
+          })
+          .returning()
+          .then((rows) => rows[0] ?? null)
+      }),
+      (error) =>
+        new FetchError({
+          message: `error creating plan version: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error creating plan version", {
+        error: toErrorContext(err),
+        projectId,
+        planId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "error creating version",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      planVersion: val as PlanVersion,
+    })
+  }
+
+  public async updatePlanVersionRecord({
+    projectId,
+    id,
+    status,
+    description,
+    currency,
+    billingConfig,
+    gracePeriod,
+    title,
+    tags,
+    whenToBill,
+    paymentProvider,
+    metadata,
+    autoRenew,
+    trialUnits,
+  }: {
+    projectId: string
+    id: string
+    status?: PlanVersion["status"]
+    description?: PlanVersion["description"]
+    currency?: PlanVersion["currency"]
+    billingConfig?: PlanVersion["billingConfig"]
+    gracePeriod?: PlanVersion["gracePeriod"]
+    title?: PlanVersion["title"]
+    tags?: PlanVersion["tags"]
+    whenToBill?: PlanVersion["whenToBill"]
+    paymentProvider?: PlanVersion["paymentProvider"]
+    metadata?: PlanVersion["metadata"]
+    autoRenew?: PlanVersion["autoRenew"]
+    trialUnits?: PlanVersion["trialUnits"]
+  }): Promise<
+    Result<{ state: "not_found" } | { state: "ok"; planVersion: PlanVersion }, FetchError>
+  > {
+    const planVersionData = await this.db.query.versions.findFirst({
+      with: {
+        plan: {
+          columns: {
+            slug: true,
+          },
+        },
+      },
+      where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, projectId)),
+    })
+
+    if (!planVersionData?.id) {
+      return Ok({ state: "not_found" })
+    }
+
+    if (planVersionData.status === "published") {
+      const { val, err } = await wrapResult(
+        this.db
+          .update(schema.versions)
+          .set({
+            ...(description !== undefined && { description }),
+            ...(status !== undefined && { status }),
+            updatedAtM: Date.now(),
+          })
+          .where(and(eq(schema.versions.id, planVersionData.id)))
+          .returning()
+          .then((rows) => rows[0] ?? null),
+        (error) =>
+          new FetchError({
+            message: `error updating published plan version: ${error.message}`,
+            retry: false,
+          })
+      )
+
+      if (err) {
+        this.logger.error("error updating published plan version", {
+          error: toErrorContext(err),
+          projectId,
+          planVersionId: id,
+        })
+        return Err(err)
+      }
+
+      if (!val) {
+        return Err(
+          new FetchError({
+            message: "Error updating version",
+            retry: false,
+          })
+        )
+      }
+
+      return Ok({
+        state: "ok",
+        planVersion: val as PlanVersion,
+      })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        if (currency && currency !== planVersionData.currency) {
+          const features = await tx.query.planVersionFeatures.findMany({
+            where: (feature, { and, eq }) =>
+              and(eq(feature.planVersionId, planVersionData.id), eq(feature.projectId, projectId)),
+          })
+
+          await Promise.all(
+            features.map(async (feature) => {
+              switch (feature.featureType) {
+                case "flat": {
+                  const config = configFlatSchema.parse(feature.config)
+                  return tx
+                    .update(schema.planVersionFeatures)
+                    .set({
+                      config: {
+                        ...config,
+                        price: {
+                          ...config.price,
+                          dinero: {
+                            ...config.price.dinero,
+                            currency: {
+                              ...config.price.dinero.currency,
+                              code: currency,
+                            },
+                          },
+                        },
+                      },
+                    })
+                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
+                }
+                case "tier": {
+                  const config = configTierSchema.parse(feature.config)
+                  return tx
+                    .update(schema.planVersionFeatures)
+                    .set({
+                      config: {
+                        ...config,
+                        tiers: config.tiers.map((tier) => ({
+                          ...tier,
+                          unitPrice: {
+                            ...tier.unitPrice,
+                            dinero: {
+                              ...tier.unitPrice.dinero,
+                              currency: {
+                                ...tier.unitPrice.dinero.currency,
+                                code: currency,
+                              },
+                            },
+                          },
+                          flatPrice: {
+                            ...tier.flatPrice,
+                            dinero: {
+                              ...tier.flatPrice.dinero,
+                              currency: {
+                                ...tier.flatPrice.dinero.currency,
+                                code: currency,
+                              },
+                            },
+                          },
+                        })),
+                      },
+                    })
+                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
+                }
+                case "usage": {
+                  const config = configUsageSchema.parse(feature.config)
+                  if (config.tiers && config.tiers.length > 0) {
+                    return tx
+                      .update(schema.planVersionFeatures)
+                      .set({
+                        config: {
+                          ...config,
+                          tiers: config.tiers.map((tier) => ({
+                            ...tier,
+                            unitPrice: {
+                              ...tier.unitPrice,
+                              dinero: {
+                                ...tier.unitPrice.dinero,
+                                currency: {
+                                  ...tier.unitPrice.dinero.currency,
+                                  code: currency,
+                                },
+                              },
+                            },
+                            flatPrice: {
+                              ...tier.flatPrice,
+                              dinero: {
+                                ...tier.flatPrice.dinero,
+                                currency: {
+                                  ...tier.flatPrice.dinero.currency,
+                                  code: currency,
+                                },
+                              },
+                            },
+                          })),
+                        },
+                      })
+                      .where(and(eq(schema.planVersionFeatures.id, feature.id)))
+                  }
+
+                  if (config.price) {
+                    return tx
+                      .update(schema.planVersionFeatures)
+                      .set({
+                        config: {
+                          ...config,
+                          price: {
+                            ...config.price,
+                            dinero: {
+                              ...config.price.dinero,
+                              currency: {
+                                ...config.price.dinero.currency,
+                                code: currency,
+                              },
+                            },
+                          },
+                        },
+                      })
+                      .where(and(eq(schema.planVersionFeatures.id, feature.id)))
+                  }
+
+                  return undefined
+                }
+                case "package": {
+                  const config = configPackageSchema.parse(feature.config)
+                  return tx
+                    .update(schema.planVersionFeatures)
+                    .set({
+                      config: {
+                        ...config,
+                        price: {
+                          ...config.price,
+                          dinero: {
+                            ...config.price.dinero,
+                            currency: {
+                              ...config.price.dinero.currency,
+                              code: currency,
+                            },
+                          },
+                        },
+                      },
+                    })
+                    .where(and(eq(schema.planVersionFeatures.id, feature.id)))
+                }
+                default:
+                  return undefined
+              }
+            })
+          )
+        }
+
+        return tx
+          .update(schema.versions)
+          .set({
+            ...(description !== undefined && { description }),
+            ...(currency !== undefined && { currency }),
+            ...(billingConfig !== undefined && { billingConfig }),
+            ...(gracePeriod !== undefined && { gracePeriod }),
+            ...(title !== undefined && { title }),
+            ...(tags !== undefined && { tags }),
+            ...(whenToBill !== undefined && { whenToBill }),
+            ...(autoRenew !== undefined && { autoRenew }),
+            ...(status !== undefined && { status }),
+            ...(metadata !== undefined && { metadata }),
+            ...(paymentProvider !== undefined && { paymentProvider }),
+            ...(trialUnits !== undefined && { trialUnits }),
+            updatedAtM: Date.now(),
+          })
+          .where(and(eq(schema.versions.id, planVersionData.id)))
+          .returning()
+          .then((rows) => rows[0] ?? null)
+      }),
+      (error) =>
+        new FetchError({
+          message: `error updating draft plan version: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating draft plan version", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error updating version",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      planVersion: val as PlanVersion,
+    })
+  }
+
+  public async deactivatePlanVersionRecord({
+    projectId,
+    id,
+  }: {
+    projectId: string
+    id: string
+  }): Promise<
+    Result<
+      | { state: "not_found" | "not_published" | "already_deactivated" }
+      | { state: "ok"; planVersion: PlanVersion },
+      FetchError
+    >
+  > {
+    const planVersionData = await this.db.query.versions.findFirst({
+      where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, projectId)),
+    })
+
+    if (!planVersionData?.id) {
+      return Ok({ state: "not_found" })
+    }
+
+    if (planVersionData.status !== "published") {
+      return Ok({ state: "not_published" })
+    }
+
+    if (!planVersionData.active) {
+      return Ok({ state: "already_deactivated" })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        let promise: Promise<unknown> | undefined
+
+        if (planVersionData.latest) {
+          const previousVersion = await tx.query.versions
+            .findMany({
+              where: (version, { and, eq }) =>
+                and(
+                  eq(version.projectId, projectId),
+                  eq(version.planId, planVersionData.planId),
+                  eq(version.status, "published"),
+                  eq(version.latest, false),
+                  eq(version.active, true)
+                ),
+              orderBy(fields, operators) {
+                return operators.desc(fields.publishedAt)
+              },
+            })
+            .then((data) => data[0])
+
+          if (previousVersion?.id) {
+            promise = tx
+              .update(schema.versions)
+              .set({
+                latest: true,
+              })
+              .where(
+                and(
+                  eq(schema.versions.projectId, projectId),
+                  eq(schema.versions.id, previousVersion.id)
+                )
+              )
+          }
+        }
+
+        const [deactivated] = await Promise.all([
+          tx
+            .update(schema.versions)
+            .set({
+              active: false,
+              latest: false,
+              updatedAtM: Date.now(),
+            })
+            .where(and(eq(schema.versions.id, planVersionData.id)))
+            .returning()
+            .then((rows) => rows[0] ?? null),
+          promise,
+        ])
+
+        return deactivated
+      }),
+      (error) =>
+        new FetchError({
+          message: `error deactivating plan version: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error deactivating plan version", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error deactivating version",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      planVersion: val as PlanVersion,
+    })
+  }
+
+  public async removePlanVersionRecord({
+    projectId,
+    id,
+  }: {
+    projectId: string
+    id: string
+  }): Promise<
+    Result<
+      { state: "not_found" | "published_conflict" } | { state: "ok"; planVersion: PlanVersion },
+      FetchError
+    >
+  > {
+    const planVersionData = await this.db.query.versions.findFirst({
+      where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, projectId)),
+    })
+
+    if (!planVersionData?.id) {
+      return Ok({ state: "not_found" })
+    }
+
+    if (planVersionData.status === "published") {
+      return Ok({ state: "published_conflict" })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .delete(schema.versions)
+        .where(
+          and(eq(schema.versions.projectId, projectId), eq(schema.versions.id, planVersionData.id))
+        )
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error removing plan version: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error removing plan version", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error deleting version",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      planVersion: val as PlanVersion,
+    })
+  }
+
+  public async duplicatePlanVersionRecord({
+    projectId,
+    id,
+  }: {
+    projectId: string
+    id: string
+  }): Promise<
+    Result<
+      | { state: "not_found" | "default_plan_payment_method_conflict" }
+      | { state: "ok"; planVersion: PlanVersion },
+      FetchError
+    >
+  > {
+    const planVersionData = await this.db.query.versions.findFirst({
+      where: (version, { and, eq }) => and(eq(version.id, id), eq(version.projectId, projectId)),
+      with: {
+        planFeatures: true,
+        plan: true,
+      },
+    })
+
+    if (!planVersionData?.id) {
+      return Ok({ state: "not_found" })
+    }
+
+    if (planVersionData.plan.defaultPlan && planVersionData.paymentMethodRequired) {
+      return Ok({ state: "default_plan_payment_method_conflict" })
+    }
+
+    const planVersionId = newId("plan_version")
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const countVersionsPlan = await tx
+          .select({ count: sql<number>`count(*)` })
+          .from(schema.versions)
+          .where(
+            and(
+              eq(schema.versions.projectId, projectId),
+              eq(schema.versions.planId, planVersionData.planId)
+            )
+          )
+          .then((res) => res[0]?.count ?? 0)
+
+        const duplicated = await tx
+          .insert(schema.versions)
+          .values({
+            ...planVersionData,
+            id: planVersionId,
+            trialUnits: planVersionData.trialUnits,
+            billingConfig: planVersionData.billingConfig,
+            autoRenew: planVersionData.autoRenew,
+            paymentMethodRequired: planVersionData.paymentMethodRequired,
+            metadata: {},
+            latest: false,
+            active: true,
+            status: "draft",
+            createdAtM: Date.now(),
+            updatedAtM: Date.now(),
+            version: Number(countVersionsPlan) + 1,
+          })
+          .returning()
+          .then((rows) => rows[0] ?? null)
+
+        if (!duplicated?.id) {
+          return null
+        }
+
+        await Promise.all(
+          planVersionData.planFeatures.map(async (feature) => {
+            await tx.insert(schema.planVersionFeatures).values({
+              ...feature,
+              id: newId("feature_version"),
+              planVersionId,
+              metadata: feature.metadata,
+              createdAtM: Date.now(),
+              updatedAtM: Date.now(),
+            })
+          })
+        )
+
+        return duplicated
+      }),
+      (error) =>
+        new FetchError({
+          message: `error duplicating plan version: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error duplicating plan version", {
+        error: toErrorContext(err),
+        projectId,
+        planVersionId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error duplicating version",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      planVersion: val as PlanVersion,
     })
   }
 }

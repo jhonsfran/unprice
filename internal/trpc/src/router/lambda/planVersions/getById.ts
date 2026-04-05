@@ -8,6 +8,17 @@ import {
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
+const getByIdOutputSchema = z.object({
+  planVersion: planVersionSelectBaseSchema.extend({
+    plan: planSelectBaseSchema,
+    planFeatures: z.array(
+      planVersionFeatureSelectBaseSchema.extend({
+        feature: featureSelectBaseSchema,
+      })
+    ),
+  }),
+})
+
 export const getById = protectedProjectProcedure
   .input(
     z.object({
@@ -15,37 +26,23 @@ export const getById = protectedProjectProcedure
       projectSlug: z.string().optional(),
     })
   )
-  .output(
-    z.object({
-      planVersion: planVersionSelectBaseSchema.extend({
-        plan: planSelectBaseSchema,
-        planFeatures: z.array(
-          planVersionFeatureSelectBaseSchema.extend({
-            feature: featureSelectBaseSchema,
-          })
-        ),
-      }),
-    })
-  )
+  .output(getByIdOutputSchema)
   .query(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { plans } = opts.ctx.services
 
-    const planVersionData = await opts.ctx.db.query.versions.findFirst({
-      with: {
-        plan: true,
-        planFeatures: {
-          with: {
-            feature: true,
-          },
-          orderBy(fields, operators) {
-            return operators.asc(fields.order)
-          },
-        },
-      },
-      where: (version, { and, eq }) => and(eq(version.projectId, project.id), eq(version.id, id)),
+    const { err, val: planVersionData } = await plans.getPlanVersionByIdDetailed({
+      planVersionId: id,
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!planVersionData) {
       throw new TRPCError({
@@ -54,7 +51,7 @@ export const getById = protectedProjectProcedure
       })
     }
 
-    return {
+    return getByIdOutputSchema.parse({
       planVersion: planVersionData,
-    }
+    })
   })
