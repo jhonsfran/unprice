@@ -17,6 +17,7 @@
     "./apikey": "./src/apikey/index.ts",
     "./billing": "./src/billing/index.ts",
     "./entitlements": "./src/entitlements/index.ts",
+    "./use-cases": "./src/use-cases/index.ts",
     "./env": "./env.ts"
   },
   "typesVersions": {

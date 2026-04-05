@@ -23,7 +23,8 @@ export async function keyAuth(c: Context<HonoEnv>) {
     throw new UnpriceApiError({ code: "UNAUTHORIZED", message: "key required" })
   }
 
-  const { apikey, logger } = c.get("services")
+  const { apikey } = c.get("services")
+  const logger = c.get("logger")
 
   // start timer
   startTime(c, "verifyApiKey")
@@ -192,7 +193,7 @@ export async function resolveContextProjectId(
   defaultProjectId: string,
   customerId: string
 ) {
-  const { logger } = c.get("services")
+  const logger = c.get("logger")
   startTime(c, "resolveContextProjectId")
 
   const unPriceCustomerId = c.get("unPriceCustomerId")

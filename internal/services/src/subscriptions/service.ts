@@ -1344,63 +1344,38 @@ export class SubscriptionService {
     // project defaults
     const timezoneToUse = timezone || customerData.project.timezone
 
-    // execute this in a transaction
-    const result = await trx.transaction(async (innerTrx) => {
-      try {
-        // create the subscription
-        const subscriptionId = newId("subscription")
+    const subscriptionId = newId("subscription")
 
-        // create the subscription and then phases
-        const newSubscription = await innerTrx
-          .insert(subscriptions)
-          .values({
-            id: subscriptionId,
-            projectId,
-            customerId: customerData.id,
-            active: false,
-            status: "active",
-            timezone: timezoneToUse,
-            metadata: metadata,
-            // provisional values
-            currentCycleStartAt: Date.now(),
-            currentCycleEndAt: Date.now(),
-          })
-          .returning()
-          .then((re) => re[0])
-          .catch((e) => {
-            this.logger.error(e.message)
-            return null
-          })
+    const newSubscription = await trx
+      .insert(subscriptions)
+      .values({
+        id: subscriptionId,
+        projectId,
+        customerId: customerData.id,
+        active: false,
+        status: "active",
+        timezone: timezoneToUse,
+        metadata: metadata,
+        // provisional values
+        currentCycleStartAt: Date.now(),
+        currentCycleEndAt: Date.now(),
+      })
+      .returning()
+      .then((re) => re[0])
+      .catch((e) => {
+        this.logger.error(e.message)
+        return null
+      })
 
-        if (!newSubscription) {
-          return Err(
-            new UnPriceSubscriptionError({
-              message: "Error while creating subscription",
-            })
-          )
-        }
-
-        return Ok(newSubscription)
-      } catch (e) {
-        this.logger.error("Error creating subscription", {
-          error: JSON.stringify(e),
+    if (!newSubscription) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Error while creating subscription",
         })
-
-        return Err(
-          new UnPriceSubscriptionError({
-            message: "Error while creating subscription",
-          })
-        )
-      }
-    })
-
-    if (result.err) {
-      return Err(result.err)
+      )
     }
 
-    const subscription = result.val
-
-    return Ok(subscription)
+    return Ok(newSubscription)
   }
 
   public async getSubscriptionData({

@@ -65,7 +65,8 @@ export type GetAnalyticsUsageResponse = z.infer<
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
-    const { analytics, cache } = c.get("services")
+    const analytics = c.get("analytics")
+    const cache = c.get("cache")
 
     // validate the request
     const key = await keyAuth(c)

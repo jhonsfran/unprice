@@ -1,9 +1,9 @@
 import { subscriptionInsertSchema, subscriptionSelectSchema } from "@unprice/db/validators"
+import { createSubscription } from "@unprice/services/use-cases"
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
 import { protectedProjectProcedure } from "#trpc"
-
 
 export const create = protectedProjectProcedure
   .input(subscriptionInsertSchema)
@@ -17,13 +17,18 @@ export const create = protectedProjectProcedure
     // only owner and admin can create a subscription
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const { subscriptions } = opts.ctx.services
-
     // create the subscription
-    const { err, val } = await subscriptions.createSubscription({
-      input: rest,
-      projectId: opts.ctx.project.id,
-    })
+    const { err, val } = await createSubscription(
+      {
+        services: opts.ctx.services,
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+      },
+      {
+        input: rest,
+        projectId: opts.ctx.project.id,
+      }
+    )
 
     if (err) {
       throw new TRPCError({

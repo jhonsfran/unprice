@@ -3,7 +3,8 @@ import type { HonoEnv } from "../hono/env"
 
 export function obs(): MiddlewareHandler<HonoEnv> {
   return async (c, next) => {
-    const { metrics, logger } = c.get("services")
+    const metrics = c.get("metrics")
+    const logger = c.get("logger")
     const start = c.get("performanceStart")
     const requestId = c.get("requestId")
     const isolateLifetime = Date.now() - c.get("isolateCreatedAt")

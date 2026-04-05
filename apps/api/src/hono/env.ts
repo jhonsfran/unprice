@@ -15,18 +15,6 @@ import type { IngestionService } from "~/ingestion/service"
 import type { ApiProjectService } from "~/project"
 
 /**
- * Infrastructure dependencies — shared runtime primitives.
- * Routes should prefer domain services over these when possible.
- */
-export type InfraContext = {
-  db: Database
-  cache: Cache
-  logger: AppLogger
-  metrics: Metrics
-  analytics: Analytics
-}
-
-/**
  * Domain services — business logic, properly wired via createServiceContext.
  */
 export type DomainServiceContext = {
@@ -40,13 +28,10 @@ export type DomainServiceContext = {
 }
 
 /**
- * The full service bag set on `c.get("services")`.
- * Combines infra + domain + metadata.
+ * Domain service bag set on `c.get("services")`.
+ * Infrastructure primitives live on top-level context variables.
  */
-export type ServiceContext = InfraContext &
-  DomainServiceContext & {
-    version: string
-  }
+export type ServiceContext = DomainServiceContext
 
 export type HonoEnv = EvlogVariables & {
   Bindings: Env
@@ -61,6 +46,13 @@ export type HonoEnv = EvlogVariables & {
     projectId?: string
     isInternal?: boolean
     isMain?: boolean
+    db: Database
+    cache: Cache
+    logger: AppLogger
+    metrics: Metrics
+    analytics: Analytics
+    // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler
+    waitUntil: (promise: Promise<any>) => void
     services: ServiceContext
     stats: Stats
   }

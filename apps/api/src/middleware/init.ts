@@ -203,18 +203,19 @@ export function init(): MiddlewareHandler<HonoEnv> {
       pipelineEvents: c.env.PIPELINE_EVENTS,
     })
 
+    c.set("cache", cache)
+    c.set("logger", logger)
+    c.set("metrics", metrics)
+    c.set("analytics", analytics)
+    c.set("db", db)
+    c.set("waitUntil", waitUntil)
+
     c.set("services", {
-      version: "1.0.0",
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,
-      analytics,
       ingestion,
       project,
-      cache,
-      logger,
-      metrics,
       apikey,
-      db,
       customer: svcCtx.customers,
       plans: svcCtx.plans,
     })

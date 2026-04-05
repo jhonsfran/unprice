@@ -59,7 +59,9 @@ export const registerStripeSetupV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { sessionId, projectId } = c.req.valid("param")
     const key = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? projectId
-    const { customer, db, logger } = c.get("services")
+    const { customer } = c.get("services")
+    const db = c.get("db")
+    const logger = c.get("logger")
 
     // rate limit the request
     const result = await c.env.RL_FREE_1000_60s.limit({ key })

@@ -11,9 +11,14 @@ export const getById = protectedProcedure
   .query(async (opts) => {
     const { id } = opts.input
 
-    const customerData = await opts.ctx.db.query.customers.findFirst({
-      where: (customer, { eq }) => eq(customer.id, id),
-    })
+    const { err, val: customerData } = await opts.ctx.services.customers.getCustomer(id)
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!customerData) {
       throw new TRPCError({

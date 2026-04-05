@@ -91,7 +91,7 @@ export const registerIngestEventsV1 = (app: App) =>
     // we use this as the time of the request to avoid clock skews
     const receivedAt = c.get("requestStartedAt")
     const timestamp = body.timestamp ?? receivedAt
-    const { logger } = c.get("services")
+    const logger = c.get("logger")
 
     // we shard the load in 2 queues for now, more than enough as we scale we add more
     const availableQueues = [c.env.QUEUE_SHARD_0, c.env.QUEUE_SHARD_1]

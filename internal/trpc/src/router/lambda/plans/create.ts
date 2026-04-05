@@ -1,8 +1,8 @@
 import { TRPCError } from "@trpc/server"
 import { planInsertBaseSchema, planSelectBaseSchema } from "@unprice/db/validators"
+import { createPlan } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-
 
 export const create = protectedProjectProcedure
   .input(planInsertBaseSchema)
@@ -17,12 +17,17 @@ export const create = protectedProjectProcedure
     // only owner and admin can create a plan
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const { plans } = opts.ctx.services
-
-    const { err, val: planData } = await plans.createPlan({
-      input: opts.input,
-      projectId: project.id,
-    })
+    const { err, val: planData } = await createPlan(
+      {
+        services: opts.ctx.services,
+        db: opts.ctx.db,
+        logger: opts.ctx.logger,
+      },
+      {
+        input: opts.input,
+        projectId: project.id,
+      }
+    )
 
     if (err) {
       throw new TRPCError({

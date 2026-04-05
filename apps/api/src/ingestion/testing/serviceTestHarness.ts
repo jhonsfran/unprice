@@ -75,9 +75,11 @@ type HarnessOptions = {
   customer?: {
     projectId: string
   } | null
-  getEnforcementState?: ReturnType<typeof vi.fn<[EnforcementInput], Promise<EnforcementResult>>>
+  getEnforcementState?: ReturnType<
+    typeof vi.fn<(input: EnforcementInput) => Promise<EnforcementResult>>
+  >
   grants?: unknown[]
-  apply?: ReturnType<typeof vi.fn<[ApplyInput], Promise<ApplyResult>>>
+  apply?: ReturnType<typeof vi.fn<(input: ApplyInput) => Promise<ApplyResult>>>
   resolveFeatureStateError?: Error
   resolveIngestionStatesError?: Error
   resolvedFeatureState?: ResolvedFeatureStateAtTimestamp
@@ -97,8 +99,8 @@ export function createServiceHarness(options: HarnessOptions = {}) {
   const meterWindowsByKey = new Map<string, MeterWindow>()
   const logger = createLoggerStub()
   const send = options.send ?? vi.fn().mockResolvedValue(undefined)
-  const apply = vi.fn<[ApplyInput], Promise<ApplyResult>>()
-  const getEnforcementState = vi.fn<[EnforcementInput], Promise<EnforcementResult>>()
+  const apply = vi.fn<(input: ApplyInput) => Promise<ApplyResult>>()
+  const getEnforcementState = vi.fn<(input: EnforcementInput) => Promise<EnforcementResult>>()
 
   const getCustomer = vi
     .fn()
@@ -198,7 +200,7 @@ export function createServiceHarness(options: HarnessOptions = {}) {
   const service = new IngestionService({
     customerService: {
       getCustomer,
-    } as unknown as Pick<CustomerService, "getCustomer">,
+    } as unknown as CustomerService,
     entitlementWindowClient: {
       getEntitlementWindowStub,
     },
@@ -206,10 +208,7 @@ export function createServiceHarness(options: HarnessOptions = {}) {
       getGrantsForCustomer,
       resolveFeatureStateAtTimestamp,
       resolveIngestionStatesFromGrants,
-    } as unknown as Pick<
-      GrantsManager,
-      "getGrantsForCustomer" | "resolveFeatureStateAtTimestamp" | "resolveIngestionStatesFromGrants"
-    >,
+    } as unknown as GrantsManager,
     idempotencyClient: {
       getIdempotencyStub,
     },

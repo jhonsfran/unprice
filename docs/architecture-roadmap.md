@@ -676,11 +676,17 @@ P0 extraction.
 Items are ordered by dependency — an agent should work top to bottom within each phase.
 Each item is self-contained: it has a clear input, output, and verification step.
 
+### Execution discipline (required)
+
+- After each checklist point is completed, create a commit before starting the next point.
+- Run validation hooks/checks for that point before committing.
+- If validation fails, fix the issues first, then commit, then continue.
+
 ### P0.1 — Infrastructure prerequisites
 
 These unblock everything else. Do them first, in order.
 
-- [ ] **Move infra out of Hono services bag**
+- [x] **Move infra out of Hono services bag**
   - Files: `apps/api/src/middleware/init.ts`, `apps/api/src/hono/env.ts`
   - What: Move `logger`, `analytics`, `db`, `waitUntil`, `metrics` from `c.set("services", { ... })`
     to separate `c.set("logger", logger)`, `c.set("db", db)`, etc. Keep only domain services
@@ -694,21 +700,21 @@ These unblock everything else. Do them first, in order.
   - Verify: `pnpm --filter api test` passes, `npx tsc --noEmit -p apps/api/tsconfig.json`
     has no new errors.
 
-- [ ] **Define `DbExecutor` type alias**
+- [x] **Define `DbExecutor` type alias**
   - File: `internal/services/src/deps.ts`
   - What: Add `export type DbExecutor = Database | Transaction` (import Transaction from
     Drizzle). This type is used by service write methods that participate in cross-service
     transactions.
   - Verify: typecheck passes.
 
-- [ ] **Add use-case conventions to root CLAUDE.md**
+- [x] **Add use-case conventions to root CLAUDE.md**
   - File: `CLAUDE.md` at repo root
   - What: Add the "Use Cases" section from the CLAUDE.md conventions block in this doc
     (see "CLAUDE.md conventions" section above). This tells agents where to put logic
     and which pattern to follow.
   - Verify: read it back, make sure the pattern and rules are clear.
 
-- [ ] **Create `internal/services/src/use-cases/` directory structure**
+- [x] **Create `internal/services/src/use-cases/` directory structure**
   - What: Create the directory and add an empty barrel export:
     `internal/services/src/use-cases/index.ts` with `export {}`.
     Add `"./use-cases": "./src/use-cases/index.ts"` to `@unprice/services` package.json exports.
@@ -720,7 +726,7 @@ These unblock everything else. Do them first, in order.
 
 Each item extracts one operation. Work top to bottom — each builds on the previous.
 
-- [ ] **`plan/create` — move to use-case shape**
+- [x] **`plan/create` — move to use-case shape**
   - Already extracted to `PlanService.createPlan()`. Move the logic into
     `use-cases/plan/create.ts` as a function: `createPlan(deps, input) -> Result`.
   - Deps: `{ services: Pick<ServiceContext, "plans">, db: Database, logger: Logger }`
@@ -728,7 +734,7 @@ Each item extracts one operation. Work top to bottom — each builds on the prev
   - Delete `PlanService.createPlan()` — the use case replaces it.
   - Verify: `pnpm --filter @unprice/services test` passes, tRPC typecheck passes.
 
-- [ ] **`customer/get-by-id` — thin router, no use case**
+- [x] **`customer/get-by-id` — thin router, no use case**
   - This is a simple read — it should call the service directly, not a use case.
   - File: `internal/trpc/src/router/lambda/customers/getById.ts`
   - What: Replace `opts.ctx.db.query.customers.findFirst(...)` with
@@ -737,7 +743,7 @@ Each item extracts one operation. Work top to bottom — each builds on the prev
     service method that does. Don't create a use case for a single cached query.
   - Verify: tRPC typecheck passes.
 
-- [ ] **`subscription/create` — extract to use case**
+- [x] **`subscription/create` — extract to use case**
   - File: create `use-cases/subscription/create.ts`
   - Extract from `SubscriptionService.createSubscription()`. The use case opens the
     transaction, calls service write methods with `{ db: tx }`.

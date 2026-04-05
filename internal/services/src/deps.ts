@@ -23,3 +23,7 @@ export interface ServiceDeps {
   cache: Cache
   metrics: Metrics
 }
+
+export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0]
+
+export type DbExecutor = Database | Transaction

@@ -1,11 +1,9 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
-import { nFormatter, newId } from "@unprice/db/utils"
+import { nFormatter } from "@unprice/db/utils"
 import {
   type BillingInterval,
   type Currency,
-  type InsertPlan,
   type Plan,
   type PlanVersionApi,
   type PlanVersionExtended,
@@ -443,84 +441,5 @@ export class PlanService {
     }
 
     return Ok(val)
-  }
-
-  public async createPlan({
-    input,
-    projectId,
-  }: {
-    input: InsertPlan
-    projectId: string
-  }): Promise<Result<Plan, FetchError>> {
-    const { slug, description, defaultPlan, enterprisePlan, title } = input
-
-    if (defaultPlan && enterprisePlan) {
-      return Err(
-        new FetchError({
-          message: "A plan cannot be both a default and enterprise plan",
-          retry: false,
-        })
-      )
-    }
-
-    if (defaultPlan) {
-      const existing = await this.db.query.plans.findFirst({
-        where: (plan, { eq, and }) =>
-          and(eq(plan.projectId, projectId), eq(plan.defaultPlan, true)),
-      })
-
-      if (existing?.id) {
-        return Err(
-          new FetchError({
-            message: "There is already a default plan for this app",
-            retry: false,
-          })
-        )
-      }
-    }
-
-    if (enterprisePlan) {
-      const existing = await this.db.query.plans.findFirst({
-        where: (plan, { eq, and }) =>
-          and(eq(plan.projectId, projectId), eq(plan.enterprisePlan, true)),
-      })
-
-      if (existing?.id) {
-        return Err(
-          new FetchError({
-            message: "There is already an enterprise plan for this app, create a new version instead",
-            retry: false,
-          })
-        )
-      }
-    }
-
-    const planId = newId("plan")
-
-    const planData = await this.db
-      .insert(schema.plans)
-      .values({
-        id: planId,
-        slug,
-        title,
-        projectId,
-        description: description ?? "",
-        active: true,
-        defaultPlan: defaultPlan ?? false,
-        enterprisePlan: enterprisePlan ?? false,
-      })
-      .returning()
-      .then((data) => data[0])
-
-    if (!planData?.id) {
-      return Err(
-        new FetchError({
-          message: "Error creating plan",
-          retry: false,
-        })
-      )
-    }
-
-    return Ok(planData)
   }
 }
