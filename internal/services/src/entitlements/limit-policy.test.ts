@@ -1,5 +1,5 @@
-import type { Fact } from "@unprice/services/entitlements"
 import { describe, expect, it } from "vitest"
+import type { Fact } from "./domain"
 import { findLimitExceededFact } from "./limit-policy"
 
 function createFact(partial: Partial<Fact>): Fact {

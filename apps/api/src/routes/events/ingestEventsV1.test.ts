@@ -1,10 +1,10 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
+import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
-import type { IngestionQueueMessage } from "~/ingestion/message"
 
 vi.mock("ulid", () => ({
   ulid: vi.fn(() => "01ARYZ6S41TSV4RRFFQ69G5FAV"),

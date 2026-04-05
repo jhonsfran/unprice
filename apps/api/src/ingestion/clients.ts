@@ -1,26 +1,13 @@
+import {
+  type EntitlementWindowClient,
+  type IdempotencyClient,
+  buildIngestionWindowName,
+} from "@unprice/services/ingestion"
 import type { Env } from "~/env"
 import { buildIngestionIdempotencyShardName } from "./idempotency"
-import { buildIngestionWindowName } from "./message"
 
 export type IngestionIdempotencyStub = ReturnType<Env["ingestionidempotency"]["getByName"]>
 export type EntitlementWindowStub = ReturnType<Env["entitlementwindow"]["getByName"]>
-
-export interface IdempotencyClient {
-  getIdempotencyStub(params: {
-    customerId: string
-    idempotencyKey: string
-    projectId: string
-  }): IngestionIdempotencyStub
-}
-
-export interface EntitlementWindowClient {
-  getEntitlementWindowStub(params: {
-    customerId: string
-    periodKey: string
-    projectId: string
-    streamId: string
-  }): EntitlementWindowStub
-}
 
 export class CloudflareIdempotencyClient implements IdempotencyClient {
   private readonly appEnv: Env["APP_ENV"]

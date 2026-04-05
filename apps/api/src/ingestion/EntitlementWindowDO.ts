@@ -16,6 +16,7 @@ import {
   type RawEvent,
   deriveMeterKey,
 } from "@unprice/services/entitlements"
+import { findLimitExceededFact } from "@unprice/services/entitlements"
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -24,7 +25,6 @@ import { idempotencyKeysTable, meterFactsOutboxTable, meterStateTable } from "./
 import { schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
-import { findLimitExceededFact } from "./limit-policy"
 
 const VALID_OVERAGE_STRATEGIES = new Set<OverageStrategy>(["none", "last-call", "always"])
 

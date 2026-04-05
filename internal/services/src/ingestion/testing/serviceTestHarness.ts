@@ -1,19 +1,22 @@
 import type { MeterConfig, OverageStrategy } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
-import type { AppLogger } from "@unprice/observability"
-import type { CustomerService } from "@unprice/services/customers"
+import type { Logger } from "@unprice/logs"
+import { vi } from "vitest"
+import type { CustomerService } from "../../customers"
 import {
   type GrantsManager,
   type IngestionResolvedState,
   type ResolvedFeatureStateAtTimestamp,
   deriveMeterKey,
-} from "@unprice/services/entitlements"
-import { vi } from "vitest"
+} from "../../entitlements"
 import { IngestionQueueConsumer } from "../consumer"
 import type { IngestionQueueMessage } from "../message"
 import { IngestionService } from "../service"
 
 type LoggerStub = {
+  flush: ReturnType<typeof vi.fn>
+  info: ReturnType<typeof vi.fn>
+  set: ReturnType<typeof vi.fn>
   debug: ReturnType<typeof vi.fn>
   error: ReturnType<typeof vi.fn>
   warn: ReturnType<typeof vi.fn>
@@ -439,7 +442,7 @@ export function createBooleanGrant(
       feature: {
         slug: params.featureSlug ?? "team_members",
       },
-      featureType: "boolean",
+      featureType: "flat",
       meterConfig: null,
     },
   }
@@ -553,10 +556,13 @@ export function createRawBatchMessage(body: unknown): {
   }
 }
 
-function createLoggerStub(): AppLogger & LoggerStub {
+function createLoggerStub(): Logger & LoggerStub {
   return {
+    flush: vi.fn().mockResolvedValue(undefined),
+    info: vi.fn(),
+    set: vi.fn(),
     debug: vi.fn(),
     error: vi.fn(),
     warn: vi.fn(),
-  } as unknown as AppLogger & LoggerStub
+  } as unknown as Logger & LoggerStub
 }

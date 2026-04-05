@@ -1,5 +1,5 @@
 import type { OverageStrategy } from "@unprice/db/validators"
-import type { Fact } from "@unprice/services/entitlements"
+import type { Fact } from "./domain"
 
 type LimitPolicyInput = {
   facts: Fact[]

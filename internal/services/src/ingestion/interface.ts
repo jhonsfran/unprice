@@ -5,7 +5,7 @@ import type {
   OverageStrategy,
 } from "@unprice/db/validators"
 import { type LakehouseEventForSource, getLakehouseSourceCurrentVersion } from "@unprice/lakehouse"
-import type { IngestionQueueConsumerMessage, IngestionQueueMessage } from "./message"
+import type { IngestionQueueMessage } from "./message"
 
 export const EVENTS_SCHEMA_VERSION = getLakehouseSourceCurrentVersion("events")
 
@@ -76,10 +76,4 @@ export type FeatureVerificationResult = {
   streamStartAt?: number
   timestamp: number
   usage?: number
-}
-
-export type CustomerQueueGroup = {
-  customerId: string
-  messages: IngestionQueueConsumerMessage[]
-  projectId: string
 }

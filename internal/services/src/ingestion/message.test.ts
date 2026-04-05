@@ -1,6 +1,6 @@
 import type { Entitlement } from "@unprice/db/validators"
-import type { IngestionResolvedState, RawEvent } from "@unprice/services/entitlements"
 import { describe, expect, it } from "vitest"
+import type { IngestionResolvedState, RawEvent } from "../entitlements"
 import {
   type IngestionQueueConsumerMessage,
   buildEntitlementWindowName,

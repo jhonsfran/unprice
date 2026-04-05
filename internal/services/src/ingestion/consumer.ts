@@ -1,12 +1,29 @@
-import type { AppLogger } from "@unprice/observability"
-import type { CustomerQueueGroup, IngestionMessageProcessingResult } from "./interface"
+import type { Logger } from "@unprice/logs"
+import type { IngestionMessageProcessingResult } from "./interface"
 import {
   type IngestionQueueConsumerMessage,
   type IngestionQueueMessage,
+  type IngestionQueueRetryOptions,
   ingestionQueueMessageSchema,
   partitionDuplicateQueuedMessages,
   sortQueuedMessages,
 } from "./message"
+
+export type IngestionQueueBatchMessage = {
+  ack: () => void
+  body: IngestionQueueMessage
+  retry: (options?: IngestionQueueRetryOptions) => void
+}
+
+export type IngestionQueueBatch = {
+  messages: readonly IngestionQueueBatchMessage[]
+}
+
+type CustomerQueueGroup = {
+  customerId: string
+  messages: IngestionQueueConsumerMessage[]
+  projectId: string
+}
 
 type GroupProcessor = {
   processCustomerGroup(params: {
@@ -17,18 +34,18 @@ type GroupProcessor = {
 }
 
 export class IngestionQueueConsumer {
-  private readonly logger: AppLogger
+  private readonly logger: Logger
   private readonly processor: GroupProcessor
 
   constructor(opts: {
-    logger: AppLogger
+    logger: Logger
     processor: GroupProcessor
   }) {
     this.logger = opts.logger
     this.processor = opts.processor
   }
 
-  public async consumeBatch(batch: MessageBatch<IngestionQueueMessage>): Promise<void> {
+  public async consumeBatch(batch: IngestionQueueBatch): Promise<void> {
     const validMessages = this.parseBatchMessages(batch)
 
     if (validMessages.length === 0) {
@@ -68,9 +85,7 @@ export class IngestionQueueConsumer {
     }
   }
 
-  private parseBatchMessages(
-    batch: MessageBatch<IngestionQueueMessage>
-  ): IngestionQueueConsumerMessage[] {
+  private parseBatchMessages(batch: IngestionQueueBatch): IngestionQueueConsumerMessage[] {
     return batch.messages.flatMap((message) => {
       const parsed = ingestionQueueMessageSchema.safeParse(message.body)
 

@@ -1,11 +1,6 @@
 import { type Entitlement, calculateCycleWindow } from "@unprice/db/validators"
-import {
-  type IngestionResolvedState,
-  type RawEvent,
-  computePeriodKey,
-} from "@unprice/services/entitlements"
 import { z } from "zod"
-import type { Env } from "~/env"
+import { type IngestionResolvedState, type RawEvent, computePeriodKey } from "../entitlements"
 
 export const ingestionQueueMessageSchema = z.object({
   version: z.literal(1),
@@ -22,10 +17,14 @@ export const ingestionQueueMessageSchema = z.object({
 
 export type IngestionQueueMessage = z.infer<typeof ingestionQueueMessageSchema>
 
+export type IngestionQueueRetryOptions = {
+  delaySeconds?: number
+}
+
 export type IngestionQueueConsumerMessage = {
   ack: () => void
   body: IngestionQueueMessage
-  retry: (options?: QueueRetryOptions) => void
+  retry: (options?: IngestionQueueRetryOptions) => void
 }
 
 export function partitionDuplicateQueuedMessages(messages: IngestionQueueConsumerMessage[]): {
@@ -59,7 +58,7 @@ export function partitionDuplicateQueuedMessages(messages: IngestionQueueConsume
 }
 
 export function buildEntitlementWindowName(params: {
-  appEnv: Env["APP_ENV"]
+  appEnv: string
   customerId: string
   entitlementId: string
   periodKey: string
@@ -75,7 +74,7 @@ export function buildEntitlementWindowName(params: {
 }
 
 export function buildIngestionWindowName(params: {
-  appEnv: Env["APP_ENV"]
+  appEnv: string
   customerId: string
   periodKey: string
   projectId: string

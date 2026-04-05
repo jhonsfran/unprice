@@ -5,6 +5,7 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
+import { FEATURE_VERIFICATION_STATUSES } from "@unprice/services/ingestion"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -13,7 +14,6 @@ import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { FEATURE_VERIFICATION_STATUSES } from "~/ingestion/interface"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["customer"]

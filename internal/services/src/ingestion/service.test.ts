@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import type { IngestionQueueMessage } from "./message"
+import type { IngestionQueueBatch } from "./consumer"
 import {
   createBatchMessage,
   createBooleanGrant,
@@ -25,7 +25,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [malformed.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(malformed.ack).toHaveBeenCalledTimes(1)
     expect(malformed.retry).not.toHaveBeenCalled()
@@ -53,7 +53,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [first.message, duplicate.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(first.ack).toHaveBeenCalledTimes(1)
     expect(duplicate.ack).toHaveBeenCalledTimes(1)
@@ -87,7 +87,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(mocks.getCustomer).toHaveBeenCalledTimes(1)
     expect(mocks.getGrantsForCustomer).not.toHaveBeenCalled()
@@ -116,7 +116,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
@@ -142,7 +142,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
@@ -165,7 +165,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(message.ack).not.toHaveBeenCalled()
     expect(message.retry).toHaveBeenCalledTimes(1)
@@ -194,7 +194,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
     expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
@@ -232,7 +232,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(mocks.begin).toHaveBeenCalledTimes(1)
     expect(mocks.apply).toHaveBeenCalledTimes(1)
@@ -258,7 +258,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
     expect(mocks.apply).not.toHaveBeenCalled()
@@ -290,7 +290,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
     expect(mocks.apply).toHaveBeenCalledTimes(1)
@@ -319,7 +319,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
@@ -359,7 +359,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(message.ack).toHaveBeenCalledTimes(1)
     expect(message.retry).not.toHaveBeenCalled()
@@ -559,8 +559,8 @@ describe("IngestionService", () => {
       resolvedFeatureState: {
         kind: "non_usage",
         entitlement: {
-          featureType: "boolean",
-        },
+          featureType: "flat",
+        } as never,
       },
     })
 
@@ -574,7 +574,7 @@ describe("IngestionService", () => {
     expect(result).toEqual({
       allowed: true,
       featureSlug: "team_members",
-      featureType: "boolean",
+      featureType: "flat",
       status: "non_usage",
       timestamp,
     })
@@ -722,7 +722,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     expect(mocks.apply).toHaveBeenCalledTimes(5)
     for (const call of mocks.apply.mock.calls) {
@@ -802,7 +802,7 @@ describe("IngestionService", () => {
 
     await consumer.consumeBatch({
       messages: [message.message],
-    } as unknown as MessageBatch<IngestionQueueMessage>)
+    } as unknown as IngestionQueueBatch)
 
     const verifyResult = await service.verifyFeatureStatus({
       customerId: "cus_123",
@@ -893,7 +893,7 @@ describe("IngestionService", () => {
 
       await consumer.consumeBatch({
         messages: [message.message],
-      } as unknown as MessageBatch<IngestionQueueMessage>)
+      } as unknown as IngestionQueueBatch)
 
       const verifyResult = await service.verifyFeatureStatus({
         customerId: "cus_123",
@@ -961,7 +961,7 @@ describe("IngestionService", () => {
 
       await consumer.consumeBatch({
         messages: [message.message],
-      } as unknown as MessageBatch<IngestionQueueMessage>)
+      } as unknown as IngestionQueueBatch)
 
       expect(message.ack).toHaveBeenCalledTimes(1)
       expect(message.retry).not.toHaveBeenCalled()
@@ -1052,7 +1052,7 @@ describe("IngestionService", () => {
 
       await consumer.consumeBatch({
         messages: batchMessages,
-      } as unknown as MessageBatch<IngestionQueueMessage>)
+      } as unknown as IngestionQueueBatch)
 
       const verifyResult = await service.verifyFeatureStatus({
         customerId: "cus_123",

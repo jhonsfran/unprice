@@ -779,6 +779,9 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.33)(terser@5.46.0)
 
   internal/logs:
     dependencies:
@@ -869,6 +872,9 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../error
+      '@unprice/lakehouse':
+        specifier: workspace:^
+        version: link:../lakehouse
       '@unprice/logs':
         specifier: workspace:^
         version: link:../logs

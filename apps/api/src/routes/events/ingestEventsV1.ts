@@ -5,6 +5,10 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
+import {
+  type IngestionQueueMessage,
+  ingestionQueueMessageSchema,
+} from "@unprice/services/ingestion"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
@@ -13,7 +17,6 @@ import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { type IngestionQueueMessage, ingestionQueueMessageSchema } from "~/ingestion/message"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["ingestion"]

@@ -4,13 +4,13 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
+import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { INGESTION_REJECTION_REASONS } from "~/ingestion/interface"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import { buildIngestionQueueMessage, rawEventSchema } from "./ingestEventsV1"
 
