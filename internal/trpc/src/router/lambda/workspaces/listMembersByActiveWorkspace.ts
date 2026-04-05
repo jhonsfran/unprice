@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { listMembersSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -12,17 +13,20 @@ export const listMembersByActiveWorkspace = protectedWorkspaceProcedure
   )
   .query(async (opts) => {
     const workspace = opts.ctx.workspace
+    const { workspaces } = opts.ctx.services
 
-    const members = await opts.ctx.db.query.members.findMany({
-      with: {
-        user: true,
-        workspace: true,
-      },
-      where: (member, { eq, and }) => and(eq(member.workspaceId, workspace.id)),
-      orderBy: (members) => members.createdAtM,
+    const { err, val: members } = await workspaces.listWorkspaceMembers({
+      workspaceId: workspace.id,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      members: members,
+      members,
     }
   })

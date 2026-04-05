@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -15,10 +13,18 @@ export const getBySlug = protectedWorkspaceProcedure
   )
   .query(async (opts) => {
     const { slug } = opts.input
+    const { workspaces } = opts.ctx.services
 
-    const workspaceData = await opts.ctx.db.query.workspaces.findFirst({
-      where: eq(schema.workspaces.slug, slug),
+    const { err, val: workspaceData } = await workspaces.getWorkspaceBySlug({
+      slug,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!workspaceData) {
       throw new TRPCError({

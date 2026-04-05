@@ -7,6 +7,7 @@ import { FeatureService } from "./features/service"
 import { PageService } from "./pages/service"
 import { PlanService } from "./plans/service"
 import { SubscriptionService } from "./subscriptions/service"
+import { WorkspaceService } from "./workspaces/service"
 
 /**
  * The fully-wired service graph returned by `createServiceContext`.
@@ -18,6 +19,7 @@ export interface ServiceContext {
   customers: CustomerService
   features: FeatureService
   pages: PageService
+  workspaces: WorkspaceService
   grantsManager: GrantsManager
   billing: BillingService
   subscriptions: SubscriptionService
@@ -68,6 +70,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     logger: deps.logger,
   })
 
+  const workspaces = new WorkspaceService({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
   // 2. Services with deps on leaves
   const billing = new BillingService({
     db: deps.db,
@@ -110,6 +117,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     customers,
     features,
     pages,
+    workspaces,
     grantsManager,
     billing,
     subscriptions,

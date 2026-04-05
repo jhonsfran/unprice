@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -17,22 +18,24 @@ export const listWorkspacesByActiveUser = protectedProcedure
   )
   .query(async (opts) => {
     const userId = opts.ctx.session?.user?.id
+    const { workspaces: workspaceService } = opts.ctx.services
 
-    const memberships = await opts.ctx.db.query.members.findMany({
-      with: {
-        workspace: true,
-      },
-      where: (member, operators) => operators.eq(member.userId, userId),
-      orderBy: (member) => member.createdAtM,
+    if (!userId) {
+      return { workspaces: [] }
+    }
+
+    const { err, val: workspaces } = await workspaceService.listWorkspacesByUser({
+      userId,
     })
 
-    const workspaces = memberships.map((member) => ({
-      ...member.workspace,
-      role: member.role,
-      userId: member.userId,
-    }))
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     return {
-      workspaces: workspaces.filter((workspace) => workspace.enabled),
+      workspaces,
     }
   })

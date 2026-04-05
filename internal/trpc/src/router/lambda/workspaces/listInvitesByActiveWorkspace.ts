@@ -1,5 +1,4 @@
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
+import { TRPCError } from "@trpc/server"
 import { invitesSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -14,12 +13,20 @@ export const listInvitesByActiveWorkspace = protectedWorkspaceProcedure
   )
   .query(async (opts) => {
     const workspace = opts.ctx.workspace
+    const { workspaces } = opts.ctx.services
 
-    const invites = await opts.ctx.db.query.invites.findMany({
-      where: eq(schema.invites.workspaceId, workspace.id),
+    const { err, val: invites } = await workspaces.listWorkspaceInvites({
+      workspaceId: workspace.id,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      invites: invites,
+      invites,
     }
   })
