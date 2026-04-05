@@ -74,7 +74,10 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,
     extends: [envServices, envDb, envAnalytics, envObservability],
-    skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
+    skipValidation:
+      !!process.env.SKIP_ENV_VALIDATION ||
+      process.env.npm_lifecycle_event === "lint" ||
+      process.env.npm_lifecycle_event === "knip",
     onValidationError: (issues: readonly StandardSchemaV1.Issue[]) => {
       throw new Error(`Invalid environment variables in API: ${JSON.stringify(issues, null, 2)}`)
     },

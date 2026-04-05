@@ -1,5 +1,5 @@
 import { z } from "@hono/zod-openapi"
-import { FetchError } from "@unprice/error"
+import { BaseError, FetchError } from "@unprice/error"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { Context } from "hono"
 import { HTTPException } from "hono/http-exception"
@@ -123,6 +123,56 @@ export class UnpriceApiError extends HTTPException {
     super(codeToStatus(code) as ContentfulStatusCode, { message })
     this.code = code
   }
+}
+
+/**
+ * Route adapters should normalize expected domain/infrastructure failures to UnpriceApiError.
+ * Unexpected errors can still surface as INTERNAL_SERVER_ERROR.
+ */
+export function toUnpriceApiError(error: unknown): UnpriceApiError {
+  if (error instanceof UnpriceApiError) {
+    return error
+  }
+
+  if (error instanceof FetchError) {
+    return new UnpriceApiError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: error.message,
+    })
+  }
+
+  if (error instanceof UnPriceCustomerError) {
+    return new UnpriceApiError({
+      code: "BAD_REQUEST",
+      message: error.message,
+    })
+  }
+
+  if (error instanceof BaseError) {
+    return new UnpriceApiError({
+      code: "BAD_REQUEST",
+      message: error.message,
+    })
+  }
+
+  if (error instanceof HTTPException) {
+    return new UnpriceApiError({
+      code: statusToCode(error.status),
+      message: error.message,
+    })
+  }
+
+  if (error instanceof Error) {
+    return new UnpriceApiError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: error.message,
+    })
+  }
+
+  return new UnpriceApiError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: "something unexpected happened",
+  })
 }
 
 export function handleZodError(

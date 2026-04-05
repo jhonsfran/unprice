@@ -18,7 +18,10 @@ export const env = createEnv({
   },
   runtimeEnv: process.env,
   extends: [observabilityEnv],
-  skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
+  skipValidation:
+    !!process.env.SKIP_ENV_VALIDATION ||
+    process.env.npm_lifecycle_event === "lint" ||
+    process.env.npm_lifecycle_event === "knip",
   onValidationError: (issues) => {
     throw new Error(
       `Invalid environment variables in Auth Proxy: ${JSON.stringify(issues, null, 2)}`

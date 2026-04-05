@@ -6,6 +6,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
+import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -80,7 +81,7 @@ export const registerGetEntitlementsV1 = (app: App) =>
     endTime(c, "getEntitlements")
 
     if (err) {
-      throw err
+      throw toUnpriceApiError(err)
     }
 
     return c.json(result, HttpStatusCodes.OK)

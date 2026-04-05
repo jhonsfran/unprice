@@ -5,7 +5,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 import { customerPaymentMethodSchema, paymentProviderSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -62,7 +62,7 @@ export const registerGetPaymentMethodsV1 = (app: App) =>
     const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
 
     if (customerDataErr) {
-      throw customerDataErr
+      throw toUnpriceApiError(customerDataErr)
     }
 
     if (!customerData) {
@@ -77,7 +77,7 @@ export const registerGetPaymentMethodsV1 = (app: App) =>
     })
 
     if (result.err) {
-      throw result.err
+      throw toUnpriceApiError(result.err)
     }
 
     return c.json(result.val, HttpStatusCodes.OK)

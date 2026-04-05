@@ -27,7 +27,10 @@ export const env = createEnv({
   runtimeEnv: process.env,
   clientPrefix: "NEXT_PUBLIC_",
   client: {},
-  skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
+  skipValidation:
+    !!process.env.SKIP_ENV_VALIDATION ||
+    process.env.npm_lifecycle_event === "lint" ||
+    process.env.npm_lifecycle_event === "knip",
   extends: [authEnv, stripeEnv, trpcEnv, dbEnv],
   onValidationError: (issues: readonly StandardSchemaV1.Issue[]) => {
     console.error("❌ Invalid environment variables in NextJS:", issues)

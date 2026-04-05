@@ -71,6 +71,9 @@ We standardize on the following boundaries.
 
 - Use existing domain errors by default.
 - Add a new custom error class only when a reusable domain-specific failure contract is needed across multiple callers.
+- In API route adapters, normalize expected service/use-case failures to `UnpriceApiError`.
+- Keep unknown/unexpected programming failures as raw errors so they are treated as internal failures.
+- Canonical mapper: `apps/api/src/errors/http.ts#toUnpriceApiError`.
 
 ## Consequences
 
@@ -94,6 +97,7 @@ We standardize on the following boundaries.
 - No service-internal construction of peer services unless explicitly documented.
 - No new API-local wrapper files for shared ingestion contracts.
 - Domain policies must stay in their owning domain module.
+- No raw `throw err` for expected route-level business failures; map through `toUnpriceApiError`.
 
 ## Canonical Locations
 

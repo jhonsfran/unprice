@@ -4,7 +4,7 @@ import { FetchError } from "@unprice/error"
 import { UnPriceCustomerError } from "@unprice/services/customers"
 import { completeStripeSetup } from "@unprice/services/use-cases"
 import { z } from "zod"
-import { UnpriceApiError, openApiErrorResponses } from "~/errors"
+import { UnpriceApiError, openApiErrorResponses, toUnpriceApiError } from "~/errors"
 import type { App } from "~/hono/app"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
@@ -109,7 +109,7 @@ export const registerStripeSetupV1 = (app: App) =>
         })
       }
 
-      throw err
+      throw toUnpriceApiError(err)
     }
 
     // in development wrangler do weird things with the url

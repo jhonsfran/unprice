@@ -8,7 +8,7 @@ import {
 } from "@unprice/db/validators"
 import type { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -57,7 +57,7 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
     const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
 
     if (customerDataErr) {
-      throw customerDataErr
+      throw toUnpriceApiError(customerDataErr)
     }
 
     if (!customerData) {
@@ -76,7 +76,7 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
       })
 
     if (paymentProviderErr) {
-      throw paymentProviderErr
+      throw toUnpriceApiError(paymentProviderErr)
     }
 
     const { err, val } = await paymentProviderService.createSession({
@@ -89,7 +89,7 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
     })
 
     if (err) {
-      throw err
+      throw toUnpriceApiError(err)
     }
 
     return c.json(val, HttpStatusCodes.OK)

@@ -10,7 +10,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -108,7 +108,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     endTime(c, "getUsage")
 
     if (err) {
-      throw err
+      throw toUnpriceApiError(err)
     }
 
     return c.json(

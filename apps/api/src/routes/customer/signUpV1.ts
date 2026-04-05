@@ -8,7 +8,7 @@ import { UnPriceCustomerError } from "@unprice/services/customers"
 import { signUp } from "@unprice/services/use-cases"
 import type { z } from "zod"
 import { keyAuth } from "~/auth/key"
-import { UnpriceApiError } from "~/errors/http"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -110,7 +110,7 @@ export const registerSignUpV1 = (app: App) =>
         })
       }
 
-      throw result.err
+      throw toUnpriceApiError(result.err)
     }
 
     return c.json(result.val, HttpStatusCodes.OK)
