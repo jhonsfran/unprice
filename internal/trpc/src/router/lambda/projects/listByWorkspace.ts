@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { projectSelectBaseSchema, workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -23,28 +24,22 @@ export const listByWorkspace = protectedWorkspaceProcedure
   )
   .query(async (opts) => {
     const workspace = opts.ctx.workspace
+    const { projects: projectsService } = opts.ctx.services
 
-    const workspaceProjects = await opts.ctx.db.query.workspaces.findFirst({
-      with: {
-        projects: {
-          orderBy: (pj, { asc }) => [asc(pj.createdAtM)],
-        },
-      },
-      where: (ws, { eq }) => eq(ws.id, workspace.id),
+    const { err, val: projects } = await projectsService.listProjectsByWorkspace({
+      workspaceId: workspace.id,
     })
 
-    if (!workspaceProjects) {
-      return {
-        projects: [],
-      }
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
     }
-
-    const { projects, ...rest } = workspaceProjects
 
     return {
       projects: projects.map((project) => ({
         ...project,
-        workspace: rest,
         styles: getRandomPatternStyle(project.id),
       })),
     }

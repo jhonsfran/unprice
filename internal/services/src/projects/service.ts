@@ -1,5 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
+import type { Project, Workspace } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ProjectFeatureCache } from "../cache"
@@ -17,6 +18,7 @@ export class ProjectService {
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
+
   constructor({
     db,
     logger,
@@ -49,21 +51,16 @@ export class ProjectService {
     const start = performance.now()
 
     // if not found in DO, then we query the db
-    const features = await this.db.query.features
-      .findMany({
-        with: {
-          project: {
-            columns: {
-              enabled: true,
-            },
+    const features = await this.db.query.features.findMany({
+      with: {
+        project: {
+          columns: {
+            enabled: true,
           },
         },
-        where: (feature, { eq }) => eq(feature.projectId, projectId),
-      })
-      .catch((err) => {
-        this.logger.set({ error: toErrorContext(err) })
-        throw err
-      })
+      },
+      where: (feature, { eq }) => eq(feature.projectId, projectId),
+    })
 
     const end = performance.now()
 
@@ -130,14 +127,14 @@ export class ProjectService {
             this.logger.warn("Failed to fetch features data from cache, retrying...", {
               projectId,
               attempt,
-              error: err.message,
+              error: toErrorContext(err),
             })
           }
         )
 
     if (err) {
       this.logger.error("error getting project features", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -164,5 +161,168 @@ export class ProjectService {
     }
 
     return Ok(val)
+  }
+
+  public async getProjectByIdInWorkspace({
+    workspaceId,
+    projectId,
+  }: {
+    workspaceId: string
+    projectId: string
+  }): Promise<Result<(Project & { workspace: Workspace }) | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.projects.findFirst({
+        with: {
+          workspace: true,
+        },
+        where: (project, { eq, and }) =>
+          and(eq(project.slug, projectId), eq(project.workspaceId, workspaceId)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting project by id: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting project by id", {
+        error: toErrorContext(err),
+        workspaceId,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as (Project & { workspace: Workspace }) | null) ?? null)
+  }
+
+  public async getProjectBySlugInWorkspace({
+    workspaceId,
+    slug,
+  }: {
+    workspaceId: string
+    slug: string
+  }): Promise<Result<(Project & { workspace: Workspace }) | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.projects.findFirst({
+        with: {
+          workspace: true,
+        },
+        where: (project, { eq, and }) =>
+          and(eq(project.slug, slug), eq(project.workspaceId, workspaceId)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting project by slug: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting project by slug", {
+        error: toErrorContext(err),
+        workspaceId,
+        slug,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as (Project & { workspace: Workspace }) | null) ?? null)
+  }
+
+  public async listProjectsByWorkspace({
+    workspaceId,
+  }: {
+    workspaceId: string
+  }): Promise<
+    Result<Array<Project & { workspace: Pick<Workspace, "slug" | "plan"> }>, FetchError>
+  > {
+    const { val, err } = await wrapResult(
+      this.db.query.workspaces.findFirst({
+        with: {
+          projects: {
+            orderBy: (project, { asc }) => [asc(project.createdAtM)],
+          },
+        },
+        where: (workspace, { eq }) => eq(workspace.id, workspaceId),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing projects by workspace: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error listing projects by workspace", {
+        error: toErrorContext(err),
+        workspaceId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok([])
+    }
+
+    const { projects, ...rest } = val
+    const workspace = {
+      slug: rest.slug,
+      plan: rest.plan,
+    }
+
+    return Ok(
+      projects.map((project) => ({
+        ...project,
+        workspace,
+      }))
+    )
+  }
+
+  public async listActiveWorkspaceProjects({
+    workspaceId,
+  }: {
+    workspaceId: string
+  }): Promise<Result<Array<Project & { workspace: Pick<Workspace, "slug"> }>, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.workspaces.findFirst({
+        with: {
+          projects: {
+            orderBy: (project, { desc }) => [desc(project.createdAtM)],
+          },
+        },
+        where: (workspace, { eq }) => eq(workspace.id, workspaceId),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing active workspace projects: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error listing active workspace projects", {
+        error: toErrorContext(err),
+        workspaceId,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Ok([])
+    }
+
+    const { projects, ...rest } = val
+    const workspace = {
+      slug: rest.slug,
+    }
+
+    return Ok(
+      projects.map((project) => ({
+        ...project,
+        workspace,
+      }))
+    )
   }
 }

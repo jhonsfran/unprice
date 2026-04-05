@@ -7,6 +7,7 @@ import { EntitlementService } from "./entitlements/service"
 import { FeatureService } from "./features/service"
 import { PageService } from "./pages/service"
 import { PlanService } from "./plans/service"
+import { ProjectService } from "./projects/service"
 import { SubscriptionService } from "./subscriptions/service"
 import { WorkspaceService } from "./workspaces/service"
 
@@ -21,6 +22,7 @@ export interface ServiceContext {
   domains: DomainService
   features: FeatureService
   pages: PageService
+  projects: ProjectService
   workspaces: WorkspaceService
   grantsManager: GrantsManager
   billing: BillingService
@@ -77,6 +79,15 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     logger: deps.logger,
   })
 
+  const projects = new ProjectService({
+    db: deps.db,
+    logger: deps.logger,
+    analytics: deps.analytics,
+    waitUntil: deps.waitUntil,
+    cache: deps.cache,
+    metrics: deps.metrics,
+  })
+
   const workspaces = new WorkspaceService({
     db: deps.db,
     logger: deps.logger,
@@ -125,6 +136,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     domains,
     features,
     pages,
+    projects,
     workspaces,
     grantsManager,
     billing,
