@@ -2,7 +2,6 @@ import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
-
 export const removePhase = protectedProjectProcedure
   .input(z.object({ id: z.string() }))
   .output(z.object({ result: z.boolean() }))

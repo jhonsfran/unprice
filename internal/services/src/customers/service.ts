@@ -1,15 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq } from "@unprice/db"
-import { customerSessions, customers, subscriptions } from "@unprice/db/schema"
-import { AesGCM, newId } from "@unprice/db/utils"
+import { customers, subscriptions } from "@unprice/db/schema"
+import { AesGCM } from "@unprice/db/utils"
 import type {
   Customer,
   CustomerPaymentMethod,
-  CustomerSignUp,
   PaymentProvider,
-  Plan,
-  PlanVersion,
-  Project,
   SubscriptionCache,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
@@ -23,36 +19,6 @@ import type { SubscriptionService } from "../subscriptions/service"
 import { toErrorContext } from "../utils/log-context"
 import { retry } from "../utils/retry"
 import { UnPriceCustomerError } from "./errors"
-
-type SignUpContext = {
-  input: CustomerSignUp
-  projectId: string
-  planVersion: PlanVersion & { project: Project; plan: Plan }
-  pageId: string | null
-  customerId: string
-  successUrl: string
-  cancelUrl: string
-}
-
-function isExternalIdConflictError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false
-  }
-
-  const dbError = error as {
-    code?: string
-    constraint?: string
-    message?: string
-  }
-
-  return (
-    dbError.code === "23505" &&
-    (dbError.constraint === "cp_external_id_idx" ||
-      dbError.message?.includes("cp_external_id_idx") ||
-      dbError.message?.includes("external_id") ||
-      false)
-  )
-}
 
 export class CustomerService {
   private readonly db: Database
@@ -166,7 +132,7 @@ export class CustomerService {
       })
       .catch((e) => {
         this.logger.error("error getting getActiveSubscriptionData from db", {
-          error: e.message,
+          error: toErrorContext(e),
         })
 
         return null
@@ -252,7 +218,7 @@ export class CustomerService {
 
     if (err) {
       this.logger.error("error getting getCustomersProjectData", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -358,7 +324,7 @@ export class CustomerService {
 
     if (err) {
       this.logger.error("error getting getCustomerData", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -427,7 +393,7 @@ export class CustomerService {
 
     if (err) {
       this.logger.error("error getting getCustomerByExternalIdData", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -576,7 +542,7 @@ export class CustomerService {
 
     if (err) {
       this.logger.error("error getting customer subscription", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -727,34 +693,33 @@ export class CustomerService {
       }
     }
 
-    // get config payment provider
-    const config = await this.db.query.paymentProviderConfig
-      .findFirst({
+    const { err: configErr, val: config } = await wrapResult(
+      this.db.query.paymentProviderConfig.findFirst({
         where: (config, { and, eq }) =>
           and(
             eq(config.projectId, projectId),
             eq(config.paymentProvider, provider),
             eq(config.active, true)
           ),
-      })
-      .catch((e) => {
-        this.logger.error("error getting payment provider config", {
-          error: e.message,
-          customerId,
-          projectId,
-          provider,
+      }),
+      (err) =>
+        new FetchError({
+          message: `error getting payment provider config: ${err.message}`,
+          retry: false,
         })
+    )
 
-        throw e
-      })
-
-    if (!config) {
+    if (configErr) {
       this.logger.error("error getting payment provider config", {
+        error: toErrorContext(configErr),
         customerId,
         projectId,
         provider,
       })
+      return Err(configErr)
+    }
 
+    if (!config) {
       return Err(
         new UnPriceCustomerError({
           code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
@@ -846,9 +811,6 @@ export class CustomerService {
       await paymentProviderService.getDefaultPaymentMethodId()
 
     if (paymentMethodErr) {
-      this.logger.error(
-        `Payment validation failed: ${paymentMethodErr.message} for project ${projectId} and payment provider ${paymentProvider}`
-      )
       return Err(
         new FetchError({
           message: paymentMethodErr.message,
@@ -858,9 +820,6 @@ export class CustomerService {
     }
 
     if (requiredPaymentMethod && !paymentMethodId?.paymentMethodId) {
-      this.logger.error(
-        `Required payment method not found for project ${projectId} and payment provider ${paymentProvider}`
-      )
       return Err(
         new FetchError({
           message: "Required payment method not found",
@@ -918,7 +877,7 @@ export class CustomerService {
           customerId,
           projectId,
           provider,
-          error: err.message,
+          error: toErrorContext(err),
         })
         return []
       }
@@ -931,7 +890,7 @@ export class CustomerService {
         customerId,
         projectId,
         provider,
-        error: error.message,
+        error: toErrorContext(error),
       })
       return []
     }
@@ -1011,7 +970,7 @@ export class CustomerService {
 
     if (err) {
       this.logger.error("error getting payment methods", {
-        error: err.message,
+        error: toErrorContext(err),
       })
 
       return Err(
@@ -1028,632 +987,6 @@ export class CustomerService {
     }
 
     return Ok(val)
-  }
-
-  /**
-   * Signs up a customer for a project
-   * @param opts - Options
-   * @returns Sign up result
-   */
-  public async signUp(opts: {
-    input: CustomerSignUp
-    projectId: string
-  }): Promise<
-    Result<
-      { success: boolean; url: string; error?: string; customerId: string },
-      UnPriceCustomerError | FetchError
-    >
-  > {
-    const { input, projectId } = opts
-
-    // Step 1: Resolve the Plan Version (Pure Logic)
-    const planResolution = await this.resolvePlanVersion({
-      input,
-      projectId,
-    })
-
-    if (planResolution.err) {
-      this.logger.set({ error: toErrorContext(planResolution.err) })
-      return Err(planResolution.err)
-    }
-
-    const { planVersion, pageId } = planResolution.val
-
-    if (input.externalId) {
-      const { err: existingCustomerErr, val: existingCustomer } =
-        await this.getCustomerByExternalId(projectId, input.externalId, {
-          skipCache: true,
-        })
-
-      if (existingCustomerErr) {
-        this.logger.set({ error: toErrorContext(existingCustomerErr) })
-        return Err(existingCustomerErr)
-      }
-
-      if (existingCustomer) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
-            message: "External customer id already exists for this project",
-          })
-        )
-      }
-    }
-
-    const customerId = newId("customer")
-    const successUrl = input.successUrl.replace("{CUSTOMER_ID}", customerId)
-
-    // Step 2: Prepare the Customer Context
-    const context: SignUpContext = {
-      projectId,
-      planVersion,
-      pageId,
-      input,
-      customerId,
-      successUrl,
-      cancelUrl: input.cancelUrl,
-    }
-
-    this.logger.set({
-      customers: {
-        operation: "sign_up",
-        name: input.name,
-        email: input.email,
-        plan_version_id: planVersion.id,
-        plan_slug: planVersion.plan.slug,
-        success_url: successUrl,
-        cancel_url: input.cancelUrl,
-        session_id: input.sessionId,
-        currency: input.defaultCurrency,
-      },
-    })
-
-    // let's skip the payment required flow if the payment provider is sandbox
-    const isSandbox = planVersion.paymentProvider === "sandbox"
-
-    // Step 3: Branch Logic
-    if (planVersion.paymentMethodRequired && !isSandbox) {
-      return this.handlePaymentRequiredFlow(context)
-    }
-
-    return this.handleDirectProvisioningFlow(context)
-  }
-
-  /**
-   * Helper: Encapsulates all the "Plan Guessing" logic
-   */
-  private async resolvePlanVersion(opts: {
-    input: CustomerSignUp
-    projectId: string
-  }): Promise<
-    Result<
-      { planVersion: PlanVersion & { project: Project; plan: Plan }; pageId: string | null },
-      UnPriceCustomerError
-    >
-  > {
-    const { input, projectId } = opts
-    const { planVersionId, defaultCurrency, planSlug, sessionId, billingInterval } = input
-
-    let planVersion: (PlanVersion & { project: Project; plan: Plan }) | null = null
-    let pageId: string | null = null
-
-    if (sessionId) {
-      this.logger.set({
-        customers: {
-          session_id: sessionId,
-          currency: defaultCurrency,
-        },
-      })
-
-      // if session id is provided, we need to get the plan version from the session
-      // get the session from analytics
-      const data = await this.analytics.getPlanClickBySessionId({
-        session_id: sessionId,
-        action: "plan_click",
-      })
-
-      const session = data.data.at(0)
-
-      if (!session) {
-        if (!planVersionId) {
-          return Err(
-            new UnPriceCustomerError({
-              code: "PLAN_VERSION_NOT_FOUND",
-              message: "Session not found",
-            })
-          )
-        }
-
-        planVersion = await this.db.query.versions
-          .findFirst({
-            with: {
-              project: true,
-              plan: true,
-            },
-            where: (version, { eq, and }) =>
-              and(eq(version.id, planVersionId), eq(version.projectId, projectId)),
-          })
-          .then((data) => data ?? null)
-      } else {
-        pageId = session.payload.page_id
-
-        planVersion = await this.db.query.versions
-          .findFirst({
-            with: {
-              project: true,
-              plan: true,
-            },
-            where: (version, { eq, and }) =>
-              and(
-                eq(version.id, session.payload.plan_version_id),
-                eq(version.projectId, projectId)
-              ),
-          })
-          .then((data) => data ?? null)
-      }
-    } else if (planVersionId) {
-      planVersion = await this.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(
-              eq(version.id, planVersionId),
-              eq(version.projectId, projectId),
-              // filter by currency if provided
-              defaultCurrency ? eq(version.currency, defaultCurrency) : undefined
-            ),
-        })
-        .then((data) => data ?? null)
-    } else if (planSlug) {
-      // find the plan version by the plan slug
-      const plan = await this.db.query.plans
-        .findFirst({
-          with: {
-            versions: {
-              with: {
-                project: true,
-                plan: true,
-              },
-              where: (version, { eq, and }) =>
-                and(
-                  // filter by latest version
-                  eq(version.latest, true),
-                  // filter by project
-                  eq(version.projectId, projectId),
-                  // filter by currency if provided
-                  defaultCurrency ? eq(version.currency, defaultCurrency) : undefined
-                ),
-            },
-          },
-          where: (plan, { eq, and }) => and(eq(plan.projectId, projectId), eq(plan.slug, planSlug)),
-        })
-        .then((data) => {
-          if (!data) {
-            return null
-          }
-
-          // filter by billing interval if provided
-          if (billingInterval) {
-            const versions = data.versions.filter(
-              (version) => version.billingConfig.billingInterval === billingInterval
-            )
-
-            return {
-              ...data,
-              versions: versions ?? [],
-            }
-          }
-
-          return data
-        })
-
-      if (!plan) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "PLAN_VERSION_NOT_FOUND",
-            message: "Plan version not found",
-          })
-        )
-      }
-
-      planVersion = plan.versions[0] ?? null
-    }
-
-    // if no plan version is provided, we use the default plan
-    if (!planVersion) {
-      // if no plan version is provided, we use the default plan
-      const defaultPlan = await this.db.query.plans.findFirst({
-        where: (plan, { eq, and }) =>
-          and(eq(plan.projectId, projectId), eq(plan.defaultPlan, true)),
-      })
-
-      if (!defaultPlan) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "NO_DEFAULT_PLAN_FOUND",
-            message: "Default plan not found, provide a plan version id, slug or session id",
-          })
-        )
-      }
-
-      planVersion = await this.db.query.versions
-        .findFirst({
-          with: {
-            project: true,
-            plan: true,
-          },
-          where: (version, { eq, and }) =>
-            and(
-              eq(version.planId, defaultPlan.id),
-              eq(version.latest, true),
-              eq(version.status, "published"),
-              eq(version.active, true)
-            ),
-        })
-        .then((data) => data ?? null)
-    }
-
-    if (!planVersion) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PLAN_VERSION_NOT_FOUND",
-          message: "Plan version not found",
-        })
-      )
-    }
-
-    this.logger.set({
-      customers: {
-        plan_version_id: planVersion.id,
-        plan_slug: planVersion.plan.slug,
-        currency: planVersion.currency,
-      },
-    })
-
-    if (planVersion.status !== "published") {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PLAN_VERSION_NOT_PUBLISHED",
-          message: "Plan version is not published",
-        })
-      )
-    }
-
-    if (planVersion.active === false) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PLAN_VERSION_NOT_ACTIVE",
-          message: "Plan version is not active",
-        })
-      )
-    }
-
-    const planProject = planVersion.project
-    const currency = defaultCurrency ?? planProject.defaultCurrency
-    const defaultBillingInterval = billingInterval ?? planVersion.billingConfig.billingInterval
-
-    if (
-      defaultBillingInterval &&
-      planVersion.billingConfig.billingInterval !== defaultBillingInterval
-    ) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "BILLING_INTERVAL_MISMATCH",
-          message: "Billing interval mismatch",
-        })
-      )
-    }
-
-    // validate the currency if provided
-    // TODO: why this is needed?
-    if (currency !== planVersion.currency) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "CURRENCY_MISMATCH",
-          message: `Currency mismatch, the project default currency does not match the plan version currency: ${currency} !== ${planVersion.currency}`,
-        })
-      )
-    }
-
-    return Ok({ planVersion, pageId })
-  }
-
-  /**
-   * Helper: Handles the external Payment Provider interaction
-   */
-  private async handlePaymentRequiredFlow(
-    context: SignUpContext
-  ): Promise<
-    Result<
-      { success: boolean; url: string; error?: string; customerId: string },
-      UnPriceCustomerError | FetchError
-    >
-  > {
-    const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
-    const { email, name, config, timezone, externalId, metadata } = input
-
-    const paymentProvider = planVersion.paymentProvider
-    const paymentRequired = planVersion.paymentMethodRequired
-    const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
-
-    // For the main project we use the default key
-    // get config payment provider
-    const configPaymentProvider = await this.db.query.paymentProviderConfig.findFirst({
-      where: (config, { and, eq }) =>
-        and(
-          eq(config.projectId, projectId),
-          eq(config.paymentProvider, paymentProvider),
-          eq(config.active, true)
-        ),
-    })
-
-    if (!configPaymentProvider) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
-          message: "Payment provider config not found or not active",
-        })
-      )
-    }
-
-    const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
-
-    const decryptedKey = await aesGCM.decrypt({
-      iv: configPaymentProvider.keyIv,
-      ciphertext: configPaymentProvider.key,
-    })
-
-    const paymentProviderService = new PaymentProviderService({
-      logger: this.logger,
-      paymentProvider: paymentProvider,
-      token: decryptedKey,
-    })
-
-    // create a session with the data of the customer, the plan version and the success and cancel urls
-    // pass the session id to stripe metadata and then once the customer adds a payment method, we call our api to create the subscription
-    const customerSessionId = newId("customer_session")
-    const customerSession = await this.db
-      .insert(customerSessions)
-      .values({
-        id: customerSessionId,
-        customer: {
-          id: customerId,
-          name: name,
-          email: email,
-          currency: currency,
-          timezone: timezone || planVersion.project.timezone,
-          projectId: projectId,
-          externalId: externalId,
-          metadata: metadata,
-        },
-        planVersion: {
-          id: planVersion.id,
-          projectId: projectId,
-          config: config,
-          paymentMethodRequired: paymentRequired,
-        },
-        metadata: {
-          sessionId: input.sessionId ?? undefined,
-          pageId: pageId ?? undefined,
-        },
-      })
-      .returning()
-      .then((data) => data[0])
-
-    if (!customerSession) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "CUSTOMER_SESSION_NOT_CREATED",
-          message: "Error creating customer session",
-        })
-      )
-    }
-
-    const { err, val } = await paymentProviderService.signUp({
-      successUrl: successUrl,
-      cancelUrl: cancelUrl,
-      customerSessionId: customerSession.id,
-      customer: {
-        id: customerId,
-        email: email,
-        currency: currency,
-        projectId: projectId,
-      },
-    })
-
-    if (err) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PAYMENT_PROVIDER_ERROR",
-          message: err.message,
-        })
-      )
-    }
-
-    if (!val) {
-      return Err(
-        new UnPriceCustomerError({
-          code: "PAYMENT_PROVIDER_ERROR",
-          message: "Error creating payment provider signup",
-        })
-      )
-    }
-
-    // send event to analytics for tracking conversions
-    this.waitUntil(
-      this.analytics.ingestEvents({
-        action: "signup",
-        version: "1",
-        session_id: input.sessionId ?? "",
-        project_id: projectId,
-        timestamp: new Date().toISOString(),
-        payload: {
-          customer_id: customerId,
-          plan_version_id: planVersion.id,
-          page_id: pageId,
-          status: "waiting_payment_provider_setup",
-        },
-      })
-    )
-
-    return Ok({
-      success: true,
-      url: val.url,
-      customerId: val.customerId,
-    })
-  }
-
-  /**
-   * Helper: Handles the Atomic Database Transaction
-   */
-  private async handleDirectProvisioningFlow(
-    context: SignUpContext
-  ): Promise<
-    Result<
-      { success: boolean; url: string; error?: string; customerId: string },
-      UnPriceCustomerError | FetchError
-    >
-  > {
-    const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
-    const { email, name, config, timezone, metadata, externalId } = input
-
-    const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
-
-    const customerMetadata = externalId ? { ...metadata, externalId } : metadata
-
-    try {
-      await this.db.transaction(async (trx) => {
-        const newCustomer = await trx
-          .insert(customers)
-          .values({
-            id: customerId,
-            name: name ?? email,
-            email: email,
-            projectId: projectId,
-            defaultCurrency: currency,
-            timezone: timezone ?? planVersion.project.timezone,
-            active: true,
-            externalId: externalId,
-            metadata: customerMetadata,
-          })
-          .returning()
-          .then((data) => data[0])
-
-        if (!newCustomer?.id) {
-          return Err(
-            new UnPriceCustomerError({
-              code: "CUSTOMER_NOT_CREATED",
-              message: "Error creating customer",
-            })
-          )
-        }
-
-        const subscriptionService = this.getSubscriptionService()
-
-        const { err, val: newSubscription } = await subscriptionService.createSubscription({
-          input: {
-            customerId: newCustomer.id,
-            projectId: projectId,
-            timezone: timezone ?? planVersion.project.timezone,
-          },
-          projectId: projectId,
-          db: trx,
-        })
-
-        if (err) {
-          this.logger.set({ error: toErrorContext(err) })
-          this.logger.error("Error creating subscription", {
-            error: err.message,
-          })
-
-          trx.rollback()
-          throw err
-        }
-
-        const phaseTimestamp = Date.now()
-
-        // create the phase
-        const { err: createPhaseErr, val: newPhase } = await subscriptionService.createPhase({
-          input: {
-            planVersionId: planVersion.id,
-            startAt: phaseTimestamp,
-            config: config,
-            paymentMethodRequired: planVersion.paymentMethodRequired,
-            customerId: newCustomer.id,
-            subscriptionId: newSubscription.id,
-          },
-          projectId: projectId,
-          db: trx,
-          now: phaseTimestamp,
-        })
-
-        if (createPhaseErr) {
-          this.logger.set({ error: toErrorContext(createPhaseErr) })
-          trx.rollback()
-
-          return Err(
-            new UnPriceCustomerError({
-              code: "PHASE_NOT_CREATED",
-              message: "Error creating phase",
-            })
-          )
-        }
-
-        this.logger.set({
-          customers: {
-            customer_id: customerId,
-            subscription_id: newSubscription?.id ?? "",
-            subscription_phase_id: newPhase?.id ?? "",
-          },
-        })
-
-        return { newCustomer, newSubscription }
-      })
-
-      // send event to analytics for tracking conversions
-      this.waitUntil(
-        this.analytics.ingestEvents({
-          action: "signup",
-          version: "1",
-          session_id: input.sessionId ?? "",
-          project_id: projectId,
-          timestamp: new Date().toISOString(),
-          payload: {
-            customer_id: customerId,
-            plan_version_id: planVersion.id,
-            page_id: pageId,
-            status: "signup_success",
-          },
-        })
-      )
-
-      return Ok({
-        success: true,
-        url: successUrl,
-        customerId: customerId,
-      })
-    } catch (error) {
-      if (isExternalIdConflictError(error)) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
-            message: "External customer id already exists for this project",
-          })
-        )
-      }
-
-      const err = error as Error
-
-      return Ok({
-        success: false,
-        url: cancelUrl,
-        error: `Error while signing up: ${err.message}`,
-        customerId: "",
-      })
-    }
   }
 
   // TODO: to implement

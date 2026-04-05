@@ -2,7 +2,6 @@ import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
-
 export const machine = protectedProjectProcedure
   .input(
     z.object({

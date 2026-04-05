@@ -7,7 +7,6 @@ import { z } from "zod"
 import { TRPCError } from "@trpc/server"
 import { protectedProjectProcedure } from "#trpc"
 
-
 export const publish = protectedProjectProcedure
   .input(planVersionSelectBaseSchema.partial().required({ id: true }))
   .output(

@@ -387,7 +387,7 @@ Estimate: ~50 of the 72 files are simple queries that just need a service method
    `SubscriptionService`. Extract to use case.
 4. **Do the complex one** — `customer/sign-up`. The 200-line monster. Extracts from
    `CustomerService.signUp()`. This is the proof that the pattern handles real complexity.
-5. **Batch the remaining simple queries** — one PR per domain (plans, features, pages, etc.)
+5. **Batch the remaining simple queries** — one commit per domain (plans, features, pages, etc.)
 
 ### CLAUDE.md conventions
 
@@ -681,6 +681,7 @@ Each item is self-contained: it has a clear input, output, and verification step
 - After each checklist point is completed, create a commit before starting the next point.
 - Run validation hooks/checks for that point before committing.
 - If validation fails, fix the issues first, then commit, then continue.
+- Keep and commit formatting or lint changes produced by validation hooks in the same checkpoint commit.
 
 ### P0.1 — Infrastructure prerequisites
 
@@ -751,7 +752,7 @@ Each item extracts one operation. Work top to bottom — each builds on the prev
   - Update the tRPC procedure `subscriptions/create.ts` to call the use case.
   - Verify: `pnpm --filter @unprice/services test` passes, tRPC typecheck passes.
 
-- [ ] **`customer/sign-up` — extract the complex proof**
+- [x] **`customer/sign-up` — extract the complex proof**
   - File: create `use-cases/customer/sign-up.ts`
   - Extract from `CustomerService.signUp()` (~200 lines). This is the hardest one:
     - Transaction boundary moves to the use case (`deps.db.transaction(...)`)
@@ -775,7 +776,7 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
     - **Multi-step orchestration** -> Extract to use case
   - Write the triage result as a checklist (file -> category -> target service or use case)
 
-- [ ] **Migrate simple queries by domain** (one PR per domain):
+- [ ] **Migrate simple queries by domain** (one commit per domain):
   - `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug
   - `customers/` — getById, getByEmail, exist, getSubscriptions, getInvoices, getInvoiceById, listByActiveProject
   - `features/` — getById, getBySlug, searchBy, listByActiveProject, exist

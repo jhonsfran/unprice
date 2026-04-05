@@ -3,7 +3,6 @@ import { getPlanVersionApiResponseSchema, getPlanVersionListSchema } from "@unpr
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
-
 export const listByActiveProject = protectedProjectProcedure
   .input(getPlanVersionListSchema)
   .output(

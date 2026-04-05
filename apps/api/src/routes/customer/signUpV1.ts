@@ -5,6 +5,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { customerSignUpSchema, signUpResponseSchema } from "@unprice/db/validators"
 import { UnPriceCustomerError } from "@unprice/services/customers"
+import { signUp } from "@unprice/services/use-cases"
 import type { z } from "zod"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors/http"
@@ -59,16 +60,26 @@ export const registerSignUpV1 = (app: App) =>
       metadata,
       sessionId,
     } = c.req.valid("json")
-    const { customer } = c.get("services")
+    const { customer, subscription, plans } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
 
     startTime(c, "customerSignUp")
 
-    // get payment methods from service
-    const result = await customer
-      .signUp({
+    const result = await signUp(
+      {
+        services: {
+          customers: customer,
+          subscriptions: subscription,
+          plans,
+        },
+        db: c.get("db"),
+        logger: c.get("logger"),
+        analytics: c.get("analytics"),
+        waitUntil: c.get("waitUntil"),
+      },
+      {
         input: {
           name,
           timezone,
@@ -85,8 +96,8 @@ export const registerSignUpV1 = (app: App) =>
           metadata: metadata,
         },
         projectId: key.projectId,
-      })
-      .finally(() => endTime(c, "customerSignUp"))
+      }
+    ).finally(() => endTime(c, "customerSignUp"))
 
     if (result.err) {
       if (

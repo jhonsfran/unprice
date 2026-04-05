@@ -370,7 +370,11 @@ describe("SubscriptionService - grant lifecycle", () => {
     const customerService = new CustomerService(serviceDeps)
     const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
     const billingService = new BillingService({ ...serviceDeps, customerService, grantsManager })
-    subscriptionService = new SubscriptionService({ ...serviceDeps, customerService, billingService })
+    subscriptionService = new SubscriptionService({
+      ...serviceDeps,
+      customerService,
+      billingService,
+    })
   })
 
   it("creates grants during the initial subscription creation flow only when the active phase is created", async () => {
