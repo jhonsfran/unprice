@@ -12,6 +12,7 @@
     "./subscriptions": "./src/subscriptions/index.ts",
     "./customers": "./src/customers/index.ts",
     "./features": "./src/features/index.ts",
+    "./pages": "./src/pages/index.ts",
     "./payment-provider": "./src/payment-provider/index.ts",
     "./cache": "./src/cache/index.ts",
     "./projects": "./src/projects/index.ts",

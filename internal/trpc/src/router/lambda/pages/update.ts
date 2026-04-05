@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { pageInsertBaseSchema, pageSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -29,11 +27,19 @@ export const update = protectedProjectProcedure
       ctaLink,
     } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { pages } = opts.ctx.services
 
-    const pageData = await opts.ctx.db.query.pages.findFirst({
-      where: (page, { eq, and }) => and(eq(page.id, id), eq(page.projectId, project.id)),
+    const { err: pageLookupErr, val: pageData } = await pages.getPageById({
+      projectId: project.id,
+      pageId: id,
     })
+
+    if (pageLookupErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: pageLookupErr.message,
+      })
+    }
 
     if (!pageData?.id) {
       throw new TRPCError({
@@ -42,26 +48,29 @@ export const update = protectedProjectProcedure
       })
     }
 
-    const updatedPage = await opts.ctx.db
-      .update(schema.pages)
-      .set({
-        subdomain,
-        customDomain,
-        description,
-        name,
-        title,
-        copy,
-        logo,
-        colorPalette,
-        faqs,
-        selectedPlans,
-        logoType,
-        ctaLink,
-        updatedAtM: Date.now(),
+    const { err: updateErr, val: updatedPage } = await pages.updatePage({
+      pageId: id,
+      projectId: project.id,
+      subdomain,
+      customDomain,
+      description,
+      name,
+      title,
+      copy,
+      logo,
+      colorPalette,
+      faqs,
+      selectedPlans,
+      logoType,
+      ctaLink,
+    })
+
+    if (updateErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: updateErr.message,
       })
-      .where(and(eq(schema.pages.id, id), eq(schema.pages.projectId, project.id)))
-      .returning()
-      .then((re) => re[0])
+    }
 
     if (!updatedPage) {
       throw new TRPCError({

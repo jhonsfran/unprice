@@ -4,6 +4,7 @@ import type { ServiceDeps } from "./deps"
 import { GrantsManager } from "./entitlements/grants"
 import { EntitlementService } from "./entitlements/service"
 import { FeatureService } from "./features/service"
+import { PageService } from "./pages/service"
 import { PlanService } from "./plans/service"
 import { SubscriptionService } from "./subscriptions/service"
 
@@ -16,6 +17,7 @@ import { SubscriptionService } from "./subscriptions/service"
 export interface ServiceContext {
   customers: CustomerService
   features: FeatureService
+  pages: PageService
   grantsManager: GrantsManager
   billing: BillingService
   subscriptions: SubscriptionService
@@ -61,6 +63,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     logger: deps.logger,
   })
 
+  const pages = new PageService({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
   // 2. Services with deps on leaves
   const billing = new BillingService({
     db: deps.db,
@@ -102,6 +109,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   return {
     customers,
     features,
+    pages,
     grantsManager,
     billing,
     subscriptions,

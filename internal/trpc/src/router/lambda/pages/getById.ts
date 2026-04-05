@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { pageSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -15,13 +16,21 @@ export const getById = protectedProjectProcedure
   .query(async (opts) => {
     const { id } = opts.input
     const project = opts.ctx.project
-    const _workspace = opts.ctx.project.workspace
+    const { pages } = opts.ctx.services
 
-    const pageData = await opts.ctx.db.query.pages.findFirst({
-      where: (page, { eq, and }) => and(eq(page.id, id), eq(page.projectId, project.id)),
+    const { err, val: pageData } = await pages.getPageById({
+      projectId: project.id,
+      pageId: id,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      page: pageData,
+      page: pageData ?? undefined,
     }
   })

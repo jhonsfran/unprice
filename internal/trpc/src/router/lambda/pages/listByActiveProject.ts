@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { pageSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -18,17 +19,20 @@ export const listByActiveProject = protectedProjectProcedure
   .query(async (opts) => {
     const { fromDate, toDate } = opts.input
     const project = opts.ctx.project
+    const { pages: pagesService } = opts.ctx.services
 
-    const pages = await opts.ctx.db.query.pages.findMany({
-      where: (page, { eq, and, between, gte, lte }) =>
-        and(
-          eq(page.projectId, project.id),
-          fromDate && toDate ? between(page.createdAtM, fromDate, toDate) : undefined,
-          fromDate ? gte(page.createdAtM, fromDate) : undefined,
-          toDate ? lte(page.createdAtM, toDate) : undefined
-        ),
-      orderBy: (page, { desc }) => [desc(page.createdAtM)],
+    const { err, val: pages } = await pagesService.listPagesByProject({
+      projectId: project.id,
+      fromDate,
+      toDate,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     return {
       pages,

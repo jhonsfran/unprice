@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { pageSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -17,12 +18,20 @@ export const getByDomain = publicProcedure
   )
   .query(async (opts) => {
     const { domain } = opts.input
+    const { pages } = opts.ctx.services
 
-    const pageData = await opts.ctx.db.query.pages.findFirst({
-      where: (page, { eq, or }) => or(eq(page.customDomain, domain), eq(page.subdomain, domain)),
+    const { err, val: pageData } = await pages.getPageByDomain({
+      domain,
     })
 
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
     return {
-      page: pageData,
+      page: pageData ?? undefined,
     }
   })
