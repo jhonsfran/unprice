@@ -5,6 +5,7 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { isZero } from "dinero.js"
 import type { ServiceContext } from "../../context"
+import { toErrorContext } from "../../utils/log-context"
 
 type PublishPlanVersionDeps = {
   services: Pick<ServiceContext, "customers">
@@ -38,6 +39,14 @@ export async function publishPlanVersion(
   >
 > {
   const { id, projectId, workspaceUnPriceCustomerId } = input
+
+  deps.logger.set({
+    business: {
+      operation: "plan-version.publish",
+      project_id: projectId,
+      unprice_customer_id: workspaceUnPriceCustomerId,
+    },
+  })
 
   const planVersionData = await deps.db.query.versions.findFirst({
     with: {
@@ -167,7 +176,7 @@ export async function publishPlanVersion(
   } catch (error) {
     const publishErr = error as Error
     deps.logger.error("error publishing plan version", {
-      error: publishErr.message,
+      error: toErrorContext(publishErr),
       projectId,
       planVersionId: id,
     })

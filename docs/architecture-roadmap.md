@@ -843,12 +843,12 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
     - [ ] `internal/trpc/src/router/lambda/workspaces/deleteMember.ts` -> `simple-crud` -> `service:workspaces.deleteMember`
     - [ ] `internal/trpc/src/router/lambda/workspaces/getBySlug.ts` -> `simple-query` -> `service:workspaces.getBySlug`
     - [x] `internal/trpc/src/router/lambda/workspaces/inviteMember.ts` -> `orchestration` -> `use-case:workspace/invite-member.ts`
-    - [ ] `internal/trpc/src/router/lambda/workspaces/listInvitesByActiveWorkspace.ts` -> `simple-query` -> `service:workspaces.listInvitesByActiveWorkspace`
-    - [ ] `internal/trpc/src/router/lambda/workspaces/listMembersByActiveWorkspace.ts` -> `simple-query` -> `service:workspaces.listMembersByActiveWorkspace`
-    - [ ] `internal/trpc/src/router/lambda/workspaces/listWorkspacesByActiveUser.ts` -> `simple-query` -> `service:workspaces.listWorkspacesByActiveUser`
+    - [x] `internal/trpc/src/router/lambda/workspaces/listInvitesByActiveWorkspace.ts` -> `simple-query` -> `service:workspaces.listInvitesByActiveWorkspace`
+    - [x] `internal/trpc/src/router/lambda/workspaces/listMembersByActiveWorkspace.ts` -> `simple-query` -> `service:workspaces.listMembersByActiveWorkspace`
+    - [x] `internal/trpc/src/router/lambda/workspaces/listWorkspacesByActiveUser.ts` -> `simple-query` -> `service:workspaces.listWorkspacesByActiveUser`
     - [x] `internal/trpc/src/router/lambda/workspaces/resendInvite.ts` -> `orchestration` -> `use-case:workspace/resend-invite.ts`
 
-- [ ] **Migrate simple queries by domain** (one commit per domain):
+- [x] **Migrate simple queries by domain** (one commit per domain):
   - [x] `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug, update
   - [x] `customers/` — getById, getByIdActiveProject, getByEmail, exist, getSubscriptions, getInvoices, getInvoiceById, listByActiveProject, update
   - [x] `features/` — getById, getBySlug, searchBy, listByActiveProject, exist, update
@@ -893,7 +893,7 @@ Apply these rules to every file you touch during P0. Don't do a separate sweep.
   - Rule: public methods return `Result`, never throw. Private methods may throw only
     for programmer errors (assertion failures, invariant violations).
 
-- [ ] **Adopt `toErrorContext()` in all service files**
+- [x] **Adopt `toErrorContext()` in all service files**
   - Currently only 5 of 12 files use it. When you touch a service file, replace
     `{ error: err.message }` with `{ error: toErrorContext(err) }` in all logger calls.
   - Progress: standardized in `billing/service.ts`, `plans/service.ts`,
@@ -909,12 +909,14 @@ Apply these rules to every file you touch during P0. Don't do a separate sweep.
 
 Apply these rules to every file you touch during P0. Don't do a separate sweep.
 
-- [ ] **Standardize wide event context keys**
+- [x] **Standardize wide event context keys**
   - In use cases: `logger.set({ business: { operation: "domain.verb", ...entity_ids } })`
   - In services: only `logger.warn()` or `logger.error()` for unexpected failures.
     Use `{ error: toErrorContext(err) }` for error context.
   - Remove per-service custom keys (`customers: { ... }`, `entitlements: { ... }`).
     Use `business` for operation context everywhere.
+  - Applied in extracted use cases (`workspace/*`, `project/*`, `plan-version/*`, `customer/sign-up`)
+    and service-layer error logging.
 
 - [x] **Remove logging of expected error paths**
   - "Customer not found" is `Ok(null)`, not a log event.

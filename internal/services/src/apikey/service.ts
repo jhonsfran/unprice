@@ -186,7 +186,7 @@ export class ApiKeysService {
       .catch((e) => {
         this.logger.set({ error: toErrorContext(e) })
         this.logger.error(`Error fetching apikey from db: ${e.message}`, {
-          error: e,
+          error: toErrorContext(e),
           keyHash,
         })
 
@@ -308,11 +308,7 @@ export class ApiKeysService {
 
       if (result.err) {
         this.logger.error("Error verifying apikey after retrying without cache", {
-          error: {
-            type: result.err.name,
-            message: result.err.message,
-            stack: result.err.stack,
-          },
+          error: toErrorContext(result.err),
         })
 
         return result
@@ -360,7 +356,7 @@ export class ApiKeysService {
     } catch (e) {
       const error = e as Error
       this.logger.error("Unhandled error while getting the apikey", {
-        error: JSON.stringify(error),
+        error: toErrorContext(error),
       })
 
       return Err(

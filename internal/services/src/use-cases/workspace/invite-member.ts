@@ -6,6 +6,7 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { z } from "zod"
 import type { Cache } from "../../cache/service"
+import { toErrorContext } from "../../utils/log-context"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
 
@@ -47,6 +48,14 @@ export async function inviteMember(
   >
 > {
   const { email, role, name, userId, workspace } = input
+
+  deps.logger.set({
+    business: {
+      operation: "workspace.invite_member",
+      workspace_id: workspace.id,
+      user_id: userId,
+    },
+  })
 
   if (workspace.isPersonal) {
     return Ok({
@@ -125,7 +134,7 @@ export async function inviteMember(
   } catch (error) {
     const e = error as Error
     deps.logger.error("error inviting workspace member", {
-      error: e.message,
+      error: toErrorContext(e),
       workspaceId: workspace.id,
       userId,
       email,

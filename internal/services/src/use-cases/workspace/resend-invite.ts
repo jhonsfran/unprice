@@ -2,6 +2,7 @@ import { type Database, and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { toErrorContext } from "../../utils/log-context"
 
 type ResendInviteDeps = {
   db: Database
@@ -28,6 +29,13 @@ export async function resendInvite(
   >
 > {
   const { email, workspace } = input
+
+  deps.logger.set({
+    business: {
+      operation: "workspace.resend_invite",
+      workspace_id: workspace.id,
+    },
+  })
 
   if (workspace.isPersonal) {
     return Ok({
@@ -57,7 +65,7 @@ export async function resendInvite(
   } catch (error) {
     const e = error as Error
     deps.logger.error("error resending workspace invite", {
-      error: e.message,
+      error: toErrorContext(e),
       workspaceId: workspace.id,
       email,
     })

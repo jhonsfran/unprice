@@ -4,6 +4,7 @@ import { newId } from "@unprice/db/utils"
 import type { PlanVersion } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { toErrorContext } from "../../utils/log-context"
 
 type DuplicatePlanVersionDeps = {
   db: Database
@@ -28,6 +29,13 @@ export async function duplicatePlanVersion(
   >
 > {
   const { id, projectId } = input
+
+  deps.logger.set({
+    business: {
+      operation: "plan-version.duplicate",
+      project_id: projectId,
+    },
+  })
 
   try {
     const planVersionData = await deps.db.query.versions.findFirst({
@@ -113,7 +121,7 @@ export async function duplicatePlanVersion(
   } catch (error) {
     const e = error as Error
     deps.logger.error("error duplicating plan version", {
-      error: e.message,
+      error: toErrorContext(e),
       projectId,
       planVersionId: id,
     })

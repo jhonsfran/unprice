@@ -222,7 +222,7 @@ export async function renewSubscription(opts: {
     logger.error(
       `Error while renewing subscription ${error instanceof Error ? error.message : "unknown error"}`,
       {
-        error: JSON.stringify(error),
+        error: toErrorContext(error),
         subscriptionId: subscription.id,
       }
     )

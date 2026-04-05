@@ -3,6 +3,7 @@ import * as schema from "@unprice/db/schema"
 import type { Project } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { toErrorContext } from "../../utils/log-context"
 
 type TransferToWorkspaceDeps = {
   db: Database
@@ -29,6 +30,13 @@ export async function transferToWorkspace(
   >
 > {
   const { project, targetWorkspaceId } = input
+
+  deps.logger.set({
+    business: {
+      operation: "project.transfer_to_workspace",
+      project_id: project.id,
+    },
+  })
 
   if (project.isMain) {
     return Ok({
@@ -74,7 +82,7 @@ export async function transferToWorkspace(
   } catch (error) {
     const e = error as Error
     deps.logger.error("error transferring project to workspace", {
-      error: e.message,
+      error: toErrorContext(e),
       projectId: project.id,
       targetWorkspaceId,
     })

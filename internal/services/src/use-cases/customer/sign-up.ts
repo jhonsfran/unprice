@@ -480,6 +480,8 @@ async function handleDirectProvisioningFlow(
 
       deps.logger.set({
         business: {
+          operation: "customer.sign_up.provision_customer",
+          project_id: projectId,
           customer_id: customerId,
         },
       })
