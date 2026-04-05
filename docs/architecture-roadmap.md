@@ -861,7 +861,7 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
   - [x] `planVersions/` — getById, create, update, duplicate, deactivate, remove
   - [x] `planVersionFeatures/` — getById, getByPlanVersionId, create, update, remove
   - [x] `events/` — listByActiveProject, update
-  - `apikeys/` — listByActiveProject
+  - [x] `apikeys/` — listByActiveProject
   - `workspaces/` mutations — create, delete, deleteMember, inviteMember, resendInvite
   - `projects/` mutations — update, transferToWorkspace, transferToPersonal
 

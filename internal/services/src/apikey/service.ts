@@ -1,14 +1,15 @@
 import type { Analytics } from "@unprice/analytics"
 import { hashStringSHA256, newId } from "@unprice/db/utils"
-import type { ApiKey, ApiKeyExtended } from "@unprice/db/validators"
+import type { ApiKey, ApiKeyExtended, SearchParamsDataTable } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
 import type { Metrics } from "@unprice/services/metrics"
 
 import type { Database } from "@unprice/db"
-import { and, eq } from "@unprice/db"
+import { and, count, eq, getTableColumns, ilike } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
+import { withDateFilters, withPagination } from "@unprice/db/utils"
 import { toErrorContext } from "../utils/log-context"
 import { retry } from "../utils/retry"
 import { UnPriceApiKeyError } from "./errors"
@@ -43,6 +44,77 @@ export class ApiKeysService {
     this.db = opts.db
     this.waitUntil = opts.waitUntil
     this.hashCache = opts.hashCache
+  }
+
+  public async listApiKeysByProject({
+    projectId,
+    query,
+  }: {
+    projectId: string
+    query: SearchParamsDataTable
+  }): Promise<Result<{ apikeys: ApiKey[]; pageCount: number }, FetchError>> {
+    const { page, page_size, search, from, to } = query
+    const columns = getTableColumns(apikeys)
+    const filter = `%${search}%`
+
+    const expressions = [
+      search ? ilike(columns.name, filter) : undefined,
+      projectId ? eq(columns.projectId, projectId) : undefined,
+    ]
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const query = tx.select().from(apikeys).$dynamic()
+        const whereQuery = withDateFilters<ApiKey>(expressions, columns.createdAtM, from, to)
+
+        const data = await withPagination(
+          query,
+          whereQuery,
+          [
+            {
+              column: columns.createdAtM,
+              order: "desc",
+            },
+          ],
+          page,
+          page_size
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(apikeys)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        return {
+          data,
+          total,
+        }
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing api keys by project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error listing api keys by project", {
+        error: toErrorContext(err),
+        projectId,
+      })
+      return Err(err)
+    }
+
+    const pageCount = Math.ceil(val.total / page_size)
+
+    return Ok({
+      apikeys: val.data as ApiKey[],
+      pageCount,
+    })
   }
 
   // in memory cache with size and TTL limits

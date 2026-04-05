@@ -1,4 +1,5 @@
 import { AnalyticsService } from "./analytics/service"
+import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
@@ -21,6 +22,7 @@ import { WorkspaceService } from "./workspaces/service"
  */
 export interface ServiceContext {
   analytics: AnalyticsService
+  apikeys: ApiKeysService
   customers: CustomerService
   domains: DomainService
   events: EventService
@@ -63,6 +65,16 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   const grantsManager = new GrantsManager({
     db: deps.db,
     logger: deps.logger,
+  })
+
+  const apikeys = new ApiKeysService({
+    db: deps.db,
+    logger: deps.logger,
+    analytics: deps.analytics,
+    waitUntil: deps.waitUntil,
+    cache: deps.cache,
+    metrics: deps.metrics,
+    hashCache: new Map<string, string>(),
   })
 
   const plans = new PlanService({
@@ -148,6 +160,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
 
   return {
     analytics,
+    apikeys,
     customers,
     domains,
     events,
