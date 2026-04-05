@@ -862,8 +862,10 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
   - [x] `planVersionFeatures/` — getById, getByPlanVersionId, create, update, remove
   - [x] `events/` — listByActiveProject, update
   - [x] `apikeys/` — listByActiveProject
-  - `workspaces/` mutations — create, delete, deleteMember, inviteMember, resendInvite
-  - `projects/` mutations — update, transferToWorkspace, transferToPersonal
+  - [x] `workspaces/` simple CRUD mutations — create, delete, deleteMember
+  - [ ] `workspaces/` orchestration mutations — inviteMember, resendInvite (move to use-cases extraction)
+  - [x] `projects/` simple CRUD mutations — update
+  - [ ] `projects/` orchestration mutations — transferToWorkspace, transferToPersonal (move to use-cases extraction)
 
 - [ ] **Extract remaining orchestrations to use cases**
   - After triage, extract each identified orchestration to `use-cases/{domain}/{operation}.ts`
@@ -896,6 +898,7 @@ Apply these rules to every file you touch during P0. Don't do a separate sweep.
   - File: `internal/services/src/plans/errors.ts` (create if not exists)
   - Plans currently use generic `FetchError`. Create `UnPricePlanError` following the
     pattern in `customers/errors.ts`.
+  - Create custom Errors for the rest of the services and follow the same pattern.
 
 ### P0.5 — Logging standardization (do alongside P0.2/P0.3)
 

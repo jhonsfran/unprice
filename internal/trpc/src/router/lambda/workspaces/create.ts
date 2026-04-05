@@ -1,10 +1,8 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq, sql } from "@unprice/db"
-import { members } from "@unprice/db/schema"
 import { workspaceInsertBase, workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProcedure } from "#trpc"
-import { createWorkspace } from "#utils/shared"
+import { unprice } from "#utils/unprice"
 
 export const create = protectedProcedure
   .input(
@@ -20,50 +18,78 @@ export const create = protectedProcedure
   )
   .mutation(async (opts) => {
     const userId = opts.ctx.userId
+    const { workspaces } = opts.ctx.services
 
-    let isPersonal = true
+    const { err: countErr, val: membershipCount } = await workspaces.countMembershipsByUser({
+      userId,
+    })
 
-    // verify if the user is a member of any workspace
-    const countMembers = await opts.ctx.db
-      .select({ count: sql<number>`count(*)` })
-      .from(members)
-      .where(and(eq(members.userId, userId)))
-      .then((res) => res[0]?.count ?? 0)
-
-    // if the user is a member of any workspace, the workspace is not personal
-    if (countMembers > 0) {
-      isPersonal = false
-    }
-    if (!isPersonal) {
-      const _customer = await opts.ctx.db.query.customers.findFirst({
-        with: {
-          project: {
-            with: {
-              workspace: true,
-            },
-          },
-        },
-        where: (customer, { eq }) => eq(customer.id, opts.input.unPriceCustomerId),
+    if (countErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: countErr.message,
       })
     }
 
-    const newWorkspace = await createWorkspace({
+    const isPersonal = membershipCount === 0
+
+    const { result: subscription, error: subscriptionErr } =
+      await unprice.customers.getSubscription({
+        customerId: opts.input.unPriceCustomerId,
+      })
+
+    if (subscriptionErr) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: subscriptionErr.message,
+      })
+    }
+
+    if (!subscription) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Subscription not found",
+      })
+    }
+
+    const { err, val } = await workspaces.createWorkspaceRecord({
       input: {
         ...opts.input,
         isPersonal,
       },
-      db: opts.ctx.db,
-      userId: userId,
+      userId,
+      plan: subscription.planSlug,
     })
 
-    if (!newWorkspace) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "user_not_found") {
       throw new TRPCError({
         code: "BAD_REQUEST",
+        message: "User not found",
+      })
+    }
+
+    if (val.state === "member_creation_failed") {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Error creating member",
+      })
+    }
+
+    if (val.state !== "ok") {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
         message: "Workspace not created",
       })
     }
 
     return {
-      workspace: newWorkspace,
+      workspace: val.workspace,
     }
   })

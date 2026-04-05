@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { membersSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -21,6 +19,7 @@ export const deleteMember = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { userId, workspaceId } = opts.input
     const workspace = opts.ctx.workspace
+    const { workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER"])
 
@@ -38,54 +37,47 @@ export const deleteMember = protectedWorkspaceProcedure
       })
     }
 
-    const user = await opts.ctx.db.query.users.findFirst({
-      where: eq(schema.users.id, userId),
+    const { err, val } = await workspaces.removeWorkspaceMember({
+      workspaceId: workspace.id,
+      userId,
     })
 
-    if (!user?.id) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "user_not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "User not found",
       })
     }
 
-    const ownerCount = await opts.ctx.db.query.workspaces.findFirst({
-      with: {
-        members: true,
-      },
-      where: (workspace, operators) => operators.and(operators.eq(workspace.id, workspaceId)),
-    })
-
-    if (ownerCount && ownerCount.members.length <= 1) {
+    if (val.state === "only_owner_conflict") {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Cannot delete the only owner of the workspace",
       })
     }
 
-    const deletedMember = await opts.ctx.db
-      .delete(schema.members)
-      .where(and(eq(schema.members.workspaceId, workspace.id), eq(schema.members.userId, user.id)))
-      .returning()
-      .then((members) => members[0] ?? undefined)
-
-    if (deletedMember) {
-      opts.ctx.waitUntil(
-        Promise.all([
-          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.id}:${userId}`),
-          opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.slug}:${userId}`),
-        ])
-      )
-    }
-
-    if (!deletedMember) {
+    if (val.state !== "ok") {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error deleting member",
       })
     }
 
+    opts.ctx.waitUntil(
+      Promise.all([
+        opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.id}:${userId}`),
+        opts.ctx.cache.workspaceGuard.remove(`workspace-guard:${workspace.slug}:${userId}`),
+      ])
+    )
+
     return {
-      member: deletedMember,
+      member: val.member,
     }
   })

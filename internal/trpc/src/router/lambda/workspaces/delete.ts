@@ -1,11 +1,8 @@
 import { TRPCError } from "@trpc/server"
-import { eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 
 import { protectedWorkspaceProcedure } from "#trpc"
-import { signOutCustomer } from "#utils/shared"
 
 export const deleteWorkspace = protectedWorkspaceProcedure
   .input(workspaceSelectBase.pick({ id: true }))
@@ -13,6 +10,7 @@ export const deleteWorkspace = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { id } = opts.input
     const workspace = opts.ctx.workspace
+    const { customers, projects, workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER"])
 
@@ -37,40 +35,51 @@ export const deleteWorkspace = protectedWorkspaceProcedure
       })
     }
 
-    const mainProject = await opts.ctx.db.query.projects.findFirst({
-      where: eq(schema.projects.isMain, true),
-    })
+    const { err: mainProjectErr, val: mainProject } = await projects.getMainProject()
 
-    if (!mainProject) {
+    if (mainProjectErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: mainProjectErr.message,
+      })
+    }
+
+    if (!mainProject?.id) {
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "Main project not found",
       })
     }
 
-    const result = await signOutCustomer({
-      input: {
-        customerId: workspace.unPriceCustomerId,
-        projectId: mainProject.id,
-      },
-      ctx: opts.ctx,
+    const { err: signOutErr, val: signOutResult } = await customers.signOut({
+      customerId: workspace.unPriceCustomerId,
+      projectId: mainProject.id,
     })
 
-    if (!result.success) {
+    if (signOutErr) {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
-        message: result.message,
+        message: signOutErr.message,
       })
     }
 
-    const deletedWorkspace = await opts.ctx.db
-      .update(schema.workspaces)
-      .set({
-        enabled: false,
+    if (!signOutResult?.success) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: signOutResult?.message ?? "Error signing out customer",
       })
-      .where(eq(schema.workspaces.id, workspace.id))
-      .returning()
-      .then((wk) => wk[0] ?? undefined)
+    }
+
+    const { err: deleteErr, val: deletedWorkspace } = await workspaces.deactivateWorkspaceById({
+      workspaceId: workspace.id,
+    })
+
+    if (deleteErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: deleteErr.message,
+      })
+    }
 
     if (!deletedWorkspace) {
       throw new TRPCError({

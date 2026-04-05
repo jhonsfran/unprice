@@ -1,5 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
-import type { Database } from "@unprice/db"
+import { type Database, eq } from "@unprice/db"
+import * as schema from "@unprice/db/schema"
 import type { Project, Workspace } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -197,6 +198,28 @@ export class ProjectService {
     return Ok((val as (Project & { workspace: Workspace }) | null) ?? null)
   }
 
+  public async getMainProject(): Promise<Result<Project | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.projects.findFirst({
+        where: eq(schema.projects.isMain, true),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting main project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting main project", {
+        error: toErrorContext(err),
+      })
+      return Err(err)
+    }
+
+    return Ok((val as Project | null) ?? null)
+  }
+
   public async getProjectBySlugInWorkspace({
     workspaceId,
     slug,
@@ -324,5 +347,71 @@ export class ProjectService {
         workspace,
       }))
     )
+  }
+
+  public async updateProjectRecord({
+    id,
+    name,
+    defaultCurrency,
+    timezone,
+    url,
+    contactEmail,
+  }: {
+    id: string
+    name?: Project["name"]
+    defaultCurrency?: Project["defaultCurrency"]
+    timezone?: Project["timezone"]
+    url?: Project["url"]
+    contactEmail?: Project["contactEmail"]
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; project: Project }, FetchError>> {
+    const projectData = await this.db.query.projects.findFirst({
+      where: (project, { eq }) => eq(project.id, id),
+    })
+
+    if (!projectData?.id) {
+      return Ok({ state: "not_found" })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .update(schema.projects)
+        .set({
+          name,
+          defaultCurrency,
+          timezone,
+          url,
+          contactEmail,
+        })
+        .where(eq(schema.projects.id, id))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error updating project record: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating project record", {
+        error: toErrorContext(err),
+        projectId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "error updating project",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      project: val as Project,
+    })
   }
 }
