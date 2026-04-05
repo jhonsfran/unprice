@@ -19,18 +19,19 @@ export const listByProjectUnprice = protectedProcedure
   )
   .query(async (opts) => {
     const { published, enterprisePlan } = opts.input
+    const { projects, plans } = opts.ctx.services
 
-    // find unprice project
-    const mainProject = await opts.ctx.db.query.projects.findFirst({
-      where: (project, { eq, and }) =>
-        and(eq(project.isMain, true), eq(project.slug, "unprice-admin")),
+    const { err: projectErr, val: mainProject } = await projects.getMainProjectBySlug({
+      slug: "unprice-admin",
     })
 
-    if (!mainProject) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" })
+    if (projectErr) {
+      throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: projectErr.message })
     }
 
-    const { plans } = opts.ctx.services
+    if (!mainProject?.id) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" })
+    }
 
     const { err, val: planVersionData } = await plans.listPlanVersions({
       projectId: mainProject.id,

@@ -18,11 +18,19 @@ export const getByIdActiveProject = protectedProjectProcedure
   .query(async (opts) => {
     const { id } = opts.input
     const { project } = opts.ctx
+    const { customers } = opts.ctx.services
 
-    const customerData = await opts.ctx.db.query.customers.findFirst({
-      where: (customer, { eq, and }) =>
-        and(eq(customer.projectId, project.id), eq(customer.id, id)),
+    const { err, val: customerData } = await customers.getCustomerByIdInProject({
+      id,
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!customerData) {
       throw new TRPCError({

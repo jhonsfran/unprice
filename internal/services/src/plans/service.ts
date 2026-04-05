@@ -515,6 +515,125 @@ export class PlanService {
     return Ok((val as Plan | null) ?? null)
   }
 
+  public async updatePlanRecord({
+    projectId,
+    id,
+    description,
+    active,
+    title,
+    defaultPlan,
+    enterprisePlan,
+  }: {
+    projectId: string
+    id: string
+    description?: Plan["description"]
+    active?: Plan["active"]
+    title?: Plan["title"]
+    defaultPlan?: Plan["defaultPlan"]
+    enterprisePlan?: Plan["enterprisePlan"]
+  }): Promise<
+    Result<
+      | {
+          state:
+            | "plan_not_found"
+            | "default_enterprise_conflict"
+            | "default_plan_exists"
+            | "enterprise_plan_exists"
+        }
+      | {
+          state: "ok"
+          plan: Plan
+        },
+      FetchError
+    >
+  > {
+    if (defaultPlan && enterprisePlan) {
+      return Ok({
+        state: "default_enterprise_conflict",
+      })
+    }
+
+    const planData = await this.db.query.plans.findFirst({
+      where: (plan, { eq, and }) => and(eq(plan.id, id), eq(plan.projectId, projectId)),
+    })
+
+    if (!planData?.id) {
+      return Ok({
+        state: "plan_not_found",
+      })
+    }
+
+    if (defaultPlan) {
+      const defaultPlanData = await this.db.query.plans.findFirst({
+        where: (plan, { eq, and }) =>
+          and(eq(plan.projectId, projectId), eq(plan.defaultPlan, true)),
+      })
+
+      if (defaultPlanData && defaultPlanData.id !== id) {
+        return Ok({
+          state: "default_plan_exists",
+        })
+      }
+    }
+
+    if (enterprisePlan) {
+      const enterprisePlanData = await this.db.query.plans.findFirst({
+        where: (plan, { eq, and }) =>
+          and(eq(plan.projectId, projectId), eq(plan.enterprisePlan, true)),
+      })
+
+      if (enterprisePlanData && enterprisePlanData.id !== id) {
+        return Ok({
+          state: "enterprise_plan_exists",
+        })
+      }
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .update(schema.plans)
+        .set({
+          ...(title !== undefined && { title }),
+          ...(description !== undefined && { description }),
+          ...(active !== undefined && { active }),
+          defaultPlan: defaultPlan ?? false,
+          enterprisePlan: enterprisePlan ?? false,
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(schema.plans.id, id), eq(schema.plans.projectId, projectId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error updating plan record: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating plan record", {
+        error: toErrorContext(err),
+        projectId,
+        planId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error updating plan",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      plan: val as Plan,
+    })
+  }
+
   public async listPlansByProject({
     projectId,
     fromDate,

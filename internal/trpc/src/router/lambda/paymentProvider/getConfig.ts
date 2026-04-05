@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { selectPaymentProviderConfigSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
@@ -11,19 +12,22 @@ export const getConfig = protectedProjectProcedure
 
     const { paymentProvider } = opts.input
     const projectId = opts.ctx.project.id
+    const { projects } = opts.ctx.services
 
     // TODO: use this for configuration of payment providers
     // const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
 
-    // TODO: abstract this into a function
-    const config = await opts.ctx.db.query.paymentProviderConfig.findFirst({
-      where: (table, { eq, and }) =>
-        and(
-          eq(table.projectId, projectId),
-          eq(table.paymentProvider, paymentProvider),
-          eq(table.active, true)
-        ),
+    const { err, val: config } = await projects.getPaymentProviderConfig({
+      projectId,
+      paymentProvider,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!config) {
       return { paymentProviderConfig: undefined }

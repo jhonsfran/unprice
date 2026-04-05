@@ -849,19 +849,20 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
     - [ ] `internal/trpc/src/router/lambda/workspaces/resendInvite.ts` -> `orchestration` -> `use-case:workspace/resend-invite.ts`
 
 - [ ] **Migrate simple queries by domain** (one commit per domain):
-  - [x] `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug
-  - [x] `customers/` — getById, getByEmail, exist, getSubscriptions, getInvoices, getInvoiceById, listByActiveProject
-  - [x] `features/` — getById, getBySlug, searchBy, listByActiveProject, exist
+  - [x] `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug, update
+  - [x] `customers/` — getById, getByIdActiveProject, getByEmail, exist, getSubscriptions, getInvoices, getInvoiceById, listByActiveProject, update
+  - [x] `features/` — getById, getBySlug, searchBy, listByActiveProject, exist, update
   - [x] `pages/` — getById, getByDomain, listByActiveProject, update
   - [x] `workspaces/` — getBySlug, listMembersByActiveWorkspace, listInvitesByActiveWorkspace, listWorkspacesByActiveUser
   - [x] `domains/` — exists, getAllByActiveWorkspace, create, update, remove
   - [x] `projects/` — getById, getBySlug, listByActiveWorkspace, listByWorkspace
   - [x] `analytics/` — getOverviewStats, getCountryVisits, getBrowserVisits, getPagesOverview, getRealtimeTicket
   - [x] `subscriptions/` — getById, listByActiveProject, listByPlanVersion
-  - [x] `planVersions/` — getById, create, update, duplicate, deactivate, remove
+  - [x] `planVersions/` — getById, create, update, duplicate, deactivate, remove, listByProjectUnprice
   - [x] `planVersionFeatures/` — getById, getByPlanVersionId, create, update, remove
   - [x] `events/` — listByActiveProject, update
   - [x] `apikeys/` — listByActiveProject
+  - [x] `paymentProvider/` — getConfig
   - [x] `workspaces/` simple CRUD mutations — create, delete, deleteMember
   - [ ] `workspaces/` orchestration mutations — inviteMember, resendInvite (move to use-cases extraction)
   - [x] `projects/` simple CRUD mutations — update

@@ -1,8 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { planInsertBaseSchema, planSelectBaseSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -16,6 +14,7 @@ export const update = protectedProjectProcedure
   .mutation(async (opts) => {
     const { id, description, active, title, defaultPlan, enterprisePlan } = opts.input
     const project = opts.ctx.project
+    const { plans } = opts.ctx.services
     const _workspace = opts.ctx.project.workspace
 
     // only owner and admin can update a plan
@@ -28,67 +27,52 @@ export const update = protectedProjectProcedure
       })
     }
 
-    const planData = await opts.ctx.db.query.plans.findFirst({
-      with: {
-        project: {
-          columns: {
-            slug: true,
-          },
-        },
-      },
-      where: (plan, { eq, and }) => and(eq(plan.id, id), eq(plan.projectId, project.id)),
+    const { err, val } = await plans.updatePlanRecord({
+      projectId: project.id,
+      id,
+      description,
+      active,
+      title,
+      defaultPlan,
+      enterprisePlan,
     })
 
-    if (!planData?.id) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "plan_not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "plan not found",
       })
     }
 
-    if (defaultPlan) {
-      const defaultPlanData = await opts.ctx.db.query.plans.findFirst({
-        where: (plan, { eq, and }) =>
-          and(eq(plan.projectId, project.id), eq(plan.defaultPlan, true)),
+    if (val.state === "default_enterprise_conflict") {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "A plan cannot be both a default and enterprise plan",
       })
-
-      if (defaultPlanData && defaultPlanData.id !== id) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "There is already a default plan for this app",
-        })
-      }
     }
 
-    if (enterprisePlan) {
-      const enterprisePlanData = await opts.ctx.db.query.plans.findFirst({
-        where: (plan, { eq, and }) =>
-          and(eq(plan.projectId, project.id), eq(plan.enterprisePlan, true)),
+    if (val.state === "default_plan_exists") {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "There is already a default plan for this app",
       })
-
-      if (enterprisePlanData && enterprisePlanData.id !== id) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "There is already an enterprise plan for this app, create a new version instead",
-        })
-      }
     }
 
-    const updatedPlan = await opts.ctx.db
-      .update(schema.plans)
-      .set({
-        title,
-        description,
-        active,
-        defaultPlan: defaultPlan ?? false,
-        enterprisePlan: enterprisePlan ?? false,
-        updatedAtM: Date.now(),
+    if (val.state === "enterprise_plan_exists") {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "There is already an enterprise plan for this app, create a new version instead",
       })
-      .where(and(eq(schema.plans.id, id), eq(schema.plans.projectId, project.id)))
-      .returning()
-      .then((re) => re[0])
+    }
 
-    if (!updatedPlan) {
+    if (val.state !== "ok") {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error updating plan",
@@ -96,6 +80,6 @@ export const update = protectedProjectProcedure
     }
 
     return {
-      plan: updatedPlan,
+      plan: val.plan,
     }
   })

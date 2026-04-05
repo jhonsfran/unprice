@@ -1,6 +1,4 @@
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import * as schema from "@unprice/db/schema"
 import { featureSelectBaseSchema } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -19,40 +17,34 @@ export const update = protectedProjectProcedure
   .mutation(async (opts) => {
     const { title, id, description, unitOfMeasure, meterConfig } = opts.input
     const project = opts.ctx.project
+    const { features } = opts.ctx.services
     const hasMeterConfig = Object.prototype.hasOwnProperty.call(opts.input, "meterConfig")
 
-    const featureData = await opts.ctx.db.query.features.findFirst({
-      where: (feature, { eq, and }) => and(eq(feature.id, id), eq(feature.projectId, project.id)),
+    const { err, val } = await features.updateFeatureRecord({
+      projectId: project.id,
+      id,
+      title,
+      description,
+      unitOfMeasure,
+      meterConfig,
+      hasMeterConfig,
     })
 
-    if (!featureData?.id) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "Feature not found",
       })
     }
 
-    const data = await opts.ctx.db
-      .update(schema.features)
-      .set({
-        title,
-        description: description ?? "",
-        unitOfMeasure: unitOfMeasure ?? "",
-        ...(hasMeterConfig && { meterConfig: meterConfig ?? null }),
-        updatedAtM: Date.now(),
-      })
-      .where(and(eq(schema.features.id, id), eq(schema.features.projectId, project.id)))
-      .returning()
-      .then((data) => data[0])
-
-    if (!data) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Error updating feature",
-      })
-    }
-
     return {
-      feature: data,
+      feature: val.feature,
     }
   })

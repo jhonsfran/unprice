@@ -1,8 +1,6 @@
 import { z } from "zod"
 
 import { TRPCError } from "@trpc/server"
-import { and, eq } from "@unprice/db"
-import { customers } from "@unprice/db/schema"
 import { customerSelectSchema } from "@unprice/db/validators"
 import { protectedProjectProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
@@ -37,46 +35,36 @@ export const update = protectedProjectProcedure
   .mutation(async (opts) => {
     const { email, id, description, metadata, name, timezone, active } = opts.input
     const { project } = opts.ctx
+    const { customers } = opts.ctx.services
 
     const _unPriceCustomerId = project.workspace.unPriceCustomerId
 
-    const customerData = await opts.ctx.db.query.customers.findFirst({
-      where: (feature, { eq, and }) => and(eq(feature.id, id), eq(feature.projectId, project.id)),
+    const { err, val } = await customers.updateCustomerRecord({
+      id,
+      projectId: project.id,
+      email,
+      description,
+      metadata,
+      name,
+      timezone,
+      active,
     })
 
-    if (!customerData?.id) {
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    if (val.state === "not_found") {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "Customer not found",
       })
     }
 
-    const updatedCustomer = await opts.ctx.db
-      .update(customers)
-      .set({
-        ...(email && { email }),
-        ...(description && { description }),
-        ...(name && { name }),
-        ...(metadata && {
-          metadata: {
-            ...customerData.metadata,
-            ...metadata,
-          },
-        }),
-        ...(timezone && { timezone }),
-        ...(active !== undefined && { active }),
-        updatedAtM: Date.now(),
-      })
-      .where(and(eq(customers.id, id), eq(customers.projectId, project.id)))
-      .returning()
-      .then((data) => data[0])
-
-    if (!updatedCustomer) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Error updating customer",
-      })
-    }
+    const updatedCustomer = val.customer
 
     // if the customer is disabled, update the ACL
     if (updatedCustomer.active === false) {

@@ -1,4 +1,5 @@
-import type { Database } from "@unprice/db"
+import { type Database, and, eq } from "@unprice/db"
+import * as schema from "@unprice/db/schema"
 import type { Feature } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -176,5 +177,76 @@ export class FeatureService {
     }
 
     return Ok(val as Feature[])
+  }
+
+  public async updateFeatureRecord({
+    projectId,
+    id,
+    title,
+    description,
+    unitOfMeasure,
+    meterConfig,
+    hasMeterConfig,
+  }: {
+    projectId: string
+    id: string
+    title: Feature["title"]
+    description?: Feature["description"]
+    unitOfMeasure?: Feature["unitOfMeasure"]
+    meterConfig?: Feature["meterConfig"]
+    hasMeterConfig: boolean
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; feature: Feature }, FetchError>> {
+    const featureData = await this.db.query.features.findFirst({
+      where: (feature, { eq, and }) => and(eq(feature.id, id), eq(feature.projectId, projectId)),
+    })
+
+    if (!featureData?.id) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .update(schema.features)
+        .set({
+          title,
+          description: description ?? "",
+          unitOfMeasure: unitOfMeasure ?? "",
+          ...(hasMeterConfig && { meterConfig: meterConfig ?? null }),
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(schema.features.id, id), eq(schema.features.projectId, projectId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error updating feature record: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating feature record", {
+        error: toErrorContext(err),
+        projectId,
+        featureId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error updating feature",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      feature: val as Feature,
+    })
   }
 }

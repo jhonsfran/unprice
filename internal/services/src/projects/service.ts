@@ -1,7 +1,12 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import type { Project, Workspace } from "@unprice/db/validators"
+import type {
+  PaymentProvider,
+  PaymentProviderConfig,
+  Project,
+  Workspace,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ProjectFeatureCache } from "../cache"
@@ -220,6 +225,33 @@ export class ProjectService {
     return Ok((val as Project | null) ?? null)
   }
 
+  public async getMainProjectBySlug({
+    slug,
+  }: {
+    slug: string
+  }): Promise<Result<Project | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.projects.findFirst({
+        where: (project, { eq, and }) => and(eq(project.isMain, true), eq(project.slug, slug)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting main project by slug: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting main project by slug", {
+        error: toErrorContext(err),
+        slug,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as Project | null) ?? null)
+  }
+
   public async getProjectBySlugInWorkspace({
     workspaceId,
     slug,
@@ -413,5 +445,40 @@ export class ProjectService {
       state: "ok",
       project: val as Project,
     })
+  }
+
+  public async getPaymentProviderConfig({
+    projectId,
+    paymentProvider,
+  }: {
+    projectId: string
+    paymentProvider: PaymentProvider
+  }): Promise<Result<PaymentProviderConfig | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.paymentProviderConfig.findFirst({
+        where: (table, { eq, and }) =>
+          and(
+            eq(table.projectId, projectId),
+            eq(table.paymentProvider, paymentProvider),
+            eq(table.active, true)
+          ),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting payment provider config: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting payment provider config", {
+        error: toErrorContext(err),
+        projectId,
+        paymentProvider,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as PaymentProviderConfig | null) ?? null)
   }
 }

@@ -413,6 +413,117 @@ export class CustomerService {
     return Ok(val)
   }
 
+  public async getCustomerByIdInProject({
+    id,
+    projectId,
+  }: {
+    id: string
+    projectId: string
+  }): Promise<Result<Customer | null, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db.query.customers.findFirst({
+        where: (customer, { eq, and }) =>
+          and(eq(customer.projectId, projectId), eq(customer.id, id)),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer by id in project: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error getting customer by id in project", {
+        error: toErrorContext(err),
+        projectId,
+        customerId: id,
+      })
+      return Err(err)
+    }
+
+    return Ok((val as Customer | null) ?? null)
+  }
+
+  public async updateCustomerRecord({
+    id,
+    projectId,
+    email,
+    description,
+    metadata,
+    name,
+    timezone,
+    active,
+  }: {
+    id: string
+    projectId: string
+    email?: Customer["email"]
+    description?: Customer["description"]
+    metadata?: Customer["metadata"]
+    name?: Customer["name"]
+    timezone?: Customer["timezone"]
+    active?: Customer["active"]
+  }): Promise<Result<{ state: "not_found" } | { state: "ok"; customer: Customer }, FetchError>> {
+    const customerData = await this.db.query.customers.findFirst({
+      where: (customer, { eq, and }) => and(eq(customer.id, id), eq(customer.projectId, projectId)),
+    })
+
+    if (!customerData?.id) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    const { val, err } = await wrapResult(
+      this.db
+        .update(customers)
+        .set({
+          ...(email && { email }),
+          ...(description && { description }),
+          ...(name && { name }),
+          ...(metadata && {
+            metadata: {
+              ...customerData.metadata,
+              ...metadata,
+            },
+          }),
+          ...(timezone && { timezone }),
+          ...(active !== undefined && { active }),
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(customers.id, id), eq(customers.projectId, projectId)))
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error updating customer record: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error updating customer record", {
+        error: toErrorContext(err),
+        projectId,
+        customerId: id,
+      })
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Error updating customer",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      state: "ok",
+      customer: val as Customer,
+    })
+  }
+
   public async resolveCustomerId(opts: {
     projectId: string
     customerId?: string
