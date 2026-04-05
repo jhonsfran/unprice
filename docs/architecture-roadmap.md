@@ -877,11 +877,9 @@ After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files
   - [x] `use-cases/plan-version/duplicate.ts`
   - [x] `use-cases/plan-version/publish.ts`
 
-- [ ] **Audit `CustomerService.setSubscriptionService()` circular dep**
-  - After `customer/sign-up` is a use case, check if `CustomerService` still needs
-    `SubscriptionService`. If only the old `signUp()` method used it and that's now
-    deleted, remove `setSubscriptionService()` and the circular dep entirely.
-  - If a remaining service method still needs it, document why.
+- [x] **Audit `CustomerService.setSubscriptionService()` circular dep**
+  - `CustomerService` no longer uses `SubscriptionService` after `customer/sign-up` extraction.
+  - Removed `setSubscriptionService()` wiring and the circular dependency from `context.ts`.
 
 ### P0.5 — Error handling standardization (do alongside P0.2/P0.3)
 

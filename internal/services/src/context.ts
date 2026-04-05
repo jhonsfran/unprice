@@ -42,8 +42,7 @@ export interface ServiceContext {
  *
  * This is the single composition root for all domain services.
  * Construction order matters: leaf services first, then services
- * that depend on them. The Customer ↔ Subscription cycle is resolved
- * via a post-construction setter.
+ * that depend on them.
  */
 export function createServiceContext(deps: ServiceDeps): ServiceContext {
   // 1. Leaf services (no service deps)
@@ -154,9 +153,6 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     grantsManager,
     billingService: billing,
   })
-
-  // 3. Resolve the Customer ↔ Subscription cycle
-  customers.setSubscriptionService(subscriptions)
 
   return {
     analytics,
