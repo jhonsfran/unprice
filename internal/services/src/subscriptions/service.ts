@@ -1,7 +1,13 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, type SQL, and, eq, inArray, sql } from "@unprice/db"
-import { grants, subscriptionItems, subscriptionPhases, subscriptions } from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
+import { type Database, type SQL, and, count, eq, getTableColumns, inArray, sql } from "@unprice/db"
+import {
+  customers,
+  grants,
+  subscriptionItems,
+  subscriptionPhases,
+  subscriptions,
+} from "@unprice/db/schema"
+import { newId, withDateFilters, withPagination } from "@unprice/db/utils"
 import {
   type GrantType,
   type InsertSubscription,
@@ -1401,6 +1407,177 @@ export class SubscriptionService {
     }
 
     return subscriptionData
+  }
+
+  public async getSubscriptionById({
+    subscriptionId,
+  }: {
+    subscriptionId: string
+  }): Promise<Result<unknown | null, UnPriceSubscriptionError>> {
+    try {
+      const subscriptionData = await this.db.query.subscriptions.findFirst({
+        where: (subscription, { eq }) => eq(subscription.id, subscriptionId),
+        with: {
+          phases: {
+            with: {
+              planVersion: {
+                with: {
+                  plan: true,
+                },
+              },
+              items: {
+                with: {
+                  featurePlanVersion: {
+                    with: {
+                      feature: true,
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: (phases, { asc }) => asc(phases.startAt),
+          },
+        },
+      })
+
+      return Ok(subscriptionData ?? null)
+    } catch (err) {
+      this.logger.error("error getting subscription by id", {
+        error: toErrorContext(err),
+        subscriptionId,
+      })
+      return Err(
+        new UnPriceSubscriptionError({
+          message: err instanceof Error ? err.message : "Error getting subscription by id",
+        })
+      )
+    }
+  }
+
+  public async listSubscriptionsByProject({
+    projectId,
+    page,
+    pageSize,
+    from,
+    to,
+  }: {
+    projectId: string
+    page: number
+    pageSize: number
+    from?: number | null
+    to?: number | null
+  }): Promise<Result<{ subscriptions: unknown[]; pageCount: number }, UnPriceSubscriptionError>> {
+    const columns = getTableColumns(subscriptions)
+    const customerColumns = getTableColumns(customers)
+
+    try {
+      const expressions = [eq(columns.projectId, projectId)]
+
+      const { data, total } = await this.db.transaction(async (tx) => {
+        const query = tx
+          .select({
+            subscriptions: subscriptions,
+            customer: customerColumns,
+          })
+          .from(subscriptions)
+          .innerJoin(
+            customers,
+            and(
+              eq(subscriptions.customerId, customers.id),
+              eq(customers.projectId, subscriptions.projectId)
+            )
+          )
+          .$dynamic()
+
+        const whereQuery = withDateFilters<Subscription>(
+          expressions,
+          columns.createdAtM,
+          from ?? null,
+          to ?? null
+        )
+
+        const data = await withPagination(
+          query,
+          whereQuery,
+          [
+            {
+              column: columns.createdAtM,
+              order: "desc",
+            },
+          ],
+          page,
+          pageSize
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(subscriptions)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        const subscriptionsData = data.map((row) => ({
+          ...row.subscriptions,
+          customer: row.customer,
+        }))
+
+        return {
+          data: subscriptionsData,
+          total,
+        }
+      })
+
+      return Ok({
+        subscriptions: data,
+        pageCount: Math.ceil(total / pageSize),
+      })
+    } catch (err) {
+      this.logger.error("error listing subscriptions by project", {
+        error: toErrorContext(err),
+        projectId,
+      })
+
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "There was an error listing subscriptions. Contact support.",
+        })
+      )
+    }
+  }
+
+  public async listSubscriptionsByPlanVersion({
+    planVersionId,
+    projectId,
+  }: {
+    planVersionId: string
+    projectId: string
+  }): Promise<Result<Subscription[], UnPriceSubscriptionError>> {
+    try {
+      const subscriptionData = await this.db.query.subscriptions.findMany({
+        with: {
+          phases: {
+            where: (phase, { eq }) => eq(phase.planVersionId, planVersionId),
+          },
+        },
+        where: (subscription, { eq }) => eq(subscription.projectId, projectId),
+      })
+
+      return Ok(subscriptionData as Subscription[])
+    } catch (err) {
+      this.logger.error("error listing subscriptions by plan version", {
+        error: toErrorContext(err),
+        planVersionId,
+        projectId,
+      })
+      return Err(
+        new UnPriceSubscriptionError({
+          message:
+            err instanceof Error ? err.message : "Error listing subscriptions by plan version",
+        })
+      )
+    }
   }
 
   private async withSubscriptionMachine<T>(args: {

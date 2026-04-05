@@ -4,42 +4,29 @@ import { z } from "zod"
 
 import { protectedProcedure } from "#trpc"
 
+const getByIdOutputSchema = z.object({
+  subscription: subscriptionSelectSchema.extend({
+    phases: subscriptionPhaseExtendedSchema.array(),
+  }),
+})
+
 export const getById = protectedProcedure
   .input(subscriptionSelectSchema.pick({ id: true }))
-  .output(
-    z.object({
-      subscription: subscriptionSelectSchema.extend({
-        phases: subscriptionPhaseExtendedSchema.array(),
-      }),
-    })
-  )
+  .output(getByIdOutputSchema)
   .query(async (opts) => {
     const { id } = opts.input
+    const { subscriptions } = opts.ctx.services
 
-    const subscriptionData = await opts.ctx.db.query.subscriptions.findFirst({
-      where: (subscription, { eq }) => eq(subscription.id, id),
-      with: {
-        phases: {
-          with: {
-            planVersion: {
-              with: {
-                plan: true,
-              },
-            },
-            items: {
-              with: {
-                featurePlanVersion: {
-                  with: {
-                    feature: true,
-                  },
-                },
-              },
-            },
-          },
-          orderBy: (phases, { asc }) => asc(phases.startAt),
-        },
-      },
+    const { err, val: subscriptionData } = await subscriptions.getSubscriptionById({
+      subscriptionId: id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!subscriptionData) {
       throw new TRPCError({
@@ -48,14 +35,21 @@ export const getById = protectedProcedure
       })
     }
 
-    return {
+    const subscription = subscriptionData as {
+      phases: Array<{
+        items: unknown[]
+        planVersion: unknown
+      }>
+    } & Record<string, unknown>
+
+    return getByIdOutputSchema.parse({
       subscription: {
-        ...subscriptionData,
-        phases: subscriptionData.phases.map((phase) => ({
+        ...subscription,
+        phases: subscription.phases.map((phase) => ({
           ...phase,
           items: phase.items,
           planVersion: phase.planVersion,
         })),
       },
-    }
+    })
   })

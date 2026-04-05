@@ -14,15 +14,19 @@ export const listByPlanVersion = protectedProjectProcedure
   .query(async (opts) => {
     const { planVersionId } = opts.input
     const project = opts.ctx.project
+    const { subscriptions } = opts.ctx.services
 
-    const subscriptionData = await opts.ctx.db.query.subscriptions.findMany({
-      with: {
-        phases: {
-          where: (phase, { eq }) => eq(phase.planVersionId, planVersionId),
-        },
-      },
-      where: (subscription, { eq }) => eq(subscription.projectId, project.id),
+    const { err, val: subscriptionData } = await subscriptions.listSubscriptionsByPlanVersion({
+      planVersionId,
+      projectId: project.id,
     })
+
+    if (err) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
 
     if (!subscriptionData || subscriptionData.length === 0) {
       throw new TRPCError({
