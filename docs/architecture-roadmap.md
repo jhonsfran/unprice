@@ -954,7 +954,7 @@ including adjacent payment callback routes.
   - Add/update tests for shared ingestion wiring.
   - Verify with checkpoint hooks and commit.
 
-- [ ] **P0.6.4 — Payment callback use-cases + thin routes**
+- [x] **P0.6.4 — Payment callback use-cases + thin routes**
   - Extract Stripe callback orchestration into:
     - `internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts`
     - `internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts`

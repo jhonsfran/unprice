@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
-import { customers } from "@unprice/db/schema"
+import { FetchError } from "@unprice/error"
+import { UnPriceCustomerError } from "@unprice/services/customers"
+import { completeStripeSignUp } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { UnpriceApiError, openApiErrorResponses } from "~/errors"
 import type { App } from "~/hono/app"
@@ -46,32 +48,6 @@ export const route = createRoute({
   },
 })
 
-const stripeSignUpMetadataSchema = z.object({
-  customerSessionId: z.string().describe("The unprice customer session id"),
-  successUrl: z.string().url().describe("The success url"),
-  cancelUrl: z.string().url().describe("The cancel url"),
-})
-
-function isExternalIdConflictError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false
-  }
-
-  const dbError = error as {
-    code?: string
-    constraint?: string
-    message?: string
-  }
-
-  return (
-    dbError.code === "23505" &&
-    (dbError.constraint === "cp_external_id_idx" ||
-      dbError.message?.includes("cp_external_id_idx") ||
-      dbError.message?.includes("external_id") ||
-      false)
-  )
-}
-
 export type StripeSignUpRequest = z.infer<typeof route.request.params>
 
 export const registerStripeSignUpV1 = (app: App) =>
@@ -79,8 +55,6 @@ export const registerStripeSignUpV1 = (app: App) =>
     const { sessionId, projectId } = c.req.valid("param")
     const key = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? projectId
     const { customer, subscription } = c.get("services")
-    const db = c.get("db")
-    const analytics = c.get("analytics")
 
     // rate limit the request
     const result = await c.env.RL_FREE_1000_60s.limit({ key })
@@ -92,176 +66,67 @@ export const registerStripeSignUpV1 = (app: App) =>
       })
     }
 
-    // get payment provider for the project
-    const { err: paymentProviderErr, val: paymentProviderService } =
-      await customer.getPaymentProvider({
+    const { err, val } = await completeStripeSignUp(
+      {
+        services: {
+          customers: customer,
+          subscriptions: subscription,
+        },
+        db: c.get("db"),
+        logger: c.get("logger"),
+        analytics: c.get("analytics"),
+        waitUntil: c.get("waitUntil"),
+      },
+      {
         projectId,
-        provider: "stripe",
-      })
+        sessionId,
+      }
+    )
 
-    if (paymentProviderErr) {
-      throw paymentProviderErr
-    }
-
-    // get session data from stripe
-    const { err: getSessionErr, val: stripeSession } = await paymentProviderService.getSession({
-      sessionId,
-    })
-
-    if (getSessionErr) {
-      throw getSessionErr
-    }
-
-    // validate metadata it needs to be present and valid
-    const metadata = stripeSignUpMetadataSchema.safeParse(stripeSession.metadata)
-
-    if (!metadata.success) {
-      throw new UnpriceApiError({
-        code: "BAD_REQUEST",
-        message: `Invalid metadata for stripe sign up: ${metadata.error.message}`,
-      })
-    }
-
-    // set customer id so we can use it in the next request
-    paymentProviderService.setCustomerId(stripeSession.customerId)
-
-    // get payment methods if available
-    const { err: getPaymentMethodsErr, val: paymentMethods } =
-      await paymentProviderService.listPaymentMethods({
-        limit: 1,
-      })
-
-    if (getPaymentMethodsErr) {
-      throw getPaymentMethodsErr
-    }
-
-    // parameters for the sign up process
-    const defaultPaymentMethodId = paymentMethods.at(0)?.id ?? null
-
-    // get the customer session
-    const customerSession = await db.query.customerSessions.findFirst({
-      where: (customerSession, { and, eq }) =>
-        and(eq(customerSession.id, metadata.data.customerSessionId)),
-    })
-
-    if (!customerSession) {
-      throw new UnpriceApiError({
-        code: "NOT_FOUND",
-        message: "Customer session not found",
-      })
-    }
-
-    // upsert the customer
-    const customerUnprice = await db
-      .insert(customers)
-      .values({
-        id: customerSession.customer.id,
-        projectId: customerSession.customer.projectId,
-        stripeCustomerId: stripeSession.customerId,
-        externalId: customerSession.customer.externalId,
-        name: customerSession.customer.name ?? "",
-        email: customerSession.customer.email ?? "",
-        defaultCurrency: customerSession.customer.currency,
-        active: true,
-        timezone: customerSession.customer.timezone,
-        metadata: {
-          stripeSubscriptionId: stripeSession.subscriptionId ?? "",
-          stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-        },
-      })
-      .onConflictDoUpdate({
-        target: [customers.id, customers.projectId],
-        set: {
-          stripeCustomerId: stripeSession.customerId,
-          externalId: customerSession.customer.externalId,
-          name: customerSession.customer.name ?? "",
-          email: customerSession.customer.email ?? "",
-          defaultCurrency: customerSession.customer.currency,
-          active: true,
-          timezone: customerSession.customer.timezone,
-          metadata: {
-            stripeSubscriptionId: stripeSession.subscriptionId ?? "",
-            stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-          },
-        },
-      })
-      .returning()
-      .then((result) => result.at(0))
-      .catch((error) => {
-        if (isExternalIdConflictError(error)) {
+    if (err) {
+      if (err instanceof UnPriceCustomerError) {
+        if (err.code === "CUSTOMER_SESSION_NOT_FOUND") {
           throw new UnpriceApiError({
-            code: "CONFLICT",
-            message: "External customer id already exists for this project",
+            code: "NOT_FOUND",
+            message: err.message,
           })
         }
 
-        throw error
-      })
+        if (err.code === "CUSTOMER_EXTERNAL_ID_CONFLICT") {
+          throw new UnpriceApiError({
+            code: "CONFLICT",
+            message: err.message,
+          })
+        }
 
-    if (!customerUnprice) {
-      throw new UnpriceApiError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Failed to upsert customer",
-      })
+        if (err.code === "PAYMENT_PROVIDER_ERROR") {
+          throw new UnpriceApiError({
+            code: "BAD_REQUEST",
+            message: err.message,
+          })
+        }
+
+        throw new UnpriceApiError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: err.message,
+        })
+      }
+
+      if (err instanceof FetchError) {
+        throw new UnpriceApiError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: err.message,
+        })
+      }
+
+      throw err
     }
-
-    // create the subscription
-    const { err: createSubscriptionErr, val: subscriptionData } =
-      await subscription.createSubscription({
-        projectId: customerSession.customer.projectId,
-        input: {
-          customerId: customerUnprice.id,
-        },
-      })
-
-    if (createSubscriptionErr) {
-      throw createSubscriptionErr
-    }
-
-    // create the phases
-    const { err: createPhaseErr } = await subscription.createPhase({
-      input: {
-        startAt: Date.now(),
-        planVersionId: customerSession.planVersion.id,
-        config: customerSession.planVersion.config,
-        paymentMethodId: defaultPaymentMethodId,
-        subscriptionId: subscriptionData.id,
-        customerId: customerUnprice.id,
-        paymentMethodRequired: customerSession.planVersion.paymentMethodRequired,
-      },
-      projectId,
-      db,
-      now: Date.now(),
-    })
-
-    if (createPhaseErr) {
-      throw createPhaseErr
-    }
-
-    // ingest the sign up event
-    c.executionCtx.waitUntil(
-      analytics.ingestEvents({
-        action: "signup",
-        version: "1",
-        session_id: customerSession.metadata?.sessionId ?? "",
-        project_id: projectId,
-        timestamp: new Date().toISOString(),
-        payload: {
-          customer_id: customerUnprice.id,
-          plan_version_id: customerSession.planVersion.id,
-          page_id: customerSession.metadata?.pageId ?? "",
-          status: "signup_success",
-        },
-      })
-    )
 
     // in development wrangler do weird things with the url
     if (c.env.NODE_ENV === "development") {
       return c.html(`
         <html>
-          <head>
-            <meta http-equiv="refresh" content="0;url=${metadata.data.successUrl}" />
-          </head>
+          <head><meta http-equiv="refresh" content="0;url=${val.redirectUrl}" /></head>
           <body>
             Redirecting from client side (only in development)...
           </body>
@@ -270,5 +135,5 @@ export const registerStripeSignUpV1 = (app: App) =>
     }
 
     // redirect to the success URL
-    return c.redirect(metadata.data.successUrl, HttpStatusCodes.MOVED_TEMPORARILY)
+    return c.redirect(val.redirectUrl, HttpStatusCodes.MOVED_TEMPORARILY)
   })

@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
-import { and, eq } from "@unprice/db"
-import { customers } from "@unprice/db/schema"
+import { FetchError } from "@unprice/error"
+import { UnPriceCustomerError } from "@unprice/services/customers"
+import { completeStripeSetup } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { UnpriceApiError, openApiErrorResponses } from "~/errors"
 import type { App } from "~/hono/app"
@@ -47,12 +48,6 @@ export const route = createRoute({
   },
 })
 
-const stripeSetupMetadataSchema = z.object({
-  customerId: z.string().describe("The stripe customer id"),
-  successUrl: z.string().url().describe("The success url"),
-  cancelUrl: z.string().url().describe("The cancel url"),
-})
-
 export type StripeSetupRequest = z.infer<typeof route.request.params>
 
 export const registerStripeSetupV1 = (app: App) =>
@@ -60,8 +55,6 @@ export const registerStripeSetupV1 = (app: App) =>
     const { sessionId, projectId } = c.req.valid("param")
     const key = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? projectId
     const { customer } = c.get("services")
-    const db = c.get("db")
-    const logger = c.get("logger")
 
     // rate limit the request
     const result = await c.env.RL_FREE_1000_60s.limit({ key })
@@ -73,94 +66,57 @@ export const registerStripeSetupV1 = (app: App) =>
       })
     }
 
-    // get payment provider for the project
-    const { err: paymentProviderErr, val: paymentProviderService } =
-      await customer.getPaymentProvider({
-        projectId,
-        provider: "stripe",
-      })
-
-    if (paymentProviderErr) {
-      throw paymentProviderErr
-    }
-
-    // get session data from stripe
-    const { err: getSessionErr, val: stripeSession } = await paymentProviderService.getSession({
-      sessionId,
-    })
-
-    if (getSessionErr) {
-      throw getSessionErr
-    }
-
-    // validate metadata it needs to be present and valid
-    const metadata = stripeSetupMetadataSchema.safeParse(stripeSession.metadata)
-
-    if (!metadata.success) {
-      throw new UnpriceApiError({
-        code: "BAD_REQUEST",
-        message: `Invalid metadata for stripe setup: ${metadata.error.message}`,
-      })
-    }
-
-    // set customer id so we can use it in the next request
-    paymentProviderService.setCustomerId(stripeSession.customerId)
-
-    // get payment methods if available
-    const { err: getPaymentMethodsErr, val: paymentMethods } =
-      await paymentProviderService.listPaymentMethods({
-        limit: 1,
-      })
-
-    if (getPaymentMethodsErr) {
-      throw getPaymentMethodsErr
-    }
-
-    // parameters for the sign up process
-    const defaultPaymentMethodId = paymentMethods.at(0)?.id ?? null
-
-    // check if the customer exists in the database
-    const customerData = await db.query.customers.findFirst({
-      where: (customer, { and, eq }) =>
-        and(eq(customer.id, metadata.data.customerId), eq(customer.projectId, projectId)),
-    })
-
-    if (!customerData) {
-      throw new UnpriceApiError({
-        code: "NOT_FOUND",
-        message: "Unprice customer not found in database",
-      })
-    }
-
-    // update the customer
-    await db
-      .update(customers)
-      .set({
-        stripeCustomerId: stripeSession.customerId,
-        metadata: {
-          ...customerData?.metadata,
-          stripeSubscriptionId: stripeSession.subscriptionId ?? "",
-          stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
+    const { err, val } = await completeStripeSetup(
+      {
+        services: {
+          customers: customer,
         },
-      })
-      .where(and(eq(customers.id, customerData.id), eq(customers.projectId, projectId)))
-      .execute()
-      .catch((err) => {
-        logger.error(`Error updating customer: ${err.message}`)
+        db: c.get("db"),
+        logger: c.get("logger"),
+      },
+      {
+        projectId,
+        sessionId,
+      }
+    )
+
+    if (err) {
+      if (err instanceof UnPriceCustomerError) {
+        if (err.code === "CUSTOMER_NOT_FOUND") {
+          throw new UnpriceApiError({
+            code: "NOT_FOUND",
+            message: err.message,
+          })
+        }
+
+        if (err.code === "PAYMENT_PROVIDER_ERROR") {
+          throw new UnpriceApiError({
+            code: "BAD_REQUEST",
+            message: err.message,
+          })
+        }
 
         throw new UnpriceApiError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "Error updating customer",
+          message: err.message,
         })
-      })
+      }
+
+      if (err instanceof FetchError) {
+        throw new UnpriceApiError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: err.message,
+        })
+      }
+
+      throw err
+    }
 
     // in development wrangler do weird things with the url
     if (c.env.NODE_ENV === "development") {
       return c.html(`
         <html>
-          <head>
-            <meta http-equiv="refresh" content="0;url=${metadata.data.successUrl}" />
-          </head>
+          <head><meta http-equiv="refresh" content="0;url=${val.redirectUrl}" /></head>
           <body>
             Redirecting from client side (only in development)...
           </body>
@@ -169,5 +125,5 @@ export const registerStripeSetupV1 = (app: App) =>
     }
 
     // redirect to the success URL
-    return c.redirect(metadata.data.successUrl, HttpStatusCodes.SEE_OTHER)
+    return c.redirect(val.redirectUrl, HttpStatusCodes.SEE_OTHER)
   })
