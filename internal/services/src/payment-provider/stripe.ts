@@ -65,7 +65,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       const e = error as Error
 
       this.logger.error("Error upserting product", {
-        error: JSON.stringify(e.message),
+        error: toErrorContext(e),
         context: e,
         ...props,
       })

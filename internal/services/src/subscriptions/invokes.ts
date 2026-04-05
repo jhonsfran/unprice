@@ -48,14 +48,12 @@ export async function loadSubscription(payload: {
   })
 
   if (!result) {
-    logger.error(`Subscription with ID ${subscriptionId} not found`)
     throw new Error(`Subscription with ID ${subscriptionId} not found`)
   }
 
   const { phases, customer, ...subscription } = result
 
   if (!customer) {
-    logger.error(`Customer with ID ${result.customerId} not found`)
     throw new Error(`Customer with ID ${result.customerId} not found`)
   }
 
@@ -298,11 +296,6 @@ export async function invoiceSubscription({
     })
 
     if (!phase || !phase.planVersion || !phase.subscription) {
-      logger.warn("Phase not found or missing plan version or subscription", {
-        phaseId: periodItemGroup.subscriptionPhaseId,
-        projectId: periodItemGroup.projectId,
-        subscriptionId: periodItemGroup.subscriptionId,
-      })
       continue
     }
 
@@ -330,11 +323,6 @@ export async function invoiceSubscription({
 
     // if no billing periods to invoice, skip
     if (!billingPeriodsToInvoice) {
-      logger.warn("Billing period to invoice not found", {
-        phaseId: periodItemGroup.subscriptionPhaseId,
-        projectId: periodItemGroup.projectId,
-        subscriptionId: periodItemGroup.subscriptionId,
-      })
       continue
     }
 

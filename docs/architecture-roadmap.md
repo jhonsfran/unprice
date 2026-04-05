@@ -916,10 +916,11 @@ Apply these rules to every file you touch during P0. Don't do a separate sweep.
   - Remove per-service custom keys (`customers: { ... }`, `entitlements: { ... }`).
     Use `business` for operation context everywhere.
 
-- [ ] **Remove logging of expected error paths**
+- [x] **Remove logging of expected error paths**
   - "Customer not found" is `Ok(null)`, not a log event.
   - "Plan version not found" is `Ok(null)`, not a log event.
   - Only log `warn/error` for unexpected failures (DB connection lost, cache unavailable).
+  - Removed expected-path not-found warn/error logs in `subscriptions/invokes.ts`.
 
 ### P2 — Cross-cutting cleanup (after P0 is stable)
 
