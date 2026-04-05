@@ -941,7 +941,7 @@ including adjacent payment callback routes.
     - `pnpm --filter @unprice/services test`
     - `pnpm --filter api typecheck` (or `npx tsc --noEmit -p apps/api/tsconfig.json`)
 
-- [ ] **P0.6.2 — Project composition-root migration**
+- [x] **P0.6.2 — Project composition-root migration**
   - Remove `ApiProjectService` usage from API service bag and Hono env typing.
   - Use `svcCtx.projects` from `createServiceContext` directly in `apps/api/src/middleware/init.ts`.
   - Update project route adapter to call `ProjectService.getProjectFeatures` and map `Result` errors.

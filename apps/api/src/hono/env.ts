@@ -8,11 +8,11 @@ import type { CustomerService } from "@unprice/services/customers"
 import type { EntitlementService } from "@unprice/services/entitlements"
 import type { Metrics } from "@unprice/services/metrics"
 import type { PlanService } from "@unprice/services/plans"
+import type { ProjectService } from "@unprice/services/projects"
 import type { SubscriptionService } from "@unprice/services/subscriptions"
 import type { EvlogVariables } from "evlog/hono"
 import type { Env } from "~/env"
 import type { IngestionService } from "~/ingestion/service"
-import type { ApiProjectService } from "~/project"
 
 /**
  * Domain services — business logic, properly wired via createServiceContext.
@@ -23,7 +23,7 @@ export type DomainServiceContext = {
   entitlement: EntitlementService
   plans: PlanService
   ingestion: IngestionService
-  project: ApiProjectService
+  project: ProjectService
   apikey: ApiKeysService
 }
 

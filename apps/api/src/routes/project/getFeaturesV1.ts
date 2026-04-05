@@ -1,10 +1,12 @@
 import { createRoute } from "@hono/zod-openapi"
+import { UnPriceProjectError } from "@unprice/services/projects"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import type { z } from "zod"
 import { keyAuth } from "~/auth/key"
+import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { getProjectFeaturesResponseSchema } from "~/project/interface"
@@ -42,12 +44,31 @@ export const registerGetFeaturesV1 = (app: App) =>
     startTime(c, "getFeatures")
 
     // validate usage from db
-    const result = await project.getProjectFeatures({
+    const { err, val } = await project.getProjectFeatures({
       projectId: key.projectId,
     })
 
     // end the timer
     endTime(c, "getFeatures")
 
-    return c.json(result, HttpStatusCodes.OK)
+    if (err) {
+      if (err instanceof UnPriceProjectError && err.code === "PROJECT_NOT_ENABLED") {
+        throw new UnpriceApiError({
+          code: "FORBIDDEN",
+          message: err.message,
+        })
+      }
+
+      throw new UnpriceApiError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: err.message,
+      })
+    }
+
+    return c.json(
+      {
+        features: val?.features ?? [],
+      },
+      HttpStatusCodes.OK
+    )
   })

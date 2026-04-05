@@ -10,7 +10,6 @@ import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { createApiLogger } from "~/observability"
-import { ApiProjectService } from "~/project"
 
 import { CloudflareEntitlementWindowClient, CloudflareIdempotencyClient } from "~/ingestion/clients"
 import { IngestionService } from "~/ingestion/service"
@@ -174,16 +173,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       metrics,
     })
 
-    const project = new ApiProjectService({
-      cache,
-      analytics,
-      logger,
-      metrics,
-      waitUntil,
-      db,
-      requestId,
-    })
-
     const apikey = new ApiKeysService({
       cache,
       analytics,
@@ -214,7 +203,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,
       ingestion,
-      project,
+      project: svcCtx.projects,
       apikey,
       customer: svcCtx.customers,
       plans: svcCtx.plans,
