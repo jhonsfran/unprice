@@ -768,13 +768,85 @@ Each item extracts one operation. Work top to bottom — each builds on the prev
 
 After the pattern is proven with P0.2, batch-migrate the remaining 72 tRPC files.
 
-- [ ] **Triage the 72 tRPC files into categories**
+- [x] **Triage the remaining tRPC files into categories**
   - Run: `grep -rl "opts\.ctx\.db\.\|ctx\.db\." internal/trpc/src/router/lambda/`
   - For each file, decide:
     - **Simple query (<15 lines, single DB call)** -> Add service method, call from procedure
     - **Simple CRUD insert/update** -> Add service method, call from procedure
     - **Multi-step orchestration** -> Extract to use case
   - Write the triage result as a checklist (file -> category -> target service or use case)
+  - Triage output (71 files remaining after P0.2 migrations):
+    - [ ] `internal/trpc/src/router/lambda/analytics/getBrowserVisits.ts` -> `simple-query` -> `service:analytics.getBrowserVisits`
+    - [ ] `internal/trpc/src/router/lambda/analytics/getCountryVisits.ts` -> `simple-query` -> `service:analytics.getCountryVisits`
+    - [ ] `internal/trpc/src/router/lambda/analytics/getOverviewStats.ts` -> `simple-query` -> `service:analytics.getOverviewStats`
+    - [ ] `internal/trpc/src/router/lambda/analytics/getPagesOverview.ts` -> `simple-query` -> `service:analytics.getPagesOverview`
+    - [ ] `internal/trpc/src/router/lambda/analytics/getRealtimeTicket.ts` -> `simple-query` -> `service:analytics.getRealtimeTicket`
+    - [ ] `internal/trpc/src/router/lambda/apikeys/listByActiveProject.ts` -> `simple-query` -> `service:apikeys.listByActiveProject`
+    - [ ] `internal/trpc/src/router/lambda/customers/exist.ts` -> `simple-query` -> `service:customers.exist`
+    - [ ] `internal/trpc/src/router/lambda/customers/getByEmail.ts` -> `simple-query` -> `service:customers.getByEmail`
+    - [ ] `internal/trpc/src/router/lambda/customers/getByIdActiveProject.ts` -> `simple-query` -> `service:customers.getByIdActiveProject`
+    - [ ] `internal/trpc/src/router/lambda/customers/getInvoiceById.ts` -> `simple-query` -> `service:customers.getInvoiceById`
+    - [ ] `internal/trpc/src/router/lambda/customers/getInvoices.ts` -> `simple-query` -> `service:customers.getInvoices`
+    - [ ] `internal/trpc/src/router/lambda/customers/getSubscriptions.ts` -> `simple-query` -> `service:customers.getSubscriptions`
+    - [ ] `internal/trpc/src/router/lambda/customers/listByActiveProject.ts` -> `simple-query` -> `service:customers.listByActiveProject`
+    - [ ] `internal/trpc/src/router/lambda/customers/update.ts` -> `simple-crud` -> `service:customers.update`
+    - [ ] `internal/trpc/src/router/lambda/domains/create.ts` -> `simple-crud` -> `service:domains.create`
+    - [ ] `internal/trpc/src/router/lambda/domains/exists.ts` -> `simple-query` -> `service:domains.exists`
+    - [ ] `internal/trpc/src/router/lambda/domains/getAllByActiveWorkspace.ts` -> `simple-query` -> `service:domains.getAllByActiveWorkspace`
+    - [ ] `internal/trpc/src/router/lambda/domains/remove.ts` -> `simple-crud` -> `service:domains.remove`
+    - [ ] `internal/trpc/src/router/lambda/domains/update.ts` -> `simple-crud` -> `service:domains.update`
+    - [ ] `internal/trpc/src/router/lambda/events/listByActiveProject.ts` -> `simple-query` -> `service:events.listByActiveProject`
+    - [ ] `internal/trpc/src/router/lambda/events/update.ts` -> `simple-crud` -> `service:events.update`
+    - [ ] `internal/trpc/src/router/lambda/features/exist.ts` -> `simple-query` -> `service:features.exist`
+    - [ ] `internal/trpc/src/router/lambda/features/getById.ts` -> `simple-query` -> `service:features.getById`
+    - [ ] `internal/trpc/src/router/lambda/features/getBySlug.ts` -> `simple-query` -> `service:features.getBySlug`
+    - [ ] `internal/trpc/src/router/lambda/features/listByActiveProject.ts` -> `simple-query` -> `service:features.listByActiveProject`
+    - [ ] `internal/trpc/src/router/lambda/features/searchBy.ts` -> `simple-query` -> `service:features.searchBy`
+    - [ ] `internal/trpc/src/router/lambda/features/update.ts` -> `simple-crud` -> `service:features.update`
+    - [ ] `internal/trpc/src/router/lambda/pages/getByDomain.ts` -> `simple-query` -> `service:pages.getByDomain`
+    - [ ] `internal/trpc/src/router/lambda/pages/getById.ts` -> `simple-query` -> `service:pages.getById`
+    - [ ] `internal/trpc/src/router/lambda/pages/listByActiveProject.ts` -> `simple-query` -> `service:pages.listByActiveProject`
+    - [ ] `internal/trpc/src/router/lambda/pages/update.ts` -> `simple-crud` -> `service:pages.update`
+    - [ ] `internal/trpc/src/router/lambda/paymentProvider/getConfig.ts` -> `simple-query` -> `service:paymentProvider.getConfig`
+    - [ ] `internal/trpc/src/router/lambda/planVersionFeatures/create.ts` -> `simple-crud` -> `service:planVersionFeatures.create`
+    - [ ] `internal/trpc/src/router/lambda/planVersionFeatures/getById.ts` -> `simple-query` -> `service:planVersionFeatures.getById`
+    - [ ] `internal/trpc/src/router/lambda/planVersionFeatures/getByPlanVersionId.ts` -> `simple-query` -> `service:planVersionFeatures.getByPlanVersionId`
+    - [ ] `internal/trpc/src/router/lambda/planVersionFeatures/remove.ts` -> `simple-crud` -> `service:planVersionFeatures.remove`
+    - [ ] `internal/trpc/src/router/lambda/planVersionFeatures/update.ts` -> `simple-crud` -> `service:planVersionFeatures.update`
+    - [ ] `internal/trpc/src/router/lambda/planVersions/create.ts` -> `simple-crud` -> `service:planVersions.create`
+    - [ ] `internal/trpc/src/router/lambda/planVersions/deactivate.ts` -> `simple-crud` -> `service:planVersions.deactivate`
+    - [ ] `internal/trpc/src/router/lambda/planVersions/duplicate.ts` -> `orchestration` -> `use-case:plan-version/duplicate.ts`
+    - [ ] `internal/trpc/src/router/lambda/planVersions/getById.ts` -> `simple-query` -> `service:planVersions.getById`
+    - [ ] `internal/trpc/src/router/lambda/planVersions/listByProjectUnprice.ts` -> `simple-query` -> `service:planVersions.listByProjectUnprice`
+    - [ ] `internal/trpc/src/router/lambda/planVersions/publish.ts` -> `orchestration` -> `use-case:plan-version/publish.ts`
+    - [ ] `internal/trpc/src/router/lambda/planVersions/remove.ts` -> `simple-crud` -> `service:planVersions.remove`
+    - [ ] `internal/trpc/src/router/lambda/planVersions/update.ts` -> `simple-crud` -> `service:planVersions.update`
+    - [ ] `internal/trpc/src/router/lambda/plans/exist.ts` -> `simple-query` -> `service:plans.exist`
+    - [ ] `internal/trpc/src/router/lambda/plans/getById.ts` -> `simple-query` -> `service:plans.getById`
+    - [ ] `internal/trpc/src/router/lambda/plans/getBySlug.ts` -> `simple-query` -> `service:plans.getBySlug`
+    - [ ] `internal/trpc/src/router/lambda/plans/getSubscriptionsBySlug.ts` -> `simple-query` -> `service:plans.getSubscriptionsBySlug`
+    - [ ] `internal/trpc/src/router/lambda/plans/getVersionsBySlug.ts` -> `simple-query` -> `service:plans.getVersionsBySlug`
+    - [ ] `internal/trpc/src/router/lambda/plans/listByActiveProject.ts` -> `simple-query` -> `service:plans.listByActiveProject`
+    - [ ] `internal/trpc/src/router/lambda/plans/update.ts` -> `simple-crud` -> `service:plans.update`
+    - [ ] `internal/trpc/src/router/lambda/projects/getById.ts` -> `simple-query` -> `service:projects.getById`
+    - [ ] `internal/trpc/src/router/lambda/projects/getBySlug.ts` -> `simple-query` -> `service:projects.getBySlug`
+    - [ ] `internal/trpc/src/router/lambda/projects/listByActiveWorkspace.ts` -> `simple-query` -> `service:projects.listByActiveWorkspace`
+    - [ ] `internal/trpc/src/router/lambda/projects/listByWorkspace.ts` -> `simple-query` -> `service:projects.listByWorkspace`
+    - [ ] `internal/trpc/src/router/lambda/projects/transferToPersonal.ts` -> `orchestration` -> `use-case:project/transfer-to-personal.ts`
+    - [ ] `internal/trpc/src/router/lambda/projects/transferToWorkspace.ts` -> `orchestration` -> `use-case:project/transfer-to-workspace.ts`
+    - [ ] `internal/trpc/src/router/lambda/projects/update.ts` -> `simple-crud` -> `service:projects.update`
+    - [ ] `internal/trpc/src/router/lambda/subscriptions/getById.ts` -> `simple-query` -> `service:subscriptions.getById`
+    - [ ] `internal/trpc/src/router/lambda/subscriptions/listByActiveProject.ts` -> `simple-query` -> `service:subscriptions.listByActiveProject`
+    - [ ] `internal/trpc/src/router/lambda/subscriptions/listByPlanVersion.ts` -> `simple-query` -> `service:subscriptions.listByPlanVersion`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/create.ts` -> `simple-crud` -> `service:workspaces.create`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/delete.ts` -> `simple-crud` -> `service:workspaces.delete`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/deleteMember.ts` -> `simple-crud` -> `service:workspaces.deleteMember`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/getBySlug.ts` -> `simple-query` -> `service:workspaces.getBySlug`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/inviteMember.ts` -> `orchestration` -> `use-case:workspace/invite-member.ts`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/listInvitesByActiveWorkspace.ts` -> `simple-query` -> `service:workspaces.listInvitesByActiveWorkspace`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/listMembersByActiveWorkspace.ts` -> `simple-query` -> `service:workspaces.listMembersByActiveWorkspace`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/listWorkspacesByActiveUser.ts` -> `simple-query` -> `service:workspaces.listWorkspacesByActiveUser`
+    - [ ] `internal/trpc/src/router/lambda/workspaces/resendInvite.ts` -> `orchestration` -> `use-case:workspace/resend-invite.ts`
 
 - [ ] **Migrate simple queries by domain** (one commit per domain):
   - `plans/` — getById, getBySlug, listByActiveProject, exist, getVersionsBySlug, getSubscriptionsBySlug
