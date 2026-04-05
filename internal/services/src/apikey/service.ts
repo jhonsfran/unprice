@@ -10,8 +10,8 @@ import type { Database } from "@unprice/db"
 import { and, count, eq, getTableColumns, ilike } from "@unprice/db"
 import { apikeys } from "@unprice/db/schema"
 import { withDateFilters, withPagination } from "@unprice/db/utils"
+import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
-import { retry } from "../utils/retry"
 import { UnPriceApiKeyError } from "./errors"
 
 export type ApiKeyLimiter = {
@@ -228,32 +228,30 @@ export class ApiKeysService {
       })
     }
 
-    const { val: data, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getData(keyHash),
-          (err) =>
-            new FetchError({
-              message: `unable to query db, ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                method: "",
-                keyHash,
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () => this.cache.apiKeyByHash.swr(keyHash, (h) => this.getData(h)),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch key data, retrying... getApiKey", {
-              hash: keyHash,
-              attempt,
-              error: toErrorContext(err),
-            })
-          }
-        )
+    const { val: data, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.apiKeyByHash,
+      cacheKey: keyHash,
+      load: () => this.getData(keyHash),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query db, ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
+            method: "",
+            keyHash,
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch key data, retrying... getApiKey", {
+          hash: keyHash,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       return Err(

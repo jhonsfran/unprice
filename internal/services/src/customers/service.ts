@@ -15,8 +15,8 @@ import type { CacheNamespaces, CustomerCache, CustomersProjectCache } from "../c
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderService } from "../payment-provider/service"
+import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
-import { retry } from "../utils/retry"
 import { UnPriceCustomerError } from "./errors"
 
 export class CustomerService {
@@ -164,32 +164,24 @@ export class CustomerService {
       })
     }
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getCustomersProjectData(projectId),
-          (err) =>
-            new FetchError({
-              message: `unable to query for getCustomersProjectData, ${err.message}`,
-              retry: false,
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customersProject.swr(projectId, () =>
-              this.getCustomersProjectData(projectId)
-            ),
-          (attempt, err) => {
-            this.logger.warn(
-              "Failed to fetch getCustomersProjectData data from cache, retrying...",
-              {
-                projectId: projectId,
-                attempt,
-                error: toErrorContext(err),
-              }
-            )
-          }
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customersProject,
+      cacheKey: projectId,
+      load: () => this.getCustomersProjectData(projectId),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query for getCustomersProjectData, ${err.message}`,
+          retry: false,
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch getCustomersProjectData data from cache, retrying...", {
+          projectId: projectId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting getCustomersProjectData", {
@@ -276,26 +268,24 @@ export class CustomerService {
       })
     }
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getCustomerData(customerId),
-          (err) =>
-            new FetchError({
-              message: `unable to query for getCustomerData, ${err.message}`,
-              retry: false,
-            })
-        )
-      : await retry(
-          3,
-          async () => this.cache.customer.swr(customerId, () => this.getCustomerData(customerId)),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch getCustomerData data from cache, retrying...", {
-              customerId: customerId,
-              attempt,
-              error: toErrorContext(err),
-            })
-          }
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customer,
+      cacheKey: customerId,
+      load: () => this.getCustomerData(customerId),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query for getCustomerData, ${err.message}`,
+          retry: false,
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch getCustomerData data from cache, retrying...", {
+          customerId: customerId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting getCustomerData", {
@@ -338,33 +328,28 @@ export class CustomerService {
       })
     }
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getCustomerByExternalIdData(projectId, externalId),
-          (err) =>
-            new FetchError({
-              message: `unable to query for getCustomerByExternalIdData, ${err.message}`,
-              retry: false,
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customerByExternalId.swr(cacheKey, () =>
-              this.getCustomerByExternalIdData(projectId, externalId)
-            ),
-          (attempt, err) => {
-            this.logger.warn(
-              "Failed to fetch getCustomerByExternalIdData data from cache, retrying...",
-              {
-                projectId,
-                externalId,
-                attempt,
-                error: toErrorContext(err),
-              }
-            )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customerByExternalId,
+      cacheKey,
+      load: () => this.getCustomerByExternalIdData(projectId, externalId),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query for getCustomerByExternalIdData, ${err.message}`,
+          retry: false,
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn(
+          "Failed to fetch getCustomerByExternalIdData data from cache, retrying...",
+          {
+            projectId,
+            externalId,
+            attempt,
+            error: toErrorContext(err),
           }
         )
+      },
+    })
 
     if (err) {
       this.logger.error("error getting getCustomerByExternalIdData", {
@@ -869,46 +854,35 @@ export class CustomerService {
     }
 
     // swr handle cache stampede and other problems for us :)
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getActiveSubscriptionData({
-            customerId,
-            projectId,
-            now,
-          }),
-          (err) =>
-            new FetchError({
-              message: `unable to query db for getActiveSubscriptionData, ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                customerId: customerId,
-                method: "getActiveSubscription",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customerSubscription.swr(cacheKey, () =>
-              this.getActiveSubscriptionData({
-                customerId,
-                projectId,
-                now,
-              })
-            ),
-          (attempt, err) => {
-            this.logger.warn(
-              "Failed to fetch getActiveSubscriptionData data from cache, retrying...",
-              {
-                customerId: customerId,
-                attempt,
-                error: toErrorContext(err),
-              }
-            )
-          }
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customerSubscription,
+      cacheKey,
+      load: () =>
+        this.getActiveSubscriptionData({
+          customerId,
+          projectId,
+          now,
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query db for getActiveSubscriptionData, ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
+            customerId: customerId,
+            method: "getActiveSubscription",
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch getActiveSubscriptionData data from cache, retrying...", {
+          customerId: customerId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting customer subscription", {
@@ -1299,44 +1273,36 @@ export class CustomerService {
     }
 
     // first try to get the payment methods from cache, if not found try to get it from DO,
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getPaymentMethodsData({
-            customerId,
-            provider,
-            projectId,
-          }),
-          (err) =>
-            new FetchError({
-              message: "unable to query payment methods from db",
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                customerId: customerId,
-                provider: provider,
-                method: "getPaymentMethods",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customerPaymentMethods.swr(cacheKey, () =>
-              this.getPaymentMethodsData({
-                customerId,
-                provider,
-                projectId,
-              })
-            ),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch payment methods data from cache, retrying...", {
-              customerId: customerId,
-              attempt,
-              error: toErrorContext(err),
-            })
-          }
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customerPaymentMethods,
+      cacheKey,
+      load: () =>
+        this.getPaymentMethodsData({
+          customerId,
+          provider,
+          projectId,
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: "unable to query payment methods from db",
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
+            customerId: customerId,
+            provider: provider,
+            method: "getPaymentMethods",
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch payment methods data from cache, retrying...", {
+          customerId: customerId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting payment methods", {

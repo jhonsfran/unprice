@@ -12,8 +12,8 @@ import type { Logger } from "@unprice/logs"
 import type { ProjectFeatureCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
-import { retry } from "../utils/retry"
 import { UnPriceProjectError } from "./errors"
 
 export class ProjectService {
@@ -104,39 +104,33 @@ export class ProjectService {
     }
   }): Promise<Result<ProjectFeatureCache | null, FetchError | UnPriceProjectError>> {
     // first try to get the entitlement from cache, if not found try to get it from DO,
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getFeaturesDataProject({
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.projectFeatures,
+      cacheKey: `${projectId}`,
+      load: () =>
+        this.getFeaturesDataProject({
+          projectId,
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query features from db, ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
             projectId,
-          }),
-          (err) =>
-            new FetchError({
-              message: `unable to query features from db, ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                projectId,
-                method: "getActiveFeatures",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.projectFeatures.swr(`${projectId}`, () =>
-              this.getFeaturesDataProject({
-                projectId,
-              })
-            ),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch features data from cache, retrying...", {
-              projectId,
-              attempt,
-              error: toErrorContext(err),
-            })
-          }
-        )
+            method: "getActiveFeatures",
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch features data from cache, retrying...", {
+          projectId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting project features", {

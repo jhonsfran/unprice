@@ -3,7 +3,7 @@ import { type Database, and, eq } from "@unprice/db"
 import { add, currencies, dinero, formatMoney, toDecimal } from "@unprice/db/utils"
 import type { Dinero } from "@unprice/db/utils"
 import type { Currency, CurrentUsage, EntitlementState } from "@unprice/db/validators"
-import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
+import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger, WideEventInput } from "@unprice/logs"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
@@ -12,8 +12,8 @@ import type { CacheNamespaces } from "../cache/namespaces"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
+import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
-import { retry } from "../utils/retry"
 import { UnPriceEntitlementError, type UnPriceEntitlementStorageError } from "./errors"
 import type { GrantsManager } from "./grants"
 
@@ -145,38 +145,29 @@ export class EntitlementService {
   }): Promise<Result<CacheNamespaces["customerRelevantEntitlements"], FetchError>> {
     const cacheKey = `${projectId}:${customerId}:${historicalDays}`
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getRelevantEntitlementsForIngestionFromDB({
-            projectId,
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.customerRelevantEntitlements,
+      cacheKey,
+      load: () =>
+        this.getRelevantEntitlementsForIngestionFromDB({
+          projectId,
+          customerId,
+          historicalDays,
+        }),
+      wrapLoadError: (error) =>
+        new FetchError({
+          message: `unable to query entitlements from db in getRelevantEntitlementsForIngestionFromDB - ${error.message}`,
+          retry: false,
+          context: {
+            error: error.message,
+            url: "",
             customerId,
-            historicalDays,
-          }),
-          (error) =>
-            new FetchError({
-              message: `unable to query entitlements from db in getRelevantEntitlementsForIngestionFromDB - ${error.message}`,
-              retry: false,
-              context: {
-                error: error.message,
-                url: "",
-                customerId,
-                projectId,
-                method: "getRelevantEntitlementsForIngestionFromDB",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.customerRelevantEntitlements.swr(cacheKey, () =>
-              this.getRelevantEntitlementsForIngestionFromDB({
-                projectId,
-                customerId,
-                historicalDays,
-              })
-            ),
-          () => {}
-        )
+            projectId,
+            method: "getRelevantEntitlementsForIngestionFromDB",
+          },
+        }),
+    })
 
     if (err) {
       return Err(
@@ -208,41 +199,31 @@ export class EntitlementService {
   }): Promise<Result<CacheNamespaces["getRelevantEntitlementsPerFeature"], FetchError>> {
     const cacheKey = `${projectId}:${customerId}:${featureSlug}:${historicalDays}`
 
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getRelevantEntitlementsPerFeatureFromDB({
-            projectId,
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.getRelevantEntitlementsPerFeature,
+      cacheKey,
+      load: () =>
+        this.getRelevantEntitlementsPerFeatureFromDB({
+          projectId,
+          customerId,
+          featureSlug,
+          historicalDays,
+        }),
+      wrapLoadError: (error) =>
+        new FetchError({
+          message: `unable to query entitlements from db in getRelevantEntitlementsPerFeatureFromDB - ${error.message}`,
+          retry: false,
+          context: {
+            error: error.message,
+            url: "",
             customerId,
+            projectId,
             featureSlug,
-            historicalDays,
-          }),
-          (error) =>
-            new FetchError({
-              message: `unable to query entitlements from db in getRelevantEntitlementsPerFeatureFromDB - ${error.message}`,
-              retry: false,
-              context: {
-                error: error.message,
-                url: "",
-                customerId,
-                projectId,
-                featureSlug,
-                method: "getRelevantEntitlementsPerFeatureFromDB",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.getRelevantEntitlementsPerFeature.swr(cacheKey, () =>
-              this.getRelevantEntitlementsPerFeatureFromDB({
-                projectId,
-                customerId,
-                featureSlug,
-                historicalDays,
-              })
-            ),
-          () => {}
-        )
+            method: "getRelevantEntitlementsPerFeatureFromDB",
+          },
+        }),
+    })
 
     if (err) {
       return Err(
@@ -361,38 +342,29 @@ export class EntitlementService {
     const cacheKey = `${projectId}:${customerId}`
 
     // first try to get the entitlement from cache, if not found try to get it from DO,
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this._getCurrentUsage({
-            customerId,
-            projectId,
-            now: opts.now ?? Date.now(),
-          }),
-          (err) =>
-            new FetchError({
-              message: `unable to query usage from _getCurrentUsage - ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                customerId: customerId,
-                projectId: projectId,
-                method: "_getCurrentUsage",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.getCurrentUsage.swr(cacheKey, () =>
-              this._getCurrentUsage({
-                customerId,
-                projectId,
-                now: opts?.now ?? Date.now(),
-              })
-            ),
-          () => {}
-        )
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.getCurrentUsage,
+      cacheKey,
+      load: () =>
+        this._getCurrentUsage({
+          customerId,
+          projectId,
+          now: opts?.now ?? Date.now(),
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query usage from _getCurrentUsage - ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
+            customerId: customerId,
+            projectId: projectId,
+            method: "_getCurrentUsage",
+          },
+        }),
+    })
 
     if (err) {
       return Err(

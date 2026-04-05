@@ -26,8 +26,8 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
-import { retry } from "../utils/retry"
 
 export class PlanService {
   private readonly db: Database
@@ -321,41 +321,34 @@ export class PlanService {
     const cachekey = this.createCacheKey(projectId, query)
 
     // first try to get the entitlement from cache
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.listPlanVersionsData({
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.planVersionList,
+      cacheKey: `${cachekey}`,
+      load: () =>
+        this.listPlanVersionsData({
+          projectId,
+          query,
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query list plans from db, ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
             projectId,
-            query,
-          }),
-          (err) =>
-            new FetchError({
-              message: `unable to query list plans from db, ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                projectId,
-                method: "listPlanVersions",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.planVersionList.swr(`${cachekey}`, () =>
-              this.listPlanVersionsData({
-                projectId,
-                query,
-              })
-            ),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch list of plans data from cache, retrying...", {
-              projectId,
-              attempt,
-              error: toErrorContext(err),
-            })
-          }
-        )
+            method: "listPlanVersions",
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch list of plans data from cache, retrying...", {
+          projectId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting list of plans", {
@@ -392,41 +385,34 @@ export class PlanService {
     const cachekey = `${planVersionId}`
 
     // first try to get the entitlement from cache
-    const { val, err } = opts?.skipCache
-      ? await wrapResult(
-          this.getPlanVersionData({
+    const { val, err } = await cachedQuery({
+      skipCache: opts?.skipCache,
+      cache: this.cache.planVersion,
+      cacheKey: `${cachekey}`,
+      load: () =>
+        this.getPlanVersionData({
+          projectId,
+          planVersionId,
+        }),
+      wrapLoadError: (err) =>
+        new FetchError({
+          message: `unable to query get plan from db, ${err.message}`,
+          retry: false,
+          context: {
+            error: err.message,
+            url: "",
             projectId,
-            planVersionId,
-          }),
-          (err) =>
-            new FetchError({
-              message: `unable to query get plan from db, ${err.message}`,
-              retry: false,
-              context: {
-                error: err.message,
-                url: "",
-                projectId,
-                method: "getPlanVersion",
-              },
-            })
-        )
-      : await retry(
-          3,
-          async () =>
-            this.cache.planVersion.swr(`${cachekey}`, () =>
-              this.getPlanVersionData({
-                projectId,
-                planVersionId,
-              })
-            ),
-          (attempt, err) => {
-            this.logger.warn("Failed to fetch plan version data from cache, retrying...", {
-              projectId,
-              attempt,
-              error: toErrorContext(err),
-            })
-          }
-        )
+            method: "getPlanVersion",
+          },
+        }),
+      onRetry: (attempt, err) => {
+        this.logger.warn("Failed to fetch plan version data from cache, retrying...", {
+          projectId,
+          attempt,
+          error: toErrorContext(err),
+        })
+      },
+    })
 
     if (err) {
       this.logger.error("error getting plan version", {

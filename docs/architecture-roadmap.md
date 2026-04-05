@@ -926,13 +926,16 @@ Apply these rules to every file you touch during P0. Don't do a separate sweep.
 
 ### P2 — Cross-cutting cleanup (after P0 is stable)
 
-- [ ] **Extract cache.swr + retry into reusable wrapper**
-  - There are 13 identical cache patterns across 5 service files. Write a generic
-    `cachedQuery()` function that encapsulates: skipCache branching, `retry(3, ...)`,
-    `cache.swr()`, error wrapping, and logging.
-  - File: `internal/services/src/utils/cached-query.ts`
-  - Then update all 13 call sites to use the wrapper.
-  - Verify: `pnpm --filter @unprice/services test` passes.
+- [x] **Extract cache.swr + retry into reusable wrapper**
+  - Added `internal/services/src/utils/cached-query.ts` with shared handling for:
+    skipCache branching, `retry(3, ...)`, `cache.swr()`, and load-error wrapping.
+  - Migrated current duplicated call sites in:
+    `projects/service.ts` (1), `plans/service.ts` (2), `apikey/service.ts` (1),
+    `customers/service.ts` (5), `entitlements/service.ts` (3).
+  - Validation passed:
+    `pnpm --filter @unprice/services typecheck`,
+    `pnpm --filter @unprice/services test`,
+    `pnpm --filter @unprice/trpc typecheck`.
 
 - [ ] **Create PaymentProviderResolver service**
   - File: `internal/services/src/payment-provider/resolver.ts`
