@@ -95,6 +95,14 @@ type EntitlementWindowApplyResult = {
 
 type Result<T, E> = { err: E; val?: undefined } | { err?: undefined; val: T }
 
+type CreateIngestionServiceParams = {
+  customerService: CustomerService
+  env: Pick<Env, "APP_ENV" | "entitlementwindow" | "ingestionidempotency" | "PIPELINE_EVENTS">
+  grantsManager: GrantsManager
+  logger: AppLogger
+  now?: () => number
+}
+
 export class IngestionService {
   private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
@@ -1048,6 +1056,18 @@ export class IngestionService {
   }
 }
 
+export function createIngestionService(params: CreateIngestionServiceParams): IngestionService {
+  return new IngestionService({
+    customerService: params.customerService,
+    entitlementWindowClient: new CloudflareEntitlementWindowClient(params.env),
+    grantsManager: params.grantsManager,
+    idempotencyClient: new CloudflareIdempotencyClient(params.env),
+    logger: params.logger,
+    pipelineEvents: params.env.PIPELINE_EVENTS,
+    now: params.now,
+  })
+}
+
 function toEventDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10)
 }
@@ -1089,13 +1109,11 @@ export async function consumeIngestionBatch(
     logger,
   })
 
-  const service = new IngestionService({
+  const service = createIngestionService({
     customerService: services.customers,
-    entitlementWindowClient: new CloudflareEntitlementWindowClient(env),
     grantsManager: services.grantsManager,
-    idempotencyClient: new CloudflareIdempotencyClient(env),
     logger,
-    pipelineEvents: env.PIPELINE_EVENTS,
+    env,
   })
 
   const consumer = new IngestionQueueConsumer({

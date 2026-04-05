@@ -947,7 +947,7 @@ including adjacent payment callback routes.
   - Update project route adapter to call `ProjectService.getProjectFeatures` and map `Result` errors.
   - Verify with checkpoint hooks and commit.
 
-- [ ] **P0.6.3 — Ingestion factory consolidation**
+- [x] **P0.6.3 — Ingestion factory consolidation**
   - Introduce a shared ingestion service factory used by both HTTP init wiring and queue consumer.
   - Keep ingestion HTTP routes as thin adapters (auth, validation, queueing only).
   - Keep orchestration in `IngestionService`.

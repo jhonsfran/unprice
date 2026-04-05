@@ -11,8 +11,7 @@ import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
 import { createApiLogger } from "~/observability"
 
-import { CloudflareEntitlementWindowClient, CloudflareIdempotencyClient } from "~/ingestion/clients"
-import { IngestionService } from "~/ingestion/service"
+import { createIngestionService } from "~/ingestion/service"
 
 /**
  * These maps persist between worker executions and are used for caching
@@ -183,13 +182,11 @@ export function init(): MiddlewareHandler<HonoEnv> {
       hashCache,
     })
 
-    const ingestion = new IngestionService({
+    const ingestion = createIngestionService({
       customerService: svcCtx.customers,
-      entitlementWindowClient: new CloudflareEntitlementWindowClient(c.env),
       grantsManager: svcCtx.grantsManager,
-      idempotencyClient: new CloudflareIdempotencyClient(c.env),
       logger,
-      pipelineEvents: c.env.PIPELINE_EVENTS,
+      env: c.env,
     })
 
     c.set("cache", cache)
