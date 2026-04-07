@@ -37,6 +37,8 @@ materialized.
 
 - `LedgerService` should be a leaf service. Other services may depend on it; it
   should not depend on peer domain services.
+- Do not introduce TypeScript `any` types. Use concrete types or `unknown`
+  with explicit narrowing where needed.
 - Keep ledger entries append-only.
 - Idempotency is mandatory. Retries must not create duplicate debits or credits.
 - Invoice/provider logic stays in billing. Ledger tracks financial facts; it

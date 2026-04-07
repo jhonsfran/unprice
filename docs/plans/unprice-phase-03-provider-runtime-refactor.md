@@ -35,14 +35,37 @@ and later crypto-backed settlement.
 - [../../apps/api/src/routes/paymentProvider/stripeSignUpV1.ts](../../apps/api/src/routes/paymentProvider/stripeSignUpV1.ts)
 - [../../apps/api/src/routes/paymentProvider/stripeSetupV1.ts](../../apps/api/src/routes/paymentProvider/stripeSetupV1.ts)
 - [../../apps/api/src/index.ts](../../apps/api/src/index.ts)
+- [../../apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/page.tsx](../../apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/page.tsx)
+- [../../apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/_components/stripe-payment-config-form.tsx](../../apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/_components/stripe-payment-config-form.tsx)
+- [../../apps/nextjs/src/components/onboarding/steps/payment-provider-step.tsx](../../apps/nextjs/src/components/onboarding/steps/payment-provider-step.tsx)
+- [../../apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/_components/subscriptions/subscription-phase-form.tsx](../../apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/_components/subscriptions/subscription-phase-form.tsx)
 
 ## Guardrails
 
 - Cut over to the Phase 2 model instead of keeping long-lived parallel storage.
+- Do not introduce TypeScript `any` types. Use concrete types or `unknown`
+  with explicit narrowing where needed.
 - Keep provider-specific code inside provider adapters, not in use cases or API
   routes.
 - Add capability flags only where provider behavior truly differs.
 - Keep decryption and provider config lookup centralized in the resolver.
+- Keep UI behavior aligned with backend cutover in the same phase; do not leave
+  frontend paths on Stripe-only assumptions after runtime migration.
+
+## UI Patterns (Agent Notes)
+
+When touching `apps/nextjs`, follow existing patterns:
+
+- Server components fetch with `~/trpc/server` and hand data to client
+  components.
+- Client interactions use `useTRPC()` + React Query (`useQuery`,
+  `useMutation`).
+- Forms use `useZodForm` and `@unprice/db/validators` schemas with
+  `@unprice/ui` primitives.
+- Mutation completion should keep current UX conventions:
+  `toastAction(...)` and `router.refresh()`/`revalidateAppPath(...)`.
+- Preserve slug-scoped dashboard routing via
+  `[workspaceSlug]/[projectSlug]` params.
 
 ## High-Risk Search Targets
 
@@ -65,6 +88,10 @@ Before changing code, search for these patterns and make a migration list:
 - `apps/api/src/routes/paymentProvider/`
 - `apps/api/src/index.ts`
 - `internal/db/src/validators/customer.ts`
+- `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/`
+- `apps/nextjs/src/components/onboarding/steps/payment-provider-step.tsx`
+- `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/_components/subscriptions/subscription-phase-form.tsx`
+- `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/[planSlug]/_components/`
 
 ## Execution Plan
 
@@ -157,7 +184,24 @@ Requirements:
   [../../apps/api/src/index.ts](../../apps/api/src/index.ts) becomes provider
   neutral
 
-### Slice 7: Remove legacy Stripe-only runtime fields
+### Slice 7: Cut over dashboard and onboarding UI flows
+
+Replace Stripe-hardcoded UI assumptions with provider-neutral flows that match
+the runtime refactor.
+
+Requirements:
+
+- payment settings page supports provider-neutral config UX instead of
+  Stripe-only copy/component naming
+- onboarding payment-provider step can configure/select provider without
+  Stripe-specific wording or control coupling
+- subscription phase UI no longer assumes provider comes only from
+  `planVersion.paymentProvider`; it must read/write the phase-level provider
+  contract
+- plan and customer payment method screens preserve sandbox parity and still
+  validate required payment-method rules correctly
+
+### Slice 8: Remove legacy Stripe-only runtime fields
 
 After every runtime caller uses the new model, remove:
 
@@ -167,7 +211,7 @@ After every runtime caller uses the new model, remove:
 
 Do this at the end of the phase, not at the start.
 
-### Slice 8: Add parity and extensibility tests
+### Slice 9: Add parity and extensibility tests
 
 Cover:
 
@@ -177,11 +221,14 @@ Cover:
 - Stripe capability behavior
 - sandbox parity
 - webhook secret loading
+- dashboard payment settings flow parity after provider-neutral refactor
+- onboarding provider setup parity across Stripe and sandbox
 
 Packages likely affected:
 
 - `@unprice/services`
 - `api`
+- `nextjs`
 - `@unprice/db` only if validators or metadata schemas changed
 
 ## Validation
@@ -189,6 +236,7 @@ Packages likely affected:
 - `pnpm --filter @unprice/services typecheck`
 - `pnpm --filter @unprice/services test`
 - `pnpm --filter api test`
+- `pnpm --filter nextjs typecheck`
 - `pnpm typecheck` if exported API shapes changed across packages
 
 ## Exit Criteria
@@ -198,6 +246,8 @@ Packages likely affected:
 - runtime provider choice comes from subscription phases
 - setup and sign-up flows are no longer hard-coded to Stripe route names or
   use-case names
+- dashboard and onboarding payment-provider UX is provider-neutral and aligned
+  with runtime contracts
 - legacy Stripe-only runtime fields are removed or clearly dead
 
 ## Out Of Scope

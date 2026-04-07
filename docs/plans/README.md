@@ -49,6 +49,8 @@ companion plans rather than a rewrite of the source file.
 
 - Do not introduce a second pricing implementation outside
   `@unprice/db/validators/subscriptions/prices.ts`.
+- Do not introduce TypeScript `any` types. Use concrete types or `unknown`
+  with explicit narrowing where needed.
 - Keep orchestration in services and use cases, not in API routes, adapters, or
   database validators.
 - Prefer replacing Stripe-specific runtime assumptions over keeping long-lived

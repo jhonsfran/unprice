@@ -10,6 +10,9 @@ Lay down the target database model for provider-neutral billing so runtime code
 can stop depending on Stripe-specific customer fields and plan-version-level
 provider coupling in later phases.
 
+Also land minimal UI compatibility updates so existing dashboard forms keep
+working as schema contracts evolve in this phase.
+
 ## Why This Phase Exists
 
 - `customers.stripeCustomerId` is globally unique and does not fit
@@ -33,9 +36,29 @@ provider coupling in later phases.
 
 - This phase is schema-first. Do not start rewriting runtime reads and writes
   here.
+- Keep UI work to compatibility updates only. Full provider-neutral UX cutover
+  belongs to Phase 3.
+- Do not introduce TypeScript `any` types. Use concrete types or `unknown`
+  with explicit narrowing where needed.
 - Prefer the target model over temporary transition tables or dual-read notes.
 - Keep the provider model normalized enough for Stripe, sandbox, and the next
   provider.
+
+## UI Patterns (Agent Notes)
+
+When touching `apps/nextjs`, follow existing patterns:
+
+- App Router split: server components load data via
+  `~/trpc/server` (`api.<router>.<procedure>`), client components own user
+  interactions.
+- Client data/mutations use `useTRPC()` + React Query
+  (`useQuery`, `useMutation`) instead of ad hoc fetch wrappers.
+- Forms use `useZodForm` with `@unprice/db/validators` schemas and UI controls
+  from `@unprice/ui/form`.
+- Mutation UX pattern: `toastAction(...)` for feedback plus `router.refresh()`
+  or `revalidateAppPath(...)` to refresh stale views.
+- Route context pattern: use `useParams()` for
+  `[workspaceSlug]/[projectSlug]` scoped pages.
 
 ## Primary Touchpoints
 
@@ -47,6 +70,10 @@ provider coupling in later phases.
 - `internal/db/src/schema.ts`
 - `internal/db/src/validators.ts`
 - `internal/db/src/migrations/`
+- `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/page.tsx`
+- `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/_components/stripe-payment-config-form.tsx`
+- `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/_components/subscriptions/subscription-phase-form.tsx`
+- `internal/trpc/src/router/lambda/paymentProvider/`
 
 ## Execution Plan
 
@@ -114,7 +141,24 @@ Export everything from the real barrels:
 - [../../internal/db/src/schema.ts](../../internal/db/src/schema.ts)
 - [../../internal/db/src/validators.ts](../../internal/db/src/validators.ts)
 
-### Slice 6: Generate and review the migration
+### Slice 6: Keep UI and tRPC contracts compatible with schema additions
+
+Apply only compatibility-safe updates required so dashboard flows do not break
+once Phase 2 schema/validator changes land.
+
+Done when:
+
+- payment-provider config inputs/outputs can carry new config fields introduced
+  in this phase (for example webhook secret fields) without forcing the full UX
+  rewrite yet
+- payment settings UI copy no longer implies Stripe-only ownership for generic
+  provider config primitives
+- subscription phase create/update payloads include the new phase-level
+  provider field from schema/validator contracts
+- existing onboarding and customer flows still work with sandbox and Stripe
+  after Phase 2 schema changes
+
+### Slice 7: Generate and review the migration
 
 Run:
 
@@ -136,6 +180,8 @@ Done when:
 - `pnpm --filter @unprice/db generate`
 - `pnpm --filter @unprice/db typecheck`
 - `pnpm --filter @unprice/db test`
+- `pnpm --filter @unprice/trpc typecheck`
+- `pnpm --filter nextjs typecheck`
 
 ## Exit Criteria
 
@@ -147,6 +193,8 @@ Done when:
 ## Out Of Scope
 
 - resolver refactors
-- route changes
+- provider-neutral route and runtime refactors
+- full provider-neutral UI redesign (settings, onboarding, and payment method
+  flows)
 - webhook processing logic
 - deletion of legacy Stripe runtime fields

@@ -23,6 +23,7 @@
     "./ingestion": "./src/ingestion/index.ts",
     "./apikey": "./src/apikey/index.ts",
     "./billing": "./src/billing/index.ts",
+    "./rating": "./src/rating/index.ts",
     "./entitlements": "./src/entitlements/index.ts",
     "./use-cases": "./src/use-cases/index.ts",
     "./env": "./env.ts"

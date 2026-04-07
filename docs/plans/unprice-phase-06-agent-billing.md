@@ -42,6 +42,8 @@ usage, posting it into the ledger, and routing it into settlement.
 
 - Do not invent a second metering algorithm. Reuse billing facts the
   entitlement flow already computes.
+- Do not introduce TypeScript `any` types. Use concrete types or `unknown`
+  with explicit narrowing where needed.
 - Keep the queue contract carrying a resolved `customerId`, even if the API edge
   stops requiring it.
 - Failed billing writes must not silently corrupt metering state.

@@ -34,6 +34,8 @@ service that later phases can call for ledger-first billing and agent billing.
 
 - Do not change pricing math formulas. The single source of truth remains
   `@unprice/db/validators/subscriptions/prices.ts`.
+- Do not introduce TypeScript `any` types. Use concrete types or `unknown`
+  with explicit narrowing where needed.
 - Keep invoice formatting, provider sync, and invoice reconciliation inside
   `BillingService`.
 - Preserve support for pre-fetched grants and usage data so callers can avoid

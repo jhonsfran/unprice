@@ -43,6 +43,8 @@ normalized webhook pipeline.
 ## Guardrails
 
 - Webhook handling must be idempotent.
+- Do not introduce TypeScript `any` types. Use concrete types or `unknown`
+  with explicit narrowing where needed.
 - Routes should stay thin: parse request, verify signature, pass normalized work
   to a use case.
 - The provider adapter normalizes provider-specific payloads; the use case owns

@@ -250,9 +250,19 @@ Add tests for:
 >
 > **Goal:** Move provider identity and provider settlement data into the right
 > tables so runtime billing no longer depends on Stripe-only customer fields or
-> plan-version-level provider coupling.
+> plan-version-level provider coupling, while keeping dashboard forms compatible
+> with the new schema contracts.
 >
 > **Branch:** `feat/provider-data-foundation`
+
+### UI Working Patterns (Phase 2/3)
+
+When touching `apps/nextjs` for provider work, follow existing repo patterns:
+- server components load data via `~/trpc/server`
+- client components use `useTRPC()` + React Query for reads/mutations
+- forms use `useZodForm` with `@unprice/db/validators` schemas
+- mutation UX uses `toastAction(...)` and `router.refresh()` or `revalidateAppPath(...)`
+- preserve slug-scoped routing via `[workspaceSlug]/[projectSlug]`
 
 ### Commits
 
@@ -304,7 +314,20 @@ Export them from:
 - [internal/db/src/schema.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema.ts)
 - [internal/db/src/validators.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators.ts)
 
-**2.6 — Generate the migration**
+**2.6 — Keep UI and tRPC contracts compatible with Phase 2 schema changes**
+
+Scope for this commit is compatibility only, not full UI redesign.
+
+Requirements:
+- payment provider config contracts can carry new config fields from Phase 2
+  (for example webhook secrets) without breaking existing flows
+- payment settings copy/components stop implying Stripe-only ownership for
+  generic provider config primitives
+- subscription phase create/update contracts carry phase-level `paymentProvider`
+  so UI forms can submit/read it
+- onboarding and customer payment-method flows keep Stripe + sandbox parity
+
+**2.7 — Generate the migration**
 
 Run from `internal/db/`:
 ```bash
@@ -323,7 +346,8 @@ Important constraint:
 >
 > **Goal:** Replace the Stripe-centric provider runtime with a provider-neutral
 > runtime that can support the next provider now and crypto-backed settlement
-> later.
+> later, and cut over dashboard onboarding/settings flows to the same neutral
+> contracts.
 >
 > **Branch:** `feat/provider-runtime-refactor`
 
@@ -394,14 +418,24 @@ Requirements:
 - mapping writes go to `customer_provider_ids`
 - callback/session completion stays outside adapters and inside use cases
 
-**3.7 — Remove legacy Stripe-only fields after runtime cutover**
+**3.7 — Cut over dashboard and onboarding UI flows**
+
+Requirements:
+- payment settings becomes provider-neutral (not Stripe-hardcoded naming/copy)
+- onboarding payment-provider step supports provider-neutral selection/setup
+- subscription phase UI reads/writes phase-level `paymentProvider` instead of
+  relying only on `planVersion.paymentProvider`
+- customer payment-method screens keep sandbox parity and preserve
+  payment-method-required behavior
+
+**3.8 — Remove legacy Stripe-only fields after runtime cutover**
 
 Remove after all runtime call sites are migrated:
 - `customers.stripeCustomerId`
 - Stripe-specific fields in customer metadata
 - Stripe-only assumptions that remain in resolver or callbacks
 
-**3.8 — Add tests for provider runtime parity and extensibility**
+**3.9 — Add tests for provider runtime parity and extensibility**
 
 Add tests for:
 - resolver behavior with mapping-table-backed provider ids
@@ -410,6 +444,8 @@ Add tests for:
 - Stripe capability behavior
 - sandbox parity
 - webhook secret loading
+- dashboard payment-settings parity after provider-neutral cutover
+- onboarding provider setup parity across Stripe and sandbox
 
 ---
 
@@ -713,11 +749,12 @@ Phase 1: Rating Foundation
 Phase 2: Payment Provider Data Foundation
   Add the schema needed for provider-neutral runtime billing: phase-level
   provider choice, provider/customer mappings, webhook secrets, and webhook
-  event storage.
+  event storage, plus compatibility updates so dashboard forms keep working.
 
 Phase 3: Payment Provider Runtime Refactor
   Replace Stripe-centric runtime assumptions with a provider-neutral runtime
-  that can support the next provider now and crypto-backed collectors later.
+  that can support the next provider now and crypto-backed collectors later,
+  and cut over dashboard/onboarding provider UX to the same contracts.
 
 Phase 4: Ledger Foundation And Billing Decoupling
   Make ledger entries the financial source of truth and make invoices a

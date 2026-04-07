@@ -32,6 +32,8 @@ not per event. If event-level billing remains correct, skip this phase.
 
 - Reuse existing Durable Object and SQLite patterns already established in the
   repo.
+- Do not introduce TypeScript `any` types. Use concrete types or `unknown`
+  with explicit narrowing where needed.
 - Keep the output of aggregation compatible with the standard rating path.
 - Preserve idempotency for duplicate events and for repeated completion signals.
 - Keep alarms and cleanup explicit so dormant trace state does not accumulate

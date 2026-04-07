@@ -10,34 +10,27 @@ import {
 import { formatAmountDinero, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type AggregationMethod,
-  type CalculatedPrice,
   type CollectionMethod,
   type Currency,
   type Customer,
   type Entitlement,
-  type EntitlementState,
   type FeatureType,
   type InvoiceItemExtended,
   type InvoiceStatus,
   type PaymentProvider,
   type SubscriptionInvoice,
-  calculateCycleWindow,
-  calculateFreeUnits,
   calculateNextNCycles,
-  calculatePricePerFeature,
   calculateProration,
-  calculateWaterfallPrice,
-  type configFeatureSchema,
-  type grantSchemaExtended,
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { addDays } from "date-fns"
-import type { z } from "zod"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
 import type { Metrics } from "../metrics"
+import type { RatingService } from "../rating/service"
+import type { RatedCharge, RatingInput } from "../rating/types"
 import { SubscriptionMachine } from "../subscriptions/machine"
 import { SubscriptionLock } from "../subscriptions/subscriptionLock"
 import { toErrorContext } from "../utils/log-context"
@@ -55,17 +48,7 @@ interface ComputeInvoiceItemsResult {
   cycleEndAt: number
 }
 
-interface ComputeCurrentUsageResult {
-  grantId?: string | null
-  price: CalculatedPrice
-  prorate: number
-  cycleStartAt: number
-  cycleEndAt: number
-  usage: number
-  included: number
-  limit: number
-  isTrial: boolean
-}
+type ComputeCurrentUsageResult = RatedCharge
 
 export class BillingService {
   private readonly db: Database
@@ -77,6 +60,7 @@ export class BillingService {
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
+  private readonly ratingService: RatingService
 
   constructor({
     db,
@@ -87,6 +71,7 @@ export class BillingService {
     metrics,
     customerService,
     grantsManager,
+    ratingService,
   }: {
     db: Database
     logger: Logger
@@ -97,6 +82,7 @@ export class BillingService {
     metrics: Metrics
     customerService: CustomerService
     grantsManager: GrantsManager
+    ratingService: RatingService
   }) {
     this.db = db
     this.logger = logger
@@ -106,6 +92,7 @@ export class BillingService {
     this.waitUntil = waitUntil
     this.customerService = customerService
     this.grantsManager = grantsManager
+    this.ratingService = ratingService
   }
 
   private setLockContext(context: {
@@ -1282,78 +1269,112 @@ export class BillingService {
           }
         }
 
-        // Process non-usage items (flat, package, tier with no usage?)
-        // Same logic as before
+        // Process non-usage items through RatingService (same delegation as usage items)
+        const nonUsageByFeature = new Map<string, InvoiceItemExtended[]>()
         for (const item of nonUsageItems) {
-          // ... existing logic for non-usage items ...
-          // Copy from previous implementation
-          let quantity = item.quantity
-          let totalAmount = 0
-          let unitAmount = 0
-          let subtotalAmount = 0
+          const slug = item.featurePlanVersion!.feature.slug
+          if (!nonUsageByFeature.has(slug)) {
+            nonUsageByFeature.set(slug, [])
+          }
+          nonUsageByFeature.get(slug)!.push(item)
+        }
 
-          const isTrial = item.kind === "trial"
+        for (const [featureSlug, featureItems] of nonUsageByFeature.entries()) {
+          const featureGrants = grantsByFeature.get(featureSlug) ?? []
+          const firstItem = featureItems[0]!
 
-          const { val: priceCalculation, err: priceCalculationErr } = calculatePricePerFeature({
-            config: item.featurePlanVersion!.config,
-            featureType: item.featurePlanVersion!.featureType,
-            quantity: quantity,
-            prorate: item.prorationFactor,
+          const calcResult = await this.calculateFeaturePrice({
+            projectId: invoice.projectId,
+            customerId: invoice.customerId,
+            featureSlug,
+            grants: featureGrants.length > 0 ? featureGrants : undefined,
+            startAt: cycleStartAt,
+            endAt: cycleEndAt,
+            // Pass the item quantity as usage override so the rating service
+            // prices non-usage features (flat, package) correctly
+            usageData: [{ featureSlug, usage: firstItem.quantity }],
           })
 
-          if (priceCalculationErr) {
-            return Err(new UnPriceBillingError({ message: priceCalculationErr.message }))
+          if (calcResult.err) {
+            this.logger.error("Error calculating non-usage feature price", {
+              featureSlug,
+              error: toErrorContext(calcResult.err),
+            })
+            return Err(new UnPriceBillingError({ message: calcResult.err.message }))
           }
 
-          const formattedTotalAmount = formatAmountDinero(priceCalculation.totalPrice.dinero)
-          const formattedUnitAmount = formatAmountDinero(priceCalculation.unitPrice.dinero)
-          const formattedSubtotalAmount = formatAmountDinero(priceCalculation.subtotalPrice.dinero)
-
-          unitAmount = formattedUnitAmount.amount
-          subtotalAmount = formattedSubtotalAmount.amount
-          totalAmount = isTrial ? 0 : formattedTotalAmount.amount
-
-          let description = ""
-          let descriptionDetail = ""
-
-          if (item.prorationFactor !== 1) {
-            // cycleEndAt in invoice items is bigint, should be finite number, but checking just in case
-            const endAt = Number.isFinite(item.cycleEndAt) ? item.cycleEndAt : new Date().getTime() // fallback if somehow invalid
-
-            const billingPeriod = `${new Date(item.cycleStartAt).toISOString().split("T")[0]} to ${
-              new Date(endAt).toISOString().split("T")[0]
-            }`
-
-            descriptionDetail +=
-              item.kind === "trial" ? ` trial (${billingPeriod})` : ` prorated (${billingPeriod})`
-          }
-
-          // Switch description logic
-          switch (item.featurePlanVersion!.featureType) {
-            case "flat":
-              description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - flat ${descriptionDetail}`
-              break
-            case "package": {
-              const quantityPackages = Math.ceil(quantity / item.featurePlanVersion!.config?.units!)
-              quantity = quantityPackages
-              description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - ${quantityPackages} package of ${item.featurePlanVersion!.config?.units!} units ${descriptionDetail}`
-              break
+          if (calcResult.val.length === 0) {
+            for (const item of featureItems) {
+              updatedItems.push({
+                id: item.id,
+                totalAmount: 0,
+                unitAmount: 0,
+                subtotalAmount: 0,
+                prorate: item.prorationFactor ?? 1,
+                description: item.featurePlanVersion!.feature.title.toUpperCase(),
+                cycleStartAt,
+                cycleEndAt,
+                quantity: 0,
+              })
             }
-            default:
-              description = item.featurePlanVersion!.feature.title.toUpperCase()
-          }
+          } else {
+            for (const res of calcResult.val) {
+              const targetItem = featureItems[0]
 
-          updatedItems.push({
-            id: item.id,
-            totalAmount,
-            unitAmount,
-            subtotalAmount,
-            prorate: item.prorationFactor,
-            description,
-            cycleStartAt: item.cycleStartAt,
-            cycleEndAt: item.cycleEndAt,
-            quantity,
-          })
+              if (targetItem) {
+                const unitAmountCents = formatAmountDinero(res.price.unitPrice.dinero).amount
+                const totalAmountCents = formatAmountDinero(res.price.totalPrice.dinero).amount
+                const subtotalAmountCents = formatAmountDinero(
+                  res.price.subtotalPrice.dinero
+                ).amount
+
+                let description = ""
+                let descriptionDetail = ""
+
+                if (res.prorate !== 1) {
+                  const endAt = Number.isFinite(res.cycleEndAt) ? res.cycleEndAt : cycleEndAt
+
+                  const billingPeriod = `${new Date(res.cycleStartAt).toISOString().split("T")[0]} to ${
+                    new Date(endAt).toISOString().split("T")[0]
+                  }`
+
+                  descriptionDetail += res.isTrial
+                    ? ` trial (${billingPeriod})`
+                    : ` prorated (${billingPeriod})`
+                }
+
+                switch (targetItem.featurePlanVersion!.featureType) {
+                  case "flat":
+                    description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - flat ${descriptionDetail}`
+                    break
+                  case "package": {
+                    const packageUnits = targetItem.featurePlanVersion!.config?.units
+                    if (packageUnits) {
+                      const quantityPackages = Math.ceil(firstItem.quantity / packageUnits)
+                      description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - ${quantityPackages} package of ${packageUnits} units ${descriptionDetail}`
+                    } else {
+                      description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - package ${descriptionDetail}`
+                    }
+                    break
+                  }
+                  default:
+                    description = targetItem.featurePlanVersion!.feature.title.toUpperCase()
+                }
+
+                updatedItems.push({
+                  id: targetItem.id,
+                  totalAmount: totalAmountCents,
+                  unitAmount: unitAmountCents,
+                  subtotalAmount: subtotalAmountCents,
+                  prorate: res.prorate,
+                  description,
+                  cycleStartAt: res.cycleStartAt,
+                  cycleEndAt: res.cycleEndAt,
+                  quantity: res.usage,
+                })
+              }
+            }
+          }
         }
       }
 
@@ -2120,488 +2141,13 @@ export class BillingService {
     return result
   }
 
-  /**
-   * Calculates the billing window based on entitlement state and time parameters.
-   * Handles both 'now' and explicit startAt/endAt scenarios.
-   */
-  private calculateBillingWindow({
-    entitlement,
-    now,
-    startAt,
-    endAt,
-  }: {
-    entitlement: Omit<Entitlement, "id">
-    now?: number
-    startAt?: number
-    endAt?: number
-  }): Result<{ billingStartAt: number; billingEndAt: number }, UnPriceBillingError> {
-    const resetConfig = entitlement.resetConfig
-
-    // If explicit dates provided, use them
-    if (startAt !== undefined && endAt !== undefined) {
-      if (startAt >= endAt) {
-        return Err(
-          new UnPriceBillingError({
-            message: `Invalid billing window: startAt (${startAt}) must be before endAt (${endAt})`,
-          })
-        )
-      }
-      return Ok({ billingStartAt: startAt, billingEndAt: endAt })
-    }
-
-    // Calculate from 'now' if provided
-    if (now !== undefined) {
-      if (resetConfig) {
-        const cycleWindow = calculateCycleWindow({
-          now,
-          effectiveStartDate: entitlement.effectiveAt,
-          effectiveEndDate: entitlement.expiresAt,
-          config: {
-            name: resetConfig.name,
-            interval: resetConfig.resetInterval,
-            intervalCount: resetConfig.resetIntervalCount,
-            planType: resetConfig.planType,
-            anchor: resetConfig.resetAnchor,
-          },
-          trialEndsAt: null,
-        })
-
-        if (cycleWindow) {
-          return Ok({
-            billingStartAt: cycleWindow.start,
-            billingEndAt: cycleWindow.end,
-          })
-        }
-      }
-
-      // Fallback: use grant effective dates
-      const billingStartAt = entitlement.effectiveAt
-      // max int64 that represent the max date
-      const billingEndAt = entitlement.expiresAt ?? new Date("9999-12-31").getTime()
-
-      if (billingStartAt >= billingEndAt) {
-        return Err(
-          new UnPriceBillingError({
-            message: `Invalid billing window: startAt (${billingStartAt}) must be before endAt (${billingEndAt})`,
-          })
-        )
-      }
-
-      return Ok({ billingStartAt, billingEndAt })
-    }
-
-    return Err(
-      new UnPriceBillingError({
-        message: "Either 'now' or both 'startAt' and 'endAt' must be provided",
-      })
-    )
-  }
-
-  /**
-   * Calculates usage data for features based on grants, entitlement state, and billing window.
-   * This method handles fetching usage data (if not provided) and computing total usage amounts.
-   * Can be reused across calculateFeaturePrice and estimatePriceCurrentUsage.
-   *
-   * @returns Object containing usage information including usage, and isUsageFeature flag
-   */
-  private async calculateUsageOfFeatures({
-    projectId,
-    customerId,
-    featureSlug,
-    entitlement,
-    billingStartAt,
-    billingEndAt,
-    usageData: providedUsageData,
-  }: {
-    projectId: string
-    customerId: string
-    featureSlug: string
-    entitlement: Omit<Entitlement, "id">
-    billingStartAt: number
-    billingEndAt: number
-    usageData?: { featureSlug: string; usage: number }[]
-  }): Promise<
-    Result<
-      {
-        usage: number
-        isUsageFeature: boolean
-      },
-      UnPriceBillingError
-    >
-  > {
-    // Validate billing window
-    if (billingStartAt >= billingEndAt) {
-      return Err(
-        new UnPriceBillingError({
-          message: `Invalid billing window: startAt (${billingStartAt}) must be before endAt (${billingEndAt})`,
-        })
-      )
-    }
-
-    const featureType = entitlement.featureType
-    const aggregationMethod = entitlement.meterConfig?.aggregationMethod
-    const isUsageFeature = featureType === "usage"
-
-    // For non-usage features, return early with zero usage
-    if (!isUsageFeature) {
-      return Ok({
-        usage: 0,
-        isUsageFeature: false,
-      })
-    }
-
-    if (!aggregationMethod) {
-      return Err(
-        new UnPriceBillingError({
-          message: `Usage feature ${featureSlug} is missing an aggregation method`,
-        })
-      )
-    }
-
-    // Use provided usage data if available, otherwise fetch it
-    let usageData: { featureSlug: string; usage: number }[]
-    if (providedUsageData && providedUsageData.length > 0) {
-      usageData = providedUsageData
-    } else {
-      // Fetch TOTAL usage for this feature (no grant filtering)
-      const { err: usageErr, val: fetchedUsageData } = await this.analytics.getUsageBillingFeatures(
-        {
-          customerId,
-          projectId,
-          features: [
-            {
-              featureSlug,
-              aggregationMethod,
-              featureType,
-            },
-          ],
-          startAt: billingStartAt,
-          endAt: billingEndAt,
-        }
-      )
-
-      if (usageErr) {
-        this.logger.error("Failed to get usage for feature", {
-          featureSlug,
-          customerId,
-          projectId,
-          billingStartAt,
-          billingEndAt,
-          error: toErrorContext(usageErr),
-        })
-        return Err(new UnPriceBillingError({ message: usageErr.message }))
-      }
-
-      usageData = fetchedUsageData
-    }
-
-    // Extract usage values for the specific feature
-    const featureUsage = usageData.find((u) => u.featureSlug === featureSlug)
-    const currentCycleUsage = featureUsage?.usage ?? 0
-
-    return Ok({
-      usage: currentCycleUsage,
-      isUsageFeature: true,
-    })
-  }
-
-  /**
-   * Calculates proration for a grant within a billing window.
-   */
-  private calculateGrantProration({
-    grant,
-    billingStartAt,
-    billingEndAt,
-    resetConfig,
-  }: {
-    grant: z.infer<typeof grantSchemaExtended>
-    billingStartAt: number
-    billingEndAt: number
-    resetConfig: Omit<EntitlementState, "id">["resetConfig"]
-  }): { prorationFactor: number; referenceCycleStart: number; referenceCycleEnd: number } {
-    // Calculate proration based on the billing period
-    // The service window is the intersection of the grant active period and the billing cycle
-    const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
-    const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
-
-    // if grant is trial, proration factor should be 0
-    if (grant.type === "trial") {
-      return {
-        prorationFactor: 0,
-        referenceCycleStart: grantServiceStart,
-        referenceCycleEnd: grantServiceEnd,
-      }
-    }
-
-    if (resetConfig) {
-      const proration = calculateProration({
-        serviceStart: grantServiceStart,
-        serviceEnd: grantServiceEnd,
-        effectiveStartDate: grant.effectiveAt, // used for anchor calculation
-        billingConfig: {
-          name: resetConfig.name,
-          billingInterval: resetConfig.resetInterval,
-          billingIntervalCount: resetConfig.resetIntervalCount,
-          planType: resetConfig.planType,
-          billingAnchor: resetConfig.resetAnchor,
-        },
-      })
-      return proration
-    }
-
-    return {
-      prorationFactor: 1,
-      referenceCycleStart: grantServiceStart,
-      referenceCycleEnd: grantServiceEnd,
-    }
-  }
-
-  /**
-   * Calculates the price for a feature based on grants, usage, and billing period.
-   * Handles waterfall attribution of usage across multiple grants and calculates proration.
-   */
   public async calculateFeaturePrice(
-    params:
-      | {
-          projectId: string
-          customerId: string
-          featureSlug: string
-          now: number
-          grants?: z.infer<typeof grantSchemaExtended>[]
-          startAt?: never
-          endAt?: never
-          usageData?: { featureSlug: string; usage: number }[]
-        }
-      | {
-          projectId: string
-          customerId: string
-          featureSlug: string
-          startAt: number
-          endAt: number
-          grants?: z.infer<typeof grantSchemaExtended>[]
-          now?: never
-          usageData?: { featureSlug: string; usage: number }[]
-        }
+    params: RatingInput
   ): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
-    const {
-      projectId,
-      customerId,
-      featureSlug,
-      grants: providedGrants,
-      usageData: providedUsageData,
-    } = params
-    const now = "now" in params ? params.now : undefined
-    const startAt = "startAt" in params ? params.startAt : undefined
-    const endAt = "endAt" in params ? params.endAt : undefined
-
-    // Validate required parameters
-    if (!projectId || !customerId || !featureSlug) {
-      return Err(
-        new UnPriceBillingError({
-          message: "Missing required parameters: projectId, customerId, or featureSlug",
-        })
-      )
-    }
-
-    // Fetch grants if not provided
-    let grants: z.infer<typeof grantSchemaExtended>[]
-    if (providedGrants) {
-      grants = providedGrants
-    } else {
-      // Fetch all grants for customer and filter by feature slug
-      const { val: grantsResult, err: grantsErr } = await this.grantsManager.getGrantsForCustomer(
-        now !== undefined
-          ? { customerId, projectId, now }
-          : { customerId, projectId, startAt: startAt!, endAt: endAt! }
-      )
-
-      if (grantsErr) {
-        this.logger.error("Failed to get grants for customer", {
-          customerId,
-          projectId,
-          featureSlug,
-          error: toErrorContext(grantsErr),
-        })
-        return Err(new UnPriceBillingError({ message: grantsErr.message }))
-      }
-
-      // Filter grants by feature slug
-      grants = grantsResult.grants.filter((g) => g.featurePlanVersion.feature.slug === featureSlug)
-    }
-
-    if (grants.length === 0) {
-      return Ok([])
-    }
-
-    // Compute entitlement state
-    const computedStateResult = await this.grantsManager.computeEntitlementState({
-      grants,
-      customerId,
-      projectId,
-    })
-
-    if (computedStateResult.err) {
-      this.logger.error("Failed to compute entitlement state", {
-        featureSlug,
-        customerId,
-        projectId,
-        error: toErrorContext(computedStateResult.err),
-      })
-      return Err(new UnPriceBillingError({ message: computedStateResult.err.message }))
-    }
-
-    const entitlement = computedStateResult.val
-
-    // Calculate billing window using extracted method
-    const billingWindowResult = this.calculateBillingWindow({
-      entitlement,
-      now,
-      startAt,
-      endAt,
-    })
-
-    if (billingWindowResult.err) {
-      return Err(billingWindowResult.err)
-    }
-
-    const { billingStartAt, billingEndAt } = billingWindowResult.val
-
-    // Calculate usage using extracted method
-    const usageResult = await this.calculateUsageOfFeatures({
-      projectId,
-      customerId,
-      featureSlug,
-      entitlement,
-      billingStartAt,
-      billingEndAt,
-      usageData: providedUsageData,
-    })
-
-    if (usageResult.err) {
-      return Err(usageResult.err)
-    }
-
-    const { usage } = usageResult.val
-
-    // Track remaining usage for waterfall attribution
-    const pricingGrants: Array<{
-      id: string
-      limit?: number | null
-      priority?: number | null
-      config: z.infer<typeof configFeatureSchema>
-      prorate?: number
-    }> = []
-
-    const grantMetadata = new Map<
-      string,
-      {
-        cycleStartAt: number
-        cycleEndAt: number
-        included: number
-        isTrial: boolean
-        limit: number
-      }
-    >()
-
-    // Prepare grants for waterfall calculation
-    for (const grant of grants) {
-      const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
-      const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
-
-      // Validate grant service window
-      if (grantServiceStart >= grantServiceEnd) {
-        continue
-      }
-
-      const grantLimit = grant.limit ?? Number.POSITIVE_INFINITY
-
-      // Calculate proration
-      const proration = this.calculateGrantProration({
-        grant,
-        billingStartAt,
-        billingEndAt,
-        resetConfig: entitlement.resetConfig,
-      })
-
-      // Calculate free units
-      const freeUnitsResult = calculateFreeUnits({
-        config: grant.featurePlanVersion.config,
-        featureType: grant.featurePlanVersion.featureType,
-      })
-
-      if (freeUnitsResult.err) {
-        this.logger.warn("Failed to calculate free units for grant", {
-          grantId: grant.id,
-          featureSlug,
-          error: toErrorContext(freeUnitsResult.err),
-        })
-      }
-
-      const freeUnits = freeUnitsResult.val ?? 0
-
-      pricingGrants.push({
-        id: grant.id,
-        limit: grant.limit,
-        priority: grant.priority,
-        config: grant.featurePlanVersion.config,
-        prorate: proration.prorationFactor,
-      })
-
-      grantMetadata.set(grant.id, {
-        cycleStartAt: grant.effectiveAt,
-        cycleEndAt: grant.expiresAt ?? Number.POSITIVE_INFINITY,
-        included: freeUnits,
-        isTrial: grant.type === "trial",
-        limit: grantLimit,
-      })
-    }
-
-    // Call waterfall calculation
-    const waterfallResult = calculateWaterfallPrice({
-      grants: pricingGrants,
-      usage,
-      featureType: entitlement.featureType,
-    })
-
-    if (waterfallResult.err) {
-      return Err(new UnPriceBillingError({ message: waterfallResult.err.message }))
-    }
-
-    const result: ComputeCurrentUsageResult[] = []
-
-    for (const item of waterfallResult.val.items) {
-      if (item.grantId) {
-        const metadata = grantMetadata.get(item.grantId)
-        if (metadata) {
-          result.push({
-            grantId: item.grantId,
-            price: item.price,
-            prorate: pricingGrants.find((g) => g.id === item.grantId)?.prorate ?? 1,
-            cycleStartAt: metadata.cycleStartAt,
-            cycleEndAt: metadata.cycleEndAt,
-            usage: item.usage,
-            included: metadata.included,
-            limit: metadata.limit,
-            isTrial: metadata.isTrial,
-          })
-        }
-      } else {
-        // Unattributed usage
-        result.push({
-          grantId: null,
-          price: item.price,
-          prorate: 1,
-          cycleStartAt: billingStartAt,
-          cycleEndAt: billingEndAt,
-          usage: item.usage,
-          included: 0,
-          limit: 0,
-          isTrial: false,
-        })
-      }
-    }
-
-    return Ok(result)
+    const result = await this.ratingService.rateBillingPeriod(params)
+    return result.err
+      ? Err(new UnPriceBillingError({ message: result.err.message }))
+      : Ok(result.val)
   }
 
   public async estimatePriceCurrentUsage({
@@ -2685,8 +2231,8 @@ export class BillingService {
 
       const entitlement = computedStateResult.val
 
-      // Calculate billing window using extracted method
-      const billingWindowResult = this.calculateBillingWindow({
+      // Calculate billing window using RatingService
+      const billingWindowResult = this.ratingService.resolveBillingWindow({
         entitlement,
         now,
       })

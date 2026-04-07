@@ -12,6 +12,7 @@ import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
+import { RatingService } from "../rating/service"
 import { SubscriptionService } from "./service"
 
 vi.mock("../../env", () => ({
@@ -374,7 +375,13 @@ describe("SubscriptionService - grant lifecycle", () => {
     })
     const customerService = new CustomerService({ ...serviceDeps, paymentProviderResolver })
     const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
-    const billingService = new BillingService({ ...serviceDeps, customerService, grantsManager })
+    const ratingService = new RatingService({ ...serviceDeps, grantsManager })
+    const billingService = new BillingService({
+      ...serviceDeps,
+      customerService,
+      grantsManager,
+      ratingService,
+    })
     subscriptionService = new SubscriptionService({
       ...serviceDeps,
       customerService,

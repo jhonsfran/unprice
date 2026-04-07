@@ -12,6 +12,7 @@ import { PageService } from "./pages/service"
 import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
 import { ProjectService } from "./projects/service"
+import { RatingService } from "./rating/service"
 import { SubscriptionService } from "./subscriptions/service"
 import { WorkspaceService } from "./workspaces/service"
 
@@ -33,6 +34,7 @@ export interface ServiceContext {
   workspaces: WorkspaceService
   grantsManager: GrantsManager
   paymentProviderResolver: PaymentProviderResolver
+  rating: RatingService
   billing: BillingService
   subscriptions: SubscriptionService
   entitlements: EntitlementService
@@ -128,6 +130,12 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   // 2. Services with deps on leaves
+  const rating = new RatingService({
+    logger: deps.logger,
+    analytics: deps.analytics,
+    grantsManager,
+  })
+
   const billing = new BillingService({
     db: deps.db,
     logger: deps.logger,
@@ -137,6 +145,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     metrics: deps.metrics,
     customerService: customers,
     grantsManager,
+    ratingService: rating,
   })
 
   const subscriptions = new SubscriptionService({
@@ -174,6 +183,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     workspaces,
     grantsManager,
     paymentProviderResolver,
+    rating,
     billing,
     subscriptions,
     entitlements,
