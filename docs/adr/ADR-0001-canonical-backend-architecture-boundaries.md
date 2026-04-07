@@ -108,9 +108,9 @@ We standardize on the following boundaries.
 
 ## Related Documents
 
-- [Architecture Roadmap](/Users/jhonsfran/repos/unprice/docs/architecture-roadmap.md)
-- [Architecture Migration Notes](/Users/jhonsfran/repos/unprice/docs/architecture-migration.md)
-- [API Orthogonal Architecture](/Users/jhonsfran/repos/unprice/docs/api-orthogonal-architecture.md)
+- [ADR README](/Users/jhonsfran/repos/unprice/docs/adr/README.md)
+- [Unprice Unified Billing Implementation Plan](/Users/jhonsfran/repos/unprice/docs/unprice-implementation-plan.md)
+- [Testing Priority: Services And Use Cases](/Users/jhonsfran/repos/unprice/docs/testing-priority-services-use-cases.md)
 
 ## Change Process
 
@@ -118,4 +118,4 @@ If a new requirement conflicts with this ADR:
 
 1. Propose a new ADR in `docs/adr/`.
 2. Mark whether it supersedes this ADR fully or partially.
-3. Update affected roadmap sections and links.
+3. Update affected implementation plans and document links.

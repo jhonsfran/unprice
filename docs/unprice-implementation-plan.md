@@ -1,9 +1,10 @@
-# Unprice Unified Billing — Refined Implementation Plan
+# Unprice Unified Billing — Implementation Plan
 
-> This plan is designed to be executed by an agent, one phase per PR, one
-> commit per todo item when practical. If a commit fails hooks or tests, fix it
-> before moving on. If the plan conflicts with what the code actually does,
-> update the plan before continuing.
+> This is the execution plan for moving Unprice from invoice-first billing to
+> rating + ledger + settlement. The target architecture must support both human
+> subscription billing and agent billing as first-class flows, and it must leave
+> the payment-provider layer robust enough for the next provider and later crypto
+> settlement.
 
 ## Progress Tracking
 
@@ -17,7 +18,50 @@ Before: **1.1 — Create RatingService shell**
 After:  **[x] 1.1 — Create RatingService shell**
 ```
 
-This keeps the plan usable as a living handoff document.
+This plan is intended to stay current as the implementation evolves.
+
+---
+
+## Architecture Context
+
+For canonical backend boundaries, use:
+- [ADR-0001 Canonical Backend Architecture Boundaries](/Users/jhonsfran/repos/unprice/docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md)
+
+This plan replaces the deleted architecture roadmap as the billing-specific
+execution document.
+
+The ADR defines the guardrails:
+- adapters stay thin
+- orchestration lives in use cases
+- reusable capabilities live in services
+- composition roots own wiring
+
+This plan applies those boundaries to billing, metering, ledger, settlement,
+and payment-provider work.
+
+---
+
+## End State
+
+The target architecture is:
+
+```text
+Raw Usage Event
+  -> RatingService
+  -> LedgerService (append-only financial entries)
+  -> SettlementRouter
+      -> invoice settlement
+      -> wallet settlement
+      -> one-time/provider-backed settlement
+  -> payment provider sync + webhook reconciliation
+```
+
+Design intent:
+- invoices are settlement artifacts, not the source of financial truth
+- pricing math remains centralized and reusable
+- payment providers are collection backends, not billing engines
+- human subscriptions and agent usage both enter the same rating and ledger pipeline
+- the provider layer must support Stripe now, another provider next, and crypto later
 
 ---
 
@@ -25,8 +69,11 @@ This keeps the plan usable as a living handoff document.
 
 Before starting any phase, align with the code that exists today.
 
+**Canonical architecture boundaries:**
+- [ADR-0001 Canonical Backend Architecture Boundaries](/Users/jhonsfran/repos/unprice/docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md)
+
 **Service structure:**
-```
+```text
 internal/services/src/[service-name]/
   ├── service.ts
   ├── errors.ts
@@ -45,30 +92,34 @@ Use that shape as the baseline for new services.
 Tables live under `internal/db/src/schema/` and are re-exported from `schema.ts`.
 
 **DB validator barrel:** [internal/db/src/validators.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators.ts)
-Do not export from a non-existent `internal/db/src/validators/index.ts`.
+Export validators from the real barrel only.
 
 **Use-case barrel:** [internal/services/src/use-cases/index.ts](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/index.ts)
 Use cases are async functions and should be re-exported here.
 
-**Pure pricing math (already extracted):** [internal/db/src/validators/subscriptions/prices.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/subscriptions/prices.ts)
-`calculateWaterfallPrice()`, `calculatePricePerFeature()`, `calculateFreeUnits()`, `calculateTierPrice()`, `calculatePackagePrice()`, and `calculateUnitPrice()` are pure functions with no service dependencies. They live in the validators package and must remain the single source of pricing math.
+**Pure pricing math:** [internal/db/src/validators/subscriptions/prices.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/subscriptions/prices.ts)
+`calculateWaterfallPrice()`, `calculatePricePerFeature()`, `calculateFreeUnits()`, `calculateTierPrice()`, `calculatePackagePrice()`, and `calculateUnitPrice()` are already extracted and must remain the single source of pricing math.
 
 **Current pricing orchestration seam:** [internal/services/src/billing/service.ts](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts)
-`BillingService.calculateFeaturePrice()` orchestrates grant fetching, usage fetching, billing-window calculation, proration, and waterfall-input preparation before calling the pure pricing functions above. This orchestration is the extraction target for `RatingService`.
-
-**Current provider interface (already provider-agnostic):** [internal/services/src/payment-provider/interface.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/interface.ts)
-`PaymentProviderInterface` exposes 15 methods (sessions, invoicing, payment methods) with normalized types. No Stripe types leak through the interface itself. The coupling is in the resolver, customer metadata, and callback routes — not the interface.
+`BillingService.calculateFeaturePrice()` currently owns grant resolution, billing-window calculation, usage fetching, proration, waterfall preparation, and result mapping. This is the extraction target for `RatingService`.
 
 **Current provider seam:** [internal/services/src/payment-provider/resolver.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/resolver.ts)
-This class already resolves provider config, decrypts provider secrets, and derives the provider customer id. Prefer evolving this seam instead of bypassing it.
+This class already resolves provider config, decrypts secrets, and derives provider customer ids. It is the correct seam to evolve.
+
+**Current provider contract:** [internal/services/src/payment-provider/interface.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/interface.ts)
+The interface is partly normalized, but it still leaks Stripe via `Stripe.ProductCreateParams` and setup semantics. That contract must become truly provider-neutral before adding the next provider.
+
+**Current provider switch layer:** [internal/services/src/payment-provider/service.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/service.ts)
+The current switch-based dispatcher works for Stripe and sandbox, but it is not strong enough yet for webhook normalization and future crypto settlement.
 
 **Current source-of-truth reminders:**
-- `plan_versions.paymentProvider` is the current provider source of truth.
-- `customers.stripeCustomerId` is still actively read and written (13 files). It has a **global uniqueness constraint** (`stripe_customer_unique`) that is NOT project-scoped — this is a multi-tenancy bug.
-- Customer metadata stores Stripe-specific fields: `stripeSubscriptionId`, `stripeDefaultPaymentMethodId`.
-- `PaymentProviderResolver.getProviderCustomerId()` (resolver.ts L130) hardcodes a `stripeCustomerId` fallback.
-- sync ingestion currently requires `customerId` in the request body. No API-key-to-customer mapping exists.
-- `EntitlementWindowDO.apply()` currently returns only `{ allowed, deniedReason, message }` but the DO already computes and writes `delta` and `value_after` to its analytics outbox.
+- `plan_versions.paymentProvider` is the current provider source of truth in runtime billing code.
+- invoices are currently created from subscription phases and immediately materialized as invoice items.
+- `customers.stripeCustomerId` is still present and has a global uniqueness constraint in [internal/db/src/schema/customers.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema/customers.ts).
+- customer metadata still stores Stripe-specific fields in [internal/db/src/validators/customer.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/customer.ts).
+- sync ingestion currently requires `customerId` in the request body via [apps/api/src/routes/events/ingestEventsV1.ts](/Users/jhonsfran/repos/unprice/apps/api/src/routes/events/ingestEventsV1.ts).
+- `resolveContextProjectId()` currently depends on `customerId` via [apps/api/src/auth/key.ts](/Users/jhonsfran/repos/unprice/apps/api/src/auth/key.ts).
+- `EntitlementWindowDO.apply()` currently returns only `{ allowed, deniedReason, message }`, even though it already computes `delta` and `value_after` in [apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts](/Users/jhonsfran/repos/unprice/apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts).
 
 **Migration command:**
 From `internal/db/`, use the package script in [internal/db/package.json](/Users/jhonsfran/repos/unprice/internal/db/package.json):
@@ -80,14 +131,16 @@ pnpm generate
 
 ## Architectural Rules For This Plan
 
-1. Extract shared logic before adding new behavior.
-2. Do not worry about backward compatibility.
-3. Do not mark ledger entries settled until some existing runtime path can actually consume that settlement state.
-4. Do not introduce a second pricing implementation — reuse the pure functions in `@unprice/db/validators/subscriptions/prices.ts`. For real-time incremental rating, use the marginal approach (call `calculatePricePerFeature()` at `usage_before` and `usage_after`, take the delta). For batch/period-end rating, use the full waterfall. Both use the same underlying math.
-5. Keep new types near the service layer unless they are truly DB-facing types.
-6. Preserve existing Stripe callback routes until generic provider flows reach parity.
-7. Keep `LedgerService` as a leaf service (no service dependencies). `BillingService` calls into `LedgerService`, never the reverse — avoids circular deps in the composition root.
-8. Fix coupling at specific points (resolver, metadata, routes) rather than adding abstraction layers on top of already-abstract interfaces.
+1. The destination is ledger-first billing. Invoices are derived settlement artifacts.
+2. Do not add backward-compatibility layers unless a phase cannot land safely without them.
+3. Prefer replacing Stripe-specific paths over maintaining dual-read and dual-write shims.
+4. Do not introduce a second pricing implementation. Reuse the pure pricing functions in `@unprice/db/validators/subscriptions/prices.ts`.
+5. Keep orchestration in services and use cases, not adapters, per ADR-0001.
+6. Keep payment-provider abstractions minimal but strong enough for Stripe, sandbox, the next provider, and later crypto-backed settlement.
+7. Keep `LedgerService` as a leaf service. Other services may depend on it; it must not depend on peer domain services.
+8. Keep new financial records append-only whenever possible.
+9. Do not keep provider choice coupled to plan design longer than necessary. Move runtime provider choice closer to the subscription phase and settlement path.
+10. Every phase must move the system closer to the end state, not add temporary architecture.
 
 ---
 
@@ -95,11 +148,9 @@ pnpm generate
 
 > **PR title:** `feat: extract pricing orchestration into RatingService`
 >
-> **Goal:** Extract the pricing orchestration layer (grant resolution, usage
-> fetching, proration, waterfall-input preparation) from `BillingService` into
-> `RatingService`. The pure pricing math already lives in
-> `@unprice/db/validators/subscriptions/prices.ts` — this phase extracts the
-> service-layer pipeline that feeds it.
+> **Goal:** Extract pricing orchestration from `BillingService` into
+> `RatingService` so pricing is reusable by both subscription billing and agent
+> billing.
 >
 > **Branch:** `feat/rating-service`
 
@@ -107,9 +158,9 @@ pnpm generate
 
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
-| **Pure pricing math** | `@unprice/db/validators/subscriptions/prices.ts` | `calculateWaterfallPrice`, `calculatePricePerFeature`, `calculateFreeUnits`, tier/unit/package calculators. Already extracted. Do not move. |
-| **Pricing orchestration** (extract target) | Currently `BillingService.calculateFeaturePrice()` | Grant fetching + filtering, entitlement state computation, billing window calculation, usage fetching, per-grant proration, waterfall-input preparation, result mapping. |
-| **Invoice domain logic** (stays in BillingService) | `BillingService._computeInvoiceItems()` | Invoice item formatting, descriptions, credit items, provider reconciliation. |
+| Pure pricing math | `@unprice/db/validators/subscriptions/prices.ts` | Tier, unit, package, free-unit, waterfall math |
+| Pricing orchestration | `internal/services/src/rating/` | Grant resolution, billing window, usage fetching, proration, result mapping |
+| Invoice settlement logic | `BillingService` | Invoice creation, provider sync, settlement-facing orchestration |
 
 ### Commits
 
@@ -118,704 +169,500 @@ pnpm generate
 Create `internal/services/src/rating/` with:
 - `errors.ts` — `UnPriceRatingError`
 - `service.ts` — `RatingService`
-- `types.ts` — service-layer types such as `RatedCharge`, `RatingInput`
+- `types.ts` — `RatedCharge`, `RatingInput`, and extracted result shapes
 - `index.ts` — barrel exports
 
 Constructor deps:
-- Infrastructure: `db`, `logger`, `analytics`, `cache`, `metrics`, `waitUntil` (from `ServiceDeps`)
-- Services: `grantsManager: GrantsManager` (same layer as `BillingService`)
+- infrastructure: `db`, `logger`, `analytics`, `cache`, `metrics`, `waitUntil`
+- service deps: `grantsManager: GrantsManager`
 
-Notes:
-- Keep `RatedCharge` in the service layer, not in `@unprice/db/validators`.
-- Match the current error pattern from [internal/services/src/billing/errors.ts](/Users/jhonsfran/repos/unprice/internal/services/src/billing/errors.ts).
+**1.2 — Extract billing-window, usage, and proration helpers**
 
-Files to read first:
-- [internal/services/src/billing/errors.ts](/Users/jhonsfran/repos/unprice/internal/services/src/billing/errors.ts)
-- [internal/services/src/deps.ts](/Users/jhonsfran/repos/unprice/internal/services/src/deps.ts)
-- [internal/services/src/context.ts](/Users/jhonsfran/repos/unprice/internal/services/src/context.ts) — understand construction order
-
-**1.2 — Extract pricing orchestration from `calculateFeaturePrice()`**
-
-Move the orchestration pipeline out of `BillingService.calculateFeaturePrice()` into `RatingService`. This is the core extraction step.
-
-What to extract (the pipeline inside `calculateFeaturePrice()` after ~L2407):
-1. Fetch grants via `grantsManager.getGrantsForCustomer()` (unless pre-fetched)
-2. Filter grants to the target feature by slug
-3. Compute entitlement state via `grantsManager.computeEntitlementState()`
-4. Calculate billing window (cycle calculation or grant effective dates)
-5. Fetch usage from Analytics (unless provided)
-6. Calculate per-grant proration via `calculateGrantProration()`
-7. Prepare waterfall inputs: priority, limits, free units, proration factors
-8. Call `calculateWaterfallPrice()` (the existing pure function in validators)
-9. Map waterfall results to `ComputeCurrentUsageResult[]`
-
-Also extract `calculateGrantProration()` (~L2311) — it computes the intersection of grant active period and billing window, then applies proration factor.
+Move these helpers out of `BillingService` into `RatingService`:
+- `calculateBillingWindow()`
+- usage-fetch orchestration currently inside `calculateUsageOfFeatures()`
+- `calculateGrantProration()`
 
 Important constraints:
-- This step must preserve existing behavior exactly.
-- `BillingService` should delegate to the extracted logic rather than maintain a fork.
-- The pure math functions in `@unprice/db/validators/subscriptions/prices.ts` stay where they are.
-- Pre-fetched grants and usage must remain supported (the batch optimization in `estimatePriceCurrentUsage` depends on this).
+- preserve behavior exactly
+- keep support for pre-fetched grants and usage data
+- keep helper ownership in the service layer, not validators
 
-Files to read first:
-- [internal/services/src/billing/service.ts#L2363](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L2363) — `calculateFeaturePrice()`
-- [internal/services/src/billing/service.ts#L2311](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L2311) — `calculateGrantProration()`
-- [internal/services/src/entitlements/grants.ts#L464](/Users/jhonsfran/repos/unprice/internal/services/src/entitlements/grants.ts#L464) — grant proration helpers
-- [internal/db/src/validators/subscriptions/prices.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/subscriptions/prices.ts) — pure pricing functions (do not move these)
+**1.3 — Extract `calculateFeaturePrice()` into `RatingService`**
 
-**1.3 — Register RatingService in the service graph**
+Move the full orchestration pipeline into `RatingService`:
+1. fetch grants unless pre-fetched
+2. filter grants by feature slug
+3. compute entitlement state
+4. calculate billing window
+5. fetch usage unless provided
+6. compute per-grant proration
+7. prepare waterfall inputs
+8. call `calculateWaterfallPrice()`
+9. map results into reusable rating output
 
-- Add `rating: RatingService` to `ServiceContext`
-- Construct it in [internal/services/src/context.ts](/Users/jhonsfran/repos/unprice/internal/services/src/context.ts) at the leaf tier (same level as `billing`, after `grantsManager`)
-- Export it from [internal/services/package.json](/Users/jhonsfran/repos/unprice/internal/services/package.json)
+**1.4 — Register RatingService in the service graph**
 
-**1.4 — Make BillingService delegate pricing to RatingService**
+- add `rating: RatingService` to `ServiceContext`
+- construct it in [internal/services/src/context.ts](/Users/jhonsfran/repos/unprice/internal/services/src/context.ts)
+- export it from [internal/services/package.json](/Users/jhonsfran/repos/unprice/internal/services/package.json)
+
+**1.5 — Make BillingService delegate to RatingService**
 
 Update `BillingService` to call `RatingService` for:
-- `_computeInvoiceItems` — replace inline `calculateFeaturePrice()` calls
-- `estimatePriceCurrentUsage` — replace inline `calculateFeaturePrice()` calls
-- any other direct `calculateFeaturePrice()` call sites
-
-BillingService constructor gains: `ratingService: RatingService`.
+- `_computeInvoiceItems()`
+- `estimatePriceCurrentUsage()`
+- any other internal pricing call site
 
 Important constraints:
-- Keep the invoice-item formatting, description generation, and credit-item logic in `BillingService`.
-- Keep the batch-optimization loop in `estimatePriceCurrentUsage` (groups features by billing window for efficient analytics queries). `RatingService` should accept pre-fetched grants and usage to support this.
-- This step is about extracting computation, not changing the invoice persistence flow.
+- keep invoice formatting and provider reconciliation in `BillingService`
+- remove inline rating duplication from billing
 
-Files to read first:
-- [internal/services/src/billing/service.ts#L1034](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L1034) — `_computeInvoiceItems()`
-- [internal/services/src/billing/service.ts#L2778](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L2778) — `estimatePriceCurrentUsage()`
+**1.6 — Add `rateBillingPeriod()` and `rateIncrementalUsage()`**
 
-**1.5 — Add `rateBillingPeriod()` as a public RatingService method**
+Add two public methods to `RatingService`:
+- `rateBillingPeriod()` for statement-period and subscription billing
+- `rateIncrementalUsage()` for event-time agent billing using marginal pricing
 
-Implement `rateBillingPeriod()` only after the shared orchestration exists.
-
-Requirements:
-- Reuses the same extracted orchestration already used by `BillingService`.
-- Returns a service-layer `RatedCharge[]` projection.
-- Does not introduce a second usage-fetching or grant-resolution algorithm.
-
-**1.6 — Add `rateIncrementalUsage()` using marginal pricing**
-
-Implement incremental usage rating using the marginal approach.
-
-Algorithm:
-- Accepts `featureSlug`, `customerId`, `usageBefore`, `usageAfter`, `grantConfig`
-- Calls `calculatePricePerFeature(usageAfter, config)` minus `calculatePricePerFeature(usageBefore, config)`
-- Returns the delta as the incremental charge
-
-This approach:
-- Correctly handles tiered pricing (usage crossing tier boundaries)
-- Correctly handles package pricing (delta = packages_after - packages_before)
-- Works in real-time without re-running the full waterfall
-- Uses the same `calculatePricePerFeature()` function as the batch path
+Incremental algorithm:
+- compute price at `usageAfter`
+- compute price at `usageBefore`
+- return the delta
 
 Important constraints:
-- Resolve grants through `GrantsManager` to get the active grant config
-- For the full waterfall case (multiple grants with priority), use `rateBillingPeriod()` instead
-- This method is specifically for the single-event, single-grant, real-time case used by agent billing
+- use the same pure pricing math as batch rating
+- do not add a second event-rating implementation
 
-**1.7 — Write unit tests for RatingService and delegated BillingService behavior**
+**1.7 — Add tests for extraction parity and incremental rating**
 
 Add tests for:
-- extracted orchestration parity with current `calculateFeaturePrice()` behavior
-- `rateIncrementalUsage` for flat pricing (delta = unit_price * usage_delta)
-- `rateIncrementalUsage` for tier boundary crossings (price jump at tier edge)
-- `rateIncrementalUsage` for package pricing (step function behavior)
-- missing grants / empty-grant behavior
-- `BillingService` continuing to produce the same invoice item totals through delegation
-- pre-fetched grants and usage path (batch optimization support)
-
-Files to read first:
-- [internal/services/src/plans/plans.test.ts](/Users/jhonsfran/repos/unprice/internal/services/src/plans/plans.test.ts)
-- [internal/db/src/validators/subscriptions/prices.test.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/subscriptions/prices.test.ts)
+- extracted orchestration parity
+- marginal rating across flat, tier, and package pricing
+- missing grants behavior
+- BillingService delegation parity
+- pre-fetched grants and usage path support
 
 ---
 
-## Phase 2: Provider Mapping Foundation
+## Phase 2: Payment Provider Data Foundation
 
-> **PR title:** `feat: add provider mapping foundation`
+> **PR title:** `feat: add provider data foundation`
 >
-> **Goal:** Introduce provider-agnostic storage without breaking the current
-> Stripe-backed customer and callback flows.
+> **Goal:** Move provider identity and provider settlement data into the right
+> tables so runtime billing no longer depends on Stripe-only customer fields or
+> plan-version-level provider coupling.
 >
-> **Branch:** `feat/provider-mapping-foundation`
+> **Branch:** `feat/provider-data-foundation`
 
 ### Commits
 
-**2.1 — Fix `stripeCustomerId` global uniqueness constraint**
+**2.1 — Fix the legacy `stripeCustomerId` uniqueness bug**
 
-The current `stripe_customer_unique` constraint on `customers.stripeCustomerId` is globally unique instead of project-scoped. This breaks multi-tenancy.
-
-Requirements:
-- Drop the global unique constraint `stripe_customer_unique`
-- Add composite unique constraint on `(stripe_customer_id, project_id)` instead
-- Verify no existing data violates the new constraint
-
-Files to read first:
-- [internal/db/src/schema/customers.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema/customers.ts) — line 40
-
-**2.2 — Add `customer_provider_ids` table**
-
-Create a provider mapping table for external customer ids.
+The current `stripe_customer_unique` constraint is globally unique and breaks multi-tenancy.
 
 Requirements:
-- composite primary key using `projectID` pattern (CUID id + projectId)
+- drop the global unique constraint
+- replace it with a project-scoped constraint while legacy data still exists
+
+**2.2 — Add `paymentProvider` to `subscription_phases`**
+
+Move runtime provider choice closer to the billable subscription phase.
+
+Requirements:
+- add `paymentProvider` to `subscription_phases`
+- treat it as the runtime source of truth for provider-backed subscription billing
+- stop treating `plan_versions.paymentProvider` as the long-term runtime source
+
+**2.3 — Add `customer_provider_ids` table**
+
+Create a provider/customer mapping table.
+
+Requirements:
 - one row per `(projectId, customerId, provider)`
 - unique lookup by `(projectId, provider, providerCustomerId)`
-- composite foreign key back to `customers` using `(customerId, projectId)`
+- composite foreign key to `customers`
 - `provider` column using existing `paymentProviderEnum`
-- `providerCustomerId` text column for the external ID
-- `metadata` JSON column for provider-specific data (replaces Stripe-specific customer metadata fields like `stripeSubscriptionId`, `stripeDefaultPaymentMethodId`)
-- export from [internal/db/src/schema.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema.ts)
-- define Drizzle relations in the schema file
+- `providerCustomerId` text column
+- `metadata` JSON column for provider-specific metadata such as subscription ids and default payment method ids
 
-**2.3 — Add `apikey_customers` table**
-
-Create a mapping table between API keys and customers.
+**2.4 — Add provider webhook storage**
 
 Requirements:
-- composite primary key using `projectID` pattern
-- unique lookup by `(projectId, apikeyId)`
-- composite foreign keys to `apikeys` and `customers` using `(id, projectId)` pattern
-- export from the schema barrel
-- define Drizzle relations
+- add `webhookSecret` and `webhookSecretIv` to `payment_provider_config`
+- add `webhook_events` for idempotent provider event processing
+- store raw payload, normalized provider id, event id, status, and error payload for replay/debugging
 
-**2.4 — Add webhook event storage**
-
-Create `webhook_events` for idempotent provider webhook processing.
-
-Requirements:
-- composite primary key using `projectID` pattern
-- unique lookup by `(projectId, provider, providerEventId)`
-- `provider` column using `paymentProviderEnum`
-- `status` enum (new `pgEnum`) with at least `pending`, `processed`, `failed`
-- `payload` JSON column and `error` text column for replay/debugging
-- `timestamps` fields
-- export from the schema barrel
-
-**2.5 — Extend payment provider config for webhook verification**
-
-Current provider config stores only the encrypted API key (`key` + `keyIv`).
-Before the webhook phase, add storage for webhook verification secrets.
-
-Requirements:
-- Add `webhookSecret` text column (encrypted, same pattern as `key`)
-- Add `webhookSecretIv` text column (IV for decryption)
-- Both nullable (not all providers use webhook secrets)
-
-Important constraint:
-- Keep encryption handling aligned with the existing `AesGCM` flow using `env.ENCRYPTION_KEY`.
-- Decryption follows the same pattern: `aesGCM.decrypt({ iv: config.webhookSecretIv, ciphertext: config.webhookSecret })`.
-
-Files to read first:
-- [internal/db/src/schema/paymentConfig.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema/paymentConfig.ts) — current `key`/`keyIv` pattern
-- [internal/db/src/validators/paymentConfig.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators/paymentConfig.ts)
-- [internal/services/src/payment-provider/resolver.ts#L86](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/resolver.ts#L86) — existing `AesGCM` decryption
-
-**2.6 — Add validators and export them from the real barrel**
+**2.5 — Add validators and export everything from the real barrels**
 
 Add validators for:
 - `customer_provider_ids`
-- `apikey_customers`
 - `webhook_events`
+- updated `payment_provider_config`
+- updated `subscription_phases`
 
-Export from:
+Export them from:
+- [internal/db/src/schema.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema.ts)
 - [internal/db/src/validators.ts](/Users/jhonsfran/repos/unprice/internal/db/src/validators.ts)
 
-**2.6 — Add `paymentProvider` snapshot to `subscription_phases` as additive state**
+**2.6 — Generate the migration**
 
-If this denormalized column is needed, add it as a snapshot field only.
-
-Important constraint:
-- Do not switch all readers immediately.
-- `plan_versions.paymentProvider` remains the source of truth until all runtime readers are migrated.
-
-Files to read first:
-- [internal/db/src/schema/planVersions.ts#L73](/Users/jhonsfran/repos/unprice/internal/db/src/schema/planVersions.ts#L73)
-- [internal/db/src/schema/subscriptions.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema/subscriptions.ts)
-
-**2.7 — Generate migration with the project script**
-
-From `internal/db/`, run:
+Run from `internal/db/`:
 ```bash
 pnpm generate
 ```
 
-Do not edit the generated SQL by hand unless there is a repo-specific migration policy requiring it.
-
-**2.8 — Add dual-read and dual-write migration notes to the plan implementation**
-
-This phase is not complete until the rollout strategy is explicit:
-- continue reading `customers.stripeCustomerId` during transition
-- write to both legacy Stripe fields and `customer_provider_ids`
-- backfill existing Stripe customer ids into the new mapping table
-- only remove legacy reads after all callbacks and resolver paths are migrated
-
-Files to read first:
-- [internal/services/src/payment-provider/resolver.ts#L106](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/resolver.ts#L106)
-- [internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts#L160](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts#L160)
-- [internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts#L132](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts#L132)
+Important constraint:
+- do not hand-maintain transitional dual-read notes in this phase
+- this phase lays down the target data model for the runtime refactor that follows
 
 ---
 
-## Phase 3: Decouple Provider-Specific Coupling Points
+## Phase 3: Payment Provider Runtime Refactor
 
-> **PR title:** `feat: decouple provider-specific coupling points`
+> **PR title:** `feat: refactor payment provider runtime`
 >
-> **Goal:** Fix the four specific points where Stripe leaks through the
-> provider-agnostic interface: (1) resolver hardcodes `stripeCustomerId`,
-> (2) customer metadata stores Stripe-specific fields, (3) callback routes are
-> Stripe-specific, (4) Stripe implementation has provider-specific behavior
-> (billing portal, tax IDs). The existing `PaymentProviderInterface` is already
-> provider-agnostic — no new abstraction layer needed.
+> **Goal:** Replace the Stripe-centric provider runtime with a provider-neutral
+> runtime that can support the next provider now and crypto-backed settlement
+> later.
 >
-> **Branch:** `feat/provider-decoupling`
+> **Branch:** `feat/provider-runtime-refactor`
 
 ### Commits
 
-**3.1 — Define normalized provider metadata schema**
+**3.1 — Make the provider contract truly provider-neutral**
 
-Replace Stripe-specific customer metadata fields with a provider-agnostic structure.
-
-Current state (in customer metadata):
-```typescript
-{ stripeSubscriptionId, stripeDefaultPaymentMethodId, country, region, city }
-```
-
-Target state (stored in `customer_provider_ids.metadata` from Phase 2):
-```typescript
-{ subscriptionId?, defaultPaymentMethodId?, ... } // per-provider row
-```
+Refactor [internal/services/src/payment-provider/interface.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/interface.ts).
 
 Requirements:
-- Define a `ProviderCustomerMetadata` type in `internal/services/src/payment-provider/`
-- Country/region/city stay on customer metadata (they're not provider-specific)
-- Provider-specific fields move to the `customer_provider_ids.metadata` column
+- remove Stripe types from the public interface
+- remove `upsertProduct()` unless a real runtime caller appears
+- add webhook verification/parsing hooks to the contract
+- keep the contract focused on customer setup, payment methods, invoice sync, payment collection, and webhook normalization
 
-Files to read first:
-- [internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts#L174](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts#L174) — current Stripe metadata writes
-- [internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts#L136](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts#L136)
+**3.2 — Refactor the provider dispatcher/service layer**
 
-**3.2 — Update `PaymentProviderResolver` to use `customer_provider_ids`**
-
-Migrate provider customer ID resolution from `customers.stripeCustomerId` to the new mapping table.
-
-Current broken code (resolver.ts ~L130):
-```typescript
-return customerData?.stripeCustomerId ?? undefined  // ALWAYS returns Stripe ID
-```
-
-Target:
-```typescript
-// Query customer_provider_ids by (projectId, customerId, provider)
-// Fall back to customers.stripeCustomerId during transition (dual-read)
-```
+Refactor [internal/services/src/payment-provider/service.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/service.ts).
 
 Requirements:
-- Query `customer_provider_ids` first
-- Fall back to `customers.stripeCustomerId` if not found (dual-read during migration)
-- Keep the resolver responsible for config loading, secret decryption, and customer ID resolution
-- Do not move secret decryption or config lookup into random call sites
-- Load webhook secret from the new `webhookSecret`/`webhookSecretIv` columns when requested
+- keep a single normalized provider entry point
+- support Stripe and sandbox cleanly
+- leave clear extension points for the next provider and later crypto collectors
+- add provider capability flags where behavior differs materially
 
-Files to read first:
-- [internal/services/src/payment-provider/resolver.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/resolver.ts) — full file
-- [internal/db/src/schema/customers.ts](/Users/jhonsfran/repos/unprice/internal/db/src/schema/customers.ts) — `stripeCustomerId` field
+Examples of capability differences:
+- billing portal support
+- saved payment methods
+- invoice line-item mutation support
+- synchronous vs asynchronous payment confirmation
 
-**3.3 — Update CustomerService for dual-write**
-
-Migrate `CustomerService.getPaymentProvider()` and customer creation/update to dual-write.
-
-Requirements:
-- On customer creation with a provider ID: write to both `customers.stripeCustomerId` AND `customer_provider_ids`
-- On customer update with a provider ID: update both locations
-- Keep current call sites working while the migration is in progress
-- `getPaymentProvider()` delegates to resolver (which now dual-reads)
-
-Files to read first:
-- [internal/services/src/customers/service.ts#L1127](/Users/jhonsfran/repos/unprice/internal/services/src/customers/service.ts#L1127)
-
-**3.4 — Handle provider-specific behavior in implementations**
-
-Address the Stripe-specific behaviors that don't generalize:
-- **Billing portal redirect** (stripe.ts L89-94): If customer already has provider ID, Stripe creates a billing portal session. Other providers need different UX. Add a capability flag or conditional path.
-- **Tax ID collection** (stripe.ts L107-109): Hardcoded `tax_id_collection: { enabled: true }`. Make configurable or provider-conditional.
-- **Invoice reconciliation** (billing/service.ts ~L1428): The item-by-item `addInvoiceItem`/`updateInvoiceItem` pattern assumes provider supports line items. Document this assumption; do not force it into a single `createInvoice(items)` call.
-
-Important constraint:
-- Preserve current invoice verification behavior (total matching).
-
-Files to read first:
-- [internal/services/src/payment-provider/stripe.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/stripe.ts)
-- [internal/services/src/payment-provider/sandbox.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/sandbox.ts)
-- [internal/services/src/billing/service.ts#L1428](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L1428)
-
-**3.5 — Add generic provider callback use case without deleting Stripe routes yet**
-
-Create a provider-agnostic callback completion use case.
+**3.3 — Update `PaymentProviderResolver` to the new data model**
 
 Requirements:
-- Write provider mappings through `customer_provider_ids` (primary)
-- Continue dual-writing `customers.stripeCustomerId` during transition
-- Store provider metadata in `customer_provider_ids.metadata` instead of customer metadata
-- Keep existing Stripe routes alive until the generic route has test parity
+- resolve provider customer ids from `customer_provider_ids`
+- load webhook secrets from `payment_provider_config`
+- stop relying on `customers.stripeCustomerId` as the main provider source
+- keep secret decryption in the resolver
 
-Files to read first:
+**3.4 — Move provider-specific customer metadata out of customer metadata**
+
+Current Stripe-specific fields must move out of customer metadata.
+
+Requirements:
+- define a normalized provider-customer metadata type
+- store provider-specific metadata in `customer_provider_ids.metadata`
+- keep generic customer metadata for customer-owned facts only
+
+**3.5 — Replace plan-version provider reads with phase-level provider reads**
+
+Update runtime billing to read provider from `subscription_phases.paymentProvider`.
+
+Files to update include:
+- invoice creation paths
+- BillingService provider resolution
+- subscription and billing flow reads that currently use `phase.planVersion.paymentProvider`
+
+**3.6 — Replace Stripe-specific completion flows with generic provider completion flows**
+
+Replace:
 - [internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-sign-up.ts)
 - [internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts](/Users/jhonsfran/repos/unprice/internal/services/src/use-cases/payment-provider/complete-stripe-setup.ts)
-- [apps/api/src/routes/paymentProvider/stripeSignUpV1.ts](/Users/jhonsfran/repos/unprice/apps/api/src/routes/paymentProvider/stripeSignUpV1.ts)
-- [apps/api/src/routes/paymentProvider/stripeSetupV1.ts](/Users/jhonsfran/repos/unprice/apps/api/src/routes/paymentProvider/stripeSetupV1.ts)
 
-**3.6 — Write tests for resolver dual-read and callback parity**
+With provider-neutral use cases and routes.
+
+Requirements:
+- provider is explicit in the route and use-case input
+- mapping writes go to `customer_provider_ids`
+- callback/session completion stays outside adapters and inside use cases
+
+**3.7 — Remove legacy Stripe-only fields after runtime cutover**
+
+Remove after all runtime call sites are migrated:
+- `customers.stripeCustomerId`
+- Stripe-specific fields in customer metadata
+- Stripe-only assumptions that remain in resolver or callbacks
+
+**3.8 — Add tests for provider runtime parity and extensibility**
 
 Add tests for:
-- resolver dual-read: returns from `customer_provider_ids` when available, falls back to `stripeCustomerId`
-- resolver returns `undefined` provider customer ID when neither source has data
-- callback use case writes to both `customer_provider_ids` and legacy `stripeCustomerId`
-- provider metadata stored in mapping table, not customer metadata
-- migration parity: generic callback produces same customer state as current Stripe-specific callbacks
+- resolver behavior with mapping-table-backed provider ids
+- provider completion flows
+- phase-level provider reads
+- Stripe capability behavior
+- sandbox parity
+- webhook secret loading
 
 ---
 
-## Phase 4: Idempotent Ledger With Billing Consumption
+## Phase 4: Ledger Foundation And Billing Decoupling
 
-> **PR title:** `feat: add idempotent ledger with billing consumption`
+> **PR title:** `feat: add ledger foundation and decouple billing from invoices`
 >
-> **Goal:** Introduce append-only ledger storage that is safe under retries,
-> and immediately wire it into `BillingService` so ledger debits become
-> invoiceable items. Settlement routing is deferred to Phase 6 (Agent Billing)
-> where an actual consumer exists beyond subscription billing.
+> **Goal:** Make rated charges and ledger entries the financial source of truth,
+> then make invoices a projection and settlement artifact rather than the place
+> where pricing is first materialized.
 >
 > **Branch:** `feat/ledger-foundation`
-
-### Why merged
-
-The original plan had a separate Phase 5 ("Make Billing Consume Ledger Entries")
-between ledger creation and settlement. But subscription billing already works
-end-to-end. A settlement router without agent billing has no consumer. Instead:
-- This phase builds the ledger AND wires it into billing in one PR.
-- Settlement routing moves to Phase 6 where agent billing creates real demand.
 
 ### Commits
 
 **4.1 — Add ledger schema**
 
-Add `ledgers` and `ledger_entries` tables.
+Add `ledgers` and `ledger_entries`.
 
 Requirements:
-- composite primary key using `projectID` pattern (CUID id + projectId)
-- one ledger per `(projectId, customerId, currency)` — unique composite constraint
-- composite foreign key to `customers` using `(customerId, projectId)`
-- `currency` using existing `currencyEnum`
-- append-only `ledger_entries` with:
-  - composite FK to `ledgers` using `(ledgerId, projectId)`
-  - `type` enum: `debit`, `credit` (new `pgEnum`)
-  - `amount` integer (cents)
-  - `runningBalance` integer (computed in transaction)
-  - `sourceType` text + `sourceId` text — deterministic idempotency key
-  - unique constraint on `(ledgerId, sourceType, sourceId)` — prevents duplicate postings
-  - `settled` boolean default false
-  - `settledAt` timestamp nullable
-  - `settlementType` enum: `invoice`, `wallet`, `one_time`, `reversal` (nullable until settled)
-  - `settlementId` text nullable (links to invoice/wallet/payment record)
-  - `timestamps` fields
-
-Important constraint:
-- The unique `(ledgerId, sourceType, sourceId)` constraint provides deterministic deduplication of retried postings at the DB level.
-- Do not rely on callers to "just not retry".
+- one ledger per `(projectId, customerId, currency)`
+- append-only entries
+- deterministic idempotency key via `sourceType + sourceId`
+- `type` enum for `debit` and `credit`
+- running balance stored transactionally
+- settlement state stored on entries
 
 **4.2 — Add ledger enums and validators**
 
-Add enums and validator exports for ledger rows.
-
 Requirements:
-- New `pgEnum` for `ledger_entry_type` (`debit`, `credit`)
-- New `pgEnum` for `settlement_type` (`invoice`, `wallet`, `one_time`, `reversal`)
-- Export through the real schema and validator barrels
-- Generate migration: `pnpm generate` from `internal/db/`
+- entry-type enum
+- settlement-type enum
+- exports through the real schema and validator barrels
+- generated migration
 
 **4.3 — Create LedgerService shell**
 
 Create `internal/services/src/ledger/` with:
-- `errors.ts` — `UnPriceLedgerError`
-- `service.ts` — `LedgerService`
-- `index.ts` — barrel exports
+- `errors.ts`
+- `service.ts`
+- `index.ts`
 
-Constructor deps: Infrastructure only (`db`, `logger`, `metrics`). No service dependencies.
+Constructor deps:
+- infrastructure only: `db`, `logger`, `metrics`
 
-Important constraint:
-- `LedgerService` MUST be a leaf service (no deps on other services). This prevents circular dependencies since `BillingService` will depend on `LedgerService`.
+**4.4 — Implement idempotent posting and read methods**
 
-**4.4 — Implement idempotent `postDebit()` and `postCredit()`**
+Add:
+- `postDebit()`
+- `postCredit()`
+- `getUnsettledEntries()`
+- `getUnsettledBalance()`
+- `markSettled()`
 
-Requirements:
-- Deterministic source identity: `sourceType + sourceId` pair (e.g., `sourceType: "invoice_item"`, `sourceId: invoiceItemId`)
-- Retries with the same source identity return the existing entry (upsert/ON CONFLICT DO NOTHING + SELECT)
-- Running balance derived within a serializable transaction
-- Auto-create ledger for `(projectId, customerId, currency)` if it doesn't exist
+Important constraints:
+- retries with the same source identity return the same ledger entry
+- running balance is computed transactionally
 
-Important constraint:
-- Billing currently retries invoice finalization in failure scenarios (`_upsertPaymentProviderInvoice` at ~L1632), so ledger posting must tolerate repeated attempts.
+**4.5 — Register LedgerService in the service graph**
 
-Files to read first:
-- [internal/services/src/billing/service.ts#L1632](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L1632) — retry scenarios in billing
+- add `ledger: LedgerService` to `ServiceContext`
+- construct it before billing
+- inject it into `BillingService`
 
-**4.5 — Implement `getUnsettledBalance()`, `getUnsettledEntries()`, and `markSettled()`**
+**4.6 — Have subscription billing post rated charges to the ledger first**
 
-Add read and state-transition methods for unsettled ledger entries.
-
-Requirements:
-- `getUnsettledEntries(ledgerId, opts?)` — returns entries where `settled = false`, optionally filtered by `sourceType`
-- `getUnsettledBalance(ledgerId)` — sum of unsettled entries
-- `markSettled(entryIds[], settlementType, settlementId)` — batch mark entries as settled within a transaction
-
-Important constraint:
-- `markSettled()` should be reserved for flows that already have a real downstream consumer or confirmed payment result.
-
-**4.6 — Register LedgerService in the service graph**
-
-- Add `ledger: LedgerService` to `ServiceContext`
-- Construct it in [internal/services/src/context.ts](/Users/jhonsfran/repos/unprice/internal/services/src/context.ts) at the **leaf tier** (before `billing`)
-- Wire `ledgerService` into `BillingService` constructor
-- Export it from [internal/services/package.json](/Users/jhonsfran/repos/unprice/internal/services/package.json)
-
-**4.7 — Post invoice-backed debits from BillingService**
-
-When wiring the ledger into billing:
-- Use stable source ids tied to invoice and item identity: `sourceType: "invoice_item"`, `sourceId: invoiceItem.id`
-- Post debits during `_computeInvoiceItems` or `_upsertPaymentProviderInvoice`
-- Avoid duplicate posting on retries (the unique constraint handles this)
-- Skip zero-value debits
-
-Important constraint:
-- This step only writes debits that correspond to known internal billing artifacts.
-
-**4.8 — Teach BillingService to discover unsettled ledger debits**
-
-Add the bridge between ledger debits and invoice lines.
+Change billing flow so it no longer treats invoice items as the first financial materialization.
 
 Requirements:
-- During invoice finalization, query `getUnsettledEntries(ledgerId, { sourceType: "agent_usage" })` to discover debits from agent billing (future Phase 6)
-- Convert unsettled entries into invoiceable items with deterministic linkage
-- Mark entries settled with `settlementType: "invoice"` and `settlementId: invoiceId` only after invoice linkage is safely persisted
-- No duplicate attachment across retries (use source identity)
+- use `RatingService.rateBillingPeriod()` to produce billable charges
+- convert rated charges into deterministic ledger debits
+- use stable source ids tied to billing periods and subscription items
 
-Important constraint:
-- This step is forward-looking infrastructure. Until Phase 6 posts agent-usage debits, this code path will find zero unsettled entries and be a no-op.
+**4.7 — Rewrite invoice materialization to consume ledger entries**
 
-**4.9 — Write unit tests for retry safety, balances, and billing integration**
+Billing must create invoice items from ledger entries, not from direct inline rating.
+
+Requirements:
+- load unsettled ledger entries for the statement window
+- map them into invoice items
+- keep invoice/provider reconciliation logic in billing
+- remove invoice-first pricing ownership
+
+**4.8 — Settle ledger entries only after invoice linkage is safely persisted**
+
+Requirements:
+- mark invoice-backed entries settled only after invoice persistence succeeds
+- settlement metadata must point back to the invoice artifact
+
+**4.9 — Add tests for ledger-first billing**
 
 Add tests for:
-- Sequential balances (debit, credit, running balance correctness)
-- Idempotent reposting with the same source identity (retry returns existing entry)
-- Unsettled balance reads
-- Settlement marking (batch, with correct types)
-- Auto-creation of missing ledgers
-- BillingService posting debits during invoice finalization
-- BillingService discovering unsettled entries (mock some agent-usage debits, verify they appear on invoice)
+- idempotent postings
+- running balance correctness
+- rating-to-ledger-to-invoice flow
+- retry safety in invoice finalization
+- invoice projection from unsettled ledger entries
 
 ---
 
-## Phase 5: Webhook Pipeline
+## Phase 5: Settlement And Webhook Pipeline
 
-> **PR title:** `feat: add provider webhook pipeline`
+> **PR title:** `feat: add settlement and webhook pipeline`
 >
-> **Goal:** Add provider webhook handling after provider mapping, webhook
-> secret storage, and ledger are in place.
+> **Goal:** Add normalized provider settlement and webhook handling on top of
+> the ledger-backed billing model.
 >
-> **Branch:** `feat/webhook-pipeline`
+> **Branch:** `feat/settlement-webhooks`
 
 ### Commits
 
-**5.1 — Add generic webhook route skeleton**
+**5.1 — Add generic provider webhook route**
 
 Create a generic provider webhook route under `apps/api/src/routes/`.
 
 Requirements:
-- parse raw body and headers
-- resolve the provider through the existing `PaymentProviderResolver` (which now decrypts webhook secrets via Phase 2)
-- verify signatures using stored webhook secrets
+- raw-body parsing
+- header capture
+- provider-aware signature verification
+- provider resolution through the provider runtime
 
-**5.2 — Implement idempotent event persistence with `webhook_events`**
+**5.2 — Persist provider events idempotently**
 
-For each normalized event:
-- insert or load by `(projectId, provider, providerEventId)`
+Requirements:
+- insert/load by `(projectId, provider, providerEventId)`
 - skip already processed events
-- preserve payload and failure context for replay/debugging
+- preserve payload and failure state for replay/debugging
 
 **5.3 — Create `processWebhookEvent` use case**
 
-Use a dedicated use case for invoice, ledger, and subscription-machine coordination.
+This use case coordinates:
+- invoice state transitions
+- provider payment status reconciliation
+- subscription machine notifications
+- ledger settlement updates
+
+**5.4 — Implement Stripe webhook normalization**
 
 Requirements:
-- `payment.succeeded` updates invoice state and settles the right ledger entries via `LedgerService.markSettled()`
-- `payment.failed` updates invoice/payment attempt state and reports machine failure via `machine.reportPaymentFailure()`
-- dispute/refund paths use reversal-style ledger credits when appropriate
+- verify Stripe signatures using stored webhook secrets
+- normalize supported Stripe events into provider-neutral event types
+- return normalized events to the route/use-case layer
 
-Files to read first:
-- [internal/services/src/billing/service.ts#L340](/Users/jhonsfran/repos/unprice/internal/services/src/billing/service.ts#L340)
-- [internal/services/src/subscriptions/machine.ts](/Users/jhonsfran/repos/unprice/internal/services/src/subscriptions/machine.ts) — xstate v5 machine with `reportPaymentSuccess()`, `reportPaymentFailure()`
-
-**5.4 — Implement Stripe webhook parsing**
-
-Add webhook event parsing to the Stripe implementation.
+**5.5 — Wire invoice payment outcomes into settlement**
 
 Requirements:
-- Verify signatures using the Stripe SDK with the decrypted webhook secret
-- Normalize supported Stripe event types to provider-agnostic event types
-- Return normalized webhook events to the route/use-case layer
+- successful payment marks the correct ledger entries settled
+- failed payment updates invoice/payment attempt state
+- subscription machine receives payment success/failure notifications
 
-Files to read first:
-- [internal/services/src/payment-provider/stripe.ts](/Users/jhonsfran/repos/unprice/internal/services/src/payment-provider/stripe.ts)
-
-**5.5 — Register the route after parity tests pass**
-
-Wire the route into [apps/api/src/index.ts](/Users/jhonsfran/repos/unprice/apps/api/src/index.ts) only after:
-- signature verification works
-- idempotency is covered by tests
-- success/failure invoice transitions are covered by tests
-
-**5.6 — Write tests for replay safety and ledger reconciliation**
+**5.6 — Add tests for replay safety and settlement correctness**
 
 Add tests for:
-- duplicate webhook delivery (idempotency)
-- successful payment settling ledger entries
-- failed payment updating invoice attempts / state transitions
-- invalid signatures being rejected
-- dispute/refund creating reversal credits
+- duplicate webhook delivery
+- invalid signatures
+- successful settlement
+- failed payment state transitions
+- refund/dispute reversal handling
 
 ---
 
-## Phase 6: Agent Billing Contract And Runtime Flow
+## Phase 6: Agent Billing Foundation
 
-> **PR title:** `feat: add agent billing flow`
+> **PR title:** `feat: add agent billing foundation`
 >
-> **Goal:** Support API-key-backed customer billing with settlement routing.
-> This phase extends the API and ingestion contracts, wires agent usage into
-> rating and ledger, and introduces the settlement router that was deferred
-> from Phase 4.
+> **Goal:** Make agents first-class billable actors by resolving customers from
+> API keys, exposing billing facts from synchronous metering, rating event-time
+> usage, and posting that usage into the same ledger and settlement pipeline as
+> human billing.
 >
 > **Branch:** `feat/agent-billing`
 
 ### Commits
 
-**6.1 — Add `apikey_customers` service methods and tRPC mutation**
+**6.1 — Add `apikey_customers` table and service methods**
 
-Implement:
-- API key to customer resolution: `resolveCustomerByApiKey(projectId, apikeyId)`
-- API key to customer linking: `linkApiKeyToCustomer(projectId, apikeyId, customerId)`
+Requirements:
+- add `apikey_customers`
+- implement API key to customer resolution
+- implement API key to customer linking
+- expose the first integration point via the existing tRPC apikey surface
 
-Use the existing tRPC apikey router surface as the first integration point.
-
-Current state: The `apikeys` table has no `customerId` field or FK to customers. The `ApiKeysService` validates keys but has no customer resolution logic. The tRPC router has 4 operations (create, revoke, roll, listByActiveProject) — none involve customer mapping.
-
-Files to read first:
-- `internal/trpc/src/router/lambda/apikeys/`
-- [internal/services/src/apikey/service.ts](/Users/jhonsfran/repos/unprice/internal/services/src/apikey/service.ts)
-
-**6.2 — Verify manual grants for agent provisioning**
-
-The current `GrantsManager.createGrant()` already supports `type: "manual"`.
-This step should verify and test agent provisioning scenarios instead of assuming a subscription dependency that does not currently exist.
-
-Files to read first:
-- [internal/services/src/entitlements/grants.ts#L837](/Users/jhonsfran/repos/unprice/internal/services/src/entitlements/grants.ts#L837)
-
-**6.3 — Extend the sync ingestion API contract to support API-key-only resolution**
-
-Before wiring agent billing into ingestion:
-- make `customerId` optional in `rawEventSchema` for the sync ingestion route
-- when `customerId` is omitted, resolve the customer from `apikey_customers` using the authenticated API key's ID
-- update `resolveContextProjectId()` to work without `customerId` (the key already provides `projectId`)
-
-Current state:
-- `keyAuth()` provides `ApiKeyExtended` with `projectId` and nested workspace context, but NO customer mapping
-- `resolveContextProjectId()` requires `customerId` to detect self-reflection (when `customerId === workspace.unPriceCustomerId`)
-- `buildIngestionQueueMessage()` requires `body.customerId`
-- Deduplication key is `[projectId, customerId, idempotencyKey]` — this still works once customerId is resolved
-
-Important constraint:
-- This is an API contract change, not just an internal service tweak.
-- Self-reflection logic must still work when customerId is provided explicitly.
-
-Files to read first:
-- [apps/api/src/routes/events/ingestEventsSyncV1.ts](/Users/jhonsfran/repos/unprice/apps/api/src/routes/events/ingestEventsSyncV1.ts) — line 74: `customerId` required
-- [apps/api/src/auth/key.ts#L191](/Users/jhonsfran/repos/unprice/apps/api/src/auth/key.ts#L191) — `resolveContextProjectId()`
-- [apps/api/src/routes/events/ingestEventsV1.ts#L26](/Users/jhonsfran/repos/unprice/apps/api/src/routes/events/ingestEventsV1.ts#L26)
-
-**6.4 — Extend `EntitlementWindowDO.apply()` to return billing facts**
-
-The DO already computes `delta` and `value_after` and writes them to its analytics outbox. Extend the return type to expose these.
-
-Current return type:
-```typescript
-{ allowed: boolean, deniedReason?: "LIMIT_EXCEEDED", message?: string }
-```
-
-Target return type:
-```typescript
-{ allowed: boolean, deniedReason?: "LIMIT_EXCEEDED", message?: string,
-  delta?: number, valueAfter?: number }
-```
-
-This is a ~5-line change — the data is already computed, it just isn't returned. No new interface needed.
-
-Files to read first:
-- [apps/api/src/ingestion/EntitlementWindowDO.ts#L121](/Users/jhonsfran/repos/unprice/apps/api/src/ingestion/EntitlementWindowDO.ts#L121) — `apply()` method, outbox writes
-
-**6.5 — Add `reportAgentUsage` use case**
-
-Once the ingestion contract provides billing facts (`delta`, `valueAfter`):
-- Rate the incremental usage through `RatingService.rateIncrementalUsage()` using the marginal approach
-- Post idempotent ledger debit with `sourceType: "agent_usage"`, `sourceId: eventId`
-- Resolve funding strategy (see 6.6)
-
-Important constraint:
-- This use case is downstream of the ingestion contract change, not a prerequisite for it.
-
-**6.6 — Add SettlementRouter for funding strategy resolution**
-
-Now that agent billing creates real demand for settlement routing, add the router.
-
-Routing rules:
-- `wallet`: immediate internal credit + settlement marking (only if wallet DO infrastructure exists)
-- `subscription`: leave entries billable by the subscription invoice flow until consumed by BillingService (Phase 4.8)
-- `one_time`: leave entries pending collection until payment succeeds (via webhook in Phase 5)
-- `threshold_invoice`: design only, no implementation required
-
-Important constraints:
-- Do not implement subscription and one-time settlement as "just mark entries settled".
-- Wallet settlement is the only path that can safely post a balancing credit and mark entries settled in one phase, because it is an internal funding source.
-- If wallet infrastructure does not exist yet, keep wallet support behind an explicit later dependency.
-
-**6.7 — Wire `reportAgentUsage` into the sync ingestion path**
-
-Only after `customerId` resolution and billing-fact output are both available.
-
-Important constraint:
-- Do not insert speculative calls into the ingestion path before the data contract is real.
-
-**6.8 — Add `provisionAgentCustomer` use case**
+**6.2 — Add `provisionAgentCustomer` use case**
 
 Coordinate:
 - customer creation or lookup
-- API key linking via `apikey_customers`
+- API key linking
 - manual grant creation
-- optional wallet top-up, if wallet infrastructure exists by then
+- initial billing configuration for an agent customer
 
-**6.9 — Write tests for the full agent-billing path**
+Important constraint:
+- manual grants are for entitlement and provisioning, not a replacement for billing artifacts
+
+**6.3 — Make ingestion resolve customer ids from API keys**
+
+Update ingestion so `customerId` becomes optional at the API edge.
+
+Requirements:
+- when `customerId` is omitted, resolve it from `apikey_customers` before building the queue message
+- update `resolveContextProjectId()` to work without request-body `customerId`
+- keep the internal queue contract carrying a resolved `customerId`
+- keep deduplication keyed by resolved customer id
+
+**6.4 — Extend `EntitlementWindowDO.apply()` to return billing facts**
+
+Extend the return type to include:
+- `delta`
+- `valueAfter`
+
+Important constraint:
+- no new metering algorithm is needed
+- the DO already computes these values
+
+**6.5 — Add `reportAgentUsage` use case**
+
+Requirements:
+- consume the billing facts from sync ingestion
+- call `RatingService.rateIncrementalUsage()`
+- post idempotent ledger debits with `sourceType: "agent_usage"`
+- use the event id as the deterministic source id
+
+**6.6 — Add SettlementRouter**
+
+Introduce a settlement router that decides how a rated or ledger-backed charge should be settled.
+
+Initial routing modes:
+- `invoice`
+- `wallet`
+- `one_time`
+
+Important constraints:
+- `invoice` must integrate with the existing invoice settlement flow
+- `wallet` is only implemented if wallet infrastructure exists by this phase
+- `one_time` must use the normalized provider runtime and leave room for crypto-backed collectors later
+
+**6.7 — Wire agent usage into the sync ingestion path**
+
+Only after customer resolution and billing facts are both available.
+
+Requirements:
+- no speculative calls before the data contract exists
+- failed agent-usage reporting must not silently corrupt metering state
+
+**6.8 — Add tests for the full agent-billing path**
 
 Add tests for:
 - API key to customer resolution
-- provisioning with manual grants
-- sync ingestion with API-key-only customer resolution
-- `EntitlementWindowDO.apply()` returning `delta` and `valueAfter`
-- incremental rating via marginal approach (flat, tiered, package)
-- ledger posting after metering facts are available
-- settlement routing (subscription leaves entries for billing, wallet settles immediately)
-- unsettled agent-usage debits appearing on the next subscription invoice
+- agent provisioning
+- sync ingestion with API-key-only resolution
+- DO billing facts
+- incremental event rating
+- ledger posting for agent usage
+- settlement routing integration
 
 ---
 
@@ -823,9 +670,8 @@ Add tests for:
 
 > **PR title:** `feat: add trace aggregation durable object`
 >
-> **Goal:** Aggregate trace-scoped usage events before billing them. This is a
-> useful extension, but it is not required to land the pricing, provider,
-> ledger, and agent-billing foundations above.
+> **Goal:** Aggregate trace-scoped usage before rating and ledger posting when
+> agent workloads need trace-level billing instead of event-level billing.
 >
 > **Branch:** `feat/trace-aggregation`
 
@@ -833,7 +679,7 @@ Add tests for:
 
 **7.1 — Create TraceAggregationDO skeleton**
 
-Follow the Durable Object and SQLite patterns used by [apps/api/src/ingestion/EntitlementWindowDO.ts](/Users/jhonsfran/repos/unprice/apps/api/src/ingestion/EntitlementWindowDO.ts).
+Follow the Durable Object and SQLite patterns used by [apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts](/Users/jhonsfran/repos/unprice/apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts).
 
 **7.2 — Add trace routing in ingestion**
 
@@ -841,7 +687,7 @@ Requirements:
 - detect trace-scoped events
 - buffer them under a stable trace key
 - complete explicitly or on timeout
-- re-emit aggregated results through the normal ingestion path
+- re-emit aggregated outputs through the standard rating path
 
 **7.3 — Add alarm-based timeout and cleanup**
 
@@ -852,83 +698,72 @@ Mirror the existing alarm and self-destruction patterns where appropriate.
 Add tests for:
 - explicit completion
 - timeout completion
-- multi-feature aggregation
 - duplicate event handling
+- multi-feature aggregation
 
 ---
 
 ## Phase Summary
 
-```
-Phase 1: Extract Pricing Orchestration Into RatingService
-  Extract the orchestration layer (grant resolution, usage fetching, proration,
-  waterfall-input preparation) from BillingService into RatingService. Pure
-  pricing math stays in @unprice/db/validators. Add marginal pricing for
-  real-time incremental rating.
+```text
+Phase 1: Rating Foundation
+  Extract pricing orchestration from BillingService into RatingService and add
+  reusable billing-period and event-time rating.
 
-Phase 2: Provider Mapping Foundation
-  Fix stripeCustomerId global uniqueness bug. Add provider/customer mapping,
-  API-key/customer mapping, webhook event storage, and webhook-secret support
-  with dual-read and dual-write migration rules.
+Phase 2: Payment Provider Data Foundation
+  Add the schema needed for provider-neutral runtime billing: phase-level
+  provider choice, provider/customer mappings, webhook secrets, and webhook
+  event storage.
 
-Phase 3: Decouple Provider-Specific Coupling Points
-  Fix the four specific coupling points (resolver hardcodes, customer metadata,
-  callback routes, provider-specific behavior) rather than adding a new
-  abstraction layer on the already-abstract PaymentProviderInterface.
+Phase 3: Payment Provider Runtime Refactor
+  Replace Stripe-centric runtime assumptions with a provider-neutral runtime
+  that can support the next provider now and crypto-backed collectors later.
 
-Phase 4: Idempotent Ledger With Billing Consumption
-  Add retry-safe ledger storage, deterministic posting, and wire it into
-  BillingService so ledger debits become invoiceable items. Merged from
-  original Phases 4+5 since settlement routing has no consumer until Phase 6.
+Phase 4: Ledger Foundation And Billing Decoupling
+  Make ledger entries the financial source of truth and make invoices a
+  projection and settlement artifact.
 
-Phase 5: Webhook Pipeline
-  Add signature verification, event idempotency, invoice transitions, and
-  ledger reconciliation.
+Phase 5: Settlement And Webhook Pipeline
+  Add provider settlement reconciliation and normalized webhook handling.
 
-Phase 6: Agent Billing Contract And Runtime Flow
-  Extend the API and ingestion contracts, wire agent usage into rating and
-  ledger, and add the settlement router (deferred from Phase 4).
+Phase 6: Agent Billing Foundation
+  Make agents first-class billable actors that flow through rating, ledger, and
+  settlement just like human billing.
 
 Phase 7: Trace Aggregation DO (Optional Extension)
-  Add trace-scoped aggregation after the main billing foundations are stable.
+  Add trace-level aggregation when agent workloads need it.
 ```
 
-## Dependencies and Parallel Tracks
+## Dependencies And Parallel Tracks
 
-Phases 1+4 and 2+3 can proceed **in parallel** since they touch different parts of the codebase.
+```text
+Track A:
+  Phase 1 -> Phase 4
 
-```
-Track A (pricing + accounting):
-  Phase 1 (Rating) → Phase 4 (Ledger + Billing Consumption)
+Track B:
+  Phase 2 -> Phase 3 -> Phase 5
 
-Track B (provider + schema):
-  Phase 2 (Schema) → Phase 3 (Provider Decoupling)
-
-Merge point:
-  Phase 5 (Webhooks) — needs Phases 2, 3, and 4
-
-Final:
-  Phase 6 (Agent Billing + Settlement) — needs Phases 1, 2, 4, and 5
+Track C:
+  Phase 6 depends on Phases 1, 4, and the provider runtime from Phase 3
 
 Optional:
-  Phase 7 (Trace Aggregation) — needs Phase 6 only if traces are part of agent billing
+  Phase 7 depends on Phase 6 only when trace-level billing is required
 ```
 
 Explicit dependency list:
-1. Phase 1 is a prerequisite for safe incremental usage rating (Phase 6).
-2. Phase 2 is a prerequisite for Phases 3 and 5.
-3. Phase 3 depends on Phase 2.
-4. Phase 4 depends on Phase 1 (RatingService must exist before ledger wires into billing).
-5. Phase 5 depends on Phases 2, 3, and 4.
-6. Phase 6 depends on Phases 1, 2, 4, and 5. Partially on Phase 5 if one-time settlement is provider-backed.
-7. Phase 7 depends on Phase 6 only if trace aggregation is part of the agent-billing path.
+1. Phase 1 is required before Phase 4 and Phase 6.
+2. Phase 2 is required before Phase 3 and Phase 5.
+3. Phase 3 is required before Phase 5 and before provider-backed settlement in Phase 6.
+4. Phase 4 is required before Phase 5 and Phase 6.
+5. Phase 5 is required before provider-backed one-time settlement is considered complete.
+6. Phase 6 depends on Phases 1, 3, and 4. It depends on Phase 5 for provider-backed settlement confirmation.
+7. Phase 7 depends on Phase 6 only if trace aggregation is part of the agent billing model.
 
 ## Non-Goals For The First Pass
 
-- Removing `customers.stripeCustomerId` in the same PR that introduces provider mappings
-- Deleting Stripe callback routes before generic-provider parity exists
-- Marking subscription-backed or one-time ledger entries settled before there is a consumer for them
-- Creating a second pricing abstraction layer — reuse `calculatePricePerFeature()` from validators
-- Creating a "collector" abstraction on top of the already-abstract `PaymentProviderInterface`
-- Building wallet DO infrastructure before agent billing creates demand for it
-- Moving pure pricing functions out of `@unprice/db/validators/subscriptions/prices.ts`
+- building a second pricing engine outside `@unprice/db/validators/subscriptions/prices.ts`
+- keeping long-lived dual-read or dual-write migration layers for Stripe-specific storage
+- treating invoices as the long-term source of financial truth
+- adding provider abstractions that solve imaginary providers instead of the next real provider plus future crypto requirements
+- building wallet top-up UX before wallet settlement exists as a real runtime need
+- moving orchestration into adapters instead of services and use cases
