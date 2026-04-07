@@ -1,7 +1,6 @@
 import type { PaymentProvider } from "@unprice/db/validators"
-import { Err, FetchError, type Result } from "@unprice/error"
+import type { FetchError, Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import type { Stripe } from "@unprice/stripe"
 import type { UnPricePaymentProviderError } from "./errors"
 import type {
   AddInvoiceItemOpts,
@@ -10,7 +9,9 @@ import type {
   GetSessionOpts,
   GetStatusInvoice,
   InvoiceProviderStatus,
+  NormalizedProviderWebhook,
   PaymentMethod,
+  PaymentProviderCapabilities,
   PaymentProviderCreateSession,
   PaymentProviderGetSession,
   PaymentProviderInterface,
@@ -18,46 +19,87 @@ import type {
   SignUpOpts,
   UpdateInvoiceItemOpts,
   UpdateInvoiceOpts,
+  VerifiedProviderWebhook,
+  VerifyWebhookOpts,
 } from "./interface"
 import { SandboxPaymentProvider } from "./sandbox"
 import { StripePaymentProvider } from "./stripe"
 
+const PROVIDER_CAPABILITIES: Record<PaymentProvider, PaymentProviderCapabilities> = {
+  stripe: {
+    billingPortal: true,
+    savedPaymentMethods: true,
+    invoiceItemMutation: true,
+    asyncPaymentConfirmation: true,
+  },
+  sandbox: {
+    billingPortal: true,
+    savedPaymentMethods: true,
+    invoiceItemMutation: true,
+    asyncPaymentConfirmation: false,
+  },
+  square: {
+    billingPortal: false,
+    savedPaymentMethods: false,
+    invoiceItemMutation: false,
+    asyncPaymentConfirmation: false,
+  },
+}
+
+export function getPaymentProviderCapabilities(
+  provider: PaymentProvider
+): PaymentProviderCapabilities {
+  return PROVIDER_CAPABILITIES[provider]
+}
+
 export class PaymentProviderService implements PaymentProviderInterface {
-  private readonly logger: Logger
-  private readonly paymentProvider: PaymentProvider
-  private readonly stripe?: StripePaymentProvider
-  private readonly sandbox?: SandboxPaymentProvider
-  private readonly providerCustomerId?: string
+  public readonly provider: PaymentProvider
+  public readonly capabilities: PaymentProviderCapabilities
+
+  private readonly adapter: PaymentProviderInterface
+  private providerCustomerId?: string
 
   constructor(opts: {
     token: string
     providerCustomerId?: string
     logger: Logger
     paymentProvider: PaymentProvider
+    webhookSecret?: string
   }) {
-    this.logger = opts.logger
-    this.paymentProvider = opts.paymentProvider
+    this.provider = opts.paymentProvider
+    this.capabilities = getPaymentProviderCapabilities(opts.paymentProvider)
+    this.providerCustomerId = opts.providerCustomerId ?? undefined
 
-    switch (this.paymentProvider) {
-      case "stripe": {
-        this.providerCustomerId = opts.providerCustomerId ?? undefined
+    this.adapter = this.createAdapter({
+      logger: opts.logger,
+      paymentProvider: opts.paymentProvider,
+      token: opts.token,
+      providerCustomerId: this.providerCustomerId,
+      webhookSecret: opts.webhookSecret,
+    })
+  }
 
-        this.stripe = new StripePaymentProvider({
+  private createAdapter(opts: {
+    token: string
+    providerCustomerId?: string
+    logger: Logger
+    paymentProvider: PaymentProvider
+    webhookSecret?: string
+  }): PaymentProviderInterface {
+    switch (opts.paymentProvider) {
+      case "stripe":
+        return new StripePaymentProvider({
           token: opts.token,
-          providerCustomerId: this.providerCustomerId,
-          logger: this.logger,
+          providerCustomerId: opts.providerCustomerId,
+          logger: opts.logger,
+          webhookSecret: opts.webhookSecret,
         })
-        break
-      }
-      case "sandbox": {
-        this.providerCustomerId = opts.providerCustomerId ?? undefined
-
-        this.sandbox = new SandboxPaymentProvider({
-          logger: this.logger,
-          providerCustomerId: this.providerCustomerId,
+      case "sandbox":
+        return new SandboxPaymentProvider({
+          logger: opts.logger,
+          providerCustomerId: opts.providerCustomerId,
+          webhookSecret: opts.webhookSecret,
         })
-        break
-      }
       default:
         throw new Error("Payment provider not supported")
     }
@@ -68,211 +110,72 @@ export class PaymentProviderService implements PaymentProviderInterface {
   }
 
   public setCustomerId(customerId: string) {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        this.stripe?.setCustomerId(customerId)
-        break
-      }
-      case "sandbox": {
-        this.sandbox?.setCustomerId(customerId)
-        break
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    this.providerCustomerId = customerId
+    this.adapter.setCustomerId(customerId)
   }
 
   public async getSession(
     opts: GetSessionOpts
   ): Promise<Result<PaymentProviderGetSession, FetchError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        const result = await this.stripe!.getSession(opts)
-        return result
-      }
-      case "sandbox": {
-        return await this.sandbox!.getSession(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.getSession(opts)
   }
 
   public async createSession(
     opts: CreateSessionOpts
   ): Promise<Result<PaymentProviderCreateSession, FetchError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        const result = await this.stripe!.createSession(opts)
-        return result
-      }
-      case "sandbox": {
-        return await this.sandbox!.createSession(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.createSession(opts)
   }
 
   public async signUp(opts: SignUpOpts): Promise<Result<PaymentProviderCreateSession, FetchError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.signUp(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.signUp(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
-  }
-
-  public async upsertProduct(
-    props: Stripe.ProductCreateParams & { id: string }
-  ): Promise<Result<{ productId: string }, FetchError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.upsertProduct(props)
-      }
-      case "sandbox": {
-        return await this.sandbox!.upsertProduct(props)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.signUp(opts)
   }
 
   public async listPaymentMethods(opts: { limit?: number }): Promise<
     Result<PaymentMethod[], FetchError | UnPricePaymentProviderError>
   > {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.listPaymentMethods(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.listPaymentMethods(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.listPaymentMethods(opts)
   }
 
   public async createInvoice(
     opts: CreateInvoiceOpts
   ): Promise<Result<PaymentProviderInvoice, FetchError | UnPricePaymentProviderError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.createInvoice(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.createInvoice(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.createInvoice(opts)
   }
 
   public async updateInvoice(
     opts: UpdateInvoiceOpts
   ): Promise<Result<PaymentProviderInvoice, FetchError | UnPricePaymentProviderError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.updateInvoice(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.updateInvoice(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.updateInvoice(opts)
   }
 
   public async addInvoiceItem(
     opts: AddInvoiceItemOpts
   ): Promise<Result<void, FetchError | UnPricePaymentProviderError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.addInvoiceItem(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.addInvoiceItem(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.addInvoiceItem(opts)
   }
 
   public async updateInvoiceItem(
     opts: UpdateInvoiceItemOpts
   ): Promise<Result<void, FetchError | UnPricePaymentProviderError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.updateInvoiceItem(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.updateInvoiceItem(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.updateInvoiceItem(opts)
   }
 
   public async getDefaultPaymentMethodId(): Promise<
     Result<{ paymentMethodId: string }, FetchError | UnPricePaymentProviderError>
   > {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.getDefaultPaymentMethodId()
-      }
-      case "sandbox": {
-        return await this.sandbox!.getDefaultPaymentMethodId()
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.getDefaultPaymentMethodId()
   }
 
   public async finalizeInvoice(opts: {
     invoiceId: string
   }): Promise<Result<{ invoiceId: string }, FetchError | UnPricePaymentProviderError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.finalizeInvoice(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.finalizeInvoice(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.finalizeInvoice(opts)
   }
 
   public async sendInvoice(opts: {
     invoiceId: string
   }): Promise<Result<void, FetchError | UnPricePaymentProviderError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.sendInvoice(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.sendInvoice(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.sendInvoice(opts)
   }
 
   public async collectPayment(opts: {
@@ -284,48 +187,30 @@ export class PaymentProviderService implements PaymentProviderInterface {
       FetchError | UnPricePaymentProviderError
     >
   > {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.collectPayment(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.collectPayment(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.collectPayment(opts)
   }
 
   public async getStatusInvoice(opts: {
     invoiceId: string
   }): Promise<Result<GetStatusInvoice, FetchError | UnPricePaymentProviderError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.getStatusInvoice(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.getStatusInvoice(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.getStatusInvoice(opts)
   }
 
   public async getInvoice(opts: {
     invoiceId: string
   }): Promise<Result<PaymentProviderInvoice, FetchError | UnPricePaymentProviderError>> {
-    switch (this.paymentProvider) {
-      case "stripe": {
-        return await this.stripe!.getInvoice(opts)
-      }
-      case "sandbox": {
-        return await this.sandbox!.getInvoice(opts)
-      }
-      default: {
-        return Err(new FetchError({ message: "Payment provider not supported", retry: false }))
-      }
-    }
+    return this.adapter.getInvoice(opts)
+  }
+
+  public async verifyWebhook(
+    opts: VerifyWebhookOpts
+  ): Promise<Result<VerifiedProviderWebhook, FetchError | UnPricePaymentProviderError>> {
+    return this.adapter.verifyWebhook(opts)
+  }
+
+  public normalizeWebhook(
+    event: VerifiedProviderWebhook
+  ): Result<NormalizedProviderWebhook, UnPricePaymentProviderError> {
+    return this.adapter.normalizeWebhook(event)
   }
 }

@@ -1,6 +1,8 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { customers } from "@unprice/db/schema"
+import { customerProviderIds, customers } from "@unprice/db/schema"
+import { newId } from "@unprice/db/utils"
+import type { PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
@@ -8,29 +10,45 @@ import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { toErrorContext } from "../../utils/log-context"
 
-type CompleteStripeSignUpDeps = {
+type CompleteProviderSignUpDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions">
   db: Database
   logger: Logger
   analytics: Analytics
-  // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler
-  waitUntil: (promise: Promise<any>) => void
+  waitUntil: (promise: Promise<unknown>) => void
 }
 
-type CompleteStripeSignUpInput = {
+type CompleteProviderSignUpInput = {
   projectId: string
   sessionId: string
+  provider: PaymentProvider
 }
 
-type CompleteStripeSignUpOutput = {
+type CompleteProviderSignUpOutput = {
   redirectUrl: string
 }
 
-const stripeSignUpMetadataSchema = z.object({
+const providerSignUpMetadataSchema = z.object({
   customerSessionId: z.string().describe("The unprice customer session id"),
   successUrl: z.string().url().describe("The success url"),
   cancelUrl: z.string().url().describe("The cancel url"),
 })
+
+function buildProviderMetadata({
+  subscriptionId,
+  defaultPaymentMethodId,
+  customerSessionId,
+}: {
+  subscriptionId: string | null
+  defaultPaymentMethodId: string | null
+  customerSessionId: string
+}) {
+  return {
+    ...(subscriptionId ? { subscriptionId } : {}),
+    ...(defaultPaymentMethodId ? { defaultPaymentMethodId } : {}),
+    customerSessionId,
+  }
+}
 
 function isExternalIdConflictError(error: unknown): boolean {
   if (!error || typeof error !== "object") {
@@ -52,15 +70,15 @@ function isExternalIdConflictError(error: unknown): boolean {
   )
 }
 
-export async function completeStripeSignUp(
-  deps: CompleteStripeSignUpDeps,
-  input: CompleteStripeSignUpInput
-): Promise<Result<CompleteStripeSignUpOutput, FetchError | UnPriceCustomerError>> {
-  const { projectId, sessionId } = input
+export async function completeProviderSignUp(
+  deps: CompleteProviderSignUpDeps,
+  input: CompleteProviderSignUpInput
+): Promise<Result<CompleteProviderSignUpOutput, FetchError | UnPriceCustomerError>> {
+  const { projectId, sessionId, provider } = input
 
   deps.logger.set({
     business: {
-      operation: "payment_provider.complete_stripe_signup",
+      operation: "payment_provider.complete_signup",
       project_id: projectId,
     },
   })
@@ -68,7 +86,7 @@ export async function completeStripeSignUp(
   const { err: paymentProviderErr, val: paymentProviderService } =
     await deps.services.customers.getPaymentProvider({
       projectId,
-      provider: "stripe",
+      provider,
     })
 
   if (paymentProviderErr) {
@@ -80,7 +98,7 @@ export async function completeStripeSignUp(
     )
   }
 
-  const { err: getSessionErr, val: stripeSession } = await paymentProviderService.getSession({
+  const { err: getSessionErr, val: providerSession } = await paymentProviderService.getSession({
     sessionId,
   })
 
@@ -93,18 +111,18 @@ export async function completeStripeSignUp(
     )
   }
 
-  const metadata = stripeSignUpMetadataSchema.safeParse(stripeSession.metadata)
+  const metadata = providerSignUpMetadataSchema.safeParse(providerSession.metadata)
 
   if (!metadata.success) {
     return Err(
       new UnPriceCustomerError({
         code: "PAYMENT_PROVIDER_ERROR",
-        message: `Invalid metadata for stripe sign up: ${metadata.error.message}`,
+        message: `Invalid metadata for provider sign up: ${metadata.error.message}`,
       })
     )
   }
 
-  paymentProviderService.setCustomerId(stripeSession.customerId)
+  paymentProviderService.setCustomerId(providerSession.customerId)
 
   const { err: getPaymentMethodsErr, val: paymentMethods } =
     await paymentProviderService.listPaymentMethods({
@@ -128,16 +146,17 @@ export async function completeStripeSignUp(
     }),
     (error) =>
       new FetchError({
-        message: `Error loading customer session for stripe sign up: ${error.message}`,
+        message: `Error loading customer session for provider sign up: ${error.message}`,
         retry: false,
       })
   )
 
   if (customerSessionErr) {
-    deps.logger.error("Error loading customer session for stripe sign up", {
+    deps.logger.error("Error loading customer session for provider sign up", {
       error: toErrorContext(customerSessionErr),
       projectId,
       customerSessionId: metadata.data.customerSessionId,
+      provider,
     })
 
     return Err(customerSessionErr)
@@ -163,32 +182,24 @@ export async function completeStripeSignUp(
       .values({
         id: customerSession.customer.id,
         projectId: customerSession.customer.projectId,
-        stripeCustomerId: stripeSession.customerId,
         externalId: customerSession.customer.externalId,
         name: customerSession.customer.name ?? "",
         email: customerSession.customer.email ?? "",
         defaultCurrency: customerSession.customer.currency,
         active: true,
         timezone: customerSession.customer.timezone,
-        metadata: {
-          stripeSubscriptionId: stripeSession.subscriptionId ?? "",
-          stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-        },
+        metadata: customerSession.customer.metadata,
       })
       .onConflictDoUpdate({
         target: [customers.id, customers.projectId],
         set: {
-          stripeCustomerId: stripeSession.customerId,
           externalId: customerSession.customer.externalId,
           name: customerSession.customer.name ?? "",
           email: customerSession.customer.email ?? "",
           defaultCurrency: customerSession.customer.currency,
           active: true,
           timezone: customerSession.customer.timezone,
-          metadata: {
-            stripeSubscriptionId: stripeSession.subscriptionId ?? "",
-            stripeDefaultPaymentMethodId: defaultPaymentMethodId ?? "",
-          },
+          metadata: customerSession.customer.metadata,
         },
       })
       .returning()
@@ -203,15 +214,16 @@ export async function completeStripeSignUp(
       )
     }
 
-    deps.logger.error("Error upserting customer for stripe sign up", {
+    deps.logger.error("Error upserting customer for provider sign up", {
       error: toErrorContext(error),
       projectId,
       customerSessionId: customerSession.id,
+      provider,
     })
 
     return Err(
       new FetchError({
-        message: `Error upserting customer for stripe sign up: ${(error as Error).message}`,
+        message: `Error upserting customer for provider sign up: ${(error as Error).message}`,
         retry: false,
       })
     )
@@ -224,6 +236,53 @@ export async function completeStripeSignUp(
         message: "Failed to upsert customer",
       })
     )
+  }
+
+  const { err: providerMappingErr } = await wrapResult(
+    deps.db
+      .insert(customerProviderIds)
+      .values({
+        id: newId("customer_provider"),
+        projectId,
+        customerId: customerUnprice.id,
+        provider,
+        providerCustomerId: providerSession.customerId,
+        metadata: buildProviderMetadata({
+          subscriptionId: providerSession.subscriptionId,
+          defaultPaymentMethodId,
+          customerSessionId: customerSession.id,
+        }),
+      })
+      .onConflictDoUpdate({
+        target: [
+          customerProviderIds.projectId,
+          customerProviderIds.customerId,
+          customerProviderIds.provider,
+        ],
+        set: {
+          providerCustomerId: providerSession.customerId,
+          metadata: buildProviderMetadata({
+            subscriptionId: providerSession.subscriptionId,
+            defaultPaymentMethodId,
+            customerSessionId: customerSession.id,
+          }),
+        },
+      }),
+    (error) =>
+      new FetchError({
+        message: `Error upserting customer provider mapping: ${error.message}`,
+        retry: false,
+      })
+  )
+
+  if (providerMappingErr) {
+    deps.logger.error("Error upserting customer provider mapping", {
+      error: toErrorContext(providerMappingErr),
+      projectId,
+      customerId: customerUnprice.id,
+      provider,
+    })
+    return Err(providerMappingErr)
   }
 
   const { err: createSubscriptionErr, val: subscriptionData } =
@@ -248,6 +307,7 @@ export async function completeStripeSignUp(
       startAt: Date.now(),
       planVersionId: customerSession.planVersion.id,
       config: customerSession.planVersion.config,
+      paymentProvider: provider,
       paymentMethodId: defaultPaymentMethodId,
       subscriptionId: subscriptionData.id,
       customerId: customerUnprice.id,

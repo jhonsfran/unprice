@@ -581,12 +581,12 @@ export class BillingService {
         return Ok(updatedInvoice)
       }
 
-      const stripePaymentInvoice = await paymentProviderService.collectPayment({
+      const providerPaymentInvoice = await paymentProviderService.collectPayment({
         invoiceId: invoicePaymentProviderId,
         paymentMethodId: paymentMethodId,
       })
 
-      if (stripePaymentInvoice.err) {
+      if (providerPaymentInvoice.err) {
         // update the attempt if the payment failed
         await this.db
           .update(invoices)
@@ -598,19 +598,19 @@ export class BillingService {
             ],
             metadata: {
               reason: "payment_failed",
-              note: `Payment failed: ${stripePaymentInvoice.err.message}`,
+              note: `Payment failed: ${providerPaymentInvoice.err.message}`,
             },
           })
           .where(eq(invoices.id, invoice.id))
 
         return Err(
           new UnPriceBillingError({
-            message: `Error collecting payment: ${stripePaymentInvoice.err.message}`,
+            message: `Error collecting payment: ${providerPaymentInvoice.err.message}`,
           })
         )
       }
 
-      const paymentStatus = stripePaymentInvoice.val.status
+      const paymentStatus = providerPaymentInvoice.val.status
       const isPaid = ["paid", "void"].includes(paymentStatus)
 
       // update the invoice status if the payment is successful
@@ -620,7 +620,7 @@ export class BillingService {
         .set({
           status: isPaid ? "paid" : "unpaid",
           ...(isPaid ? { paidAt: Date.now() } : {}),
-          ...(isPaid ? { invoicePaymentProviderUrl: stripePaymentInvoice.val.invoiceUrl } : {}),
+          ...(isPaid ? { invoicePaymentProviderUrl: providerPaymentInvoice.val.invoiceUrl } : {}),
           paymentAttempts: [
             ...(invoice.paymentAttempts ?? []),
             {
@@ -647,14 +647,14 @@ export class BillingService {
 
     // send the invoice to the customer and wait for the payment
     if (invoice.collectionMethod === "send_invoice") {
-      const stripeSendInvoice = await paymentProviderService.sendInvoice({
+      const providerSendInvoice = await paymentProviderService.sendInvoice({
         invoiceId: invoicePaymentProviderId,
       })
 
-      if (stripeSendInvoice.err) {
+      if (providerSendInvoice.err) {
         return Err(
           new UnPriceBillingError({
-            message: `Error sending invoice: ${stripeSendInvoice.err.message}`,
+            message: `Error sending invoice: ${providerSendInvoice.err.message}`,
           })
         )
       }
@@ -1614,7 +1614,7 @@ export class BillingService {
               description: "Customer credits applied",
               isProrated: false,
               totalAmount: -credit, // negative
-              unitAmount: -credit, // ensure Stripe wrapper uses 'amount' for no-product items
+              unitAmount: -credit, // negative amount for credit line items without a product
               quantity: 1,
               currency: invoice.currency,
               metadata: { kind: "credit_applied", invoiceId: invoice.id },
@@ -1995,7 +1995,7 @@ export class BillingService {
                         projectId: phase.projectId,
                         customerId: phase.subscription.customerId,
                         currency: phase.planVersion.currency,
-                        paymentProvider: phase.planVersion.paymentProvider,
+                        paymentProvider: phase.paymentProvider,
                         totalAmount: creditAmount,
                         amountUsed: 0,
                         reason: "mid_cycle_change",
@@ -2070,7 +2070,7 @@ export class BillingService {
                   subscriptionId: phase.subscriptionId,
                   invoiceAt,
                   currency: phase.planVersion.currency,
-                  paymentProvider: phase.planVersion.paymentProvider,
+                  paymentProvider: phase.paymentProvider,
                   collectionMethod: phase.planVersion.collectionMethod,
                 })
 

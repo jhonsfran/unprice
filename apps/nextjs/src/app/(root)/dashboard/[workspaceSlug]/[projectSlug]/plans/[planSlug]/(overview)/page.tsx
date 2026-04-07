@@ -62,7 +62,7 @@ export default async function PlanPage({
                       title: plan.title,
                       projectId: plan.projectId,
                       currency: project.defaultCurrency,
-                      paymentProvider: "stripe",
+                      paymentProvider: "sandbox",
                       collectionMethod: "charge_automatically",
                       whenToBill: "pay_in_arrear",
                       trialUnits: 0,

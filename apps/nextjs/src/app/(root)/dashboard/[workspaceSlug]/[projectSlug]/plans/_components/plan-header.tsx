@@ -61,7 +61,7 @@ export default function PlanHeader(props: {
                   projectId: plan.projectId,
                   // TODO: use default currency from org settings
                   currency: "USD",
-                  paymentProvider: "stripe",
+                  paymentProvider: "sandbox",
                   collectionMethod: "charge_automatically",
                   whenToBill: "pay_in_arrear",
                   trialUnits: 0,

@@ -244,7 +244,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/paymentProvider/stripe/signUp/{sessionId}/{projectId}": {
+  "/v1/paymentProvider/{provider}/signUp/{sessionId}/{projectId}": {
     parameters: {
       query?: never
       header?: never
@@ -252,14 +252,15 @@ export interface paths {
       cookie?: never
     }
     /**
-     * stripe sign up
-     * @description This endpoint is called by stripe after the customer has signed up. No webhook is needed.
+     * provider sign up
+     * @description This endpoint is called by the configured payment provider after the customer sign-up setup session completes.
      */
     get: {
       parameters: {
         query?: never
         header?: never
         path: {
+          provider: "stripe" | "square" | "sandbox"
           projectId: string
           sessionId: string
         }
@@ -358,7 +359,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/paymentProvider/stripe/setup/{sessionId}/{projectId}": {
+  "/v1/paymentProvider/{provider}/setup/{sessionId}/{projectId}": {
     parameters: {
       query?: never
       header?: never
@@ -366,14 +367,15 @@ export interface paths {
       cookie?: never
     }
     /**
-     * stripe setup
-     * @description This endpoint is called by stripe after the customer setup a payment method. No webhook is needed.
+     * provider setup
+     * @description This endpoint is called by the configured payment provider after customer payment-method setup completes.
      */
     get: {
       parameters: {
         query?: never
         header?: never
         path: {
+          provider: "stripe" | "square" | "sandbox"
           projectId: string
           sessionId: string
         }
@@ -1414,6 +1416,8 @@ export interface operations {
               subscriptionId: string
               planVersionId: string
               paymentMethodId: string | null
+              /** @enum {string} */
+              paymentProvider: "stripe" | "square" | "sandbox"
               /** @default 0 */
               trialUnits: number | null
               billingAnchor: number
@@ -1830,8 +1834,6 @@ export interface operations {
            *     }
            */
           metadata?: {
-            stripeSubscriptionId?: string
-            stripeDefaultPaymentMethodId?: string
             country?: string
             region?: string
             city?: string

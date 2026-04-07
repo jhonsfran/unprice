@@ -15,7 +15,7 @@ import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
-export function StripePaymentConfigForm({
+export function PaymentProviderConfigForm({
   provider,
   paymentProvider,
   setDialogOpen,

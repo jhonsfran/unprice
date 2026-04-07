@@ -8,8 +8,6 @@ import { subscriptionItemsConfigSchema } from "./subscriptions/items"
 extendZodWithOpenApi(z)
 
 export const customerMetadataSchema = z.object({
-  stripeSubscriptionId: z.string().optional(),
-  stripeDefaultPaymentMethodId: z.string().optional(),
   // analytics
   country: z.string().optional(),
   region: z.string().optional(),
@@ -175,7 +173,7 @@ export const createPaymentMethodResponseSchema = z.object({
   }),
 })
 
-export const stripeSetupSchema = z.object({
+export const customerSessionCustomerSchema = z.object({
   id: z.string().min(1, "Customer id is required"),
   name: z.string().optional(),
   email: z.string().email(),
@@ -195,7 +193,7 @@ export const customerSetUpSchema = z.object({
   paymentProvider: paymentProviderSchema,
 })
 
-export const stripePlanVersionSchema = z.object({
+export const customerSessionPlanVersionSchema = z.object({
   id: z.string().min(1, "Plan version id is required"),
   projectId: z.string().min(1, "Project id is required"),
   config: subscriptionItemsConfigSchema.optional(),
@@ -216,10 +214,10 @@ export const customerPaymentMethodSchema = z.object({
   brand: z.string().optional(),
 })
 
-export type StripePlanVersion = z.infer<typeof stripePlanVersionSchema>
 export type Customer = z.infer<typeof customerSelectSchema>
 export type InsertCustomer = z.infer<typeof customerInsertBaseSchema>
-export type StripeSetup = z.infer<typeof stripeSetupSchema>
+export type CustomerSessionCustomer = z.infer<typeof customerSessionCustomerSchema>
 export type CustomerSignUp = z.infer<typeof customerSignUpSchema>
 export type CustomerSetUp = z.infer<typeof customerSetUpSchema>
 export type CustomerPaymentMethod = z.infer<typeof customerPaymentMethodSchema>
+export type CustomerSessionPlanVersion = z.infer<typeof customerSessionPlanVersionSchema>

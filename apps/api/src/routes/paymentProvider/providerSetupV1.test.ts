@@ -4,7 +4,7 @@ import type { ExecutionContext } from "hono"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
-import { registerStripeSignUpV1 } from "./stripeSignUpV1"
+import { registerProviderSetupV1 } from "./providerSetupV1"
 
 vi.mock("cloudflare:workers", () => ({
   env: {
@@ -13,15 +13,15 @@ vi.mock("cloudflare:workers", () => ({
 }))
 
 const useCaseMocks = vi.hoisted(() => ({
-  completeStripeSignUp: vi.fn(),
+  completeProviderSetup: vi.fn(),
 }))
 
 vi.mock("@unprice/services/use-cases", () => ({
-  completeStripeSignUp: useCaseMocks.completeStripeSignUp,
+  completeProviderSetup: useCaseMocks.completeProviderSetup,
 }))
 
 beforeEach(() => {
-  useCaseMocks.completeStripeSignUp.mockResolvedValue({
+  useCaseMocks.completeProviderSetup.mockResolvedValue({
     val: {
       redirectUrl: "https://example.com/success",
     },
@@ -32,20 +32,21 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-describe("stripeSignUpV1 route", () => {
+describe("providerSetupV1 route", () => {
   it("redirects to success url when use-case succeeds", async () => {
     const { app, env, executionCtx } = createTestApp()
+
     const response = await app.fetch(buildRequest(), env, executionCtx)
 
-    expect(response.status).toBe(302)
+    expect(response.status).toBe(303)
     expect(response.headers.get("location")).toBe("https://example.com/success")
   })
 
-  it("maps CUSTOMER_SESSION_NOT_FOUND to NOT_FOUND", async () => {
-    useCaseMocks.completeStripeSignUp.mockResolvedValue({
+  it("maps CUSTOMER_NOT_FOUND to NOT_FOUND", async () => {
+    useCaseMocks.completeProviderSetup.mockResolvedValue({
       err: new UnPriceCustomerError({
-        code: "CUSTOMER_SESSION_NOT_FOUND",
-        message: "Customer session not found",
+        code: "CUSTOMER_NOT_FOUND",
+        message: "Unprice customer not found in database",
       }),
     })
 
@@ -56,25 +57,6 @@ describe("stripeSignUpV1 route", () => {
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         code: "NOT_FOUND",
-      })
-    )
-  })
-
-  it("maps CUSTOMER_EXTERNAL_ID_CONFLICT to CONFLICT", async () => {
-    useCaseMocks.completeStripeSignUp.mockResolvedValue({
-      err: new UnPriceCustomerError({
-        code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
-        message: "External customer id already exists for this project",
-      }),
-    })
-
-    const { app, env, executionCtx } = createTestApp()
-    const response = await app.fetch(buildRequest(), env, executionCtx)
-
-    expect(response.status).toBe(409)
-    await expect(response.json()).resolves.toEqual(
-      expect.objectContaining({
-        code: "CONFLICT",
       })
     )
   })
@@ -94,7 +76,6 @@ function createTestApp() {
   app.use("*", async (c, next) => {
     c.set("services", {
       customer: {},
-      subscription: {},
     })
     c.set("db", {})
     c.set("logger", {
@@ -103,15 +84,11 @@ function createTestApp() {
       error: vi.fn(),
       debug: vi.fn(),
     })
-    c.set("analytics", {
-      ingestEvents: vi.fn(),
-    })
-    c.set("waitUntil", vi.fn())
 
     await next()
   })
 
-  registerStripeSignUpV1(app)
+  registerProviderSetupV1(app)
 
   const env = {
     NODE_ENV: "production",
@@ -129,7 +106,7 @@ function createTestApp() {
 }
 
 function buildRequest() {
-  return new Request("https://example.com/v1/paymentProvider/stripe/signUp/sess_123/proj_123", {
+  return new Request("https://example.com/v1/paymentProvider/stripe/setup/sess_123/proj_123", {
     method: "GET",
     headers: {
       "x-forwarded-for": "127.0.0.1",

@@ -1,10 +1,9 @@
 import { newId } from "@unprice/db/utils"
 import type { Currency } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
-import { type FetchError, Ok } from "@unprice/error"
+import { Err, type FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import type { Stripe } from "@unprice/stripe"
-import type { UnPricePaymentProviderError } from "./errors"
+import { UnPricePaymentProviderError } from "./errors"
 import type {
   AddInvoiceItemOpts,
   CreateInvoiceOpts,
@@ -12,7 +11,9 @@ import type {
   GetSessionOpts,
   GetStatusInvoice,
   InvoiceProviderStatus,
+  NormalizedProviderWebhook,
   PaymentMethod,
+  PaymentProviderCapabilities,
   PaymentProviderCreateSession,
   PaymentProviderGetSession,
   PaymentProviderInterface,
@@ -20,26 +21,39 @@ import type {
   SignUpOpts,
   UpdateInvoiceItemOpts,
   UpdateInvoiceOpts,
+  VerifiedProviderWebhook,
+  VerifyWebhookOpts,
 } from "./interface"
 
 export class SandboxPaymentProvider implements PaymentProviderInterface {
+  public readonly provider = "sandbox"
+  public readonly capabilities: PaymentProviderCapabilities = {
+    billingPortal: true,
+    savedPaymentMethods: true,
+    invoiceItemMutation: true,
+    asyncPaymentConfirmation: false,
+  }
+
   private readonly logger: Logger
   private providerCustomerId?: string | null
+  private readonly webhookSecret?: string
 
-  constructor(opts: { logger: Logger; providerCustomerId?: string | null }) {
+  constructor(opts: {
+    logger: Logger
+    providerCustomerId?: string | null
+    webhookSecret?: string
+  }) {
     this.logger = opts.logger
     this.providerCustomerId = opts.providerCustomerId
+    this.webhookSecret = opts.webhookSecret
+  }
+
+  public getCustomerId(): string | undefined {
+    return this.providerCustomerId ?? undefined
   }
 
   public setCustomerId(customerId: string) {
     this.providerCustomerId = customerId
-  }
-
-  public async upsertProduct(
-    props: Stripe.ProductCreateParams & { id: string }
-  ): Promise<Result<{ productId: string }, FetchError>> {
-    this.logger.info("Sandbox: upsertProduct", props as unknown as Record<string, unknown>)
-    return Ok({ productId: props.id })
   }
 
   public async signUp(opts: SignUpOpts): Promise<Result<PaymentProviderCreateSession, FetchError>> {
@@ -162,7 +176,6 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
           createdAt: Math.floor(Date.now() / 1000),
         },
       ],
-      items: [],
     })
   }
 
@@ -208,5 +221,50 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
   > {
     this.logger.info("Sandbox: getDefaultPaymentMethodId")
     return Ok({ paymentMethodId: "pm_sandbox_default" })
+  }
+
+  public async verifyWebhook(
+    opts: VerifyWebhookOpts
+  ): Promise<Result<VerifiedProviderWebhook, FetchError | UnPricePaymentProviderError>> {
+    const signature = opts.signature ?? opts.headers?.["sandbox-signature"]
+    const signatureToUse = Array.isArray(signature) ? signature.at(0) : signature
+
+    if (this.webhookSecret && signatureToUse && signatureToUse !== this.webhookSecret) {
+      return Err(new UnPricePaymentProviderError({ message: "Invalid sandbox webhook signature" }))
+    }
+
+    try {
+      const parsedPayload = JSON.parse(opts.rawBody) as Record<string, unknown>
+      const eventId = typeof parsedPayload.id === "string" ? parsedPayload.id : newId("event")
+      const eventType =
+        typeof parsedPayload.type === "string" ? parsedPayload.type : "sandbox.event"
+
+      return Ok({
+        eventId,
+        eventType,
+        occurredAt: Date.now(),
+        payload: parsedPayload,
+      })
+    } catch {
+      return Err(new UnPricePaymentProviderError({ message: "Invalid sandbox webhook payload" }))
+    }
+  }
+
+  public normalizeWebhook(
+    event: VerifiedProviderWebhook
+  ): Result<NormalizedProviderWebhook, UnPricePaymentProviderError> {
+    const payload = event.payload as Record<string, unknown>
+
+    return Ok({
+      provider: this.provider,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      occurredAt: event.occurredAt,
+      customerId: typeof payload.customerId === "string" ? payload.customerId : undefined,
+      subscriptionId:
+        typeof payload.subscriptionId === "string" ? payload.subscriptionId : undefined,
+      invoiceId: typeof payload.invoiceId === "string" ? payload.invoiceId : undefined,
+      payload: event.payload,
+    })
   }
 }

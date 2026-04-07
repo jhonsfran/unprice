@@ -172,8 +172,6 @@ async function main() {
         name: "unprice",
         projectId: project.id,
         email: userExists.email,
-        // stripe customer test
-        stripeCustomerId: "cus_QCzIbAwmpxZeEA",
         timezone: "UTC",
         defaultCurrency: "EUR",
         isMain: true,

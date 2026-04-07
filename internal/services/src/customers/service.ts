@@ -834,7 +834,6 @@ export class CustomerService {
     email,
     metadata,
     defaultCurrency,
-    stripeCustomerId,
     timezone,
     externalId,
   }: {
@@ -844,7 +843,6 @@ export class CustomerService {
     email: Customer["email"]
     metadata?: Customer["metadata"]
     defaultCurrency?: Customer["defaultCurrency"]
-    stripeCustomerId?: Customer["stripeCustomerId"]
     timezone?: Customer["timezone"]
     externalId?: Customer["externalId"]
   }): Promise<Result<Customer, FetchError>> {
@@ -864,7 +862,6 @@ export class CustomerService {
           ...(metadata && { metadata }),
           ...(externalId && { externalId }),
           ...(defaultCurrency && { defaultCurrency }),
-          ...(stripeCustomerId && { stripeCustomerId }),
         })
         .returning()
         .then((rows) => rows[0] ?? null),
@@ -1238,11 +1235,11 @@ export class CustomerService {
       return []
     }
 
-    try {
-      const customerId = paymentProviderService.getCustomerId()
+    const providerCustomerId = paymentProviderService.getCustomerId()
 
-      // if no customer id, return empty array
-      if (!customerId) {
+    try {
+      // For sandbox we can still simulate a payment method list without an external customer id.
+      if (!providerCustomerId && provider !== "sandbox") {
         return []
       }
 
@@ -1252,7 +1249,7 @@ export class CustomerService {
 
       if (err) {
         this.logger.error("payment provider error", {
-          customerId,
+          customerId: providerCustomerId,
           projectId,
           provider,
           error: toErrorContext(err),
@@ -1265,7 +1262,7 @@ export class CustomerService {
       const error = err as Error
 
       this.logger.error("payment provider error", {
-        customerId,
+        customerId: providerCustomerId,
         projectId,
         provider,
         error: toErrorContext(error),

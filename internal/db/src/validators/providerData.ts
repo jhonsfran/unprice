@@ -4,7 +4,14 @@ import { z } from "zod"
 import * as schema from "../schema"
 import { paymentProviderSchema } from "./shared"
 
-export const customerProviderMetadataSchema = z.record(z.string(), z.unknown())
+export const customerProviderMetadataSchema = z
+  .object({
+    defaultPaymentMethodId: z.string().optional(),
+    subscriptionId: z.string().optional(),
+    setupSessionId: z.string().optional(),
+    customerSessionId: z.string().optional(),
+  })
+  .passthrough()
 
 export const customerProviderIdSelectSchema = createSelectSchema(schema.customerProviderIds, {
   provider: paymentProviderSchema,

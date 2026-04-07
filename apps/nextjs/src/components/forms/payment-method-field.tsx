@@ -53,7 +53,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
     trpc.customers.listPaymentMethods.queryOptions(
       {
         customerId: customerId,
-        provider: paymentProvider ?? "stripe",
+        provider: paymentProvider,
       },
       {
         enabled: !!customerId,

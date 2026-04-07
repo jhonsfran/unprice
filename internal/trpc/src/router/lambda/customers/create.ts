@@ -8,16 +8,7 @@ export const create = protectedProjectProcedure
   .input(customerInsertBaseSchema)
   .output(z.object({ customer: customerSelectSchema }))
   .mutation(async (opts) => {
-    const {
-      description,
-      name,
-      email,
-      metadata,
-      defaultCurrency,
-      stripeCustomerId,
-      timezone,
-      externalId,
-    } = opts.input
+    const { description, name, email, metadata, defaultCurrency, timezone, externalId } = opts.input
     const { project } = opts.ctx
     const { customers } = opts.ctx.services
 
@@ -32,7 +23,6 @@ export const create = protectedProjectProcedure
       email,
       metadata: metadataWithGeolocation,
       defaultCurrency,
-      stripeCustomerId,
       timezone,
       externalId,
     })

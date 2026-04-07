@@ -13,8 +13,10 @@ import { useEffect } from "react"
 import { z } from "zod"
 import ConfigItemsFormField from "~/components/forms/items-fields"
 import PaymentMethodsFormField from "~/components/forms/payment-method-field"
+import { PaymentProviderFormField } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/[planSlug]/_components/version-fields-form"
 import SelectPlanFormField from "~/components/forms/select-plan-field"
 import TrialUnitsFormField from "~/components/forms/trial-days-field"
+import { useParams } from "next/navigation"
 import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
@@ -31,6 +33,9 @@ export function SubscriptionPhaseForm({
   onSubmit: (data: InsertSubscriptionPhase | SubscriptionPhase) => void
 }) {
   const trpc = useTRPC()
+  const params = useParams()
+  const workspaceSlug = params.workspaceSlug as string
+  const projectSlug = params.projectSlug as string
   const editMode = defaultValues.id !== "" && defaultValues.id !== undefined
 
   const formSchema = editMode
@@ -105,6 +110,8 @@ export function SubscriptionPhaseForm({
   )
 
   const selectedPlanVersionId = form.watch("planVersionId")
+  const selectedPaymentProvider = form.watch("paymentProvider")
+  const paymentMethodRequired = form.watch("paymentMethodRequired")
   const selectedPlanVersion = planVersions?.planVersions.find(
     (version) => version.id === selectedPlanVersionId
   )
@@ -117,7 +124,7 @@ export function SubscriptionPhaseForm({
       form.setValue("paymentMethodId", defaultValues.paymentMethodId)
       form.setValue("trialUnits", selectedPlanVersion.trialUnits)
     }
-  }, [selectedPlanVersionId])
+  }, [selectedPlanVersion, defaultValues.paymentMethodId, form])
 
   return (
     <Form {...form}>
@@ -127,6 +134,13 @@ export function SubscriptionPhaseForm({
           isDisabled={editMode}
           planVersions={planVersions?.planVersions ?? []}
           isLoading={isLoading}
+        />
+
+        <PaymentProviderFormField
+          form={form}
+          isDisabled={true}
+          workspaceSlug={workspaceSlug}
+          projectSlug={projectSlug}
         />
 
         <Separator />
@@ -141,12 +155,12 @@ export function SubscriptionPhaseForm({
           />
         </div>
 
-        {selectedPlanVersion?.paymentProvider && selectedPlanVersion?.paymentMethodRequired && (
+        {selectedPaymentProvider && paymentMethodRequired && (
           <PaymentMethodsFormField
             form={form}
             withSeparator
-            paymentProvider={selectedPlanVersion?.paymentProvider}
-            paymentProviderRequired={selectedPlanVersion?.paymentMethodRequired}
+            paymentProvider={selectedPaymentProvider}
+            paymentProviderRequired={paymentMethodRequired}
           />
         )}
 

@@ -20,8 +20,8 @@ import { registerVerifyV1 } from "./routes/customer/verifyV1"
 import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerGetLakehouseFilePlanV1 } from "./routes/lakehouse/getLakehouseFilePlanV1"
-import { registerStripeSetupV1 } from "./routes/paymentProvider/stripeSetupV1"
-import { registerStripeSignUpV1 } from "./routes/paymentProvider/stripeSignUpV1"
+import { registerProviderSetupV1 } from "./routes/paymentProvider/providerSetupV1"
+import { registerProviderSignUpV1 } from "./routes/paymentProvider/providerSignUpV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
 import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
 import { registerGetFeaturesV1 } from "./routes/project/getFeaturesV1"
@@ -138,8 +138,8 @@ registerGetPlanVersionV1(app)
 registerListPlanVersionsV1(app)
 
 // Payment provider routes
-registerStripeSignUpV1(app)
-registerStripeSetupV1(app)
+registerProviderSignUpV1(app)
+registerProviderSetupV1(app)
 
 // Analytics routes
 registerGetAnalyticsUsageV1(app)

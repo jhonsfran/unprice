@@ -1,20 +1,20 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { customerSessions, customers } from "@unprice/db/schema"
+import { customerProviderIds, customerSessions, customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
+import { getPaymentProviderCapabilities } from "../../payment-provider/service"
 
 type SignUpDeps = {
   services: Pick<ServiceContext, "plans" | "customers" | "subscriptions">
   db: Database
   logger: Logger
   analytics: Analytics
-  // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler
-  waitUntil: (promise: Promise<any>) => void
+  waitUntil: (promise: Promise<unknown>) => void
 }
 
 type SignUpInput = {
@@ -403,6 +403,7 @@ async function handleDirectProvisioningFlow(
 > {
   const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
   const { email, name, config, timezone, metadata, externalId } = input
+  const paymentProvider = planVersion.paymentProvider
 
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
   const customerMetadata = externalId ? { ...metadata, externalId } : metadata
@@ -434,6 +435,23 @@ async function handleDirectProvisioningFlow(
         )
       }
 
+      // Providers that don't support async payment confirmation (e.g. sandbox)
+      // won't go through the redirect-based sign-up flow, so we create the
+      // provider mapping here using the internal customer id.
+      const providerCaps = getPaymentProviderCapabilities(paymentProvider)
+      if (!providerCaps.asyncPaymentConfirmation) {
+        await tx.insert(customerProviderIds).values({
+          id: newId("customer_provider"),
+          projectId,
+          customerId: newCustomer.id,
+          provider: paymentProvider,
+          providerCustomerId: newCustomer.id,
+          metadata: {
+            setupSessionId: "direct_signup",
+          },
+        })
+      }
+
       const { err, val: newSubscription } = await deps.services.subscriptions.createSubscription({
         input: {
           customerId: newCustomer.id,
@@ -460,7 +478,7 @@ async function handleDirectProvisioningFlow(
           planVersionId: planVersion.id,
           startAt: phaseTimestamp,
           config: config,
-          paymentProvider: planVersion.paymentProvider,
+          paymentProvider: paymentProvider,
           paymentMethodRequired: planVersion.paymentMethodRequired,
           customerId: newCustomer.id,
           subscriptionId: newSubscription.id,
@@ -602,9 +620,9 @@ export async function signUp(
     },
   })
 
-  const isSandbox = planVersion.paymentProvider === "sandbox"
+  const capabilities = getPaymentProviderCapabilities(planVersion.paymentProvider)
 
-  if (planVersion.paymentMethodRequired && !isSandbox) {
+  if (planVersion.paymentMethodRequired && capabilities.asyncPaymentConfirmation) {
     return handlePaymentRequiredFlow(deps, context)
   }
 

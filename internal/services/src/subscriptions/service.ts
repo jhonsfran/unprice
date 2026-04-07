@@ -29,6 +29,7 @@ import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { Metrics } from "../metrics"
+import { getPaymentProviderCapabilities } from "../payment-provider/service"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
@@ -800,13 +801,13 @@ export class SubscriptionService {
     // if (billingAnchorToUse === "dayOfCreation") {
     //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
     // }
-    // let's skip the payment method validation if the payment provider is sandbox
     const paymentProviderToUse = paymentProvider ?? versionData.paymentProvider
+    const providerCaps = getPaymentProviderCapabilities(paymentProviderToUse)
 
-    // validate payment method is required and if not provided
+    // skip payment method validation for providers without async payment confirmation
     if (
       paymentMethodRequired &&
-      paymentProviderToUse !== "sandbox" &&
+      providerCaps.asyncPaymentConfirmation &&
       (!paymentMethodId || paymentMethodId === "")
     ) {
       return Err(

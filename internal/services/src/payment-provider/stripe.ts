@@ -1,6 +1,6 @@
 import {
-  STRIPE_SETUP_CALLBACK_PREFIX_URL,
-  STRIPE_SIGNUP_CALLBACK_PREFIX_URL,
+  getPaymentProviderSetupCallbackPrefixUrl,
+  getPaymentProviderSignUpCallbackPrefixUrl,
 } from "@unprice/config"
 import type { Currency } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
@@ -16,7 +16,9 @@ import type {
   GetSessionOpts,
   GetStatusInvoice,
   InvoiceProviderStatus,
+  NormalizedProviderWebhook,
   PaymentMethod,
+  PaymentProviderCapabilities,
   PaymentProviderCreateSession,
   PaymentProviderGetSession,
   PaymentProviderInterface,
@@ -24,16 +26,33 @@ import type {
   SignUpOpts,
   UpdateInvoiceItemOpts,
   UpdateInvoiceOpts,
+  VerifiedProviderWebhook,
+  VerifyWebhookOpts,
 } from "./interface"
 
 export class StripePaymentProvider implements PaymentProviderInterface {
+  public readonly provider = "stripe"
+  public readonly capabilities: PaymentProviderCapabilities = {
+    billingPortal: true,
+    savedPaymentMethods: true,
+    invoiceItemMutation: true,
+    asyncPaymentConfirmation: true,
+  }
+
   private readonly client: Stripe
   private providerCustomerId?: string | null
   private readonly logger: Logger
+  private readonly webhookSecret?: string
 
-  constructor(opts: { token: string; providerCustomerId?: string | null; logger: Logger }) {
+  constructor(opts: {
+    token: string
+    providerCustomerId?: string | null
+    logger: Logger
+    webhookSecret?: string
+  }) {
     this.providerCustomerId = opts?.providerCustomerId
     this.logger = opts?.logger
+    this.webhookSecret = opts.webhookSecret
 
     this.client = new Stripe(opts.token, {
       apiVersion: "2023-10-16",
@@ -41,42 +60,12 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     })
   }
 
-  public setCustomerId(customerId: string) {
-    this.providerCustomerId = customerId
+  public getCustomerId(): string | undefined {
+    return this.providerCustomerId ?? undefined
   }
 
-  public async upsertProduct(
-    props: Stripe.ProductCreateParams & { id: string }
-  ): Promise<Result<{ productId: string }, FetchError>> {
-    try {
-      const { id, type, ...rest } = props
-      const product = await this.client.products.retrieve(id).catch(() => null)
-
-      if (product) {
-        const updatedProduct = await this.client.products.update(id, {
-          ...rest,
-        })
-
-        return Ok({ productId: updatedProduct.id })
-      }
-
-      return Ok({ productId: (await this.client.products.create(props)).id })
-    } catch (error) {
-      const e = error as Error
-
-      this.logger.error("Error upserting product", {
-        error: toErrorContext(e),
-        context: e,
-        ...props,
-      })
-
-      return Err(
-        new FetchError({
-          message: e.message,
-          retry: true,
-        })
-      )
-    }
+  public setCustomerId(customerId: string) {
+    this.providerCustomerId = customerId
   }
 
   public async signUp(opts: SignUpOpts): Promise<Result<PaymentProviderCreateSession, FetchError>> {
@@ -96,7 +85,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
 
       // do not use `new URL(...).searchParams` here, because it will escape the curly braces and stripe will not replace them with the session id
       // we pass urls as metadata and the call one of our endpoints to handle the session validation and then redirect the user to the success or cancel url
-      const apiCallbackUrl = `${STRIPE_SIGNUP_CALLBACK_PREFIX_URL}/{CHECKOUT_SESSION_ID}/${opts.customer.projectId}`
+      const apiCallbackUrl = `${getPaymentProviderSignUpCallbackPrefixUrl("stripe")}/{CHECKOUT_SESSION_ID}/${opts.customer.projectId}`
 
       // create a new session for registering a payment method
       const session = await this.client.checkout.sessions.create({
@@ -157,7 +146,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
 
       // do not use `new URL(...).searchParams` here, because it will escape the curly braces and stripe will not replace them with the session id
       // we pass urls as metadata and the call one of our endpoints to handle the session validation and then redirect the user to the success or cancel url
-      const apiCallbackUrl = `${STRIPE_SETUP_CALLBACK_PREFIX_URL}/{CHECKOUT_SESSION_ID}/${opts.projectId}`
+      const apiCallbackUrl = `${getPaymentProviderSetupCallbackPrefixUrl("stripe")}/{CHECKOUT_SESSION_ID}/${opts.projectId}`
 
       // create a new session for registering a payment method
       const session = await this.client.checkout.sessions.create({
@@ -657,5 +646,66 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     }
 
     return Ok({ paymentMethodId: paymentMethod.id })
+  }
+
+  public async verifyWebhook(
+    opts: VerifyWebhookOpts
+  ): Promise<Result<VerifiedProviderWebhook, FetchError | UnPricePaymentProviderError>> {
+    const signature = opts.signature ?? opts.headers?.["stripe-signature"]
+    const signatureToUse = Array.isArray(signature) ? signature.at(0) : signature
+    const secret = opts.secret ?? this.webhookSecret
+
+    if (!secret) {
+      return Err(new UnPricePaymentProviderError({ message: "Webhook secret not configured" }))
+    }
+
+    if (!signatureToUse) {
+      return Err(new UnPricePaymentProviderError({ message: "Missing webhook signature" }))
+    }
+
+    try {
+      const event = this.client.webhooks.constructEvent(opts.rawBody, signatureToUse, secret)
+
+      return Ok({
+        eventId: event.id,
+        eventType: event.type,
+        occurredAt: event.created * 1000,
+        payload: event as unknown,
+      })
+    } catch (error) {
+      const e = error as Error
+      this.logger.error("Error verifying stripe webhook", {
+        error: toErrorContext(e),
+      })
+      return Err(new FetchError({ message: e.message, retry: false }))
+    }
+  }
+
+  public normalizeWebhook(
+    event: VerifiedProviderWebhook
+  ): Result<NormalizedProviderWebhook, UnPricePaymentProviderError> {
+    const payload = event.payload as {
+      data?: {
+        object?: Record<string, unknown>
+      }
+    }
+
+    const object = payload.data?.object
+    const customerId = typeof object?.customer === "string" ? object.customer : undefined
+    const subscriptionId =
+      typeof object?.subscription === "string" ? object.subscription : undefined
+    const invoiceId =
+      typeof object?.id === "string" && event.eventType.includes("invoice") ? object.id : undefined
+
+    return Ok({
+      provider: this.provider,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      occurredAt: event.occurredAt,
+      customerId,
+      subscriptionId,
+      invoiceId,
+      payload: event.payload,
+    })
   }
 }

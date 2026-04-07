@@ -1,6 +1,5 @@
-import type { CollectionMethod, Currency } from "@unprice/db/validators"
+import type { CollectionMethod, Currency, PaymentProvider } from "@unprice/db/validators"
 import type { FetchError, Result } from "@unprice/error"
-import type { Stripe } from "@unprice/stripe"
 import type { UnPricePaymentProviderError } from "./errors"
 
 export interface PaymentProviderCreateSession {
@@ -35,6 +34,40 @@ export interface SignUpOpts {
   customerSessionId: string
   successUrl: string
   cancelUrl: string
+}
+
+export type PaymentProviderCapabilities = {
+  billingPortal: boolean
+  savedPaymentMethods: boolean
+  invoiceItemMutation: boolean
+  asyncPaymentConfirmation: boolean
+}
+
+export type PaymentProviderWebhookHeaders = Record<string, string | string[] | undefined>
+
+export type VerifyWebhookOpts = {
+  rawBody: string
+  signature?: string
+  headers?: PaymentProviderWebhookHeaders
+  secret?: string
+}
+
+export type VerifiedProviderWebhook = {
+  eventId: string
+  eventType: string
+  occurredAt: number
+  payload: unknown
+}
+
+export type NormalizedProviderWebhook = {
+  provider: PaymentProvider
+  eventId: string
+  eventType: string
+  occurredAt: number
+  customerId?: string
+  subscriptionId?: string
+  invoiceId?: string
+  payload: unknown
 }
 
 export interface CreateInvoiceOpts {
@@ -139,15 +172,19 @@ export type InvoiceProviderStatus =
 
 // Cache interface so you can swap out the cache implementation
 export interface PaymentProviderInterface {
+  readonly provider: PaymentProvider
+  readonly capabilities: PaymentProviderCapabilities
+
+  getCustomerId: () => string | undefined
+  setCustomerId: (customerId: string) => void
+
+  getSession: (opts: GetSessionOpts) => Promise<Result<PaymentProviderGetSession, FetchError>>
+
   createSession: (
     opts: CreateSessionOpts
   ) => Promise<Result<PaymentProviderCreateSession, FetchError>>
 
   signUp: (opts: SignUpOpts) => Promise<Result<PaymentProviderCreateSession, FetchError>>
-
-  upsertProduct: (
-    props: Stripe.ProductCreateParams & { id: string }
-  ) => Promise<Result<{ productId: string }, FetchError>>
 
   listPaymentMethods: (opts: { limit?: number }) => Promise<
     Result<PaymentMethod[], FetchError | UnPricePaymentProviderError>
@@ -179,7 +216,7 @@ export interface PaymentProviderInterface {
 
   collectPayment: (opts: { invoiceId: string; paymentMethodId: string }) => Promise<
     Result<
-      { invoiceId: string; status: InvoiceProviderStatus },
+      { invoiceId: string; status: InvoiceProviderStatus; invoiceUrl: string },
       FetchError | UnPricePaymentProviderError
     >
   >
@@ -195,4 +232,12 @@ export interface PaymentProviderInterface {
   updateInvoiceItem: (
     opts: UpdateInvoiceItemOpts
   ) => Promise<Result<void, FetchError | UnPricePaymentProviderError>>
+
+  verifyWebhook: (
+    opts: VerifyWebhookOpts
+  ) => Promise<Result<VerifiedProviderWebhook, FetchError | UnPricePaymentProviderError>>
+
+  normalizeWebhook: (
+    event: VerifiedProviderWebhook
+  ) => Result<NormalizedProviderWebhook, UnPricePaymentProviderError>
 }

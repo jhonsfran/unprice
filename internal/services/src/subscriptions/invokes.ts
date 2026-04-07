@@ -66,7 +66,7 @@ export async function loadSubscription(payload: {
   const { val, err: validatePaymentMethodErr } = await customerService.validatePaymentMethod({
     customerId: customer.id,
     projectId: projectId,
-    paymentProvider: currentPhase?.planVersion.paymentProvider,
+    paymentProvider: currentPhase?.paymentProvider,
     requiredPaymentMethod: currentPhase?.planVersion.paymentMethodRequired,
   })
 
@@ -393,7 +393,7 @@ export async function invoiceSubscription({
             collectionMethod: phase.planVersion.collectionMethod,
             invoicePaymentProviderId: "",
             invoicePaymentProviderUrl: "",
-            paymentProvider: phase.planVersion.paymentProvider,
+            paymentProvider: phase.paymentProvider,
             currency: phase.planVersion.currency,
             pastDueAt: pastDueAt,
             dueAt: dueAt,
