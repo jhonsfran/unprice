@@ -14,7 +14,7 @@ export const saveConfig = protectedProjectProcedure
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
-    const { key, paymentProvider } = opts.input
+    const { key, paymentProvider, webhookSecret } = opts.input
     const projectId = opts.ctx.project.id
 
     const { val, err } = await savePaymentProviderConfigUseCase(
@@ -25,6 +25,7 @@ export const saveConfig = protectedProjectProcedure
       {
         projectId,
         key,
+        webhookSecret: webhookSecret ?? undefined,
         paymentProvider,
       }
     )

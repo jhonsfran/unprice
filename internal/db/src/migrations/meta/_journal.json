@@ -15,6 +15,13 @@
       "when": 1774125033406,
       "tag": "0001_next_vector",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1775595938768,
+      "tag": "0002_mysterious_owl",
+      "breakpoints": true
     }
   ]
 }

@@ -460,6 +460,7 @@ async function handleDirectProvisioningFlow(
           planVersionId: planVersion.id,
           startAt: phaseTimestamp,
           config: config,
+          paymentProvider: planVersion.paymentProvider,
           paymentMethodRequired: planVersion.paymentMethodRequired,
           customerId: newCustomer.id,
           subscriptionId: newSubscription.id,

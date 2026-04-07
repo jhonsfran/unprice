@@ -113,6 +113,7 @@ export function SubscriptionPhaseForm({
   useEffect(() => {
     if (selectedPlanVersion) {
       form.setValue("paymentMethodRequired", selectedPlanVersion.paymentMethodRequired)
+      form.setValue("paymentProvider", selectedPlanVersion.paymentProvider)
       form.setValue("paymentMethodId", defaultValues.paymentMethodId)
       form.setValue("trialUnits", selectedPlanVersion.trialUnits)
     }

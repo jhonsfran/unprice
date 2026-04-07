@@ -22,7 +22,7 @@ import type {
 } from "../validators/subscriptions"
 import { billingPeriods } from "./billingPeriods"
 import { customers } from "./customers"
-import { subscriptionStatusEnum } from "./enums"
+import { paymentProviderEnum, subscriptionStatusEnum } from "./enums"
 import { invoices } from "./invoices"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { versions } from "./planVersions"
@@ -95,6 +95,7 @@ export const subscriptionPhases = pgTableProject(
     // payment method id of the customer - if not set, the first payment method will be used
     // payment method is tied to the phase because it's tied to the plan version payment provider
     paymentMethodId: text("payment_method_id"),
+    paymentProvider: paymentProviderEnum("payment_provider").notNull().default("stripe"),
     // trial units of the phase
     trialUnits: integer("trial_units").notNull().default(0),
     // billing anchor of the phase

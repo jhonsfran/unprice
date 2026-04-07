@@ -59,6 +59,7 @@ export function StripePaymentConfigForm({
       paymentProvider: paymentProvider,
       key: "",
       keyIv: "",
+      webhookSecret: "",
       active: true,
       // from onboarding we can't infer the projectSlug, so we pass it as a search param
       ...(projectSlug ? { projectSlug } : {}),
@@ -92,11 +93,31 @@ export function StripePaymentConfigForm({
           name="key"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Stripe Secret Key</FormLabel>
+              <FormLabel>Provider Secret Key</FormLabel>
               <FormControl>
                 <Input
                   {...field}
-                  placeholder="stripe api key"
+                  placeholder="api key"
+                  type="password"
+                  disabled={!form.getValues("active")}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="webhookSecret"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Webhook Secret (optional)</FormLabel>
+              <FormControl>
+                <Input
+                  {...field}
+                  value={field.value ?? ""}
+                  placeholder="provider webhook secret"
                   type="password"
                   disabled={!form.getValues("active")}
                 />

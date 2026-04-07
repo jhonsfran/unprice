@@ -12,9 +12,9 @@ export default async function ProjectPaymentSettingsPage() {
       <CardHeader>
         <div className="flex flex-row items-center justify-between">
           <div className="flex flex-col space-y-1.5">
-            <CardTitle>Stripe Privider</CardTitle>
+            <CardTitle>Payment Provider</CardTitle>
             <CardDescription>
-              Connect your Stripe account to enable payments for your project
+              Configure your provider credentials to enable payment processing for this project
             </CardDescription>
           </div>
         </div>

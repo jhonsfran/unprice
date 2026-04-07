@@ -16,13 +16,14 @@ type SavePaymentProviderConfigInput = {
   projectId: string
   paymentProvider: PaymentProvider
   key: string
+  webhookSecret?: string
 }
 
 export async function savePaymentProviderConfig(
   deps: SavePaymentProviderConfigDeps,
   input: SavePaymentProviderConfigInput
 ): Promise<Result<PaymentProviderConfig, FetchError>> {
-  const { projectId, paymentProvider, key } = input
+  const { projectId, paymentProvider, key, webhookSecret } = input
 
   const { val: encryptedKey, err: encryptErr } = await wrapResult(
     (async () => {
@@ -45,24 +46,63 @@ export async function savePaymentProviderConfig(
     return Err(encryptErr)
   }
 
+  let encryptedWebhookSecret: { ciphertext: string; iv: string } | undefined
+  const webhookSecretToEncrypt = webhookSecret?.trim()
+
+  if (webhookSecretToEncrypt) {
+    const { val, err } = await wrapResult(
+      (async () => {
+        const aesGCM = await AesGCM.withBase64Key(env.ENCRYPTION_KEY)
+        return aesGCM.encrypt(webhookSecretToEncrypt)
+      })(),
+      (error) =>
+        new FetchError({
+          message: `error encrypting payment provider webhook secret: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      deps.logger.error("error encrypting payment provider webhook secret", {
+        error: toErrorContext(err),
+        projectId,
+        paymentProvider,
+      })
+      return Err(err)
+    }
+
+    encryptedWebhookSecret = val
+  }
+
+  const insertValues: typeof paymentProviderConfig.$inferInsert = {
+    id: newId("payment_provider_config"),
+    projectId,
+    paymentProvider,
+    active: true,
+    key: encryptedKey.ciphertext,
+    keyIv: encryptedKey.iv,
+    webhookSecret: encryptedWebhookSecret?.ciphertext ?? null,
+    webhookSecretIv: encryptedWebhookSecret?.iv ?? null,
+  }
+
+  const onConflictSet: Partial<typeof paymentProviderConfig.$inferInsert> = {
+    active: true,
+    key: encryptedKey.ciphertext,
+    keyIv: encryptedKey.iv,
+  }
+
+  if (encryptedWebhookSecret) {
+    onConflictSet.webhookSecret = encryptedWebhookSecret.ciphertext
+    onConflictSet.webhookSecretIv = encryptedWebhookSecret.iv
+  }
+
   const { val, err } = await wrapResult(
     deps.db
       .insert(paymentProviderConfig)
-      .values({
-        id: newId("payment_provider_config"),
-        projectId,
-        paymentProvider,
-        active: true,
-        key: encryptedKey.ciphertext,
-        keyIv: encryptedKey.iv,
-      })
+      .values(insertValues)
       .onConflictDoUpdate({
         target: [paymentProviderConfig.paymentProvider, paymentProviderConfig.projectId],
-        set: {
-          active: true,
-          key: encryptedKey.ciphertext,
-          keyIv: encryptedKey.iv,
-        },
+        set: onConflictSet,
       })
       .returning()
       .then((rows) => rows[0] ?? null),

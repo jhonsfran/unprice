@@ -16,6 +16,8 @@ export const paymentProviderConfig = pgTableProject(
     paymentProvider: paymentProviderEnum("payment_provider").default("stripe").notNull(),
     key: text("key").notNull(),
     keyIv: text("key_iv").notNull(),
+    webhookSecret: text("webhook_secret"),
+    webhookSecretIv: text("webhook_secret_iv"),
   },
   (table) => ({
     primary: primaryKey({

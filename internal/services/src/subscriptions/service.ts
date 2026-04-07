@@ -655,6 +655,7 @@ export class SubscriptionService {
       trialUnits,
       metadata,
       config,
+      paymentProvider,
       paymentMethodId,
       startAt,
       endAt,
@@ -800,12 +801,12 @@ export class SubscriptionService {
     //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
     // }
     // let's skip the payment method validation if the payment provider is sandbox
-    const paymentProvider = versionData.paymentProvider
+    const paymentProviderToUse = paymentProvider ?? versionData.paymentProvider
 
     // validate payment method is required and if not provided
     if (
       paymentMethodRequired &&
-      paymentProvider !== "sandbox" &&
+      paymentProviderToUse !== "sandbox" &&
       (!paymentMethodId || paymentMethodId === "")
     ) {
       return Err(
@@ -883,6 +884,7 @@ export class SubscriptionService {
           planVersionId,
           subscriptionId,
           paymentMethodId,
+          paymentProvider: paymentProviderToUse,
           trialEndsAt: trialsEndAt,
           trialUnits: trialUnitsToUse,
           startAt: startAtToUse,

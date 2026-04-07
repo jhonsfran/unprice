@@ -6,6 +6,7 @@ import { paymentProviderSchema } from "./shared"
 
 export const insertPaymentProviderConfigSchema = createInsertSchema(paymentProviderConfig, {
   key: z.string().min(1),
+  webhookSecret: z.string().optional(),
   paymentProvider: paymentProviderSchema,
 })
   .required({

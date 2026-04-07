@@ -37,7 +37,7 @@ export const customers = pgTableProject(
     description: text("description"),
     externalId: text("external_id"),
     metadata: json("metadata").$type<z.infer<typeof customerMetadataSchema>>(),
-    stripeCustomerId: text("stripe_customer_id").unique("stripe_customer_unique"),
+    stripeCustomerId: text("stripe_customer_id"),
     active: boolean("active").notNull().default(true),
     isMain: boolean("is_main").notNull().default(false),
     // all customers will have a default currency - normally the currency of the project
@@ -49,6 +49,9 @@ export const customers = pgTableProject(
     externalId: uniqueIndex("cp_external_id_idx")
       .on(table.projectId, table.externalId)
       .where(sql`${table.externalId} IS NOT NULL`),
+    stripeCustomerId: uniqueIndex("customers_project_stripe_customer_id_uq")
+      .on(table.projectId, table.stripeCustomerId)
+      .where(sql`${table.stripeCustomerId} IS NOT NULL`),
     // improve performance when querying by customer id only
     customerId: index("customer_id").on(table.id),
     primary: primaryKey({
