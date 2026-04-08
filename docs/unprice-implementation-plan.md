@@ -613,129 +613,266 @@ Add tests for:
 >
 > **Goal:** Make agents first-class billable actors by resolving customers from
 > API keys, exposing billing facts from synchronous metering, rating event-time
-> usage, and posting that usage into the same ledger and settlement pipeline as
-> human billing.
+> usage, and posting that usage into the ledger. Prepare the event schema for
+> trace/session grouping and outcome-based pricing.
 >
 > **Branch:** `feat/agent-billing`
+>
+> **Detailed plan:** [docs/plans/unprice-phase-06-agent-billing.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-06-agent-billing.md)
 
 ### Commits
 
 **6.1 — Add `apikey_customers` table and service methods**
 
-Requirements:
-- add `apikey_customers`
-- implement API key to customer resolution
-- implement API key to customer linking
-- expose the first integration point via the existing tRPC apikey surface
+Add `apikey_customers`, implement API key to customer resolution and linking,
+and keep omission of `customerId` valid only for dedicated keys with a single
+active binding.
 
 **6.2 — Add `provisionAgentCustomer` use case**
 
-Coordinate:
-- customer creation or lookup
-- API key linking
-- manual grant creation
-- initial billing configuration for an agent customer
-
-Important constraint:
-- manual grants are for entitlement and provisioning, not a replacement for billing artifacts
+Coordinate customer creation or lookup, dedicated API key linkage, manual grant
+creation from explicit `featurePlanVersionIds`, and eager entitlement
+materialization.
 
 **6.3 — Make ingestion resolve customer ids from API keys**
 
-Update ingestion so `customerId` becomes optional at the API edge.
+Make `customerId` optional at the API edge for dedicated keys. Keep internal
+contracts carrying resolved `customerId`.
 
-Requirements:
-- when `customerId` is omitted, resolve it from `apikey_customers` before building the queue message
-- update `resolveContextProjectId()` to work without request-body `customerId`
-- keep the internal queue contract carrying a resolved `customerId`
-- keep deduplication keyed by resolved customer id
+**6.4 — Persist durable billing facts from synchronous metering**
 
-**6.4 — Extend `EntitlementWindowDO.apply()` to return billing facts**
+Extend `EntitlementWindowDO.apply()` so accepted events persist billing facts
+and a Durable Object billing outbox. Do not rate in the sync path.
 
-Extend the return type to include:
-- `delta`
-- `valueAfter`
+**6.5 — Narrow the `RatingService` seam**
 
-Important constraint:
-- no new metering algorithm is needed
-- the DO already computes these values
+Refactor `rateIncrementalUsage()` into smaller internal steps for context
+resolution, single-snapshot rating, and delta calculation so future billing
+modes can reuse the same building blocks.
 
-**6.5 — Add `reportAgentUsage` use case**
+**6.6 — Add `reportAgentUsage` use case**
 
-Requirements:
-- consume the billing facts from sync ingestion
-- call `RatingService.rateIncrementalUsage()`
-- post idempotent ledger debits with `sourceType: "agent_usage"`
-- use the event id as the deterministic source id
+Consume durable billing facts, rate incremental usage asynchronously, and post
+idempotent ledger debits with `sourceType: "agent_usage_v1"`. Settlement
+routing deferred to Phase 7.
 
-**6.6 — Add SettlementRouter**
+**6.7 — Wire background agent billing from the Durable Object**
 
-Introduce a settlement router that decides how a rated or ledger-backed charge should be settled.
+Connect: authenticate → resolve customer → entitlement eval → persist billing
+facts → trigger background billing. Failed billing must not corrupt metering
+state.
 
-Initial routing modes:
-- `invoice`
-- `wallet`
-- `one_time`
+**6.8 — Keep backend ready for future grouping and spend controls**
 
-Important constraints:
-- `invoice` must integrate with the existing invoice settlement flow
-- `wallet` is only implemented if wallet infrastructure exists by this phase
-- `one_time` must use the normalized provider runtime and leave room for crypto-backed collectors later
+Preserve enough metadata and billing-fact context for future `operationId`,
+estimated spend, and spend-control work without expanding the SDK in this
+phase.
 
-**6.7 — Wire agent usage into the sync ingestion path**
-
-Only after customer resolution and billing facts are both available.
-
-Requirements:
-- no speculative calls before the data contract exists
-- failed agent-usage reporting must not silently corrupt metering state
-
-**6.8 — Add tests for the full agent-billing path**
-
-Add tests for:
-- API key to customer resolution
-- agent provisioning
-- sync ingestion with API-key-only resolution
-- DO billing facts
-- incremental event rating
-- ledger posting for agent usage
-- settlement routing integration
+**6.9 — Add tests for the full agent-billing path**
 
 ---
 
-## Phase 7: Trace Aggregation DO (Optional Extension)
+## Phase 7: Credits, Wallets & Settlement Router
 
-> **PR title:** `feat: add trace aggregation durable object`
+> **PR title:** `feat: add credits, wallets, and settlement router`
 >
-> **Goal:** Aggregate trace-scoped usage before rating and ledger posting when
-> agent workloads need trace-level billing instead of event-level billing.
+> **Goal:** Add prepaid credits as the universal billing abstraction for AI
+> workloads. Introduce the settlement router for invoice, wallet, and one-time
+> settlement modes.
 >
-> **Branch:** `feat/trace-aggregation`
+> **Branch:** `feat/credits-wallets`
+>
+> **Detailed plan:** [docs/plans/unprice-phase-07-credits-wallets.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-07-credits-wallets.md)
 
 ### Commits
 
-**7.1 — Create TraceAggregationDO skeleton**
+**7.1 — Add wallet, credit grant, and burn rate schemas**
 
-Follow the Durable Object and SQLite patterns used by [apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts](/Users/jhonsfran/repos/unprice/apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts).
+`wallets`, `credit_grants`, `credit_burn_rates` tables with versioned burn
+rates (`effectiveAt`/`supersededAt`).
 
-**7.2 — Add trace routing in ingestion**
+**7.2 — Add validators and migration**
 
-Requirements:
-- detect trace-scoped events
-- buffer them under a stable trace key
-- complete explicitly or on timeout
-- re-emit aggregated outputs through the standard rating path
+**7.3 — Create WalletService**
 
-**7.3 — Add alarm-based timeout and cleanup**
+Leaf service. Methods: `getOrCreateWallet`, `addCredits`, `deductCredits`
+(atomic check-and-deduct), `getBalance`, `hasEnoughCredits`.
 
-Mirror the existing alarm and self-destruction patterns where appropriate.
+**7.4 — Add SettlementRouter**
 
-**7.4 — Add integration tests**
+Routes charges to `invoice`, `wallet`, or `one_time` settlement.
+Default: `invoice` for subscriptions, `wallet` for agent usage.
 
-Add tests for:
-- explicit completion
-- timeout completion
-- duplicate event handling
-- multi-feature aggregation
+**7.5 — Wire wallet settlement into agent billing**
+
+Update `reportAgentUsage` to route through SettlementRouter.
+
+**7.6 — Add credit purchase flow**
+
+Use case: provider checkout → payment webhook → `WalletService.addCredits()`.
+
+**7.7 — Add API endpoints**
+
+Wallet balance, purchase, and grant history endpoints. Update SDK types.
+
+**7.8 — Add UI**
+
+Wallet dashboard, credit purchase flow, burn rate configuration, settlement
+preference per customer.
+
+**7.9 — Add tests**
+
+---
+
+## Phase 8: Financial Guardrails & Spending Controls
+
+> **PR title:** `feat: add financial guardrails and spending controls`
+>
+> **Goal:** Prevent runaway agents from generating unbounded charges with
+> real-time financial enforcement, spending limits, budget alerts, and circuit
+> breakers.
+>
+> **Branch:** `feat/financial-guardrails`
+>
+> **Detailed plan:** [docs/plans/unprice-phase-08-financial-guardrails.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-08-financial-guardrails.md)
+
+### Commits
+
+**8.1 — Add spending limits schema**
+
+`spending_limits` table with scope (customer/session/feature), period, thresholds,
+and action (alert/soft_block/hard_block).
+
+**8.2 — Create SpendingGuard service**
+
+Methods: `checkSpendingLimit`, `recordSpend`, `getSpendingSummary`.
+Uses cache for hot-path speed, reconciled against ledger.
+
+**8.3 — Wire into sync ingestion**
+
+After entitlement check, before billing: estimate cost → check spending limit →
+enforce. Sync response gains `spendingWarning` field.
+
+**8.4 — Add budget alert hooks**
+
+Configurable webhook alerts at spending thresholds. Deduplicated per threshold
+per period.
+
+**8.5 — Add circuit breaker for runaway agents**
+
+Cost velocity detection over sliding window. Auto-block on anomalous spend rate.
+
+**8.6 — Add API endpoints and SDK updates**
+
+Spending summary, limit management. SDK types.
+
+**8.7 — Add UI**
+
+Spending limits editor, budget dashboard, alert history, circuit breaker status.
+
+**8.8 — Add tests**
+
+---
+
+## Phase 9: Outcome-Based Pricing & Trace Aggregation
+
+> **PR title:** `feat: add outcome-based pricing and trace aggregation`
+>
+> **Goal:** Support billing for outcomes rather than raw usage. Branch the
+> ingestion path so outcome-based meters aggregate events in a dedicated DO,
+> then create billable facts only when the outcome is confirmed or times out.
+>
+> **Branch:** `feat/outcome-pricing`
+>
+> **Detailed plan:** [docs/plans/unprice-phase-09-outcome-pricing.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-09-outcome-pricing.md)
+
+### Commits
+
+**9.1 — Extend meter config for outcome-based meters**
+
+Add `meterType` (usage/outcome), `outcomeConfig` with success condition,
+timeout, timeout action, and outcome aggregation method.
+
+**9.2 — Add `groupId` to ingestion schema**
+
+**9.3 — Create `OutcomeAggregationDO`**
+
+Follows EntitlementWindowDO patterns. Aggregates events per group. On success
+report or timeout, creates facts that enter the normal rating pipeline.
+
+**9.4 — Branch ingestion routing**
+
+Route outcome-metered or grouped events to OutcomeAggregationDO. Audit path
+unchanged (individual events always audited).
+
+**9.5 — Add outcome reporting endpoint**
+
+`POST /v1/outcomes/report` with `groupId` and outcome (success/failure/partial).
+
+**9.6 — Add property-match auto-resolution**
+
+Auto-resolve when event property matches configured success condition.
+
+**9.7 — Add SDK and API**
+
+Event grouping, outcome reporting, status querying. SDK types.
+
+**9.8 — Add UI**
+
+Outcome meter config, trace/session viewer, outcome analytics dashboard.
+
+**9.9 — Add tests**
+
+---
+
+## Phase 10: Compound Metering & Cost Attribution
+
+> **PR title:** `feat: add compound metering and cost attribution`
+>
+> **Goal:** Support multi-dimensional metering (one event → multiple billing
+> facts) and track cost-to-serve for margin analysis.
+>
+> **Branch:** `feat/compound-metering`
+>
+> **Detailed plan:** [docs/plans/unprice-phase-10-compound-metering.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-10-compound-metering.md)
+
+### Commits
+
+**10.1 — Extend meter config for compound meters**
+
+Add `compoundMeters` array with per-dimension aggregation and burn rate
+multipliers.
+
+**10.2 — Add compound fan-out in EntitlementWindowDO**
+
+One event → one fact per dimension. Separate aggregation state per dimension.
+
+**10.3 — Add per-dimension rating**
+
+Each dimension rated independently. Total charge = sum of dimension charges.
+
+**10.4 — Add cost table schema**
+
+`cost_tables` with per-feature/dimension cost rates, versioned with
+`effectiveAt`/`supersededAt`.
+
+**10.5 — Add cost metadata on meter facts**
+
+Optional `cost_cents` and `cost_source` on facts for margin tracking.
+
+**10.6 — Add margin analytics**
+
+Per-customer and per-feature margin calculation from ledger + cost data.
+
+**10.7 — Add API endpoints and SDK updates**
+
+Margin queries, cost table management. SDK types.
+
+**10.8 — Add UI**
+
+Compound meter config, cost table editor, margin dashboard.
+
+**10.9 — Add tests**
 
 ---
 
@@ -764,37 +901,64 @@ Phase 5: Settlement And Webhook Pipeline
   Add provider settlement reconciliation and normalized webhook handling.
 
 Phase 6: Agent Billing Foundation
-  Make agents first-class billable actors that flow through rating, ledger, and
-  settlement just like human billing.
+  Make agents first-class billable actors that flow through rating and ledger.
+  Prepare event schema for trace grouping and outcome pricing.
 
-Phase 7: Trace Aggregation DO (Optional Extension)
-  Add trace-level aggregation when agent workloads need it.
+Phase 7: Credits, Wallets & Settlement Router
+  Add prepaid credits as the universal AI billing abstraction. Introduce the
+  settlement router for invoice, wallet, and one-time settlement modes.
+
+Phase 8: Financial Guardrails & Spending Controls
+  Prevent runaway agents with real-time financial enforcement, spending limits,
+  budget alerts, and circuit breakers.
+
+Phase 9: Outcome-Based Pricing & Trace Aggregation
+  Support billing for outcomes rather than raw usage via OutcomeAggregationDO.
+  Group events by task, bill on success or timeout.
+
+Phase 10: Compound Metering & Cost Attribution
+  Support multi-dimensional metering and track cost-to-serve for margin
+  analysis.
 ```
 
 ## Dependencies And Parallel Tracks
 
 ```text
-Track A:
+Track A (Core Billing):
   Phase 1 -> Phase 4
 
-Track B:
+Track B (Provider):
   Phase 2 -> Phase 3 -> Phase 5
 
-Track C:
-  Phase 6 depends on Phases 1, 4, and the provider runtime from Phase 3
+Track C (Agent Billing):
+  Phase 6 depends on Phases 1, 3, 4
+  Phase 7 depends on Phases 4, 5
 
-Optional:
-  Phase 7 depends on Phase 6 only when trace-level billing is required
+Track D (Advanced Billing):
+  Phase 8 depends on Phases 6, 7
+  Phase 9 depends on Phases 6, 7
+  Phase 10 depends on Phases 6, 7
 ```
 
 Explicit dependency list:
 1. Phase 1 is required before Phase 4 and Phase 6.
 2. Phase 2 is required before Phase 3 and Phase 5.
 3. Phase 3 is required before Phase 5 and before provider-backed settlement in Phase 6.
-4. Phase 4 is required before Phase 5 and Phase 6.
-5. Phase 5 is required before provider-backed one-time settlement is considered complete.
-6. Phase 6 depends on Phases 1, 3, and 4. It depends on Phase 5 for provider-backed settlement confirmation.
-7. Phase 7 depends on Phase 6 only if trace aggregation is part of the agent billing model.
+4. Phase 4 is required before Phase 5, Phase 6, and Phase 7.
+5. Phase 5 is required before Phase 7 (credit purchase needs webhook confirmation).
+6. Phase 6 depends on Phases 1, 3, and 4.
+7. Phase 7 depends on Phases 4 and 5.
+8. Phases 8, 9, and 10 each depend on Phases 6 and 7.
+9. Phases 6 and 7 can run in parallel (no dependency between them).
+10. Phases 8, 9, and 10 can run in parallel after both 6 and 7 complete.
+
+Sequential execution order: 6 → 7 → 8 → 9 → 10
+
+## Related Documents
+
+- [AI Billing Trends 2024-2026](docs/ai-billing-trends-2024-2026.md) — industry
+  trend analysis that informed phases 6-10
+- [ADR-0001 Canonical Backend Architecture Boundaries](docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md)
 
 ## Non-Goals For The First Pass
 
@@ -802,5 +966,7 @@ Explicit dependency list:
 - keeping long-lived dual-read or dual-write migration layers for Stripe-specific storage
 - treating invoices as the long-term source of financial truth
 - adding provider abstractions that solve imaginary providers instead of the next real provider plus future crypto requirements
-- building wallet top-up UX before wallet settlement exists as a real runtime need
 - moving orchestration into adapters instead of services and use cases
+- nested outcomes (outcome groups within outcome groups)
+- ML-based cost prediction or anomaly detection
+- crypto-backed credit purchase (the settlement router leaves room for it)
