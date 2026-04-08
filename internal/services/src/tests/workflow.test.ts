@@ -7,6 +7,7 @@ import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import { LedgerService } from "../ledger/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { RatingService } from "../rating/service"
@@ -290,16 +291,24 @@ describe("Workflow - Billing and Subscriptions", () => {
     const customerService = new CustomerService({ ...serviceDeps, paymentProviderResolver })
     const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
     const ratingService = new RatingService({ ...serviceDeps, grantsManager })
+    const ledgerService = new LedgerService({
+      db: mockDb,
+      logger: mockLogger,
+      metrics: mockMetrics,
+    })
     _billingService = new BillingService({
       ...serviceDeps,
       customerService,
       grantsManager,
       ratingService,
+      ledgerService,
     })
     subscriptionService = new SubscriptionService({
       ...serviceDeps,
       customerService,
       billingService: _billingService,
+      ratingService,
+      ledgerService,
     })
   })
 

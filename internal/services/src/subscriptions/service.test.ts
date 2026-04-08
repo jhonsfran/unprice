@@ -10,6 +10,7 @@ import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import { LedgerService } from "../ledger/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { RatingService } from "../rating/service"
@@ -381,11 +382,22 @@ describe("SubscriptionService - grant lifecycle", () => {
       customerService,
       grantsManager,
       ratingService,
+      ledgerService: new LedgerService({
+        db: mockDb,
+        logger: mockLogger,
+        metrics: mockMetrics,
+      }),
     })
     subscriptionService = new SubscriptionService({
       ...serviceDeps,
       customerService,
       billingService,
+      ratingService,
+      ledgerService: new LedgerService({
+        db: mockDb,
+        logger: mockLogger,
+        metrics: mockMetrics,
+      }),
     })
   })
 

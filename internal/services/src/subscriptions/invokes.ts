@@ -1,11 +1,13 @@
 import { type Database, and, eq, inArray, lte, sql } from "@unprice/db"
 import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
-import { calculateCycleWindow, calculateDateAt, calculateProration } from "@unprice/db/validators"
+import { formatAmountDinero, newId } from "@unprice/db/utils"
+import { calculateCycleWindow, calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import type { CustomerService } from "../customers/service"
+import type { LedgerService } from "../ledger/service"
+import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
 import type { SubscriptionContext } from "./types"
 
@@ -238,10 +240,14 @@ export async function invoiceSubscription({
   context,
   logger,
   db,
+  ratingService,
+  ledgerService,
 }: {
   context: SubscriptionContext
   logger: Logger
   db: Database
+  ratingService: RatingService
+  ledgerService: LedgerService
 }): Promise<
   Partial<SubscriptionContext> & {
     phasesProcessed: number
@@ -314,6 +320,7 @@ export async function invoiceSubscription({
       },
       where: (table, { eq }) =>
         and(
+          eq(table.status, "pending"),
           eq(table.projectId, periodItemGroup.projectId),
           eq(table.subscriptionId, periodItemGroup.subscriptionId),
           eq(table.subscriptionPhaseId, periodItemGroup.subscriptionPhaseId),
@@ -322,13 +329,182 @@ export async function invoiceSubscription({
     })
 
     // if no billing periods to invoice, skip
-    if (!billingPeriodsToInvoice) {
+    if (billingPeriodsToInvoice.length === 0) {
       continue
     }
 
-    // statement start and end at is min and max of the billing periods
-    const statementStartAt = Math.min(...billingPeriodsToInvoice.map((bp) => bp.cycleStartAt))
-    const statementEndAt = Math.max(...billingPeriodsToInvoice.map((bp) => bp.cycleEndAt))
+    // 1) Rate each pending period and post deterministic ledger entries first.
+    for (const period of billingPeriodsToInvoice) {
+      const feature = period.subscriptionItem.featurePlanVersion.feature
+      const nonUsageQuantity = period.subscriptionItem.units ?? 0
+      const usageData =
+        period.subscriptionItem.featurePlanVersion.featureType === "usage"
+          ? undefined
+          : [{ featureSlug: feature.slug, usage: nonUsageQuantity }]
+
+      const ratingResult = await ratingService.rateBillingPeriod({
+        projectId: period.projectId,
+        customerId: period.customerId,
+        featureSlug: feature.slug,
+        startAt: period.cycleStartAt,
+        endAt: period.cycleEndAt,
+        usageData,
+      })
+
+      if (ratingResult.err) {
+        logger.error("Error while rating billing period before ledger posting", {
+          billingPeriodId: period.id,
+          phaseId: phase.id,
+          statementKey: period.statementKey,
+          error: toErrorContext(ratingResult.err),
+        })
+        throw ratingResult.err
+      }
+
+      const ratedCharges = ratingResult.val
+      const firstCharge = ratedCharges[0]
+
+      const totalAmountCents = ratedCharges.reduce(
+        (sum, charge) => sum + formatAmountDinero(charge.price.totalPrice.dinero).amount,
+        0
+      )
+      const subtotalAmountCents = ratedCharges.reduce(
+        (sum, charge) => sum + formatAmountDinero(charge.price.subtotalPrice.dinero).amount,
+        0
+      )
+      const unitAmountCents = firstCharge
+        ? formatAmountDinero(firstCharge.price.unitPrice.dinero).amount
+        : 0
+      const ratedQuantity = ratedCharges.reduce((sum, charge) => sum + Math.max(0, charge.usage), 0)
+      const quantity = ratedCharges.length > 0 ? Math.trunc(ratedQuantity) : nonUsageQuantity
+      const rawProrationFactor = firstCharge?.prorate
+      const prorationFactor =
+        period.type === "trial"
+          ? 0
+          : typeof rawProrationFactor === "number" && Number.isFinite(rawProrationFactor)
+            ? rawProrationFactor
+            : 1
+      const sourceType = "subscription_billing_period_charge_v1"
+      const sourceId = `${period.id}:${period.subscriptionItemId}`
+
+      const postResult =
+        totalAmountCents < 0
+          ? await ledgerService.postCredit({
+              projectId: period.projectId,
+              customerId: period.customerId,
+              currency: phase.planVersion.currency,
+              amountCents: Math.abs(totalAmountCents),
+              sourceType,
+              sourceId,
+              statementKey: period.statementKey,
+              subscriptionId: period.subscriptionId,
+              subscriptionPhaseId: period.subscriptionPhaseId,
+              subscriptionItemId: period.subscriptionItemId,
+              billingPeriodId: period.id,
+              featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
+              invoiceItemKind: period.type === "trial" ? "trial" : "period",
+              cycleStartAt: period.cycleStartAt,
+              cycleEndAt: period.cycleEndAt,
+              quantity,
+              unitAmountCents,
+              amountSubtotalCents: subtotalAmountCents,
+              amountTotalCents: totalAmountCents,
+              description: period.subscriptionItem.featurePlanVersion.feature.title,
+              metadata: {
+                source: "subscription-invoice",
+                prorationFactor,
+                ratedChargeCount: ratedCharges.length,
+              },
+              db,
+              now,
+            })
+          : await ledgerService.postDebit({
+              projectId: period.projectId,
+              customerId: period.customerId,
+              currency: phase.planVersion.currency,
+              amountCents: totalAmountCents,
+              sourceType,
+              sourceId,
+              statementKey: period.statementKey,
+              subscriptionId: period.subscriptionId,
+              subscriptionPhaseId: period.subscriptionPhaseId,
+              subscriptionItemId: period.subscriptionItemId,
+              billingPeriodId: period.id,
+              featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
+              invoiceItemKind: period.type === "trial" ? "trial" : "period",
+              cycleStartAt: period.cycleStartAt,
+              cycleEndAt: period.cycleEndAt,
+              quantity,
+              unitAmountCents,
+              amountSubtotalCents: subtotalAmountCents,
+              amountTotalCents: totalAmountCents,
+              description: period.subscriptionItem.featurePlanVersion.feature.title,
+              metadata: {
+                source: "subscription-invoice",
+                prorationFactor,
+                ratedChargeCount: ratedCharges.length,
+              },
+              db,
+              now,
+            })
+
+      if (postResult.err) {
+        logger.error("Error while posting rated period to ledger", {
+          billingPeriodId: period.id,
+          phaseId: phase.id,
+          statementKey: period.statementKey,
+          error: toErrorContext(postResult.err),
+        })
+        throw postResult.err
+      }
+    }
+
+    // 2) Build invoice lines from unsettled ledger entries.
+    const unsettledEntriesResult = await ledgerService.getUnsettledEntries({
+      projectId: periodItemGroup.projectId,
+      customerId: phase.subscription.customerId,
+      currency: phase.planVersion.currency,
+      statementKey: periodItemGroup.statementKey,
+      subscriptionId: periodItemGroup.subscriptionId,
+      db,
+    })
+
+    if (unsettledEntriesResult.err) {
+      logger.error("Error while loading unsettled ledger entries", {
+        phaseId: phase.id,
+        statementKey: periodItemGroup.statementKey,
+        error: toErrorContext(unsettledEntriesResult.err),
+      })
+      throw unsettledEntriesResult.err
+    }
+
+    const ledgerEntriesToInvoice = unsettledEntriesResult.val.filter(
+      (entry) => entry.billingPeriodId !== null
+    )
+
+    if (ledgerEntriesToInvoice.length === 0) {
+      await db
+        .update(billingPeriods)
+        .set({ status: "voided" })
+        .where(
+          and(
+            eq(billingPeriods.projectId, periodItemGroup.projectId),
+            eq(billingPeriods.subscriptionId, periodItemGroup.subscriptionId),
+            eq(billingPeriods.subscriptionPhaseId, periodItemGroup.subscriptionPhaseId),
+            eq(billingPeriods.statementKey, periodItemGroup.statementKey),
+            eq(billingPeriods.status, "pending")
+          )
+        )
+
+      continue
+    }
+
+    const statementStartAt = Math.min(
+      ...ledgerEntriesToInvoice.map((entry) => entry.cycleStartAt ?? periodItemGroup.invoiceAt)
+    )
+    const statementEndAt = Math.max(
+      ...ledgerEntriesToInvoice.map((entry) => entry.cycleEndAt ?? periodItemGroup.invoiceAt)
+    )
 
     // all of this happens in a single transaction
     await db.transaction(async (tx) => {
@@ -449,39 +625,27 @@ export async function invoiceSubscription({
           return
         }
 
-        const invoiceItemsData = billingPeriodsToInvoice.map((period) => {
-          const itemBillingConfig = {
-            ...period.subscriptionItem.featurePlanVersion.billingConfig,
-            // ensure numeric anchor alignment to phase anchor
-            billingAnchor: phase.billingAnchor,
-          }
-
-          const proration = calculateProration({
-            serviceStart: period.cycleStartAt,
-            serviceEnd: period.cycleEndAt,
-            effectiveStartDate: phase.startAt,
-            billingConfig: itemBillingConfig,
-          })
-
-          // trial is not billable
-          const prorationFactor = period.type === "trial" ? 0 : proration.prorationFactor
+        const projectedInvoiceItems = ledgerEntriesToInvoice.map((entry) => {
+          const prorationRaw = entry.metadata?.prorationFactor
+          const prorationFactor =
+            typeof prorationRaw === "number" && Number.isFinite(prorationRaw) ? prorationRaw : 1
 
           return {
             id: newId("invoice_item"),
             invoiceId: invoice.id,
-            featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
-            subscriptionItemId: period.subscriptionItem.id,
-            billingPeriodId: period.id,
-            projectId: period.projectId,
-            quantity: period.subscriptionItem.units ?? 0,
-            cycleStartAt: period.cycleStartAt,
-            cycleEndAt: period.cycleEndAt,
-            kind: period.type === "trial" ? ("trial" as const) : ("period" as const),
-            unitAmountCents: 0,
-            amountSubtotal: 0,
-            amountTotal: 0,
-            prorationFactor: prorationFactor,
-            description: period.subscriptionItem.featurePlanVersion.feature.title,
+            featurePlanVersionId: entry.featurePlanVersionId,
+            subscriptionItemId: entry.subscriptionItemId,
+            billingPeriodId: entry.billingPeriodId,
+            projectId: entry.projectId,
+            quantity: Math.max(0, Math.trunc(entry.quantity ?? 0)),
+            cycleStartAt: entry.cycleStartAt ?? statementStartAt,
+            cycleEndAt: entry.cycleEndAt ?? statementEndAt,
+            kind: entry.invoiceItemKind,
+            unitAmountCents: entry.unitAmountCents ?? 0,
+            amountSubtotal: entry.amountSubtotalCents,
+            amountTotal: entry.amountTotalCents,
+            prorationFactor,
+            description: entry.description ?? null,
             itemProviderId: null,
           }
         })
@@ -489,7 +653,7 @@ export async function invoiceSubscription({
         // create invoice items
         await tx
           .insert(invoiceItems)
-          .values(invoiceItemsData)
+          .values(projectedInvoiceItems)
           // idempotency protection
           .onConflictDoNothing({
             target: [invoiceItems.projectId, invoiceItems.invoiceId, invoiceItems.billingPeriodId],
@@ -533,6 +697,20 @@ export async function invoiceSubscription({
               eq(billingPeriods.subscriptionId, phase.subscriptionId)
             )
           )
+
+        const settleResult = await ledgerService.markSettled({
+          projectId: phase.projectId,
+          entryIds: ledgerEntriesToInvoice.map((entry) => entry.id),
+          settlementType: "invoice",
+          settlementArtifactId: invoice.id,
+          settlementPendingProviderConfirmation: true,
+          now,
+          db: tx,
+        })
+
+        if (settleResult.err) {
+          throw settleResult.err
+        }
       } catch (error) {
         logger.error("Error while invoicing phase", {
           phaseId: phase.id,

@@ -1,17 +1,22 @@
+import * as dineroCurrencies from "@dinero.js/currencies"
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/db/schema"
 import type {
   Customer,
+  LedgerEntry,
   Subscription,
   SubscriptionPhaseExtended,
   SubscriptionStatus,
 } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { dinero } from "dinero.js"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { CustomerService } from "../customers/service"
+import type { LedgerService } from "../ledger/service"
+import type { RatingService } from "../rating/service"
 import { db } from "../utils/db"
 import { SubscriptionMachine } from "./machine"
 
@@ -162,6 +167,8 @@ describe("SubscriptionMachine - comprehensive", () => {
   let mockCustomerService: CustomerService
   let mockLogger: Logger
   let mockDb: Database
+  let mockRatingService: RatingService
+  let mockLedgerService: LedgerService
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   let dbMockData: Record<string, any>[] = []
 
@@ -189,6 +196,148 @@ describe("SubscriptionMachine - comprehensive", () => {
       syncActiveEntitlementsLastUsage: vi.fn().mockResolvedValue(Ok({})),
       validatePaymentMethod: vi.fn().mockResolvedValue(Ok({})),
     } as unknown as CustomerService
+
+    const postedLedgerEntries = new Map<string, LedgerEntry>()
+
+    mockRatingService = {
+      rateBillingPeriod: vi
+        .fn()
+        .mockImplementation(async (input: { startAt: number; endAt: number }) => {
+          const usd = dineroCurrencies.USD
+          return Ok([
+            {
+              grantId: "grant_test",
+              price: {
+                unitPrice: {
+                  dinero: dinero({ amount: 100, currency: usd }),
+                  displayAmount: "$1",
+                },
+                subtotalPrice: {
+                  dinero: dinero({ amount: 100, currency: usd }),
+                  displayAmount: "$1",
+                },
+                totalPrice: {
+                  dinero: dinero({ amount: 100, currency: usd }),
+                  displayAmount: "$1",
+                },
+              },
+              prorate: 1,
+              cycleStartAt: input.startAt,
+              cycleEndAt: input.endAt,
+              usage: 1,
+              included: 0,
+              limit: 100,
+              isTrial: false,
+            },
+          ])
+        }),
+    } as unknown as RatingService
+
+    const upsertEntry = (entryType: "debit" | "credit", input: Record<string, unknown>) => {
+      const sourceType = String(input.sourceType)
+      const sourceId = String(input.sourceId)
+      const key = `${sourceType}:${sourceId}`
+      const existing = postedLedgerEntries.get(key)
+      if (existing) {
+        return Ok(existing)
+      }
+
+      const amount = Number(input.amountCents ?? 0)
+      const signedAmount = entryType === "debit" ? amount : -amount
+      const next: LedgerEntry = {
+        id: `le_${postedLedgerEntries.size + 1}`,
+        projectId: String(input.projectId),
+        createdAtM: Number(input.now ?? Date.now()),
+        updatedAtM: Number(input.now ?? Date.now()),
+        ledgerId: "ledger_test",
+        customerId: String(input.customerId),
+        currency: input.currency as LedgerEntry["currency"],
+        entryType,
+        amountCents: amount,
+        signedAmountCents: signedAmount,
+        sourceType,
+        sourceId,
+        idempotencyKey: key,
+        description: (input.description as string | null | undefined) ?? null,
+        statementKey: (input.statementKey as string | null | undefined) ?? null,
+        subscriptionId: (input.subscriptionId as string | null | undefined) ?? null,
+        subscriptionPhaseId: (input.subscriptionPhaseId as string | null | undefined) ?? null,
+        subscriptionItemId: (input.subscriptionItemId as string | null | undefined) ?? null,
+        billingPeriodId: (input.billingPeriodId as string | null | undefined) ?? null,
+        featurePlanVersionId: (input.featurePlanVersionId as string | null | undefined) ?? null,
+        invoiceItemKind:
+          (input.invoiceItemKind as LedgerEntry["invoiceItemKind"] | undefined) ?? "period",
+        cycleStartAt: (input.cycleStartAt as number | null | undefined) ?? null,
+        cycleEndAt: (input.cycleEndAt as number | null | undefined) ?? null,
+        quantity: Number(input.quantity ?? 1),
+        unitAmountCents: (input.unitAmountCents as number | null | undefined) ?? null,
+        amountSubtotalCents: Number(input.amountSubtotalCents ?? amount),
+        amountTotalCents: Number(
+          input.amountTotalCents ?? (entryType === "debit" ? amount : -amount)
+        ),
+        balanceAfterCents: signedAmount,
+        settlementType: null,
+        settlementArtifactId: null,
+        settlementPendingProviderConfirmation: false,
+        settledAt: null,
+        metadata: (input.metadata as Record<string, unknown> | null | undefined) ?? null,
+      }
+
+      postedLedgerEntries.set(key, next)
+      return Ok(next)
+    }
+
+    mockLedgerService = {
+      postDebit: vi.fn().mockImplementation(async (input) => upsertEntry("debit", input)),
+      postCredit: vi.fn().mockImplementation(async (input) => upsertEntry("credit", input)),
+      getUnsettledEntries: vi.fn().mockImplementation(
+        async (input: {
+          projectId: string
+          customerId: string
+          currency: string
+          statementKey?: string
+          subscriptionId?: string
+        }) => {
+          const unsettled = [...postedLedgerEntries.values()].filter(
+            (entry) =>
+              entry.projectId === input.projectId &&
+              entry.customerId === input.customerId &&
+              entry.currency === input.currency &&
+              entry.settledAt === null &&
+              (input.statementKey ? entry.statementKey === input.statementKey : true) &&
+              (input.subscriptionId ? entry.subscriptionId === input.subscriptionId : true)
+          )
+          return Ok(unsettled)
+        }
+      ),
+      markSettled: vi.fn().mockImplementation(
+        async (input: {
+          entryIds: string[]
+          settlementType: LedgerEntry["settlementType"]
+          settlementArtifactId: string
+          settlementPendingProviderConfirmation?: boolean
+          now?: number
+        }) => {
+          const now = input.now ?? Date.now()
+          const updated: LedgerEntry[] = []
+          for (const [key, entry] of postedLedgerEntries.entries()) {
+            if (!input.entryIds.includes(entry.id)) continue
+
+            const next: LedgerEntry = {
+              ...entry,
+              settlementType: input.settlementType ?? null,
+              settlementArtifactId: input.settlementArtifactId,
+              settlementPendingProviderConfirmation:
+                input.settlementPendingProviderConfirmation ?? false,
+              settledAt: now,
+            }
+            postedLedgerEntries.set(key, next)
+            updated.push(next)
+          }
+          return Ok(updated)
+        }
+      ),
+    } as unknown as LedgerService
   })
 
   function setupDbMocks(
@@ -370,17 +519,25 @@ describe("SubscriptionMachine - comprehensive", () => {
                 id: "bp_1",
                 projectId: subscription.projectId,
                 subscriptionId: subscription.id,
+                customerId: subscription.customerId,
                 subscriptionPhaseId: subscription.phases[0]!.id,
                 subscriptionItemId: subscription.phases[0]!.items[0]!.id,
                 cycleStartAt: subscription.currentCycleStartAt,
                 cycleEndAt: subscription.currentCycleEndAt,
+                statementKey: "test_statement_key",
+                type: "normal",
                 prorationFactor: 1,
                 subscriptionItem: {
                   id: subscription.phases[0]!.items[0]!.id,
                   units: subscription.phases[0]!.items[0]!.units,
                   featurePlanVersion: {
                     id: subscription.phases[0]!.items[0]!.featurePlanVersion.id,
+                    featureType: "flat",
                     unitOfMeasure: "units",
+                    feature: {
+                      slug: "test-feature",
+                      title: "Test Feature",
+                    },
                   },
                 },
               },
@@ -444,18 +601,31 @@ describe("SubscriptionMachine - comprehensive", () => {
     vi.spyOn(db, "select").mockImplementation(mockDb.select as any)
   }
 
+  const createMachine = async (input: {
+    subscriptionId: string
+    projectId: string
+    now?: number
+    db?: Database
+  }) =>
+    SubscriptionMachine.create({
+      subscriptionId: input.subscriptionId,
+      projectId: input.projectId,
+      analytics: mockAnalytics,
+      logger: mockLogger,
+      now: input.now ?? Date.now(),
+      customer: mockCustomerService,
+      ratingService: mockRatingService,
+      ledgerService: mockLedgerService,
+      db: input.db ?? mockDb,
+    })
+
   it("restores to correct state based on subscription.status", async () => {
     const { sub } = buildMockSubscription({ status: "active", trialEnded: true, autoRenew: true })
     setupDbMocks(sub)
 
-    const result = await SubscriptionMachine.create({
+    const result = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
 
     expect(result.err).toBeUndefined()
@@ -474,14 +644,9 @@ describe("SubscriptionMachine - comprehensive", () => {
     sub.phases[0]!.planVersion.whenToBill = "pay_in_advance"
     setupDbMocks(sub)
 
-    const { err, val } = await SubscriptionMachine.create({
+    const { err, val } = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -506,14 +671,9 @@ describe("SubscriptionMachine - comprehensive", () => {
     const { sub } = buildMockSubscription({ status: "trialing", autoRenew: true, trialEnded: true })
     setupDbMocks(sub)
 
-    const { err, val } = await SubscriptionMachine.create({
+    const { err, val } = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -533,20 +693,9 @@ describe("SubscriptionMachine - comprehensive", () => {
     const { sub } = buildMockSubscription({ status: "active", autoRenew: true, trialEnded: true })
     setupDbMocks(sub)
 
-    // mark hasDueBillingPeriods true through load -> generateBillingPeriods on context
-    // emulate db query returning a due billing period
-    mockDb.query.billingPeriods.findMany = vi
-      .fn()
-      .mockResolvedValue([{ id: "bp_due", subscriptionItem: sub.phases[0]!.items[0]! }])
-
-    const { err, val } = await SubscriptionMachine.create({
+    const { err, val } = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
 
     expect(err).toBeUndefined()
@@ -570,14 +719,9 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     // First: no due billing periods
     mockDb.query.billingPeriods.findFirst = vi.fn().mockResolvedValue(null)
-    const created1 = await SubscriptionMachine.create({
+    const created1 = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
     expect(created1.err).toBeUndefined()
     if (created1.err) return
@@ -587,14 +731,9 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     // Then: there are due billing periods
     mockDb.query.billingPeriods.findFirst = vi.fn().mockResolvedValue({ id: "bp_due" })
-    const created2 = await SubscriptionMachine.create({
+    const created2 = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
     expect(created2.err).toBeUndefined()
     if (created2.err) return
@@ -606,14 +745,9 @@ describe("SubscriptionMachine - comprehensive", () => {
   it("payment success moves past_due -> active and failure stays past_due", async () => {
     const { sub } = buildMockSubscription({ status: "active", autoRenew: true, trialEnded: true })
     setupDbMocks(sub)
-    const { err, val } = await SubscriptionMachine.create({
+    const { err, val } = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -632,14 +766,9 @@ describe("SubscriptionMachine - comprehensive", () => {
   it("invoice success/failure transitions between active and past_due", async () => {
     const { sub } = buildMockSubscription({ status: "active", autoRenew: true, trialEnded: true })
     setupDbMocks(sub)
-    const { err, val } = await SubscriptionMachine.create({
+    const { err, val } = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return
@@ -660,13 +789,9 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     // no due billing periods
 
-    const { err, val } = await SubscriptionMachine.create({
+    const { err, val } = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
       db: {
         ...mockDb,
         select: vi.fn(() => ({
@@ -701,14 +826,9 @@ describe("SubscriptionMachine - comprehensive", () => {
     })
     setupDbMocks(sub)
 
-    const { err, val } = await SubscriptionMachine.create({
+    const { err, val } = await createMachine({
       subscriptionId: sub.id,
       projectId: sub.projectId,
-      analytics: mockAnalytics,
-      logger: mockLogger,
-      now: Date.now(),
-      customer: mockCustomerService,
-      db: mockDb,
     })
     expect(err).toBeUndefined()
     if (err) return

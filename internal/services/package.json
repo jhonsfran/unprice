@@ -15,6 +15,7 @@
     "./domains": "./src/domains/index.ts",
     "./events": "./src/events/index.ts",
     "./features": "./src/features/index.ts",
+    "./ledger": "./src/ledger/index.ts",
     "./pages": "./src/pages/index.ts",
     "./workspaces": "./src/workspaces/index.ts",
     "./payment-provider": "./src/payment-provider/index.ts",

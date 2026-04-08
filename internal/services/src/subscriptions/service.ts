@@ -28,8 +28,10 @@ import type { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import type { LedgerService } from "../ledger/service"
 import type { Metrics } from "../metrics"
 import { getPaymentProviderCapabilities } from "../payment-provider/service"
+import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
@@ -71,6 +73,8 @@ export class SubscriptionService {
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly customerService: CustomerService
   private readonly billingService: BillingService
+  private readonly ratingService: RatingService
+  private readonly ledgerService: LedgerService
 
   constructor({
     db,
@@ -81,6 +85,8 @@ export class SubscriptionService {
     metrics,
     customerService,
     billingService,
+    ratingService,
+    ledgerService,
   }: {
     db: Database
     logger: Logger
@@ -91,6 +97,8 @@ export class SubscriptionService {
     metrics: Metrics
     customerService: CustomerService
     billingService: BillingService
+    ratingService: RatingService
+    ledgerService: LedgerService
   }) {
     this.db = db
     this.logger = logger
@@ -100,6 +108,8 @@ export class SubscriptionService {
     this.waitUntil = waitUntil
     this.customerService = customerService
     this.billingService = billingService
+    this.ratingService = ratingService
+    this.ledgerService = ledgerService
   }
 
   private setLockContext(context: {
@@ -1699,6 +1709,8 @@ export class SubscriptionService {
       logger: this.logger,
       analytics: this.analytics,
       customer: this.customerService,
+      ratingService: this.ratingService,
+      ledgerService: this.ledgerService,
       db: this.db,
     })
 

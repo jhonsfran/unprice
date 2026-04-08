@@ -28,6 +28,7 @@ import { addDays } from "date-fns"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
+import type { LedgerService } from "../ledger/service"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { RatedCharge, RatingInput } from "../rating/types"
@@ -61,6 +62,7 @@ export class BillingService {
   private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
   private readonly ratingService: RatingService
+  private readonly ledgerService: LedgerService
 
   constructor({
     db,
@@ -72,6 +74,7 @@ export class BillingService {
     customerService,
     grantsManager,
     ratingService,
+    ledgerService,
   }: {
     db: Database
     logger: Logger
@@ -83,6 +86,7 @@ export class BillingService {
     customerService: CustomerService
     grantsManager: GrantsManager
     ratingService: RatingService
+    ledgerService: LedgerService
   }) {
     this.db = db
     this.logger = logger
@@ -93,6 +97,7 @@ export class BillingService {
     this.customerService = customerService
     this.grantsManager = grantsManager
     this.ratingService = ratingService
+    this.ledgerService = ledgerService
   }
 
   private setLockContext(context: {
@@ -233,6 +238,8 @@ export class BillingService {
       logger: this.logger,
       analytics: this.analytics,
       customer: this.customerService,
+      ratingService: this.ratingService,
+      ledgerService: this.ledgerService,
       db: trx,
       dryRun,
     })
@@ -849,39 +856,50 @@ export class BillingService {
       return Ok(openInvoiceData)
     }
 
-    // only kind period or trial are supported
-    // for getting the quantity and price
-    // TODO: we need to handle the other cases as well (credit and discount)
-    const invoiceItemsToUpdate = openInvoiceData.invoiceItems
+    const billableInvoiceItems = openInvoiceData.invoiceItems
       .filter((item) => item.featurePlanVersionId !== null)
       .filter((item) => item.subscriptionItemId !== null)
       .filter((item) => item.kind === "period" || item.kind === "trial")
 
-    if (invoiceItemsToUpdate.length === 0) {
+    if (billableInvoiceItems.length === 0) {
       return Ok(openInvoiceData)
     }
 
-    // compute the invoice items for getting the right quantities and prices
-    const { val: billableItems, err: billableItemsErr } = await this._computeInvoiceItems({
-      invoice: openInvoiceData,
-      items: invoiceItemsToUpdate as InvoiceItemExtended[],
-    })
+    // In ledger-first flow, invoice items may already have priced amounts from ledger projection.
+    // We only compute pricing for legacy/unpriced period items.
+    const invoiceItemsToCompute = billableInvoiceItems.filter(
+      (item) =>
+        (item.amountSubtotal ?? 0) === 0 &&
+        (item.amountTotal ?? 0) === 0 &&
+        (item.unitAmountCents ?? 0) === 0
+    )
 
-    if (billableItemsErr) {
-      this.logger.error("Error computing invoice items", {
-        statementKey: openInvoiceData.statementKey,
-        subscriptionId: openInvoiceData.subscriptionId,
-        projectId: openInvoiceData.projectId,
-        customerId: openInvoiceData.customerId,
+    const computedBillableItems: ComputeInvoiceItemsResult[] = []
+
+    if (invoiceItemsToCompute.length > 0) {
+      const { val: billableItems, err: billableItemsErr } = await this._computeInvoiceItems({
+        invoice: openInvoiceData,
+        items: invoiceItemsToCompute as InvoiceItemExtended[],
       })
 
-      return Err(new UnPriceBillingError({ message: billableItemsErr.message }))
+      if (billableItemsErr) {
+        this.logger.error("Error computing invoice items", {
+          statementKey: openInvoiceData.statementKey,
+          subscriptionId: openInvoiceData.subscriptionId,
+          projectId: openInvoiceData.projectId,
+          customerId: openInvoiceData.customerId,
+        })
+
+        return Err(new UnPriceBillingError({ message: billableItemsErr.message }))
+      }
+
+      computedBillableItems.push(...billableItems.items)
     }
 
     // all this happends in a transaction
     const result = await this.db.transaction(async (tx) => {
       try {
-        const billableItemsIds = billableItems.items.map((item) => item.id)
+        const billableItemsIds = computedBillableItems.map((item) => item.id)
 
         // we update in a single query
         const quantityChunks = []
@@ -890,14 +908,14 @@ export class BillingService {
         const subtotalAmountChunks = []
         const descriptionChunks = []
 
-        if (billableItems.items.length > 0) {
+        if (computedBillableItems.length > 0) {
           quantityChunks.push(sql`(case`)
           totalAmountChunks.push(sql`(case`)
           unitAmountChunks.push(sql`(case`)
           subtotalAmountChunks.push(sql`(case`)
           descriptionChunks.push(sql`(case`)
 
-          for (const item of billableItems.items) {
+          for (const item of computedBillableItems) {
             quantityChunks.push(
               sql`when ${invoiceItems.id} = ${item.id} then cast(${item.quantity} as int)`
             )
@@ -948,9 +966,20 @@ export class BillingService {
             )
         }
 
-        // get the subtotal amount
-        const subtotalAmount = billableItems.items.reduce((a, i) => a + i.subtotalAmount, 0)
-        const totalAmount = billableItems.items.reduce((a, i) => a + i.totalAmount, 0)
+        const pricedInvoiceItems = await tx.query.invoiceItems.findMany({
+          columns: {
+            amountSubtotal: true,
+            amountTotal: true,
+          },
+          where: (item, ops) =>
+            ops.and(eq(item.projectId, projectId), eq(item.invoiceId, openInvoiceData.id)),
+        })
+
+        const subtotalAmount = pricedInvoiceItems.reduce(
+          (sum, item) => sum + item.amountSubtotal,
+          0
+        )
+        const totalAmount = pricedInvoiceItems.reduce((sum, item) => sum + item.amountTotal, 0)
 
         // apply credits if any
         const { err: applyCreditsErr, val: applyCreditsResult } = await this._applyCredits({

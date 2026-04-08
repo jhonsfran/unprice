@@ -240,6 +240,8 @@ export const COLLECTION_METHODS = ["charge_automatically", "send_invoice"] as co
 export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
 export const OVERAGE_STRATEGIES = ["none", "last-call", "always"] as const
+export const LEDGER_ENTRY_TYPES = ["debit", "credit"] as const
+export const LEDGER_SETTLEMENT_TYPES = ["invoice", "manual"] as const
 
 export const TIER_MODES = Object.keys(TIER_MODES_MAP) as unknown as readonly [
   TierMode,

@@ -29,6 +29,13 @@
       "when": 1775602679189,
       "tag": "0003_good_stingray",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1775633056190,
+      "tag": "0004_clever_zzzax",
+      "breakpoints": true
     }
   ]
 }

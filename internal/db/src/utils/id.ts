@@ -38,6 +38,8 @@ export const prefixes = {
   invoice_credit_application: "ica",
   entitlement: "ent",
   grant: "grnt",
+  ledger: "ldg",
+  ledger_entry: "le",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

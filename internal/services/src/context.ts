@@ -8,6 +8,7 @@ import { GrantsManager } from "./entitlements/grants"
 import { EntitlementService } from "./entitlements/service"
 import { EventService } from "./events/service"
 import { FeatureService } from "./features/service"
+import { LedgerService } from "./ledger/service"
 import { PageService } from "./pages/service"
 import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
@@ -35,6 +36,7 @@ export interface ServiceContext {
   grantsManager: GrantsManager
   paymentProviderResolver: PaymentProviderResolver
   rating: RatingService
+  ledger: LedgerService
   billing: BillingService
   subscriptions: SubscriptionService
   entitlements: EntitlementService
@@ -59,6 +61,12 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   const paymentProviderResolver = new PaymentProviderResolver({
     db: deps.db,
     logger: deps.logger,
+  })
+
+  const ledger = new LedgerService({
+    db: deps.db,
+    logger: deps.logger,
+    metrics: deps.metrics,
   })
 
   const customers = new CustomerService({
@@ -146,6 +154,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     customerService: customers,
     grantsManager,
     ratingService: rating,
+    ledgerService: ledger,
   })
 
   const subscriptions = new SubscriptionService({
@@ -157,6 +166,8 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     metrics: deps.metrics,
     customerService: customers,
     billingService: billing,
+    ratingService: rating,
+    ledgerService: ledger,
   })
 
   const entitlements = new EntitlementService({
@@ -184,6 +195,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     grantsManager,
     paymentProviderResolver,
     rating,
+    ledger,
     billing,
     subscriptions,
     entitlements,

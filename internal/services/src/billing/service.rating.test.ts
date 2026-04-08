@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
+import type { LedgerService } from "../ledger/service"
 import type { Metrics } from "../metrics"
 import { UnPriceRatingError } from "../rating/errors"
 import type { RatingService } from "../rating/service"
@@ -30,6 +31,7 @@ describe("BillingService rating delegation", () => {
       customerService: {} as CustomerService,
       grantsManager: {} as GrantsManager,
       ratingService,
+      ledgerService: {} as LedgerService,
     })
 
   it("delegates calculateFeaturePrice to RatingService.rateBillingPeriod", async () => {

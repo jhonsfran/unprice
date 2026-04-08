@@ -19,6 +19,8 @@ import { UnPriceMachineError } from "./errors"
 
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import type { LedgerService } from "../ledger/service"
+import type { RatingService } from "../rating/service"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
   canRenew,
@@ -63,6 +65,8 @@ export class SubscriptionMachine {
   private now: number
   private customerService: CustomerService
   private grantService: GrantsManager
+  private ratingService: RatingService
+  private ledgerService: LedgerService
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -77,6 +81,8 @@ export class SubscriptionMachine {
     analytics,
     logger,
     customer,
+    ratingService,
+    ledgerService,
     now,
     db,
   }: {
@@ -85,6 +91,8 @@ export class SubscriptionMachine {
     analytics: Analytics
     logger: Logger
     customer: CustomerService
+    ratingService: RatingService
+    ledgerService: LedgerService
     now: number
     db: Database
   }) {
@@ -94,6 +102,8 @@ export class SubscriptionMachine {
     this.logger = logger
     this.now = now
     this.customerService = customer
+    this.ratingService = ratingService
+    this.ledgerService = ledgerService
     this.db = db
     this.machine = this.createMachineSubscription()
     this.grantService = new GrantsManager({ db: db, logger: logger })
@@ -142,11 +152,21 @@ export class SubscriptionMachine {
         invoiceSubscription: fromPromise(
           async ({
             input,
-          }: { input: { context: SubscriptionContext; logger: Logger; db: Database } }) => {
+          }: {
+            input: {
+              context: SubscriptionContext
+              logger: Logger
+              db: Database
+              ratingService: RatingService
+              ledgerService: LedgerService
+            }
+          }) => {
             const result = await invoiceSubscription({
               context: input.context,
               logger: input.logger,
               db: input.db,
+              ratingService: input.ratingService,
+              ledgerService: input.ledgerService,
             })
 
             return result
@@ -385,7 +405,13 @@ export class SubscriptionMachine {
           invoke: {
             id: "invoiceSubscription",
             src: "invoiceSubscription",
-            input: ({ context }) => ({ context, logger: this.logger, db: this.db }),
+            input: ({ context }) => ({
+              context,
+              logger: this.logger,
+              db: this.db,
+              ratingService: this.ratingService,
+              ledgerService: this.ledgerService,
+            }),
             onDone: {
               target: "active",
               actions: [
@@ -765,6 +791,8 @@ export class SubscriptionMachine {
     analytics: Analytics
     logger: Logger
     customer: CustomerService
+    ratingService: RatingService
+    ledgerService: LedgerService
     now: number
     db: Database
     dryRun?: boolean
