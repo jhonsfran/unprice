@@ -691,20 +691,86 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     }
 
     const object = payload.data?.object
-    const customerId = typeof object?.customer === "string" ? object.customer : undefined
+    const customerValue = object?.customer
+    const subscriptionValue = object?.subscription
+    const invoiceValue = object?.invoice
+    const hostedInvoiceUrl = object?.hosted_invoice_url
+    const failureCode = object?.failure_code
+    const failureMessage = object?.failure_message
+    const paymentFailureCode = object?.last_payment_error_code
+    const paymentFailureMessage = object?.last_payment_error_message
+
+    const customerId =
+      typeof customerValue === "string"
+        ? customerValue
+        : customerValue &&
+            typeof customerValue === "object" &&
+            "id" in customerValue &&
+            typeof customerValue.id === "string"
+          ? customerValue.id
+          : undefined
     const subscriptionId =
-      typeof object?.subscription === "string" ? object.subscription : undefined
+      typeof subscriptionValue === "string"
+        ? subscriptionValue
+        : subscriptionValue &&
+            typeof subscriptionValue === "object" &&
+            "id" in subscriptionValue &&
+            typeof subscriptionValue.id === "string"
+          ? subscriptionValue.id
+          : undefined
     const invoiceId =
-      typeof object?.id === "string" && event.eventType.includes("invoice") ? object.id : undefined
+      typeof object?.id === "string" && event.eventType.startsWith("invoice.")
+        ? object.id
+        : typeof invoiceValue === "string"
+          ? invoiceValue
+          : invoiceValue &&
+              typeof invoiceValue === "object" &&
+              "id" in invoiceValue &&
+              typeof invoiceValue.id === "string"
+            ? invoiceValue.id
+            : undefined
+    const invoiceUrl = typeof hostedInvoiceUrl === "string" ? hostedInvoiceUrl : undefined
+
+    const normalizedEventType: NormalizedProviderWebhook["eventType"] = (() => {
+      switch (event.eventType) {
+        case "invoice.paid":
+        case "invoice.payment_succeeded":
+          return "payment.succeeded"
+        case "invoice.payment_failed":
+          return "payment.failed"
+        case "charge.refunded":
+        case "charge.dispute.created":
+        case "charge.dispute.funds_withdrawn":
+          return "payment.reversed"
+        case "charge.dispute.funds_reinstated":
+          return "payment.dispute_reversed"
+        default:
+          return "noop"
+      }
+    })()
 
     return Ok({
       provider: this.provider,
       eventId: event.eventId,
-      eventType: event.eventType,
+      eventType: normalizedEventType,
+      providerEventType: event.eventType,
       occurredAt: event.occurredAt,
       customerId,
       subscriptionId,
       invoiceId,
+      invoiceUrl,
+      failureCode:
+        typeof failureCode === "string"
+          ? failureCode
+          : typeof paymentFailureCode === "string"
+            ? paymentFailureCode
+            : undefined,
+      failureMessage:
+        typeof failureMessage === "string"
+          ? failureMessage
+          : typeof paymentFailureMessage === "string"
+            ? paymentFailureMessage
+            : undefined,
       payload: event.payload,
     })
   }

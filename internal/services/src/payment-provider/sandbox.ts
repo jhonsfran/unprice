@@ -254,16 +254,35 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
     event: VerifiedProviderWebhook
   ): Result<NormalizedProviderWebhook, UnPricePaymentProviderError> {
     const payload = event.payload as Record<string, unknown>
+    const normalizedEventType: NormalizedProviderWebhook["eventType"] = (() => {
+      switch (event.eventType) {
+        case "sandbox.payment.succeeded":
+          return "payment.succeeded"
+        case "sandbox.payment.failed":
+          return "payment.failed"
+        case "sandbox.payment.reversed":
+          return "payment.reversed"
+        case "sandbox.payment.dispute_reversed":
+          return "payment.dispute_reversed"
+        default:
+          return "noop"
+      }
+    })()
 
     return Ok({
       provider: this.provider,
       eventId: event.eventId,
-      eventType: event.eventType,
+      eventType: normalizedEventType,
+      providerEventType: event.eventType,
       occurredAt: event.occurredAt,
       customerId: typeof payload.customerId === "string" ? payload.customerId : undefined,
       subscriptionId:
         typeof payload.subscriptionId === "string" ? payload.subscriptionId : undefined,
       invoiceId: typeof payload.invoiceId === "string" ? payload.invoiceId : undefined,
+      invoiceUrl: typeof payload.invoiceUrl === "string" ? payload.invoiceUrl : undefined,
+      failureCode: typeof payload.failureCode === "string" ? payload.failureCode : undefined,
+      failureMessage:
+        typeof payload.failureMessage === "string" ? payload.failureMessage : undefined,
       payload: event.payload,
     })
   }

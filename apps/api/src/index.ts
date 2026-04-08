@@ -22,6 +22,7 @@ import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerGetLakehouseFilePlanV1 } from "./routes/lakehouse/getLakehouseFilePlanV1"
 import { registerProviderSetupV1 } from "./routes/paymentProvider/providerSetupV1"
 import { registerProviderSignUpV1 } from "./routes/paymentProvider/providerSignUpV1"
+import { registerProviderWebhookV1 } from "./routes/paymentProvider/providerWebhookV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
 import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
 import { registerGetFeaturesV1 } from "./routes/project/getFeaturesV1"
@@ -140,6 +141,7 @@ registerListPlanVersionsV1(app)
 // Payment provider routes
 registerProviderSignUpV1(app)
 registerProviderSetupV1(app)
+registerProviderWebhookV1(app)
 
 // Analytics routes
 registerGetAnalyticsUsageV1(app)

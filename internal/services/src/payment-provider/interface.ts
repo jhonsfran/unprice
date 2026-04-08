@@ -59,14 +59,25 @@ export type VerifiedProviderWebhook = {
   payload: unknown
 }
 
+export type NormalizedWebhookEventType =
+  | "payment.succeeded"
+  | "payment.failed"
+  | "payment.reversed"
+  | "payment.dispute_reversed"
+  | "noop"
+
 export type NormalizedProviderWebhook = {
   provider: PaymentProvider
   eventId: string
-  eventType: string
+  eventType: NormalizedWebhookEventType
+  providerEventType: string
   occurredAt: number
   customerId?: string
   subscriptionId?: string
   invoiceId?: string
+  invoiceUrl?: string
+  failureCode?: string
+  failureMessage?: string
   payload: unknown
 }
 

@@ -1788,4 +1788,60 @@ export class SubscriptionService {
       return Err(e as UnPriceSubscriptionError)
     }
   }
+
+  public async reconcilePaymentOutcome({
+    subscriptionId,
+    projectId,
+    invoiceId,
+    outcome,
+    failureMessage,
+    now = Date.now(),
+  }: {
+    subscriptionId: string
+    projectId: string
+    invoiceId: string
+    outcome: "success" | "failure"
+    failureMessage?: string
+    now?: number
+  }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        lock: true,
+        run: async (machine) => {
+          if (outcome === "success") {
+            const ok = await machine.reportPaymentSuccess({ invoiceId })
+            if (ok.err) {
+              throw ok.err
+            }
+            return ok.val
+          }
+
+          const failed = await machine.reportPaymentFailure({
+            invoiceId,
+            error: failureMessage ?? "Payment failed from provider webhook",
+          })
+          if (failed.err) {
+            throw failed.err
+          }
+          return failed.val
+        },
+      })
+
+      return Ok({ status })
+    } catch (error) {
+      return Err(
+        error instanceof UnPriceSubscriptionError
+          ? error
+          : new UnPriceSubscriptionError({
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to reconcile subscription payment outcome",
+            })
+      )
+    }
+  }
 }
