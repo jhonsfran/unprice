@@ -40,10 +40,13 @@ export const rawEventSchema = z.object({
     description: "The event slug",
     example: "tokens_used",
   }),
-  customerId: z.string().openapi({
-    description: "The unprice customer id",
-    example: "cus_123",
-  }),
+  customerId: z
+    .string()
+    .openapi({
+      description: "The unprice customer id",
+      example: "cus_123",
+    })
+    .optional(),
   timestamp: z
     .number()
     .openapi({
@@ -101,8 +104,20 @@ export const registerIngestEventsV1 = (app: App) =>
 
     // 1. auth for the request
     const key = await keyAuth(c)
+    const customerId = resolveRequestCustomerId({
+      explicitCustomerId: body.customerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
+
+    if (!customerId) {
+      throw new UnpriceApiError({
+        code: "BAD_REQUEST",
+        message: "customerId is required when the API key has no default customer binding",
+      })
+    }
+
     // 2. resolve the proper project Id if this is called from main project
-    const projectId = await resolveContextProjectId(c, key.projectId, body.customerId)
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     try {
       // 3. events that are too old doesn't get pass, also events that are too far from the future.
@@ -133,6 +148,7 @@ export const registerIngestEventsV1 = (app: App) =>
         ...body,
         idempotencyKey,
       },
+      customerId,
       projectId,
       receivedAt,
       requestId,
@@ -142,7 +158,7 @@ export const registerIngestEventsV1 = (app: App) =>
     // shard by customerid to make sure the messages of specific customer go to the same queue
     // this way we can group them together in background
     const selectedQueue =
-      availableQueues[selectQueueShardIndex(body.customerId, availableQueues.length)]!
+      availableQueues[selectQueueShardIndex(customerId, availableQueues.length)]!
 
     // This sends the message in background to avoid blocking the requests
     // There is a retry mechanism and last option we send to analytics events
@@ -232,18 +248,19 @@ export function generateEventId(now = Date.now()): string {
 
 export function buildIngestionQueueMessage(params: {
   body: IngestEventsRequest
+  customerId: string
   projectId: string
   receivedAt: number
   requestId: string
   timestamp: number
 }): IngestionQueueMessage {
-  const { body, projectId, receivedAt, requestId, timestamp } = params
+  const { body, customerId, projectId, receivedAt, requestId, timestamp } = params
   const eventId = body.id ?? generateEventId(receivedAt)
 
   return ingestionQueueMessageSchema.parse({
     version: 1,
     projectId,
-    customerId: body.customerId,
+    customerId,
     requestId,
     receivedAt,
     idempotencyKey: body.idempotencyKey,
@@ -252,6 +269,13 @@ export function buildIngestionQueueMessage(params: {
     timestamp,
     properties: body.properties,
   })
+}
+
+export function resolveRequestCustomerId(params: {
+  explicitCustomerId?: string
+  defaultCustomerId?: string | null
+}): string | null {
+  return params.explicitCustomerId ?? params.defaultCustomerId ?? null
 }
 
 export type IngestEventsRequest = z.infer<typeof rawEventSchema>

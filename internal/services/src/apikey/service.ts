@@ -122,11 +122,13 @@ export class ApiKeysService {
     isRoot,
     name,
     expiresAt,
+    defaultCustomerId,
   }: {
     projectId: string
     isRoot: boolean
     name: string
     expiresAt?: number | null
+    defaultCustomerId?: string | null
   }): Promise<Result<ApiKey & { key: string }, FetchError>> {
     const apiKey = newId("apikey_key")
     const apiKeyId = newId("apikey")
@@ -142,6 +144,7 @@ export class ApiKeysService {
           expiresAt,
           projectId,
           isRoot,
+          defaultCustomerId,
         })
         .returning()
         .then((rows) => rows[0] ?? null),
@@ -282,6 +285,7 @@ export class ApiKeysService {
           expiresAt: true,
           revokedAt: true,
           hash: true,
+          defaultCustomerId: true,
         },
         where: (apikey, { eq }) => eq(apikey.hash, keyHash),
       })
@@ -516,15 +520,133 @@ export class ApiKeysService {
       newKey,
     }
 
-    // update cache
+    // evict stale entry under old hash, then cache under new hash
     this.waitUntil(
-      this.cache.apiKeyByHash.set(apiKeyHash, {
-        ...apiKey,
-        ...newApiKey,
-      })
+      this.cache.apiKeyByHash.remove(req.keyHash).then(() =>
+        this.cache.apiKeyByHash.set(apiKeyHash, {
+          ...apiKey,
+          ...newApiKey,
+        })
+      )
     )
 
     return Ok(newApiKeyExtended)
+  }
+
+  public async bindCustomer({
+    apikeyId,
+    customerId,
+    projectId,
+  }: {
+    apikeyId: string
+    customerId: string
+    projectId: string
+  }): Promise<Result<{ state: "ok" } | { state: "not_found" }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(apikeys)
+        .set({
+          defaultCustomerId: customerId,
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(apikeys.id, apikeyId), eq(apikeys.projectId, projectId)))
+        .returning({
+          hash: apikeys.hash,
+        }),
+      (error) =>
+        new FetchError({
+          message: `error binding customer to api key: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error binding customer to api key", {
+        error: toErrorContext(err),
+        projectId,
+        apikeyId,
+        customerId,
+      })
+      return Err(err)
+    }
+
+    if (val.length === 0) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    this.waitUntil(Promise.all(val.map((apikey) => this.cache.apiKeyByHash.remove(apikey.hash))))
+
+    return Ok({
+      state: "ok",
+    })
+  }
+
+  public async unbindCustomer({
+    apikeyId,
+    projectId,
+  }: {
+    apikeyId: string
+    projectId: string
+  }): Promise<Result<{ state: "ok" } | { state: "not_found" }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(apikeys)
+        .set({
+          defaultCustomerId: null,
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(apikeys.id, apikeyId), eq(apikeys.projectId, projectId)))
+        .returning({
+          hash: apikeys.hash,
+        }),
+      (error) =>
+        new FetchError({
+          message: `error unbinding customer from api key: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error("error unbinding customer from api key", {
+        error: toErrorContext(err),
+        projectId,
+        apikeyId,
+      })
+      return Err(err)
+    }
+
+    if (val.length === 0) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    this.waitUntil(Promise.all(val.map((apikey) => this.cache.apiKeyByHash.remove(apikey.hash))))
+
+    return Ok({
+      state: "ok",
+    })
+  }
+
+  public async resolveCustomerId(req: {
+    key: string
+  }): Promise<Result<string | null, SchemaError | FetchError | UnPriceApiKeyError>> {
+    const { val, err } = await this.getApiKey(
+      {
+        key: req.key,
+      },
+      {
+        skipCache: false,
+      }
+    )
+
+    if (err) {
+      return Err(err)
+    }
+
+    return Ok(val.defaultCustomerId ?? null)
   }
 
   /**

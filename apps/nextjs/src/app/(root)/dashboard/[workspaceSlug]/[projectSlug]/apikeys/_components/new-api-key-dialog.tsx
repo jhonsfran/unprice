@@ -34,6 +34,7 @@ export default function NewApiKeyDialog() {
           defaultValues={{
             name: "",
             expiresAt: null,
+            defaultCustomerId: null,
           }}
         />
       </DialogContent>

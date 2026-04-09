@@ -57,6 +57,7 @@ type HandleMessageParams = {
 }
 
 type ApplyResolvedStatesParams = {
+  candidateGrants: IngestionCandidateGrants
   customerId: string
   message: IngestionQueueMessage
   processableStates: IngestionResolvedState[]
@@ -64,6 +65,7 @@ type ApplyResolvedStatesParams = {
 }
 
 type ApplyResolvedStateParams = {
+  candidateGrants: IngestionCandidateGrants
   customerId: string
   enforceLimit: boolean
   message: IngestionQueueMessage
@@ -73,6 +75,7 @@ type ApplyResolvedStateParams = {
 
 export type EntitlementWindowApplyInput = {
   customerId: string
+  currency: string
   enforceLimit: boolean
   event: {
     id: string
@@ -90,6 +93,7 @@ export type EntitlementWindowApplyInput = {
   periodKey: string
   projectId: string
   streamId: string
+  featurePlanVersionId: string | null
 }
 
 export type EntitlementWindowController = {
@@ -236,6 +240,7 @@ export class IngestionService {
     }
 
     const applyResult = await this.applyResolvedState({
+      candidateGrants: preparedContext.candidateGrants,
       customerId,
       enforceLimit: true,
       message,
@@ -495,6 +500,7 @@ export class IngestionService {
     }
 
     await this.applyResolvedStates({
+      candidateGrants: context.candidateGrants,
       customerId,
       message,
       processableStates: processableStatesResult.val,
@@ -825,10 +831,11 @@ export class IngestionService {
   }
 
   private async applyResolvedStates(params: ApplyResolvedStatesParams): Promise<void> {
-    const { customerId, message, processableStates, projectId } = params
+    const { candidateGrants, customerId, message, processableStates, projectId } = params
 
     for (const state of processableStates) {
       await this.applyResolvedState({
+        candidateGrants,
         customerId,
         enforceLimit: false,
         message,
@@ -841,7 +848,9 @@ export class IngestionService {
   private async applyResolvedState(
     params: ApplyResolvedStateParams
   ): Promise<EntitlementWindowApplyResult | null> {
-    const { customerId, enforceLimit, message, projectId, state } = params
+    const { candidateGrants, customerId, enforceLimit, message, projectId, state } = params
+    const currency = resolveCurrencyForResolvedState(candidateGrants, state)
+    const featurePlanVersionId = resolveFeaturePlanVersionIdForResolvedState(candidateGrants, state)
 
     const periodKey = computeResolvedStatePeriodKey(state, message.timestamp)
 
@@ -874,7 +883,9 @@ export class IngestionService {
       idempotencyKey: message.idempotencyKey,
       projectId,
       customerId,
+      currency,
       streamId: state.streamId,
+      featurePlanVersionId,
       featureSlug: state.featureSlug,
       periodKey,
       meters: [state.meterConfig],
@@ -940,6 +951,85 @@ export class IngestionService {
       state: outcome.state,
     }
   }
+}
+
+function resolveCurrencyForResolvedState(
+  candidateGrants: IngestionCandidateGrants,
+  state: IngestionResolvedState
+): string {
+  const activeGrantIds = new Set(state.activeGrantIds)
+
+  for (const grant of candidateGrants) {
+    if (!activeGrantIds.has(grant.id)) {
+      continue
+    }
+
+    const config = grant.featurePlanVersion?.config
+    const currencyFromPrice = extractCurrencyCode(config, "price")
+    if (currencyFromPrice) {
+      return currencyFromPrice
+    }
+
+    const tiers = extractTiers(config)
+    for (const tier of tiers) {
+      const currencyFromTier = extractCurrencyCode(tier, "unitPrice")
+      if (currencyFromTier) {
+        return currencyFromTier
+      }
+    }
+  }
+
+  return "USD"
+}
+
+function resolveFeaturePlanVersionIdForResolvedState(
+  candidateGrants: IngestionCandidateGrants,
+  state: IngestionResolvedState
+): string | null {
+  const activeGrantIds = new Set(state.activeGrantIds)
+  const matchingGrant = candidateGrants.find((grant) => activeGrantIds.has(grant.id))
+  return matchingGrant?.featurePlanVersionId ?? null
+}
+
+function extractCurrencyCode(input: unknown, priceKey: string): string | null {
+  if (!isRecord(input)) {
+    return null
+  }
+
+  const price = input[priceKey]
+  if (!isRecord(price)) {
+    return null
+  }
+
+  const dinero = price.dinero
+  if (!isRecord(dinero)) {
+    return null
+  }
+
+  const currency = dinero.currency
+  if (!isRecord(currency)) {
+    return null
+  }
+
+  const code = currency.code
+  return typeof code === "string" && code.length > 0 ? code : null
+}
+
+function extractTiers(input: unknown): Record<string, unknown>[] {
+  if (!isRecord(input)) {
+    return []
+  }
+
+  const tiers = input.tiers
+  if (!Array.isArray(tiers)) {
+    return []
+  }
+
+  return tiers.filter((tier): tier is Record<string, unknown> => isRecord(tier))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }
 
 function buildAuditPayload(

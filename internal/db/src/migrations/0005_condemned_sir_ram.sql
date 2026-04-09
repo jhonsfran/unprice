@@ -1,0 +1,3 @@
+ALTER TABLE "unprice_apikeys" ADD COLUMN "default_customer_id" varchar(36);--> statement-breakpoint
+ALTER TABLE "unprice_apikeys" ADD CONSTRAINT "apikeys_default_customer_id_fkey" FOREIGN KEY ("default_customer_id","project_id") REFERENCES "public"."unprice_customers"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "apikeys_project_default_customer_idx" ON "unprice_apikeys" USING btree ("project_id","default_customer_id") WHERE "unprice_apikeys"."default_customer_id" IS NOT NULL;

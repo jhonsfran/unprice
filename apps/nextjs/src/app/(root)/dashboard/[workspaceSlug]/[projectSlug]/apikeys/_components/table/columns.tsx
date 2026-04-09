@@ -50,6 +50,19 @@ export const columns: ColumnDef<ApiKey>[] = [
     enableResizing: true,
   },
   {
+    accessorKey: "defaultCustomerId",
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Default Customer" />,
+    cell: ({ row }) => {
+      if (!row.original.defaultCustomerId) {
+        return <span className="text-muted-foreground">Not configured</span>
+      }
+
+      return row.original.defaultCustomerId
+    },
+    enableSorting: false,
+    enableHiding: true,
+  },
+  {
     accessorKey: "createdAtM",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Created At" />,
     cell: ({ row }) => (

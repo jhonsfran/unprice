@@ -41,6 +41,7 @@ const requestBody = {
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
+  defaultCustomerId: "cus_default_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
@@ -110,6 +111,82 @@ describe("ingestEventsSyncV1 route", () => {
         timestamp: requestBody.timestamp,
       }),
     })
+  })
+
+  it("resolves customer id from key binding when request customerId is omitted", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: undefined,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(ingestFeatureSync).toHaveBeenCalledWith({
+      featureSlug: "api_calls",
+      message: expect.objectContaining({
+        customerId: verifiedKey.defaultCustomerId,
+      }),
+    })
+  })
+
+  it("uses explicit customerId from body even when key has a different default", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: "cus_explicit_999",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(ingestFeatureSync).toHaveBeenCalledWith({
+      featureSlug: "api_calls",
+      message: expect.objectContaining({
+        customerId: "cus_explicit_999",
+      }),
+    })
+  })
+
+  it("returns 400 when customerId is omitted and key has no default binding", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+    authMocks.keyAuth.mockResolvedValueOnce({
+      ...verifiedKey,
+      defaultCustomerId: null,
+    })
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: undefined,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "BAD_REQUEST",
+        message: "customerId is required when the API key has no default customer binding",
+      })
+    )
   })
 })
 

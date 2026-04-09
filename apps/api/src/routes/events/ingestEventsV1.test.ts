@@ -43,6 +43,7 @@ const requestBody = {
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
+  defaultCustomerId: "cus_default_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
@@ -277,6 +278,92 @@ describe("ingestEventsV1 route", () => {
       expect.objectContaining({
         idempotencyKey: requestBody.idempotencyKey,
         id: "evt_01ARYZ6S41TSV4RRFFQ69G5FAV",
+      })
+    )
+  })
+
+  it("resolves customer id from the API key binding when omitted in the request", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: undefined,
+      }),
+      env,
+      executionCtx
+    )
+    await Promise.all(waitUntilPromises)
+
+    expect(response.status).toBe(202)
+
+    const selectedQueue =
+      selectQueueShardIndex(verifiedKey.defaultCustomerId) === 0
+        ? env.QUEUE_SHARD_0
+        : env.QUEUE_SHARD_1
+
+    expect(selectedQueue.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: verifiedKey.defaultCustomerId,
+      })
+    )
+  })
+
+  it("uses explicit customerId from body even when key has a different default", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: "cus_explicit_999",
+      }),
+      env,
+      executionCtx
+    )
+    await Promise.all(waitUntilPromises)
+
+    expect(response.status).toBe(202)
+
+    const selectedQueue =
+      selectQueueShardIndex("cus_explicit_999") === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
+
+    expect(selectedQueue.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: "cus_explicit_999",
+      })
+    )
+  })
+
+  it("returns 400 when customerId is omitted and the api key has no default customer", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+    authMocks.keyAuth.mockResolvedValueOnce({
+      ...verifiedKey,
+      defaultCustomerId: null,
+    })
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: undefined,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "BAD_REQUEST",
+        message: "customerId is required when the API key has no default customer binding",
       })
     )
   })

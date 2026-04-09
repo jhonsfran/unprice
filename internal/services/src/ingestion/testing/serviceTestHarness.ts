@@ -27,6 +27,7 @@ type LoggerStub = {
 
 type ApplyInput = {
   customerId: string
+  currency: string
   enforceLimit: boolean
   event: {
     id: string
@@ -44,6 +45,7 @@ type ApplyInput = {
   periodKey: string
   projectId: string
   streamId: string
+  featurePlanVersionId: string | null
 }
 
 type ApplyResult = {
@@ -447,16 +449,39 @@ function normalizeLimit(limit?: number | null): number | null {
 export function createUsageGrant(
   params: {
     featureSlug?: string
+    grantId?: string
+    featurePlanVersionId?: string
+    currency?: string
   } = {}
 ) {
+  const featureSlug = params.featureSlug ?? "api_calls"
+  const currency = params.currency ?? "USD"
+
   return {
+    id: params.grantId ?? "grant_123",
+    featurePlanVersionId: params.featurePlanVersionId ?? "fpv_123",
     featurePlanVersion: {
       feature: {
-        slug: params.featureSlug ?? "api_calls",
+        slug: featureSlug,
       },
       featureType: "usage",
       meterConfig: {
-        eventId: `meter_${params.featureSlug ?? "api_calls"}`,
+        eventId: `meter_${featureSlug}`,
+      },
+      config: {
+        usageMode: "unit",
+        price: {
+          dinero: {
+            amount: 100,
+            currency: {
+              code: currency,
+              base: 10,
+              exponent: 2,
+            },
+            scale: 2,
+          },
+          displayAmount: "1.00",
+        },
       },
     },
   }

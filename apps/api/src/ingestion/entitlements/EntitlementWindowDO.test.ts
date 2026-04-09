@@ -6,12 +6,16 @@ const TEST_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
 type Fact = { delta: number; meterKey: string; valueAfter: number }
 type PersistOptions = { beforePersist?: (facts: Fact[]) => void }
 
-// biome-ignore lint/suspicious/noExplicitAny: test-only types mirror drizzle query conditions
-type DrizzleCondition = { kind: string; value?: any; values?: any[] }
+type DrizzleCondition = {
+  kind: string
+  value?: unknown
+  values?: unknown[]
+  conditions?: DrizzleCondition[]
+}
 
 type FakeDbState = {
   idempotencyRows: Map<string, { createdAt: number; result: string }>
-  outboxRows: { id: number; payload: string }[]
+  outboxRows: { id: number; payload: string; currency: string; billedAt: number | null }[]
 }
 
 type FakeDurableObjectState = {
@@ -32,6 +36,7 @@ const testState = {
   analyticsIngest: vi.fn(),
   db: null as FakeDbState | null,
   engineApply: vi.fn(),
+  reportAgentUsage: vi.fn(),
   logger: {
     debug: vi.fn(),
     emit: vi.fn(),
@@ -62,6 +67,14 @@ describe("EntitlementWindowDO", () => {
     for (const fn of Object.values(testState.logger)) fn.mockReset()
     testState.analyticsIngest.mockReset()
     testState.engineApply.mockReset()
+    testState.reportAgentUsage.mockReset()
+    testState.reportAgentUsage.mockResolvedValue({
+      val: {
+        amountCents: 100,
+        sourceId: "proj_123:cus_123:api_calls:idem_123",
+        state: "debited",
+      },
+    })
     vi.spyOn(Date, "now").mockReturnValue(BASE_NOW)
   })
 
@@ -175,6 +188,16 @@ describe("EntitlementWindowDO", () => {
     await durableObject.alarm()
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(testState.reportAgentUsage).toHaveBeenCalledTimes(1)
+    expect(testState.reportAgentUsage).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        fact: expect.objectContaining({
+          currency: "USD",
+          feature_plan_version_id: "fpv_123",
+        }),
+      })
+    )
     expect(testState.analyticsIngest).toHaveBeenCalledWith([
       expect.objectContaining({
         delta: 2,
@@ -187,6 +210,36 @@ describe("EntitlementWindowDO", () => {
     ])
     expect(db.outboxRows).toHaveLength(0)
     expect(state.alarmAt).toBe(input.periodEndAt + TEST_MAX_EVENT_AGE_MS)
+  })
+
+  it("keeps unbilled rows for retry when background billing fails", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 2, meterKey: DEFAULT_METER_KEY, valueAfter: 2 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.analyticsIngest.mockResolvedValue({
+      quarantined_rows: 0,
+      successful_rows: 1,
+    })
+    testState.reportAgentUsage.mockResolvedValue({
+      err: new Error("ledger failed"),
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const input = createApplyInput()
+
+    await durableObject.apply(input)
+    await durableObject.alarm()
+
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(testState.reportAgentUsage).toHaveBeenCalledTimes(1)
+    expect(db.outboxRows).toHaveLength(1)
+    expect(db.outboxRows[0]?.billedAt).toBeNull()
   })
 })
 
@@ -222,11 +275,17 @@ async function loadEntitlementWindowDO() {
   vi.doMock("./drizzle-adapter", () => ({ DrizzleStorageAdapter: class {} }))
   vi.doMock("./drizzle/migrations", () => ({ default: [] }))
 
+  vi.doMock("@unprice/db", () => ({
+    createConnection: vi.fn(() => ({})),
+  }))
+
   vi.doMock("drizzle-orm", () => ({
+    and: (...conditions: DrizzleCondition[]): DrizzleCondition => ({ kind: "and", conditions }),
     asc: (col: unknown) => ({ col, kind: "asc" }),
     eq: (_col: unknown, value: unknown): DrizzleCondition => ({ kind: "eq", value }),
     inArray: (_col: unknown, values: unknown[]): DrizzleCondition => ({ kind: "inArray", values }),
-    like: (_col: unknown, value: string): DrizzleCondition => ({ kind: "like", value }),
+    isNull: (): DrizzleCondition => ({ kind: "isNull" }),
+    isNotNull: (): DrizzleCondition => ({ kind: "isNotNull" }),
     lt: (_col: unknown, value: unknown): DrizzleCondition => ({ kind: "lt", value }),
     sql: () => ({ kind: "sql" }),
   }))
@@ -241,6 +300,7 @@ async function loadEntitlementWindowDO() {
   vi.doMock("@unprice/services/entitlements", () => {
     class EventTimestampTooFarInFutureError extends Error {}
     class EventTimestampTooOldError extends Error {}
+    class GrantsManager {}
 
     return {
       AsyncMeterAggregationEngine: class {
@@ -250,6 +310,7 @@ async function loadEntitlementWindowDO() {
       },
       EventTimestampTooFarInFutureError,
       EventTimestampTooOldError,
+      GrantsManager,
       MAX_EVENT_AGE_MS: TEST_MAX_EVENT_AGE_MS,
       deriveMeterKey: (m: {
         eventId: string
@@ -281,6 +342,22 @@ async function loadEntitlementWindowDO() {
       },
     }
   })
+
+  vi.doMock("@unprice/services/rating", () => ({
+    RatingService: class {},
+  }))
+
+  vi.doMock("@unprice/services/ledger", () => ({
+    LedgerService: class {},
+  }))
+
+  vi.doMock("@unprice/services/metrics", () => ({
+    NoopMetrics: class {},
+  }))
+
+  vi.doMock("@unprice/services/use-cases", () => ({
+    billMeterFact: testState.reportAgentUsage,
+  }))
 
   const module = (await import("./EntitlementWindowDO")) as {
     EntitlementWindowDO: new (
@@ -335,15 +412,28 @@ function createFakeDbState(): FakeDbState {
 function buildFakeDrizzle(state: FakeDbState) {
   let nextOutboxId = 1
 
-  // biome-ignore lint/suspicious/noExplicitAny: test-only drizzle mock
-  const _chainable = (resolve: () => any) => {
-    const builder: Record<string, unknown> = {}
-    for (const method of ["from", "where", "orderBy", "limit"]) {
-      builder[method] = (..._args: unknown[]) => builder
+  const matchOutboxCondition = (
+    row: { id: number; billedAt: number | null },
+    condition?: DrizzleCondition
+  ): boolean => {
+    if (!condition) {
+      return true
     }
-    builder.get = resolve
-    builder.all = resolve
-    return builder
+
+    switch (condition.kind) {
+      case "and":
+        return (condition.conditions ?? []).every((nested) => matchOutboxCondition(row, nested))
+      case "eq":
+        return row.id === Number(condition.value)
+      case "inArray":
+        return (condition.values ?? []).includes(row.id)
+      case "isNull":
+        return row.billedAt === null
+      case "isNotNull":
+        return row.billedAt !== null
+      default:
+        return true
+    }
   }
 
   const db = {
@@ -355,7 +445,8 @@ function buildFakeDrizzle(state: FakeDbState) {
         return callback(db)
       } catch (error) {
         state.idempotencyRows.clear()
-        for (const [k, v] of idempotencySnapshot) state.idempotencyRows.set(k, v)
+        for (const [k, v] of Array.from(idempotencySnapshot.entries()))
+          state.idempotencyRows.set(k, v)
         state.outboxRows.splice(0, state.outboxRows.length, ...outboxSnapshot)
         nextOutboxId = outboxIdSnapshot
         throw error
@@ -391,12 +482,33 @@ function buildFakeDrizzle(state: FakeDbState) {
         },
         all() {
           if (keys.includes("id") && keys.includes("payload")) {
-            return [...state.outboxRows].sort((a, b) => a.id - b.id).slice(0, limitCount)
+            const rows = [...state.outboxRows]
+              .filter((row) => matchOutboxCondition(row, cond))
+              .sort((a, b) => a.id - b.id)
+              .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
+
+            if (keys.includes("currency")) {
+              return rows.map((row) => ({
+                id: row.id,
+                payload: row.payload,
+                currency: row.currency,
+              }))
+            }
+
+            return rows.map((row) => ({
+              id: row.id,
+              payload: row.payload,
+            }))
+          }
+          if (keys.length === 1 && keys.includes("id")) {
+            return [...state.outboxRows]
+              .filter((row) => matchOutboxCondition(row, cond))
+              .map((row) => ({ id: row.id }))
           }
           if (keys.includes("eventId")) {
-            return [...state.idempotencyRows.entries()]
+            return [...Array.from(state.idempotencyRows.entries())]
               .filter(([, r]) => r.createdAt < Number(cond?.value))
-              .slice(0, limitCount)
+              .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
               .map(([eventId]) => ({ eventId }))
           }
           return []
@@ -410,7 +522,12 @@ function buildFakeDrizzle(state: FakeDbState) {
           return {
             run() {
               if ("payload" in value && !("eventId" in value)) {
-                state.outboxRows.push({ id: nextOutboxId++, payload: String(value.payload) })
+                state.outboxRows.push({
+                  id: nextOutboxId++,
+                  payload: String(value.payload),
+                  currency: String(value.currency),
+                  billedAt: value.billedAt === null ? null : Number(value.billedAt ?? null),
+                })
                 return
               }
               if ("eventId" in value && "result" in value) {
@@ -427,18 +544,44 @@ function buildFakeDrizzle(state: FakeDbState) {
       }
     },
 
+    update() {
+      return {
+        set(value: Record<string, unknown>) {
+          return {
+            where(condition: DrizzleCondition) {
+              return {
+                run() {
+                  if ("billedAt" in value) {
+                    for (const row of state.outboxRows) {
+                      if (!matchOutboxCondition(row, condition)) {
+                        continue
+                      }
+                      row.billedAt = value.billedAt === null ? null : Number(value.billedAt)
+                    }
+                    return
+                  }
+
+                  throw new Error("Unsupported update in fake db")
+                },
+              }
+            },
+          }
+        },
+      }
+    },
+
     delete() {
       return {
         where(cond: DrizzleCondition) {
           return {
             run() {
               if (cond.kind !== "inArray") throw new Error("Unsupported delete condition")
-              if (cond.values.every((v: unknown) => typeof v === "number")) {
-                const ids = new Set(cond.values)
+              if ((cond.values ?? []).every((v: unknown) => typeof v === "number")) {
+                const ids = new Set(cond.values as number[])
                 const remaining = state.outboxRows.filter((r) => !ids.has(r.id))
                 state.outboxRows.splice(0, state.outboxRows.length, ...remaining)
               } else {
-                for (const v of cond.values) state.idempotencyRows.delete(String(v))
+                for (const v of cond.values ?? []) state.idempotencyRows.delete(String(v))
               }
             },
           }
@@ -452,6 +595,11 @@ function buildFakeDrizzle(state: FakeDbState) {
 
 function createEnv() {
   return {
+    APP_ENV: "test",
+    DATABASE_URL: "postgres://user:pass@localhost:5432/unprice",
+    DATABASE_READ1_URL: "postgres://user:pass@localhost:5432/unprice",
+    DATABASE_READ2_URL: "postgres://user:pass@localhost:5432/unprice",
+    DRIZZLE_LOG: false,
     FALLBACK_ANALYTICS: { writeDataPoint: vi.fn() },
     TINYBIRD_TOKEN: "token",
     TINYBIRD_URL: "https://example.com",
@@ -461,6 +609,7 @@ function createEnv() {
 function createApplyInput(overrides: Record<string, unknown> = {}) {
   return {
     customerId: "cus_123",
+    currency: "USD",
     enforceLimit: false,
     event: {
       id: "evt_123",
@@ -477,6 +626,7 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
     periodEndAt: BASE_NOW + 60_000,
     periodKey: "period_2026_03",
     projectId: "proj_123",
+    featurePlanVersionId: "fpv_123",
     streamId: "stream_123",
     ...overrides,
   }

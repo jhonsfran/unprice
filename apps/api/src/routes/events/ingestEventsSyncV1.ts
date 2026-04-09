@@ -12,7 +12,11 @@ import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import * as HttpStatusCodes from "~/util/http-status-codes"
-import { buildIngestionQueueMessage, rawEventSchema } from "./ingestEventsV1"
+import {
+  buildIngestionQueueMessage,
+  rawEventSchema,
+  resolveRequestCustomerId,
+} from "./ingestEventsV1"
 
 const tags = ["ingestion"]
 
@@ -71,7 +75,19 @@ export const registerIngestEventsSyncV1 = (app: App) =>
     const timestamp = body.timestamp ?? receivedAt
 
     const key = await keyAuth(c)
-    const projectId = await resolveContextProjectId(c, key.projectId, body.customerId)
+    const customerId = resolveRequestCustomerId({
+      explicitCustomerId: body.customerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
+
+    if (!customerId) {
+      throw new UnpriceApiError({
+        code: "BAD_REQUEST",
+        message: "customerId is required when the API key has no default customer binding",
+      })
+    }
+
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     try {
       validateEventTimestamp(timestamp, receivedAt)
@@ -91,6 +107,7 @@ export const registerIngestEventsSyncV1 = (app: App) =>
 
     const message = buildIngestionQueueMessage({
       body,
+      customerId,
       projectId,
       receivedAt,
       requestId,

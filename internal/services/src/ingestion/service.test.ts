@@ -159,6 +159,38 @@ describe("IngestionService", () => {
     ])
   })
 
+  it("passes billing currency and feature plan version id to the entitlement window apply input", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { consumer, mocks } = createServiceHarness({
+      grants: [
+        createUsageGrant({
+          currency: "EUR",
+          featurePlanVersionId: "fpv_billing_123",
+        }),
+      ],
+      resolvedStates: [createResolvedState(timestamp)],
+    })
+    const message = createBatchMessage({
+      id: "evt_currency",
+      idempotencyKey: "idem_currency",
+      timestamp,
+      properties: {
+        amount: 7,
+      },
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as IngestionQueueBatch)
+
+    expect(mocks.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currency: "EUR",
+        featurePlanVersionId: "fpv_billing_123",
+      })
+    )
+  })
+
   it("retries the entire group when processing fails with an unrecoverable error", async () => {
     const { consumer, mocks } = createServiceHarness({
       customer: null,
