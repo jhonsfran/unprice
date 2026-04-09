@@ -1,38 +1,39 @@
-// import { featureUsageSchema } from "./utils"
-// TODO: use this to get the token
-// cat .tinyb | jq .token
-// TODO: use for now https://mockingbird.tinybird.co
-
-// console.info(JSON.stringify(featureUsageSchema, null, 2))
-
-// const tbGenerator = new TinybirdGenerator({
-//   schema: featureUsageSchema,
-//   eps: 100, // events per second
-//   limit: 1000, // limit of events to generate
-//   endpoint: "https://api.tinybird.co", // endpoint to use
-//   logs: true,
-//   datasource: "feature_usage_v1", // datasource to use
-//   token: process.env.TINYBIRD_TOKEN || "" // token to use
-// })
-
-// async function main() {
-
-//   console.info("Generating data...")
-
-//   await tbGenerator.generate()
-
-//   console.info("Data generated successfully")
-// }
-
-// main()
-
 import { randomUUID } from "node:crypto"
 import { Unprice } from "@unprice/api"
 
+// ─── Config ──────────────────────────────────────────────────────────────────
+
+const CUSTOMER_ID = process.env.CUSTOMER_ID || ""
+const UNPRICE_TOKEN = process.env.UNPRICE_TOKEN || ""
+const UNPRICE_API_URL = process.env.UNPRICE_API_URL || "http://localhost:8787"
+
+// which tests to run (comma-separated), empty = all
+const ONLY = process.env.ONLY?.split(",").map((s) => s.trim()) ?? []
+
 const unprice = new Unprice({
-  token: process.env.UNPRICE_TOKEN || "",
-  baseUrl: process.env.UNPRICE_API_URL || "http://localhost:8787",
+  token: UNPRICE_TOKEN,
+  baseUrl: UNPRICE_API_URL,
 })
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+const colors = {
+  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
+  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
+  yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
+  cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
+  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
+}
+
+let passed = 0
+let failed = 0
+let skipped = 0
+
+function assert(condition: boolean, message: string): void {
+  if (!condition) {
+    throw new Error(`Assertion failed: ${message}`)
+  }
+}
 
 function buildIngestionProperties(
   usage: number,
@@ -43,154 +44,520 @@ function buildIngestionProperties(
       }
     | undefined
 ): Record<string, unknown> | null {
-  if (!meterConfig) {
-    return null
-  }
+  if (!meterConfig) return null
+  if (meterConfig.aggregationMethod === "count") return {}
 
-  if (meterConfig.aggregationMethod === "count") {
-    return {}
-  }
+  const field = meterConfig.aggregationField?.trim()
+  if (!field) return null
 
-  const aggregationField = meterConfig.aggregationField?.trim()
-  if (!aggregationField) {
-    return null
-  }
-
-  return { [aggregationField]: usage }
+  return { [field]: usage }
 }
 
-async function generateData(customerId: string, useAsyncIngestion = false) {
-  const now = performance.now()
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
-  const { result: entitlements, error } = await unprice.customers.getEntitlements({ customerId })
+// ─── Test runner ─────────────────────────────────────────────────────────────
 
-  if (error) {
-    console.error("Error getting entitlements", error)
-    return
+type TestFn = () => Promise<void>
+
+const tests: Array<{ name: string; fn: TestFn }> = []
+
+function test(name: string, fn: TestFn) {
+  tests.push({ name, fn })
+}
+
+async function runTests() {
+  if (!CUSTOMER_ID) {
+    console.error(colors.red("CUSTOMER_ID env var is required"))
+    process.exit(1)
+  }
+  if (!UNPRICE_TOKEN) {
+    console.error(colors.red("UNPRICE_TOKEN env var is required"))
+    process.exit(1)
   }
 
-  if (!entitlements?.length) {
-    console.error("No entitlements found")
-    return
-  }
+  console.info(
+    `\n${colors.cyan("E2E Tests")} against ${colors.dim(UNPRICE_API_URL)} for customer ${colors.dim(CUSTOMER_ID)}\n`
+  )
 
-  for (let i = 0; i < 100; i++) {
-    // ramdom usage between -10 and 100 (negative usage is allowed)
-    const usage = Math.floor(Math.random() * 200) - 10
-    // pick a random feature slug
-    const featureSlug = entitlements[Math.floor(Math.random() * entitlements.length)]?.featureSlug
+  for (const t of tests) {
+    if (ONLY.length > 0 && !ONLY.some((o) => t.name.toLowerCase().includes(o.toLowerCase()))) {
+      skipped++
+      console.info(`  ${colors.yellow("SKIP")} ${t.name}`)
+      continue
+    }
 
-    if (featureSlug) {
-      // verify the usage
-      const verificationAt = Date.now()
-      const verification = await unprice.customers.verify({
-        customerId,
-        featureSlug,
-      })
-
-      const latency = Date.now() - verificationAt
-
-      if (verification.error) {
-        console.error(`Error verifying ${featureSlug}`, verification.error)
-        continue
-      }
-
-      const eventSlug = verification.result?.meterConfig?.eventSlug
-      const ingestionProperties = buildIngestionProperties(usage, verification.result?.meterConfig)
-
-      console.info(
-        `Verification ${featureSlug}, status: ${verification.result?.status}, allowed: ${verification.result?.allowed} for ${customerId} in ${latency}ms`
+    const start = performance.now()
+    try {
+      await t.fn()
+      const ms = (performance.now() - start).toFixed(0)
+      passed++
+      console.info(`  ${colors.green("PASS")} ${t.name} ${colors.dim(`(${ms}ms)`)}`)
+    } catch (err) {
+      const ms = (performance.now() - start).toFixed(0)
+      failed++
+      console.error(
+        `  ${colors.red("FAIL")} ${t.name} ${colors.dim(`(${ms}ms)`)}\n    ${(err as Error).message}`
       )
+    }
+  }
 
-      if (!eventSlug) {
-        console.error(`No eventSlug found for ${featureSlug}, skipping ingestion`)
-        continue
-      }
+  console.info(
+    `\n  ${colors.green(`${passed} passed`)}${failed ? `, ${colors.red(`${failed} failed`)}` : ""}${skipped ? `, ${colors.yellow(`${skipped} skipped`)}` : ""}\n`
+  )
 
-      if (!ingestionProperties) {
-        console.error(
-          `Invalid meter config for ${featureSlug}, cannot build ingestion properties`,
-          verification.result?.meterConfig
-        )
-        continue
-      }
+  process.exit(failed > 0 ? 1 : 0)
+}
 
-      if (verification.result?.allowed) {
-        console.info(`Verification ${featureSlug} verified for ${customerId}`)
+// ─── Shared state across tests ───────────────────────────────────────────────
+// Tests run sequentially, so later tests can rely on state from earlier ones.
 
-        // ingest usage
-        // wait 200ms
-        await new Promise((resolve) => setTimeout(resolve, 10))
+let entitlements: Array<{ id: string; featureSlug: string }> = []
+// pick a usage-based feature for ingestion tests
+let usageFeature: {
+  featureSlug: string
+  eventSlug: string
+  aggregationMethod: string
+  aggregationField?: string
+} | null = null
 
-        if (useAsyncIngestion) {
-          const result = await unprice.events.ingest({
-            customerId,
-            eventSlug,
-            properties: ingestionProperties,
-            idempotencyKey: randomUUID(),
-          })
+// ─── Tests ───────────────────────────────────────────────────────────────────
 
-          if (result.error) {
-            console.error(`Async ingestion failed for ${eventSlug}`, result.error)
-            continue
-          }
+test("subscription: is active", async () => {
+  const { result, error } = await unprice.customers.getSubscription({
+    customerId: CUSTOMER_ID,
+  })
 
-          if (result.result?.accepted) {
-            console.info(`Usage ${usage} async ingested for ${eventSlug}`)
-          } else {
-            console.error(`Usage ${usage} async ingestion was not accepted for ${eventSlug}`)
-          }
-          continue
-        }
+  assert(!error, `getSubscription error: ${error?.message}`)
+  assert(!!result, "subscription result should exist")
+  assert(result?.active === true, `subscription should be active, got status=${result?.status}`)
+  assert(
+    ["active", "trialing"].includes(result?.status ?? ""),
+    `expected status active|trialing, got ${result?.status}`
+  )
 
-        const result = await unprice.events.ingestSync({
-          customerId,
-          eventSlug,
-          featureSlug,
-          properties: ingestionProperties,
-          idempotencyKey: randomUUID(),
-        })
+  console.info(`    subscription: ${result?.planSlug} (${result?.status})`)
+})
 
-        if (result.error) {
-          console.error(`Sync ingestion failed for ${featureSlug}`, result.error)
-          continue
-        }
+test("entitlements: fetches list", async () => {
+  const { result, error } = await unprice.customers.getEntitlements({
+    customerId: CUSTOMER_ID,
+  })
 
-        if (result.result?.allowed) {
-          console.info(`Usage ${usage} sync ingested for ${featureSlug}`)
-        } else {
-          console.error(
-            `Usage ${usage} sync ingestion rejected for ${featureSlug}`,
-            result.result?.rejectionReason,
-            result.result?.message
-          )
-        }
-      } else {
-        console.error(
-          `Verification for ${featureSlug} and ${customerId} cannot be used`,
-          verification.result?.message
-        )
+  assert(!error, `getEntitlements error: ${error?.message}`)
+  assert(!!result, "entitlements result should exist")
+  assert(Array.isArray(result), "entitlements should be an array")
+  assert((result?.length ?? 0) > 0, "customer should have at least 1 entitlement")
+
+  entitlements = result ?? []
+  console.info(
+    `    found ${result?.length} entitlements: ${result?.map((e) => e.featureSlug).join(", ")}`
+  )
+})
+
+test("verification: verify all entitlements", async () => {
+  assert(entitlements.length > 0, "no entitlements loaded (did previous test fail?)")
+
+  for (const ent of entitlements) {
+    const { result, error } = await unprice.customers.verify({
+      customerId: CUSTOMER_ID,
+      featureSlug: ent.featureSlug,
+    })
+
+    assert(!error, `verify ${ent.featureSlug} error: ${error?.message}`)
+    assert(!!result, `verify ${ent.featureSlug}: result should exist`)
+    assert(
+      typeof result?.allowed === "boolean",
+      `verify ${ent.featureSlug}: allowed should be boolean`
+    )
+    assert(!!result?.status, `verify ${ent.featureSlug}: status should exist`)
+
+    // discover a usage-based feature for ingestion tests
+    if (result?.meterConfig?.eventSlug && !usageFeature) {
+      usageFeature = {
+        featureSlug: ent.featureSlug,
+        eventSlug: result?.meterConfig?.eventSlug,
+        aggregationMethod: result.meterConfig.aggregationMethod,
+        aggregationField: result?.meterConfig?.aggregationField,
       }
     }
   }
 
-  console.info(`Time taken: ${performance.now() - now}ms`)
-}
+  if (usageFeature) {
+    console.info(
+      `    usage feature for ingestion tests: ${usageFeature.featureSlug} (event: ${usageFeature.eventSlug})`
+    )
+  } else {
+    console.info(
+      `    ${colors.yellow("no usage-based features found — ingestion tests will be skipped")}`
+    )
+  }
+})
 
-async function main() {
-  // const customerFree = "cus_1MeUjVxFbv8DP9X7f1UW9"
-  // const customerPro = "cus_11Sb5A8HkjB6AeG4QS9WM4"
-  const customerFree = "cus_11Uy2rEe341EKVni7HyuEx"
-  // const customerEnterprise = "cus_1MVdMxZ45uJKDo5z48hYJ"
+test("sync-ingestion: ingest and verify usage delta", async () => {
+  if (!usageFeature) {
+    throw new Error("SKIP: no usage-based feature found")
+  }
 
-  // PRO plan
-  // await generateData(customerPro, false)
+  // 1. Verify before ingestion
+  const before = await unprice.customers.verify({
+    customerId: CUSTOMER_ID,
+    featureSlug: usageFeature.featureSlug,
+  })
 
-  // FREE plan
-  await generateData(customerFree, false)
+  assert(!before.error, `pre-verify error: ${before.error?.message}`)
+  assert(
+    before.result?.allowed === true,
+    `feature ${usageFeature.featureSlug} not allowed — cannot test ingestion`
+  )
 
-  // ENTERPRISE plan
-  // await generateData(customerEnterprise)
-}
+  const usageBefore = before.result?.usage ?? 0
 
-main()
+  // 2. Build ingestion payload
+  const ingestAmount = 5
+  const props = buildIngestionProperties(ingestAmount, {
+    aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+    aggregationField: usageFeature.aggregationField,
+  })
+  assert(props !== null, "could not build ingestion properties")
+
+  // 3. Sync ingest
+  const ingestResult = await unprice.events.ingestSync({
+    customerId: CUSTOMER_ID,
+    eventSlug: usageFeature.eventSlug,
+    featureSlug: usageFeature.featureSlug,
+    properties: props!,
+    idempotencyKey: randomUUID(),
+  })
+
+  assert(!ingestResult.error, `ingestSync error: ${ingestResult.error?.message}`)
+  assert(
+    ingestResult.result?.allowed === true,
+    `ingestSync rejected: ${ingestResult.result?.rejectionReason}`
+  )
+
+  // 4. Verify after ingestion — usage should have changed
+  const after = await unprice.customers.verify({
+    customerId: CUSTOMER_ID,
+    featureSlug: usageFeature.featureSlug,
+  })
+
+  assert(!after.error, `post-verify error: ${after.error?.message}`)
+
+  const usageAfter = after.result?.usage ?? 0
+  const method = usageFeature.aggregationMethod
+
+  if (method === "sum") {
+    assert(
+      usageAfter === usageBefore + ingestAmount,
+      `expected usage ${usageBefore + ingestAmount}, got ${usageAfter}`
+    )
+  } else if (method === "count") {
+    assert(usageAfter === usageBefore + 1, `expected count ${usageBefore + 1}, got ${usageAfter}`)
+  } else if (method === "max") {
+    assert(usageAfter >= ingestAmount, `expected max >= ${ingestAmount}, got ${usageAfter}`)
+  } else if (method === "latest") {
+    assert(usageAfter === ingestAmount, `expected latest = ${ingestAmount}, got ${usageAfter}`)
+  }
+
+  console.info(`    usage: ${usageBefore} → ${usageAfter} (${method}, ingested ${ingestAmount})`)
+})
+
+test("async-ingestion: ingest and poll for eventual consistency", async () => {
+  if (!usageFeature) {
+    throw new Error("SKIP: no usage-based feature found")
+  }
+
+  // 1. Verify before
+  const before = await unprice.customers.verify({
+    customerId: CUSTOMER_ID,
+    featureSlug: usageFeature.featureSlug,
+  })
+
+  assert(!before.error, `pre-verify error: ${before.error?.message}`)
+  assert(before.result?.allowed === true, "feature not allowed — cannot test async ingestion")
+
+  const usageBefore = before.result?.usage ?? 0
+
+  // 2. Async ingest
+  const ingestAmount = 3
+  const props = buildIngestionProperties(ingestAmount, {
+    aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+    aggregationField: usageFeature.aggregationField,
+  })
+  assert(props !== null, "could not build ingestion properties")
+
+  const ingestResult = await unprice.events.ingest({
+    customerId: CUSTOMER_ID,
+    eventSlug: usageFeature.eventSlug,
+    properties: props!,
+    idempotencyKey: randomUUID(),
+  })
+
+  assert(!ingestResult.error, `async ingest error: ${ingestResult.error?.message}`)
+  assert(ingestResult.result?.accepted === true, "async event should be accepted")
+
+  // 3. Poll until usage reflects the change (max 10s)
+  let usageAfter = usageBefore
+  const deadline = Date.now() + 10_000
+  const method = usageFeature.aggregationMethod
+
+  while (Date.now() < deadline) {
+    await sleep(500)
+
+    const check = await unprice.customers.verify({
+      customerId: CUSTOMER_ID,
+      featureSlug: usageFeature.featureSlug,
+    })
+
+    if (check.error) continue
+    usageAfter = check.result?.usage ?? usageBefore
+
+    // check if usage has changed from the baseline
+    if (usageAfter !== usageBefore) break
+  }
+
+  if (method === "sum") {
+    assert(
+      usageAfter === usageBefore + ingestAmount,
+      `expected usage ${usageBefore + ingestAmount}, got ${usageAfter} (may need more poll time)`
+    )
+  } else if (method === "count") {
+    assert(usageAfter === usageBefore + 1, `expected count ${usageBefore + 1}, got ${usageAfter}`)
+  }
+
+  console.info(`    async usage: ${usageBefore} → ${usageAfter} (polled until consistent)`)
+})
+
+test("idempotency: duplicate key is deduplicated", async () => {
+  if (!usageFeature) {
+    throw new Error("SKIP: no usage-based feature found")
+  }
+
+  // 1. Verify baseline
+  const before = await unprice.customers.verify({
+    customerId: CUSTOMER_ID,
+    featureSlug: usageFeature.featureSlug,
+  })
+
+  assert(!before.error, `pre-verify error: ${before.error?.message}`)
+  assert(before.result?.allowed === true, "feature not allowed")
+
+  const usageBefore = before.result?.usage ?? 0
+  const ingestAmount = 7
+  const idempotencyKey = randomUUID()
+
+  const props = buildIngestionProperties(ingestAmount, {
+    aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+    aggregationField: usageFeature.aggregationField,
+  })
+  assert(props !== null, "could not build ingestion properties")
+
+  // 2. Send the same event twice with the same idempotency key
+  const first = await unprice.events.ingestSync({
+    customerId: CUSTOMER_ID,
+    eventSlug: usageFeature.eventSlug,
+    featureSlug: usageFeature.featureSlug,
+    properties: props!,
+    idempotencyKey,
+  })
+  assert(!first.error, `first ingest error: ${first.error?.message}`)
+
+  const second = await unprice.events.ingestSync({
+    customerId: CUSTOMER_ID,
+    eventSlug: usageFeature.eventSlug,
+    featureSlug: usageFeature.featureSlug,
+    properties: props!,
+    idempotencyKey,
+  })
+  // second call should succeed (idempotent) but not double-count
+  assert(!second.error, `second ingest error: ${second.error?.message}`)
+
+  // 3. Verify usage increased only once
+  const after = await unprice.customers.verify({
+    customerId: CUSTOMER_ID,
+    featureSlug: usageFeature.featureSlug,
+  })
+
+  assert(!after.error, `post-verify error: ${after.error?.message}`)
+  const usageAfter = after.result?.usage ?? 0
+
+  const method = usageFeature.aggregationMethod
+  if (method === "sum") {
+    assert(
+      usageAfter === usageBefore + ingestAmount,
+      `idempotency failed: expected ${usageBefore + ingestAmount}, got ${usageAfter} (double-counted?)`
+    )
+  } else if (method === "count") {
+    assert(
+      usageAfter === usageBefore + 1,
+      `idempotency failed: expected ${usageBefore + 1}, got ${usageAfter}`
+    )
+  }
+
+  console.info(`    usage: ${usageBefore} → ${usageAfter} (same key sent twice, counted once)`)
+})
+
+test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
+  if (!usageFeature) {
+    throw new Error("SKIP: no usage-based feature found")
+  }
+
+  // 1. Check current state
+  const check = await unprice.customers.verify({
+    customerId: CUSTOMER_ID,
+    featureSlug: usageFeature.featureSlug,
+  })
+
+  assert(!check.error, `verify error: ${check.error?.message}`)
+
+  const limit = check.result?.limit
+  const currentUsage = check.result?.usage ?? 0
+
+  if (limit === null || limit === undefined) {
+    console.info(`    ${colors.yellow("no limit set on this feature — skipping")}`)
+    return
+  }
+
+  if (!check.result?.allowed) {
+    // already at limit, try one more ingest to confirm rejection
+    const props = buildIngestionProperties(1, {
+      aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+      aggregationField: usageFeature.aggregationField,
+    })
+
+    if (props) {
+      const res = await unprice.events.ingestSync({
+        customerId: CUSTOMER_ID,
+        eventSlug: usageFeature.eventSlug,
+        featureSlug: usageFeature.featureSlug,
+        properties: props,
+        idempotencyKey: randomUUID(),
+      })
+
+      assert(!res.error, `ingestSync error: ${res.error?.message}`)
+      assert(res.result?.allowed === false, "expected rejection when limit already reached")
+      assert(
+        res.result?.rejectionReason === "LIMIT_EXCEEDED",
+        `expected LIMIT_EXCEEDED, got ${res.result?.rejectionReason}`
+      )
+    }
+
+    console.info(`    limit already reached (${currentUsage}/${limit}), rejection confirmed`)
+    return
+  }
+
+  // Not at limit yet — try to push over
+  const remaining = limit - currentUsage
+  if (remaining > 100) {
+    console.info(
+      `    ${colors.yellow(`too far from limit (${currentUsage}/${limit}) — skipping exhaustion`)}`
+    )
+    return
+  }
+
+  // Ingest enough to exceed the limit
+  const overshoot = remaining + 1
+  const props = buildIngestionProperties(overshoot, {
+    aggregationMethod: usageFeature.aggregationMethod as "sum" | "count" | "max" | "latest",
+    aggregationField: usageFeature.aggregationField,
+  })
+  assert(props !== null, "could not build ingestion properties")
+
+  const res = await unprice.events.ingestSync({
+    customerId: CUSTOMER_ID,
+    eventSlug: usageFeature.eventSlug,
+    featureSlug: usageFeature.featureSlug,
+    properties: props!,
+    idempotencyKey: randomUUID(),
+  })
+
+  assert(!res.error, `ingestSync error: ${res.error?.message}`)
+
+  // depending on overage strategy this might be allowed (last-call) or rejected
+  if (res.result?.allowed === false) {
+    assert(
+      res.result?.rejectionReason === "LIMIT_EXCEEDED",
+      `expected LIMIT_EXCEEDED, got ${res.result?.rejectionReason}`
+    )
+    console.info(`    ingestion rejected at limit (${currentUsage}/${limit})`)
+  } else {
+    console.info(
+      `    overage allowed (strategy: ${check.result?.overageStrategy}), usage=${currentUsage + overshoot}/${limit}`
+    )
+  }
+})
+
+test("analytics: getUsage returns data", async () => {
+  const { result, error } = await unprice.analytics.getUsage({
+    customer_id: CUSTOMER_ID,
+    range: "24h",
+  })
+
+  assert(!error, `getUsage error: ${error?.message}`)
+  assert(!!result, "usage result should exist")
+  assert(Array.isArray(result?.usage), "usage should be an array")
+
+  console.info(`${result?.usage?.length} usage records in last 24h`)
+
+  if (usageFeature && (result?.usage?.length ?? 0) > 0) {
+    const featureUsage = result?.usage?.find((u) => u.feature_slug === usageFeature!.featureSlug)
+    if (featureUsage) {
+      console.info(`    ${usageFeature.featureSlug}: value=${featureUsage.value_after}`)
+    }
+  }
+})
+
+test("verification: non-existent feature returns proper error", async () => {
+  const fakeSlug = `fake_feature_${Date.now()}`
+  const { result, error } = await unprice.customers.verify({
+    customerId: CUSTOMER_ID,
+    featureSlug: fakeSlug,
+  })
+
+  // The API should either return an error or a result with allowed=false
+  if (error) {
+    // API-level error is acceptable
+    console.info(`    API error for fake feature: ${error.code}`)
+    return
+  }
+
+  assert(!!result, "result should exist")
+  assert(
+    result.allowed === false,
+    `fake feature should not be allowed, got allowed=${result.allowed}`
+  )
+  assert(
+    result.status === "feature_missing" || result.status === "feature_inactive",
+    `expected feature_missing|feature_inactive, got ${result.status}`
+  )
+
+  console.info(`    correctly denied: status=${result.status}`)
+})
+
+test("verification: non-existent customer returns proper error", async () => {
+  const fakeCustomer = `cus_fake_${Date.now()}`
+  const { result, error } = await unprice.customers.verify({
+    customerId: fakeCustomer,
+    featureSlug: entitlements[0]?.featureSlug ?? "any",
+  })
+
+  if (error) {
+    console.info(`    API error for fake customer: ${error.code}`)
+    return
+  }
+
+  assert(!!result, "result should exist")
+  assert(result?.allowed === false, "fake customer should not be allowed")
+  assert(
+    result.status === "customer_not_found",
+    `expected customer_not_found, got ${result.status}`
+  )
+
+  console.info(`    correctly denied: status=${result.status}`)
+})
+
+// ─── Run ─────────────────────────────────────────────────────────────────────
+
+runTests()

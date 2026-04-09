@@ -5,6 +5,8 @@
   "scripts": {
     "cookie": "tsx cookie.ts",
     "main": "tsx main.ts",
+    "e2e": "tsx main.ts",
+    "e2e:local": "UNPRICE_API_URL=http://localhost:8787 tsx main.ts",
     "clean": "git clean -xdf .next .turbo node_modules",
     "with-env": "infisical run --env=preview --path=/app --"
   },
