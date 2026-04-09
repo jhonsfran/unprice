@@ -372,7 +372,7 @@ export class SubscriptionService {
       const currentCandidates = currentGrantsByKey.get(target.key) ?? []
       const futureCandidates = futureGrantsByKey.get(target.key) ?? []
       const targetIsCurrent =
-        target.effectiveAt <= now && (target.expiresAt === null || target.expiresAt > now)
+        target.effectiveAt <= now && (target.expiresAt === null || target.expiresAt >= now)
 
       if (targetIsCurrent) {
         const currentMatch = currentCandidates.find((grant) =>
@@ -517,6 +517,27 @@ export class SubscriptionService {
         )
       }
     }
+
+    const recomputeEntitlementsResult = await grantsManager.computeGrantsForCustomer({
+      customerId,
+      projectId: phase.projectId,
+      now,
+    })
+
+    if (recomputeEntitlementsResult.err) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: recomputeEntitlementsResult.err.message,
+        })
+      )
+    }
+
+    this.waitUntil(
+      Promise.all([
+        this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:0`),
+        this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:30`),
+      ])
+    )
 
     return Ok(undefined)
   }

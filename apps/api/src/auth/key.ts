@@ -246,18 +246,16 @@ export function validateIsAllowedToAccessProject({
   key: ApiKeyExtended
   requestedProjectId: string
 }) {
-  const projectID = isMain
-    ? requestedProjectId
-      ? requestedProjectId
-      : key.projectId
-    : key.projectId
-
-  if (!isMain && projectID !== key.projectId) {
-    throw new UnpriceApiError({
-      code: "FORBIDDEN",
-      message: "You are not allowed to access this app analytics.",
-    })
+  if (isMain) {
+    return requestedProjectId || key.projectId
   }
 
-  return projectID
+  if (!requestedProjectId || requestedProjectId === key.projectId) {
+    return key.projectId
+  }
+
+  throw new UnpriceApiError({
+    code: "FORBIDDEN",
+    message: "You are not allowed to access a different project.",
+  })
 }

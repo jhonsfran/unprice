@@ -87,10 +87,10 @@ export const registerGetRealtimeTicketV1 = (app: App) =>
       })
     }
 
-    if (customerData.projectId !== projectId && !isMain) {
+    if (customerData.projectId !== finalProjectId) {
       throw new UnpriceApiError({
         code: "FORBIDDEN",
-        message: "Customer does not belong to this project",
+        message: "Customer does not belong to the requested project",
       })
     }
 
