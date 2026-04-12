@@ -3,7 +3,7 @@ import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
 import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
-import { and, asc, eq, isNull, lt, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { apiDrain } from "~/observability"
@@ -63,6 +63,22 @@ export class IngestionAuditDO extends DurableObject {
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(this.db, migrations)
     })
+  }
+
+  public async exists(idempotencyKeys: string[]): Promise<string[]> {
+    await this.ready
+
+    if (idempotencyKeys.length === 0) {
+      return []
+    }
+
+    const rows = this.db
+      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
+      .from(ingestionAuditTable)
+      .where(inArray(ingestionAuditTable.idempotencyKey, idempotencyKeys))
+      .all()
+
+    return rows.map((r) => r.idempotencyKey)
   }
 
   public async commit(entries: LedgerEntry[]): Promise<CommitResult> {

@@ -153,8 +153,10 @@ export function createServiceHarness(options: HarnessOptions = {}) {
     } as never)
   })
 
+  const exists = vi.fn<(idempotencyKeys: string[]) => Promise<string[]>>().mockResolvedValue([])
   const getAuditStub = vi.fn().mockReturnValue({
     commit,
+    exists,
   })
 
   const cache = {
@@ -266,6 +268,7 @@ export function createServiceHarness(options: HarnessOptions = {}) {
     mocks: {
       apply,
       commit,
+      exists,
       getEnforcementState,
       getEntitlementWindowStub,
       getGrantsForCustomer,

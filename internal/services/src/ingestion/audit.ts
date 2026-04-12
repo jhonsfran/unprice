@@ -19,6 +19,7 @@ export type IngestionAuditCommitResult = {
 
 export type IngestionAuditController = {
   commit: (entries: IngestionAuditEntry[]) => Promise<IngestionAuditCommitResult>
+  exists: (idempotencyKeys: string[]) => Promise<string[]>
 }
 
 export interface IngestionAuditClient {

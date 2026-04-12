@@ -506,7 +506,8 @@ describe("IngestionService", () => {
     const expectedShardIndex = selectIngestionAuditShardIndex(firstKey)
 
     expect(selectIngestionAuditShardIndex(secondKey)).toBe(expectedShardIndex)
-    expect(mocks.getAuditStub).toHaveBeenCalledTimes(1)
+    // 1 call for cross-period exists pre-check + 1 call for audit commit
+    expect(mocks.getAuditStub).toHaveBeenCalledTimes(2)
     expect(mocks.getAuditStub).toHaveBeenCalledWith({
       customerId: "cus_123",
       projectId: "proj_123",
@@ -1166,6 +1167,293 @@ describe("IngestionService", () => {
     ])
 
     expect(leftHash).not.toBe(rightHash)
+  })
+
+  // --- Cross-period idempotency tests ---
+
+  it("skips processing and acks a batch message whose idempotency key is already in the audit DO", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [createResolvedState(timestamp)],
+    })
+
+    // Simulate: "idem_known" was processed in a previous reset period
+    mocks.exists.mockResolvedValue(["idem_known"])
+
+    const message = createBatchMessage({
+      id: "evt_cross_period_dup",
+      idempotencyKey: "idem_known",
+      timestamp,
+      properties: { amount: 5 },
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as IngestionQueueBatch)
+
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
+    // The EntitlementWindowDO should never be called for a cross-period duplicate
+    expect(mocks.apply).not.toHaveBeenCalled()
+    // Duplicate should not be committed to audit again — it's already there
+    expect(mocks.commit).not.toHaveBeenCalled()
+  })
+
+  it("processes only fresh messages when a batch mixes known and new idempotency keys", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [createResolvedState(timestamp)],
+    })
+
+    // Only the first key is known from a previous period
+    mocks.exists.mockImplementation(async (keys: string[]) =>
+      keys.filter((k) => k === "idem_old_period")
+    )
+
+    const knownMessage = createBatchMessage({
+      id: "evt_old",
+      idempotencyKey: "idem_old_period",
+      timestamp,
+      properties: { amount: 3 },
+    })
+    const freshMessage = createBatchMessage({
+      id: "evt_fresh",
+      idempotencyKey: "idem_fresh",
+      timestamp: timestamp + 1,
+      properties: { amount: 7 },
+    })
+
+    await consumer.consumeBatch({
+      messages: [knownMessage.message, freshMessage.message],
+    } as unknown as IngestionQueueBatch)
+
+    expect(knownMessage.ack).toHaveBeenCalledTimes(1)
+    expect(freshMessage.ack).toHaveBeenCalledTimes(1)
+    expect(knownMessage.retry).not.toHaveBeenCalled()
+    expect(freshMessage.retry).not.toHaveBeenCalled()
+    // Only the fresh event should reach the EntitlementWindowDO
+    expect(mocks.apply).toHaveBeenCalledTimes(1)
+    expect(mocks.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "idem_fresh",
+      })
+    )
+    // Only the fresh event should be committed to audit
+    expect(mocks.commit).toHaveBeenCalledWith([
+      expect.objectContaining({
+        idempotencyKey: "idem_fresh",
+        status: "processed",
+      }),
+    ])
+  })
+
+  it("acks all messages without processing when the entire batch is cross-period duplicates", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [createResolvedState(timestamp)],
+    })
+
+    mocks.exists.mockImplementation(async (keys: string[]) => keys)
+
+    const first = createBatchMessage({
+      id: "evt_dup_1",
+      idempotencyKey: "idem_dup_1",
+      timestamp,
+      properties: { amount: 1 },
+    })
+    const second = createBatchMessage({
+      id: "evt_dup_2",
+      idempotencyKey: "idem_dup_2",
+      timestamp: timestamp + 1,
+      properties: { amount: 2 },
+    })
+
+    await consumer.consumeBatch({
+      messages: [first.message, second.message],
+    } as unknown as IngestionQueueBatch)
+
+    expect(first.ack).toHaveBeenCalledTimes(1)
+    expect(second.ack).toHaveBeenCalledTimes(1)
+    expect(mocks.apply).not.toHaveBeenCalled()
+    expect(mocks.commit).not.toHaveBeenCalled()
+  })
+
+  it("falls through to normal processing when the audit exists check fails", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const { consumer, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [createResolvedState(timestamp)],
+    })
+
+    // Audit DO is unavailable
+    mocks.exists.mockRejectedValue(new Error("DO unavailable"))
+
+    const message = createBatchMessage({
+      id: "evt_audit_down",
+      idempotencyKey: "idem_audit_down",
+      timestamp,
+      properties: { amount: 4 },
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as IngestionQueueBatch)
+
+    // Should still process the message normally via the EntitlementWindowDO
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    expect(message.retry).not.toHaveBeenCalled()
+    expect(mocks.apply).toHaveBeenCalledTimes(1)
+    expect(mocks.commit).toHaveBeenCalledWith([
+      expect.objectContaining({
+        idempotencyKey: "idem_audit_down",
+        status: "processed",
+      }),
+    ])
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      "audit cross-period dedup failed, processing all messages",
+      expect.objectContaining({
+        projectId: "proj_123",
+        customerId: "cus_123",
+      })
+    )
+  })
+
+  it("skips the audit exists check when the customer is not found", async () => {
+    const { consumer, mocks } = createServiceHarness({
+      customer: null,
+    })
+    const message = createBatchMessage({
+      id: "evt_no_customer_no_audit_check",
+    })
+
+    await consumer.consumeBatch({
+      messages: [message.message],
+    } as unknown as IngestionQueueBatch)
+
+    expect(message.ack).toHaveBeenCalledTimes(1)
+    // The exists check should never be called for missing customers
+    expect(mocks.exists).not.toHaveBeenCalled()
+    expect(mocks.commit).toHaveBeenCalledWith([
+      expect.objectContaining({
+        status: "rejected",
+        rejectionReason: "CUSTOMER_NOT_FOUND",
+      }),
+    ])
+  })
+
+  it("returns allowed:true for sync ingestion when the idempotency key is already in the audit DO", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const state = createResolvedState(timestamp)
+    const { service, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [state],
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+    })
+
+    mocks.exists.mockResolvedValue(["idem_sync_dup"])
+
+    const message = createBatchMessage({
+      id: "evt_sync_cross_period",
+      idempotencyKey: "idem_sync_dup",
+      timestamp,
+      properties: { amount: 3 },
+    }).message.body
+
+    const result = await service.ingestFeatureSync({
+      featureSlug: "api_calls",
+      message,
+    })
+
+    expect(result).toEqual({
+      allowed: true,
+      message: undefined,
+      rejectionReason: undefined,
+      state: "processed",
+    })
+    // The EntitlementWindowDO should never be called
+    expect(mocks.apply).not.toHaveBeenCalled()
+  })
+
+  it("processes sync ingestion normally when the idempotency key is not in the audit DO", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const state = createResolvedState(timestamp)
+    const { service, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [state],
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+    })
+
+    // exists returns nothing — key is fresh
+    mocks.exists.mockResolvedValue([])
+
+    const message = createBatchMessage({
+      id: "evt_sync_fresh",
+      idempotencyKey: "idem_sync_fresh",
+      timestamp,
+      properties: { amount: 8 },
+    }).message.body
+
+    const result = await service.ingestFeatureSync({
+      featureSlug: "api_calls",
+      message,
+    })
+
+    expect(result).toEqual({
+      allowed: true,
+      message: undefined,
+      rejectionReason: undefined,
+      state: "processed",
+    })
+    expect(mocks.apply).toHaveBeenCalledTimes(1)
+    expect(mocks.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "idem_sync_fresh",
+        enforceLimit: true,
+      })
+    )
+  })
+
+  it("falls through to normal sync processing when the audit exists check fails", async () => {
+    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
+    const state = createResolvedState(timestamp)
+    const { service, mocks } = createServiceHarness({
+      grants: [createUsageGrant()],
+      resolvedStates: [state],
+      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+    })
+
+    mocks.exists.mockRejectedValue(new Error("DO unavailable"))
+
+    const message = createBatchMessage({
+      id: "evt_sync_audit_down",
+      idempotencyKey: "idem_sync_audit_down",
+      timestamp,
+      properties: { amount: 2 },
+    }).message.body
+
+    const result = await service.ingestFeatureSync({
+      featureSlug: "api_calls",
+      message,
+    })
+
+    expect(result).toEqual({
+      allowed: true,
+      message: undefined,
+      rejectionReason: undefined,
+      state: "processed",
+    })
+    expect(mocks.apply).toHaveBeenCalledTimes(1)
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      "audit idempotency pre-check failed, falling through",
+      expect.objectContaining({
+        projectId: "proj_123",
+        customerId: "cus_123",
+        idempotencyKey: "idem_sync_audit_down",
+      })
+    )
   })
 })
 

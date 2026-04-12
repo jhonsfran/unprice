@@ -239,6 +239,15 @@ export class IngestionService {
       })
     }
 
+    // Cross-period idempotency: if the audit DO already recorded this key,
+    // the event was processed in a prior reset window — return the cached result.
+    if (await this.isKnownByAudit(projectId, customerId, message.idempotencyKey)) {
+      return this.toSyncResult({
+        allowed: true,
+        outcome: { state: "processed" },
+      })
+    }
+
     const applyResult = await this.applyResolvedState({
       candidateGrants: preparedContext.candidateGrants,
       customerId,
@@ -458,22 +467,41 @@ export class IngestionService {
         projectId,
       })
 
-      const outcomes =
-        preparedGroup.rejectionReason === "CUSTOMER_NOT_FOUND"
-          ? this.buildCustomerNotFoundOutcomes(preparedGroup.messages, {
-              customerId,
-              projectId,
-              rejectionReason: preparedGroup.rejectionReason,
-            })
-          : await this.processPreparedMessages(preparedGroup.messages, {
+      if (preparedGroup.rejectionReason === "CUSTOMER_NOT_FOUND") {
+        const outcomes = this.buildCustomerNotFoundOutcomes(preparedGroup.messages, {
+          customerId,
+          projectId,
+          rejectionReason: preparedGroup.rejectionReason,
+        })
+        await this.commitOutcomesToAudit(projectId, customerId, outcomes)
+        return this.mapOutcomesToAckResults(outcomes)
+      }
+
+      // Cross-period idempotency: filter out events the audit DO already recorded
+      // so they are not reprocessed in a new reset window.
+      const { fresh, duplicateOutcomes } = await this.filterCrossPeriodDuplicates(
+        projectId,
+        customerId,
+        preparedGroup.messages
+      )
+
+      const freshOutcomes =
+        fresh.length > 0
+          ? await this.processPreparedMessages(fresh, {
               candidateGrants: preparedGroup.candidateGrants,
               customerId,
               projectId,
               rejectionReason: preparedGroup.rejectionReason,
             })
+          : []
 
-      await this.commitOutcomesToAudit(projectId, customerId, outcomes)
-      return this.mapOutcomesToAckResults(outcomes)
+      // Only commit fresh outcomes — duplicates are already in the audit DO
+      await this.commitOutcomesToAudit(projectId, customerId, freshOutcomes)
+
+      return [
+        ...this.mapOutcomesToAckResults(freshOutcomes),
+        ...duplicateOutcomes.map(({ message }) => this.ackMessage(message)),
+      ]
     } catch (error) {
       this.logger.error("raw ingestion queue processing failed", {
         projectId,
@@ -682,6 +710,101 @@ export class IngestionService {
     this.waitUntil(
       this.commitOutcomesToAudit(message.projectId, message.customerId, [{ message, outcome }])
     )
+  }
+
+  private async isKnownByAudit(
+    projectId: string,
+    customerId: string,
+    idempotencyKey: string
+  ): Promise<boolean> {
+    try {
+      const shardIndex = selectIngestionAuditShardIndex(idempotencyKey)
+      const knownKeys = await this.auditClient
+        .getAuditStub({ projectId, customerId, shardIndex })
+        .exists([idempotencyKey])
+      return knownKeys.length > 0
+    } catch (error) {
+      this.logger.warn("audit idempotency pre-check failed, falling through", {
+        projectId,
+        customerId,
+        idempotencyKey,
+        error,
+      })
+      return false
+    }
+  }
+
+  private async filterCrossPeriodDuplicates(
+    projectId: string,
+    customerId: string,
+    messages: IngestionQueueMessage[]
+  ): Promise<{
+    duplicateOutcomes: MessageOutcome[]
+    fresh: IngestionQueueMessage[]
+  }> {
+    if (messages.length === 0) {
+      return { fresh: [], duplicateOutcomes: [] }
+    }
+
+    try {
+      // Group idempotency keys by audit shard for parallel lookup
+      const keysByShard = new Map<number, string[]>()
+
+      for (const message of messages) {
+        const shardIndex = selectIngestionAuditShardIndex(message.idempotencyKey)
+        const existing = keysByShard.get(shardIndex)
+        if (existing) {
+          existing.push(message.idempotencyKey)
+        } else {
+          keysByShard.set(shardIndex, [message.idempotencyKey])
+        }
+      }
+
+      const shardResults = await Promise.all(
+        [...keysByShard.entries()].map(([shardIndex, keys]) =>
+          this.auditClient.getAuditStub({ projectId, customerId, shardIndex }).exists(keys)
+        )
+      )
+
+      const knownKeys = new Set(shardResults.flat())
+
+      if (knownKeys.size === 0) {
+        return { fresh: messages, duplicateOutcomes: [] }
+      }
+
+      const fresh: IngestionQueueMessage[] = []
+      const duplicateOutcomes: MessageOutcome[] = []
+
+      for (const message of messages) {
+        if (knownKeys.has(message.idempotencyKey)) {
+          duplicateOutcomes.push({
+            message,
+            outcome: { state: "processed" },
+          })
+        } else {
+          fresh.push(message)
+        }
+      }
+
+      if (duplicateOutcomes.length > 0) {
+        this.logger.info("cross-period duplicates filtered", {
+          projectId,
+          customerId,
+          duplicateCount: duplicateOutcomes.length,
+          freshCount: fresh.length,
+        })
+      }
+
+      return { fresh, duplicateOutcomes }
+    } catch (error) {
+      this.logger.warn("audit cross-period dedup failed, processing all messages", {
+        projectId,
+        customerId,
+        messageCount: messages.length,
+        error,
+      })
+      return { fresh: messages, duplicateOutcomes: [] }
+    }
   }
 
   private mapOutcomesToAckResults(outcomes: MessageOutcome[]): IngestionMessageProcessingResult[] {
