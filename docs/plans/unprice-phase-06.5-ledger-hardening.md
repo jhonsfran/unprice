@@ -64,6 +64,96 @@ Settlement state machine (on `ledger_settlements.status`, NOT on entries):
           (terminal — re-settlement creates a new record)
 ```
 
+## Architectural Pattern: fold / decide / shell
+
+Inspired by [`ricofritzsche/eventstore-typescript`](https://github.com/ricofritzsche/eventstore-typescript),
+a lightweight TypeScript event store that enforces a clean functional separation
+for event-sourced domains:
+
+1. **fold** — a pure function that reduces a list of events (or entries) into
+   current state. No I/O, no side effects.
+2. **decide** ��� a pure function that takes a command + the folded state and
+   returns either a success result (new event/entry to append) or a domain error.
+3. **shell** — the impure orchestrator that queries, calls fold, calls decide,
+   and persists the result.
+
+This maps directly to the ledger:
+
+```
+                     ┌──────────────────────────────┐
+  query entries      │         LedgerService         │
+  ─────────────────► │  (shell — DB + transactions)  │
+                     └──────┬───────────┬────────────┘
+                            │           │
+                    fold    │           │  decide
+                    ────────▼──         ──▼─────────
+                    foldLedgerState     decideDebit
+                    (entries[])         (command, state)
+                    → { balance,        → Ok(DebitEntry)
+                        unsettled }     | Err(InsufficientBalance)
+                    ────────────        ────────────────
+                    pure, testable      pure, testable
+```
+
+### What to extract
+
+Refactor `LedgerService.postDebit` and `postCredit` into three layers:
+
+- **`foldLedgerState(entries: LedgerEntry[]): LedgerState`** — computes
+  `{ balanceMinor, unsettledBalanceMinor }` by summing `signedAmountMinor`.
+  Pure function, unit-testable with zero DB setup.
+- **`decideDebit(command: PostDebitInput, state: LedgerState): Result<NewEntry, LedgerError>`**
+  — validates amount > 0, truncates to integer, computes `balanceAfterMinor`.
+  Returns the entry to insert or a typed error. Pure function.
+- **`LedgerService.postDebit` (the shell)** — acquires the lock
+  (`SELECT ... FOR UPDATE`), queries entries, calls `foldLedgerState`, calls
+  `decideDebit`, persists inside the transaction. Same DB semantics as today,
+  but the business logic is extracted and independently testable.
+
+Same extraction for settlement:
+
+- **`foldSettlementState(settlements: LedgerSettlement[]): SettlementState`** —
+  computes current status, total settled amount, transition history.
+- **`decideConfirm(state: SettlementState): Result<StatusTransition, LedgerError>`**
+  — enforces `pending → confirmed`, rejects invalid transitions.
+- **`decideReverse(state: SettlementState, reason: string): Result<ReversalPlan, LedgerError>`**
+  — enforces `pending|confirmed → reversed`, produces reversal entries.
+
+### Why this matters now
+
+The fold/decide split is not a future aspiration — it solves three immediate
+problems in this phase:
+
+1. **Testability.** The current `postDebit` mixes validation, arithmetic, and
+   DB operations in one method. Extracting pure functions lets us unit-test
+   balance computation, idempotency edge cases, and settlement transitions
+   without standing up a database. Integration tests (Slice 7) still validate
+   the shell, but the combinatorial explosion of business rules is covered by
+   fast pure-function tests.
+
+2. **Replayability.** If `foldLedgerState` can compute balance from entries,
+   then `reconcileUnsettledBalance` is just `fold all entries → compare with
+   cached counter`. Same function, different input set. The fold IS the
+   reconciliation logic.
+
+3. **Settlement state machine safety.** `decideConfirm` and `decideReverse`
+   encode the valid transitions as pure logic. The shell calls decide and
+   either persists or returns the error. No way to accidentally bypass the
+   state machine from a webhook handler or use case.
+
+### Optimistic concurrency (future consideration)
+
+The eventstore-typescript library replaces row-level `SELECT ... FOR UPDATE`
+with filter-scoped optimistic locking: query → fold → decide → append with
+`expectedMaxSequenceNumber`. If a concurrent write appended matching events,
+the append fails and the caller retries. This eliminates deadlock risk and
+allows concurrent writes to different customers without contention.
+
+We keep `SELECT ... FOR UPDATE` for now — it works and is battle-tested. But
+the fold/decide extraction makes the switch to optimistic concurrency a
+mechanical change later: replace the lock acquisition in the shell with a
+sequence-number check on append. The pure functions don't change at all.
+
 ## Why This Phase Exists
 
 ### Industry context
@@ -346,6 +436,7 @@ webhook compatibility.
 - [../../internal/services/src/context.ts](../../internal/services/src/context.ts)
 - [./unprice-phase-04-ledger-foundation.md](./unprice-phase-04-ledger-foundation.md)
 - [./unprice-phase-07-credits-wallets.md](./unprice-phase-07-credits-wallets.md)
+- [`ricofritzsche/eventstore-typescript`](https://github.com/ricofritzsche/eventstore-typescript) — fold/decide/shell pattern reference, filter-scoped optimistic concurrency
 
 ## Guardrails
 
@@ -590,7 +681,106 @@ for traceability).
 - `internal/db/src/validators/ledger.ts` — new validators for settlement tables
 - `internal/db/src/utils/constants.ts` — `LEDGER_SETTLEMENT_TYPES`, `LEDGER_SETTLEMENT_STATUSES`
 
-### Slice 2: LedgerService settlement methods
+### Slice 2: LedgerService — fold/decide extraction + settlement methods
+
+**Step A: Extract fold/decide pure functions.**
+
+Create `internal/services/src/ledger/core.ts` — pure business logic, zero I/O:
+
+```typescript
+// --- fold functions ---
+
+export function foldLedgerState(entries: LedgerEntry[]): LedgerState {
+  return entries.reduce(
+    (state, entry) => ({
+      balanceMinor: state.balanceMinor + entry.signedAmountMinor,
+      unsettledBalanceMinor: entry.settledViaLine
+        ? state.unsettledBalanceMinor
+        : state.unsettledBalanceMinor + entry.signedAmountMinor,
+      entryCount: state.entryCount + 1,
+    }),
+    { balanceMinor: 0n, unsettledBalanceMinor: 0n, entryCount: 0 }
+  )
+}
+
+export function foldSettlementState(
+  settlement: LedgerSettlement,
+  lines: LedgerSettlementLine[]
+): SettlementState {
+  return {
+    status: settlement.status,
+    totalSettledMinor: lines.reduce((sum, l) => sum + l.amountMinor, 0n),
+    lineCount: lines.length,
+    transitions: settlement.metadata?.transitions ?? [],
+  }
+}
+
+// --- decide functions ---
+
+export function decideDebit(
+  command: PostDebitInput,
+  state: LedgerState
+): Result<NewDebitEntry, LedgerError> {
+  if (command.amountMinor <= 0n) return Err(new LedgerError("INVALID_AMOUNT"))
+  const balanceAfterMinor = state.balanceMinor + command.amountMinor
+  return Ok({
+    entryType: "debit",
+    amountMinor: command.amountMinor,
+    signedAmountMinor: command.amountMinor,
+    balanceAfterMinor,
+    // ... remaining fields from command
+  })
+}
+
+export function decideConfirm(
+  state: SettlementState
+): Result<StatusTransition, LedgerError> {
+  if (state.status !== "pending")
+    return Err(new LedgerError("SETTLEMENT_INVALID_TRANSITION"))
+  return Ok({ from: "pending", to: "confirmed" })
+}
+
+export function decideReverse(
+  state: SettlementState,
+  reason: string
+): Result<ReversalPlan, LedgerError> {
+  if (state.status === "reversed")
+    return Err(new LedgerError("SETTLEMENT_INVALID_TRANSITION"))
+  return Ok({
+    from: state.status,
+    to: "reversed",
+    reason,
+    reversalEntries: /* one reversal entry per settlement line, opposite sign */,
+  })
+}
+```
+
+Types (`LedgerState`, `SettlementState`, `NewDebitEntry`, `StatusTransition`,
+`ReversalPlan`) live in `internal/services/src/ledger/types.ts`. They are
+ledger-internal — NOT exported to other services.
+
+**Step B: Refactor shell methods.**
+
+Refactor `postDebit` / `postCredit` in `service.ts` to call the pure functions:
+
+```typescript
+async postDebit(input) {
+  return this.db.transaction(async (tx) => {
+    // 1. lock + query (shell)
+    const ledger = await this.acquireLedgerLock(tx, input)
+    const entries = await this.getEntries(tx, ledger.id)
+    // 2. fold (pure)
+    const state = foldLedgerState(entries)
+    // 3. decide (pure)
+    const decision = decideDebit(input, state)
+    if (decision.err) return decision
+    // 4. persist (shell)
+    return this.persistEntry(tx, ledger, decision.val)
+  })
+}
+```
+
+**Step C: Add settlement methods.**
 
 Replace `markSettled()` and add new methods to
 `internal/services/src/ledger/service.ts`:
@@ -661,7 +851,9 @@ getUnsettledEntries(input: {
 - `reversed → *` (invalid — terminal state, re-settlement creates new record)
 
 **Files changed**:
-- `internal/services/src/ledger/service.ts` — new methods, replace markSettled
+- `internal/services/src/ledger/core.ts` — new: pure fold/decide functions
+- `internal/services/src/ledger/types.ts` — new: `LedgerState`, `SettlementState`, `NewDebitEntry`, `StatusTransition`, `ReversalPlan`
+- `internal/services/src/ledger/service.ts` — refactored shell methods, new settlement methods, replace markSettled
 - `internal/services/src/ledger/errors.ts` — new error codes:
   `SETTLEMENT_INVALID_TRANSITION`, `SETTLEMENT_NOT_FOUND`, `ENTRY_ALREADY_SETTLED`
 
@@ -753,7 +945,26 @@ Verify the flow end-to-end:
 **Files changed**:
 - `internal/services/src/subscriptions/invokes.ts`
 
-### Slice 7: Integration tests against real Postgres
+### Slice 7: Pure-function unit tests + integration tests against real Postgres
+
+**Unit tests for fold/decide (fast, no DB):**
+
+Add `internal/services/src/ledger/core.test.ts`:
+
+- `foldLedgerState`: empty entries → zero balance; mixed debits/credits →
+  correct signed sum; entries with settlement lines → correct unsettled balance
+- `decideDebit`: zero amount → Err; negative → Err; valid → Ok with correct
+  `balanceAfterMinor`; sub-cent precision preserved at scale 6
+- `decideConfirm`: pending → Ok; confirmed → Err; reversed → Err
+- `decideReverse`: pending → Ok with reversal entries; confirmed → Ok;
+  reversed → Err (terminal); reversal entries have opposite sign and correct
+  `sourceType: "reversal_v1"`
+- `foldSettlementState`: correct total, line count, transition history
+
+These are the fast tests that cover the combinatorial explosion of business
+rules. They run in milliseconds with zero infrastructure.
+
+**Integration tests against real Postgres:**
 
 The current test suite mocks the entire DB layer. The critical ledger
 invariants (`SELECT FOR UPDATE` serialization, `onConflictDoNothing`
@@ -782,6 +993,7 @@ Add integration tests using the project's existing test database setup:
 Keep the existing unit tests for fast feedback on business logic.
 
 **Files changed**:
+- `internal/services/src/ledger/core.test.ts` — new: pure fold/decide unit tests
 - `internal/services/src/ledger/service.test.ts` — extend with integration tests
 
 ### Slice 8: Migration
@@ -894,6 +1106,13 @@ Slices 7-8 are P3 (validation + deploy).
 - Settlement types are `varchar` validated by Zod, not a Postgres enum
 - `invoice_items` has `ledgerEntryId` FK for traceability
 - `reconcileUnsettledBalance` can detect and correct cache drift
+- **fold/decide/shell separation**: business logic (`core.ts`) is pure and
+  independently unit-testable; the shell (`service.ts`) handles only I/O and
+  transactions. `foldLedgerState` can recompute balance from any set of entries.
+  `decideConfirm` / `decideReverse` enforce the settlement state machine as
+  pure functions.
+- Pure-function unit tests cover balance folding, settlement transitions, and
+  edge cases without DB setup
 - Integration tests verify idempotency, serialization, reversal, settlement
   state machine, partial settlement, reconciliation, and precision against
   real Postgres
@@ -907,6 +1126,8 @@ Slices 7-8 are P3 (validation + deploy).
 - Credit lots / wallet grants (Phase 7)
 - Invoice-as-pure-projection refactoring (Phase 7 — wait for settlement router)
 - Financial guardrails and spend controls (Phase 8)
+- Optimistic concurrency (replacing `SELECT FOR UPDATE` with sequence-number-based
+  append — the fold/decide extraction makes this a mechanical swap later)
 - Retroactive repricing / event replay
 - Multi-currency conversion within the ledger
 - Context table split (deferred until write pressure is measured)

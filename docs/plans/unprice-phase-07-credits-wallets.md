@@ -59,6 +59,41 @@ wallet deduction, or one-time provider charge.
 - Do not introduce TypeScript `any` types.
 - Keep orchestration in use cases, not adapters.
 
+## Pattern Note: fold/decide for wallets
+
+Wallet operations (grant credits, consume credits, expire grants) are a natural
+fit for the **fold/decide/shell** pattern introduced in Phase 6.5 for the ledger.
+See [`ricofritzsche/eventstore-typescript`](https://github.com/ricofritzsche/eventstore-typescript)
+for the reference implementation of this pattern.
+
+The wallet domain maps cleanly:
+
+```
+fold:    foldWalletState(grants[]) → { balance, grantsByPriority[], expired[] }
+decide:  decideDeduct(command, state) → Ok(ConsumptionPlan) | Err(InsufficientBalance)
+shell:   WalletService.deductCredits — tx, lock, fold, decide, persist
+```
+
+The `foldWalletState` function reduces all grants into current wallet state
+(available balance, grants sorted by priority/expiry, expired grants to skip).
+The `decideDeduct` function produces a consumption plan (which grants to draw
+from, how much from each) or rejects with insufficient balance — all as a pure
+function, testable without DB setup.
+
+If the fold/decide pattern proves effective on the ledger in Phase 6.5, consider
+going further for wallets: model wallet mutations as append-only events
+(`CreditGranted`, `CreditConsumed`, `CreditExpired`, `GrantRevoked`) stored via
+a lightweight event store. Wallet balance becomes a **projection** that folds
+over these events — rebuildable, auditable, and trivially testable. The
+eventstore-typescript library provides Postgres-backed event storage with
+filter-scoped optimistic concurrency that could replace `SELECT ... FOR UPDATE`
+on the wallet row, eliminating deadlock risk under concurrent deductions.
+
+This is not a requirement for Phase 7 — the DB-transactional approach described
+in the slices below works. But the event-sourced variant would give wallets
+full replay capability, point-in-time balance reconstruction, and a clean audit
+trail of every credit lifecycle event.
+
 ## Primary Touchpoints
 
 - `internal/db/src/schema/wallets.ts` — new
