@@ -29,7 +29,7 @@
     "@unprice/tsconfig": "workspace:^",
     "drizzle-kit": "^0.30.5",
     "typescript": "^5.3.3",
-    "vitest": "^2.1.9",
+    "vitest": "^4.1.4",
     "wrangler": "4.67.0"
   },
   "dependencies": {
