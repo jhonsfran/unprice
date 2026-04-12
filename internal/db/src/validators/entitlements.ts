@@ -11,8 +11,8 @@ import {
   meterConfigSchema,
   overageStrategySchema,
   resetConfigSchema,
+  typeFeatureSchema,
 } from "./shared"
-import { typeFeatureSchema } from "./shared"
 import {
   subscriptionItemsSelectSchema,
   subscriptionPhaseSelectSchema,
@@ -163,24 +163,6 @@ export const entitlementGrantsSnapshotSchema = z.object({
   config: configFeatureSchema.optional(), // Added for pricing calculations
 })
 
-export const entitlementSchema = createSelectSchema(schema.entitlements, {
-  metadata: entitlementMetadataSchema.nullable(),
-  grants: entitlementGrantsSnapshotSchema.array(),
-  resetConfig: resetConfigSchema
-    .extend({
-      resetAnchor: z.number(),
-    })
-    .nullable(),
-  meterConfig: meterConfigSchema.nullable(),
-  featureType: typeFeatureSchema,
-  mergingPolicy: entitlementMergingPolicySchema,
-  unitOfMeasure: z
-    .string()
-    .describe(
-      "Unit of measurement for this entitlement, computed from the winning grants. Example: 'calls', 'GB', 'seats'"
-    ),
-})
-
 export const meterStateSchema = z.object({
   lastReconciledId: z
     .string()
@@ -316,22 +298,37 @@ export const currentUsageSchema = z.object({
   priceSummary: priceSummaryDisplaySchema,
 })
 
-export const entitlementStateSchema = entitlementSchema.extend({
-  meter: meterStateSchema,
-})
-
-export const minimalEntitlementSchema = entitlementSchema.pick({
-  id: true,
-  featureSlug: true,
-  effectiveAt: true,
-  expiresAt: true,
-})
-
-export type MinimalEntitlement = z.infer<typeof minimalEntitlementSchema>
 export type CurrentUsage = z.infer<typeof currentUsageSchema>
-export type Entitlement = z.infer<typeof entitlementSchema>
 export type MeterState = z.infer<typeof meterStateSchema>
+export type Grant = z.infer<typeof grantSchema>
+
+// Entitlement is now a computed type derived from grants, not a database table.
+// It represents the effective entitlement state for a customer+feature pair.
+export const entitlementSchema = z.object({
+  id: z.string(),
+  limit: z.number().nullable(),
+  mergingPolicy: entitlementMergingPolicySchema,
+  effectiveAt: z.number(),
+  expiresAt: z.number().nullable(),
+  resetConfig: resetConfigSchema
+    .extend({
+      resetAnchor: z.number(),
+    })
+    .nullable(),
+  meterConfig: meterConfigSchema.nullable(),
+  featureType: typeFeatureSchema,
+  unitOfMeasure: z.string(),
+  grants: entitlementGrantsSnapshotSchema.array(),
+  featureSlug: z.string(),
+  customerId: z.string(),
+  projectId: z.string(),
+  isCurrent: z.boolean(),
+  createdAtM: z.number(),
+  updatedAtM: z.number(),
+  metadata: entitlementMetadataSchema.nullable(),
+})
+
+export type Entitlement = z.infer<typeof entitlementSchema>
 export type EntitlementState = Entitlement & {
   meter: MeterState
 }
-export type Grant = z.infer<typeof grantSchema>

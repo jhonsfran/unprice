@@ -124,6 +124,14 @@ describe("Workflow - Billing and Subscriptions", () => {
           .fn()
           .mockImplementation(async (_key, fetcher) => ({ val: await fetcher(), fresh: true })),
       },
+      customerRelevantEntitlements: {
+        remove: vi.fn(),
+        swr: vi
+          .fn()
+          .mockImplementation(async (_key, fetcher) => ({ val: await fetcher(), fresh: true })),
+        set: vi.fn(),
+        get: vi.fn(),
+      },
       getCurrentUsage: {
         remove: vi.fn(),
       },

@@ -1,6 +1,6 @@
 import { type Database, and, eq, inArray } from "@unprice/db"
-import { entitlements, grants } from "@unprice/db/schema"
-import { type UsageMode, hashStringSHA256, newId } from "@unprice/db/utils"
+import { grants } from "@unprice/db/schema"
+import { type UsageMode, hashStringSHA256 } from "@unprice/db/utils"
 import {
   type FeatureType,
   type OverageStrategy,
@@ -612,8 +612,8 @@ export class GrantsManager {
   /**
    * Resolve the event-time metering state directly from grants.
    *
-   * This is the ingestion-facing alternative to trusting the materialized
-   * `entitlements` table. The important distinction is:
+   * Resolves event-time metering state directly from grants.
+   * The important distinction is:
    *
    * - Grants answer "what is true at this event timestamp?"
    * - The stream answers "which counter should accumulate this event?"
@@ -991,117 +991,6 @@ export class GrantsManager {
   }
 
   /**
-   * Computes all entitlements for a customer by aggregating grants from:
-   * - Customer-level grants (subjectSource: "customer")
-   * - Project-level grants (subjectSource: "project")
-   * - Plan-level grants (subjectSource: "plan") from customer's subscription
-   *
-   * Creates versioned snapshots that are valid until the next cycle end.
-   * @param customerId - Customer id to compute the entitlements for
-   * @param projectId - Project id to compute the entitlements for
-   * @param now - Current time to compute the entitlements for
-   * @returns Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>
-   * @throws UnPriceGrantError if the entitlements cannot be computed
-   * @throws FetchError if the entitlements cannot be computed
-   */
-  // TODO: we need to change this to compute entitlements customer
-  public async computeGrantsForCustomer({
-    customerId,
-    projectId,
-    now,
-    featureSlug,
-  }: {
-    customerId: string
-    projectId: string
-    now: number
-    featureSlug?: string
-  }): Promise<Result<(typeof entitlements.$inferSelect)[], FetchError | UnPriceGrantError>> {
-    try {
-      const { val: result, err: getGrantsErr } = await this.getGrantsForCustomer({
-        customerId,
-        projectId,
-        now,
-      })
-
-      if (getGrantsErr) {
-        return Err(getGrantsErr)
-      }
-
-      const { grants: allGrants } = result
-
-      // Group grants by feature slug
-      const grantsByFeature = new Map<string, typeof allGrants>()
-
-      for (const grant of allGrants) {
-        const grantFeatureSlug = grant.featurePlanVersion.feature.slug
-
-        // Optimization: skip if we are looking for a specific feature
-        if (featureSlug && grantFeatureSlug !== featureSlug) {
-          continue
-        }
-
-        if (!grantsByFeature.has(grantFeatureSlug)) {
-          grantsByFeature.set(grantFeatureSlug, [])
-        }
-
-        // add the grant to the list of grants for the feature
-        grantsByFeature.get(grantFeatureSlug)!.push(grant)
-      }
-
-      // Compute entitlements for each feature
-      const computedEntitlements: (typeof entitlements.$inferSelect)[] = []
-
-      for (const [featureSlugItem, featureGrants] of grantsByFeature.entries()) {
-        if (featureGrants.length === 0) continue
-
-        // optimization
-        if (featureSlug && featureSlug !== featureSlugItem) {
-          continue
-        }
-
-        // compute the entitlement for each feature in the current cycle
-        // this is idempotent, so if the entitlement already exists, it will be updated
-        const entitlementResult = await this.computeEntitlementFromGrants({
-          grants: featureGrants,
-          customerId,
-          projectId,
-        })
-
-        if (entitlementResult.err) {
-          this.logger.error(entitlementResult.err.message, {
-            featureSlug: featureSlugItem,
-            customerId,
-            projectId,
-          })
-
-          return Err(entitlementResult.err)
-        }
-
-        computedEntitlements.push(entitlementResult.val)
-      }
-
-      return Ok(computedEntitlements)
-    } catch (error) {
-      this.logger.error("Error computing entitlements for customer", {
-        error: {
-          message: error instanceof Error ? error.message : String(error),
-          type: error instanceof Error ? error.name : undefined,
-          stack: error instanceof Error ? error.stack : undefined,
-        },
-        customerId,
-        projectId,
-      })
-
-      return Err(
-        new FetchError({
-          message: `Failed to compute entitlements: ${error instanceof Error ? error.message : String(error)}`,
-          retry: true,
-        })
-      )
-    }
-  }
-
-  /**
    * Computes the entitlement state from a list of grants without saving to the database.
    * This logic is shared between the entitlement computation and the billing estimation.
    */
@@ -1137,7 +1026,7 @@ export class GrantsManager {
     }
 
     // Sort by priority (higher first) to preserve consumption order and get the best priority grant.
-    // This determines the canonical configuration for the materialized entitlement.
+    // This determines the canonical configuration for the computed entitlement.
     const ordered = fungibleGrantSet.orderedGrants
     const bestPriorityGrant = ordered[0]!
     const winningUnitOfMeasure = fungibleGrantSet.signature.unitOfMeasure
@@ -1159,7 +1048,7 @@ export class GrantsManager {
     const merged = this.mergeGrants({
       grants: grantsSnapshot,
       featureType: bestPriorityGrant.featurePlanVersion.featureType,
-      usageMode: bestPriorityGrant.featurePlanVersion.config.usageMode,
+      usageMode: bestPriorityGrant.featurePlanVersion.config?.usageMode,
     })
 
     // The effective configuration should come from the "winning" grant(s)
@@ -1257,148 +1146,6 @@ export class GrantsManager {
       updatedAtM: Date.now(),
       metadata: winningGrantMetadata,
     })
-  }
-
-  /**
-   * Computes a single entitlement from a list of grants for a feature.
-   * This is the core merging logic.
-   * @param grants - List of grants to compute the entitlement from
-   * @param customerId - Customer id
-   * @param projectId - Project id
-   * @param featureSlug - Feature slug to compute the entitlement for
-   * @param now - Current time
-   * @param timezone - Timezone to use for the entitlement
-   * @param cycleEndAt - Cycle end at to use for the entitlement
-   * @returns Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>
-   * @throws UnPriceGrantError if no grants are provided
-   * @throws FetchError if the entitlement cannot be computed
-   */
-  private async computeEntitlementFromGrants({
-    grants,
-    customerId,
-    projectId,
-  }: {
-    grants: z.infer<typeof grantSchemaExtended>[]
-    customerId: string
-    projectId: string
-  }): Promise<Result<typeof entitlements.$inferSelect, FetchError | UnPriceGrantError>> {
-    const computedStateResult = await this.computeEntitlementState({
-      grants,
-      customerId,
-      projectId,
-    })
-
-    if (computedStateResult.err) {
-      return Err(
-        new UnPriceGrantError({
-          message: computedStateResult.err.message,
-          subjectId: customerId,
-        })
-      )
-    }
-
-    const computedState = computedStateResult.val
-
-    const entitlementId = newId("entitlement")
-
-    // Prepare base entitlement data
-    const entitlementData = {
-      projectId,
-      customerId,
-      featureSlug: computedState.featureSlug,
-      featureType: computedState.featureType,
-      unitOfMeasure: computedState.unitOfMeasure,
-      limit: computedState.limit,
-      meterConfig: computedState.meterConfig,
-      resetConfig: computedState.resetConfig,
-      mergingPolicy: computedState.mergingPolicy,
-      grants: computedState.grants,
-      metadata: computedState.metadata,
-    }
-
-    const newEntitlement = await this.db
-      .transaction(async (tx) => {
-        const now = Date.now()
-        const currentEntitlement = await tx.query.entitlements.findFirst({
-          where: (entitlement, { and, eq }) =>
-            and(
-              eq(entitlement.projectId, projectId),
-              eq(entitlement.customerId, customerId),
-              eq(entitlement.featureSlug, computedState.featureSlug),
-              eq(entitlement.isCurrent, true)
-            ),
-        })
-
-        const hasSameWindow =
-          currentEntitlement &&
-          currentEntitlement.effectiveAt === computedState.effectiveAt &&
-          currentEntitlement.expiresAt === computedState.expiresAt
-
-        if (hasSameWindow) {
-          return tx
-            .update(entitlements)
-            .set({
-              updatedAtM: now,
-            })
-            .where(
-              and(eq(entitlements.projectId, projectId), eq(entitlements.id, currentEntitlement.id))
-            )
-            .returning()
-            .then((rows) => rows?.[0] ?? null)
-        }
-
-        // Close old active entitlement snapshot for this subject+feature.
-        await tx
-          .update(entitlements)
-          .set({
-            isCurrent: false,
-            updatedAtM: now,
-          })
-          .where(
-            and(
-              eq(entitlements.projectId, projectId),
-              eq(entitlements.customerId, customerId),
-              eq(entitlements.featureSlug, computedState.featureSlug),
-              eq(entitlements.isCurrent, true)
-            )
-          )
-
-        // Insert new current materialized snapshot.
-        return tx
-          .insert(entitlements)
-          .values({
-            ...entitlementData,
-            id: entitlementId,
-            isCurrent: true,
-            effectiveAt: computedState.effectiveAt,
-            expiresAt: computedState.expiresAt,
-            updatedAtM: now,
-          })
-          .returning()
-          .then((rows) => rows?.[0] ?? null)
-      })
-      .catch((error) => {
-        this.logger.error(`Error computeEntitlementFromGrants: ${error.message}`, {
-          error: {
-            message: error instanceof Error ? error.message : String(error),
-            type: error instanceof Error ? error.name : undefined,
-            stack: error instanceof Error ? error.stack : undefined,
-          },
-          entitlementId,
-        })
-        return null
-      })
-
-    if (!newEntitlement) {
-      return Err(
-        new UnPriceGrantError({
-          message: `Failed to compute entitlement from grants for feature slug: ${computedState.featureSlug}`,
-          subjectId: customerId,
-        })
-      )
-    }
-
-    return Ok(newEntitlement)
   }
 
   private isGrantActiveAt(grant: z.infer<typeof grantSchemaExtended>, timestamp: number): boolean {
@@ -1548,10 +1295,6 @@ export class GrantsManager {
       }
     }
 
-    // Helper to get default date range if no specific logic applies
-    // Actually we should calculate dates based on the winners
-    // But initial implementation can use the sorted list
-
     let result: {
       limit: number | null
       grants: z.infer<typeof entitlementGrantsSnapshotSchema>[]
@@ -1568,14 +1311,15 @@ export class GrantsManager {
         // For sum, the validity range is the union of all grants
         const minStart = Math.min(...scopedGrants.map((g) => g.effectiveAt))
         const hasNoExpiry = scopedGrants.some((g) => g.expiresAt === null)
-        const maxEnd = Math.max(...scopedGrants.map((g) => g.expiresAt ?? Number.NEGATIVE_INFINITY))
+        const expiryTimes = scopedGrants
+          .map((g) => g.expiresAt)
+          .filter((e): e is number => e !== null)
 
         result = {
           limit,
-          // we take all the grants that were used to calculate the limit
           grants: scopedGrants,
           effectiveAt: minStart,
-          expiresAt: hasNoExpiry || maxEnd === Number.NEGATIVE_INFINITY ? null : maxEnd,
+          expiresAt: hasNoExpiry ? null : expiryTimes.length > 0 ? Math.max(...expiryTimes) : null,
           mergingPolicy: policy,
         }
         break
@@ -1603,9 +1347,11 @@ export class GrantsManager {
       }
 
       case "min": {
+        // If all grants are unlimited, result is unlimited.
+        // Otherwise take the smallest numeric limit (ignoring unlimited grants).
         const limits = scopedGrants.map((g) => g.limit).filter((l): l is number => l !== null)
-
-        const minLimit = limits.length > 0 ? Math.min(...limits) : null
+        const allUnlimited = limits.length === 0
+        const minLimit = allUnlimited ? null : Math.min(...limits)
 
         // Filter grants: keep only the highest priority grant that offers the min limit
         const winningGrant = scopedGrants.find((g) => g.limit === minLimit) || scopedGrants[0]!

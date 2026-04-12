@@ -8,119 +8,17 @@ import {
   json,
   primaryKey,
   unique,
-  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core"
 
-import { pgTableProject } from "../utils/_table"
-import { projectID } from "../utils/sql"
-
-import { sql } from "drizzle-orm"
 import type { z } from "zod"
+import { pgTableProject } from "../utils/_table"
 import { cuid, timestamps } from "../utils/fields"
-import type {
-  entitlementGrantsSnapshotSchema,
-  entitlementMetadataSchema,
-  grantsMetadataSchema,
-} from "../validators/entitlements"
-import type { meterConfigSchema, resetConfigSchema } from "../validators/shared"
-import { customers } from "./customers"
-import {
-  entitlementMergingPolicyEnum,
-  grantTypeEnum,
-  overageStrategyEnum,
-  subjectTypeEnum,
-  typeFeatureEnum,
-} from "./enums"
+import { projectID } from "../utils/sql"
+import type { grantsMetadataSchema } from "../validators/entitlements"
+import { grantTypeEnum, overageStrategyEnum, subjectTypeEnum } from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
-
-// entitlements are a snapshot of the grants grouped by subject and feature
-// if there are more than one grant for the same subject and feature, the entitlements will be merged using the merging policy
-// but still having them inside grants as json for billing attribution
-// the uniqueness is based on the customerId, featureSlug
-// IMPORTANT: All grants for the same featureSlug MUST have the same:
-//   - featureType
-//   - resetConfig
-//   - meterConfig for usage features
-//   - unitOfMeasure
-// Only limit and hardLimit can differ (merged by priority)
-// The effective values are stored directly in the entitlement for performance
-export const entitlements = pgTableProject(
-  "entitlements",
-  {
-    ...projectID,
-    ...timestamps,
-    customerId: cuid("customer_id").notNull(),
-    featureSlug: varchar("feature_slug", { length: 64 }).notNull(),
-
-    // Effective configuration (must be same across all grants)
-    // if grants don't share the same config then we take the highest priority grant config
-    featureType: typeFeatureEnum("feature_type").notNull(),
-    // unit of measurement for the entitlement (computed winner from grants)
-    unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
-    // null here mean the entitlement never resets
-    resetConfig: json("reset_config").$type<
-      (z.infer<typeof resetConfigSchema> & { resetAnchor: number }) | null
-    >(),
-    // canonical meter definition for usage features
-    meterConfig: json("meter_config").$type<z.infer<typeof meterConfigSchema> | null>(),
-    // A flag to mark which version is currently active
-    isCurrent: boolean("is_current").notNull().default(true),
-
-    // merging policy for the entitlement - sum, max, min, replace, etc.
-    // sum limits, max limit, min limit, replace limit and units
-    // this normally is decided by the feature type
-    mergingPolicy: entitlementMergingPolicyEnum("merging_policy").notNull().default("sum"),
-
-    // Computed from active grants
-    limit: integer("limit"), // null = unlimited
-
-    // effective at is the date when the entitlement was created
-    effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
-    // expires at is the date when the entitlement will expire
-    expiresAt: bigint("expires_at", { mode: "number" }),
-
-    // grants snapshot is the snapshot of the grants that were applied to the customer at the time of the entitlement
-    // grants are consumed by priority, so the higher priority will be consumed first
-    // usage records are associated to the entitlement and the grant id for billing attribution
-    grants: json("grants")
-      .$type<z.infer<typeof entitlementGrantsSnapshotSchema>[]>()
-      .notNull()
-      .default([]),
-
-    // metadata for the entitlement
-    metadata: json("metadata").$type<z.infer<typeof entitlementMetadataSchema>>(),
-  },
-  (table) => ({
-    primary: primaryKey({
-      columns: [table.id, table.projectId],
-      name: "pk_entitlement",
-    }),
-    // customer can only have ONE "current" entitlement per feature,
-    // but unlimited historical (isCurrent = false) entitlements!
-    uniqueCurrentSubjectFeature: uniqueIndex("unique_current_subject_feature")
-      .on(table.projectId, table.customerId, table.featureSlug)
-      .where(sql`${table.isCurrent} = true`),
-    // Index for the Edge Cache Worker to quickly grab the 30-day window
-    idxEdgeCache: index("idx_entitlements_edge_cache").on(
-      table.projectId,
-      table.customerId,
-      table.featureSlug,
-      table.effectiveAt
-    ),
-    projectfk: foreignKey({
-      columns: [table.projectId],
-      foreignColumns: [projects.id],
-      name: "project_id_fkey",
-    }),
-    customerfk: foreignKey({
-      columns: [table.customerId, table.projectId],
-      foreignColumns: [customers.id, customers.projectId],
-      name: "customer_id_fkey",
-    }).onDelete("cascade"),
-  })
-)
 
 // Grants are the limits and overrides that are applied to a feature plan version
 // for a given subject (workspace, project, plan, plan_version, customer)
@@ -219,17 +117,6 @@ export const grants = pgTableProject(
     }),
   })
 )
-
-export const entitlementsRelations = relations(entitlements, ({ one }) => ({
-  customer: one(customers, {
-    fields: [entitlements.customerId, entitlements.projectId],
-    references: [customers.id, customers.projectId],
-  }),
-  project: one(projects, {
-    fields: [entitlements.projectId],
-    references: [projects.id],
-  }),
-}))
 
 export const grantsRelations = relations(grants, ({ one }) => ({
   project: one(projects, {

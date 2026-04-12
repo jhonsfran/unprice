@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
 import type { ApiKeyExtended } from "@unprice/db/validators"
+import { describe, expect, it } from "vitest"
 import { UnpriceApiError } from "~/errors"
 import { validateIsAllowedToAccessProject } from "./key"
 

@@ -1,7 +1,19 @@
 import { bigint, varchar } from "drizzle-orm/pg-core"
 
-// easier to migrate to another db
-export const cuid = (d: string) => varchar(d, { length: 36 })
+// Uses varchar(36) for proper type inference (dataType: 'string') with drizzle-orm and drizzle-zod,
+// but patches getSQLType() so drizzle-kit migrations emit COLLATE "C" for sort performance.
+export const cuid = (name: string) => {
+  const builder = varchar(name, { length: 36 })
+  // biome-ignore lint/suspicious/noExplicitAny: patching drizzle-orm internal build() to override getSQLType
+  const origBuild = (builder as any).build
+  // biome-ignore lint/suspicious/noExplicitAny: drizzle-orm internal API
+  ;(builder as any).build = function (this: any, table: any) {
+    const column = origBuild.call(this, table)
+    column.getSQLType = () => 'varchar(36) COLLATE "C"'
+    return column
+  }
+  return builder
+}
 
 // for workspace
 export const id = {

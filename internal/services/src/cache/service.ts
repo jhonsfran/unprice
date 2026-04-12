@@ -157,11 +157,6 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
-      getRelevantEntitlementsPerFeature: new Namespace<
-        CacheNamespaces["getRelevantEntitlementsPerFeature"]
-      >(this.context, {
-        ...defaultOpts,
-      }),
       ingestionPreparedGrantContext: new Namespace<
         CacheNamespaces["ingestionPreparedGrantContext"]
       >(this.context, {

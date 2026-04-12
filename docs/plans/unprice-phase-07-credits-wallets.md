@@ -15,6 +15,7 @@ wallet deduction, or one-time provider charge.
 
 - Phase 4 for `LedgerService`
 - Phase 5 for settlement webhooks (credit purchase confirmation)
+- Phase 6 for `billMeterFact` use case (agent/meter billing)
 
 ## Why This Phase Exists
 
@@ -32,6 +33,8 @@ wallet deduction, or one-time provider charge.
 
 - [../../internal/services/src/ledger/service.ts](../../internal/services/src/ledger/service.ts)
 - [../../internal/db/src/schema/ledger.ts](../../internal/db/src/schema/ledger.ts)
+- [../../internal/db/src/schema/invoices.ts](../../internal/db/src/schema/invoices.ts) — existing `creditGrants` and `invoiceCreditApplications` tables (to be replaced)
+- [../../internal/services/src/use-cases/billing/bill-meter-fact.ts](../../internal/services/src/use-cases/billing/bill-meter-fact.ts)
 - [../../internal/services/src/use-cases/payment-provider/process-webhook-event.ts](../../internal/services/src/use-cases/payment-provider/process-webhook-event.ts)
 - [../../internal/services/src/payment-provider/interface.ts](../../internal/services/src/payment-provider/interface.ts)
 - [./unprice-phase-04-ledger-foundation.md](./unprice-phase-04-ledger-foundation.md)
@@ -46,37 +49,44 @@ wallet deduction, or one-time provider charge.
   entirely (no partial deduction).
 - Credits are ledger entries. `addCredits` posts a ledger credit with
   `sourceType: "credit_purchase"`. `deductCredits` posts a ledger debit with
-  `sourceType: "credit_burn"`. The wallet balance is a projection of the ledger.
+  `sourceType: "credit_burn"`. **The ledger is the source of truth.** The wallet
+  table's `balanceCents` is a denormalized cache updated atomically within the
+  same DB transaction as ledger posts (same pattern as `ledgers.unsettledBalanceCents`).
 - Burn rates are versioned with `effectiveAt`/`supersededAt`. Changing a burn rate
   never modifies existing subscriptions or historical ledger entries.
+- Use `CreditGrant` naming everywhere to avoid confusion with the existing
+  `GrantsManager` (which manages entitlement grants, a different concept).
 - Do not introduce TypeScript `any` types.
 - Keep orchestration in use cases, not adapters.
 
 ## Primary Touchpoints
 
 - `internal/db/src/schema/wallets.ts` — new
-- `internal/db/src/schema/credit-grants.ts` — new
+- `internal/db/src/schema/invoices.ts` — replace existing `creditGrants` and `invoiceCreditApplications` tables
 - `internal/db/src/schema/credit-burn-rates.ts` — new
+- `internal/db/src/utils/constants.ts` — extend `LEDGER_SETTLEMENT_TYPES` with `"wallet"`
 - `internal/db/src/validators/wallets.ts` — new
 - `internal/services/src/wallet/service.ts` — new
 - `internal/services/src/settlement/router.ts` — new
 - `internal/services/src/use-cases/wallet/purchase-credits.ts` — new
-- `internal/services/src/use-cases/agent/report-agent-usage.ts` — wire settlement
-- `internal/services/src/context.ts` — register new services
+- `internal/services/src/use-cases/billing/bill-meter-fact.ts` — wire settlement router
+- `internal/services/src/context.ts` — register WalletService
+- `apps/api/src/middleware/init.ts` — expose WalletService to route handlers
+- `apps/api/src/hono/env.ts` — add wallet to HonoEnv services type
 - `apps/api/src/routes/` — new wallet endpoints
 - `packages/api/src/openapi.d.ts` — SDK types
 - dashboard UI: wallet page, credit purchase flow, burn rate editor
 
 ## Execution Plan
 
-### Slice 1: Wallet schema
+### Slice 1: Wallet & credit grant schema
 
 Create `internal/db/src/schema/wallets.ts`:
 
 ```
 wallets(
   id, projectId, customerId, currency,
-  balanceCents,           -- current spendable balance
+  balanceCents,           -- denormalized cache of ledger balance (updated atomically with ledger posts)
   lifetimeCreditsCents,   -- total credits ever purchased
   lifetimeDebitsCents,    -- total credits ever consumed
   createdAt, updatedAt
@@ -84,7 +94,13 @@ wallets(
 -- unique: (projectId, customerId, currency)
 ```
 
-Create `internal/db/src/schema/credit-grants.ts`:
+The `balanceCents` column is a **denormalized cache**, not the source of truth.
+It follows the same pattern as `ledgers.unsettledBalanceCents` — updated within
+the same DB transaction as the corresponding ledger entry. If drift is ever
+suspected, the ledger can be replayed to recompute the correct balance.
+
+Add `credit_grants` to the wallets schema (replaces the existing `creditGrants`
+table in `invoices.ts`):
 
 ```
 credit_grants(
@@ -99,6 +115,11 @@ credit_grants(
 )
 ```
 
+**Migration note:** Remove the old `creditGrants` and `invoiceCreditApplications`
+tables from `internal/db/src/schema/invoices.ts`. Remove their relations. No
+backward compatibility needed — drop and replace. Update the schema barrel
+export to include the new wallets schema.
+
 Create `internal/db/src/schema/credit-burn-rates.ts`:
 
 ```
@@ -111,17 +132,42 @@ credit_burn_rates(
 )
 ```
 
-The burn rate table is versioned: changing a rate creates a new row and
-supersedes the old one. This allows price adjustments without modifying
-existing subscriptions — the credit-per-unit exchange rate changes, not the
-customer contract.
+The burn rate is a **post-rating conversion layer**. The pricing pipeline is:
+`usage → RatingService.rateIncrementalUsage() (cents) → burn rate (credits) → WalletService.deductCredits()`.
+The burn rate converts rated cents to credits. It does not replace the rating
+service — it sits after it.
 
-### Slice 2: Validators and migration
+### Slice 2: Settlement type enum + settlement preference schema
 
-Add validators for all new tables. Export from the real schema and validator
-barrels. Run migration.
+Extend `LEDGER_SETTLEMENT_TYPES` in `internal/db/src/utils/constants.ts`:
 
-### Slice 3: WalletService
+```typescript
+export const LEDGER_SETTLEMENT_TYPES = ["invoice", "manual", "wallet"] as const
+```
+
+Add settlement preference to subscription phases (or customer billing config).
+This column does not exist today — it must be created:
+
+```
+-- on subscription_phases or a new customer_billing_config table:
+settlementPreference  -- "invoice" | "wallet" (nullable, defaults to "invoice")
+```
+
+Defaults:
+- subscriptions: `"invoice"`
+- meter/agent usage: `"wallet"` (falls back to `"invoice"` if no wallet exists)
+
+Run migration for both the new tables, dropped tables, and enum extension.
+
+### Slice 3: Validators
+
+Add validators for all new tables (`wallets`, `credit_grants`,
+`credit_burn_rates`). Export from the schema and validator barrels.
+
+Use `drizzle-zod` `createSelectSchema` / `createInsertSchema` following the
+existing pattern in `internal/db/src/validators/ledger.ts`.
+
+### Slice 4: WalletService
 
 Create `internal/services/src/wallet/` with:
 
@@ -136,24 +182,37 @@ Methods:
 
 - `getOrCreateWallet(projectId, customerId, currency)` — idempotent
 - `addCredits(walletId, amount, sourceType, sourceId, expiresAt?, priority?)`
-  — posts a ledger credit with `sourceType: "credit_purchase"` and creates a
-  `credit_grant` row
-- `deductCredits(walletId, amount, sourceType, sourceId)` — atomic
-  check-and-deduct. Consumes from grants in priority + expiry order (lowest
-  priority first, earliest expiry first within same priority). Posts ledger
-  debit with `sourceType: "credit_burn"`
-- `getBalance(walletId)` — current spendable balance
+  — runs in a **single DB transaction** that:
+  1. Creates a `credit_grant` row
+  2. Posts a ledger credit via `LedgerService.postCredit()` with
+     `sourceType: "credit_purchase"`
+  3. Increments wallet `balanceCents` and `lifetimeCreditsCents`
+- `deductCredits(walletId, amount, sourceType, sourceId)` — runs in a
+  **single DB transaction** that:
+  1. Checks wallet `balanceCents >= amount` (fast rejection)
+  2. Consumes from grants in priority + expiry order (lowest priority first,
+     earliest expiry first within same priority, **skipping expired grants**)
+  3. Decrements `remainingCents` on each consumed grant
+  4. Posts a ledger debit with `sourceType: "credit_burn"`
+  5. Decrements wallet `balanceCents` and increments `lifetimeDebitsCents`
+  If balance is insufficient, the **entire transaction rolls back** — no
+  partial deduction.
+- `getBalance(walletId)` — returns cached `balanceCents` from wallet table
 - `getGrantHistory(walletId)` — credit grant timeline with remaining amounts
 - `hasEnoughCredits(walletId, estimatedCost)` — fast balance check for
   guardrails (Phase 8)
 
-Important constraint: `deductCredits` runs in a database transaction. If
-balance is insufficient, the entire operation is rejected — no partial
-deduction.
+**Important:** `addCredits` and `deductCredits` both accept an optional `db`
+parameter for caller-provided transaction context (same pattern as
+`LedgerService.postEntry`). The WalletService needs access to `LedgerService`
+for posting entries — pass it as a constructor dep alongside the infra deps.
+This makes WalletService a near-leaf service (depends only on LedgerService,
+which is itself a leaf).
 
-Register in `internal/services/src/context.ts`.
+Register in `internal/services/src/context.ts`. Construct after `LedgerService`,
+pass `ledgerService` as a constructor dep.
 
-### Slice 4: SettlementRouter
+### Slice 5: SettlementRouter
 
 Create `internal/services/src/settlement/router.ts`.
 
@@ -166,23 +225,29 @@ Routing modes:
 - `one_time` — charge via provider immediately (uses normalized provider
   runtime, leaves room for crypto-backed collectors)
 
-Settlement preference is configured per subscription phase or per customer
-billing config. Defaults:
+The router takes:
+- the settlement preference (from subscription phase or customer config)
+- the charge amount and context
+- and dispatches to the appropriate handler
 
-- subscriptions: `invoice`
-- agent usage: `wallet` (falls back to `invoice` if no wallet exists)
+If `wallet` mode is selected but no wallet exists or balance is insufficient,
+fall back to `invoice` mode.
 
-### Slice 5: Wire wallet settlement into agent billing
+### Slice 6: Wire wallet settlement into meter billing
 
-Update `reportAgentUsage` (from Phase 6) to:
+Update `billMeterFact` (`internal/services/src/use-cases/billing/bill-meter-fact.ts`)
+to:
 
-1. Rate the usage
-2. Post ledger debit
+1. Rate the usage (existing — `RatingService.rateIncrementalUsage()`)
+2. Post ledger debit (existing — `LedgerService.postDebit()`)
 3. Route through SettlementRouter
-4. If `wallet`: call `WalletService.deductCredits()`
+4. If `wallet`: convert cents to credits via burn rate, call
+   `WalletService.deductCredits()`
 5. If `invoice`: accumulate for next billing cycle (existing behavior)
 
-### Slice 6: Credit purchase flow
+Update `BillMeterFactDeps` to include `Pick<ServiceContext, "rating" | "ledger" | "wallet">`.
+
+### Slice 7: Credit purchase flow
 
 Create `internal/services/src/use-cases/wallet/purchase-credits.ts`.
 
@@ -195,44 +260,59 @@ Use case `purchaseCredits`:
   `sourceType: "purchase"`, `sourceId: paymentIntentId`
 - idempotent: same `sourceId` returns existing grant
 
-### Slice 7: API endpoints
+Update `processWebhookEvent` to handle credit purchase confirmation events
+(new outcome type alongside existing invoice payment flow).
 
-New routes:
+### Slice 8: API endpoints
+
+New routes (all POST, matching existing convention):
 
 - `POST /v1/wallet/balance` — check credit balance for a customer
 - `POST /v1/wallet/purchase` — initiate credit purchase (returns checkout URL)
-- `GET /v1/wallet/grants` — list credit grants with remaining amounts
+- `POST /v1/wallet/grants` — list credit grants with remaining amounts
+
+Register routes in `apps/api/src/index.ts`.
+
+Add WalletService to `apps/api/src/middleware/init.ts` service exposure
+(alongside existing `subscription`, `entitlement`, `customer`, etc.) and
+update `apps/api/src/hono/env.ts` services type.
 
 Update `packages/api/` OpenAPI types.
 
-DX: developers can check balance before making expensive calls, purchase
-credits programmatically, and query grant history.
-
-### Slice 8: UI
+### Slice 9: UI — wallet dashboard & balance
 
 - **Wallet dashboard:** current balance display, grant history timeline showing
   purchases/burns/expirations, burn rate over time chart
-- **Credit purchase flow:** select credit pack → Stripe checkout → confirmation
-  callback → balance updated
-- **Burn rate configuration:** per-feature credit cost editor on the plan version
-  feature configuration page. Shows current rate and effective date.
 - **Customer billing page:** show wallet balance alongside subscription status.
   If wallet-based, show "Credits remaining: $X" prominently.
+
+### Slice 10: UI — credit purchase flow
+
+- **Credit purchase flow:** select credit pack → Stripe checkout → confirmation
+  callback → balance updated
+
+### Slice 11: UI — burn rate & settlement config
+
+- **Burn rate configuration:** per-feature credit cost editor on the plan version
+  feature configuration page. Shows current rate and effective date.
 - **Settlement preference:** per-subscription or per-customer toggle between
   invoice and wallet settlement modes
 
-### Slice 9: Tests
+### Slice 12: Tests
 
 Cover:
 
 - wallet creation idempotency
 - credit grant with priority and expiry
 - FIFO/priority consumption order
-- grant expiry (expired grants skipped)
-- atomic deduction (insufficient balance rejection)
-- settlement router routing logic per mode
+- expired grants skipped during deduction
+- atomic deduction (insufficient balance rejection, full rollback)
+- wallet `balanceCents` stays in sync with ledger after add/deduct
+- settlement router routing logic per mode (wallet, invoice, fallback)
 - purchase → webhook → credit grant e2e flow
 - burn rate versioning (rate change mid-period uses new rate for new events)
+- pricing pipeline: `rateIncrementalUsage → burn rate → deductCredits`
+- `billMeterFact` with wallet settlement mode
 - wallet balance consistency under concurrent deductions
 
 ## Validation
@@ -248,9 +328,11 @@ Cover:
 
 - customers can hold prepaid credit balances
 - credits are purchased via provider checkout and granted on payment confirmation
-- agent usage can be settled by wallet deduction or invoice accumulation
+- agent/meter usage can be settled by wallet deduction or invoice accumulation
 - burn rates are versioned and can be changed without modifying subscriptions
 - settlement router correctly routes charges to the configured mode
+- wallet `balanceCents` is a denormalized cache of ledger state, not independent
+- existing `creditGrants` and `invoiceCreditApplications` tables are removed
 - SDK exposes wallet balance and purchase endpoints
 - dashboard shows wallet state and allows credit purchases
 

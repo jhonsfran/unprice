@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq } from "@unprice/db"
-import { add, currencies, dinero, formatMoney, toDecimal } from "@unprice/db/utils"
+import { add, currencies, dinero, formatMoney, newId, toDecimal } from "@unprice/db/utils"
 import type { Dinero } from "@unprice/db/utils"
 import type { Currency, CurrentUsage, EntitlementState } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
@@ -77,35 +77,11 @@ export class EntitlementService {
     this.logger.set({ entitlements: context })
   }
 
-  private async getRelevantEntitlementsPerFeatureFromDB({
-    projectId,
-    customerId,
-    featureSlug,
-    historicalDays = 30,
-  }: {
-    projectId: string
-    customerId: string
-    featureSlug: string
-    historicalDays?: number
-  }): Promise<CacheNamespaces["getRelevantEntitlementsPerFeature"]> {
-    // Get current entitlement and the entitlements that experied in the last 30 days.
-    // This is for late report
-    const historicalWindowMs = historicalDays * 24 * 60 * 60 * 1000 // in ms
-    const historicalCutoff = Date.now() - historicalWindowMs
-
-    return this.db.query.entitlements.findMany({
-      where: (entitlement, { and, eq, gt, or }) =>
-        and(
-          eq(entitlement.projectId, projectId),
-          eq(entitlement.customerId, customerId),
-          eq(entitlement.featureSlug, featureSlug),
-          or(eq(entitlement.isCurrent, true), gt(entitlement.expiresAt, historicalCutoff - 1))
-        ),
-      orderBy: (entitlement, { desc }) => desc(entitlement.effectiveAt),
-    })
-  }
-
-  private async getRelevantEntitlementsForIngestionFromDB({
+  /**
+   * Compute entitlements directly from grants (source of truth).
+   * This avoids drift between the materialized entitlements table and the grants table.
+   */
+  private async computeEntitlementsFromGrants({
     projectId,
     customerId,
     historicalDays = 30,
@@ -114,20 +90,74 @@ export class EntitlementService {
     customerId: string
     historicalDays?: number
   }): Promise<CacheNamespaces["customerRelevantEntitlements"]> {
-    const historicalWindowMs = historicalDays * 24 * 60 * 60 * 1000
-    const historicalCutoff = Date.now() - historicalWindowMs
+    const now = Date.now()
 
-    const data = await this.db.query.entitlements.findMany({
-      where: (entitlement, { and, eq, gt, or }) =>
-        and(
-          eq(entitlement.projectId, projectId),
-          eq(entitlement.customerId, customerId),
-          or(eq(entitlement.isCurrent, true), gt(entitlement.expiresAt, historicalCutoff - 1))
-        ),
-      orderBy: (entitlement, { asc }) => asc(entitlement.effectiveAt),
-    })
+    // Use time range to include historical grants for late reporting,
+    // or point-in-time for current-only queries
+    const grantsResult =
+      historicalDays > 0
+        ? await this.grantsManager.getGrantsForCustomer({
+            customerId,
+            projectId,
+            startAt: now - historicalDays * 24 * 60 * 60 * 1000,
+            endAt: now,
+          })
+        : await this.grantsManager.getGrantsForCustomer({
+            customerId,
+            projectId,
+            now,
+          })
 
-    return data ?? []
+    if (grantsResult.err) {
+      this.logger.debug("No grants found for customer", {
+        customerId,
+        projectId,
+        error: grantsResult.err.message,
+      })
+      return []
+    }
+
+    const { grants } = grantsResult.val
+
+    if (grants.length === 0) {
+      return []
+    }
+
+    // Group grants by feature slug
+    const grantsByFeature = new Map<string, typeof grants>()
+    for (const grant of grants) {
+      const slug = grant.featurePlanVersion.feature.slug
+      const existing = grantsByFeature.get(slug) ?? []
+      grantsByFeature.set(slug, [...existing, grant])
+    }
+
+    // Compute entitlement state for each feature
+    const entitlements: CacheNamespaces["customerRelevantEntitlements"] = []
+
+    for (const [slug, featureGrants] of grantsByFeature) {
+      const result = await this.grantsManager.computeEntitlementState({
+        customerId,
+        projectId,
+        grants: featureGrants,
+      })
+
+      if (result.err) {
+        this.logger.warn("Failed to compute entitlement state for feature", {
+          customerId,
+          projectId,
+          featureSlug: slug,
+          error: result.err.message,
+        })
+        continue
+      }
+
+      entitlements.push({
+        ...result.val,
+        id: newId("entitlement"),
+      })
+    }
+
+    return entitlements
   }
 
   public async getRelevantEntitlementsForIngestion({
@@ -150,77 +180,21 @@ export class EntitlementService {
       cache: this.cache.customerRelevantEntitlements,
       cacheKey,
       load: () =>
-        this.getRelevantEntitlementsForIngestionFromDB({
+        this.computeEntitlementsFromGrants({
           projectId,
           customerId,
           historicalDays,
         }),
       wrapLoadError: (error) =>
         new FetchError({
-          message: `unable to query entitlements from db in getRelevantEntitlementsForIngestionFromDB - ${error.message}`,
+          message: `unable to compute entitlements from grants - ${error.message}`,
           retry: false,
           context: {
             error: error.message,
             url: "",
             customerId,
             projectId,
-            method: "getRelevantEntitlementsForIngestionFromDB",
-          },
-        }),
-    })
-
-    if (err) {
-      return Err(
-        new FetchError({
-          message: err.message,
-          retry: true,
-          cause: err,
-        })
-      )
-    }
-
-    return Ok(val ?? [])
-  }
-
-  public async getRelevantEntitlementsPerFeature({
-    projectId,
-    customerId,
-    featureSlug,
-    historicalDays = 30,
-    opts,
-  }: {
-    projectId: string
-    customerId: string
-    featureSlug: string
-    historicalDays?: number
-    opts?: {
-      skipCache?: boolean
-    }
-  }): Promise<Result<CacheNamespaces["getRelevantEntitlementsPerFeature"], FetchError>> {
-    const cacheKey = `${projectId}:${customerId}:${featureSlug}:${historicalDays}`
-
-    const { val, err } = await cachedQuery({
-      skipCache: opts?.skipCache,
-      cache: this.cache.getRelevantEntitlementsPerFeature,
-      cacheKey,
-      load: () =>
-        this.getRelevantEntitlementsPerFeatureFromDB({
-          projectId,
-          customerId,
-          featureSlug,
-          historicalDays,
-        }),
-      wrapLoadError: (error) =>
-        new FetchError({
-          message: `unable to query entitlements from db in getRelevantEntitlementsPerFeatureFromDB - ${error.message}`,
-          retry: false,
-          context: {
-            error: error.message,
-            url: "",
-            customerId,
-            projectId,
-            featureSlug,
-            method: "getRelevantEntitlementsPerFeatureFromDB",
+            method: "computeEntitlementsFromGrants",
           },
         }),
     })

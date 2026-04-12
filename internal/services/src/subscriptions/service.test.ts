@@ -235,6 +235,9 @@ describe("SubscriptionService - grant lifecycle", () => {
         set: vi.fn().mockResolvedValue(undefined),
         remove: vi.fn().mockResolvedValue(undefined),
       },
+      customerRelevantEntitlements: {
+        remove: vi.fn().mockResolvedValue(undefined),
+      },
     } as unknown as Cache
 
     mockDb = {
@@ -361,7 +364,6 @@ describe("SubscriptionService - grant lifecycle", () => {
       Ok({ paymentMethodId: null, requiredPaymentMethod: false })
     )
     vi.spyOn(CustomerService.prototype, "updateAccessControlList").mockResolvedValue(undefined)
-
     const serviceDeps = {
       db: mockDb,
       logger: mockLogger,
@@ -622,6 +624,116 @@ describe("SubscriptionService - grant lifecycle", () => {
         }),
       }),
     })
+  })
+
+  it("ends the active phase at now without creating duplicate grants", async () => {
+    state.subscriptions = [
+      {
+        id: "subscription_existing",
+        projectId,
+        customerId,
+        active: true,
+        status: "active",
+        timezone: "UTC",
+        metadata: null,
+        currentCycleStartAt: initialNow,
+        currentCycleEndAt: initialNow,
+        renewAt: null,
+        planSlug: "basic",
+      },
+    ]
+    state.phases = [
+      {
+        id: "phase_old",
+        projectId,
+        subscriptionId: "subscription_existing",
+        planVersionId: basicPlanVersion.id,
+        paymentMethodId: null,
+        trialEndsAt: null,
+        trialUnits: 0,
+        startAt: initialNow,
+        endAt: null,
+        metadata: null,
+        billingAnchor: 1,
+      },
+    ]
+    state.items = [
+      {
+        id: "subscription_item_old",
+        subscriptionPhaseId: "phase_old",
+        subscriptionId: "subscription_existing",
+        projectId,
+        featurePlanVersionId: "pf_basic",
+        units: 3,
+      },
+    ]
+
+    const transitionAt = initialNow + 7 * 24 * 60 * 60 * 1000
+    const existingGrant = {
+      id: "grant_old",
+      projectId,
+      subjectType: "customer",
+      subjectId: customerId,
+      type: "subscription",
+      featurePlanVersionId: "pf_basic",
+      effectiveAt: initialNow,
+      expiresAt: null,
+      autoRenew: false,
+      deleted: false,
+      deletedAt: null,
+      priority: 10,
+      limit: 3,
+      units: 3,
+      overageStrategy: "none",
+      anchor: 1,
+      metadata: {
+        subscriptionId: "subscription_existing",
+        subscriptionPhaseId: "phase_old",
+        subscriptionItemId: "subscription_item_old",
+      },
+      name: "Base Plan",
+      createdAtM: initialNow,
+      updatedAtM: initialNow,
+    }
+
+    const getPhaseOwnedGrantsSpy = vi
+      .spyOn(GrantsManager.prototype, "getPhaseOwnedGrants")
+      .mockResolvedValue(Ok([existingGrant as never]))
+    const createGrantSpy = vi
+      .spyOn(GrantsManager.prototype, "createGrant")
+      .mockImplementation(async ({ grant }) => Ok(grant as never))
+
+    const updatePhaseInput = {
+      ...state.phases[0]!,
+      endAt: transitionAt,
+      items: state.items.map((item) => ({
+        id: item.id,
+        units: item.units,
+      })),
+    } as unknown as InsertSubscriptionPhase & { id: string }
+
+    const updatePhaseResult = await subscriptionService.updatePhase({
+      input: updatePhaseInput as never,
+      subscriptionId: "subscription_existing",
+      projectId,
+      now: transitionAt,
+    })
+
+    expect(updatePhaseResult.err).toBeUndefined()
+    expect(getPhaseOwnedGrantsSpy).toHaveBeenCalledWith({
+      projectId,
+      customerId,
+      subscriptionPhaseId: "phase_old",
+      featurePlanVersionIds: ["pf_basic"],
+      phaseStartAt: initialNow,
+      phaseEndAt: transitionAt,
+    })
+    expect(createGrantSpy).not.toHaveBeenCalled()
+    expect(state.grantUpdateSets).toContainEqual(
+      expect.objectContaining({
+        expiresAt: transitionAt,
+      })
+    )
   })
 
   it("removes future phase grants using phase-derived feature plan versions", async () => {

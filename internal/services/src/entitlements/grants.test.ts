@@ -8,11 +8,6 @@ describe("GrantsManager", () => {
   let grantsManager: GrantsManager
   let mockDb: Database
   let mockLogger: Logger
-  let txInsertValuesMock: ReturnType<typeof vi.fn>
-  let txQueryEntitlementsFindFirstMock: ReturnType<typeof vi.fn>
-  let txUpdateSetMock: ReturnType<typeof vi.fn>
-  let txUpdateWhereMock: ReturnType<typeof vi.fn>
-  let txUpdateReturningMock: ReturnType<typeof vi.fn>
 
   const now = Date.now()
   const customerId = "cust_grants_123"
@@ -111,20 +106,27 @@ describe("GrantsManager", () => {
     anchor: 1,
   }
 
+  // Helper to mock DB responses for tests that need getGrantsForCustomer
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+  const setupMocks = (grantsList: any[]) => {
+    vi.spyOn(mockDb.query.customers, "findFirst").mockResolvedValue({
+      subscriptions: [{ phases: [{ planVersion: { plan: { id: "plan_1" }, id: "pv_1" } }] }],
+      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+    } as any)
+
+    let callCount = 0
+    vi.spyOn(mockDb.query.grants, "findMany").mockImplementation(() => {
+      if (callCount === 0) {
+        callCount++
+        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        return grantsList as any
+      }
+      return []
+    })
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
-
-    txQueryEntitlementsFindFirstMock = vi.fn().mockResolvedValue(null)
-    txUpdateReturningMock = vi.fn().mockResolvedValue([])
-    txUpdateWhereMock = vi.fn().mockImplementation(() => ({
-      returning: txUpdateReturningMock,
-    }))
-    txUpdateSetMock = vi.fn().mockImplementation(() => ({
-      where: txUpdateWhereMock,
-    }))
-    txInsertValuesMock = vi.fn().mockImplementation((values) => ({
-      returning: vi.fn().mockResolvedValue([{ ...values }]),
-    }))
 
     mockLogger = {
       set: vi.fn(),
@@ -141,25 +143,7 @@ describe("GrantsManager", () => {
         grants: {
           findMany: vi.fn(),
         },
-        entitlements: {
-          findFirst: vi.fn(),
-        },
       },
-      transaction: vi.fn(async (callback) =>
-        callback({
-          query: {
-            entitlements: {
-              findFirst: txQueryEntitlementsFindFirstMock,
-            },
-          },
-          update: vi.fn(() => ({
-            set: txUpdateSetMock,
-          })),
-          insert: vi.fn(() => ({
-            values: txInsertValuesMock,
-          })),
-        })
-      ),
       insert: vi.fn(() => ({
         values: vi.fn(() => ({
           onConflictDoUpdate: vi.fn(() => ({
@@ -172,29 +156,7 @@ describe("GrantsManager", () => {
     grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
   })
 
-  // Helper to mock DB responses
-  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-  const setupMocks = (grantsList: any[]) => {
-    // Mock customer subscription (always found)
-    vi.spyOn(mockDb.query.customers, "findFirst").mockResolvedValue({
-      subscriptions: [{ phases: [{ planVersion: { plan: { id: "plan_1" }, id: "pv_1" } }] }],
-      // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-    } as any)
-
-    // We should only return the list ONCE, or filter by arguments if possible.
-    // Or just mock implementation to return empty list for subsequent calls.
-    let callCount = 0
-    vi.spyOn(mockDb.query.grants, "findMany").mockImplementation(() => {
-      if (callCount === 0) {
-        callCount++
-        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-        return grantsList as any
-      }
-      return []
-    })
-  }
-
-  describe("computeGrantsForCustomer - Merge Rules", () => {
+  describe("computeEntitlementState - Merge Rules", () => {
     it("should sum limits for usage features", async () => {
       const grants = [
         {
@@ -213,144 +175,29 @@ describe("GrantsManager", () => {
         },
       ]
 
-      setupMocks(grants)
-
-      const result = await grantsManager.computeGrantsForCustomer({
+      const result = await grantsManager.computeEntitlementState({
         customerId,
         projectId,
-        now,
+        grants,
       })
 
       expect(result.err).toBeUndefined()
-      expect(result.val).toHaveLength(1)
-      const entitlement = result.val![0]
-      expect(entitlement).toBeDefined()
-      expect(entitlement!.limit).toBe(150) // 100 + 50
-      expect(entitlement!.mergingPolicy).toBe("sum")
+      const entitlement = result.val!
+      expect(entitlement.limit).toBe(150) // 100 + 50
+      expect(entitlement.mergingPolicy).toBe("sum")
 
-      // Verify the materialized snapshot preserves the business window bounds.
+      // Verify the window bounds
       expect(grants[0]).toBeDefined()
       expect(grants[1]).toBeDefined()
       const minStart = Math.min(grants[0]!.effectiveAt, grants[1]!.effectiveAt)
       const maxEnd = Math.max(grants[0]!.expiresAt, grants[1]!.expiresAt)
-      expect(entitlement!.effectiveAt).toBe(minStart)
-      expect(entitlement!.expiresAt).toBe(maxEnd)
-      expect(txUpdateSetMock.mock.calls[0]?.[0]).toEqual({
-        isCurrent: false,
-        updatedAtM: expect.any(Number),
-      })
+      expect(entitlement.effectiveAt).toBe(minStart)
+      expect(entitlement.expiresAt).toBe(maxEnd)
 
       // Verify feature slug and type
-      expect(entitlement!.featureSlug).toBe(featureSlug)
-      expect(entitlement!.featureType).toBe("usage")
-      expect(entitlement!.meterConfig?.aggregationMethod).toBe("sum")
-    })
-
-    it("reuses the current entitlement snapshot when version and window are unchanged", async () => {
-      vi.useFakeTimers()
-      vi.setSystemTime(now)
-
-      try {
-        const grants = [
-          {
-            ...baseGrant,
-            id: "g1",
-            limit: 100,
-          },
-        ]
-
-        setupMocks(grants)
-
-        const firstResult = await grantsManager.computeGrantsForCustomer({
-          customerId,
-          projectId,
-          now,
-        })
-
-        expect(firstResult.err).toBeUndefined()
-        const firstEntitlement = firstResult.val![0]!
-        const refreshTime = now + 60_000
-
-        txQueryEntitlementsFindFirstMock.mockResolvedValue({
-          ...firstEntitlement,
-          id: "ent_existing",
-          isCurrent: true,
-        })
-        txUpdateReturningMock.mockResolvedValue([
-          {
-            ...firstEntitlement,
-            id: "ent_existing",
-            isCurrent: true,
-            updatedAtM: refreshTime,
-          },
-        ])
-
-        setupMocks(grants)
-        vi.setSystemTime(refreshTime)
-
-        const secondResult = await grantsManager.computeGrantsForCustomer({
-          customerId,
-          projectId,
-          now: refreshTime,
-        })
-
-        expect(secondResult.err).toBeUndefined()
-        expect(txInsertValuesMock).toHaveBeenCalledTimes(1)
-        expect(txUpdateSetMock).toHaveBeenLastCalledWith({
-          updatedAtM: refreshTime,
-        })
-        expect(secondResult.val?.[0]).toEqual(
-          expect.objectContaining({
-            id: "ent_existing",
-            effectiveAt: firstEntitlement.effectiveAt,
-            expiresAt: firstEntitlement.expiresAt,
-          })
-        )
-      } finally {
-        vi.useRealTimers()
-      }
-    })
-
-    it("preserves the resolved trial and paid window starts when materializing snapshots", async () => {
-      const phaseStart = Date.UTC(2026, 2, 1)
-      const trialEndsAt = Date.UTC(2026, 2, 15)
-      const phaseEnd = Date.UTC(2026, 3, 1)
-
-      const trialGrant = {
-        ...baseGrant,
-        id: "g_trial",
-        type: "trial" as const,
-        effectiveAt: phaseStart,
-        expiresAt: trialEndsAt,
-      }
-      const paidGrant = {
-        ...baseGrant,
-        id: "g_paid",
-        type: "subscription" as const,
-        effectiveAt: trialEndsAt,
-        expiresAt: phaseEnd,
-      }
-
-      setupMocks([trialGrant])
-      const trialResult = await grantsManager.computeGrantsForCustomer({
-        customerId,
-        projectId,
-        now: phaseStart + 1_000,
-      })
-
-      setupMocks([paidGrant])
-      const paidResult = await grantsManager.computeGrantsForCustomer({
-        customerId,
-        projectId,
-        now: trialEndsAt + 1_000,
-      })
-
-      expect(trialResult.err).toBeUndefined()
-      expect(paidResult.err).toBeUndefined()
-      expect(trialResult.val?.[0]?.effectiveAt).toBe(phaseStart)
-      expect(trialResult.val?.[0]?.expiresAt).toBe(trialEndsAt)
-      expect(paidResult.val?.[0]?.effectiveAt).toBe(trialEndsAt)
-      expect(paidResult.val?.[0]?.expiresAt).toBe(phaseEnd)
+      expect(entitlement.featureSlug).toBe(featureSlug)
+      expect(entitlement.featureType).toBe("usage")
+      expect(entitlement.meterConfig?.aggregationMethod).toBe("sum")
     })
 
     it("should take max limit for tier features", async () => {
@@ -379,25 +226,21 @@ describe("GrantsManager", () => {
         },
       ]
 
-      setupMocks(grants)
-
-      const result = await grantsManager.computeGrantsForCustomer({
+      const result = await grantsManager.computeEntitlementState({
         customerId,
         projectId,
-        now,
+        grants,
       })
 
       expect(result.err).toBeUndefined()
-      const entitlement = result.val![0]
-      expect(entitlement).toBeDefined()
-      expect(entitlement!.limit).toBe(500) // Max of 100, 500, 50
-      expect(entitlement!.mergingPolicy).toBe("max")
+      const entitlement = result.val!
+      expect(entitlement.limit).toBe(500) // Max of 100, 500, 50
+      expect(entitlement.mergingPolicy).toBe("max")
+      expect(entitlement.meterConfig).toBeNull()
 
-      expect(entitlement!.meterConfig).toBeNull()
-
-      // Verify only the winning grant is kept in the entitlement
-      expect(entitlement!.grants).toHaveLength(1)
-      expect(entitlement!.grants[0]!.id).toBe("g2") // g2 has limit 500
+      // Verify only the winning grant is kept
+      expect(entitlement.grants).toHaveLength(1)
+      expect(entitlement.grants[0]!.id).toBe("g2") // g2 has limit 500
     })
 
     it("should replace limits for flat features (highest priority wins)", async () => {
@@ -419,25 +262,21 @@ describe("GrantsManager", () => {
         },
       ]
 
-      setupMocks(grants)
-
-      const result = await grantsManager.computeGrantsForCustomer({
+      const result = await grantsManager.computeEntitlementState({
         customerId,
         projectId,
-        now,
+        grants,
       })
 
       expect(result.err).toBeUndefined()
-      const entitlement = result.val![0]
-      expect(entitlement).toBeDefined()
-      expect(entitlement!.limit).toBe(999)
-      expect(entitlement!.mergingPolicy).toBe("replace")
+      const entitlement = result.val!
+      expect(entitlement.limit).toBe(999)
+      expect(entitlement.mergingPolicy).toBe("replace")
 
-      // Verify only the winning grant is kept in the entitlement
-      expect(entitlement!.grants).toHaveLength(1)
-      expect(entitlement!.grants[0]!.id).toBe("g_high") // g_high has priority 100
-
-      expect(entitlement!.resetConfig).toBeNull()
+      // Verify only the winning grant is kept
+      expect(entitlement.grants).toHaveLength(1)
+      expect(entitlement.grants[0]!.id).toBe("g_high")
+      expect(entitlement.resetConfig).toBeNull()
     })
 
     it("should allow overage if ANY grant allows it (sum policy)", async () => {
@@ -449,7 +288,10 @@ describe("GrantsManager", () => {
           limit: 100,
           featurePlanVersion: {
             ...usageFeature,
-            metadata: { overageStrategy: "none" as const },
+            metadata: {
+              ...baseGrant.featurePlanVersion.metadata,
+              overageStrategy: "none" as const,
+            },
           },
         },
         {
@@ -458,23 +300,23 @@ describe("GrantsManager", () => {
           limit: 50,
           featurePlanVersion: {
             ...usageFeature,
-            metadata: { overageStrategy: "always" as const },
+            metadata: {
+              ...baseGrant.featurePlanVersion.metadata,
+              overageStrategy: "always" as const,
+            },
           },
         },
       ]
 
-      setupMocks(grants)
-
-      const result = await grantsManager.computeGrantsForCustomer({
+      const result = await grantsManager.computeEntitlementState({
         customerId,
         projectId,
-        now,
+        grants,
       })
 
       expect(result.err).toBeUndefined()
-      const entitlement = result.val![0]
-      expect(entitlement).toBeDefined()
-      expect(entitlement!.metadata?.overageStrategy).toBe("always")
+      const entitlement = result.val!
+      expect(entitlement.metadata?.overageStrategy).toBe("always")
     })
 
     it("should reject non-fungible grants with different meter configs", async () => {
@@ -506,12 +348,10 @@ describe("GrantsManager", () => {
         },
       ]
 
-      setupMocks(grants)
-
-      const result = await grantsManager.computeGrantsForCustomer({
+      const result = await grantsManager.computeEntitlementState({
         customerId,
         projectId,
-        now,
+        grants,
       })
 
       expect(result.val).toBeUndefined()
@@ -545,12 +385,10 @@ describe("GrantsManager", () => {
         },
       ]
 
-      setupMocks(grants)
-
-      const result = await grantsManager.computeGrantsForCustomer({
+      const result = await grantsManager.computeEntitlementState({
         customerId,
         projectId,
-        now,
+        grants,
       })
 
       expect(result.val).toBeUndefined()
@@ -568,7 +406,10 @@ describe("GrantsManager", () => {
           limit: 100,
           featurePlanVersion: {
             ...tierFeature,
-            metadata: { overageStrategy: "none" as const },
+            metadata: {
+              ...baseGrant.featurePlanVersion.metadata,
+              overageStrategy: "none" as const,
+            },
           },
         },
         {
@@ -577,23 +418,23 @@ describe("GrantsManager", () => {
           limit: 50,
           featurePlanVersion: {
             ...tierFeature,
-            metadata: { overageStrategy: "always" as const },
+            metadata: {
+              ...baseGrant.featurePlanVersion.metadata,
+              overageStrategy: "always" as const,
+            },
           },
         },
       ]
 
-      setupMocks(grants)
-
-      const result = await grantsManager.computeGrantsForCustomer({
+      const result = await grantsManager.computeEntitlementState({
         customerId,
         projectId,
-        now,
+        grants,
       })
 
       expect(result.err).toBeUndefined()
-      const entitlement = result.val![0]
-      expect(entitlement).toBeDefined()
-      expect(entitlement!.metadata?.overageStrategy).toBe("always")
+      const entitlement = result.val!
+      expect(entitlement.metadata?.overageStrategy).toBe("always")
     })
 
     it("should require ALL grants to allow overage for min policy", async () => {
@@ -614,7 +455,10 @@ describe("GrantsManager", () => {
           featurePlanVersionId: "fpv1",
           featurePlanVersion: {
             ...feature,
-            metadata: { overageStrategy: "always" as const },
+            metadata: {
+              ...baseGrant.featurePlanVersion.metadata,
+              overageStrategy: "always" as const,
+            },
           },
           subjectId: customerId,
           subjectType: "customer" as const,
@@ -632,7 +476,10 @@ describe("GrantsManager", () => {
           featurePlanVersionId: "fpv1",
           featurePlanVersion: {
             ...feature,
-            metadata: { overageStrategy: "none" as const },
+            metadata: {
+              ...baseGrant.featurePlanVersion.metadata,
+              overageStrategy: "none" as const,
+            },
           },
           subjectId: customerId,
           subjectType: "customer" as const,
@@ -675,6 +522,520 @@ describe("GrantsManager", () => {
           }
         )
       )
+    })
+  })
+
+  describe("mergeGrants - null/unlimited limits", () => {
+    it("sum: one unlimited grant makes total unlimited", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: null, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "sum",
+      })
+
+      expect(merged.limit).toBeNull()
+      expect(merged.grants).toHaveLength(2)
+    })
+
+    it("sum: all numeric limits are summed", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: 200, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g3", priority: 5, limit: 50, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "sum",
+      })
+
+      expect(merged.limit).toBe(350)
+    })
+
+    it("max: one unlimited grant makes result unlimited", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: null, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "max",
+      })
+
+      expect(merged.limit).toBeNull()
+    })
+
+    it("min: all unlimited grants results in unlimited", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: null, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: null, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "min",
+      })
+
+      expect(merged.limit).toBeNull()
+    })
+
+    it("min: mixed unlimited and numeric takes the numeric minimum", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: null, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g3", priority: 5, limit: 50, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "min",
+      })
+
+      expect(merged.limit).toBe(50)
+    })
+  })
+
+  describe("mergeGrants - single grant", () => {
+    it("single grant with sum policy returns that grant's limit", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "sum",
+      })
+
+      expect(merged.limit).toBe(100)
+      expect(merged.grants).toHaveLength(1)
+    })
+
+    it("single grant with replace policy returns that grant", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 42, effectiveAt: now, expiresAt: now + 5000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "replace",
+      })
+
+      expect(merged.limit).toBe(42)
+      expect(merged.grants).toHaveLength(1)
+      expect(merged.effectiveAt).toBe(now)
+      expect(merged.expiresAt).toBe(now + 5000)
+    })
+
+    it("single unlimited grant", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: null, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "max",
+      })
+
+      expect(merged.limit).toBeNull()
+    })
+  })
+
+  describe("mergeGrants - window computation", () => {
+    it("sum: union of all grant windows", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 5000 },
+          { id: "g2", priority: 20, limit: 100, effectiveAt: now - 1000, expiresAt: now + 3000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "sum",
+      })
+
+      expect(merged.effectiveAt).toBe(now - 1000)
+      expect(merged.expiresAt).toBe(now + 5000)
+    })
+
+    it("sum: unbounded grant makes expiresAt null", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: null },
+          { id: "g2", priority: 20, limit: 100, effectiveAt: now - 1000, expiresAt: now + 3000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "sum",
+      })
+
+      expect(merged.effectiveAt).toBe(now - 1000)
+      expect(merged.expiresAt).toBeNull()
+    })
+
+    it("max/min/replace: window comes from the winning grant", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 5000 },
+          {
+            id: "g2",
+            priority: 20,
+            limit: 999,
+            effectiveAt: now - 1000,
+            expiresAt: now + 3000,
+          },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "max",
+      })
+
+      // g2 wins (limit 999), so window is g2's window
+      expect(merged.effectiveAt).toBe(now - 1000)
+      expect(merged.expiresAt).toBe(now + 3000)
+    })
+  })
+
+  describe("mergeGrants - empty grants", () => {
+    it("returns null limit and empty grants for empty input", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [],
+        policy: "sum",
+      })
+
+      expect(merged.limit).toBeNull()
+      expect(merged.grants).toHaveLength(0)
+      expect(merged.mergingPolicy).toBe("replace")
+    })
+  })
+
+  describe("mergeGrants - policy derivation from feature type", () => {
+    it("usage feature with unit mode derives sum policy", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: 50, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        featureType: "usage",
+        usageMode: "unit",
+      })
+
+      expect(merged.mergingPolicy).toBe("sum")
+      expect(merged.limit).toBe(150)
+    })
+
+    it("usage feature with tier mode derives max policy", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: 50, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        featureType: "usage",
+        usageMode: "tier",
+      })
+
+      expect(merged.mergingPolicy).toBe("max")
+      expect(merged.limit).toBe(100)
+    })
+
+    it("package feature derives max policy", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: 500, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        featureType: "package",
+      })
+
+      expect(merged.mergingPolicy).toBe("max")
+      expect(merged.limit).toBe(500)
+    })
+
+    it("flat feature derives replace policy (highest priority wins)", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 20, limit: 50, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        featureType: "flat",
+      })
+
+      expect(merged.mergingPolicy).toBe("replace")
+      expect(merged.limit).toBe(50) // g2 wins (priority 20)
+    })
+  })
+
+  describe("mergeGrants - priority edge cases", () => {
+    it("equal priority grants: deterministic winner (first after sort)", () => {
+      const merged = grantsManager.mergeGrants({
+        grants: [
+          { id: "g1", priority: 10, limit: 100, effectiveAt: now, expiresAt: now + 1000 },
+          { id: "g2", priority: 10, limit: 200, effectiveAt: now, expiresAt: now + 1000 },
+          // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+        ] as any,
+        policy: "replace",
+      })
+
+      // With equal priority, one must win deterministically
+      expect(merged.limit).toBeDefined()
+      expect(merged.grants).toHaveLength(1)
+    })
+  })
+
+  describe("computeEntitlementState - edge cases", () => {
+    it("single grant computes correctly", async () => {
+      const result = await grantsManager.computeEntitlementState({
+        customerId,
+        projectId,
+        grants: [baseGrant],
+      })
+
+      expect(result.err).toBeUndefined()
+      const entitlement = result.val!
+      expect(entitlement.limit).toBe(100)
+      expect(entitlement.featureSlug).toBe(featureSlug)
+      expect(entitlement.grants).toHaveLength(1)
+    })
+
+    it("rejects empty grants array", async () => {
+      const result = await grantsManager.computeEntitlementState({
+        customerId,
+        projectId,
+        grants: [],
+      })
+
+      expect(result.err).toBeDefined()
+      expect(result.err?.message).toContain("No grants provided")
+    })
+
+    it("rejects grants with different feature slugs", async () => {
+      const result = await grantsManager.computeEntitlementState({
+        customerId,
+        projectId,
+        grants: [
+          baseGrant,
+          {
+            ...baseGrant,
+            id: "g2",
+            featurePlanVersion: {
+              ...baseGrant.featurePlanVersion,
+              feature: { ...baseGrant.featurePlanVersion.feature, slug: "other-feature" },
+            },
+          },
+        ],
+      })
+
+      expect(result.err).toBeDefined()
+      expect(result.err?.message).toContain("same feature slug")
+    })
+
+    it("package feature uses max policy", async () => {
+      const packageFeature = { ...baseGrant.featurePlanVersion, featureType: "package" as const }
+      const result = await grantsManager.computeEntitlementState({
+        customerId,
+        projectId,
+        grants: [
+          { ...baseGrant, id: "g1", limit: 100, featurePlanVersion: packageFeature },
+          { ...baseGrant, id: "g2", limit: 500, priority: 20, featurePlanVersion: packageFeature },
+        ],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val!.limit).toBe(500)
+      expect(result.val!.mergingPolicy).toBe("max")
+    })
+
+    it("usage feature with null usageMode defaults to sum", async () => {
+      const usageFeature = {
+        ...baseGrant.featurePlanVersion,
+        featureType: "usage" as const,
+        config: { ...baseGrant.featurePlanVersion.config, usageMode: undefined },
+      }
+      const result = await grantsManager.computeEntitlementState({
+        customerId,
+        projectId,
+        grants: [
+          { ...baseGrant, id: "g1", limit: 100, featurePlanVersion: usageFeature },
+          { ...baseGrant, id: "g2", limit: 50, priority: 20, featurePlanVersion: usageFeature },
+        ],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val!.limit).toBe(150)
+      expect(result.val!.mergingPolicy).toBe("sum")
+    })
+  })
+
+  describe("mergeGrants - property-based tests", () => {
+    const grantArb = fc.record({
+      id: fc.uuid(),
+      priority: fc.integer({ min: 0, max: 1000 }),
+      limit: fc.integer({ min: 1, max: 10000 }),
+      effectiveAt: fc.integer({ min: 0, max: 1_000_000 }),
+      expiresAt: fc.integer({ min: 1_000_001, max: 2_000_000 }),
+    })
+
+    it("sum: result limit equals sum of all limits", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(grantArb, { minLength: 1, maxLength: 10 }),
+          async (grantsData) => {
+            const merged = grantsManager.mergeGrants({
+              // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+              grants: grantsData as any,
+              policy: "sum",
+            })
+
+            const expectedSum = grantsData.reduce((sum, g) => sum + g.limit, 0)
+            expect(merged.limit).toBe(expectedSum)
+          }
+        )
+      )
+    })
+
+    it("max: result limit equals max of all limits", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(grantArb, { minLength: 1, maxLength: 10 }),
+          async (grantsData) => {
+            const merged = grantsManager.mergeGrants({
+              // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+              grants: grantsData as any,
+              policy: "max",
+            })
+
+            const expectedMax = Math.max(...grantsData.map((g) => g.limit))
+            expect(merged.limit).toBe(expectedMax)
+          }
+        )
+      )
+    })
+
+    it("min: result limit equals min of all limits", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(grantArb, { minLength: 1, maxLength: 10 }),
+          async (grantsData) => {
+            const merged = grantsManager.mergeGrants({
+              // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+              grants: grantsData as any,
+              policy: "min",
+            })
+
+            const expectedMin = Math.min(...grantsData.map((g) => g.limit))
+            expect(merged.limit).toBe(expectedMin)
+          }
+        )
+      )
+    })
+
+    it("sum: effectiveAt is always the earliest start", async () => {
+      await fc.assert(
+        fc.asyncProperty(
+          fc.array(grantArb, { minLength: 1, maxLength: 10 }),
+          async (grantsData) => {
+            const merged = grantsManager.mergeGrants({
+              // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+              grants: grantsData as any,
+              policy: "sum",
+            })
+
+            const expectedMin = Math.min(...grantsData.map((g) => g.effectiveAt))
+            expect(merged.effectiveAt).toBe(expectedMin)
+          }
+        )
+      )
+    })
+  })
+
+  describe("resolveIngestionStatesFromGrants - edge cases", () => {
+    it("returns empty for grants with no usage features", async () => {
+      const flatGrant = {
+        ...baseGrant,
+        id: "g_flat",
+        featurePlanVersion: {
+          ...baseGrant.featurePlanVersion,
+          featureType: "flat" as const,
+          meterConfig: null,
+        },
+      }
+
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp: now,
+        grants: [flatGrant],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(0)
+    })
+
+    it("returns empty for no grants", async () => {
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp: now,
+        grants: [],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(0)
+    })
+
+    it("excludes grants not active at timestamp", async () => {
+      const futureGrant = {
+        ...baseGrant,
+        id: "g_future",
+        effectiveAt: now + 10_000,
+        expiresAt: now + 20_000,
+      }
+
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp: now,
+        grants: [futureGrant],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(0)
+    })
+
+    it("stream ID is stable for same customer/feature/project", async () => {
+      const result1 = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp: now,
+        grants: [baseGrant],
+      })
+      const result2 = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp: now + 1000,
+        grants: [baseGrant],
+      })
+
+      expect(result1.val?.[0]?.streamId).toBe(result2.val?.[0]?.streamId)
+    })
+
+    it("non-continuous grants produce separate stream windows", async () => {
+      const march1 = Date.UTC(2026, 2, 1)
+      const march10 = Date.UTC(2026, 2, 10)
+      const march20 = Date.UTC(2026, 2, 20)
+      const march31 = Date.UTC(2026, 2, 31)
+
+      // Gap between march10 and march20
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
+        customerId,
+        projectId,
+        timestamp: march20 + 1000,
+        grants: [
+          { ...baseGrant, id: "g1", effectiveAt: march1, expiresAt: march10 },
+          { ...baseGrant, id: "g2", effectiveAt: march20, expiresAt: march31 },
+        ],
+      })
+
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(1)
+      // Second grant's window should NOT extend back to march1 (there's a gap)
+      expect(result.val?.[0]?.streamStartAt).toBe(march20)
     })
   })
 

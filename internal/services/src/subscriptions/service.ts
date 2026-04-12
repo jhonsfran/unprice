@@ -518,20 +518,7 @@ export class SubscriptionService {
       }
     }
 
-    const recomputeEntitlementsResult = await grantsManager.computeGrantsForCustomer({
-      customerId,
-      projectId: phase.projectId,
-      now,
-    })
-
-    if (recomputeEntitlementsResult.err) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: recomputeEntitlementsResult.err.message,
-        })
-      )
-    }
-
+    // Invalidate entitlement cache so the next read recomputes from grants
     this.waitUntil(
       Promise.all([
         this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:0`),

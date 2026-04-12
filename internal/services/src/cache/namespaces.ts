@@ -68,7 +68,6 @@ export type CacheNamespaces = {
   getOverviewStats: Stats | null
   getUsage: Usage | null
   getCurrentUsage: CurrentUsage | null
-  getRelevantEntitlementsPerFeature: Entitlement[]
   ingestionPreparedGrantContext: PreparedCustomerGrantContext
 }
 

@@ -43,6 +43,13 @@
       "when": 1775686217143,
       "tag": "0005_condemned_sir_ram",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1775855764446,
+      "tag": "0006_remarkable_doorman",
+      "breakpoints": true
     }
   ]
 }
