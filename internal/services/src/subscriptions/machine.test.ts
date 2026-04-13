@@ -19,6 +19,7 @@ import type { LedgerService } from "../ledger/service"
 import type { RatingService } from "../rating/service"
 import { db } from "../utils/db"
 import { SubscriptionMachine } from "./machine"
+import { DrizzleSubscriptionRepository } from "./repository.drizzle"
 
 vi.mock("../../env", () => ({
   env: { ENCRYPTION_KEY: "test_encryption_key" },
@@ -242,8 +243,9 @@ describe("SubscriptionMachine - comprehensive", () => {
         return Ok(existing)
       }
 
-      const amount = Number(input.amountCents ?? 0)
+      const amount = BigInt(Number(input.amountMinor ?? 0))
       const signedAmount = entryType === "debit" ? amount : -amount
+      const metadata = (input.metadata as Record<string, unknown> | null | undefined) ?? {}
       const next: LedgerEntry = {
         id: `le_${postedLedgerEntries.size + 1}`,
         projectId: String(input.projectId),
@@ -253,39 +255,34 @@ describe("SubscriptionMachine - comprehensive", () => {
         customerId: String(input.customerId),
         currency: input.currency as LedgerEntry["currency"],
         entryType,
-        amountCents: amount,
-        signedAmountCents: signedAmount,
+        amountMinor: amount,
+        signedAmountMinor: signedAmount,
         sourceType,
         sourceId,
         idempotencyKey: key,
         description: (input.description as string | null | undefined) ?? null,
         statementKey: (input.statementKey as string | null | undefined) ?? null,
-        subscriptionId: (input.subscriptionId as string | null | undefined) ?? null,
-        subscriptionPhaseId: (input.subscriptionPhaseId as string | null | undefined) ?? null,
-        subscriptionItemId: (input.subscriptionItemId as string | null | undefined) ?? null,
-        billingPeriodId: (input.billingPeriodId as string | null | undefined) ?? null,
-        featurePlanVersionId: (input.featurePlanVersionId as string | null | undefined) ?? null,
-        invoiceItemKind:
-          (input.invoiceItemKind as LedgerEntry["invoiceItemKind"] | undefined) ?? "period",
-        cycleStartAt: (input.cycleStartAt as number | null | undefined) ?? null,
-        cycleEndAt: (input.cycleEndAt as number | null | undefined) ?? null,
-        quantity: Number(input.quantity ?? 1),
-        unitAmountCents: (input.unitAmountCents as number | null | undefined) ?? null,
-        amountSubtotalCents: Number(input.amountSubtotalCents ?? amount),
-        amountTotalCents: Number(
-          input.amountTotalCents ?? (entryType === "debit" ? amount : -amount)
-        ),
-        balanceAfterCents: signedAmount,
-        settlementType: null,
-        settlementArtifactId: null,
-        settlementPendingProviderConfirmation: false,
-        settledAt: null,
-        metadata: (input.metadata as Record<string, unknown> | null | undefined) ?? null,
+        balanceAfterMinor: signedAmount,
+        journalId: (input.journalId as string | null | undefined) ?? null,
+        metadata: {
+          subscriptionId: (metadata.subscriptionId as string | undefined) ?? undefined,
+          subscriptionPhaseId: (metadata.subscriptionPhaseId as string | undefined) ?? undefined,
+          subscriptionItemId: (metadata.subscriptionItemId as string | undefined) ?? undefined,
+          billingPeriodId: (metadata.billingPeriodId as string | undefined) ?? undefined,
+          featurePlanVersionId: (metadata.featurePlanVersionId as string | undefined) ?? undefined,
+          invoiceItemKind: (metadata.invoiceItemKind as "period" | "trial" | undefined) ?? "period",
+          cycleStartAt: (metadata.cycleStartAt as number | undefined) ?? undefined,
+          cycleEndAt: (metadata.cycleEndAt as number | undefined) ?? undefined,
+          quantity: Number(metadata.quantity ?? 1),
+          unitAmountMinor: (metadata.unitAmountMinor as string | undefined) ?? undefined,
+        },
       }
 
       postedLedgerEntries.set(key, next)
       return Ok(next)
     }
+
+    const settledEntryIds = new Set<string>()
 
     mockLedgerService = {
       postDebit: vi.fn().mockImplementation(async (input) => upsertEntry("debit", input)),
@@ -298,43 +295,93 @@ describe("SubscriptionMachine - comprehensive", () => {
           statementKey?: string
           subscriptionId?: string
         }) => {
-          const unsettled = [...postedLedgerEntries.values()].filter(
-            (entry) =>
-              entry.projectId === input.projectId &&
-              entry.customerId === input.customerId &&
-              entry.currency === input.currency &&
-              entry.settledAt === null &&
-              (input.statementKey ? entry.statementKey === input.statementKey : true) &&
-              (input.subscriptionId ? entry.subscriptionId === input.subscriptionId : true)
-          )
+          const unsettled = [...postedLedgerEntries.values()].filter((entry) => {
+            if (entry.projectId !== input.projectId) return false
+            if (entry.customerId !== input.customerId) return false
+            if (entry.currency !== input.currency) return false
+            if (settledEntryIds.has(entry.id)) return false
+            if (input.statementKey && entry.statementKey !== input.statementKey) return false
+            if (input.subscriptionId) {
+              const meta = entry.metadata as Record<string, unknown> | null
+              if (meta?.subscriptionId !== input.subscriptionId) return false
+            }
+            return true
+          })
           return Ok(unsettled)
         }
       ),
-      markSettled: vi.fn().mockImplementation(
+      getEntriesByJournal: vi.fn().mockImplementation(
         async (input: {
+          projectId: string
+          journalId: string
+        }) => {
+          const entries = [...postedLedgerEntries.values()].filter((entry) => {
+            if (entry.projectId !== input.projectId) return false
+            if (entry.journalId !== input.journalId) return false
+            return true
+          })
+          return Ok(entries)
+        }
+      ),
+      settleEntries: vi.fn().mockImplementation(
+        async (input: {
+          projectId: string
           entryIds: string[]
-          settlementType: LedgerEntry["settlementType"]
-          settlementArtifactId: string
-          settlementPendingProviderConfirmation?: boolean
+          type: string
+          artifactId: string
           now?: number
         }) => {
           const now = input.now ?? Date.now()
-          const updated: LedgerEntry[] = []
-          for (const [key, entry] of postedLedgerEntries.entries()) {
-            if (!input.entryIds.includes(entry.id)) continue
-
-            const next: LedgerEntry = {
-              ...entry,
-              settlementType: input.settlementType ?? null,
-              settlementArtifactId: input.settlementArtifactId,
-              settlementPendingProviderConfirmation:
-                input.settlementPendingProviderConfirmation ?? false,
-              settledAt: now,
-            }
-            postedLedgerEntries.set(key, next)
-            updated.push(next)
+          for (const id of input.entryIds) {
+            settledEntryIds.add(id)
           }
-          return Ok(updated)
+          return Ok({
+            id: `ls_${settledEntryIds.size}`,
+            projectId: input.projectId,
+            ledgerId: "ledger_test",
+            type: input.type,
+            artifactId: input.artifactId,
+            status: "pending",
+            reversesSettlementId: null,
+            confirmedAt: null,
+            reversedAt: null,
+            reversalReason: null,
+            metadata: null,
+            createdAtM: now,
+            updatedAtM: now,
+          })
+        }
+      ),
+      settleJournal: vi.fn().mockImplementation(
+        async (input: {
+          projectId: string
+          journalId: string
+          type: string
+          artifactId: string
+          now?: number
+        }) => {
+          const now = input.now ?? Date.now()
+          // Settle all entries in this journal
+          for (const entry of postedLedgerEntries.values()) {
+            if (entry.projectId === input.projectId && entry.journalId === input.journalId) {
+              settledEntryIds.add(entry.id)
+            }
+          }
+          return Ok({
+            id: `ls_journal_${settledEntryIds.size}`,
+            projectId: input.projectId,
+            ledgerId: "ledger_test",
+            type: input.type,
+            artifactId: input.artifactId,
+            status: "pending",
+            reversesSettlementId: null,
+            confirmedAt: null,
+            reversedAt: null,
+            reversalReason: null,
+            metadata: null,
+            createdAtM: now,
+            updatedAtM: now,
+          })
         }
       ),
     } as unknown as LedgerService
@@ -579,11 +626,14 @@ describe("SubscriptionMachine - comprehensive", () => {
           findMany: vi.fn().mockImplementation(() => {
             const entry = dbMockData.find((i) => i.table === "invoiceItems")
             const rows = Array.isArray(entry?.data) ? entry?.data : entry ? [entry.data] : []
-            // return only columns requested in code path (billingPeriodId)
+            // Return all persisted fields so both listInvoiceItemBillingPeriodIds
+            // and listInvoiceItemAmounts work against the same mock.
             return Promise.resolve(
-              (rows as Array<{ billingPeriodId: string | null }>).map((r) => ({
-                // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-                billingPeriodId: (r as any).billingPeriodId ?? null,
+              // biome-ignore lint/suspicious/noExplicitAny: test mock
+              (rows as any[]).map((r) => ({
+                billingPeriodId: r.billingPeriodId ?? null,
+                amountSubtotal: r.amountSubtotal ?? 0,
+                amountTotal: r.amountTotal ?? 0,
               }))
             )
           }),
@@ -617,6 +667,7 @@ describe("SubscriptionMachine - comprehensive", () => {
       ratingService: mockRatingService,
       ledgerService: mockLedgerService,
       db: input.db ?? mockDb,
+      repo: new DrizzleSubscriptionRepository(input.db ?? mockDb),
     })
 
   it("restores to correct state based on subscription.status", async () => {

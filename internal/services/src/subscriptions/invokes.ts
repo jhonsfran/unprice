@@ -1,63 +1,38 @@
-import { type Database, and, eq, inArray, lte, sql } from "@unprice/db"
-import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/db/schema"
-import { formatAmountDinero, newId } from "@unprice/db/utils"
+import type { Database } from "@unprice/db"
+import { formatAmountForLedger, ledgerAmountToCents, newId, randomId } from "@unprice/db/utils"
 import { calculateCycleWindow, calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
+import { DrizzleBillingRepository } from "../billing/repository.drizzle"
 import type { CustomerService } from "../customers/service"
+import { DrizzleLedgerRepository } from "../ledger/repository.drizzle"
 import type { LedgerService } from "../ledger/service"
 import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
+import type { SubscriptionRepository } from "./repository"
 import type { SubscriptionContext } from "./types"
 
 export async function loadSubscription(payload: {
   context: SubscriptionContext
   logger: Logger
-  db: Database
+  repo: SubscriptionRepository
   customerService: CustomerService
 }): Promise<SubscriptionContext> {
-  const { context, logger, db, customerService } = payload
+  const { context, logger, repo, customerService } = payload
   const { subscriptionId, projectId, now } = context
 
-  const result = await db.query.subscriptions.findFirst({
-    with: {
-      phases: {
-        where: (phase, { lte, and, gte, isNull, or }) =>
-          and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
-        limit: 1, // we only need the active phase and there is only one at the time
-        with: {
-          planVersion: {
-            with: {
-              plan: true,
-            },
-          },
-          items: {
-            with: {
-              featurePlanVersion: {
-                with: {
-                  feature: true,
-                },
-              },
-            },
-          },
-        },
-      },
-      customer: true,
-    },
-    where: (table, { eq, and }) =>
-      and(eq(table.id, subscriptionId), eq(table.projectId, projectId)),
+  const result = await repo.findSubscriptionForMachine({
+    subscriptionId,
+    projectId,
+    now,
   })
 
   if (!result) {
     throw new Error(`Subscription with ID ${subscriptionId} not found`)
   }
 
-  const { phases, customer, ...subscription } = result
-
-  if (!customer) {
-    throw new Error(`Customer with ID ${result.customerId} not found`)
-  }
+  const { phases, customer, subscription } = result
 
   // phase can be undefined if the subscription is paused or ended but still the machine can be in active state
   //  for instance the subscription was pasued there is no current phase but there is an option to resume and
@@ -112,9 +87,9 @@ export async function renewSubscription(opts: {
   context: SubscriptionContext
   logger: Logger
   customerService: CustomerService
-  db: Database
+  repo: SubscriptionRepository
 }) {
-  const { context, logger, db } = opts
+  const { context, logger, repo } = opts
   const { subscription, currentPhase } = context
 
   if (!currentPhase) throw new Error("No active phase found")
@@ -175,41 +150,17 @@ export async function renewSubscription(opts: {
   }
 
   try {
-    // TODO: fix this because none of this should happen here
-    // // I have to reset entitlement usage
-    // const { err: resetEntitlementsErr } = await customerService.syncActiveEntitlementsLastUsage({
-    //   customerId: subscription.customerId,
-    //   projectId: subscription.projectId,
-    //   now: currentCycle.end,
-    // })
-
-    // if (resetEntitlementsErr) {
-    //   throw resetEntitlementsErr
-    // }
-
-    // // invalidate entitlements data in unprice API and reset the entitlements usage
-    // await unprice.customers.resetEntitlements({
-    //   customerId: subscription.customerId,
-    //   projectId: subscription.projectId,
-    // })
-
     // update subscription for ui purposes
-    const subscriptionUpdated = await db
-      .update(subscriptions)
-      .set({
-        planSlug: currentPhase.planVersion.plan.slug, // consider slug
-        renewAt: next.start, // schedule next boundary
+    const subscriptionUpdated = await repo.updateSubscription({
+      subscriptionId: subscription.id,
+      projectId: subscription.projectId,
+      data: {
+        planSlug: currentPhase.planVersion.plan.slug,
+        renewAt: next.start,
         currentCycleStartAt: current.start,
         currentCycleEndAt: current.end,
-      })
-      .where(
-        and(
-          eq(subscriptions.id, subscription.id),
-          eq(subscriptions.projectId, subscription.projectId)
-        )
-      )
-      .returning()
-      .then((result) => result[0])
+      },
+    })
 
     if (!subscriptionUpdated) {
       throw new Error("Subscription not updated")
@@ -240,12 +191,14 @@ export async function invoiceSubscription({
   context,
   logger,
   db,
+  repo,
   ratingService,
   ledgerService,
 }: {
   context: SubscriptionContext
   logger: Logger
   db: Database
+  repo: SubscriptionRepository
   ratingService: RatingService
   ledgerService: LedgerService
 }): Promise<
@@ -254,84 +207,41 @@ export async function invoiceSubscription({
   }
 > {
   const { subscription, now } = context
+  const billingRepo = new DrizzleBillingRepository(db)
 
-  // get pending periods items per subscription
-  // can have multiple phases as long as they have the same statement key
-  const periodItemsGroups = await db
-    .select({
-      projectId: billingPeriods.projectId,
-      subscriptionId: billingPeriods.subscriptionId,
-      subscriptionPhaseId: billingPeriods.subscriptionPhaseId,
-      statementKey: billingPeriods.statementKey,
-      invoiceAt: billingPeriods.invoiceAt,
-    })
-    .from(billingPeriods)
-    .groupBy(
-      billingPeriods.projectId,
-      billingPeriods.subscriptionId,
-      billingPeriods.subscriptionPhaseId,
-      billingPeriods.statementKey,
-      billingPeriods.invoiceAt
-    )
-    .where(
-      and(
-        eq(billingPeriods.status, "pending"),
-        lte(billingPeriods.invoiceAt, now),
-        eq(billingPeriods.projectId, subscription.projectId),
-        eq(billingPeriods.subscriptionId, subscription.id)
-      )
-    )
-    .limit(500) // limit to 500 period items to avoid overwhelming the system
+  const periodItemsGroups = await billingRepo.listPendingPeriodGroups({
+    projectId: subscription.projectId,
+    subscriptionId: subscription.id,
+    now,
+  })
 
   logger.info(`Invoicing for ${periodItemsGroups.length} periodItemsGroups`)
 
-  // for each phase, materialize the invoice and items
   for (const periodItemGroup of periodItemsGroups) {
-    // get the phase
-    const phase = await db.query.subscriptionPhases.findFirst({
-      with: {
-        planVersion: true,
-        subscription: true,
-      },
-      where: (table, { eq }) =>
-        and(
-          eq(table.projectId, periodItemGroup.projectId),
-          eq(table.subscriptionId, periodItemGroup.subscriptionId),
-          eq(table.id, periodItemGroup.subscriptionPhaseId)
-        ),
+    const phase = await repo.findPhaseForBilling({
+      phaseId: periodItemGroup.subscriptionPhaseId,
+      projectId: periodItemGroup.projectId,
+      subscriptionId: periodItemGroup.subscriptionId,
     })
 
     if (!phase || !phase.planVersion || !phase.subscription) {
       continue
     }
 
-    // get the billing periods to invoice every item in the phase
-    const billingPeriodsToInvoice = await db.query.billingPeriods.findMany({
-      with: {
-        subscriptionItem: {
-          with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
-          },
-        },
-      },
-      where: (table, { eq }) =>
-        and(
-          eq(table.status, "pending"),
-          eq(table.projectId, periodItemGroup.projectId),
-          eq(table.subscriptionId, periodItemGroup.subscriptionId),
-          eq(table.subscriptionPhaseId, periodItemGroup.subscriptionPhaseId),
-          eq(table.statementKey, periodItemGroup.statementKey)
-        ),
+    const billingPeriodsToInvoice = await billingRepo.listPendingPeriodsForStatement({
+      projectId: periodItemGroup.projectId,
+      subscriptionId: periodItemGroup.subscriptionId,
+      subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
+      statementKey: periodItemGroup.statementKey,
     })
 
-    // if no billing periods to invoice, skip
     if (billingPeriodsToInvoice.length === 0) {
       continue
     }
+
+    // Generate a journalId for this statement group so all entries can be
+    // settled atomically via settleJournal instead of query-filter-by-IDs.
+    const journalId = `jrnl_${randomId()}`
 
     // 1) Rate each pending period and post deterministic ledger entries first.
     for (const period of billingPeriodsToInvoice) {
@@ -364,17 +274,13 @@ export async function invoiceSubscription({
       const ratedCharges = ratingResult.val
       const firstCharge = ratedCharges[0]
 
-      const totalAmountCents = ratedCharges.reduce(
-        (sum, charge) => sum + formatAmountDinero(charge.price.totalPrice.dinero).amount,
-        0
+      const totalAmountMinor = ratedCharges.reduce(
+        (sum, charge) => sum + BigInt(formatAmountForLedger(charge.price.totalPrice.dinero).amount),
+        BigInt(0)
       )
-      const subtotalAmountCents = ratedCharges.reduce(
-        (sum, charge) => sum + formatAmountDinero(charge.price.subtotalPrice.dinero).amount,
-        0
-      )
-      const unitAmountCents = firstCharge
-        ? formatAmountDinero(firstCharge.price.unitPrice.dinero).amount
-        : 0
+      const unitAmountMinor = firstCharge
+        ? BigInt(formatAmountForLedger(firstCharge.price.unitPrice.dinero).amount)
+        : BigInt(0)
       const ratedQuantity = ratedCharges.reduce((sum, charge) => sum + Math.max(0, charge.usage), 0)
       const quantity = ratedCharges.length > 0 ? Math.trunc(ratedQuantity) : nonUsageQuantity
       const rawProrationFactor = firstCharge?.prorate
@@ -386,65 +292,73 @@ export async function invoiceSubscription({
             : 1
       const sourceType = "subscription_billing_period_charge_v1"
       const sourceId = `${period.id}:${period.subscriptionItemId}`
+      const entryMetadata = {
+        subscriptionId: period.subscriptionId,
+        subscriptionPhaseId: period.subscriptionPhaseId,
+        subscriptionItemId: period.subscriptionItemId,
+        billingPeriodId: period.id,
+        featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
+        invoiceItemKind: (period.type === "trial" ? "trial" : "period") as "trial" | "period",
+        cycleStartAt: period.cycleStartAt,
+        cycleEndAt: period.cycleEndAt,
+        quantity,
+        unitAmountMinor: unitAmountMinor.toString(),
+        prorationFactor,
+      }
+      const ledgerRepo = new DrizzleLedgerRepository(db)
+
+      // Post $0 trial entries for audit trail completeness (they won't appear
+      // on invoices but maintain a continuous ledger history).
+      if (totalAmountMinor === BigInt(0)) {
+        // Skip ledger post for $0 — the ledger rejects zero amounts.
+        // Record a zero-amount audit entry only for trials so they leave a trace.
+        if (period.type === "trial") {
+          await ledgerService.postDebit({
+            projectId: period.projectId,
+            customerId: period.customerId,
+            currency: phase.planVersion.currency,
+            amountMinor: BigInt(1), // minimum representable unit (sub-cent)
+            sourceType,
+            sourceId,
+            statementKey: period.statementKey,
+            journalId,
+            description: `${feature.title} (trial - $0)`,
+            metadata: { ...entryMetadata, invoiceItemKind: "trial" },
+            repo: ledgerRepo,
+            now,
+          })
+        }
+        continue
+      }
 
       const postResult =
-        totalAmountCents < 0
+        totalAmountMinor < BigInt(0)
           ? await ledgerService.postCredit({
               projectId: period.projectId,
               customerId: period.customerId,
               currency: phase.planVersion.currency,
-              amountCents: Math.abs(totalAmountCents),
+              amountMinor: -totalAmountMinor,
               sourceType,
               sourceId,
               statementKey: period.statementKey,
-              subscriptionId: period.subscriptionId,
-              subscriptionPhaseId: period.subscriptionPhaseId,
-              subscriptionItemId: period.subscriptionItemId,
-              billingPeriodId: period.id,
-              featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
-              invoiceItemKind: period.type === "trial" ? "trial" : "period",
-              cycleStartAt: period.cycleStartAt,
-              cycleEndAt: period.cycleEndAt,
-              quantity,
-              unitAmountCents,
-              amountSubtotalCents: subtotalAmountCents,
-              amountTotalCents: totalAmountCents,
-              description: period.subscriptionItem.featurePlanVersion.feature.title,
-              metadata: {
-                source: "subscription-invoice",
-                prorationFactor,
-                ratedChargeCount: ratedCharges.length,
-              },
-              db,
+              journalId,
+              description: feature.title,
+              metadata: entryMetadata,
+              repo: ledgerRepo,
               now,
             })
           : await ledgerService.postDebit({
               projectId: period.projectId,
               customerId: period.customerId,
               currency: phase.planVersion.currency,
-              amountCents: totalAmountCents,
+              amountMinor: totalAmountMinor,
               sourceType,
               sourceId,
               statementKey: period.statementKey,
-              subscriptionId: period.subscriptionId,
-              subscriptionPhaseId: period.subscriptionPhaseId,
-              subscriptionItemId: period.subscriptionItemId,
-              billingPeriodId: period.id,
-              featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
-              invoiceItemKind: period.type === "trial" ? "trial" : "period",
-              cycleStartAt: period.cycleStartAt,
-              cycleEndAt: period.cycleEndAt,
-              quantity,
-              unitAmountCents,
-              amountSubtotalCents: subtotalAmountCents,
-              amountTotalCents: totalAmountCents,
-              description: period.subscriptionItem.featurePlanVersion.feature.title,
-              metadata: {
-                source: "subscription-invoice",
-                prorationFactor,
-                ratedChargeCount: ratedCharges.length,
-              },
-              db,
+              journalId,
+              description: feature.title,
+              metadata: entryMetadata,
+              repo: ledgerRepo,
               now,
             })
 
@@ -459,89 +373,78 @@ export async function invoiceSubscription({
       }
     }
 
-    // 2) Build invoice lines from unsettled ledger entries.
-    const unsettledEntriesResult = await ledgerService.getUnsettledEntries({
+    // 2) Build invoice lines from journal entries (all entries posted above share the same journalId).
+    const journalEntriesResult = await ledgerService.getEntriesByJournal({
       projectId: periodItemGroup.projectId,
-      customerId: phase.subscription.customerId,
-      currency: phase.planVersion.currency,
-      statementKey: periodItemGroup.statementKey,
-      subscriptionId: periodItemGroup.subscriptionId,
-      db,
+      journalId,
+      repo: new DrizzleLedgerRepository(db),
     })
 
-    if (unsettledEntriesResult.err) {
-      logger.error("Error while loading unsettled ledger entries", {
+    if (journalEntriesResult.err) {
+      logger.error("Error while loading journal ledger entries", {
         phaseId: phase.id,
+        journalId,
         statementKey: periodItemGroup.statementKey,
-        error: toErrorContext(unsettledEntriesResult.err),
+        error: toErrorContext(journalEntriesResult.err),
       })
-      throw unsettledEntriesResult.err
+      throw journalEntriesResult.err
     }
 
-    const ledgerEntriesToInvoice = unsettledEntriesResult.val.filter(
-      (entry) => entry.billingPeriodId !== null
+    const ledgerEntriesToInvoice = journalEntriesResult.val.filter(
+      (entry) => entry.metadata?.billingPeriodId != null
     )
 
     if (ledgerEntriesToInvoice.length === 0) {
-      await db
-        .update(billingPeriods)
-        .set({ status: "voided" })
-        .where(
-          and(
-            eq(billingPeriods.projectId, periodItemGroup.projectId),
-            eq(billingPeriods.subscriptionId, periodItemGroup.subscriptionId),
-            eq(billingPeriods.subscriptionPhaseId, periodItemGroup.subscriptionPhaseId),
-            eq(billingPeriods.statementKey, periodItemGroup.statementKey),
-            eq(billingPeriods.status, "pending")
-          )
-        )
+      await billingRepo.voidPendingPeriods({
+        projectId: periodItemGroup.projectId,
+        subscriptionId: periodItemGroup.subscriptionId,
+        subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
+        statementKey: periodItemGroup.statementKey,
+      })
 
       continue
     }
 
     const statementStartAt = Math.min(
-      ...ledgerEntriesToInvoice.map((entry) => entry.cycleStartAt ?? periodItemGroup.invoiceAt)
+      ...ledgerEntriesToInvoice.map(
+        (entry) => entry.metadata?.cycleStartAt ?? periodItemGroup.invoiceAt
+      )
     )
     const statementEndAt = Math.max(
-      ...ledgerEntriesToInvoice.map((entry) => entry.cycleEndAt ?? periodItemGroup.invoiceAt)
+      ...ledgerEntriesToInvoice.map(
+        (entry) => entry.metadata?.cycleEndAt ?? periodItemGroup.invoiceAt
+      )
     )
 
-    // all of this happens in a single transaction
     await db.transaction(async (tx) => {
       try {
+        const txBillingRepo = new DrizzleBillingRepository(tx)
         const invoiceAt = periodItemGroup.invoiceAt
-        // wait so we can aovid late usage records being flushed from analytics system
         const waitPeriodAdvance = ["minute"].includes(
           phase.planVersion.billingConfig.billingInterval
         )
           ? 1000 * 60 * 1
-          : 1000 * 60 * 15 // 1 minute for minute interval, 15 minutes for other intervals
+          : 1000 * 60 * 15
 
         const waitPeriodArrear = ["minute"].includes(
           phase.planVersion.billingConfig.billingInterval
         )
           ? 1000 * 60 * 1
-          : 1000 * 60 * 60 // 1 minute for minute interval, 1 hour for other intervals
+          : 1000 * 60 * 60
 
-        // statement date string is the date that is shown on the invoice
-        // take the timezone from the subscription
         const timezone = phase.subscription.timezone
         const date = toZonedTime(new Date(invoiceAt), timezone)
-        // minute interval is special because it has the time in the statement date string
         const statementDateString = ["minute"].includes(
           phase.planVersion.billingConfig.billingInterval
         )
           ? format(date, "MMMM d, yyyy hh:mm a")
           : format(date, "MMMM d, yyyy")
 
-        // pay in advance have smaller grace period
         const dueAt =
           phase.planVersion.whenToBill === "pay_in_advance"
             ? invoiceAt + waitPeriodAdvance
             : invoiceAt + waitPeriodArrear
 
-        // grace period depening on the interval
-        // this handles failed payments or other issues
         const pastDueAt = calculateDateAt({
           startDate: dueAt,
           config: {
@@ -550,68 +453,41 @@ export async function invoiceSubscription({
           },
         })
 
-        // create invoice
-        let invoice = await tx
-          .insert(invoices)
-          .values({
-            id: newId("invoice"),
+        let invoice = await txBillingRepo.createInvoice({
+          id: newId("invoice"),
+          projectId: phase.projectId,
+          subscriptionId: phase.subscriptionId,
+          customerId: phase.subscription.customerId,
+          requiredPaymentMethod: phase.planVersion.paymentMethodRequired,
+          paymentMethodId: phase.paymentMethodId ?? null,
+          status: "draft",
+          statementDateString: statementDateString,
+          statementKey: periodItemGroup.statementKey,
+          statementStartAt: statementStartAt,
+          statementEndAt: statementEndAt,
+          whenToBill: phase.planVersion.whenToBill,
+          collectionMethod: phase.planVersion.collectionMethod,
+          invoicePaymentProviderId: "",
+          invoicePaymentProviderUrl: "",
+          paymentProvider: phase.paymentProvider,
+          currency: phase.planVersion.currency,
+          pastDueAt: pastDueAt,
+          dueAt: dueAt,
+          paidAt: null,
+          subtotalCents: 0,
+          paymentAttempts: [],
+          totalCents: 0,
+          amountCreditUsed: 0,
+          issueDate: null,
+          metadata: { note: "Invoiced by scheduler" },
+        })
+
+        if (!invoice) {
+          invoice = await txBillingRepo.findInvoiceByStatementKey({
+            statementKey: periodItemGroup.statementKey,
             projectId: phase.projectId,
             subscriptionId: phase.subscriptionId,
             customerId: phase.subscription.customerId,
-            requiredPaymentMethod: phase.planVersion.paymentMethodRequired,
-            paymentMethodId: phase.paymentMethodId ?? null,
-            status: "draft",
-            statementDateString: statementDateString,
-            statementKey: periodItemGroup.statementKey,
-            statementStartAt: statementStartAt,
-            statementEndAt: statementEndAt,
-            whenToBill: phase.planVersion.whenToBill,
-            collectionMethod: phase.planVersion.collectionMethod,
-            invoicePaymentProviderId: "",
-            invoicePaymentProviderUrl: "",
-            paymentProvider: phase.paymentProvider,
-            currency: phase.planVersion.currency,
-            pastDueAt: pastDueAt,
-            dueAt: dueAt,
-            // all this is calculated in finalizeInvoice
-            paidAt: null,
-            subtotalCents: 0,
-            paymentAttempts: [],
-            totalCents: 0,
-            amountCreditUsed: 0,
-            issueDate: null, // we don't have a issue date yet
-            metadata: { note: "Invoiced by scheduler" },
-          }) // idempotency protection
-          .onConflictDoNothing({
-            target: [
-              invoices.projectId,
-              invoices.subscriptionId,
-              invoices.customerId,
-              invoices.statementKey,
-            ],
-          })
-          .returning()
-          .catch((error) => {
-            logger.error("Error while creating invoice", {
-              phaseId: phase.id,
-              statementStartAt: statementStartAt,
-              statementEndAt: statementEndAt,
-              error: toErrorContext(error),
-            })
-            throw error
-          })
-          .then((result) => result[0])
-
-        // if invoice is not created, try to retrieve it
-        if (!invoice) {
-          invoice = await tx.query.invoices.findFirst({
-            where: (inv, { eq, and }) =>
-              and(
-                eq(inv.statementKey, periodItemGroup.statementKey),
-                eq(inv.projectId, phase.projectId),
-                eq(inv.subscriptionId, phase.subscriptionId),
-                eq(inv.customerId, phase.subscription.customerId)
-              ),
           })
         }
 
@@ -626,86 +502,82 @@ export async function invoiceSubscription({
         }
 
         const projectedInvoiceItems = ledgerEntriesToInvoice.map((entry) => {
-          const prorationRaw = entry.metadata?.prorationFactor
+          const meta = entry.metadata
+          const prorationRaw = meta?.prorationFactor
           const prorationFactor =
             typeof prorationRaw === "number" && Number.isFinite(prorationRaw) ? prorationRaw : 1
+
+          const unitAmountMinorBigint = meta?.unitAmountMinor ? BigInt(meta.unitAmountMinor) : null
 
           return {
             id: newId("invoice_item"),
             invoiceId: invoice.id,
-            featurePlanVersionId: entry.featurePlanVersionId,
-            subscriptionItemId: entry.subscriptionItemId,
-            billingPeriodId: entry.billingPeriodId,
+            featurePlanVersionId: meta?.featurePlanVersionId ?? null,
+            subscriptionItemId: meta?.subscriptionItemId ?? null,
+            billingPeriodId: meta?.billingPeriodId ?? null,
             projectId: entry.projectId,
-            quantity: Math.max(0, Math.trunc(entry.quantity ?? 0)),
-            cycleStartAt: entry.cycleStartAt ?? statementStartAt,
-            cycleEndAt: entry.cycleEndAt ?? statementEndAt,
-            kind: entry.invoiceItemKind,
-            unitAmountCents: entry.unitAmountCents ?? 0,
-            amountSubtotal: entry.amountSubtotalCents,
-            amountTotal: entry.amountTotalCents,
+            quantity: Math.max(0, Math.trunc(meta?.quantity ?? 0)),
+            cycleStartAt: meta?.cycleStartAt ?? statementStartAt,
+            cycleEndAt: meta?.cycleEndAt ?? statementEndAt,
+            kind: meta?.invoiceItemKind ?? "period",
+            unitAmountCents: unitAmountMinorBigint ? ledgerAmountToCents(unitAmountMinorBigint) : 0,
+            amountSubtotal: ledgerAmountToCents(entry.amountMinor),
+            amountTotal: ledgerAmountToCents(entry.amountMinor),
             prorationFactor,
             description: entry.description ?? null,
             itemProviderId: null,
+            ledgerEntryId: entry.id,
           }
         })
 
-        // create invoice items
-        await tx
-          .insert(invoiceItems)
-          .values(projectedInvoiceItems)
-          // idempotency protection
-          .onConflictDoNothing({
-            target: [invoiceItems.projectId, invoiceItems.invoiceId, invoiceItems.billingPeriodId],
-            where: sql`${invoiceItems.billingPeriodId} IS NOT NULL`,
-          })
-          .catch((error) => {
-            logger.error("Error while creating invoice items", {
-              phaseId: phase.id,
-              statementStartAt: statementStartAt,
-              statementEndAt: statementEndAt,
-              error: toErrorContext(error),
-            })
-            throw error
-          })
+        await txBillingRepo.createInvoiceItemsBatch({ items: projectedInvoiceItems })
 
-        // get the invoice items that were inserted
-        const invoiceItemsInserted = await tx.query.invoiceItems.findMany({
-          columns: {
-            billingPeriodId: true,
-          },
-          where: (item, { eq, and }) =>
-            and(eq(item.invoiceId, invoice.id), eq(item.projectId, phase.projectId)),
+        // Compute and persist invoice totals from the projected items.
+        const itemAmounts = await txBillingRepo.listInvoiceItemAmounts({
+          invoiceId: invoice.id,
+          projectId: phase.projectId,
         })
 
-        // update billing period to invoiced
-        await tx
-          .update(billingPeriods)
-          .set({
-            status: "invoiced",
+        const subtotalCents = itemAmounts.reduce((sum, item) => sum + (item.amountSubtotal ?? 0), 0)
+        const totalCents = itemAmounts.reduce((sum, item) => sum + (item.amountTotal ?? 0), 0)
+
+        await txBillingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId: phase.projectId,
+          data: {
+            subtotalCents,
+            totalCents,
+            updatedAtM: now,
+          },
+        })
+
+        const invoiceItemsInserted = await txBillingRepo.listInvoiceItemBillingPeriodIds({
+          invoiceId: invoice.id,
+          projectId: phase.projectId,
+        })
+
+        const periodIdsToMark = invoiceItemsInserted
+          .map((item) => item.billingPeriodId)
+          .filter((id): id is string => id !== null)
+
+        if (periodIdsToMark.length > 0) {
+          await txBillingRepo.markPeriodsInvoiced({
+            projectId: phase.projectId,
+            subscriptionId: phase.subscriptionId,
+            periodIds: periodIdsToMark,
             invoiceId: invoice.id,
           })
-          .where(
-            and(
-              inArray(
-                billingPeriods.id,
-                invoiceItemsInserted
-                  .map((period) => period.billingPeriodId)
-                  .filter((id) => id !== null)
-              ),
-              eq(billingPeriods.projectId, phase.projectId),
-              eq(billingPeriods.subscriptionId, phase.subscriptionId)
-            )
-          )
+        }
 
-        const settleResult = await ledgerService.markSettled({
+        // Settle via journalId — all entries for this statement share the same journal.
+        const txLedgerRepo = new DrizzleLedgerRepository(tx)
+        const settleResult = await ledgerService.settleJournal({
           projectId: phase.projectId,
-          entryIds: ledgerEntriesToInvoice.map((entry) => entry.id),
-          settlementType: "invoice",
-          settlementArtifactId: invoice.id,
-          settlementPendingProviderConfirmation: true,
+          journalId,
+          type: "invoice",
+          artifactId: invoice.id,
           now,
-          db: tx,
+          repo: txLedgerRepo,
         })
 
         if (settleResult.err) {
@@ -719,7 +591,7 @@ export async function invoiceSubscription({
           error: toErrorContext(error),
         })
 
-        tx.rollback()
+        // Drizzle auto-rolls back on throw — no explicit tx.rollback() needed.
         throw error
       }
     })

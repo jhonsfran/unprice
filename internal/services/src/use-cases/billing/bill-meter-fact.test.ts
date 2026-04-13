@@ -83,7 +83,7 @@ describe("billMeterFact", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val).toEqual({
-      amountCents: 500,
+      amountMinor: BigInt(5_000_000),
       sourceId: "proj_123:cus_123:api_calls:idem_123",
       state: "debited",
     })
@@ -98,8 +98,11 @@ describe("billMeterFact", () => {
       expect.objectContaining({
         sourceType: "meter_fact_v1",
         sourceId: "proj_123:cus_123:api_calls:idem_123",
-        featurePlanVersionId: "fpv_123",
-        amountCents: 500,
+        amountMinor: BigInt(5_000_000),
+        metadata: expect.objectContaining({
+          featurePlanVersionId: "fpv_123",
+          billingFactId: baseFact.id,
+        }),
       })
     )
   })
@@ -126,7 +129,7 @@ describe("billMeterFact", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val).toEqual({
-      amountCents: 0,
+      amountMinor: BigInt(0),
       sourceId: "proj_123:cus_123:api_calls:idem_123",
       state: "noop",
     })
@@ -140,7 +143,7 @@ describe("billMeterFact", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val).toEqual({
-      amountCents: 0,
+      amountMinor: BigInt(0),
       sourceId: "proj_123:cus_123:api_calls:idem_123",
       state: "noop",
     })
@@ -192,7 +195,9 @@ describe("billMeterFact", () => {
 
     expect(mockPostDebit).toHaveBeenCalledWith(
       expect.objectContaining({
-        featurePlanVersionId: undefined,
+        metadata: expect.objectContaining({
+          featurePlanVersionId: undefined,
+        }),
       })
     )
   })

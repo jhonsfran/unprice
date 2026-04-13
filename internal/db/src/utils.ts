@@ -11,6 +11,62 @@ import {
   up,
 } from "dinero.js"
 
+/**
+ * Fixed internal scale for all ledger amounts.
+ * 1 USD = 1_000_000 minor units at scale 6.
+ * This handles sub-cent AI pricing (e.g., $0.003/token = 3_000 minor units).
+ */
+export const LEDGER_INTERNAL_SCALE = 6
+
+/**
+ * Convert a Dinero amount to ledger storage units (scale 6).
+ * Use this at the rating→ledger boundary. After this point the ledger
+ * works with plain bigint arithmetic — no Dinero inside LedgerService.
+ */
+export function formatAmountForLedger(price: Dinero<number>): {
+  amount: number
+  currency: Currency
+} {
+  const scaled = transformScale(price, LEDGER_INTERNAL_SCALE, up)
+  const { amount, currency } = toSnapshot(scaled)
+  return {
+    amount,
+    currency: currency.code.toLowerCase() as Currency,
+  }
+}
+
+/**
+ * Reconstruct a Dinero object from a ledger minor-unit amount (for display/invoice formatting).
+ */
+export function ledgerAmountToDinero(amount: number, currency: Currency): Dinero<number> {
+  return dinero({
+    amount,
+    currency: currencies[currency.toUpperCase() as keyof typeof currencies],
+    scale: LEDGER_INTERNAL_SCALE,
+  })
+}
+
+/**
+ * Convert ledger scale-6 minor units to provider scale-2 cents.
+ * Used when projecting ledger entries into invoice_items (Stripe expects scale-2).
+ *
+ * Uses round-half-away-from-zero to avoid systematic under/over-billing
+ * when sub-cent amounts accumulate (e.g. AI token pricing at $0.003).
+ */
+export function ledgerAmountToCents(amountMinor: bigint): number {
+  const SCALE_FACTOR = BigInt(10_000)
+  const HALF = BigInt(5_000)
+  const ZERO = BigInt(0)
+  const ONE = BigInt(1)
+  const quotient = amountMinor / SCALE_FACTOR
+  const remainder = amountMinor % SCALE_FACTOR
+  const absRemainder = remainder < ZERO ? -remainder : remainder
+  if (absRemainder >= HALF) {
+    return Number(amountMinor > ZERO ? quotient + ONE : quotient - ONE)
+  }
+  return Number(quotient)
+}
+
 export * from "./utils/_table"
 export * from "./utils/aesGcm"
 export * from "./utils/hash"

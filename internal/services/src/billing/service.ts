@@ -1,12 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, eq, inArray, sql } from "@unprice/db"
-import {
-  billingPeriods,
-  creditGrants,
-  invoiceCreditApplications,
-  invoiceItems,
-  invoices,
-} from "@unprice/db/schema"
+import { type Database, and, eq, sql } from "@unprice/db"
+import { creditGrants, invoiceCreditApplications } from "@unprice/db/schema"
 import { formatAmountDinero, hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type AggregationMethod,
@@ -33,9 +27,11 @@ import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { RatedCharge, RatingInput } from "../rating/types"
 import { SubscriptionMachine } from "../subscriptions/machine"
+import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { SubscriptionLock } from "../subscriptions/subscriptionLock"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceBillingError } from "./errors"
+import { DrizzleBillingRepository } from "./repository.drizzle"
 
 interface ComputeInvoiceItemsResult {
   id: string
@@ -241,6 +237,7 @@ export class BillingService {
       ratingService: this.ratingService,
       ledgerService: this.ledgerService,
       db: trx,
+      repo: new DrizzleSubscriptionRepository(trx),
       dryRun,
     })
 
@@ -355,11 +352,10 @@ export class BillingService {
     now: number
   }): Promise<Result<SubscriptionInvoice, UnPriceBillingError>> {
     const { invoiceId, projectId, now } = payload
+    const billingRepo = new DrizzleBillingRepository(this.db)
 
     // Get invoice details
-    const invoice = await this.db.query.invoices.findFirst({
-      where: (table, { eq, and }) => and(eq(table.id, invoiceId), eq(table.projectId, projectId)),
-    })
+    const invoice = await billingRepo.findInvoiceById({ invoiceId, projectId })
 
     if (!invoice) {
       return Err(new UnPriceBillingError({ message: "Invoice not found" }))
@@ -490,9 +486,10 @@ export class BillingService {
       // if the invoice is paid or void, we update the invoice status
       if (["paid", "void"].includes(statusPaymentProviderInvoice.val.status)) {
         // update the invoice status
-        const updatedInvoice = await this.db
-          .update(invoices)
-          .set({
+        const updatedInvoice = await billingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId,
+          data: {
             status: statusPaymentProviderInvoice.val.status as InvoiceStatus,
             paidAt: statusPaymentProviderInvoice.val.paidAt,
             invoicePaymentProviderUrl: statusPaymentProviderInvoice.val.invoiceUrl,
@@ -508,10 +505,8 @@ export class BillingService {
                   ? "Invoice paid successfully"
                   : "Invoice voided",
             },
-          })
-          .where(eq(invoices.id, invoice.id))
-          .returning()
-          .then((res) => res[0])
+          },
+        })
 
         if (!updatedInvoice) {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
@@ -527,18 +522,17 @@ export class BillingService {
         (invoice.pastDueAt && invoice.pastDueAt < now)
       ) {
         // update the invoice status
-        const updatedInvoice = await this.db
-          .update(invoices)
-          .set({
+        const updatedInvoice = await billingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId,
+          data: {
             status: "failed",
             metadata: {
               reason: "pending_expiration",
               note: "Invoice has reached the maximum number of payment attempts and the past due date is suppased",
             },
-          })
-          .where(eq(invoices.id, invoice.id))
-          .returning()
-          .then((res) => res[0])
+          },
+        })
 
         if (!updatedInvoice) {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
@@ -564,9 +558,10 @@ export class BillingService {
       if (["paid", "void"].includes(statusInvoice.val.status)) {
         // update the invoice status if the payment is successful
         // if not add the failed attempt
-        const updatedInvoice = await this.db
-          .update(invoices)
-          .set({
+        const updatedInvoice = await billingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId,
+          data: {
             status: statusInvoice.val.status as InvoiceStatus,
             ...(statusInvoice.val.status === "paid" ? { paidAt: Date.now() } : {}),
             ...(statusInvoice.val.status === "paid"
@@ -576,10 +571,8 @@ export class BillingService {
               ...(invoice.paymentAttempts ?? []),
               ...statusInvoice.val.paymentAttempts,
             ],
-          })
-          .where(eq(invoices.id, invoice.id))
-          .returning()
-          .then((res) => res[0])
+          },
+        })
 
         if (!updatedInvoice) {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
@@ -595,9 +588,10 @@ export class BillingService {
 
       if (providerPaymentInvoice.err) {
         // update the attempt if the payment failed
-        await this.db
-          .update(invoices)
-          .set({
+        await billingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId,
+          data: {
             // set the intempts to failed
             paymentAttempts: [
               ...(invoice.paymentAttempts ?? []),
@@ -607,8 +601,8 @@ export class BillingService {
               reason: "payment_failed",
               note: `Payment failed: ${providerPaymentInvoice.err.message}`,
             },
-          })
-          .where(eq(invoices.id, invoice.id))
+          },
+        })
 
         return Err(
           new UnPriceBillingError({
@@ -622,9 +616,10 @@ export class BillingService {
 
       // update the invoice status if the payment is successful
       // if not add the failed attempt
-      const updatedInvoice = await this.db
-        .update(invoices)
-        .set({
+      const updatedInvoice = await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId,
+        data: {
           status: isPaid ? "paid" : "unpaid",
           ...(isPaid ? { paidAt: Date.now() } : {}),
           ...(isPaid ? { invoicePaymentProviderUrl: providerPaymentInvoice.val.invoiceUrl } : {}),
@@ -640,10 +635,8 @@ export class BillingService {
             reason: isPaid ? "payment_received" : "payment_pending",
             note: isPaid ? "Invoice paid successfully" : `Payment pending for ${paymentStatus}`,
           },
-        })
-        .where(eq(invoices.id, invoice.id))
-        .returning()
-        .then((res) => res[0])
+        },
+      })
 
       if (!updatedInvoice) {
         return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
@@ -667,9 +660,10 @@ export class BillingService {
       }
 
       // update the invoice status if send invoice is successful
-      const updatedInvoice = await this.db
-        .update(invoices)
-        .set({
+      const updatedInvoice = await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId,
+        data: {
           status: "waiting",
           sentAt: Date.now(),
           metadata: {
@@ -677,10 +671,8 @@ export class BillingService {
             reason: "payment_pending",
             note: "Invoice sent to the customer, waiting for payment",
           },
-        })
-        .where(eq(invoices.id, invoice.id))
-        .returning()
-        .then((res) => res[0])
+        },
+      })
 
       if (!updatedInvoice) {
         return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
@@ -865,8 +857,12 @@ export class BillingService {
       return Ok(openInvoiceData)
     }
 
-    // In ledger-first flow, invoice items may already have priced amounts from ledger projection.
-    // We only compute pricing for legacy/unpriced period items.
+    // LEGACY PATH: In the ledger-first flow (invokes.ts), invoice items are already
+    // priced from ledger entry projection. This code path only fires for items that
+    // bypassed the ledger (amountSubtotal/amountTotal/unitAmountCents all zero).
+    // Uses formatAmountDinero (scale-2) intentionally because these items go directly
+    // to the invoice, not through the ledger. Once all billing flows go through the
+    // ledger, this fallback can be removed.
     const invoiceItemsToCompute = billableInvoiceItems.filter(
       (item) =>
         (item.amountSubtotal ?? 0) === 0 &&
@@ -899,80 +895,28 @@ export class BillingService {
     // all this happends in a transaction
     const result = await this.db.transaction(async (tx) => {
       try {
+        const txBillingRepo = new DrizzleBillingRepository(tx)
         const billableItemsIds = computedBillableItems.map((item) => item.id)
 
-        // we update in a single query
-        const quantityChunks = []
-        const totalAmountChunks = []
-        const unitAmountChunks = []
-        const subtotalAmountChunks = []
-        const descriptionChunks = []
-
         if (computedBillableItems.length > 0) {
-          quantityChunks.push(sql`(case`)
-          totalAmountChunks.push(sql`(case`)
-          unitAmountChunks.push(sql`(case`)
-          subtotalAmountChunks.push(sql`(case`)
-          descriptionChunks.push(sql`(case`)
-
-          for (const item of computedBillableItems) {
-            quantityChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.quantity} as int)`
-            )
-            totalAmountChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.totalAmount} as int)`
-            )
-            unitAmountChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.unitAmount} as int)`
-            )
-            subtotalAmountChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.subtotalAmount} as int)`
-            )
-            descriptionChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then ${item.description}`
-            )
-          }
-
-          // add end) to the chunks
-          quantityChunks.push(sql`end)`)
-          totalAmountChunks.push(sql`end)`)
-          unitAmountChunks.push(sql`end)`)
-          subtotalAmountChunks.push(sql`end)`)
-          descriptionChunks.push(sql`end)`)
-
-          const sqlQueryQuantity = sql.join(quantityChunks, sql.raw(" "))
-          const sqlQueryTotalAmount = sql.join(totalAmountChunks, sql.raw(" "))
-          const sqlQueryUnitAmount = sql.join(unitAmountChunks, sql.raw(" "))
-          const sqlQuerySubtotalAmount = sql.join(subtotalAmountChunks, sql.raw(" "))
-          const sqlQueryDescription = sql.join(descriptionChunks, sql.raw(" "))
-
-          // for every invoice item we update the invoice item
-          // one single query for updating the invoice items
-          await tx
-            .update(invoiceItems)
-            .set({
-              quantity: sqlQueryQuantity,
-              unitAmountCents: sqlQueryUnitAmount,
-              amountTotal: sqlQueryTotalAmount,
-              amountSubtotal: sqlQuerySubtotalAmount,
-              description: sqlQueryDescription,
-            })
-            .where(
-              and(
-                eq(invoiceItems.invoiceId, openInvoiceData.id),
-                eq(invoiceItems.projectId, projectId),
-                inArray(invoiceItems.id, billableItemsIds)
-              )
-            )
+          await txBillingRepo.batchUpdateInvoiceItemAmounts({
+            invoiceId: openInvoiceData.id,
+            projectId,
+            itemIds: billableItemsIds,
+            updates: computedBillableItems.map((item) => ({
+              id: item.id,
+              quantity: item.quantity,
+              totalAmount: item.totalAmount,
+              unitAmount: item.unitAmount,
+              subtotalAmount: item.subtotalAmount,
+              description: item.description,
+            })),
+          })
         }
 
-        const pricedInvoiceItems = await tx.query.invoiceItems.findMany({
-          columns: {
-            amountSubtotal: true,
-            amountTotal: true,
-          },
-          where: (item, ops) =>
-            ops.and(eq(item.projectId, projectId), eq(item.invoiceId, openInvoiceData.id)),
+        const pricedInvoiceItems = await txBillingRepo.listInvoiceItemAmounts({
+          invoiceId: openInvoiceData.id,
+          projectId,
         })
 
         const subtotalAmount = pricedInvoiceItems.reduce(
@@ -1005,9 +949,10 @@ export class BillingService {
         const statusInvoice = totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
 
         // update the invoice
-        const updatedInvoice = await tx
-          .update(invoices)
-          .set({
+        const updatedInvoice = await txBillingRepo.updateInvoice({
+          invoiceId: openInvoiceData.id,
+          projectId,
+          data: {
             subtotalCents: finalSubtotalAmount,
             totalCents: finalTotalAmount,
             status: statusInvoice,
@@ -1017,16 +962,8 @@ export class BillingService {
               // TODO: change who is finalizing the invoice
               note: "Finilized by scheduler",
             },
-          })
-          .where(
-            and(
-              eq(invoices.id, openInvoiceData.id),
-              eq(invoices.projectId, projectId),
-              eq(invoices.subscriptionId, subscriptionId)
-            )
-          )
-          .returning()
-          .then((res) => res[0])
+          },
+        })
 
         if (!updatedInvoice) {
           throw new Error("Error updating invoice")
@@ -1429,22 +1366,11 @@ export class BillingService {
     >
   > {
     const { default: pLimit } = await import("p-limit")
+    const billingRepo = new DrizzleBillingRepository(this.db)
 
-    const invoice = await this.db.query.invoices.findFirst({
-      with: {
-        customer: true,
-        invoiceItems: {
-          with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
-          },
-        },
-      },
-      where: (table, { eq, and }) =>
-        and(eq(table.id, opts.invoiceId), eq(table.projectId, opts.projectId)),
+    const invoice = await billingRepo.findInvoiceWithDetails({
+      invoiceId: opts.invoiceId,
+      projectId: opts.projectId,
     })
 
     if (!invoice) {
@@ -1691,17 +1617,19 @@ export class BillingService {
       // the newly created invoice from the provider remains as draft to be able to debug if necessary
       // next iteration we will try to finalize the invoice again
       await this.db.transaction(async (tx) => {
-        await tx
-          .update(invoices)
-          .set({
+        const txBillingRepo = new DrizzleBillingRepository(tx)
+        await txBillingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId: invoice.projectId,
+          data: {
             status: "draft", // we need to set the status to draft to be able to debug
             metadata: {
               ...(invoice.metadata ?? {}),
               reason: "invoice_failed",
               note: "Failed to finalize invoice due to provider invoice total mismatch",
             },
-          })
-          .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, invoice.projectId)))
+          },
+        })
       })
 
       return Err(
@@ -1731,26 +1659,29 @@ export class BillingService {
 
     // Persist provider ids in a short tx
     await this.db.transaction(async (tx) => {
-      await tx
-        .update(invoices)
-        .set({
+      const txBillingRepo = new DrizzleBillingRepository(tx)
+      await txBillingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
+        data: {
           invoicePaymentProviderId: providerInvoiceId,
           invoicePaymentProviderUrl: providerInvoiceUrl,
           metadata: {
             ...(invoice.metadata ?? {}),
             note: "Invoice finalized successfully",
           },
-        })
-        .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, invoice.projectId)))
+        },
+      })
 
       for (const item of invoice.invoiceItems) {
         const subId = item.subscriptionItemId ?? ""
         const id = subId ? providerItemBySub.get(subId) : undefined
         if (!id) continue
-        await tx
-          .update(invoiceItems)
-          .set({ itemProviderId: id })
-          .where(and(eq(invoiceItems.id, item.id), eq(invoiceItems.projectId, item.projectId)))
+        await txBillingRepo.updateInvoiceItemProviderId({
+          itemId: item.id,
+          projectId: item.projectId,
+          itemProviderId: id,
+        })
       }
     })
 
@@ -1850,14 +1781,16 @@ export class BillingService {
       const newTotal = Math.max(0, (invoice.subtotalCents ?? 0) - newAmountCreditUsed)
 
       // Persist only if anything changed or if idempotent recompute
-      await tx
-        .update(invoices)
-        .set({
+      const txBillingRepo = new DrizzleBillingRepository(tx)
+      await txBillingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId,
+        data: {
           amountCreditUsed: newAmountCreditUsed,
           totalCents: newTotal,
           metadata: { ...(invoice.metadata ?? {}), credits: "Credits applied" },
-        })
-        .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, projectId)))
+        },
+      })
 
       return Ok({ applied, remainingInvoiceTotal: newTotal, applications })
     })
@@ -1922,56 +1855,31 @@ export class BillingService {
 
     const result = await trx
       .transaction(async (tx) => {
+        const txBillingRepo = new DrizzleBillingRepository(tx)
         for (const phase of phases) {
           // 0. Cap any existing pending periods for this phase that exceed the phase end date
           // this is useful for mid-cycle cancellations or plan changes
           if (phase.endAt) {
             // update billing periods
             if (!dryRun) {
-              await tx
-                .update(billingPeriods)
-                .set({
-                  cycleEndAt: sql`LEAST(${billingPeriods.cycleEndAt}, ${phase.endAt})`,
-                  invoiceAt:
-                    phase.planVersion.whenToBill === "pay_in_arrear"
-                      ? sql`LEAST(${billingPeriods.invoiceAt}, ${phase.endAt})`
-                      : billingPeriods.invoiceAt,
-                })
-                .where(
-                  and(
-                    eq(billingPeriods.subscriptionPhaseId, phase.id),
-                    eq(billingPeriods.status, "pending"),
-                    sql`${billingPeriods.cycleEndAt} > ${phase.endAt}`
-                  )
-                )
+              await txBillingRepo.capPendingPeriodsAtPhaseEnd({
+                phaseId: phase.id,
+                phaseEndAt: phase.endAt,
+                whenToBill: phase.planVersion.whenToBill,
+              })
             }
 
             // 0.1 Handle credits for already invoiced/paid periods that are now shortened (Prepaid Billing)
-            const invoicedPeriods = await tx.query.billingPeriods.findMany({
-              where: (bp, ops) =>
-                ops.and(
-                  ops.eq(bp.subscriptionPhaseId, phase.id),
-                  ops.eq(bp.status, "invoiced"),
-                  ops.gt(bp.cycleEndAt, phase.endAt!)
-                ),
+            const invoicedPeriods = await txBillingRepo.listInvoicedPeriodsExceedingPhaseEnd({
+              phaseId: phase.id,
+              phaseEndAt: phase.endAt!,
             })
 
             for (const period of invoicedPeriods) {
               // Find the specific invoice item for this billing period to get the actual amount paid
-              const itemLine = await tx.query.invoiceItems.findFirst({
-                with: {
-                  invoice: true,
-                  subscriptionItem: {
-                    with: {
-                      featurePlanVersion: true,
-                    },
-                  },
-                },
-                where: (ii, ops) =>
-                  ops.and(
-                    ops.eq(ii.billingPeriodId, period.id),
-                    ops.eq(ii.projectId, phase.projectId)
-                  ),
+              const itemLine = await txBillingRepo.findInvoiceItemByBillingPeriod({
+                billingPeriodId: period.id,
+                projectId: phase.projectId,
               })
 
               // do not consider draft or void invoices
@@ -2043,25 +1951,21 @@ export class BillingService {
 
               // Update the invoiced period to reflect the new shortened end date in the database
               if (!dryRun) {
-                await tx
-                  .update(billingPeriods)
-                  .set({ cycleEndAt: phase.endAt })
-                  .where(eq(billingPeriods.id, period.id))
+                await txBillingRepo.shortenBillingPeriod({
+                  periodId: period.id,
+                  cycleEndAt: phase.endAt!,
+                })
               }
             }
           }
 
           for (const item of phase.items) {
             // 1. Find the last period for this item to make per-item backfill
-            const lastForItem = await tx.query.billingPeriods.findFirst({
-              where: (bp, ops) =>
-                ops.and(
-                  ops.eq(bp.projectId, phase.projectId),
-                  ops.eq(bp.subscriptionId, phase.subscriptionId),
-                  ops.eq(bp.subscriptionPhaseId, phase.id),
-                  ops.eq(bp.subscriptionItemId, item.id)
-                ),
-              orderBy: (bp, ops) => ops.desc(bp.cycleEndAt),
+            const lastForItem = await txBillingRepo.getLastPeriodForItem({
+              projectId: phase.projectId,
+              subscriptionId: phase.subscriptionId,
+              subscriptionPhaseId: phase.id,
+              subscriptionItemId: item.id,
             })
 
             const cursorStart = lastForItem ? lastForItem.cycleEndAt : phase.startAt
@@ -2127,19 +2031,9 @@ export class BillingService {
             // 4. Batch insert billing periods for this item
             if (billingPeriodValues.length > 0) {
               if (!dryRun) {
-                await tx
-                  .insert(billingPeriods)
-                  .values(billingPeriodValues)
-                  .onConflictDoNothing({
-                    target: [
-                      billingPeriods.projectId,
-                      billingPeriods.subscriptionId,
-                      billingPeriods.subscriptionPhaseId,
-                      billingPeriods.subscriptionItemId,
-                      billingPeriods.cycleStartAt,
-                      billingPeriods.cycleEndAt,
-                    ],
-                  })
+                await txBillingRepo.createPeriodsBatch({
+                  periods: billingPeriodValues,
+                })
               }
               cyclesCreated += billingPeriodValues.length
             }

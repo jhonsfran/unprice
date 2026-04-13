@@ -50,6 +50,20 @@
       "when": 1775855764446,
       "tag": "0006_remarkable_doorman",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776094851704,
+      "tag": "0007_slim_betty_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776107368951,
+      "tag": "0008_huge_hellfire_club",
+      "breakpoints": true
     }
   ]
 }

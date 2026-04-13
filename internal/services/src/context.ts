@@ -8,12 +8,14 @@ import { GrantsManager } from "./entitlements/grants"
 import { EntitlementService } from "./entitlements/service"
 import { EventService } from "./events/service"
 import { FeatureService } from "./features/service"
+import { DrizzleLedgerRepository } from "./ledger/repository.drizzle"
 import { LedgerService } from "./ledger/service"
 import { PageService } from "./pages/service"
 import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
 import { ProjectService } from "./projects/service"
 import { RatingService } from "./rating/service"
+import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
 import { WorkspaceService } from "./workspaces/service"
 
@@ -64,7 +66,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   const ledger = new LedgerService({
-    db: deps.db,
+    repo: new DrizzleLedgerRepository(deps.db),
     logger: deps.logger,
     metrics: deps.metrics,
   })
@@ -159,6 +161,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
 
   const subscriptions = new SubscriptionService({
     db: deps.db,
+    repo: new DrizzleSubscriptionRepository(deps.db),
     logger: deps.logger,
     analytics: deps.analytics,
     waitUntil: deps.waitUntil,

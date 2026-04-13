@@ -7,10 +7,12 @@ import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import { DrizzleLedgerRepository } from "../ledger/repository.drizzle"
 import { LedgerService } from "../ledger/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { RatingService } from "../rating/service"
+import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { SubscriptionService } from "../subscriptions/service"
 import { createClock } from "../test-utils"
 
@@ -300,7 +302,7 @@ describe("Workflow - Billing and Subscriptions", () => {
     const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
     const ratingService = new RatingService({ ...serviceDeps, grantsManager })
     const ledgerService = new LedgerService({
-      db: mockDb,
+      repo: new DrizzleLedgerRepository(mockDb),
       logger: mockLogger,
       metrics: mockMetrics,
     })
@@ -313,6 +315,7 @@ describe("Workflow - Billing and Subscriptions", () => {
     })
     subscriptionService = new SubscriptionService({
       ...serviceDeps,
+      repo: new DrizzleSubscriptionRepository(mockDb),
       customerService,
       billingService: _billingService,
       ratingService,

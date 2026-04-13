@@ -28,6 +28,7 @@ import {
   paymentProviderEnum,
   whenToBillEnum,
 } from "./enums"
+import { ledgerEntries } from "./ledger"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
 import { subscriptionItems, subscriptions } from "./subscriptions"
@@ -157,6 +158,8 @@ export const invoiceItems = pgTableProject(
     description: varchar("description", { length: 200 }),
     // provider-level mapping for reconciliation
     itemProviderId: text("item_provider_id"),
+    // traceability FK to the ledger entry that originated this line item (nullable)
+    ledgerEntryId: cuid("ledger_entry_id"),
   },
   (table) => ({
     pk: primaryKey({
@@ -188,6 +191,11 @@ export const invoiceItems = pgTableProject(
       foreignColumns: [projects.id],
       name: "invoice_items_project_id_fkey",
     }).onDelete("cascade"),
+    ledgerEntryfk: foreignKey({
+      columns: [table.ledgerEntryId, table.projectId],
+      foreignColumns: [ledgerEntries.id, ledgerEntries.projectId],
+      name: "invoice_items_ledger_entry_id_fkey",
+    }).onDelete("set null"),
     // avoid duplicate materialization of the same billing period into the same invoice
     uqByCycle: uniqueIndex("invoice_items_cycle_unique")
       .on(table.projectId, table.invoiceId, table.billingPeriodId)

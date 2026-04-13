@@ -1,6 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and as dbAnd, eq } from "@unprice/db"
-import { subscriptions } from "@unprice/db/schema"
+import type { Database } from "@unprice/db"
 import type { Customer, Subscription, SubscriptionStatus } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -32,6 +31,7 @@ import {
   isTrialExpired,
 } from "./guards"
 import { invoiceSubscription, loadSubscription, renewSubscription } from "./invokes"
+import type { SubscriptionRepository } from "./repository"
 import type {
   MachineTags,
   SubscriptionActions,
@@ -62,6 +62,7 @@ export class SubscriptionMachine {
   private logger: Logger
   private actor!: AnyActorRef
   private db: Database
+  private repo: SubscriptionRepository
   private now: number
   private customerService: CustomerService
   private grantService: GrantsManager
@@ -85,6 +86,7 @@ export class SubscriptionMachine {
     ledgerService,
     now,
     db,
+    repo,
   }: {
     subscriptionId: string
     projectId: string
@@ -95,6 +97,7 @@ export class SubscriptionMachine {
     ledgerService: LedgerService
     now: number
     db: Database
+    repo: SubscriptionRepository
   }) {
     this.subscriptionId = subscriptionId
     this.projectId = projectId
@@ -105,6 +108,7 @@ export class SubscriptionMachine {
     this.ratingService = ratingService
     this.ledgerService = ledgerService
     this.db = db
+    this.repo = repo
     this.machine = this.createMachineSubscription()
     this.grantService = new GrantsManager({ db: db, logger: logger })
   }
@@ -135,14 +139,14 @@ export class SubscriptionMachine {
             input: {
               context: SubscriptionContext
               logger: Logger
-              db: Database
+              repo: SubscriptionRepository
               customerService: CustomerService
             }
           }) => {
             const result = await loadSubscription({
               context: input.context,
               logger: input.logger,
-              db: input.db,
+              repo: input.repo,
               customerService: input.customerService,
             })
 
@@ -157,6 +161,7 @@ export class SubscriptionMachine {
               context: SubscriptionContext
               logger: Logger
               db: Database
+              repo: SubscriptionRepository
               ratingService: RatingService
               ledgerService: LedgerService
             }
@@ -165,6 +170,7 @@ export class SubscriptionMachine {
               context: input.context,
               logger: input.logger,
               db: input.db,
+              repo: input.repo,
               ratingService: input.ratingService,
               ledgerService: input.ledgerService,
             })
@@ -180,14 +186,14 @@ export class SubscriptionMachine {
               context: SubscriptionContext
               logger: Logger
               customerService: CustomerService
-              db: Database
+              repo: SubscriptionRepository
             }
           }) => {
             const result = await renewSubscription({
               context: input.context,
               logger: input.logger,
               customerService: input.customerService,
-              db: input.db,
+              repo: input.repo,
             })
 
             return result
@@ -242,7 +248,7 @@ export class SubscriptionMachine {
             input: ({ context }) => ({
               context,
               logger: this.logger,
-              db: this.db,
+              repo: this.repo,
               customerService: this.customerService,
             }),
             onDone: {
@@ -409,6 +415,7 @@ export class SubscriptionMachine {
               context,
               logger: this.logger,
               db: this.db,
+              repo: this.repo,
               ratingService: this.ratingService,
               ledgerService: this.ledgerService,
             }),
@@ -441,6 +448,7 @@ export class SubscriptionMachine {
                         note: "Invoice failed after trying to invoice",
                       },
                     },
+                    repo: this.repo,
                   }),
                 assign({
                   error: ({ event }) => ({
@@ -462,7 +470,7 @@ export class SubscriptionMachine {
               context,
               customerService: this.customerService,
               logger: this.logger,
-              db: this.db,
+              repo: this.repo,
             }),
             onDone: {
               target: "active",
@@ -743,18 +751,14 @@ export class SubscriptionMachine {
         if (currentState === lastPersisted) return
 
         try {
-          await this.db
-            .update(subscriptions)
-            .set({
+          await this.repo.updateSubscription({
+            subscriptionId: this.subscriptionId,
+            projectId: this.projectId,
+            data: {
               status: currentState as SubscriptionStatus,
               active: !["expired", "canceled"].includes(currentState),
-            })
-            .where(
-              dbAnd(
-                eq(subscriptions.id, this.subscriptionId),
-                eq(subscriptions.projectId, this.projectId)
-              )
-            )
+            },
+          })
 
           lastPersisted = currentState as SubscriptionStatus
         } catch (err) {
@@ -795,6 +799,7 @@ export class SubscriptionMachine {
     ledgerService: LedgerService
     now: number
     db: Database
+    repo: SubscriptionRepository
     dryRun?: boolean
   }): Promise<Result<SubscriptionMachine, UnPriceMachineError>> {
     const subscription = new SubscriptionMachine(payload)

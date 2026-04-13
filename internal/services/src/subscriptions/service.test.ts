@@ -10,10 +10,12 @@ import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import { DrizzleLedgerRepository } from "../ledger/repository.drizzle"
 import { LedgerService } from "../ledger/service"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { RatingService } from "../rating/service"
+import { DrizzleSubscriptionRepository } from "./repository.drizzle"
 import { SubscriptionService } from "./service"
 
 vi.mock("../../env", () => ({
@@ -385,18 +387,19 @@ describe("SubscriptionService - grant lifecycle", () => {
       grantsManager,
       ratingService,
       ledgerService: new LedgerService({
-        db: mockDb,
+        repo: new DrizzleLedgerRepository(mockDb),
         logger: mockLogger,
         metrics: mockMetrics,
       }),
     })
     subscriptionService = new SubscriptionService({
       ...serviceDeps,
+      repo: new DrizzleSubscriptionRepository(mockDb),
       customerService,
       billingService,
       ratingService,
       ledgerService: new LedgerService({
-        db: mockDb,
+        repo: new DrizzleLedgerRepository(mockDb),
         logger: mockLogger,
         metrics: mockMetrics,
       }),

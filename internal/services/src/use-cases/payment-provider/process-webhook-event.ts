@@ -1,9 +1,10 @@
 import { type Database, and, eq } from "@unprice/db"
-import { invoices, ledgerEntries, ledgers, webhookEvents } from "@unprice/db/schema"
+import { webhookEvents } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import type {
@@ -12,7 +13,7 @@ import type {
 } from "../../payment-provider/interface"
 
 type ProcessWebhookEventDeps = {
-  services: Pick<ServiceContext, "customers" | "subscriptions">
+  services: Pick<ServiceContext, "customers" | "subscriptions" | "ledger">
   db: Database
   logger: Logger
 }
@@ -124,96 +125,6 @@ function nextPaymentAttempts({
   return [...(currentAttempts ?? []), { status, createdAt: now }]
 }
 
-async function confirmLedgerSettlementByInvoiceId({
-  deps,
-  projectId,
-  invoiceId,
-}: {
-  deps: ProcessWebhookEventDeps
-  projectId: string
-  invoiceId: string
-}): Promise<void> {
-  await deps.db
-    .update(ledgerEntries)
-    .set({
-      settlementPendingProviderConfirmation: false,
-      updatedAtM: Date.now(),
-    })
-    .where(
-      and(
-        eq(ledgerEntries.projectId, projectId),
-        eq(ledgerEntries.settlementType, "invoice"),
-        eq(ledgerEntries.settlementArtifactId, invoiceId),
-        eq(ledgerEntries.settlementPendingProviderConfirmation, true)
-      )
-    )
-}
-
-async function reopenLedgerSettlementByInvoiceId({
-  deps,
-  projectId,
-  invoiceId,
-  now,
-}: {
-  deps: ProcessWebhookEventDeps
-  projectId: string
-  invoiceId: string
-  now: number
-}): Promise<void> {
-  await deps.db.transaction(async (tx) => {
-    const relatedEntries = await tx.query.ledgerEntries.findMany({
-      where: (entry, ops) =>
-        ops.and(
-          ops.eq(entry.projectId, projectId),
-          ops.eq(entry.settlementType, "invoice"),
-          ops.eq(entry.settlementArtifactId, invoiceId)
-        ),
-    })
-
-    const entriesToReopen = relatedEntries.filter((entry) => entry.settledAt !== null)
-    if (entriesToReopen.length === 0) {
-      return
-    }
-
-    for (const entry of entriesToReopen) {
-      await tx
-        .update(ledgerEntries)
-        .set({
-          settlementType: null,
-          settlementArtifactId: null,
-          settlementPendingProviderConfirmation: false,
-          settledAt: null,
-          updatedAtM: now,
-        })
-        .where(and(eq(ledgerEntries.projectId, entry.projectId), eq(ledgerEntries.id, entry.id)))
-    }
-
-    const signedAmountByLedger = entriesToReopen.reduce((acc, entry) => {
-      acc.set(entry.ledgerId, (acc.get(entry.ledgerId) ?? 0) + entry.signedAmountCents)
-      return acc
-    }, new Map<string, number>())
-
-    for (const [ledgerId, signedAmount] of signedAmountByLedger.entries()) {
-      const ledger = await tx.query.ledgers.findFirst({
-        where: (table, ops) =>
-          ops.and(ops.eq(table.projectId, projectId), ops.eq(table.id, ledgerId)),
-      })
-
-      if (!ledger) {
-        continue
-      }
-
-      await tx
-        .update(ledgers)
-        .set({
-          unsettledBalanceCents: ledger.unsettledBalanceCents + signedAmount,
-          updatedAtM: now,
-        })
-        .where(and(eq(ledgers.projectId, projectId), eq(ledgers.id, ledgerId)))
-    }
-  })
-}
-
 async function applyWebhookEvent({
   deps,
   projectId,
@@ -238,13 +149,11 @@ async function applyWebhookEvent({
     })
   }
   const providerInvoiceId = normalizedEvent.invoiceId
+  const billingRepo = new DrizzleBillingRepository(deps.db)
 
-  const invoice = await deps.db.query.invoices.findFirst({
-    where: (table, ops) =>
-      ops.and(
-        ops.eq(table.projectId, projectId),
-        ops.eq(table.invoicePaymentProviderId, providerInvoiceId)
-      ),
+  const invoice = await billingRepo.findInvoiceByProviderId({
+    projectId,
+    invoicePaymentProviderId: providerInvoiceId,
   })
 
   if (!invoice) {
@@ -255,9 +164,10 @@ async function applyWebhookEvent({
 
   if (normalizedEvent.eventType === "payment.succeeded") {
     const alreadyPaid = invoice.status === "paid"
-    await deps.db
-      .update(invoices)
-      .set({
+    await billingRepo.updateInvoice({
+      invoiceId: invoice.id,
+      projectId,
+      data: {
         status: "paid",
         paidAt: invoice.paidAt ?? normalizedEvent.occurredAt,
         invoicePaymentProviderUrl: normalizedEvent.invoiceUrl ?? invoice.invoicePaymentProviderUrl,
@@ -274,14 +184,25 @@ async function applyWebhookEvent({
           note: "Payment confirmed by provider webhook",
         },
         updatedAtM: now,
-      })
-      .where(and(eq(invoices.projectId, projectId), eq(invoices.id, invoice.id)))
-
-    await confirmLedgerSettlementByInvoiceId({
-      deps,
-      projectId,
-      invoiceId: invoice.id,
+      },
     })
+
+    // Confirm the ledger settlement for this invoice via LedgerService.
+    const confirmResult = await deps.services.ledger.confirmSettlement({
+      projectId,
+      artifactId: invoice.id,
+      type: "invoice",
+      now,
+    })
+
+    if (confirmResult.err) {
+      return Err(
+        new FetchError({
+          message: `Ledger settlement confirm failed: ${confirmResult.err.message}`,
+          retry: false,
+        })
+      )
+    }
 
     const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
       projectId,
@@ -308,9 +229,10 @@ async function applyWebhookEvent({
   }
 
   if (normalizedEvent.eventType === "payment.dispute_reversed") {
-    await deps.db
-      .update(invoices)
-      .set({
+    await billingRepo.updateInvoice({
+      invoiceId: invoice.id,
+      projectId,
+      data: {
         status: "paid",
         paidAt: invoice.paidAt ?? normalizedEvent.occurredAt,
         paymentAttempts: nextPaymentAttempts({
@@ -324,14 +246,24 @@ async function applyWebhookEvent({
           note: "Payment reinstated after dispute reversal",
         },
         updatedAtM: now,
-      })
-      .where(and(eq(invoices.projectId, projectId), eq(invoices.id, invoice.id)))
-
-    await confirmLedgerSettlementByInvoiceId({
-      deps,
-      projectId,
-      invoiceId: invoice.id,
+      },
     })
+
+    const disputeConfirmResult = await deps.services.ledger.confirmSettlement({
+      projectId,
+      artifactId: invoice.id,
+      type: "invoice",
+      now,
+    })
+
+    if (disputeConfirmResult.err) {
+      return Err(
+        new FetchError({
+          message: `Ledger settlement confirm failed: ${disputeConfirmResult.err.message}`,
+          retry: false,
+        })
+      )
+    }
 
     const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
       projectId,
@@ -359,9 +291,10 @@ async function applyWebhookEvent({
 
   const failedStatus = normalizedEvent.eventType === "payment.failed" ? "unpaid" : "failed"
 
-  await deps.db
-    .update(invoices)
-    .set({
+  await billingRepo.updateInvoice({
+    invoiceId: invoice.id,
+    projectId,
+    data: {
       status: failedStatus,
       paymentAttempts: nextPaymentAttempts({
         currentAttempts: invoice.paymentAttempts ?? null,
@@ -378,16 +311,28 @@ async function applyWebhookEvent({
             : "Payment failed from provider webhook"),
       },
       updatedAtM: now,
-    })
-    .where(and(eq(invoices.projectId, projectId), eq(invoices.id, invoice.id)))
+    },
+  })
 
   if (normalizedEvent.eventType === "payment.reversed") {
-    await reopenLedgerSettlementByInvoiceId({
-      deps,
+    // Reverse the ledger settlement via LedgerService — posts reversal entries,
+    // preserves full audit trail, and restores unsettled balance.
+    const reversalResult = await deps.services.ledger.reverseSettlement({
       projectId,
-      invoiceId: invoice.id,
+      artifactId: invoice.id,
+      type: "invoice",
+      reason: normalizedEvent.failureMessage ?? "Payment reversed by provider",
       now,
     })
+
+    if (reversalResult.err) {
+      return Err(
+        new FetchError({
+          message: `Ledger settlement reversal failed: ${reversalResult.err.message}`,
+          retry: false,
+        })
+      )
+    }
   }
 
   const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({

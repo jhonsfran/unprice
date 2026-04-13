@@ -40,6 +40,8 @@ export const prefixes = {
   grant: "grnt",
   ledger: "ldg",
   ledger_entry: "le",
+  ledger_settlement: "lset",
+  ledger_settlement_line: "lsl",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

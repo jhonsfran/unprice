@@ -1,3 +1,6 @@
 export * from "./machine"
+export * from "./repository"
+export * from "./repository.drizzle"
+export * from "./repository.memory"
 export * from "./service"
 export * from "./types"

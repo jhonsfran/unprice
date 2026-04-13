@@ -18,7 +18,7 @@ import {
 } from "@unprice/services/entitlements"
 import { GrantsManager } from "@unprice/services/entitlements"
 import { findLimitExceededFact } from "@unprice/services/entitlements"
-import { LedgerService } from "@unprice/services/ledger"
+import { DrizzleLedgerRepository, LedgerService } from "@unprice/services/ledger"
 import { NoopMetrics } from "@unprice/services/metrics"
 import { RatingService } from "@unprice/services/rating"
 import { type MeterBillingFact, billMeterFact } from "@unprice/services/use-cases"
@@ -185,7 +185,7 @@ export class EntitlementWindowDO extends DurableObject {
       grantsManager,
     })
     this.ledger = new LedgerService({
-      db: billingDb,
+      repo: new DrizzleLedgerRepository(billingDb),
       logger: this.logger,
       metrics: new NoopMetrics(),
     })

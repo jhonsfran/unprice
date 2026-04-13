@@ -349,6 +349,7 @@ async function loadEntitlementWindowDO() {
 
   vi.doMock("@unprice/services/ledger", () => ({
     LedgerService: class {},
+    DrizzleLedgerRepository: class {},
   }))
 
   vi.doMock("@unprice/services/metrics", () => ({

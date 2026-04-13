@@ -68,7 +68,7 @@ export const route = createRoute({
 export const registerProviderWebhookV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { provider, projectId } = c.req.valid("param")
-    const { customer, subscription } = c.get("services")
+    const { customer, subscription, ledger } = c.get("services")
     const rawBody = await c.req.raw.text()
 
     if (!rawBody) {
@@ -83,6 +83,7 @@ export const registerProviderWebhookV1 = (app: App) =>
         services: {
           customers: customer,
           subscriptions: subscription,
+          ledger,
         },
         db: c.get("db"),
         logger: c.get("logger"),

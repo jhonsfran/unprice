@@ -1,9 +1,7 @@
-import { and, eq } from "@unprice/db"
-import { subscriptions } from "@unprice/db/schema"
 import type { Subscription } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 
-import { db } from "../utils/db"
+import type { SubscriptionRepository } from "./repository"
 import type { SubscriptionContext, SubscriptionEvent } from "./types"
 
 /**
@@ -67,17 +65,17 @@ export default ({
 export const updateSubscription = async ({
   context,
   subscription,
+  repo,
 }: {
   context: SubscriptionContext
   subscription: Partial<Subscription>
+  repo: SubscriptionRepository
 }): Promise<void> => {
   const { subscriptionId, projectId } = context
 
-  // update the subscription
-  await db
-    .update(subscriptions)
-    .set({
-      ...subscription,
-    })
-    .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
+  await repo.updateSubscription({
+    subscriptionId,
+    projectId,
+    data: subscription,
+  })
 }

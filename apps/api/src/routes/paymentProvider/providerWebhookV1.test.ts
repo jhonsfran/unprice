@@ -111,6 +111,7 @@ function createTestApp() {
     c.set("services", {
       customer: {},
       subscription: {},
+      ledger: {},
     })
     c.set("db", {})
     c.set("logger", {

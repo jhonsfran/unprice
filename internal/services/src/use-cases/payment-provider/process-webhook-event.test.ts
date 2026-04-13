@@ -26,7 +26,10 @@ function createLogger(): Logger {
 }
 
 function createDbMocks() {
-  const updateWhere = vi.fn().mockResolvedValue(undefined)
+  const updateReturning = vi.fn().mockResolvedValue([{ id: "inv_1", status: "paid" }])
+  const updateWhere = vi.fn().mockReturnValue({
+    returning: updateReturning,
+  })
   const updateSet = vi.fn().mockReturnValue({
     where: updateWhere,
   })
@@ -97,6 +100,7 @@ function createDbMocks() {
       update,
       updateSet,
       updateWhere,
+      updateReturning,
       query,
       transaction,
       txQuery,
@@ -127,6 +131,10 @@ describe("processWebhookEvent", () => {
   let subscriptions: {
     reconcilePaymentOutcome: ReturnType<typeof vi.fn>
   }
+  let ledger: {
+    confirmSettlement: ReturnType<typeof vi.fn>
+    reverseSettlement: ReturnType<typeof vi.fn>
+  }
 
   beforeEach(() => {
     const setup = createDbMocks()
@@ -142,6 +150,13 @@ describe("processWebhookEvent", () => {
     subscriptions = {
       reconcilePaymentOutcome: vi.fn().mockResolvedValue({ val: { status: "active" } }),
     }
+
+    ledger = {
+      confirmSettlement: vi.fn().mockResolvedValue({ val: { status: "confirmed" } }),
+      reverseSettlement: vi.fn().mockResolvedValue({
+        val: { settlement: { status: "reversed" }, reversalEntries: [] },
+      }),
+    }
   })
 
   it("returns provider error when signature verification fails", async () => {
@@ -154,6 +169,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          ledger: ledger as unknown as never,
         },
         db,
         logger,
@@ -201,6 +217,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          ledger: ledger as unknown as never,
         },
         db,
         logger,
@@ -262,6 +279,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          ledger: ledger as unknown as never,
         },
         db,
         logger,
@@ -279,6 +297,9 @@ describe("processWebhookEvent", () => {
     expect(result.err).toBeUndefined()
     expect(result.val?.status).toBe("processed")
     expect(result.val?.outcome).toBe("payment_succeeded")
+    expect(ledger.confirmSettlement).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj_1", artifactId: "inv_1", type: "invoice" })
+    )
     expect(subscriptions.reconcilePaymentOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "success",
@@ -331,6 +352,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          ledger: ledger as unknown as never,
         },
         db,
         logger,
@@ -396,6 +418,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          ledger: ledger as unknown as never,
         },
         db,
         logger,
@@ -416,6 +439,9 @@ describe("processWebhookEvent", () => {
     expect(result.err).toBeUndefined()
     expect(result.val?.outcome).toBe("payment_dispute_reversed")
     expect(result.val?.invoiceId).toBe("inv_1")
+    expect(ledger.confirmSettlement).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj_1", artifactId: "inv_1", type: "invoice" })
+    )
     expect(subscriptions.reconcilePaymentOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "success",
@@ -466,6 +492,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          ledger: ledger as unknown as never,
         },
         db,
         logger,
@@ -524,26 +551,12 @@ describe("processWebhookEvent", () => {
       invoicePaymentProviderUrl: null,
     })
 
-    dbMocks.txQuery.ledgerEntries.findMany.mockResolvedValue([
-      {
-        id: "le_1",
-        projectId: "proj_1",
-        ledgerId: "ldg_1",
-        signedAmountCents: 1500,
-        settledAt: Date.now(),
-      },
-    ])
-    dbMocks.txQuery.ledgers.findFirst.mockResolvedValue({
-      id: "ldg_1",
-      projectId: "proj_1",
-      unsettledBalanceCents: 0,
-    })
-
     const result = await processWebhookEvent(
       {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          ledger: ledger as unknown as never,
         },
         db,
         logger,
@@ -560,7 +573,9 @@ describe("processWebhookEvent", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val?.outcome).toBe("payment_reversed")
-    expect(dbMocks.transaction).toHaveBeenCalledTimes(1)
+    expect(ledger.reverseSettlement).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "proj_1", artifactId: "inv_1", type: "invoice" })
+    )
     expect(subscriptions.reconcilePaymentOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: "failure",

@@ -1,13 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, type SQL, and, count, eq, getTableColumns, inArray, sql } from "@unprice/db"
-import {
-  customers,
-  grants,
-  subscriptionItems,
-  subscriptionPhases,
-  subscriptions,
-} from "@unprice/db/schema"
-import { newId, withDateFilters, withPagination } from "@unprice/db/utils"
+import { type Database, and, eq, inArray } from "@unprice/db"
+import { grants } from "@unprice/db/schema"
+import { newId } from "@unprice/db/utils"
 import {
   type GrantType,
   type InsertSubscription,
@@ -35,6 +29,7 @@ import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceSubscriptionError } from "./errors"
 import { SubscriptionMachine } from "./machine"
+import type { SubscriptionRepository } from "./repository"
 import { SubscriptionLock } from "./subscriptionLock"
 import type { SusbriptionMachineStatus } from "./types"
 
@@ -65,6 +60,7 @@ type PhaseOwnedGrant = typeof grants.$inferSelect
 
 export class SubscriptionService {
   private readonly db: Database
+  private readonly repo: SubscriptionRepository
   private readonly logger: Logger
   private readonly analytics: Analytics
   private readonly cache: Cache
@@ -78,6 +74,7 @@ export class SubscriptionService {
 
   constructor({
     db,
+    repo,
     logger,
     analytics,
     waitUntil,
@@ -89,6 +86,7 @@ export class SubscriptionService {
     ledgerService,
   }: {
     db: Database
+    repo: SubscriptionRepository
     logger: Logger
     analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -101,6 +99,7 @@ export class SubscriptionService {
     ledgerService: LedgerService
   }) {
     this.db = db
+    this.repo = repo
     this.logger = logger
     this.analytics = analytics
     this.cache = cache
@@ -694,11 +693,8 @@ export class SubscriptionService {
     }
 
     // get subscription with phases from start date
-    const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
-      where: (sub, { eq }) => eq(sub.id, subscriptionId),
-      with: {
-        phases: true,
-      },
+    const subscriptionWithPhases = await this.repo.findSubscriptionWithPhases({
+      subscriptionId,
     })
 
     if (!subscriptionWithPhases) {
@@ -893,30 +889,21 @@ export class SubscriptionService {
       )
     }
 
-    const result = await (db ?? this.db).transaction(async (trx) => {
-      // create the subscription phase
-      const phase = await trx
-        .insert(subscriptionPhases)
-        .values({
-          id: newId("subscription_phase"),
-          projectId,
-          planVersionId,
-          subscriptionId,
-          paymentMethodId,
-          paymentProvider: paymentProviderToUse,
-          trialEndsAt: trialsEndAt,
-          trialUnits: trialUnitsToUse,
-          startAt: startAtToUse,
-          endAt: endAtToUse,
-          metadata,
-          billingAnchor: billingAnchorToUse ?? 0,
-        })
-        .returning()
-        .catch((e) => {
-          this.logger.error(e.message)
-          throw e
-        })
-        .then((re) => re[0])
+    const result = await this.repo.withTransaction(async (txRepo) => {
+      const phase = await txRepo.insertPhase({
+        id: newId("subscription_phase"),
+        projectId,
+        planVersionId,
+        subscriptionId,
+        paymentMethodId: paymentMethodId ?? null,
+        paymentProvider: paymentProviderToUse,
+        trialEndsAt: trialsEndAt,
+        trialUnits: trialUnitsToUse,
+        startAt: startAtToUse,
+        endAt: endAtToUse,
+        metadata: metadata ?? null,
+        billingAnchor: billingAnchorToUse ?? 0,
+      })
 
       if (!phase) {
         return Err(
@@ -936,15 +923,7 @@ export class SubscriptionService {
         subscriptionId,
       }))
 
-      await trx
-        .insert(subscriptionItems)
-        .values(subscriptionItemValues)
-        .returning()
-        .catch((e) => {
-          this.logger.error(e.message)
-          trx.rollback()
-          throw e
-        })
+      await txRepo.insertItems({ items: subscriptionItemValues })
 
       const normalizedPhaseItems = this.normalizePhaseGrantItems(
         subscriptionItemValues.map((item) => {
@@ -973,17 +952,18 @@ export class SubscriptionService {
 
       if (isActivePhase) {
         const status = trialUnitsToUse > 0 ? "trialing" : "active"
-        await trx
-          .update(subscriptions)
-          .set({
+        await txRepo.updateSubscription({
+          subscriptionId,
+          projectId,
+          data: {
             active: true,
             status,
             planSlug: versionData.plan.slug,
             currentCycleStartAt: calculatedBillingCycle.start,
             currentCycleEndAt: calculatedBillingCycle.end,
-            renewAt: calculatedBillingCycle.start, // we schedule the renewal for the start of the cycle always
-          })
-          .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
+            renewAt: calculatedBillingCycle.start,
+          },
+        })
 
         // Update the access control list status in the cache
         this.waitUntil(
@@ -999,7 +979,7 @@ export class SubscriptionService {
           subscriptionId,
           phase,
           items: normalizedPhaseItems,
-          db: trx,
+          db: db ?? this.db,
           now,
         })
 
@@ -1044,16 +1024,9 @@ export class SubscriptionService {
   }): Promise<Result<boolean, UnPriceSubscriptionError | SchemaError>> {
     // only allow that are not active
     // and are not in the past
-    const phase = await this.db.query.subscriptionPhases.findFirst({
-      with: {
-        items: true,
-        subscription: {
-          with: {
-            customer: true,
-          },
-        },
-      },
-      where: (phase, { eq, and }) => and(eq(phase.id, phaseId), eq(phase.projectId, projectId)),
+    const phase = await this.repo.findPhaseWithItemsAndSubscription({
+      phaseId,
+      projectId,
     })
 
     if (!phase) {
@@ -1075,15 +1048,10 @@ export class SubscriptionService {
       )
     }
 
-    const result = await this.db.transaction(async (trx) => {
-      const grantService = this.createGrantManager(trx)
+    const result = await this.repo.withTransaction(async (txRepo) => {
+      const grantService = this.createGrantManager(this.db)
 
-      // removing the phase will cascade to the subscription items and entitlements
-      const subscriptionPhase = await trx
-        .delete(subscriptionPhases)
-        .where(and(eq(subscriptionPhases.id, phaseId), eq(subscriptionPhases.projectId, projectId)))
-        .returning()
-        .then((re) => re[0])
+      const subscriptionPhase = await txRepo.deletePhase({ phaseId, projectId })
 
       if (!subscriptionPhase) {
         return Err(
@@ -1140,24 +1108,10 @@ export class SubscriptionService {
     }
 
     // get subscription with phases from start date
-    const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
-      where: (sub, { eq, and }) => and(eq(sub.id, subscriptionId), eq(sub.projectId, projectId)),
-      with: {
-        phases: {
-          where: (phase, { gte }) => gte(phase.startAt, startAt),
-          with: {
-            items: {
-              with: {
-                featurePlanVersion: {
-                  with: {
-                    feature: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+    const subscriptionWithPhases = await this.repo.findSubscriptionWithPhases({
+      subscriptionId,
+      projectId,
+      phasesFromStartAt: startAt,
     })
 
     if (!subscriptionWithPhases) {
@@ -1209,17 +1163,14 @@ export class SubscriptionService {
 
     // we allow to set the end date before the current billing cycle end date to allow mid-cycle cancellations
     // if the end date is less than the current date, it will be set to the current date by endAtToUse logic above
-    const result = await (db ?? this.db).transaction(async (trx) => {
-      // create the subscription phase
-      const subscriptionPhase = await trx
-        .update(subscriptionPhases)
-        .set({
+    const result = await this.repo.withTransaction(async (txRepo) => {
+      const subscriptionPhase = await txRepo.updatePhase({
+        phaseId: input.id,
+        data: {
           startAt: startAt,
           endAt: endAtToUse ?? null,
-        })
-        .where(eq(subscriptionPhases.id, input.id))
-        .returning()
-        .then((re) => re[0])
+        },
+      })
 
       if (!subscriptionPhase) {
         return Err(
@@ -1240,36 +1191,13 @@ export class SubscriptionService {
       })
 
       if (itemsToChange?.length) {
-        const sqlChunksItems: SQL[] = []
-
-        const ids: string[] = []
-        sqlChunksItems.push(sql`(case`)
-
-        for (const item of itemsToChange) {
-          sqlChunksItems.push(
-            item.units === null
-              ? sql`when ${subscriptionItems.id} = ${item.id} then NULL`
-              : sql`when ${subscriptionItems.id} = ${item.id} then cast(${item.units} as int)`
-          )
-          ids.push(item.id)
-        }
-
-        sqlChunksItems.push(sql`end)`)
-
-        const finalSqlItems: SQL = sql.join(sqlChunksItems, sql.raw(" "))
-
-        await trx
-          .update(subscriptionItems)
-          .set({ units: finalSqlItems })
-          .where(
-            and(inArray(subscriptionItems.id, ids), eq(subscriptionItems.projectId, projectId))
-          )
-          .catch((e) => {
-            this.logger.error(e.message)
-            throw new UnPriceSubscriptionError({
-              message: `Error while updating subscription items: ${e.message}`,
-            })
-          })
+        await txRepo.updateItemUnits({
+          projectId,
+          updates: itemsToChange.map((item) => ({
+            id: item.id,
+            units: item.units ?? null,
+          })),
+        })
       }
 
       const updatedPhaseItems = itemsFromPhase.map((item) => {
@@ -1292,7 +1220,7 @@ export class SubscriptionService {
           trialEndsAt: subscriptionPhase.trialEndsAt,
         },
         items: this.normalizePhaseGrantItems(updatedPhaseItems),
-        db: trx,
+        db: db ?? this.db,
         now,
       })
 
@@ -1373,26 +1301,17 @@ export class SubscriptionService {
 
     const subscriptionId = newId("subscription")
 
-    const newSubscription = await trx
-      .insert(subscriptions)
-      .values({
-        id: subscriptionId,
-        projectId,
-        customerId: customerData.id,
-        active: false,
-        status: "active",
-        timezone: timezoneToUse,
-        metadata: metadata,
-        // provisional values
-        currentCycleStartAt: Date.now(),
-        currentCycleEndAt: Date.now(),
-      })
-      .returning()
-      .then((re) => re[0])
-      .catch((e) => {
-        this.logger.error(e.message)
-        return null
-      })
+    const newSubscription = await this.repo.insertSubscription({
+      id: subscriptionId,
+      projectId,
+      customerId: customerData.id,
+      active: false,
+      status: "active",
+      timezone: timezoneToUse,
+      metadata: metadata ?? null,
+      currentCycleStartAt: Date.now(),
+      currentCycleEndAt: Date.now(),
+    })
 
     if (!newSubscription) {
       return Err(
@@ -1412,22 +1331,7 @@ export class SubscriptionService {
     subscriptionId: string
     projectId: string
   }): Promise<Subscription | null> {
-    const subscriptionData = await this.db.query.subscriptions.findFirst({
-      with: {
-        project: true,
-      },
-      where: (subscription, operators) =>
-        operators.and(
-          operators.eq(subscription.id, subscriptionId),
-          operators.eq(subscription.projectId, projectId)
-        ),
-    })
-
-    if (!subscriptionData?.id) {
-      return null
-    }
-
-    return subscriptionData
+    return this.repo.findSubscription({ subscriptionId, projectId })
   }
 
   public async getSubscriptionById({
@@ -1436,31 +1340,7 @@ export class SubscriptionService {
     subscriptionId: string
   }): Promise<Result<unknown | null, UnPriceSubscriptionError>> {
     try {
-      const subscriptionData = await this.db.query.subscriptions.findFirst({
-        where: (subscription, { eq }) => eq(subscription.id, subscriptionId),
-        with: {
-          phases: {
-            with: {
-              planVersion: {
-                with: {
-                  plan: true,
-                },
-              },
-              items: {
-                with: {
-                  featurePlanVersion: {
-                    with: {
-                      feature: true,
-                    },
-                  },
-                },
-              },
-            },
-            orderBy: (phases, { asc }) => asc(phases.startAt),
-          },
-        },
-      })
-
+      const subscriptionData = await this.repo.findSubscriptionFull({ subscriptionId })
       return Ok(subscriptionData ?? null)
     } catch (err) {
       this.logger.error("error getting subscription by id", {
@@ -1488,71 +1368,18 @@ export class SubscriptionService {
     from?: number | null
     to?: number | null
   }): Promise<Result<{ subscriptions: unknown[]; pageCount: number }, UnPriceSubscriptionError>> {
-    const columns = getTableColumns(subscriptions)
-    const customerColumns = getTableColumns(customers)
-
     try {
-      const expressions = [eq(columns.projectId, projectId)]
-
-      const { data, total } = await this.db.transaction(async (tx) => {
-        const query = tx
-          .select({
-            subscriptions: subscriptions,
-            customer: customerColumns,
-          })
-          .from(subscriptions)
-          .innerJoin(
-            customers,
-            and(
-              eq(subscriptions.customerId, customers.id),
-              eq(customers.projectId, subscriptions.projectId)
-            )
-          )
-          .$dynamic()
-
-        const whereQuery = withDateFilters<Subscription>(
-          expressions,
-          columns.createdAtM,
-          from ?? null,
-          to ?? null
-        )
-
-        const data = await withPagination(
-          query,
-          whereQuery,
-          [
-            {
-              column: columns.createdAtM,
-              order: "desc",
-            },
-          ],
-          page,
-          pageSize
-        )
-
-        const total = await tx
-          .select({
-            count: count(),
-          })
-          .from(subscriptions)
-          .where(whereQuery)
-          .execute()
-          .then((res) => res[0]?.count ?? 0)
-
-        const subscriptionsData = data.map((row) => ({
-          ...row.subscriptions,
-          customer: row.customer,
-        }))
-
-        return {
-          data: subscriptionsData,
-          total,
-        }
+      const result = await this.repo.listSubscriptionsByProject({
+        projectId,
+        page,
+        pageSize,
+        from,
+        to,
       })
 
       return Ok({
-        subscriptions: data,
-        pageCount: Math.ceil(total / pageSize),
+        subscriptions: result.subscriptions,
+        pageCount: result.pageCount,
       })
     } catch (err) {
       this.logger.error("error listing subscriptions by project", {
@@ -1576,16 +1403,12 @@ export class SubscriptionService {
     projectId: string
   }): Promise<Result<Subscription[], UnPriceSubscriptionError>> {
     try {
-      const subscriptionData = await this.db.query.subscriptions.findMany({
-        with: {
-          phases: {
-            where: (phase, { eq }) => eq(phase.planVersionId, planVersionId),
-          },
-        },
-        where: (subscription, { eq }) => eq(subscription.projectId, projectId),
+      const subscriptionData = await this.repo.listSubscriptionsByPlanVersion({
+        planVersionId,
+        projectId,
       })
 
-      return Ok(subscriptionData as Subscription[])
+      return Ok(subscriptionData)
     } catch (err) {
       this.logger.error("error listing subscriptions by plan version", {
         error: toErrorContext(err),
@@ -1720,6 +1543,7 @@ export class SubscriptionService {
       ratingService: this.ratingService,
       ledgerService: this.ledgerService,
       db: this.db,
+      repo: this.repo,
     })
 
     if (err) {
