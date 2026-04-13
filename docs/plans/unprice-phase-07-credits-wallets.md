@@ -237,13 +237,20 @@ WalletDO.sync()
   `GrantsManager` (which manages entitlement grants, a different concept).
 - Do not introduce TypeScript `any` types.
 - Keep orchestration in use cases, not adapters.
+- **Naming convention:** Wallet columns use `Cents` suffix (`balanceCents`,
+  `remainingCents`) because credits are a separate virtual currency from monetary
+  amounts. The ledger uses `Minor` suffix (`amountMinor`, `balanceMinor`) for
+  scale-6 monetary minor units. When `WalletService` posts a ledger entry for a
+  credit purchase, the ledger entry is in monetary minor units (the actual payment
+  amount); the wallet's `Cents` fields track the credit balance. Do not confuse
+  the two unit systems.
 
 ## Primary Touchpoints
 
 - `internal/db/src/schema/wallets.ts` — new
 - `internal/db/src/schema/invoices.ts` — replace existing `creditGrants` and `invoiceCreditApplications` tables
 - `internal/db/src/schema/credit-burn-rates.ts` — new
-- `internal/db/src/utils/constants.ts` — extend `LEDGER_SETTLEMENT_TYPES` with `"wallet"`
+- `internal/db/src/utils/constants.ts` — already has `"wallet"` and `"one_time"` (done in Phase 6.5)
 - `internal/db/src/validators/wallets.ts` — new
 - `internal/services/src/wallet/service.ts` — new (Postgres-side)
 - `internal/services/src/wallet/core.ts` — new (pure fold/decide, shared by DO and service)
@@ -321,13 +328,10 @@ The burn rate is a **post-rating conversion layer**. The pricing pipeline is:
 The burn rate converts rated cents to credits. It does not replace the rating
 service — it sits after it.
 
-### Slice 2: Settlement type enum + settlement preference schema
+### Slice 2: Settlement preference schema
 
-Extend `LEDGER_SETTLEMENT_TYPES` in `internal/db/src/utils/constants.ts`:
-
-```typescript
-export const LEDGER_SETTLEMENT_TYPES = ["invoice", "manual", "wallet"] as const
-```
+`LEDGER_SETTLEMENT_TYPES` already includes `"wallet"` and `"one_time"` — added
+during Phase 6.5 ledger hardening. No enum changes needed.
 
 Add settlement preference to subscription phases (or customer billing config).
 This column does not exist today — it must be created:

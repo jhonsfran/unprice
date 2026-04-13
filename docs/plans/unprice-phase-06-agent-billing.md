@@ -177,32 +177,31 @@ The alarm flow becomes:
 
 1. flush pending outbox rows to Tinybird (existing behavior, unchanged)
 2. query outbox rows where `billedAt IS NULL` (new billing step)
-3. for each unbilled fact, call `reportAgentUsage` use case
+3. for each unbilled fact, call `billMeterFact` use case
 4. on success, set `billedAt = Date.now()` on the outbox row
 5. on failure, log the error and leave `billedAt` as null for next alarm
 
-The use case at
-`internal/services/src/use-cases/agent/report-agent-usage.ts`:
+The use case is implemented at
+`internal/services/src/use-cases/billing/bill-meter-fact.ts`:
 
-- accepts a single billing fact payload (parsed from outbox row)
+- accepts a single `MeterBillingFact` payload (parsed from outbox row)
 - calls `RatingService.rateIncrementalUsage()` with:
   - `usageBefore` = `valueAfter - delta` (from the billing fact)
   - `usageAfter` = `valueAfter` (from the billing fact)
-  - `now` or `startAt/endAt` derived from the fact's `periodKey`
+  - `now` = `timestamp` from the billing fact
   - `currency` from the billing fact
 - takes the `deltaPrice` from the rating result
 - posts an idempotent ledger debit via `LedgerService.postDebit()` with:
-  - `sourceType: "agent_usage_v1"`
+  - `sourceType: "meter_fact_v1"`
   - `sourceId: projectId:customerId:featureSlug:idempotencyKey`
-  - `amountCents` from `deltaPrice.totalPrice`
+  - `amountMinor` from `formatAmountForLedger(deltaPrice.totalPrice.dinero)`
   - `currency` from the billing fact
-  - `featurePlanVersionId` from the billing fact's `streamId` context
-  - `metadata` carrying the raw billing fact for audit
+  - `metadata` carrying billing context (featurePlanVersionId, subscriptionId, etc.)
 
 Deps type follows use-case pattern:
 
 ```ts
-type ReportAgentUsageDeps = {
+type BillMeterFactDeps = {
   services: Pick<ServiceContext, "rating" | "ledger">
   logger: Logger
 }
@@ -217,7 +216,7 @@ Failure handling:
 - metering state is never affected by billing failures
 - the DO already retries alarms every 30s while outbox rows exist
 
-The DO needs access to the `reportAgentUsage` use case. Implementation
+The DO needs access to the `billMeterFact` use case. Implementation
 options (decide during execution):
 
 - RPC call from DO to a Hono internal endpoint that wraps the use case

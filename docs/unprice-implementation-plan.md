@@ -498,7 +498,10 @@ Add:
 - `postCredit()`
 - `getUnsettledEntries()`
 - `getUnsettledBalance()`
-- `markSettled()`
+- `settleEntries()` / `settleJournal()`
+- `confirmSettlement()`
+- `reverseSettlement()`
+- `reconcileBalance()`
 
 Important constraints:
 - retries with the same source identity return the same ledger entry
@@ -650,10 +653,10 @@ Refactor `rateIncrementalUsage()` into smaller internal steps for context
 resolution, single-snapshot rating, and delta calculation so future billing
 modes can reuse the same building blocks.
 
-**6.6 — Add `reportAgentUsage` use case**
+**6.6 — Add `billMeterFact` use case**
 
 Consume durable billing facts, rate incremental usage asynchronously, and post
-idempotent ledger debits with `sourceType: "agent_usage_v1"`. Settlement
+idempotent ledger debits with `sourceType: "meter_fact_v1"`. Settlement
 routing deferred to Phase 7.
 
 **6.7 — Wire background agent billing from the Durable Object**
@@ -695,8 +698,12 @@ rates (`effectiveAt`/`supersededAt`).
 
 **7.3 — Create WalletService**
 
-Leaf service. Methods: `getOrCreateWallet`, `addCredits`, `deductCredits`
-(atomic check-and-deduct), `getBalance`, `hasEnoughCredits`.
+Near-leaf service (depends only on `LedgerService`). Methods:
+`getOrCreateWallet`, `addCredits`, `deductCredits` (atomic check-and-deduct),
+`getBalance`, `getGrantHistory`, `getActiveGrants`, `reconcileBalance`.
+Real-time `hasEnoughCredits` lives on the `WalletDO` (edge-side Durable
+Object), not on the Postgres-backed service. Calls `LedgerService.postCredit()`
+and `postDebit()` within shared transactions via the `repo` parameter.
 
 **7.4 — Add SettlementRouter**
 
@@ -705,7 +712,7 @@ Default: `invoice` for subscriptions, `wallet` for agent usage.
 
 **7.5 — Wire wallet settlement into agent billing**
 
-Update `reportAgentUsage` to route through SettlementRouter.
+Update `billMeterFact` use case to route through SettlementRouter.
 
 **7.6 — Add credit purchase flow**
 
