@@ -679,9 +679,13 @@ phase.
 
 > **PR title:** `feat: add credits, wallets, and settlement router`
 >
-> **Goal:** Add prepaid credits as the universal billing abstraction for AI
-> workloads. Introduce the settlement router for invoice, wallet, and one-time
-> settlement modes.
+> **Goal:** Add **edge** prepaid credit enforcement (`WalletDO`), burn rates, and
+> settlement router wiring on top of **Phase 6.6** (`LedgerGateway`, split
+> `LedgerService` / `WalletService`, grants-as-accounts, `Dinero`). Introduce
+> invoice, wallet, and one-time settlement modes without re-implementing pgledger
+> wallet persistence.
+>
+> **Prerequisite:** [docs/plans/unprice-phase-06.6-new-ledger.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-06.6-new-ledger.md)
 >
 > **Branch:** `feat/credits-wallets`
 >
@@ -691,19 +695,19 @@ phase.
 
 **7.1 — Add wallet, credit grant, and burn rate schemas**
 
-`wallets`, `credit_grants`, `credit_burn_rates` tables with versioned burn
-rates (`effectiveAt`/`supersededAt`).
+`wallets` (identity; no balance cache if Phase 6.6 already applied), `credit_grants`
+(`amount` numeric / Dinero; remaining from pgledger), `credit_burn_rates` with
+versioned burn rates (`effectiveAt`/`supersededAt`). Skip columns dropped in 6.6.
 
 **7.2 — Add validators and migration**
 
-**7.3 — Create WalletService**
+**7.3 — Extend WalletService (after Phase 6.6)**
 
-Near-leaf service (depends only on `LedgerService`). Methods:
-`getOrCreateWallet`, `addCredits`, `deductCredits` (atomic check-and-deduct),
-`getBalance`, `getGrantHistory`, `getActiveGrants`, `reconcileBalance`.
-Real-time `hasEnoughCredits` lives on the `WalletDO` (edge-side Durable
-Object), not on the Postgres-backed service. Calls `LedgerService.postCredit()`
-and `postDebit()` within shared transactions via the `repo` parameter.
+`WalletService` already owns grants + **`LedgerGateway`** transfers from 6.6.
+Phase 7 adds DO-focused methods (`getActiveGrants` with live balances, flush
+validation / `GRANT_FLUSH_MISMATCH`) and ensures **`hasEnoughCredits`** remains on
+`WalletDO` only. **No** `LedgerService` dependency on `WalletService`; **no**
+`reconcileBalance` cache repair.
 
 **7.4 — Add SettlementRouter**
 
@@ -712,7 +716,8 @@ Default: `invoice` for subscriptions, `wallet` for agent usage.
 
 **7.5 — Wire wallet settlement into agent billing**
 
-Update `billMeterFact` use case to route through SettlementRouter.
+Update `billMeterFact` to route **`Dinero`** through `SettlementRouter` so
+`invoice` vs `wallet` does not double-post ledger charges (see Phase 7 plan).
 
 **7.6 — Add credit purchase flow**
 
@@ -911,9 +916,14 @@ Phase 6: Agent Billing Foundation
   Make agents first-class billable actors that flow through rating and ledger.
   Prepare event schema for trace grouping and outcome pricing.
 
+Phase 6.6: pgledger Ledger And Wallet Core
+  Replace hand-rolled ledger tables with pgledger; split LedgerService vs
+  WalletService; grants as accounts; Dinero at boundaries. See
+  docs/plans/unprice-phase-06.6-new-ledger.md.
+
 Phase 7: Credits, Wallets & Settlement Router
-  Add prepaid credits as the universal AI billing abstraction. Introduce the
-  settlement router for invoice, wallet, and one-time settlement modes.
+  WalletDO edge enforcement, burn rates, and settlement router on top of 6.6.
+  Invoice, wallet, and one-time settlement modes.
 
 Phase 8: Financial Guardrails & Spending Controls
   Prevent runaway agents with real-time financial enforcement, spending limits,
@@ -939,27 +949,29 @@ Track B (Provider):
 
 Track C (Agent Billing):
   Phase 6 depends on Phases 1, 3, 4
-  Phase 7 depends on Phases 4, 5
+  Phase 6.6 (pgledger — see plans/unprice-phase-06.6-new-ledger.md) depends on Phase 6
+  Phase 7 depends on Phases 5, 6, and Phase 6.6
 
 Track D (Advanced Billing):
-  Phase 8 depends on Phases 6, 7
-  Phase 9 depends on Phases 6, 7
-  Phase 10 depends on Phases 6, 7
+  Phase 8 depends on Phases 6, 6.6, 7
+  Phase 9 depends on Phases 6, 6.6, 7
+  Phase 10 depends on Phases 6, 6.6, 7
 ```
 
 Explicit dependency list:
 1. Phase 1 is required before Phase 4 and Phase 6.
 2. Phase 2 is required before Phase 3 and Phase 5.
 3. Phase 3 is required before Phase 5 and before provider-backed settlement in Phase 6.
-4. Phase 4 is required before Phase 5, Phase 6, and Phase 7.
+4. Phase 4 is required before Phase 5, Phase 6, and Phase 6.6.
 5. Phase 5 is required before Phase 7 (credit purchase needs webhook confirmation).
 6. Phase 6 depends on Phases 1, 3, and 4.
-7. Phase 7 depends on Phases 4 and 5.
-8. Phases 8, 9, and 10 each depend on Phases 6 and 7.
-9. Phases 6 and 7 can run in parallel (no dependency between them).
-10. Phases 8, 9, and 10 can run in parallel after both 6 and 7 complete.
+7. Phase 6.6 (pgledger ledger + wallet core) depends on Phase 6 and supersedes
+   hand-rolled ledger wallet columns from earlier plans.
+8. Phase 7 depends on Phases 5, 6, and **6.6** (edge wallet + router on top of gateway).
+9. Phases 8, 9, and 10 each depend on Phases 6, 6.6, and 7.
+10. Phases 8, 9, and 10 can run in parallel after 6, 6.6, and 7 complete.
 
-Sequential execution order: 6 → 7 → 8 → 9 → 10
+Sequential execution order: 6 → 6.6 → 7 → 8 → 9 → 10
 
 ## Related Documents
 
