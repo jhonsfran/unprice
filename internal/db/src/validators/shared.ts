@@ -15,9 +15,6 @@ import {
   FEATURE_TYPES,
   GRANT_TYPES,
   INVOICE_STATUS,
-  LEDGER_ENTRY_TYPES,
-  LEDGER_SETTLEMENT_STATUSES,
-  LEDGER_SETTLEMENT_TYPES,
   OVERAGE_STRATEGIES,
   PAYMENT_PROVIDERS,
   PLAN_TYPES,
@@ -75,9 +72,6 @@ export const whenToBillSchema = z.enum(WHEN_TO_BILLING)
 export const subscriptionStatusSchema = z.enum(SUBSCRIPTION_STATUS)
 export const dueBehaviourSchema = z.enum(DUE_BEHAVIOUR)
 export const invoiceStatusSchema = z.enum(INVOICE_STATUS)
-export const ledgerEntryTypeSchema = z.enum(LEDGER_ENTRY_TYPES)
-export const ledgerSettlementTypeSchema = z.enum(LEDGER_SETTLEMENT_TYPES)
-export const ledgerSettlementStatusSchema = z.enum(LEDGER_SETTLEMENT_STATUSES)
 export const billingAnchorSchema = z.union([
   z.coerce.number().int().min(1).max(31).openapi({
     description:
@@ -212,9 +206,6 @@ export type BillingAnchor = z.infer<typeof billingAnchorSchema>
 export type CollectionMethod = z.infer<typeof collectionMethodSchema>
 export type SubscriptionStatus = z.infer<typeof subscriptionStatusSchema>
 export type InvoiceStatus = z.infer<typeof invoiceStatusSchema>
-export type LedgerEntryType = z.infer<typeof ledgerEntryTypeSchema>
-export type LedgerSettlementType = z.infer<typeof ledgerSettlementTypeSchema>
-export type LedgerSettlementStatus = z.infer<typeof ledgerSettlementStatusSchema>
 export type BillingInterval = z.infer<typeof billingIntervalSchema>
 export type PlanType = z.infer<typeof planTypeSchema>
 export type BillingConfig = z.infer<typeof billingConfigSchema>

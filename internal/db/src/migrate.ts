@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { eq, sql } from "drizzle-orm"
+import type { Database } from "."
 import { createConnection } from "./createConnection"
 import * as schema from "./schema"
 import { hashStringSHA256, newId } from "./utils"
@@ -6,6 +9,48 @@ import { hashStringSHA256, newId } from "./utils"
 import { FEATURE_SLUGS } from "@unprice/config"
 import { migrate } from "drizzle-orm/neon-serverless/migrator"
 import { env } from "../env"
+
+const PGLEDGER_DIR = join(process.cwd(), "src/migrations/pgledger")
+
+async function installPgledger(db: Database) {
+  const ulidSql = readFileSync(join(PGLEDGER_DIR, "ulid.sql"), "utf8")
+  const pgledgerSql = readFileSync(join(PGLEDGER_DIR, "pgledger.sql"), "utf8")
+  const version = readFileSync(join(PGLEDGER_DIR, "VERSION"), "utf8").trim()
+
+  // Multi-statement files with $$-quoted bodies are run via the simple query
+  // protocol — sql.raw passes the text through unparameterised, which is what
+  // pgledger's CREATE FUNCTION blocks need.
+  await db.execute(sql.raw(ulidSql))
+  await db.execute(sql.raw(pgledgerSql))
+
+  // Track installed versions so re-runs are observable and downgrades surface.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS pgledger_install_version (
+      version text NOT NULL,
+      installed_at timestamptz NOT NULL DEFAULT now()
+    )
+  `)
+
+  const existing = await db.execute<{ version: string }>(
+    sql`SELECT version FROM pgledger_install_version ORDER BY installed_at DESC LIMIT 1`
+  )
+  const previous = existing.rows[0]?.version
+
+  if (!previous) {
+    await db.execute(sql`INSERT INTO pgledger_install_version (version) VALUES (${version})`)
+    console.info(`✅ pgledger ${version} installed`)
+  } else if (previous !== version) {
+    if (previous > version) {
+      throw new Error(
+        `pgledger downgrade refused: installed=${previous}, requested=${version}. Restore an older VERSION file or run a forward migration.`
+      )
+    }
+    await db.execute(sql`INSERT INTO pgledger_install_version (version) VALUES (${version})`)
+    console.info(`✅ pgledger upgraded ${previous} → ${version}`)
+  } else {
+    console.info(`✅ pgledger ${version} already installed`)
+  }
+}
 
 async function main() {
   const start = Date.now()
@@ -21,6 +66,7 @@ async function main() {
   })
 
   await migrate(db, { migrationsFolder: "src/migrations" })
+  await installPgledger(db)
 
   let userExists = await db.query.users
     .findFirst({

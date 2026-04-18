@@ -14,7 +14,6 @@ import {
   GRANT_TYPES,
   INVOICE_ITEM_KIND,
   INVOICE_STATUS,
-  LEDGER_ENTRY_TYPES,
   OVERAGE_STRATEGIES,
   PAYMENT_PROVIDERS,
   PLAN_TYPES,
@@ -52,4 +51,3 @@ export const whenToBillEnum = pgEnum("when_to_bill", WHEN_TO_BILLING)
 export const collectionMethodEnum = pgEnum("collection_method", COLLECTION_METHODS)
 export const invoiceItemKindEnum = pgEnum("invoice_item_kind", INVOICE_ITEM_KIND)
 export const overageStrategyEnum = pgEnum("overage_strategy", OVERAGE_STRATEGIES)
-export const ledgerEntryTypeEnum = pgEnum("ledger_entry_type", LEDGER_ENTRY_TYPES)

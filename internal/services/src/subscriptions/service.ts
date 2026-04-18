@@ -22,7 +22,7 @@ import type { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
-import type { LedgerService } from "../ledger/service"
+import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { getPaymentProviderCapabilities } from "../payment-provider/service"
 import type { RatingService } from "../rating/service"
@@ -70,7 +70,7 @@ export class SubscriptionService {
   private readonly customerService: CustomerService
   private readonly billingService: BillingService
   private readonly ratingService: RatingService
-  private readonly ledgerService: LedgerService
+  private readonly ledgerService: LedgerGateway
 
   constructor({
     db,
@@ -96,7 +96,7 @@ export class SubscriptionService {
     customerService: CustomerService
     billingService: BillingService
     ratingService: RatingService
-    ledgerService: LedgerService
+    ledgerService: LedgerGateway
   }) {
     this.db = db
     this.repo = repo

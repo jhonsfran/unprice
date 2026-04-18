@@ -18,8 +18,7 @@ import {
 } from "@unprice/services/entitlements"
 import { GrantsManager } from "@unprice/services/entitlements"
 import { findLimitExceededFact } from "@unprice/services/entitlements"
-import { DrizzleLedgerRepository, LedgerService } from "@unprice/services/ledger"
-import { NoopMetrics } from "@unprice/services/metrics"
+import { LedgerGateway } from "@unprice/services/ledger"
 import { RatingService } from "@unprice/services/rating"
 import { type MeterBillingFact, billMeterFact } from "@unprice/services/use-cases"
 import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm"
@@ -120,7 +119,7 @@ export class EntitlementWindowDO extends DurableObject {
   private readonly analytics: Analytics
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly fallbackAnalytics: AnalyticsEngineDataset | null
-  private readonly ledger: LedgerService
+  private readonly ledger: LedgerGateway
   private readonly logger: AppLogger
   private readonly rating: RatingService
   private readonly ready: Promise<void>
@@ -184,10 +183,9 @@ export class EntitlementWindowDO extends DurableObject {
       analytics: this.analytics,
       grantsManager,
     })
-    this.ledger = new LedgerService({
-      repo: new DrizzleLedgerRepository(billingDb),
+    this.ledger = new LedgerGateway({
+      db: billingDb,
       logger: this.logger,
-      metrics: new NoopMetrics(),
     })
     this.fallbackAnalytics = env.FALLBACK_ANALYTICS ?? null
 

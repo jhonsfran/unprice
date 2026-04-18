@@ -1,13 +1,13 @@
 import type { Database } from "@unprice/db"
-import { formatAmountForLedger, ledgerAmountToCents, newId, randomId } from "@unprice/db/utils"
+import { type Dinero, formatAmountDinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateCycleWindow, calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
+import { isNegative } from "dinero.js"
 import { DrizzleBillingRepository } from "../billing/repository.drizzle"
 import type { CustomerService } from "../customers/service"
-import { DrizzleLedgerRepository } from "../ledger/repository.drizzle"
-import type { LedgerService } from "../ledger/service"
+import type { LedgerEntry, LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
 import type { SubscriptionRepository } from "./repository"
@@ -200,7 +200,7 @@ export async function invoiceSubscription({
   db: Database
   repo: SubscriptionRepository
   ratingService: RatingService
-  ledgerService: LedgerService
+  ledgerService: LedgerGateway
 }): Promise<
   Partial<SubscriptionContext> & {
     phasesProcessed: number
@@ -239,11 +239,9 @@ export async function invoiceSubscription({
       continue
     }
 
-    // Generate a journalId for this statement group so all entries can be
-    // settled atomically via settleJournal instead of query-filter-by-IDs.
-    const journalId = `jrnl_${randomId()}`
-
     // 1) Rate each pending period and post deterministic ledger entries first.
+    //    Entries are tagged with the statement_key so the invoicing query below
+    //    can enumerate them via the gateway's metadata-filtered view.
     for (const period of billingPeriodsToInvoice) {
       const feature = period.subscriptionItem.featurePlanVersion.feature
       const nonUsageQuantity = period.subscriptionItem.units ?? 0
@@ -274,13 +272,13 @@ export async function invoiceSubscription({
       const ratedCharges = ratingResult.val
       const firstCharge = ratedCharges[0]
 
-      const totalAmountMinor = ratedCharges.reduce(
-        (sum, charge) => sum + BigInt(formatAmountForLedger(charge.price.totalPrice.dinero).amount),
-        BigInt(0)
-      )
-      const unitAmountMinor = firstCharge
-        ? BigInt(formatAmountForLedger(firstCharge.price.unitPrice.dinero).amount)
-        : BigInt(0)
+      const totalAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
+        if (sum === null) return charge.price.totalPrice.dinero
+        // biome-ignore lint/suspicious/noExplicitAny: dinero add typing
+        return (require("dinero.js") as any).add(sum, charge.price.totalPrice.dinero)
+      }, null)
+
+      const unitAmount = firstCharge ? firstCharge.price.unitPrice.dinero : null
       const ratedQuantity = ratedCharges.reduce((sum, charge) => sum + Math.max(0, charge.usage), 0)
       const quantity = ratedCharges.length > 0 ? Math.trunc(ratedQuantity) : nonUsageQuantity
       const rawProrationFactor = firstCharge?.prorate
@@ -293,74 +291,47 @@ export async function invoiceSubscription({
       const sourceType = "subscription_billing_period_charge_v1"
       const sourceId = `${period.id}:${period.subscriptionItemId}`
       const entryMetadata = {
-        subscriptionId: period.subscriptionId,
-        subscriptionPhaseId: period.subscriptionPhaseId,
-        subscriptionItemId: period.subscriptionItemId,
-        billingPeriodId: period.id,
-        featurePlanVersionId: period.subscriptionItem.featurePlanVersion.id,
-        invoiceItemKind: (period.type === "trial" ? "trial" : "period") as "trial" | "period",
-        cycleStartAt: period.cycleStartAt,
-        cycleEndAt: period.cycleEndAt,
+        subscription_id: period.subscriptionId,
+        subscription_phase_id: period.subscriptionPhaseId,
+        subscription_item_id: period.subscriptionItemId,
+        billing_period_id: period.id,
+        feature_plan_version_id: period.subscriptionItem.featurePlanVersion.id,
+        invoice_item_kind: (period.type === "trial" ? "trial" : "period") as "trial" | "period",
+        cycle_start_at: period.cycleStartAt,
+        cycle_end_at: period.cycleEndAt,
         quantity,
-        unitAmountMinor: unitAmountMinor.toString(),
-        prorationFactor,
+        unit_amount_snapshot: unitAmount ? toSnapshot(unitAmount) : null,
+        proration_factor: prorationFactor,
+        description: feature.title,
       }
-      const ledgerRepo = new DrizzleLedgerRepository(db)
 
-      // Post $0 trial entries for audit trail completeness (they won't appear
-      // on invoices but maintain a continuous ledger history).
-      if (totalAmountMinor === BigInt(0)) {
-        // Skip ledger post for $0 — the ledger rejects zero amounts.
-        // Record a zero-amount audit entry only for trials so they leave a trace.
-        if (period.type === "trial") {
-          await ledgerService.postDebit({
-            projectId: period.projectId,
-            customerId: period.customerId,
-            currency: phase.planVersion.currency,
-            amountMinor: BigInt(1), // minimum representable unit (sub-cent)
-            sourceType,
-            sourceId,
-            statementKey: period.statementKey,
-            journalId,
-            description: `${feature.title} (trial - $0)`,
-            metadata: { ...entryMetadata, invoiceItemKind: "trial" },
-            repo: ledgerRepo,
-            now,
-          })
-        }
+      // Trial / zero-amount periods don't post to the ledger — pgledger
+      // rejects non-positive transfers and there's no receivable to record.
+      if (!totalAmount || isZero(totalAmount)) {
         continue
       }
 
-      const postResult =
-        totalAmountMinor < BigInt(0)
-          ? await ledgerService.postCredit({
-              projectId: period.projectId,
-              customerId: period.customerId,
-              currency: phase.planVersion.currency,
-              amountMinor: -totalAmountMinor,
-              sourceType,
-              sourceId,
-              statementKey: period.statementKey,
-              journalId,
-              description: feature.title,
-              metadata: entryMetadata,
-              repo: ledgerRepo,
-              now,
-            })
-          : await ledgerService.postDebit({
-              projectId: period.projectId,
-              customerId: period.customerId,
-              currency: phase.planVersion.currency,
-              amountMinor: totalAmountMinor,
-              sourceType,
-              sourceId,
-              statementKey: period.statementKey,
-              journalId,
-              description: feature.title,
-              metadata: entryMetadata,
-              repo: ledgerRepo,
-              now,
-            })
+      if (isNegative(totalAmount)) {
+        // Negative period totals would require issuing credits from a grant
+        // account, which isn't wired up at the ledger layer. Skip here and
+        // let the wallet layer post credits against the customer account.
+        logger.warn("Skipping negative billing period — credits land in wallet flow", {
+          billingPeriodId: period.id,
+          phaseId: phase.id,
+        })
+        continue
+      }
+
+      const postResult = await ledgerService.postCharge({
+        projectId: period.projectId,
+        customerId: period.customerId,
+        currency: phase.planVersion.currency,
+        amount: totalAmount,
+        source: { type: sourceType, id: sourceId },
+        statementKey: period.statementKey,
+        metadata: entryMetadata,
+        eventAt: new Date(now),
+      })
 
       if (postResult.err) {
         logger.error("Error while posting rated period to ledger", {
@@ -373,25 +344,26 @@ export async function invoiceSubscription({
       }
     }
 
-    // 2) Build invoice lines from journal entries (all entries posted above share the same journalId).
-    const journalEntriesResult = await ledgerService.getEntriesByJournal({
+    // 2) Build invoice lines from entries that share this statement_key.
+    //    The new ledger has no settlement table — invoice → ledger linkage
+    //    lives in the entry's metadata (`statement_key`, `billing_period_id`).
+    const statementEntriesResult = await ledgerService.getEntriesByStatementKey({
       projectId: periodItemGroup.projectId,
-      journalId,
-      repo: new DrizzleLedgerRepository(db),
+      statementKey: periodItemGroup.statementKey,
     })
 
-    if (journalEntriesResult.err) {
-      logger.error("Error while loading journal ledger entries", {
+    if (statementEntriesResult.err) {
+      logger.error("Error while loading statement-key ledger entries", {
         phaseId: phase.id,
-        journalId,
         statementKey: periodItemGroup.statementKey,
-        error: toErrorContext(journalEntriesResult.err),
+        error: toErrorContext(statementEntriesResult.err),
       })
-      throw journalEntriesResult.err
+      throw statementEntriesResult.err
     }
 
-    const ledgerEntriesToInvoice = journalEntriesResult.val.filter(
-      (entry) => entry.metadata?.billingPeriodId != null
+    const ledgerEntriesToInvoice = statementEntriesResult.val.filter(
+      (entry: LedgerEntry) =>
+        (entry.metadata as Record<string, unknown> | null)?.billing_period_id != null
     )
 
     if (ledgerEntriesToInvoice.length === 0) {
@@ -406,14 +378,16 @@ export async function invoiceSubscription({
     }
 
     const statementStartAt = Math.min(
-      ...ledgerEntriesToInvoice.map(
-        (entry) => entry.metadata?.cycleStartAt ?? periodItemGroup.invoiceAt
-      )
+      ...ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
+        const meta = entry.metadata as Record<string, unknown> | null
+        return (meta?.cycle_start_at as number | undefined) ?? periodItemGroup.invoiceAt
+      })
     )
     const statementEndAt = Math.max(
-      ...ledgerEntriesToInvoice.map(
-        (entry) => entry.metadata?.cycleEndAt ?? periodItemGroup.invoiceAt
-      )
+      ...ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
+        const meta = entry.metadata as Record<string, unknown> | null
+        return (meta?.cycle_end_at as number | undefined) ?? periodItemGroup.invoiceAt
+      })
     )
 
     await db.transaction(async (tx) => {
@@ -501,32 +475,43 @@ export async function invoiceSubscription({
           return
         }
 
-        const projectedInvoiceItems = ledgerEntriesToInvoice.map((entry) => {
-          const meta = entry.metadata
-          const prorationRaw = meta?.prorationFactor
+        const projectedInvoiceItems = ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
+          const meta = entry.metadata as Record<string, unknown> | null
+          const prorationRaw = meta?.proration_factor
           const prorationFactor =
             typeof prorationRaw === "number" && Number.isFinite(prorationRaw) ? prorationRaw : 1
 
-          const unitAmountMinorBigint = meta?.unitAmountMinor ? BigInt(meta.unitAmountMinor) : null
+          const unitSnap = meta?.unit_amount_snapshot as
+            | { amount: number; scale: number; currency: { code: string; exponent: number } }
+            | undefined
+          const unitAmountCents = unitSnap ? convertSnapshotToProviderCents(unitSnap) : 0
+          const lineCents = formatAmountDinero(entry.amount).amount
+          const description = (meta?.description as string | undefined) ?? null
 
           return {
             id: newId("invoice_item"),
             invoiceId: invoice.id,
-            featurePlanVersionId: meta?.featurePlanVersionId ?? null,
-            subscriptionItemId: meta?.subscriptionItemId ?? null,
-            billingPeriodId: meta?.billingPeriodId ?? null,
-            projectId: entry.projectId,
-            quantity: Math.max(0, Math.trunc(meta?.quantity ?? 0)),
-            cycleStartAt: meta?.cycleStartAt ?? statementStartAt,
-            cycleEndAt: meta?.cycleEndAt ?? statementEndAt,
-            kind: meta?.invoiceItemKind ?? "period",
-            unitAmountCents: unitAmountMinorBigint ? ledgerAmountToCents(unitAmountMinorBigint) : 0,
-            amountSubtotal: ledgerAmountToCents(entry.amountMinor),
-            amountTotal: ledgerAmountToCents(entry.amountMinor),
+            featurePlanVersionId: (meta?.feature_plan_version_id as string | undefined) ?? null,
+            subscriptionItemId: (meta?.subscription_item_id as string | undefined) ?? null,
+            billingPeriodId: (meta?.billing_period_id as string | undefined) ?? null,
+            projectId: periodItemGroup.projectId,
+            quantity: Math.max(0, Math.trunc((meta?.quantity as number | undefined) ?? 0)),
+            cycleStartAt: (meta?.cycle_start_at as number | undefined) ?? statementStartAt,
+            cycleEndAt: (meta?.cycle_end_at as number | undefined) ?? statementEndAt,
+            kind: ((meta?.invoice_item_kind as string | undefined) ?? "period") as
+              | "period"
+              | "tax"
+              | "discount"
+              | "refund"
+              | "adjustment"
+              | "trial",
+            unitAmountCents,
+            amountSubtotal: lineCents,
+            amountTotal: lineCents,
             prorationFactor,
-            description: entry.description ?? null,
+            description,
             itemProviderId: null,
-            ledgerEntryId: entry.id,
+            ledgerTransferId: entry.transferId,
           }
         })
 
@@ -569,20 +554,8 @@ export async function invoiceSubscription({
           })
         }
 
-        // Settle via journalId — all entries for this statement share the same journal.
-        const txLedgerRepo = new DrizzleLedgerRepository(tx)
-        const settleResult = await ledgerService.settleJournal({
-          projectId: phase.projectId,
-          journalId,
-          type: "invoice",
-          artifactId: invoice.id,
-          now,
-          repo: txLedgerRepo,
-        })
-
-        if (settleResult.err) {
-          throw settleResult.err
-        }
+        // No "settle" step in the new ledger — entries point at this invoice
+        // via the shared statement_key in metadata.
       } catch (error) {
         logger.error("Error while invoicing phase", {
           phaseId: phase.id,
@@ -601,4 +574,19 @@ export async function invoiceSubscription({
     phasesProcessed: periodItemsGroups.length,
     subscription,
   }
+}
+
+// Convert a Dinero scale-N snapshot back into the provider scale-2 cent value
+// invoice_items expect. The snapshot's `currency.exponent` carries the target
+// scale (e.g. 2 for USD); rounding mirrors `formatAmountDinero`'s behavior.
+function convertSnapshotToProviderCents(snapshot: {
+  amount: number
+  scale: number
+  currency: { exponent: number }
+}): number {
+  const targetScale = snapshot.currency.exponent
+  const diff = snapshot.scale - targetScale
+  if (diff <= 0) return snapshot.amount
+  const divisor = 10 ** diff
+  return Math.round(snapshot.amount / divisor)
 }

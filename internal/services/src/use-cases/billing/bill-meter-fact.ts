@@ -1,7 +1,7 @@
-import { formatAmountForLedger } from "@unprice/db/utils"
 import { type Currency, currencySchema } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { type Dinero, isZero } from "dinero.js"
 import type { ServiceContext } from "../../context"
 import type { UnPriceLedgerError } from "../../ledger/errors"
 import { UnPriceRatingError } from "../../rating/errors"
@@ -39,7 +39,7 @@ type BillMeterFactInput = {
 }
 
 type BillMeterFactOutput = {
-  amountMinor: bigint
+  amount: Dinero<number> | null
   sourceId: string
   state: "debited" | "noop"
 }
@@ -52,7 +52,7 @@ export async function billMeterFact(
 
   if (fact.delta <= 0) {
     return Ok({
-      amountMinor: BigInt(0),
+      amount: null,
       sourceId: buildLedgerSourceId(fact),
       state: "noop",
     })
@@ -87,32 +87,29 @@ export async function billMeterFact(
     return Err(ratingResult.err)
   }
 
-  // Convert rated Dinero amount to ledger scale-6 minor units.
-  const { amount } = formatAmountForLedger(ratingResult.val.deltaPrice.totalPrice.dinero)
-  const amountMinor = BigInt(amount)
+  const amount = ratingResult.val.deltaPrice.totalPrice.dinero
 
-  if (amountMinor <= BigInt(0)) {
+  if (isZero(amount)) {
     return Ok({
-      amountMinor: BigInt(0),
+      amount: null,
       sourceId: buildLedgerSourceId(fact),
       state: "noop",
     })
   }
 
   const sourceId = buildLedgerSourceId(fact)
-  const ledgerResult = await deps.services.ledger.postDebit({
+  const ledgerResult = await deps.services.ledger.postCharge({
     projectId: fact.project_id,
     customerId: fact.customer_id,
     currency,
-    amountMinor,
-    sourceType: "meter_fact_v1",
-    sourceId,
+    amount,
+    source: { type: "meter_fact_v1", id: sourceId },
     statementKey: fact.statement_key ?? undefined,
     metadata: {
-      featurePlanVersionId: fact.feature_plan_version_id ?? undefined,
-      subscriptionId: fact.subscription_id ?? undefined,
-      subscriptionItemId: fact.subscription_item_id ?? undefined,
-      billingFactId: fact.id,
+      feature_plan_version_id: fact.feature_plan_version_id ?? undefined,
+      subscription_id: fact.subscription_id ?? undefined,
+      subscription_item_id: fact.subscription_item_id ?? undefined,
+      billing_fact_id: fact.id,
     },
   })
 
@@ -121,7 +118,7 @@ export async function billMeterFact(
   }
 
   return Ok({
-    amountMinor,
+    amount,
     sourceId,
     state: "debited",
   })

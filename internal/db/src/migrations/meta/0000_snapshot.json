@@ -1,5 +1,5 @@
 {
-  "id": "789f5d17-08cf-478c-8b16-9d3530ef02d7",
+  "id": "dfe449aa-8ce1-4175-a071-ba45ea4f76e0",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -10,13 +10,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -71,9 +71,37 @@
           "primaryKey": false,
           "notNull": true,
           "default": "''"
+        },
+        "default_customer_id": {
+          "name": "default_customer_id",
+          "type": "varchar(36) COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
+        "apikeys_project_default_customer_idx": {
+          "name": "apikeys_project_default_customer_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "default_customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"unprice_apikeys\".\"default_customer_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "hash": {
           "name": "hash",
           "columns": [
@@ -95,23 +123,25 @@
           "name": "unprice_apikeys_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_apikeys",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "apikeys_default_customer_id_fkey": {
+          "name": "apikeys_default_customer_id_fkey",
+          "tableFrom": "unprice_apikeys",
+          "tableTo": "unprice_customers",
+          "columnsFrom": ["default_customer_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
+          "onDelete": "no action",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
         "pk_apikeys": {
           "name": "pk_apikeys",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -125,7 +155,7 @@
       "columns": {
         "userId": {
           "name": "userId",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -196,12 +226,8 @@
           "name": "unprice_account_userId_unprice_user_id_fk",
           "tableFrom": "unprice_account",
           "tableTo": "unprice_user",
-          "columnsFrom": [
-            "userId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["userId"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -209,10 +235,7 @@
       "compositePrimaryKeys": {
         "unprice_account_provider_providerAccountId_pk": {
           "name": "unprice_account_provider_providerAccountId_pk",
-          "columns": [
-            "provider",
-            "providerAccountId"
-          ]
+          "columns": ["provider", "providerAccountId"]
         }
       },
       "uniqueConstraints": {},
@@ -232,7 +255,7 @@
         },
         "userId": {
           "name": "userId",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -279,12 +302,8 @@
           "name": "unprice_authenticator_userId_unprice_user_id_fk",
           "tableFrom": "unprice_authenticator",
           "tableTo": "unprice_user",
-          "columnsFrom": [
-            "userId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["userId"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -292,19 +311,14 @@
       "compositePrimaryKeys": {
         "unprice_authenticator_userId_credentialID_pk": {
           "name": "unprice_authenticator_userId_credentialID_pk",
-          "columns": [
-            "userId",
-            "credentialID"
-          ]
+          "columns": ["userId", "credentialID"]
         }
       },
       "uniqueConstraints": {
         "unprice_authenticator_credentialID_unique": {
           "name": "unprice_authenticator_credentialID_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "credentialID"
-          ]
+          "columns": ["credentialID"]
         }
       },
       "policies": {},
@@ -317,13 +331,13 @@
       "columns": {
         "sessionToken": {
           "name": "sessionToken",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": true,
           "notNull": true
         },
         "userId": {
           "name": "userId",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -340,12 +354,8 @@
           "name": "unprice_session_userId_unprice_user_id_fk",
           "tableFrom": "unprice_session",
           "tableTo": "unprice_user",
-          "columnsFrom": [
-            "userId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["userId"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -362,7 +372,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": true,
           "notNull": true
         },
@@ -430,9 +440,7 @@
         "unprice_user_email_unique": {
           "name": "unprice_user_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -445,13 +453,13 @@
       "columns": {
         "identifier": {
           "name": "identifier",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "token": {
           "name": "token",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -467,10 +475,7 @@
       "compositePrimaryKeys": {
         "unprice_verificationToken_identifier_token_pk": {
           "name": "unprice_verificationToken_identifier_token_pk",
-          "columns": [
-            "identifier",
-            "token"
-          ]
+          "columns": ["identifier", "token"]
         }
       },
       "uniqueConstraints": {},
@@ -484,7 +489,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": true,
           "notNull": true
         },
@@ -535,13 +540,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -586,12 +591,6 @@
         "metadata": {
           "name": "metadata",
           "type": "json",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "stripe_customer_id": {
-          "name": "stripe_customer_id",
-          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -684,12 +683,8 @@
           "name": "unprice_customers_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_customers",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -697,12 +692,8 @@
           "name": "project_id_fkey",
           "tableFrom": "unprice_customers",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -710,21 +701,10 @@
       "compositePrimaryKeys": {
         "pk_customer": {
           "name": "pk_customer",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
-      "uniqueConstraints": {
-        "stripe_customer_unique": {
-          "name": "stripe_customer_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "stripe_customer_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -735,7 +715,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": true,
           "notNull": true
         },
@@ -755,7 +735,7 @@
         },
         "workspace_id": {
           "name": "workspace_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -801,12 +781,8 @@
           "name": "fk_domain_workspace",
           "tableFrom": "unprice_domains",
           "tableTo": "unprice_workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -816,9 +792,7 @@
         "unprice_domains_name_unique": {
           "name": "unprice_domains_name_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "name"
-          ]
+          "columns": ["name"]
         }
       },
       "policies": {},
@@ -831,13 +805,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -902,12 +876,8 @@
           "name": "unprice_events_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_events",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -915,10 +885,7 @@
       "compositePrimaryKeys": {
         "events_pkey": {
           "name": "events_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -932,13 +899,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1022,12 +989,8 @@
           "name": "unprice_features_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_features",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1035,10 +998,7 @@
       "compositePrimaryKeys": {
         "features_pkey": {
           "name": "features_pkey",
-          "columns": [
-            "project_id",
-            "id"
-          ]
+          "columns": ["project_id", "id"]
         }
       },
       "uniqueConstraints": {},
@@ -1052,13 +1012,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1078,25 +1038,25 @@
         },
         "subscription_id": {
           "name": "subscription_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "customer_id": {
           "name": "customer_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "subscription_phase_id": {
           "name": "subscription_phase_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "subscription_item_id": {
           "name": "subscription_item_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1142,7 +1102,7 @@
         },
         "invoice_id": {
           "name": "invoice_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
@@ -1273,12 +1233,8 @@
           "name": "unprice_billing_periods_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_billing_periods",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1286,14 +1242,8 @@
           "name": "billing_periods_subscription_id_fkey",
           "tableFrom": "unprice_billing_periods",
           "tableTo": "unprice_subscriptions",
-          "columnsFrom": [
-            "subscription_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["subscription_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1301,14 +1251,8 @@
           "name": "billing_periods_subscription_phase_id_fkey",
           "tableFrom": "unprice_billing_periods",
           "tableTo": "unprice_subscription_phases",
-          "columnsFrom": [
-            "subscription_phase_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["subscription_phase_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1316,14 +1260,8 @@
           "name": "billing_periods_customer_id_fkey",
           "tableFrom": "unprice_billing_periods",
           "tableTo": "unprice_customers",
-          "columnsFrom": [
-            "customer_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["customer_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1331,12 +1269,8 @@
           "name": "billing_periods_project_id_fkey",
           "tableFrom": "unprice_billing_periods",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1344,14 +1278,8 @@
           "name": "billing_periods_subscription_item_id_fkey",
           "tableFrom": "unprice_billing_periods",
           "tableTo": "unprice_subscription_items",
-          "columnsFrom": [
-            "subscription_item_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["subscription_item_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1359,14 +1287,8 @@
           "name": "billing_periods_invoice_id_fkey",
           "tableFrom": "unprice_billing_periods",
           "tableTo": "unprice_invoices",
-          "columnsFrom": [
-            "invoice_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["invoice_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1374,10 +1296,7 @@
       "compositePrimaryKeys": {
         "billing_periods_pkey": {
           "name": "billing_periods_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1391,13 +1310,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1417,7 +1336,7 @@
         },
         "customer_id": {
           "name": "customer_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1480,12 +1399,8 @@
           "name": "unprice_credit_grants_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_credit_grants",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1493,14 +1408,8 @@
           "name": "credit_grants_customer_id_fkey",
           "tableFrom": "unprice_credit_grants",
           "tableTo": "unprice_customers",
-          "columnsFrom": [
-            "customer_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["customer_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1508,12 +1417,8 @@
           "name": "credit_grants_project_id_fkey",
           "tableFrom": "unprice_credit_grants",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1521,10 +1426,7 @@
       "compositePrimaryKeys": {
         "credit_grants_pkey": {
           "name": "credit_grants_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1538,13 +1440,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1564,13 +1466,13 @@
         },
         "invoice_id": {
           "name": "invoice_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "credit_grant_id": {
           "name": "credit_grant_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1587,12 +1489,8 @@
           "name": "unprice_invoice_credit_applications_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_invoice_credit_applications",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1600,14 +1498,8 @@
           "name": "invoice_credit_applications_invoice_id_fkey",
           "tableFrom": "unprice_invoice_credit_applications",
           "tableTo": "unprice_invoices",
-          "columnsFrom": [
-            "invoice_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["invoice_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1615,14 +1507,8 @@
           "name": "invoice_credit_applications_credit_grant_id_fkey",
           "tableFrom": "unprice_invoice_credit_applications",
           "tableTo": "unprice_credit_grants",
-          "columnsFrom": [
-            "credit_grant_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["credit_grant_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1630,10 +1516,7 @@
       "compositePrimaryKeys": {
         "invoice_credit_applications_pkey": {
           "name": "invoice_credit_applications_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1647,13 +1530,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -1673,25 +1556,25 @@
         },
         "invoice_id": {
           "name": "invoice_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "billing_period_id": {
           "name": "billing_period_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
         "subscription_item_id": {
           "name": "subscription_item_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
         "feature_plan_version_id": {
           "name": "feature_plan_version_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
@@ -1757,6 +1640,12 @@
         },
         "item_provider_id": {
           "name": "item_provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ledger_transfer_id": {
+          "name": "ledger_transfer_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1888,12 +1777,8 @@
           "name": "unprice_invoice_items_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_invoice_items",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1901,14 +1786,8 @@
           "name": "invoice_items_invoice_id_fkey",
           "tableFrom": "unprice_invoice_items",
           "tableTo": "unprice_invoices",
-          "columnsFrom": [
-            "invoice_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["invoice_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1916,14 +1795,8 @@
           "name": "invoice_items_billing_period_id_fkey",
           "tableFrom": "unprice_invoice_items",
           "tableTo": "unprice_billing_periods",
-          "columnsFrom": [
-            "billing_period_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["billing_period_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1931,14 +1804,8 @@
           "name": "invoice_items_subscription_item_id_fkey",
           "tableFrom": "unprice_invoice_items",
           "tableTo": "unprice_subscription_items",
-          "columnsFrom": [
-            "subscription_item_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["subscription_item_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1946,14 +1813,8 @@
           "name": "invoice_items_feature_plan_version_id_fkey",
           "tableFrom": "unprice_invoice_items",
           "tableTo": "unprice_plan_versions_features",
-          "columnsFrom": [
-            "feature_plan_version_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["feature_plan_version_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1961,12 +1822,8 @@
           "name": "invoice_items_project_id_fkey",
           "tableFrom": "unprice_invoice_items",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1974,10 +1831,7 @@
       "compositePrimaryKeys": {
         "invoice_items_pkey": {
           "name": "invoice_items_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1991,13 +1845,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2017,13 +1871,13 @@
         },
         "subscription_id": {
           "name": "subscription_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "customer_id": {
           "name": "customer_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2257,12 +2111,8 @@
           "name": "unprice_invoices_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_invoices",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2270,14 +2120,8 @@
           "name": "invoices_subscription_id_fkey",
           "tableFrom": "unprice_invoices",
           "tableTo": "unprice_subscriptions",
-          "columnsFrom": [
-            "subscription_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["subscription_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2285,14 +2129,8 @@
           "name": "invoices_customer_id_fkey",
           "tableFrom": "unprice_invoices",
           "tableTo": "unprice_customers",
-          "columnsFrom": [
-            "customer_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["customer_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2300,12 +2138,8 @@
           "name": "invoices_project_id_fkey",
           "tableFrom": "unprice_invoices",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2313,10 +2147,99 @@
       "compositePrimaryKeys": {
         "invoices_pkey": {
           "name": "invoices_pkey",
+          "columns": ["id", "project_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.unprice_ledger_idempotency": {
+      "name": "unprice_ledger_idempotency",
+      "schema": "",
+      "columns": {
+        "project_id": {
+          "name": "project_id",
+          "type": "varchar(36) COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_type": {
+          "name": "source_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "source_id": {
+          "name": "source_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "transfer_id": {
+          "name": "transfer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "statement_key": {
+          "name": "statement_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ledger_idempotency_statement_key_idx": {
+          "name": "ledger_idempotency_statement_key_idx",
           "columns": [
-            "id",
-            "project_id"
-          ]
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "statement_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ledger_idempotency_transfer_id_idx": {
+          "name": "ledger_idempotency_transfer_id_idx",
+          "columns": [
+            {
+              "expression": "transfer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "ledger_idempotency_pkey": {
+          "name": "ledger_idempotency_pkey",
+          "columns": ["project_id", "source_type", "source_id"]
         }
       },
       "uniqueConstraints": {},
@@ -2330,13 +2253,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2508,12 +2431,8 @@
           "name": "unprice_pages_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_pages",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2521,26 +2440,19 @@
       "compositePrimaryKeys": {
         "page_pkey": {
           "name": "page_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {
         "unprice_pages_custom_domain_unique": {
           "name": "unprice_pages_custom_domain_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "custom_domain"
-          ]
+          "columns": ["custom_domain"]
         },
         "unprice_pages_subdomain_unique": {
           "name": "unprice_pages_subdomain_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "subdomain"
-          ]
+          "columns": ["subdomain"]
         }
       },
       "policies": {},
@@ -2553,13 +2465,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2603,6 +2515,18 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "webhook_secret": {
+          "name": "webhook_secret",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "webhook_secret_iv": {
+          "name": "webhook_secret_iv",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -2633,12 +2557,8 @@
           "name": "unprice_payment_provider_config_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_payment_provider_config",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2646,10 +2566,7 @@
       "compositePrimaryKeys": {
         "pk_ppconfig": {
           "name": "pk_ppconfig",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -2663,13 +2580,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2761,12 +2678,8 @@
           "name": "unprice_plans_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_plans",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2774,10 +2687,7 @@
       "compositePrimaryKeys": {
         "plans_pkey": {
           "name": "plans_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -2791,13 +2701,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2817,7 +2727,7 @@
         },
         "plan_version_id": {
           "name": "plan_version_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2831,7 +2741,7 @@
         },
         "feature_id": {
           "name": "feature_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -2905,12 +2815,8 @@
           "name": "unprice_plan_versions_features_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_plan_versions_features",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2918,14 +2824,8 @@
           "name": "plan_versions_id_fkey",
           "tableFrom": "unprice_plan_versions_features",
           "tableTo": "unprice_plan_versions",
-          "columnsFrom": [
-            "plan_version_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["plan_version_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2933,14 +2833,8 @@
           "name": "features_id_fkey",
           "tableFrom": "unprice_plan_versions_features",
           "tableTo": "unprice_features",
-          "columnsFrom": [
-            "feature_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["feature_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2948,22 +2842,14 @@
       "compositePrimaryKeys": {
         "plan_versions_pkey": {
           "name": "plan_versions_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {
         "unique_version_feature": {
           "name": "unique_version_feature",
           "nullsNotDistinct": true,
-          "columns": [
-            "plan_version_id",
-            "feature_id",
-            "project_id",
-            "order"
-          ]
+          "columns": ["plan_version_id", "feature_id", "project_id", "order"]
         }
       },
       "policies": {},
@@ -2976,13 +2862,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3002,7 +2888,7 @@
         },
         "plan_id": {
           "name": "plan_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3054,7 +2940,7 @@
         },
         "published_by": {
           "name": "published_by",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
@@ -3073,7 +2959,7 @@
         },
         "archived_by": {
           "name": "archived_by",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": false
         },
@@ -3169,12 +3055,8 @@
           "name": "unprice_plan_versions_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_plan_versions",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3182,12 +3064,8 @@
           "name": "unprice_plan_versions_published_by_unprice_user_id_fk",
           "tableFrom": "unprice_plan_versions",
           "tableTo": "unprice_user",
-          "columnsFrom": [
-            "published_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["published_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3195,12 +3073,8 @@
           "name": "unprice_plan_versions_archived_by_unprice_user_id_fk",
           "tableFrom": "unprice_plan_versions",
           "tableTo": "unprice_user",
-          "columnsFrom": [
-            "archived_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["archived_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -3208,14 +3082,8 @@
           "name": "plan_versions_plan_id_pkey",
           "tableFrom": "unprice_plan_versions",
           "tableTo": "unprice_plans",
-          "columnsFrom": [
-            "plan_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["plan_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3223,10 +3091,331 @@
       "compositePrimaryKeys": {
         "plan_versions_plan_id_fkey": {
           "name": "plan_versions_plan_id_fkey",
+          "columns": ["id", "project_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.unprice_customer_provider_ids": {
+      "name": "unprice_customer_provider_ids",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36) COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "varchar(36) COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at_m": {
+          "name": "created_at_m",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at_m": {
+          "name": "updated_at_m",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "varchar(36) COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "payment_providers",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_customer_id": {
+          "name": "provider_customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "customer_provider_ids_customer_provider_uq": {
+          "name": "customer_provider_ids_customer_provider_uq",
           "columns": [
-            "id",
-            "project_id"
-          ]
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "customer_provider_ids_provider_customer_uq": {
+          "name": "customer_provider_ids_provider_customer_uq",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "customer_provider_ids_customer_idx": {
+          "name": "customer_provider_ids_customer_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "customer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "unprice_customer_provider_ids_project_id_unprice_projects_id_fk": {
+          "name": "unprice_customer_provider_ids_project_id_unprice_projects_id_fk",
+          "tableFrom": "unprice_customer_provider_ids",
+          "tableTo": "unprice_projects",
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "customer_provider_ids_customer_id_fkey": {
+          "name": "customer_provider_ids_customer_id_fkey",
+          "tableFrom": "unprice_customer_provider_ids",
+          "tableTo": "unprice_customers",
+          "columnsFrom": ["customer_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "customer_provider_ids_pkey": {
+          "name": "customer_provider_ids_pkey",
+          "columns": ["id", "project_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.unprice_webhook_events": {
+      "name": "unprice_webhook_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "varchar(36) COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "project_id": {
+          "name": "project_id",
+          "type": "varchar(36) COLLATE \"C\"",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at_m": {
+          "name": "created_at_m",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "updated_at_m": {
+          "name": "updated_at_m",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "provider": {
+          "name": "provider",
+          "type": "payment_providers",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_event_id": {
+          "name": "provider_event_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_payload": {
+          "name": "raw_payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "signature": {
+          "name": "signature",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "headers": {
+          "name": "headers",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "processed_at_m": {
+          "name": "processed_at_m",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error_payload": {
+          "name": "error_payload",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "webhook_events_provider_event_uq": {
+          "name": "webhook_events_provider_event_uq",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "webhook_events_status_idx": {
+          "name": "webhook_events_status_idx",
+          "columns": [
+            {
+              "expression": "project_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "unprice_webhook_events_project_id_unprice_projects_id_fk": {
+          "name": "unprice_webhook_events_project_id_unprice_projects_id_fk",
+          "tableFrom": "unprice_webhook_events",
+          "tableTo": "unprice_projects",
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "webhook_events_pkey": {
+          "name": "webhook_events_pkey",
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -3240,13 +3429,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": true,
           "notNull": true
         },
         "workspace_id": {
           "name": "workspace_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3369,12 +3558,8 @@
           "name": "fk_project_workspace",
           "tableFrom": "unprice_projects",
           "tableTo": "unprice_workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3384,9 +3569,7 @@
         "unique_slug": {
           "name": "unique_slug",
           "nullsNotDistinct": false,
-          "columns": [
-            "slug"
-          ]
+          "columns": ["slug"]
         }
       },
       "policies": {},
@@ -3399,13 +3582,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3431,19 +3614,19 @@
         },
         "feature_plan_version_id": {
           "name": "feature_plan_version_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "subscription_phase_id": {
           "name": "subscription_phase_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "subscription_id": {
           "name": "subscription_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         }
@@ -3454,12 +3637,8 @@
           "name": "unprice_subscription_items_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_subscription_items",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3467,14 +3646,8 @@
           "name": "subscription_items_plan_version_id_fkey",
           "tableFrom": "unprice_subscription_items",
           "tableTo": "unprice_plan_versions_features",
-          "columnsFrom": [
-            "feature_plan_version_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["feature_plan_version_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3482,12 +3655,8 @@
           "name": "subscription_items_project_id_fkey",
           "tableFrom": "unprice_subscription_items",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3495,14 +3664,8 @@
           "name": "subscription_items_subscription_phase_id_fkey",
           "tableFrom": "unprice_subscription_items",
           "tableTo": "unprice_subscription_phases",
-          "columnsFrom": [
-            "subscription_phase_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["subscription_phase_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3510,14 +3673,8 @@
           "name": "subscription_items_subscription_id_fkey",
           "tableFrom": "unprice_subscription_items",
           "tableTo": "unprice_subscriptions",
-          "columnsFrom": [
-            "subscription_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["subscription_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3525,10 +3682,7 @@
       "compositePrimaryKeys": {
         "subscription_items_pkey": {
           "name": "subscription_items_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -3542,13 +3696,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3568,13 +3722,13 @@
         },
         "subscription_id": {
           "name": "subscription_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "plan_version_id": {
           "name": "plan_version_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3583,6 +3737,14 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "payment_provider": {
+          "name": "payment_provider",
+          "type": "payment_providers",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'sandbox'"
         },
         "trial_units": {
           "name": "trial_units",
@@ -3663,12 +3825,8 @@
           "name": "unprice_subscription_phases_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_subscription_phases",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3676,14 +3834,8 @@
           "name": "subscription_phases_plan_version_id_fkey",
           "tableFrom": "unprice_subscription_phases",
           "tableTo": "unprice_plan_versions",
-          "columnsFrom": [
-            "plan_version_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["plan_version_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3691,12 +3843,8 @@
           "name": "subscription_phases_project_id_fkey",
           "tableFrom": "unprice_subscription_phases",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3704,14 +3852,8 @@
           "name": "subscription_phases_subscription_id_fkey",
           "tableFrom": "unprice_subscription_phases",
           "tableTo": "unprice_subscriptions",
-          "columnsFrom": [
-            "subscription_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["subscription_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3719,10 +3861,7 @@
       "compositePrimaryKeys": {
         "subscription_phases_pkey": {
           "name": "subscription_phases_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -3736,13 +3875,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3762,7 +3901,7 @@
         },
         "customers_id": {
           "name": "customers_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3854,12 +3993,8 @@
           "name": "unprice_subscriptions_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_subscriptions",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3867,14 +4002,8 @@
           "name": "subscriptions_customer_id_fkey",
           "tableFrom": "unprice_subscriptions",
           "tableTo": "unprice_customers",
-          "columnsFrom": [
-            "customers_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["customers_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3882,12 +4011,8 @@
           "name": "subscriptions_project_id_fkey",
           "tableFrom": "unprice_subscriptions",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3895,10 +4020,7 @@
       "compositePrimaryKeys": {
         "subscriptions_pkey": {
           "name": "subscriptions_pkey",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {},
@@ -3912,13 +4034,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -3983,12 +4105,8 @@
           "name": "unprice_subscription_locks_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_subscription_locks",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3996,10 +4114,7 @@
       "compositePrimaryKeys": {
         "subscription_locks_pk": {
           "name": "subscription_locks_pk",
-          "columns": [
-            "project_id",
-            "subscription_id"
-          ]
+          "columns": ["project_id", "subscription_id"]
         }
       },
       "uniqueConstraints": {},
@@ -4027,7 +4142,7 @@
         },
         "workspace_id": {
           "name": "workspace_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -4059,7 +4174,7 @@
         },
         "invited_by": {
           "name": "invited_by",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         }
@@ -4070,12 +4185,8 @@
           "name": "invites_workspace_id_fkey",
           "tableFrom": "unprice_invites",
           "tableTo": "unprice_workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4083,12 +4194,8 @@
           "name": "invites_invited_by_fkey",
           "tableFrom": "unprice_invites",
           "tableTo": "unprice_user",
-          "columnsFrom": [
-            "invited_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["invited_by"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4096,10 +4203,7 @@
       "compositePrimaryKeys": {
         "invites_pkey": {
           "name": "invites_pkey",
-          "columns": [
-            "email",
-            "workspace_id"
-          ]
+          "columns": ["email", "workspace_id"]
         }
       },
       "uniqueConstraints": {},
@@ -4127,13 +4231,13 @@
         },
         "workspace_id": {
           "name": "workspace_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "user_id": {
           "name": "user_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -4152,12 +4256,8 @@
           "name": "members_user_id_fkey",
           "tableFrom": "unprice_members",
           "tableTo": "unprice_user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4165,12 +4265,8 @@
           "name": "members_workspace_id_fkey",
           "tableFrom": "unprice_members",
           "tableTo": "unprice_workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["workspace_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4178,10 +4274,7 @@
       "compositePrimaryKeys": {
         "members_pkey": {
           "name": "members_pkey",
-          "columns": [
-            "user_id",
-            "workspace_id"
-          ]
+          "columns": ["user_id", "workspace_id"]
         }
       },
       "uniqueConstraints": {},
@@ -4195,7 +4288,7 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": true,
           "notNull": true
         },
@@ -4248,7 +4341,7 @@
         },
         "created_by": {
           "name": "created_by",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -4301,12 +4394,8 @@
           "name": "unprice_workspaces_created_by_unprice_user_id_fk",
           "tableFrom": "unprice_workspaces",
           "tableTo": "unprice_user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -4316,272 +4405,14 @@
         "unprice_workspaces_slug_unique": {
           "name": "unprice_workspaces_slug_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "slug"
-          ]
+          "columns": ["slug"]
         },
         "unprice_customer_id": {
           "name": "unprice_customer_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "unprice_customer_id"
-          ]
+          "columns": ["unprice_customer_id"]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.unprice_entitlements": {
-      "name": "unprice_entitlements",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "project_id": {
-          "name": "project_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at_m": {
-          "name": "created_at_m",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "updated_at_m": {
-          "name": "updated_at_m",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "customer_id": {
-          "name": "customer_id",
-          "type": "varchar(36)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "feature_slug": {
-          "name": "feature_slug",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "feature_type": {
-          "name": "feature_type",
-          "type": "feature_types",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "unit_of_measure": {
-          "name": "unit_of_measure",
-          "type": "varchar(24)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'units'"
-        },
-        "reset_config": {
-          "name": "reset_config",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "meter_config": {
-          "name": "meter_config",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "is_current": {
-          "name": "is_current",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "merging_policy": {
-          "name": "merging_policy",
-          "type": "merging_policy",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'sum'"
-        },
-        "limit": {
-          "name": "limit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "effective_at": {
-          "name": "effective_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "computed_at": {
-          "name": "computed_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "next_revalidate_at": {
-          "name": "next_revalidate_at",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "grants": {
-          "name": "grants",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::json"
-        },
-        "metadata": {
-          "name": "metadata",
-          "type": "json",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "unique_current_subject_feature": {
-          "name": "unique_current_subject_feature",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "customer_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "feature_slug",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"unprice_entitlements\".\"is_current\" = true",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_entitlements_edge_cache": {
-          "name": "idx_entitlements_edge_cache",
-          "columns": [
-            {
-              "expression": "project_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "customer_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "feature_slug",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "effective_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "unprice_entitlements_project_id_unprice_projects_id_fk": {
-          "name": "unprice_entitlements_project_id_unprice_projects_id_fk",
-          "tableFrom": "unprice_entitlements",
-          "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "project_id_fkey": {
-          "name": "project_id_fkey",
-          "tableFrom": "unprice_entitlements",
-          "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "customer_id_fkey": {
-          "name": "customer_id_fkey",
-          "tableFrom": "unprice_entitlements",
-          "tableTo": "unprice_customers",
-          "columnsFrom": [
-            "customer_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "pk_entitlement": {
-          "name": "pk_entitlement",
-          "columns": [
-            "id",
-            "project_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -4592,13 +4423,13 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
         "project_id": {
           "name": "project_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -4624,7 +4455,7 @@
         },
         "feature_plan_version_id": {
           "name": "feature_plan_version_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -4644,7 +4475,7 @@
         },
         "subject_id": {
           "name": "subject_id",
-          "type": "varchar(36)",
+          "type": "varchar(36) COLLATE \"C\"",
           "primaryKey": false,
           "notNull": true
         },
@@ -4807,12 +4638,8 @@
           "name": "unprice_grants_project_id_unprice_projects_id_fk",
           "tableFrom": "unprice_grants",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4820,14 +4647,8 @@
           "name": "feature_plan_version_id_fkey",
           "tableFrom": "unprice_grants",
           "tableTo": "unprice_plan_versions_features",
-          "columnsFrom": [
-            "feature_plan_version_id",
-            "project_id"
-          ],
-          "columnsTo": [
-            "id",
-            "project_id"
-          ],
+          "columnsFrom": ["feature_plan_version_id", "project_id"],
+          "columnsTo": ["id", "project_id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -4835,12 +4656,8 @@
           "name": "project_id_fkey",
           "tableFrom": "unprice_grants",
           "tableTo": "unprice_projects",
-          "columnsFrom": [
-            "project_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["project_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -4848,10 +4665,7 @@
       "compositePrimaryKeys": {
         "pk_grant": {
           "name": "pk_grant",
-          "columns": [
-            "id",
-            "project_id"
-          ]
+          "columns": ["id", "project_id"]
         }
       },
       "uniqueConstraints": {
@@ -4878,226 +4692,122 @@
     "public.aggregation_method": {
       "name": "aggregation_method",
       "schema": "public",
-      "values": [
-        "sum",
-        "count",
-        "max",
-        "latest"
-      ]
+      "values": ["sum", "count", "max", "latest"]
     },
     "public.billing_interval": {
       "name": "billing_interval",
       "schema": "public",
-      "values": [
-        "month",
-        "year",
-        "week",
-        "day",
-        "minute",
-        "onetime"
-      ]
+      "values": ["month", "year", "week", "day", "minute", "onetime"]
     },
     "public.billing_period_status_v1": {
       "name": "billing_period_status_v1",
       "schema": "public",
-      "values": [
-        "pending",
-        "invoiced",
-        "voided"
-      ]
+      "values": ["pending", "invoiced", "voided"]
     },
     "public.billing_period_type": {
       "name": "billing_period_type",
       "schema": "public",
-      "values": [
-        "normal",
-        "trial"
-      ]
+      "values": ["normal", "trial"]
     },
     "public.collection_method": {
       "name": "collection_method",
       "schema": "public",
-      "values": [
-        "charge_automatically",
-        "send_invoice"
-      ]
+      "values": ["charge_automatically", "send_invoice"]
     },
     "public.currency": {
       "name": "currency",
       "schema": "public",
-      "values": [
-        "USD",
-        "EUR"
-      ]
+      "values": ["USD", "EUR"]
     },
     "public.due_behaviour": {
       "name": "due_behaviour",
       "schema": "public",
-      "values": [
-        "cancel",
-        "downgrade"
-      ]
+      "values": ["cancel", "downgrade"]
     },
     "public.merging_policy": {
       "name": "merging_policy",
       "schema": "public",
-      "values": [
-        "sum",
-        "max",
-        "min",
-        "replace"
-      ]
+      "values": ["sum", "max", "min", "replace"]
     },
     "public.grant_type": {
       "name": "grant_type",
       "schema": "public",
-      "values": [
-        "subscription",
-        "manual",
-        "promotion",
-        "trial",
-        "addon"
-      ]
+      "values": ["subscription", "manual", "promotion", "trial", "addon"]
     },
     "public.invoice_item_kind": {
       "name": "invoice_item_kind",
       "schema": "public",
-      "values": [
-        "period",
-        "tax",
-        "discount",
-        "refund",
-        "adjustment",
-        "trial"
-      ]
+      "values": ["period", "tax", "discount", "refund", "adjustment", "trial"]
     },
     "public.invoice_status": {
       "name": "invoice_status",
       "schema": "public",
-      "values": [
-        "unpaid",
-        "paid",
-        "waiting",
-        "void",
-        "draft",
-        "failed"
-      ]
+      "values": ["unpaid", "paid", "waiting", "void", "draft", "failed"]
     },
     "public.overage_strategy": {
       "name": "overage_strategy",
       "schema": "public",
-      "values": [
-        "none",
-        "last-call",
-        "always"
-      ]
+      "values": ["none", "last-call", "always"]
     },
     "public.payment_providers": {
       "name": "payment_providers",
       "schema": "public",
-      "values": [
-        "stripe",
-        "square",
-        "sandbox"
-      ]
+      "values": ["stripe", "square", "sandbox"]
     },
     "public.plan_type": {
       "name": "plan_type",
       "schema": "public",
-      "values": [
-        "recurring",
-        "onetime"
-      ]
+      "values": ["recurring", "onetime"]
     },
     "public.app_stages": {
       "name": "app_stages",
       "schema": "public",
-      "values": [
-        "prod",
-        "test",
-        "dev"
-      ]
+      "values": ["prod", "test", "dev"]
     },
     "public.plan_version_status": {
       "name": "plan_version_status",
       "schema": "public",
-      "values": [
-        "draft",
-        "published"
-      ]
+      "values": ["draft", "published"]
     },
     "public.subject_type": {
       "name": "subject_type",
       "schema": "public",
-      "values": [
-        "project",
-        "plan",
-        "plan_version",
-        "customer"
-      ]
+      "values": ["project", "plan", "plan_version", "customer"]
     },
     "public.subscription_status_v3": {
       "name": "subscription_status_v3",
       "schema": "public",
-      "values": [
-        "active",
-        "trialing",
-        "canceled",
-        "expired",
-        "past_due"
-      ]
+      "values": ["active", "trialing", "canceled", "expired", "past_due"]
     },
     "public.team_roles": {
       "name": "team_roles",
       "schema": "public",
-      "values": [
-        "OWNER",
-        "ADMIN",
-        "MEMBER"
-      ]
+      "values": ["OWNER", "ADMIN", "MEMBER"]
     },
     "public.tier_mode": {
       "name": "tier_mode",
       "schema": "public",
-      "values": [
-        "volume",
-        "graduated"
-      ]
+      "values": ["volume", "graduated"]
     },
     "public.feature_config_types": {
       "name": "feature_config_types",
       "schema": "public",
-      "values": [
-        "feature",
-        "addon"
-      ]
+      "values": ["feature", "addon"]
     },
     "public.feature_types": {
       "name": "feature_types",
       "schema": "public",
-      "values": [
-        "flat",
-        "tier",
-        "package",
-        "usage"
-      ]
+      "values": ["flat", "tier", "package", "usage"]
     },
     "public.usage_mode": {
       "name": "usage_mode",
       "schema": "public",
-      "values": [
-        "tier",
-        "package",
-        "unit"
-      ]
+      "values": ["tier", "package", "unit"]
     },
     "public.when_to_bill": {
       "name": "when_to_bill",
       "schema": "public",
-      "values": [
-        "pay_in_advance",
-        "pay_in_arrear"
-      ]
+      "values": ["pay_in_advance", "pay_in_arrear"]
     }
   },
   "schemas": {},

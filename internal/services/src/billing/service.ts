@@ -22,7 +22,7 @@ import { addDays } from "date-fns"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
-import type { LedgerService } from "../ledger/service"
+import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { RatedCharge, RatingInput } from "../rating/types"
@@ -58,7 +58,7 @@ export class BillingService {
   private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
   private readonly ratingService: RatingService
-  private readonly ledgerService: LedgerService
+  private readonly ledgerService: LedgerGateway
 
   constructor({
     db,
@@ -82,7 +82,7 @@ export class BillingService {
     customerService: CustomerService
     grantsManager: GrantsManager
     ratingService: RatingService
-    ledgerService: LedgerService
+    ledgerService: LedgerGateway
   }) {
     this.db = db
     this.logger = logger

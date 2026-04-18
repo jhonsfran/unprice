@@ -1,7 +1,7 @@
 import { USD } from "@dinero.js/currencies"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { dinero } from "dinero.js"
+import { dinero, isZero } from "dinero.js"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import { UnPriceLedgerError } from "../../ledger/errors"
@@ -34,7 +34,7 @@ describe("billMeterFact", () => {
   }
 
   const mockRateIncrementalUsage = vi.fn()
-  const mockPostDebit = vi.fn()
+  const mockPostCharge = vi.fn()
   const logger: Logger = {
     set: vi.fn(),
     debug: vi.fn(),
@@ -50,7 +50,7 @@ describe("billMeterFact", () => {
         rateIncrementalUsage: mockRateIncrementalUsage,
       },
       ledger: {
-        postDebit: mockPostDebit,
+        postCharge: mockPostCharge,
       },
     } as unknown as Pick<ServiceContext, "rating" | "ledger">,
     logger,
@@ -60,7 +60,7 @@ describe("billMeterFact", () => {
     vi.clearAllMocks()
   })
 
-  it("rates incremental usage and posts an idempotent ledger debit", async () => {
+  it("rates incremental usage and posts an idempotent ledger charge", async () => {
     mockRateIncrementalUsage.mockResolvedValueOnce(
       Ok({
         usageBefore: 20,
@@ -75,18 +75,17 @@ describe("billMeterFact", () => {
         },
       })
     )
-    mockPostDebit.mockResolvedValueOnce(Ok({ id: "ledger_entry_123" }))
+    mockPostCharge.mockResolvedValueOnce(Ok({ id: "pglt_123" }))
 
     const result = await billMeterFact(deps, {
       fact: baseFact,
     })
 
     expect(result.err).toBeUndefined()
-    expect(result.val).toEqual({
-      amountMinor: BigInt(5_000_000),
-      sourceId: "proj_123:cus_123:api_calls:idem_123",
-      state: "debited",
-    })
+    expect(result.val?.sourceId).toBe("proj_123:cus_123:api_calls:idem_123")
+    expect(result.val?.state).toBe("debited")
+    expect(result.val?.amount).toBeDefined()
+    expect(isZero(result.val!.amount!)).toBe(false)
     expect(mockRateIncrementalUsage).toHaveBeenCalledWith(
       expect.objectContaining({
         usageBefore: 20,
@@ -94,14 +93,13 @@ describe("billMeterFact", () => {
         now: baseFact.timestamp,
       })
     )
-    expect(mockPostDebit).toHaveBeenCalledWith(
+    expect(mockPostCharge).toHaveBeenCalledWith(
       expect.objectContaining({
-        sourceType: "meter_fact_v1",
-        sourceId: "proj_123:cus_123:api_calls:idem_123",
-        amountMinor: BigInt(5_000_000),
+        source: { type: "meter_fact_v1", id: "proj_123:cus_123:api_calls:idem_123" },
+        currency: "USD",
         metadata: expect.objectContaining({
-          featurePlanVersionId: "fpv_123",
-          billingFactId: baseFact.id,
+          feature_plan_version_id: "fpv_123",
+          billing_fact_id: baseFact.id,
         }),
       })
     )
@@ -129,11 +127,11 @@ describe("billMeterFact", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val).toEqual({
-      amountMinor: BigInt(0),
+      amount: null,
       sourceId: "proj_123:cus_123:api_calls:idem_123",
       state: "noop",
     })
-    expect(mockPostDebit).not.toHaveBeenCalled()
+    expect(mockPostCharge).not.toHaveBeenCalled()
   })
 
   it("returns noop for negative delta (correction events)", async () => {
@@ -143,12 +141,12 @@ describe("billMeterFact", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val).toEqual({
-      amountMinor: BigInt(0),
+      amount: null,
       sourceId: "proj_123:cus_123:api_calls:idem_123",
       state: "noop",
     })
     expect(mockRateIncrementalUsage).not.toHaveBeenCalled()
-    expect(mockPostDebit).not.toHaveBeenCalled()
+    expect(mockPostCharge).not.toHaveBeenCalled()
   })
 
   it("returns noop for zero delta", async () => {
@@ -169,10 +167,10 @@ describe("billMeterFact", () => {
     expect(result.err).toBeInstanceOf(UnPriceRatingError)
     expect(result.err?.message).toContain("Invalid currency")
     expect(mockRateIncrementalUsage).not.toHaveBeenCalled()
-    expect(mockPostDebit).not.toHaveBeenCalled()
+    expect(mockPostCharge).not.toHaveBeenCalled()
   })
 
-  it("passes undefined featurePlanVersionId when fact has null value", async () => {
+  it("passes undefined feature_plan_version_id when fact has null value", async () => {
     mockRateIncrementalUsage.mockResolvedValueOnce(
       Ok({
         usageBefore: 20,
@@ -187,16 +185,16 @@ describe("billMeterFact", () => {
         },
       })
     )
-    mockPostDebit.mockResolvedValueOnce(Ok({ id: "ledger_entry_456" }))
+    mockPostCharge.mockResolvedValueOnce(Ok({ id: "pglt_456" }))
 
     await billMeterFact(deps, {
       fact: { ...baseFact, feature_plan_version_id: null },
     })
 
-    expect(mockPostDebit).toHaveBeenCalledWith(
+    expect(mockPostCharge).toHaveBeenCalledWith(
       expect.objectContaining({
         metadata: expect.objectContaining({
-          featurePlanVersionId: undefined,
+          feature_plan_version_id: undefined,
         }),
       })
     )
@@ -216,7 +214,7 @@ describe("billMeterFact", () => {
     })
 
     expect(result.err).toBeInstanceOf(UnPriceRatingError)
-    expect(mockPostDebit).not.toHaveBeenCalled()
+    expect(mockPostCharge).not.toHaveBeenCalled()
   })
 
   it("propagates ledger errors", async () => {
@@ -234,10 +232,10 @@ describe("billMeterFact", () => {
         },
       })
     )
-    mockPostDebit.mockResolvedValueOnce(
+    mockPostCharge.mockResolvedValueOnce(
       Err(
         new UnPriceLedgerError({
-          message: "LEDGER_POST_ENTRY_FAILED",
+          message: "LEDGER_TRANSFER_FAILED",
         })
       )
     )

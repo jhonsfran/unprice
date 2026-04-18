@@ -1,1 +1,0 @@
-DROP TYPE "public"."ledger_settlement_type";

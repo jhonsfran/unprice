@@ -209,7 +209,12 @@ export interface CreateInvoiceItemsBatchInput {
     prorationFactor: number
     description: string | null
     itemProviderId: string | null
-    ledgerEntryId: string | null
+    /**
+     * pgledger transfer id (e.g. `pglt_<ulid>`). Stored as plain text — pgledger
+     * tables sit outside Drizzle's schema, so this is a soft pointer rather than
+     * a Drizzle foreign key.
+     */
+    ledgerTransferId: string | null
   }>
 }
 

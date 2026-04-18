@@ -7,8 +7,7 @@ import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
-import { DrizzleLedgerRepository } from "../ledger/repository.drizzle"
-import { LedgerService } from "../ledger/service"
+import { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { RatingService } from "../rating/service"
@@ -301,10 +300,9 @@ describe("Workflow - Billing and Subscriptions", () => {
     const customerService = new CustomerService({ ...serviceDeps, paymentProviderResolver })
     const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
     const ratingService = new RatingService({ ...serviceDeps, grantsManager })
-    const ledgerService = new LedgerService({
-      repo: new DrizzleLedgerRepository(mockDb),
+    const ledgerService = new LedgerGateway({
+      db: mockDb,
       logger: mockLogger,
-      metrics: mockMetrics,
     })
     _billingService = new BillingService({
       ...serviceDeps,

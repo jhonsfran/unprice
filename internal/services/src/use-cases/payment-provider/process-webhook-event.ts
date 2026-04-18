@@ -13,7 +13,7 @@ import type {
 } from "../../payment-provider/interface"
 
 type ProcessWebhookEventDeps = {
-  services: Pick<ServiceContext, "customers" | "subscriptions" | "ledger">
+  services: Pick<ServiceContext, "customers" | "subscriptions">
   db: Database
   logger: Logger
 }
@@ -187,22 +187,9 @@ async function applyWebhookEvent({
       },
     })
 
-    // Confirm the ledger settlement for this invoice via LedgerService.
-    const confirmResult = await deps.services.ledger.confirmSettlement({
-      projectId,
-      artifactId: invoice.id,
-      type: "invoice",
-      now,
-    })
-
-    if (confirmResult.err) {
-      return Err(
-        new FetchError({
-          message: `Ledger settlement confirm failed: ${confirmResult.err.message}`,
-          retry: false,
-        })
-      )
-    }
+    // Payment-side ledger entries (cash clearing the customer receivable) are
+    // owned by the payout-reconciliation adapter, not this webhook path.
+    // Invoice status above captures the payment state for downstream consumers.
 
     const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
       projectId,
@@ -249,21 +236,9 @@ async function applyWebhookEvent({
       },
     })
 
-    const disputeConfirmResult = await deps.services.ledger.confirmSettlement({
-      projectId,
-      artifactId: invoice.id,
-      type: "invoice",
-      now,
-    })
-
-    if (disputeConfirmResult.err) {
-      return Err(
-        new FetchError({
-          message: `Ledger settlement confirm failed: ${disputeConfirmResult.err.message}`,
-          retry: false,
-        })
-      )
-    }
+    // As with payment.succeeded, the payout-reconciliation adapter owns
+    // the ledger-side accounting; the invoice status captures the dispute
+    // resolution.
 
     const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
       projectId,
@@ -314,26 +289,9 @@ async function applyWebhookEvent({
     },
   })
 
-  if (normalizedEvent.eventType === "payment.reversed") {
-    // Reverse the ledger settlement via LedgerService — posts reversal entries,
-    // preserves full audit trail, and restores unsettled balance.
-    const reversalResult = await deps.services.ledger.reverseSettlement({
-      projectId,
-      artifactId: invoice.id,
-      type: "invoice",
-      reason: normalizedEvent.failureMessage ?? "Payment reversed by provider",
-      now,
-    })
-
-    if (reversalResult.err) {
-      return Err(
-        new FetchError({
-          message: `Ledger settlement reversal failed: ${reversalResult.err.message}`,
-          retry: false,
-        })
-      )
-    }
-  }
+  // Refund accounting (revenue → customer reverse transfers) is owned by
+  // the wallet layer. The invoice's failed/unpaid status above already
+  // reflects the reversal for downstream consumers.
 
   const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
     projectId,

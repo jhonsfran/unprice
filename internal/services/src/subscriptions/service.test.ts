@@ -10,8 +10,7 @@ import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
-import { DrizzleLedgerRepository } from "../ledger/repository.drizzle"
-import { LedgerService } from "../ledger/service"
+import { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { RatingService } from "../rating/service"
@@ -386,10 +385,9 @@ describe("SubscriptionService - grant lifecycle", () => {
       customerService,
       grantsManager,
       ratingService,
-      ledgerService: new LedgerService({
-        repo: new DrizzleLedgerRepository(mockDb),
+      ledgerService: new LedgerGateway({
+        db: mockDb,
         logger: mockLogger,
-        metrics: mockMetrics,
       }),
     })
     subscriptionService = new SubscriptionService({
@@ -398,10 +396,9 @@ describe("SubscriptionService - grant lifecycle", () => {
       customerService,
       billingService,
       ratingService,
-      ledgerService: new LedgerService({
-        repo: new DrizzleLedgerRepository(mockDb),
+      ledgerService: new LedgerGateway({
+        db: mockDb,
         logger: mockLogger,
-        metrics: mockMetrics,
       }),
     })
   })

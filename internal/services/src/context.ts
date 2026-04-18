@@ -8,8 +8,7 @@ import { GrantsManager } from "./entitlements/grants"
 import { EntitlementService } from "./entitlements/service"
 import { EventService } from "./events/service"
 import { FeatureService } from "./features/service"
-import { DrizzleLedgerRepository } from "./ledger/repository.drizzle"
-import { LedgerService } from "./ledger/service"
+import { LedgerGateway } from "./ledger"
 import { PageService } from "./pages/service"
 import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
@@ -38,7 +37,7 @@ export interface ServiceContext {
   grantsManager: GrantsManager
   paymentProviderResolver: PaymentProviderResolver
   rating: RatingService
-  ledger: LedgerService
+  ledger: LedgerGateway
   billing: BillingService
   subscriptions: SubscriptionService
   entitlements: EntitlementService
@@ -65,10 +64,9 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     logger: deps.logger,
   })
 
-  const ledger = new LedgerService({
-    repo: new DrizzleLedgerRepository(deps.db),
+  const ledger = new LedgerGateway({
+    db: deps.db,
     logger: deps.logger,
-    metrics: deps.metrics,
   })
 
   const customers = new CustomerService({

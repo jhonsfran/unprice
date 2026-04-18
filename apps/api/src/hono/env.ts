@@ -6,7 +6,7 @@ import type { ApiKeysService } from "@unprice/services/apikey"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { EntitlementService } from "@unprice/services/entitlements"
-import type { LedgerService } from "@unprice/services/ledger"
+import type { LedgerGateway } from "@unprice/services/ledger"
 import type { Metrics } from "@unprice/services/metrics"
 import type { PlanService } from "@unprice/services/plans"
 import type { ProjectService } from "@unprice/services/projects"
@@ -26,7 +26,7 @@ export type DomainServiceContext = {
   ingestion: IngestionService
   project: ProjectService
   apikey: ApiKeysService
-  ledger: LedgerService
+  ledger: LedgerGateway
 }
 
 /**

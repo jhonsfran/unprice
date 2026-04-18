@@ -18,7 +18,7 @@ import { UnPriceMachineError } from "./errors"
 
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
-import type { LedgerService } from "../ledger/service"
+import type { LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
@@ -67,7 +67,7 @@ export class SubscriptionMachine {
   private customerService: CustomerService
   private grantService: GrantsManager
   private ratingService: RatingService
-  private ledgerService: LedgerService
+  private ledgerService: LedgerGateway
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -94,7 +94,7 @@ export class SubscriptionMachine {
     logger: Logger
     customer: CustomerService
     ratingService: RatingService
-    ledgerService: LedgerService
+    ledgerService: LedgerGateway
     now: number
     db: Database
     repo: SubscriptionRepository
@@ -163,7 +163,7 @@ export class SubscriptionMachine {
               db: Database
               repo: SubscriptionRepository
               ratingService: RatingService
-              ledgerService: LedgerService
+              ledgerService: LedgerGateway
             }
           }) => {
             const result = await invoiceSubscription({
@@ -796,7 +796,7 @@ export class SubscriptionMachine {
     logger: Logger
     customer: CustomerService
     ratingService: RatingService
-    ledgerService: LedgerService
+    ledgerService: LedgerGateway
     now: number
     db: Database
     repo: SubscriptionRepository
