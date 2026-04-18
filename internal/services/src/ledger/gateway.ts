@@ -143,19 +143,6 @@ function asCurrency(value: string): Currency {
   return value as Currency
 }
 
-function dineroSnapshot(amount: Dinero<number>): {
-  amount: number
-  scale: number
-  currency: string
-} {
-  const snap = toSnapshot(amount)
-  return {
-    amount: snap.amount,
-    scale: snap.scale,
-    currency: snap.currency.code,
-  }
-}
-
 /**
  * Typed wrapper over the pgledger SQL surface. Owns:
  *
@@ -651,18 +638,7 @@ export class LedgerGateway {
     }
 
     const decimal = toLedgerAmount(request.amount)
-    const snapshot = dineroSnapshot(request.amount)
-    // Source identity (project/source/statement) lives on the idempotency row,
-    // not here — the JSONB stays user-metadata + the dinero snapshot for round-
-    // trip reads against the numeric column's scale.
-    const metadata = {
-      ...(request.metadata ?? {}),
-      dinero: {
-        amount: snapshot.amount,
-        scale: snapshot.scale,
-        currency: snapshot.currency,
-      },
-    }
+    const metadata = request.metadata ?? {}
     const eventAt = request.eventAt ?? null
 
     const result = await tx.execute<PgledgerTransferRow>(

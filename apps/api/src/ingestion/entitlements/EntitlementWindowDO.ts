@@ -301,9 +301,7 @@ export class EntitlementWindowDO extends DurableObject {
 
       // if there are facts inserted lets set an alarm to flush to analytics
       if (result.allowed && insertedFactCount > 0 && !this.isAlarmScheduled) {
-        // set the alarm to flush the outbox to tinybird
-        await this.ctx.storage.setAlarm(Date.now() + 30_000) // every 30secs
-        this.isAlarmScheduled = true
+        await this.scheduleAlarm(Date.now() + 30_000)
       }
 
       return result
@@ -455,15 +453,13 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     if (remainingOutboxCount > 0) {
-      await this.ctx.storage.setAlarm(Date.now() + 30_000)
-      this.isAlarmScheduled = true
+      await this.scheduleAlarm(Date.now() + 30_000)
       return
     }
 
     // Outbox is empty, but we haven't reached self-destruct time.
     // Schedule one final alarm to wake up and die.
-    await this.ctx.storage.setAlarm(selfDestructAt)
-    this.isAlarmScheduled = true
+    await this.scheduleAlarm(selfDestructAt)
   }
 
   private parseApplyInput(input: ApplyInput): ApplyInput {
@@ -558,8 +554,10 @@ export class EntitlementWindowDO extends DurableObject {
 
   private async processBillingBatch(rows: OutboxBillingRow[]): Promise<void> {
     for (const row of rows) {
+      let parsedFact: OutboxFact | undefined
+
       try {
-        const parsedFact = this.parseOutboxFactPayload(row.payload)
+        parsedFact = this.parseOutboxFactPayload(row.payload)
         const fact: MeterBillingFact = {
           ...parsedFact,
         }
@@ -582,6 +580,7 @@ export class EntitlementWindowDO extends DurableObject {
             outboxId: row.id,
             projectId: fact.project_id,
             customerId: fact.customer_id,
+            eventId: fact.event_id,
             featureSlug: fact.feature_slug,
             idempotencyKey: fact.idempotency_key,
             error: this.errorMessage(result.err),
@@ -599,6 +598,8 @@ export class EntitlementWindowDO extends DurableObject {
       } catch (error) {
         this.logger.error("Failed to parse or process unbilled meter fact row", {
           outboxId: row.id,
+          customerId: parsedFact?.customer_id,
+          eventId: parsedFact?.event_id,
           error: this.errorMessage(error),
         })
       }
@@ -687,5 +688,10 @@ export class EntitlementWindowDO extends DurableObject {
 
   private makeMeterStateKey(meterKey: string): string {
     return `meter-state:${meterKey}`
+  }
+
+  private async scheduleAlarm(scheduledAt: number): Promise<void> {
+    await this.ctx.storage.setAlarm(scheduledAt)
+    this.isAlarmScheduled = true
   }
 }

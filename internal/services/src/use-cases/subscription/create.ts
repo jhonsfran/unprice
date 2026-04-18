@@ -1,6 +1,10 @@
 import type { Database } from "@unprice/db"
-import type { InsertSubscription, Subscription } from "@unprice/db/validators"
-import type { Result, SchemaError } from "@unprice/error"
+import type {
+  InsertSubscription,
+  InsertSubscriptionPhase,
+  Subscription,
+} from "@unprice/db/validators"
+import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
@@ -12,7 +16,7 @@ type CreateSubscriptionDeps = {
 }
 
 type CreateSubscriptionInput = {
-  input: Omit<InsertSubscription, "phases">
+  input: InsertSubscription
   projectId: string
 }
 
@@ -21,6 +25,7 @@ export async function createSubscription(
   params: CreateSubscriptionInput
 ): Promise<Result<Subscription, UnPriceSubscriptionError | SchemaError>> {
   const { input, projectId } = params
+  const { phases, ...subscriptionInput } = input
 
   deps.logger.set({
     business: {
@@ -31,10 +36,34 @@ export async function createSubscription(
   })
 
   return deps.db.transaction(async (tx) => {
-    return deps.services.subscriptions.createSubscription({
-      input,
+    const { err, val: subscription } = await deps.services.subscriptions.createSubscription({
+      input: subscriptionInput,
       projectId,
       db: tx,
     })
+
+    if (err) {
+      return Err(err)
+    }
+
+    const now = Date.now()
+
+    for (const phase of phases) {
+      const { err: phaseErr } = await deps.services.subscriptions.createPhase({
+        input: {
+          ...phase,
+          subscriptionId: subscription.id,
+        } as InsertSubscriptionPhase,
+        projectId,
+        db: tx,
+        now,
+      })
+
+      if (phaseErr) {
+        return Err(phaseErr)
+      }
+    }
+
+    return Ok(subscription)
   })
 }
