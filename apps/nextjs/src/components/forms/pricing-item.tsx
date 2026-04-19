@@ -1,17 +1,14 @@
 "use client"
 
-import {
-  FEATURE_TYPES_MAPS,
-  TIER_MODES_MAP,
-  USAGE_MODES_MAP,
-  currencySymbol,
-} from "@unprice/db/utils"
+import { FEATURE_TYPES_MAPS, TIER_MODES_MAP, USAGE_MODES_MAP } from "@unprice/db/utils"
+
 import { nFormatter } from "@unprice/db/utils"
 import {
   type PlanVersionExtended,
   calculateFreeUnits,
   calculatePricePerFeature,
 } from "@unprice/db/validators"
+import { currencySymbol } from "@unprice/money"
 import { CheckIcon, HelpCircle } from "@unprice/ui/icons"
 import { Slider } from "@unprice/ui/slider"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"

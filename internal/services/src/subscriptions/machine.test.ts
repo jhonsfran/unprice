@@ -1,4 +1,3 @@
-import * as dineroCurrencies from "@dinero.js/currencies"
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/db/schema"
@@ -11,6 +10,7 @@ import type {
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { type Dinero, dinero, toSnapshot } from "dinero.js"
+import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { CustomerService } from "../customers/service"

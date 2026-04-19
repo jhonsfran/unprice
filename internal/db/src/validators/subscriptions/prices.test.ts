@@ -1,7 +1,7 @@
 import { dinero, toDecimal } from "dinero.js"
 import { describe, expect, it } from "vitest"
 
-import * as currencies from "@dinero.js/currencies"
+import * as currencies from "dinero.js/currencies"
 import type { Feature } from "../features"
 import type { PlanVersionFeature } from "../planVersionFeatures"
 import type { PlanVersionExtended } from "../planVersions"

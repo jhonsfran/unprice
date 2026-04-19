@@ -1,5 +1,5 @@
-import { EUR, USD } from "@dinero.js/currencies"
 import { dinero } from "dinero.js"
+import { EUR, USD } from "dinero.js/currencies"
 import { describe, expect, it } from "vitest"
 import { assertCurrencyMatch, assertPositiveAmount } from "./core"
 

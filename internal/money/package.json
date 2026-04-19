@@ -1,0 +1,28 @@
+{
+  "name": "@unprice/money",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "typesVersions": {
+    "*": {
+      "*": ["src/*"]
+    }
+  },
+  "license": "AGPL-3.0",
+  "scripts": {
+    "clean": "rm -rf .turbo node_modules",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "dinero.js": "2.0.2"
+  },
+  "devDependencies": {
+    "@unprice/tsconfig": "workspace:*",
+    "typescript": "^5.3.3",
+    "vitest": "^2.0.5"
+  }
+}

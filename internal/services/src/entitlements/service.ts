@@ -1,10 +1,11 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq } from "@unprice/db"
-import { add, currencies, dinero, formatMoney, newId, toDecimal } from "@unprice/db/utils"
+import { add, currencies, dinero, newId, toDecimal } from "@unprice/db/utils"
 import type { Dinero } from "@unprice/db/utils"
 import type { Currency, CurrentUsage, EntitlementState } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger, WideEventInput } from "@unprice/logs"
+import { formatMoney } from "@unprice/money"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import type { BillingService } from "../billing"
@@ -586,7 +587,7 @@ export class EntitlementService {
           const included = usageGrants.reduce((acc, u) => acc + u.included, 0)
 
           // TODO: sloppy, we should use the currency from the plan version feature
-          const zeroDinero = dinero({
+          const zeroDinero: import("dinero.js").Dinero<number> = dinero({
             amount: 0,
             currency: currencies[currency as keyof typeof currencies],
           })

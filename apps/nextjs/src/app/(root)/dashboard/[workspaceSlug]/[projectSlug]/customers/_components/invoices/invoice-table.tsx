@@ -1,6 +1,6 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@unprice/ui/table"
 
-import { formatMoney } from "@unprice/db/utils"
+import { formatMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Separator } from "@unprice/ui/separator"
 import { Typography } from "@unprice/ui/typography"

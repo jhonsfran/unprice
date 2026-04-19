@@ -1,5 +1,5 @@
-import * as currencies from "@dinero.js/currencies"
 import { dinero } from "dinero.js"
+import * as currencies from "dinero.js/currencies"
 import { describe, expect, it } from "vitest"
 import type { UsageGrant } from "./prices"
 import { calculateWaterfallPrice } from "./prices"

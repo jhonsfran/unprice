@@ -1,5 +1,6 @@
-import * as currencies from "@dinero.js/currencies"
+import { LEDGER_SCALE } from "@unprice/money"
 import { dinero } from "dinero.js"
+import * as currencies from "dinero.js/currencies"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import * as z from "zod"
 import { ZodError } from "zod"
@@ -22,11 +23,20 @@ import {
 
 extendZodWithOpenApi(z)
 
+// Prices are validated against the ledger scale (LEDGER_SCALE = 8 decimal
+// places) on both ends: finer fractions would be silently truncated by the
+// ledger's numeric column, and a pre-decimal limit keeps the max encodable
+// minor-unit amount (10^8 × 10^8 = 10^16) safely below `Number.MAX_SAFE_INTEGER`
+// (~9.007 × 10^15). Single prices >$99,999,999 aren't realistic for SaaS;
+// revisit if they ever are.
 export const priceSchema = z.coerce
   .string()
-  .regex(/^\d{1,10}(\.\d{1,10})?$/, "Invalid price format")
+  .regex(
+    new RegExp(`^\\d{1,8}(\\.\\d{1,${LEDGER_SCALE}})?$`),
+    `Invalid price format: up to 8 digits before the decimal and up to ${LEDGER_SCALE} after (ledger precision)`
+  )
   .describe(
-    "Price value as a decimal string. Supports up to 10 digits before and after the decimal point. Examples: '9.99', '100', '0.50', '1234.56'"
+    `Price value as a decimal string. Up to 8 digits before the decimal point and up to ${LEDGER_SCALE} after (matches ledger scale). Examples: '9.99', '100', '0.50', '1234.56', '0.00000003'`
   )
 
 export const dineroSnapshotSchema = z
@@ -101,8 +111,12 @@ export const dineroSchema = z
     })
 
     try {
+      // Cast to the unbranded snapshot shape so the zod output type stays
+      // currency-agnostic. In dinero 2.0.2, `currencies[code]` is typed with
+      // the full ISO union, which leaks into `.toJSON()` and would narrow
+      // every downstream consumer (CalculatedPrice, test fixtures, etc.).
       return {
-        dinero: price.toJSON(),
+        dinero: price.toJSON() as z.infer<typeof dineroSnapshotSchema>,
         displayAmount: priceCents,
       }
     } catch {

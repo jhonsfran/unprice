@@ -7,7 +7,7 @@ import { useFieldArray } from "react-hook-form"
 import { BILLING_CONFIG, OVERAGE_STRATEGIES_MAP, RESET_CONFIG } from "@unprice/db/utils"
 import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
 
-import { currencySymbol } from "@unprice/db/utils"
+import { currencySymbol } from "@unprice/money"
 import { Button } from "@unprice/ui/button"
 import { FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { Input } from "@unprice/ui/input"

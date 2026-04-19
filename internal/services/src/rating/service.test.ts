@@ -1,10 +1,10 @@
-import * as dineroCurrencies from "@dinero.js/currencies"
 import type { Analytics } from "@unprice/analytics"
-import { formatAmountDinero } from "@unprice/db/utils"
 import type { Entitlement, grantSchemaExtended } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { formatAmountForProvider } from "@unprice/money"
 import { dinero } from "dinero.js"
+import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { z } from "zod"
 import type { GrantsManager } from "../entitlements"
@@ -209,7 +209,7 @@ describe("RatingService", () => {
     expect(mockAnalytics.getUsageBillingFeatures).not.toHaveBeenCalled()
 
     const totalCents = result.val!.reduce(
-      (total, item) => total + formatAmountDinero(item.price.totalPrice.dinero).amount,
+      (total, item) => total + formatAmountForProvider(item.price.totalPrice.dinero).amount,
       0
     )
     expect(totalCents).toBe(700)
@@ -261,7 +261,7 @@ describe("RatingService", () => {
     })
 
     expect(result.err).toBeUndefined()
-    expect(formatAmountDinero(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(500)
+    expect(formatAmountForProvider(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(500)
   })
 
   it("computes marginal delta for tier pricing", async () => {
@@ -299,7 +299,7 @@ describe("RatingService", () => {
     })
 
     expect(result.err).toBeUndefined()
-    expect(formatAmountDinero(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(100)
+    expect(formatAmountForProvider(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(100)
   })
 
   it("computes marginal delta for package pricing", async () => {
@@ -324,7 +324,7 @@ describe("RatingService", () => {
     })
 
     expect(result.err).toBeUndefined()
-    expect(formatAmountDinero(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(1_000)
+    expect(formatAmountForProvider(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(1_000)
   })
 
   describe("multi-grant waterfall", () => {
@@ -372,11 +372,11 @@ describe("RatingService", () => {
 
       // Grant A (higher priority) consumes first 5 units
       expect(chargeA.usage).toBe(5)
-      expect(formatAmountDinero(chargeA.price.totalPrice.dinero).amount).toBe(500)
+      expect(formatAmountForProvider(chargeA.price.totalPrice.dinero).amount).toBe(500)
 
       // Grant B gets remaining 3 units at $2/unit
       expect(chargeB.usage).toBe(3)
-      expect(formatAmountDinero(chargeB.price.totalPrice.dinero).amount).toBe(600)
+      expect(formatAmountForProvider(chargeB.price.totalPrice.dinero).amount).toBe(600)
     })
 
     it("handles overage when usage exceeds all grant limits", async () => {
@@ -408,12 +408,12 @@ describe("RatingService", () => {
       expect(charges.length).toBe(2)
 
       const baseCharge = charges.find((c) => c.usage === 3)!
-      expect(formatAmountDinero(baseCharge.price.totalPrice.dinero).amount).toBe(300)
+      expect(formatAmountForProvider(baseCharge.price.totalPrice.dinero).amount).toBe(300)
 
       const overageCharge = charges.find((c) => c.usage === 4)!
       expect(overageCharge.usage).toBe(4)
       // Overage is marginal: price(7) - price(3) = 700 - 300 = 400
-      expect(formatAmountDinero(overageCharge.price.totalPrice.dinero).amount).toBe(400)
+      expect(formatAmountForProvider(overageCharge.price.totalPrice.dinero).amount).toBe(400)
     })
   })
 
@@ -599,7 +599,7 @@ describe("RatingService", () => {
       // entitlement computed once (not twice — before and after share it)
       expect(mockComputeEntitlementState).toHaveBeenCalledTimes(1)
       expect(result.val!.usageDelta).toBe(5)
-      expect(formatAmountDinero(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(500)
+      expect(formatAmountForProvider(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(500)
     })
 
     it("returns zero delta when no grants exist", async () => {
@@ -616,7 +616,7 @@ describe("RatingService", () => {
       expect(result.err).toBeUndefined()
       expect(result.val!.before).toEqual([])
       expect(result.val!.after).toEqual([])
-      expect(formatAmountDinero(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(0)
+      expect(formatAmountForProvider(result.val!.deltaPrice.totalPrice.dinero).amount).toBe(0)
     })
   })
 })

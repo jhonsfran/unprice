@@ -1,5 +1,13 @@
+import { type Dinero, dinero } from "dinero.js"
+import { USD } from "dinero.js/currencies"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
+
+// Real Dinero<number> at the requested scale; the production pricing path
+// calls transformScale/toSnapshot on it, so plain objects won't do.
+function fakeDinero(amount: number, scale: number): Dinero<number> {
+  return dinero({ amount, currency: USD, scale })
+}
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 const TEST_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
@@ -79,6 +87,9 @@ const DEFAULT_METER_KEY = [
   DEFAULT_METER_CONFIG.aggregationField,
 ].join(":")
 
+// configFeatureSchema is mocked to accept any record; the DO forwards this
+// straight to calculatePricePerFeature (also mocked) and never inspects its
+// internals, so this stub just needs to pass validation.
 const DEFAULT_PRICE_CONFIG = {
   usageMode: "unit" as const,
   price: {
@@ -97,16 +108,16 @@ describe("EntitlementWindowDO", () => {
     testState.analyticsIngestV2.mockReset()
     testState.engineApply.mockReset()
     testState.pricePerFeature.mockReset()
-    // Default: unit pricing — amount = quantity * 100 cents
-    testState.pricePerFeature.mockImplementation(
-      ({ quantity }: { quantity: number }) => ({
-        val: {
-          totalPrice: {
-            dinero: { amount: Math.max(0, quantity) * 100, scale: 2 },
-          },
+    // Default: unit pricing — amount = quantity * $1.00. We return fake Dinero
+    // objects (toJSON + currency snapshot) so the real diffLedgerMinor /
+    // transformScale pipeline can rescale them to LEDGER_SCALE (6).
+    testState.pricePerFeature.mockImplementation(({ quantity }: { quantity: number }) => ({
+      val: {
+        totalPrice: {
+          dinero: fakeDinero(Math.max(0, quantity) * 100, 2),
         },
-      })
-    )
+      },
+    }))
     vi.spyOn(Date, "now").mockReturnValue(BASE_NOW)
   })
 
@@ -140,12 +151,52 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(1)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
 
-    // priced payload surfaces amount_cents + priced_at
+    // priced payload surfaces ledger-scale amount + priced_at
     const payload = JSON.parse(db.outboxRows[0]!.payload)
-    expect(payload.amount_cents).toBe(300) // 3 units @ 100 cents
+    // 3 units @ $1.00 = $3.00 = 300_000_000 at LEDGER_SCALE (8)
+    expect(payload.amount).toBe(300_000_000)
+    expect(payload.amount_scale).toBe(8)
     expect(payload.currency).toBe("USD")
     expect(payload.priced_at).toBe(BASE_NOW)
     expect(payload.feature_plan_version_id).toBe("fpv_123")
+  })
+
+  it("preserves sub-cent pricing precisely across many events", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    // Price = $0.000003 per unit (3 at scale 6; transformScale up-converts
+    // to 300 at LEDGER_SCALE=8). Each event has delta=1; cumulative
+    // value_after grows by 1 per call.
+    testState.pricePerFeature.mockImplementation(({ quantity }: { quantity: number }) => ({
+      val: { totalPrice: { dinero: fakeDinero(Math.max(0, quantity) * 3, 6) } },
+    }))
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const EVENT_COUNT = 1000
+    for (let i = 0; i < EVENT_COUNT; i++) {
+      testState.engineApply.mockImplementationOnce((_event: unknown, options?: PersistOptions) => {
+        const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: i + 1 }]
+        options?.beforePersist?.(facts)
+        return facts
+      })
+      await durableObject.apply(
+        createApplyInput({
+          idempotencyKey: `idem_${i}`,
+          event: { ...createApplyInput().event, id: `evt_${i}` },
+        })
+      )
+    }
+
+    // Per-event amount would round to 0 cents at scale 2, losing all revenue.
+    // At LEDGER_SCALE=8 each $0.000003 delta = 300 minor units; sum is exact.
+    const total = db.outboxRows.reduce(
+      (acc, row) => acc + (JSON.parse(row.payload).amount as number),
+      0
+    )
+    expect(total).toBe(EVENT_COUNT * 300)
   })
 
   it("stores denied results and reuses them when a retry hits the same limit", async () => {
@@ -246,7 +297,8 @@ describe("EntitlementWindowDO", () => {
         idempotency_key: input.idempotencyKey,
         stream_id: input.streamId,
         value_after: 2,
-        amount_cents: 200,
+        amount: 200_000_000,
+        amount_scale: 8,
         currency: "USD",
       }),
     ])
@@ -304,7 +356,10 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
     for (let i = 0; i < 10; i++) {
       await durableObject.apply(
-        createApplyInput({ idempotencyKey: `idem_${i}`, event: { ...createApplyInput().event, id: `evt_${i}` } })
+        createApplyInput({
+          idempotencyKey: `idem_${i}`,
+          event: { ...createApplyInput().event, id: `evt_${i}` },
+        })
       )
     }
     await durableObject.alarm()
@@ -333,7 +388,9 @@ describe("EntitlementWindowDO", () => {
 
     // subsequent apply with a different plan version must throw
     await expect(
-      durableObject.apply(createApplyInput({ idempotencyKey: "idem_b", featurePlanVersionId: "fpv_other" }))
+      durableObject.apply(
+        createApplyInput({ idempotencyKey: "idem_b", featurePlanVersionId: "fpv_other" })
+      )
     ).rejects.toThrow(/Plan version for meter .* has changed/)
   })
 
@@ -419,13 +476,6 @@ async function loadEntitlementWindowDO() {
   vi.doMock("@unprice/db/validators", () => ({
     calculatePricePerFeature: testState.pricePerFeature,
     configFeatureSchema: z.record(z.string(), z.unknown()),
-  }))
-
-  vi.doMock("@unprice/db/utils", () => ({
-    formatAmountDinero: (price: { amount: number }) => ({
-      amount: price.amount,
-      currency: "usd",
-    }),
   }))
 
   vi.doMock("@unprice/services/entitlements", () => {

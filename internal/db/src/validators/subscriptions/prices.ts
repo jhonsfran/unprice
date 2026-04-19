@@ -1,11 +1,11 @@
-import * as currencies from "@dinero.js/currencies"
 import type { Dinero } from "dinero.js"
 import { add, dinero, isZero, multiply, toDecimal, trimScale } from "dinero.js"
+import * as currencies from "dinero.js/currencies"
 import { z } from "zod"
 
 import type { Result } from "@unprice/error"
 import { Err, Ok, type SchemaError } from "@unprice/error"
-import { calculatePercentage, formatMoney } from "../../utils"
+import { calculatePercentage, formatMoney } from "@unprice/money"
 import type { PlanVersionExtended } from "../planVersions"
 import { type Currency, typeFeatureSchema } from "../shared"
 import { UnPriceCalculationError } from "./../errors"
@@ -57,7 +57,9 @@ export const calculateFlatPricePlan = ({
   prorate?: number
 }): Result<z.infer<typeof calculatePriceSchema>, UnPriceCalculationError> => {
   const defaultDineroCurrency = currencies[planVersion.currency]
-  let total = dinero({ amount: 0, currency: defaultDineroCurrency })
+  // `Dinero<number>` (default scale=string) so `add` accepts CalculatedPrice
+  // dineros that aren't narrowed to "USD"|"EUR".
+  let total: Dinero<number> = dinero({ amount: 0, currency: defaultDineroCurrency })
   let hasUsage = false
 
   // here we are getting the price of flat features because that determines the plan price
@@ -109,7 +111,7 @@ export const calculateTotalPricePlan = ({
   currency: Currency
 }): Result<z.infer<typeof calculatePriceSchema>, UnPriceCalculationError> => {
   const defaultDineroCurrency = currencies[currency]
-  let total = dinero({ amount: 0, currency: defaultDineroCurrency })
+  let total: Dinero<number> = dinero({ amount: 0, currency: defaultDineroCurrency })
 
   for (const feature of features) {
     // flat features are always quantity 1

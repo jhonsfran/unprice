@@ -42,7 +42,6 @@
     "test:file": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run \"$@\""
   },
   "dependencies": {
-    "@dinero.js/currencies": "2.0.0-alpha.14",
     "@t3-oss/env-core": "^0.12.0",
     "@unkey/cache": "^1.5.0",
     "@unprice/analytics": "workspace:^",
@@ -53,11 +52,12 @@
     "@unprice/lakehouse": "workspace:^",
     "@unprice/logs": "workspace:^",
     "@unprice/metrics": "workspace:^",
+    "@unprice/money": "workspace:^",
     "@unprice/stripe": "workspace:^",
     "@upstash/redis": "^1.35.3",
     "date-fns": "^3.3.1",
     "date-fns-tz": "^3.2.0",
-    "dinero.js": "2.0.0-alpha.14",
+    "dinero.js": "2.0.2",
     "p-limit": "^7.1.1",
     "xstate": "^5.21.0",
     "zod": "^3.24.2"

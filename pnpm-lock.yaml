@@ -84,6 +84,9 @@ importers:
       '@unprice/logs':
         specifier: workspace:^
         version: link:../../internal/logs
+      '@unprice/money':
+        specifier: workspace:^
+        version: link:../../internal/money
       '@unprice/observability':
         specifier: workspace:^
         version: link:../../internal/observability
@@ -127,6 +130,9 @@ importers:
       '@unprice/tsconfig':
         specifier: workspace:^
         version: link:../../tooling/typescript
+      dinero.js:
+        specifier: 2.0.2
+        version: 2.0.2
       drizzle-kit:
         specifier: ^0.30.5
         version: 0.30.6
@@ -188,9 +194,6 @@ importers:
 
   apps/nextjs:
     dependencies:
-      '@dinero.js/currencies':
-        specifier: 2.0.0-alpha.14
-        version: 2.0.0-alpha.14
       '@dnd-kit/core':
         specifier: ^6.1.0
         version: 6.3.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
@@ -266,6 +269,9 @@ importers:
       '@unprice/logs':
         specifier: workspace:^
         version: link:../../internal/logs
+      '@unprice/money':
+        specifier: workspace:^
+        version: link:../../internal/money
       '@unprice/observability':
         specifier: workspace:^
         version: link:../../internal/observability
@@ -312,8 +318,8 @@ importers:
         specifier: ^3.2.0
         version: 3.2.0(date-fns@3.6.0)
       dinero.js:
-        specifier: 2.0.0-alpha.14
-        version: 2.0.0-alpha.14
+        specifier: 2.0.2
+        version: 2.0.2
       evlog:
         specifier: 2.4.1
         version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.35(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(@vercel/functions@1.6.0(@aws-sdk/credential-provider-web-identity@3.972.8))(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
@@ -441,6 +447,9 @@ importers:
       '@unprice/logs':
         specifier: workspace:^
         version: link:../logs
+      '@unprice/money':
+        specifier: workspace:^
+        version: link:../money
       evlog:
         specifier: 2.4.1
         version: 2.4.1(h3@1.15.5)(hono@4.11.9)(next@14.2.35(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
@@ -531,9 +540,6 @@ importers:
       '@auth/core':
         specifier: ^0.34.1
         version: 0.34.3(nodemailer@7.0.13)
-      '@dinero.js/currencies':
-        specifier: 2.0.0-alpha.14
-        version: 2.0.0-alpha.14
       '@neondatabase/serverless':
         specifier: ^0.10.3
         version: 0.10.4
@@ -546,6 +552,9 @@ importers:
       '@unprice/error':
         specifier: workspace:^
         version: link:../error
+      '@unprice/money':
+        specifier: workspace:^
+        version: link:../money
       base-x:
         specifier: ^4.0.0
         version: 4.0.1
@@ -556,8 +565,8 @@ importers:
         specifier: ^3.2.0
         version: 3.2.0(date-fns@3.6.0)
       dinero.js:
-        specifier: 2.0.0-alpha.14
-        version: 2.0.0-alpha.14
+        specifier: 2.0.2
+        version: 2.0.2
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0)
@@ -758,6 +767,22 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  internal/money:
+    dependencies:
+      dinero.js:
+        specifier: 2.0.2
+        version: 2.0.2
+    devDependencies:
+      '@unprice/tsconfig':
+        specifier: workspace:*
+        version: link:../../tooling/typescript
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.33)(terser@5.46.0)
+
   internal/observability:
     dependencies:
       '@t3-oss/env-core':
@@ -788,9 +813,6 @@ importers:
 
   internal/services:
     dependencies:
-      '@dinero.js/currencies':
-        specifier: 2.0.0-alpha.14
-        version: 2.0.0-alpha.14
       '@t3-oss/env-core':
         specifier: ^0.12.0
         version: 0.12.0(typescript@5.9.3)(zod@3.25.76)
@@ -821,6 +843,9 @@ importers:
       '@unprice/metrics':
         specifier: workspace:^
         version: link:../metrics
+      '@unprice/money':
+        specifier: workspace:^
+        version: link:../money
       '@unprice/stripe':
         specifier: workspace:^
         version: link:../stripe
@@ -834,8 +859,8 @@ importers:
         specifier: ^3.2.0
         version: 3.2.0(date-fns@3.6.0)
       dinero.js:
-        specifier: 2.0.0-alpha.14
-        version: 2.0.0-alpha.14
+        specifier: 2.0.2
+        version: 2.0.2
       p-limit:
         specifier: ^7.1.1
         version: 7.3.0
@@ -6947,6 +6972,10 @@ packages:
 
   dinero.js@2.0.0-alpha.14:
     resolution: {integrity: sha512-dkURHd9P+2TjuSTMUAnvrB7SsL4GbBYG/WPtIBV8M+L7Xf80x84sJcUUTxIS33S4AlkIbVANlaL86w2g5zdrmg==}
+
+  dinero.js@2.0.2:
+    resolution: {integrity: sha512-d+4egJTvNinkb66KSed11Daqz6MWaOHzyalLu6h3p+BLrsmwKFjHjvOKivOWeM7WyoX89te+xx4cKI6zrDtCfQ==}
+    engines: {node: '>=20.0.0'}
 
   dir-glob@3.0.1:
     resolution: {integrity: sha512-WkrWp9GR4KXfKGYzOLmTuGVi1UWFfws377n9cc55/tb6DuqyF6pcQ5AbiHEshaDpY9v6oaSr2XCDidGmMwdzIA==}
@@ -18471,6 +18500,8 @@ snapshots:
       '@dinero.js/calculator-number': 2.0.0-alpha.14
       '@dinero.js/core': 2.0.0-alpha.14
       '@dinero.js/currencies': 2.0.0-alpha.14
+
+  dinero.js@2.0.2: {}
 
   dir-glob@3.0.1:
     dependencies:

@@ -1,7 +1,7 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq, sql } from "@unprice/db"
 import { creditGrants, invoiceCreditApplications } from "@unprice/db/schema"
-import { formatAmountDinero, hashStringSHA256, newId } from "@unprice/db/utils"
+import { hashStringSHA256, newId } from "@unprice/db/utils"
 import {
   type AggregationMethod,
   type CollectionMethod,
@@ -18,6 +18,7 @@ import {
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { formatAmountForProvider } from "@unprice/money"
 import { addDays } from "date-fns"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
@@ -860,7 +861,7 @@ export class BillingService {
     // LEGACY PATH: In the ledger-first flow (invokes.ts), invoice items are already
     // priced from ledger entry projection. This code path only fires for items that
     // bypassed the ledger (amountSubtotal/amountTotal/unitAmountCents all zero).
-    // Uses formatAmountDinero (scale-2) intentionally because these items go directly
+    // Uses formatAmountForProvider (scale-2) intentionally because these items go directly
     // to the invoice, not through the ledger. Once all billing flows go through the
     // ledger, this fallback can be removed.
     const invoiceItemsToCompute = billableInvoiceItems.filter(
@@ -1183,9 +1184,9 @@ export class BillingService {
               const targetItem = featureItems[0]
 
               if (targetItem) {
-                const unitAmountCents = formatAmountDinero(res.price.unitPrice.dinero).amount
-                const totalAmountCents = formatAmountDinero(res.price.totalPrice.dinero).amount
-                const subtotalAmountCents = formatAmountDinero(
+                const unitAmountCents = formatAmountForProvider(res.price.unitPrice.dinero).amount
+                const totalAmountCents = formatAmountForProvider(res.price.totalPrice.dinero).amount
+                const subtotalAmountCents = formatAmountForProvider(
                   res.price.subtotalPrice.dinero
                 ).amount
 
@@ -1288,9 +1289,9 @@ export class BillingService {
               const targetItem = featureItems[0]
 
               if (targetItem) {
-                const unitAmountCents = formatAmountDinero(res.price.unitPrice.dinero).amount
-                const totalAmountCents = formatAmountDinero(res.price.totalPrice.dinero).amount
-                const subtotalAmountCents = formatAmountDinero(
+                const unitAmountCents = formatAmountForProvider(res.price.unitPrice.dinero).amount
+                const totalAmountCents = formatAmountForProvider(res.price.totalPrice.dinero).amount
+                const subtotalAmountCents = formatAmountForProvider(
                   res.price.subtotalPrice.dinero
                 ).amount
 

@@ -1,7 +1,7 @@
 TOKEN "web-apps" APPEND
 
 DESCRIPTION >
-    Priced entitlement meter facts flushed from the durable object outbox. Carries amount_cents and currency alongside the raw delta / value_after for spend aggregation.
+    Priced entitlement meter facts flushed from the durable object outbox. `amount` is a signed integer at `amount_scale` (ledger scale 6 — 1 unit = 10^-6 of a major currency unit) so sub-cent pricing (e.g. LLM token pricing) is preserved losslessly per event. Quantization to currency minor units happens at invoicing, not here.
 
 TAGS "entitlements,usage,metering,billing"
 
@@ -22,7 +22,8 @@ SCHEMA >
     `priced_at` Int64 `json:$.priced_at`,
     `delta` Decimal64(4) `json:$.delta`,
     `value_after` Decimal64(4) `json:$.value_after`,
-    `amount_cents` Int64 `json:$.amount_cents`,
+    `amount` Int64 `json:$.amount`,
+    `amount_scale` Int8 `json:$.amount_scale`,
     `currency` LowCardinality(String) `json:$.currency`
 
 ENGINE ReplacingMergeTree

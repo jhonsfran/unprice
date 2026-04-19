@@ -23,9 +23,7 @@ export const idempotencyKeysTable = sqliteTable("idempotency_keys", {
 export const meterPricingTable = sqliteTable("meter_pricing", {
   meterKey: text("meter_key").primaryKey(),
   currency: text("currency").notNull(),
-  priceConfig: text("price_config", { mode: "json" })
-    .$type<ConfigFeatureVersionType>()
-    .notNull(),
+  priceConfig: text("price_config", { mode: "json" }).$type<ConfigFeatureVersionType>().notNull(),
   pinnedPlanVersionId: text("pinned_plan_version_id").notNull(),
   createdAt: integer("created_at").notNull(),
 })

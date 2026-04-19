@@ -1,8 +1,4 @@
-import type {
-  ConfigFeatureVersionType,
-  MeterConfig,
-  OverageStrategy,
-} from "@unprice/db/validators"
+import type { ConfigFeatureVersionType, MeterConfig, OverageStrategy } from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { vi } from "vitest"

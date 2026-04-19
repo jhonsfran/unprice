@@ -1,5 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import { add, currencies, dinero, formatMoney, toDecimal } from "@unprice/db/utils"
+import { add, currencies, dinero, toDecimal } from "@unprice/db/utils"
 import {
   type CalculatedPrice,
   type Currency,
@@ -14,6 +14,7 @@ import {
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { formatMoney } from "@unprice/money"
 import { subtract, toSnapshot } from "dinero.js"
 import type { z } from "zod"
 import type { GrantsManager } from "../entitlements"

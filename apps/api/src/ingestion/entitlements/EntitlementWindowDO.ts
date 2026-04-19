@@ -4,13 +4,13 @@ import {
   type AnalyticsEntitlementMeterFactV2,
   entitlementMeterFactSchemaV2,
 } from "@unprice/analytics"
-import { formatAmountDinero } from "@unprice/db/utils"
 import {
   type ConfigFeatureVersionType,
   type OverageStrategy,
   calculatePricePerFeature,
   configFeatureSchema,
 } from "@unprice/db/validators"
+import { LEDGER_SCALE, diffLedgerMinor } from "@unprice/money"
 import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
 import {
   AsyncMeterAggregationEngine,
@@ -88,7 +88,12 @@ const outboxFactSchema = z.object({
   created_at: z.number(),
   delta: z.number(),
   value_after: z.number(),
-  amount_cents: z.number().int().nonnegative(),
+  // Signed integer at LEDGER_SCALE (6). Number (not bigint) — at scale 6,
+  // Number.MAX_SAFE_INTEGER covers ~$9T, far beyond any plausible per-event
+  // delta. Negative values represent corrections/refunds; clamping belongs
+  // at invoicing.
+  amount: z.number().int(),
+  amount_scale: z.literal(LEDGER_SCALE),
   priced_at: z.number().int(),
 })
 
@@ -262,7 +267,7 @@ export class EntitlementWindowDO extends DurableObject {
         insertedFactCount = facts.length
 
         for (const fact of facts) {
-          const amountCents = this.computeAmountCents({
+          const amountMinor = this.computeAmountMinor({
             fact,
             priceConfig: input.priceConfig,
           })
@@ -284,7 +289,8 @@ export class EntitlementWindowDO extends DurableObject {
             created_at: createdAt,
             delta: fact.delta,
             value_after: fact.valueAfter,
-            amount_cents: amountCents,
+            amount: amountMinor,
+            amount_scale: LEDGER_SCALE,
             priced_at: createdAt,
           }
 
@@ -504,14 +510,18 @@ export class EntitlementWindowDO extends DurableObject {
       .run()
   }
 
-  private computeAmountCents(params: {
+  // Returns a signed integer at LEDGER_SCALE. Negative values are legitimate
+  // (corrections/refunds); the invoicing layer is responsible for any sign
+  // handling. We price against cumulative usage (after − before) so tier
+  // boundaries are handled correctly, and skip the scale-2 quantization that
+  // used to drop sub-cent amounts per event.
+  private computeAmountMinor(params: {
     fact: Fact
     priceConfig: ConfigFeatureVersionType
   }): number {
     const { fact, priceConfig } = params
 
-    // Corrections / zero-delta events don't move pricing.
-    if (fact.delta <= 0) {
+    if (fact.delta === 0) {
       return 0
     }
 
@@ -537,9 +547,7 @@ export class EntitlementWindowDO extends DurableObject {
       throw afterResult.err
     }
 
-    const { amount: afterCents } = formatAmountDinero(afterResult.val.totalPrice.dinero)
-    const { amount: beforeCents } = formatAmountDinero(beforeResult.val.totalPrice.dinero)
-    return Math.max(0, afterCents - beforeCents)
+    return diffLedgerMinor(afterResult.val.totalPrice.dinero, beforeResult.val.totalPrice.dinero)
   }
 
   private async flushToTinybird(batch: OutboxFlushRow[]): Promise<boolean> {

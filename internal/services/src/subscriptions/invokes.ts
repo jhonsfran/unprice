@@ -1,7 +1,8 @@
 import type { Database } from "@unprice/db"
-import { type Dinero, formatAmountDinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
+import { type Dinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateCycleWindow, calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
+import { formatAmountForProvider } from "@unprice/money"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { isNegative } from "dinero.js"
@@ -485,7 +486,7 @@ export async function invoiceSubscription({
             | { amount: number; scale: number; currency: { code: string; exponent: number } }
             | undefined
           const unitAmountCents = unitSnap ? convertSnapshotToProviderCents(unitSnap) : 0
-          const lineCents = formatAmountDinero(entry.amount).amount
+          const lineCents = formatAmountForProvider(entry.amount).amount
           const description = (meta?.description as string | undefined) ?? null
 
           return {
@@ -578,7 +579,7 @@ export async function invoiceSubscription({
 
 // Convert a Dinero scale-N snapshot back into the provider scale-2 cent value
 // invoice_items expect. The snapshot's `currency.exponent` carries the target
-// scale (e.g. 2 for USD); rounding mirrors `formatAmountDinero`'s behavior.
+// scale (e.g. 2 for USD); rounding mirrors `formatAmountForProvider`'s behavior.
 function convertSnapshotToProviderCents(snapshot: {
   amount: number
   scale: number

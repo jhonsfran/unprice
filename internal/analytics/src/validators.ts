@@ -1,3 +1,4 @@
+import { LEDGER_SCALE } from "@unprice/money"
 import * as z from "zod"
 import type { Analytics } from "./analytics"
 
@@ -173,7 +174,13 @@ export const entitlementMeterFactSchemaV1 = z.object({
 
 export const entitlementMeterFactSchemaV2 = entitlementMeterFactSchemaV1.extend({
   feature_plan_version_id: z.string().nullable().optional(),
-  amount_cents: z.number().int().nonnegative(),
+  // Signed integer at `amount_scale`. At scale 6, JS number handles per-event
+  // deltas up to ~$9T — comfortable headroom — so we keep this as number and
+  // defer bigint to the day we actually need sub-cent arithmetic on totals
+  // that approach Number.MAX_SAFE_INTEGER. Invoicing quantizes to currency
+  // minor units; raw events stay precise.
+  amount: z.number().int(),
+  amount_scale: z.literal(LEDGER_SCALE),
   currency: z.string().length(3),
   priced_at: z.number().int(),
 })
