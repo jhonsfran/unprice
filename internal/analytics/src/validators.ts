@@ -170,15 +170,7 @@ export const entitlementMeterFactSchemaV1 = z.object({
   created_at: z.number().describe("timestamp of when the fact row was created"),
   delta: z.number(),
   value_after: z.number(),
-})
-
-export const entitlementMeterFactSchemaV2 = entitlementMeterFactSchemaV1.extend({
   feature_plan_version_id: z.string().nullable().optional(),
-  // Signed integer at `amount_scale`. At scale 6, JS number handles per-event
-  // deltas up to ~$9T — comfortable headroom — so we keep this as number and
-  // defer bigint to the day we actually need sub-cent arithmetic on totals
-  // that approach Number.MAX_SAFE_INTEGER. Invoicing quantizes to currency
-  // minor units; raw events stay precise.
   amount: z.number().int(),
   amount_scale: z.literal(LEDGER_SCALE),
   currency: z.string().length(3),
@@ -357,7 +349,6 @@ export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
 export type AnalyticsEntitlementMeterFact = z.infer<typeof entitlementMeterFactSchemaV1>
-export type AnalyticsEntitlementMeterFactV2 = z.infer<typeof entitlementMeterFactSchemaV2>
 
 // Plan conversion response schemas
 export const planConversionResponseSchema = z.object({

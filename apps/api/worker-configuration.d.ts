@@ -7,7 +7,6 @@ declare namespace Cloudflare {
 	}
 	interface ProdEnv {
 		LAKEHOUSE: R2Bucket;
-		FALLBACK_ANALYTICS: AnalyticsEngineDataset;
 		QUEUE_SHARD_0: Queue;
 		QUEUE_SHARD_1: Queue;
 		INGESTION_DLQ: Queue;
@@ -41,7 +40,6 @@ declare namespace Cloudflare {
 	}
 	interface PreviewEnv {
 		LAKEHOUSE: R2Bucket;
-		FALLBACK_ANALYTICS: AnalyticsEngineDataset;
 		QUEUE_SHARD_0: Queue;
 		QUEUE_SHARD_1: Queue;
 		INGESTION_DLQ: Queue;
@@ -75,7 +73,6 @@ declare namespace Cloudflare {
 	}
 	interface DevEnv {
 		LAKEHOUSE: R2Bucket;
-		FALLBACK_ANALYTICS: AnalyticsEngineDataset;
 		QUEUE_SHARD_0: Queue;
 		QUEUE_SHARD_1: Queue;
 		INGESTION_DLQ: Queue;
@@ -129,7 +126,6 @@ declare namespace Cloudflare {
 		UNPRICE_API_KEY: string;
 		UNPRICE_API_URL: string;
 		LAKEHOUSE?: R2Bucket;
-		FALLBACK_ANALYTICS?: AnalyticsEngineDataset;
 		QUEUE_SHARD_0?: Queue;
 		QUEUE_SHARD_1?: Queue;
 		INGESTION_DLQ?: Queue;

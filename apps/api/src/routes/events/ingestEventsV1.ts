@@ -13,7 +13,6 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
-import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -161,10 +160,8 @@ export const registerIngestEventsV1 = (app: App) =>
       availableQueues[selectQueueShardIndex(customerId, availableQueues.length)]!
 
     // This sends the message in background to avoid blocking the requests
-    // There is a retry mechanism and last option we send to analytics events
     c.executionCtx.waitUntil(
       safeSendToQueue({
-        env: c.env,
         queue: selectedQueue,
         message,
         logger,
@@ -192,50 +189,39 @@ export function selectQueueShardIndex(customerId: string, shardCount = 2): numbe
 }
 
 export async function safeSendToQueue(params: {
-  env: Env
   logger: AppLogger
   queue: Queue<IngestionQueueMessage>
   message: IngestionQueueMessage
 }): Promise<void> {
-  const { env, logger, queue, message } = params
+  const { logger, queue, message } = params
 
-  try {
-    for (let attempt = 0; attempt < SAFE_QUEUE_SEND_RETRIES; attempt++) {
-      try {
-        await queue.send(message)
-        return
-      } catch (error) {
-        logger.warn("raw ingestion queue send failed", {
-          attempt: attempt + 1,
-          maxAttempts: SAFE_QUEUE_SEND_RETRIES,
-          projectId: message.projectId,
-          customerId: message.customerId,
-          eventId: message.id,
-          idempotencyKey: message.idempotencyKey,
-          error,
-        })
+  for (let attempt = 0; attempt < SAFE_QUEUE_SEND_RETRIES; attempt++) {
+    try {
+      await queue.send(message)
+      return
+    } catch (error) {
+      logger.warn("raw ingestion queue send failed", {
+        attempt: attempt + 1,
+        maxAttempts: SAFE_QUEUE_SEND_RETRIES,
+        projectId: message.projectId,
+        customerId: message.customerId,
+        eventId: message.id,
+        idempotencyKey: message.idempotencyKey,
+        error,
+      })
 
-        if (attempt < SAFE_QUEUE_SEND_RETRIES - 1) {
-          await sleep(SAFE_QUEUE_SEND_BASE_DELAY_MS * 2 ** attempt)
-        }
+      if (attempt < SAFE_QUEUE_SEND_RETRIES - 1) {
+        await sleep(SAFE_QUEUE_SEND_BASE_DELAY_MS * 2 ** attempt)
       }
     }
-
-    // write the message to analytics as fallback
-    env.FALLBACK_ANALYTICS.writeDataPoint({
-      indexes: [message.projectId, message.customerId, message.slug],
-      doubles: [message.timestamp, message.receivedAt],
-      blobs: [message.id, message.requestId, JSON.stringify(message)],
-    })
-  } catch (error) {
-    logger.error("raw ingestion background send failed permanently", {
-      projectId: message.projectId,
-      customerId: message.customerId,
-      eventId: message.id,
-      idempotencyKey: message.idempotencyKey,
-      error,
-    })
   }
+
+  logger.error("raw ingestion background send failed permanently", {
+    projectId: message.projectId,
+    customerId: message.customerId,
+    eventId: message.id,
+    idempotencyKey: message.idempotencyKey,
+  })
 }
 
 async function sleep(ms: number): Promise<void> {

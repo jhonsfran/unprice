@@ -7,7 +7,6 @@ import {
   type AnalyticsEventAction,
   analyticsEventSchema,
   entitlementMeterFactSchemaV1,
-  entitlementMeterFactSchemaV2,
   pageEventSchema,
   schemaPlanClick,
 } from "./validators"
@@ -50,14 +49,6 @@ export class Analytics {
     return this.writeClient.buildIngestEndpoint({
       datasource: "unprice_entitlement_meter_facts",
       event: entitlementMeterFactSchemaV1,
-      wait: true,
-    })
-  }
-
-  public get ingestEntitlementMeterFactsV2() {
-    return this.writeClient.buildIngestEndpoint({
-      datasource: "unprice_entitlement_meter_facts_v2",
-      event: entitlementMeterFactSchemaV2,
       wait: true,
     })
   }

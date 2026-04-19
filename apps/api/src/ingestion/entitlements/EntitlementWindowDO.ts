@@ -1,8 +1,8 @@
 import { DurableObject } from "cloudflare:workers"
 import {
   Analytics,
-  type AnalyticsEntitlementMeterFactV2,
-  entitlementMeterFactSchemaV2,
+  type AnalyticsEntitlementMeterFact,
+  entitlementMeterFactSchemaV1,
 } from "@unprice/analytics"
 import {
   type ConfigFeatureVersionType,
@@ -56,15 +56,6 @@ class EntitlementWindowLimitExceededError extends Error {
   }
 }
 
-class MeterPricingMismatchError extends Error {
-  constructor(params: { meterKey: string; expected: string; received: string }) {
-    super(
-      `Plan version for meter ${params.meterKey} has changed: snapshotted ${params.expected}, got ${params.received}. A new entitlement requires a new DO instance.`
-    )
-    this.name = MeterPricingMismatchError.name
-  }
-}
-
 type ApplyResult = {
   allowed: boolean
   deniedReason?: "LIMIT_EXCEEDED"
@@ -88,10 +79,10 @@ const outboxFactSchema = z.object({
   created_at: z.number(),
   delta: z.number(),
   value_after: z.number(),
-  // Signed integer at LEDGER_SCALE (6). Number (not bigint) — at scale 6,
-  // Number.MAX_SAFE_INTEGER covers ~$9T, far beyond any plausible per-event
-  // delta. Negative values represent corrections/refunds; clamping belongs
-  // at invoicing.
+  // Signed integer at LEDGER_SCALE (8). Number (not bigint) — at scale 8,
+  // Number.MAX_SAFE_INTEGER covers ~$90M per event, far beyond any plausible
+  // per-event delta. Negative values represent corrections/refunds; clamping
+  // belongs at invoicing.
   amount: z.number().int(),
   amount_scale: z.literal(LEDGER_SCALE),
   priced_at: z.number().int(),
@@ -226,12 +217,13 @@ export class EntitlementWindowDO extends DurableObject {
 
         const meterKey = deriveMeterKey(input.meter)
 
-        // Snapshot price config on first apply; verify on every subsequent call.
+        // Snapshot price config on first apply. The streamId already guarantees
+        // meter/reset fungibility, so we don't pin the featurePlanVersionId —
+        // stacked grants from different fpvs are valid on the same stream.
         this.ensureMeterPricing(tx, {
           meterKey,
           priceConfig: input.priceConfig,
           currency: input.currency,
-          pinnedPlanVersionId: input.featurePlanVersionId,
           createdAt,
         })
 
@@ -476,37 +468,12 @@ export class EntitlementWindowDO extends DurableObject {
       meterKey: string
       priceConfig: ConfigFeatureVersionType
       currency: string
-      pinnedPlanVersionId: string
       createdAt: number
     }
   ): void {
-    const { meterKey, priceConfig, currency, pinnedPlanVersionId, createdAt } = params
-
-    const existing = tx
-      .select({ pinnedPlanVersionId: meterPricingTable.pinnedPlanVersionId })
-      .from(meterPricingTable)
-      .where(eq(meterPricingTable.meterKey, meterKey))
-      .get()
-
-    if (existing) {
-      if (existing.pinnedPlanVersionId !== pinnedPlanVersionId) {
-        throw new MeterPricingMismatchError({
-          meterKey,
-          expected: existing.pinnedPlanVersionId,
-          received: pinnedPlanVersionId,
-        })
-      }
-      return
-    }
-
     tx.insert(meterPricingTable)
-      .values({
-        meterKey,
-        currency,
-        priceConfig,
-        pinnedPlanVersionId,
-        createdAt,
-      })
+      .values(params)
+      .onConflictDoNothing({ target: meterPricingTable.meterKey })
       .run()
   }
 
@@ -543,6 +510,7 @@ export class EntitlementWindowDO extends DurableObject {
       featureType: DO_FEATURE_TYPE,
       config: priceConfig,
     })
+
     if (afterResult.err) {
       throw afterResult.err
     }
@@ -551,10 +519,10 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private async flushToTinybird(batch: OutboxFlushRow[]): Promise<boolean> {
-    let facts: AnalyticsEntitlementMeterFactV2[]
+    let facts: AnalyticsEntitlementMeterFact[]
 
     try {
-      facts = batch.map((row) => entitlementMeterFactSchemaV2.parse(JSON.parse(row.payload)))
+      facts = batch.map((row) => entitlementMeterFactSchemaV1.parse(JSON.parse(row.payload)))
     } catch (error) {
       this.logger.error("Failed to parse entitlement meter fact outbox payload", {
         error: this.errorMessage(error),
@@ -564,7 +532,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     try {
-      const result = await this.analytics.ingestEntitlementMeterFactsV2(facts)
+      const result = await this.analytics.ingestEntitlementMeterFacts(facts)
       const successful = result?.successful_rows ?? 0
       const quarantined = result?.quarantined_rows ?? 0
 

@@ -1104,17 +1104,28 @@ export class IngestionService {
   }
 }
 
+// state.activeGrantIds is priority-ordered (desc) by assertFungibleGrantSet
+// in grants.ts. Iterating it directly — and looking up in candidateGrants —
+// gives a deterministic, priority-respecting selection rather than relying on
+// candidateGrants' arbitrary iteration order.
+function iterateActiveGrantsByPriority(
+  candidateGrants: IngestionCandidateGrants,
+  state: IngestionResolvedState
+): IngestionCandidateGrants[number][] {
+  const byId = new Map(candidateGrants.map((grant) => [grant.id, grant]))
+  const ordered: IngestionCandidateGrants[number][] = []
+  for (const id of state.activeGrantIds) {
+    const grant = byId.get(id)
+    if (grant) ordered.push(grant)
+  }
+  return ordered
+}
+
 function resolveCurrencyForResolvedState(
   candidateGrants: IngestionCandidateGrants,
   state: IngestionResolvedState
 ): string {
-  const activeGrantIds = new Set(state.activeGrantIds)
-
-  for (const grant of candidateGrants) {
-    if (!activeGrantIds.has(grant.id)) {
-      continue
-    }
-
+  for (const grant of iterateActiveGrantsByPriority(candidateGrants, state)) {
     const config = grant.featurePlanVersion?.config
     const currencyFromPrice = extractCurrencyCode(config, "price")
     if (currencyFromPrice) {
@@ -1137,8 +1148,7 @@ function resolveActiveGrantForResolvedState(
   candidateGrants: IngestionCandidateGrants,
   state: IngestionResolvedState
 ): IngestionCandidateGrants[number] | undefined {
-  const activeGrantIds = new Set(state.activeGrantIds)
-  return candidateGrants.find((grant) => activeGrantIds.has(grant.id))
+  return iterateActiveGrantsByPriority(candidateGrants, state)[0]
 }
 
 function extractCurrencyCode(input: unknown, priceKey: string): string | null {

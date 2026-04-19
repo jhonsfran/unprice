@@ -76,12 +76,9 @@ describe("ingestEventsV1 helpers", () => {
     expect(generateEventId(requestBody.timestamp)).toBe("evt_01ARYZ6S41TSV4RRFFQ69G5FAV")
   })
 
-  it("retries queue send and falls back to analytics engine", async () => {
+  it("retries queue send and logs an error when all attempts fail", async () => {
     const queue: Pick<Queue<IngestionQueueMessage>, "send"> = {
       send: vi.fn().mockRejectedValue(new Error("queue down")),
-    }
-    const analytics: Pick<AnalyticsEngineDataset, "writeDataPoint"> = {
-      writeDataPoint: vi.fn(),
     }
     const logger: Pick<AppLogger, "error" | "warn"> = {
       error: vi.fn(),
@@ -89,9 +86,6 @@ describe("ingestEventsV1 helpers", () => {
     }
 
     await safeSendToQueue({
-      env: {
-        FALLBACK_ANALYTICS: analytics,
-      },
       logger,
       queue: queue as Queue<IngestionQueueMessage>,
       message: {
@@ -109,8 +103,8 @@ describe("ingestEventsV1 helpers", () => {
     })
 
     expect(queue.send).toHaveBeenCalledTimes(3)
-    expect(analytics.writeDataPoint).toHaveBeenCalledTimes(1)
     expect(logger.warn).toHaveBeenCalledTimes(3)
+    expect(logger.error).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -404,9 +398,6 @@ function createTestApp() {
     },
     QUEUE_SHARD_1: {
       send: vi.fn().mockResolvedValue(undefined),
-    },
-    FALLBACK_ANALYTICS: {
-      writeDataPoint: vi.fn(),
     },
   }
 

@@ -25,12 +25,6 @@
           "bucket_name": "unprice-lakehouse-prod"
         }
       ],
-      "analytics_engine_datasets": [
-        {
-          "binding": "FALLBACK_ANALYTICS",
-          "dataset": "unprice_api_ingestion_fallback_prod"
-        }
-      ],
       "queues": {
         "producers": [
           {
@@ -142,12 +136,6 @@
           "bucket_name": "unprice-lakehouse-dev"
         }
       ],
-      "analytics_engine_datasets": [
-        {
-          "binding": "FALLBACK_ANALYTICS",
-          "dataset": "unprice_api_ingestion_fallback_preview"
-        }
-      ],
       "queues": {
         "producers": [
           {
@@ -251,12 +239,6 @@
         {
           "binding": "LAKEHOUSE",
           "bucket_name": "unprice-lakehouse-dev"
-        }
-      ],
-      "analytics_engine_datasets": [
-        {
-          "binding": "FALLBACK_ANALYTICS",
-          "dataset": "unprice_api_ingestion_fallback_dev"
         }
       ],
       "queues": {

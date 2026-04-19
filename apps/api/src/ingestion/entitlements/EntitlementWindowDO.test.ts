@@ -33,7 +33,6 @@ type MeterPricingRow = {
   meterKey: string
   currency: string
   priceConfig: unknown
-  pinnedPlanVersionId: string
   createdAt: number
 }
 
@@ -58,7 +57,7 @@ type FakeDurableObjectState = {
 }
 
 const testState = {
-  analyticsIngestV2: vi.fn(),
+  analyticsIngest: vi.fn(),
   db: null as FakeDbState | null,
   engineApply: vi.fn(),
   pricePerFeature: vi.fn(),
@@ -105,7 +104,7 @@ const DEFAULT_PRICE_CONFIG = {
 describe("EntitlementWindowDO", () => {
   beforeEach(() => {
     for (const fn of Object.values(testState.logger)) fn.mockReset()
-    testState.analyticsIngestV2.mockReset()
+    testState.analyticsIngest.mockReset()
     testState.engineApply.mockReset()
     testState.pricePerFeature.mockReset()
     // Default: unit pricing — amount = quantity * $1.00. We return fake Dinero
@@ -272,7 +271,7 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    testState.analyticsIngestV2.mockResolvedValue({
+    testState.analyticsIngest.mockResolvedValue({
       quarantined_rows: 0,
       successful_rows: 1,
     })
@@ -287,8 +286,8 @@ describe("EntitlementWindowDO", () => {
     state.alarmAt = null
     await durableObject.alarm()
 
-    expect(testState.analyticsIngestV2).toHaveBeenCalledTimes(1)
-    expect(testState.analyticsIngestV2).toHaveBeenCalledWith([
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngest).toHaveBeenCalledWith([
       expect.objectContaining({
         delta: 2,
         event_id: input.event.id,
@@ -316,7 +315,7 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    testState.analyticsIngestV2.mockRejectedValueOnce(new Error("tinybird down"))
+    testState.analyticsIngest.mockRejectedValueOnce(new Error("tinybird down"))
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const input = createApplyInput()
@@ -324,17 +323,17 @@ describe("EntitlementWindowDO", () => {
     await durableObject.apply(input)
     await durableObject.alarm()
 
-    expect(testState.analyticsIngestV2).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
     // Failed flush leaves the row in the outbox
     expect(db.outboxRows).toHaveLength(1)
 
     // Next alarm retries successfully and drains the outbox
-    testState.analyticsIngestV2.mockResolvedValueOnce({
+    testState.analyticsIngest.mockResolvedValueOnce({
       quarantined_rows: 0,
       successful_rows: 1,
     })
     await durableObject.alarm()
-    expect(testState.analyticsIngestV2).toHaveBeenCalledTimes(2)
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
     expect(db.outboxRows).toHaveLength(0)
   })
 
@@ -348,7 +347,7 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    testState.analyticsIngestV2.mockResolvedValue({
+    testState.analyticsIngest.mockResolvedValue({
       quarantined_rows: 0,
       successful_rows: 10,
     })
@@ -369,29 +368,40 @@ describe("EntitlementWindowDO", () => {
     expect(ratingRateIncrementalSpy).not.toHaveBeenCalled()
   })
 
-  it("snapshots price config on first apply and rejects plan version drift", async () => {
+  it("snapshots price config once and accepts later applies with different fpvs on the same stream", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
+    let cumulative = 0
     testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
-      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      cumulative += 1
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: cumulative }]
       options?.beforePersist?.(facts)
       return facts
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
 
-    await durableObject.apply(createApplyInput({ idempotencyKey: "idem_a" }))
+    // First apply pins priceConfig + currency for the meterKey.
+    await durableObject.apply(
+      createApplyInput({ idempotencyKey: "idem_a", featurePlanVersionId: "fpv_a" })
+    )
     expect(db.meterPricingRows.size).toBe(1)
-    expect(db.meterPricingRows.get(DEFAULT_METER_KEY)?.pinnedPlanVersionId).toBe("fpv_123")
+    const pricingRow = db.meterPricingRows.get(DEFAULT_METER_KEY)
+    expect(pricingRow?.currency).toBe("USD")
+    expect(pricingRow?.priceConfig).toEqual(DEFAULT_PRICE_CONFIG)
 
-    // subsequent apply with a different plan version must throw
-    await expect(
-      durableObject.apply(
-        createApplyInput({ idempotencyKey: "idem_b", featurePlanVersionId: "fpv_other" })
-      )
-    ).rejects.toThrow(/Plan version for meter .* has changed/)
+    // Second apply with a different fpv (e.g. addon grant) — same fungible
+    // stream, must succeed. streamId is the identity; fpv is per-event audit.
+    await durableObject.apply(
+      createApplyInput({ idempotencyKey: "idem_b", featurePlanVersionId: "fpv_b" })
+    )
+
+    expect(db.meterPricingRows.size).toBe(1)
+    expect(db.outboxRows).toHaveLength(2)
+    const fpvs = db.outboxRows.map((row) => JSON.parse(row.payload).feature_plan_version_id)
+    expect(fpvs).toEqual(["fpv_a", "fpv_b"])
   })
 
   it("scheduleAlarm does not downgrade an earlier pending alarm", async () => {
@@ -468,9 +478,9 @@ async function loadEntitlementWindowDO() {
 
   vi.doMock("@unprice/analytics", () => ({
     Analytics: class {
-      public ingestEntitlementMeterFactsV2 = testState.analyticsIngestV2
+      public ingestEntitlementMeterFacts = testState.analyticsIngest
     },
-    entitlementMeterFactSchemaV2: { parse: (p: unknown) => p },
+    entitlementMeterFactSchemaV1: { parse: (p: unknown) => p },
   }))
 
   vi.doMock("@unprice/db/validators", () => ({
@@ -639,10 +649,6 @@ function buildFakeDrizzle(state: FakeDbState) {
               denyMessage: row.denyMessage,
             }
           }
-          if (keys.includes("pinnedPlanVersionId")) {
-            const row = state.meterPricingRows.get(String(cond?.value))
-            return row ? { pinnedPlanVersionId: row.pinnedPlanVersionId } : undefined
-          }
           if (keys.includes("count")) return { count: state.outboxRows.length }
           if (keys.includes("value")) return undefined
           throw new Error(`Unsupported select().get(): ${keys}`)
@@ -669,7 +675,10 @@ function buildFakeDrizzle(state: FakeDbState) {
     insert() {
       return {
         values(value: Record<string, unknown>) {
-          return {
+          const builder = {
+            onConflictDoNothing() {
+              return builder
+            },
             run() {
               if ("payload" in value && !("eventId" in value) && !("meterKey" in value)) {
                 state.outboxRows.push({
@@ -689,11 +698,12 @@ function buildFakeDrizzle(state: FakeDbState) {
                 return
               }
               if ("meterKey" in value) {
-                state.meterPricingRows.set(String(value.meterKey), {
-                  meterKey: String(value.meterKey),
+                const key = String(value.meterKey)
+                if (state.meterPricingRows.has(key)) return
+                state.meterPricingRows.set(key, {
+                  meterKey: key,
                   currency: String(value.currency),
                   priceConfig: value.priceConfig,
-                  pinnedPlanVersionId: String(value.pinnedPlanVersionId),
                   createdAt: Number(value.createdAt),
                 })
                 return
@@ -701,6 +711,7 @@ function buildFakeDrizzle(state: FakeDbState) {
               throw new Error("Unsupported insert in fake db")
             },
           }
+          return builder
         },
       }
     },

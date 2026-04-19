@@ -1,11 +1,6 @@
 import type { ConfigFeatureVersionType } from "@unprice/db/validators"
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
-export const meterStateTable = sqliteTable("meter_state", {
-  key: text("key").primaryKey(),
-  value: real("value").notNull(),
-})
-
 export const meterFactsOutboxTable = sqliteTable("meter_facts_outbox", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   payload: text("payload").notNull(),
@@ -24,8 +19,12 @@ export const meterPricingTable = sqliteTable("meter_pricing", {
   meterKey: text("meter_key").primaryKey(),
   currency: text("currency").notNull(),
   priceConfig: text("price_config", { mode: "json" }).$type<ConfigFeatureVersionType>().notNull(),
-  pinnedPlanVersionId: text("pinned_plan_version_id").notNull(),
   createdAt: integer("created_at").notNull(),
+})
+
+export const meterStateTable = sqliteTable("meter_state", {
+  key: text("key").primaryKey(),
+  value: real("value").notNull(),
 })
 
 export const schema = {

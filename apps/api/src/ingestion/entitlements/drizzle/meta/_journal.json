@@ -22,6 +22,13 @@
       "when": 1776816000000,
       "tag": "0002_shiny_puck",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1776634887984,
+      "tag": "0003_natural_boom_boom",
+      "breakpoints": true
     }
   ]
 }
