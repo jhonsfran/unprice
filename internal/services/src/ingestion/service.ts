@@ -1,3 +1,4 @@
+import type { ConfigFeatureVersionType } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
@@ -86,14 +87,15 @@ export type EntitlementWindowApplyInput = {
   featureSlug: string
   idempotencyKey: string
   limit: IngestionResolvedState["limit"]
-  meters: IngestionResolvedState["meterConfig"][]
+  meter: IngestionResolvedState["meterConfig"]
+  priceConfig: ConfigFeatureVersionType
   now: number
   overageStrategy: IngestionResolvedState["overageStrategy"]
   periodEndAt: number
   periodKey: string
   projectId: string
   streamId: string
-  featurePlanVersionId: string | null
+  featurePlanVersionId: string
 }
 
 export type EntitlementWindowController = {
@@ -972,8 +974,33 @@ export class IngestionService {
     params: ApplyResolvedStateParams
   ): Promise<EntitlementWindowApplyResult | null> {
     const { candidateGrants, customerId, enforceLimit, message, projectId, state } = params
+    const activeGrant = resolveActiveGrantForResolvedState(candidateGrants, state)
+
+    if (!activeGrant) {
+      this.logger.debug("no active grant for resolved state", {
+        projectId,
+        customerId,
+        streamId: state.streamId,
+      })
+      return null
+    }
+
+    const priceConfig = activeGrant.featurePlanVersion?.config as
+      | ConfigFeatureVersionType
+      | undefined
+    const featurePlanVersionId = activeGrant.featurePlanVersionId
+
+    if (!priceConfig || !featurePlanVersionId) {
+      this.logger.warn("active grant missing price config or plan version id", {
+        projectId,
+        customerId,
+        grantId: activeGrant.id,
+        streamId: state.streamId,
+      })
+      return null
+    }
+
     const currency = resolveCurrencyForResolvedState(candidateGrants, state)
-    const featurePlanVersionId = resolveFeaturePlanVersionIdForResolvedState(candidateGrants, state)
 
     const periodKey = computeResolvedStatePeriodKey(state, message.timestamp)
 
@@ -1011,7 +1038,8 @@ export class IngestionService {
       featurePlanVersionId,
       featureSlug: state.featureSlug,
       periodKey,
-      meters: [state.meterConfig],
+      meter: state.meterConfig,
+      priceConfig,
       limit: state.limit,
       overageStrategy: state.overageStrategy,
       enforceLimit,
@@ -1105,13 +1133,12 @@ function resolveCurrencyForResolvedState(
   return "USD"
 }
 
-function resolveFeaturePlanVersionIdForResolvedState(
+function resolveActiveGrantForResolvedState(
   candidateGrants: IngestionCandidateGrants,
   state: IngestionResolvedState
-): string | null {
+): IngestionCandidateGrants[number] | undefined {
   const activeGrantIds = new Set(state.activeGrantIds)
-  const matchingGrant = candidateGrants.find((grant) => activeGrantIds.has(grant.id))
-  return matchingGrant?.featurePlanVersionId ?? null
+  return candidateGrants.find((grant) => activeGrantIds.has(grant.id))
 }
 
 function extractCurrencyCode(input: unknown, priceKey: string): string | null {

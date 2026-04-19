@@ -4,11 +4,11 @@ Source: [../unprice-implementation-plan.md](../unprice-implementation-plan.md)
 PR title: `refactor: strip billing + rating out of EntitlementWindowDO`
 Branch: `refactor/agent-billing-simplification`
 
-**Prerequisite:** [Phase 6.6 — pgledger gateway](./unprice-phase-06.6-new-ledger.md).
+**Prerequisite:** [Phase 6.6 — pgledger service](./unprice-phase-06.6-new-ledger.md).
 **Next:** [Phase 7 — Wallets & Reservations](./unprice-phase-07-credits-wallets.md).
 
 ## Mission
-`Rename LedgerGateway to LedgerService`
+
 `EntitlementWindowDO` today does four unrelated jobs in `alarm()`: flush
 analytics to Tinybird, drive billing into Postgres via `processBillingBatch`,
 reconcile `billedAt` on the outbox, and self-destruct. It imports
@@ -18,23 +18,22 @@ re-looks-up plan-version pricing in Postgres.
 
 Phase 6.7 rips the billing driver out of the DO. The alarm becomes a single
 concern: batch priced facts to Tinybird. Rating becomes pure math inside
-`applyEventSync` against a rate card snapshotted at entitlement activation.
-Per-meter spend caps move to the hot path next to unit caps. No Postgres
-client in the DO. No ledger writes anywhere in this phase.
+`applyEventSync` against a price config snapshotted at entitlement activation.
+No Postgres client in the DO. No ledger writes anywhere in this phase.
 
 Outcome:
 
 - `EntitlementWindowDO` runtime deps are `analytics` (Tinybird) and `logger`.
-  That's it. No ledger gateway, no rating service, no `createConnection`, no
+  That's it. No ledger service, no rating service, no `createConnection`, no
   CF Queue producer for billing.
-- Rating is pure math. Rate card snapshotted at activation. `applyEventSync`
-  returns a priced fact with `amount_cents`, `currency`, `tier_breakdown`.
-- Per-meter spend caps enforce synchronously alongside unit caps.
+- Rating is pure math. Price config snapshotted at activation. `applyEventSync`
+  returns a priced fact with `amount_cents` and `currency`.
 - The outbox is single-purpose: DO → Tinybird. **Zero per-event ledger
   writes exist.** `bill-meter-fact.ts` and `processBillingBatch` are deleted
   with no replacement.
 - Idempotency stores in columns, not JSON blobs.
-- Tinybird failure path is one owned channel (DLQ), not a reactive dual-write.
+- Tinybird failure path: outbox rows stay for retry on next alarm. No
+  dual-write, no separate DLQ queue. `FALLBACK_ANALYTICS` deleted.
 
 ## Scope reduction — no per-event ledger work
 
@@ -45,6 +44,8 @@ Explicitly not built:
 - `apps/api/src/queues/bill-meter-fact-consumer.ts`.
 - `ctx.waitUntil(queue.send(...))` in `apply()`.
 - `RatingService.rateIncrementalUsage` per-event call (replaced by local `calculatePricePerFeature` double-call-and-diff in the DO).
+- Per-meter spend caps. Phase 7 owns spend enforcement via the reservation primitive.
+- `analytics-flush-dlq` CF Queue. The outbox is the retry buffer.
 
 Phase 7's reservation primitive pre-moves funds into a reserved account
 before the DO sees an event. Building a per-event ledger write now, only to
@@ -53,7 +54,7 @@ risk.
 
 **The gap.** Between Phase 6.7 and Phase 7 shipping, agent meter facts
 produce **no ledger entries**. Tinybird still records every priced fact with
-full detail (delta, valueAfter, amount_cents, currency, tier_breakdown).
+full detail (delta, valueAfter, amount_cents, currency).
 `customer.{id}.consumed` does not advance for agent usage during the gap.
 Subscription billing via `invoiceSubscription` is unaffected — it uses its
 own path through `RatingService.rateBillingPeriod` and `LedgerService`.
@@ -77,7 +78,7 @@ back-fill. If the gap matters, accelerate Phase 7 — do not reinflate 6.7.
 
 ## Guardrails
 
-- Zero wallets, zero reservations, zero credits. That's Phase 7.
+- Zero wallets, zero reservations, zero credits, zero spend caps. That's Phase 7.
 - No new pricing math. `calculatePricePerFeature` and its tier helpers are the only price functions the DO calls.
 - No backward-compatibility shims. Drop columns, drop JSON blobs, migrate cleanly.
 - DO ends the phase with zero Postgres client. If `createConnection` appears under `apps/api/src/ingestion/entitlements/`, the refactor is unfinished.
@@ -120,26 +121,29 @@ Schema (DO SQLite, `apps/api/src/ingestion/entitlements/db/schema.ts`):
 export const meterPricingTable = sqliteTable("meter_pricing", {
   meterKey: text("meter_key").primaryKey(),
   currency: text("currency").notNull(),
-  rateCard: text("rate_card", { mode: "json" }).$type<RateCard>().notNull(),
+  priceConfig: text("price_config", { mode: "json" }).$type<PriceConfig>().notNull(),
   pinnedPlanVersionId: text("pinned_plan_version_id").notNull(),
   createdAt: integer("created_at").notNull(),
 })
 ```
 
+Where `PriceConfig` = `z.infer<typeof configFeatureSchema>` from
+`internal/db/src/validators/planVersionFeatures`.
+
 API:
 
-- Extend `applyInputSchema` with `rateCards: Record<MeterKey, RateCard>`.
-- The activation caller already loads `featurePlanVersion`; extract the rate card from `featurePlanVersion.config` and pass it in.
+- Extend `applyInputSchema` with `priceConfigs: Record<MeterKey, PriceConfig>`.
+- The activation caller already loads `featurePlanVersion`; extract the config from `featurePlanVersion.config` and pass it in.
 - First `apply()` per meter upserts the row. Subsequent calls verify `pinnedPlanVersionId`; mismatch = new entitlement = new DO instance.
 
 Rating inside the DO:
 
-- In `applyEventSync`'s `beforePersist` hook: after `{delta, valueAfter}` is produced, look up the snapshotted rate card and compute the price delta using the same double-call-and-diff pattern that `RatingService.rateIncrementalUsage` uses today:
+- In `applyEventSync`'s `beforePersist` hook: after `{delta, valueAfter}` is produced, look up the snapshotted price config and compute the price delta using the same double-call-and-diff pattern that `RatingService.rateIncrementalUsage` uses today:
     1. `priceBefore = calculatePricePerFeature({ quantity: valueAfter - delta, featureType, config })` (usage before this event)
     2. `priceAfter  = calculatePricePerFeature({ quantity: valueAfter, featureType, config })` (usage after this event)
     3. `amountCents = priceAfter.totalPrice.dinero - priceBefore.totalPrice.dinero`
-  This is pure math — no DB, no `RatingService` instance. The rate card config and `featureType` come from the snapshotted `meter_pricing` row.
-- Extended fact shape: `{ meterKey, delta, valueAfter, amountCents, currency, tierBreakdown }`.
+  This is pure math — no DB, no `RatingService` instance. The config and `featureType` come from the snapshotted `meter_pricing` row.
+- Extended fact shape: `{ meterKey, delta, valueAfter, amountCents, currency }`.
 
 Outcome: `buildOutboxFactPayload` fills priced fields directly. No async
 pricing lookup anywhere in the DO.
@@ -153,39 +157,18 @@ Validator (`outboxFactSchema`) gains:
 ```ts
 amount_cents: z.number().int().nonnegative(),
 currency: z.string().length(3),
-tier_breakdown: z.array(z.object({
-  tierIndex: z.number().int(),
-  units: z.number(),
-  unitPriceCents: z.number(),
-})).optional(),
 priced_at: z.number().int(),
 ```
+
+No `tier_breakdown`. The outbox transports `amount_cents` and `currency` —
+that's what Tinybird aggregates need. Tier decomposition is internal to
+`calculatePricePerFeature` and doesn't belong in the transport schema. If
+tier debug data is needed, log it.
 
 Tinybird: mirror the new columns in `entitlement_meter_fact_v2`. Keep v1
 for in-flight drain until cutover, then drop v1.
 
-### 6.7.4 — Per-meter spend cap enforcement
-
-Intent: spend cap is real-time, per-meter, definitive. Cross-meter
-aggregation is out of scope and stays that way (needs a fan-in DO; not now).
-
-Schema extension on `meterStateTable`:
-
-```ts
-spendCapCents: integer("spend_cap_cents"),
-spendSoFarCents: integer("spend_so_far_cents").notNull().default(0),
-```
-
-Input: `applyInputSchema.spendCapCents: z.number().int().nullable()`.
-
-Enforcement: extend `findLimitExceededFact` to compare
-`spendSoFarCents + amountCents > spendCapCents`. Throw
-`EntitlementWindowSpendCapExceededError` with reason `SPEND_CAP_EXCEEDED`.
-
-Denial-reason enum: `LIMIT_EXCEEDED | SPEND_CAP_EXCEEDED | WALLET_EMPTY`.
-`WALLET_EMPTY` lands in Phase 7 — reserve the slot now.
-
-### 6.7.5 — Single-purpose outbox
+### 6.7.4 — Single-purpose outbox
 
 Intent: one producer (DO), one consumer (Tinybird), one lifecycle.
 
@@ -200,7 +183,7 @@ Intent: one producer (DO), one consumer (Tinybird), one lifecycle.
 
 - Emit `outbox_depth` gauge on every alarm. Alert on > 1,000 rows per DO (Tinybird flush failing).
 
-### 6.7.6 — Idempotency table hygiene
+### 6.7.5 — Idempotency table hygiene
 
 Intent: queryable columns, not a JSON cell.
 
@@ -218,7 +201,7 @@ Delete: `parseStoredResult`, `parseApplyInput` re-parse, the redundant
 `outboxFactSchema.parse` inside `buildOutboxFactPayload`. Boundary
 validation once at `apply()` entry is enough.
 
-### 6.7.7 — Alarm scheduling correctness
+### 6.7.6 — Alarm scheduling correctness
 
 Intent: remove the in-memory lie.
 
@@ -235,36 +218,47 @@ private async scheduleAlarm(target: number): Promise<void> {
 }
 ```
 
-### 6.7.8 — Fallback analytics: pick one
+### 6.7.7 — Kill FALLBACK_ANALYTICS, outbox as retry buffer
 
 Intent: stop the unowned dual-write branch in `flushToTinybird`.
 
-Decision: Tinybird + DLQ. On flush failure, push the failed batch to
-`analytics-flush-dlq` CF Queue. DLQ consumer exposes a replay endpoint.
-Delete `writeBatchToFallbackAnalytics` and the `fallbackAnalytics` binding.
+Changes:
 
-Rationale: dual-write doubles storage without improving durability — both
-destinations can fail together if the shared serializer breaks. DLQ is
-explicit and cheap.
+- Delete `writeBatchToFallbackAnalytics` and the `fallbackAnalytics` field from the DO.
+- Remove the `FALLBACK_ANALYTICS` binding from wrangler config and the test mock.
+- On Tinybird flush failure: log the error, leave unflushed rows in the outbox. The next alarm retries them.
 
-### 6.7.9 — Tests
+The outbox *is* the retry buffer. Rows that fail to flush stay put and get
+picked up on the next alarm cycle. The `outbox_depth` gauge from 6.7.4
+alerts if retries aren't clearing. No new CF Queue, no new binding. If
+outbox depth alerts start firing in production and retries aren't sufficient,
+build a DLQ then — not now.
+
+Completion check:
+
+```
+rg "FALLBACK_ANALYTICS|fallbackAnalytics|writeBatchToFallback" apps/api/src/ingestion/entitlements/
+# → empty
+```
+
+### 6.7.8 — Tests
 
 `apps/api/src/ingestion/entitlements/EntitlementWindowDO.spec.ts`:
 
 - **Snapshot pricing parity:** DO `amount_cents` matches `calculatePricePerFeature` across flat / tier / package pricing.
-- **Spend cap:** unit cap + spend cap independent; distinct deny reasons; priced fact produced up to the cap, event at the cap denied.
 - **Idempotency:** repeat `apply()` with same key returns stored result from columns; no new outbox row.
 - **Alarm:** `scheduleAlarm` is idempotent across simulated eviction.
 - **Outbox depth:** 10k events → 10k rows, post-flush → 0 rows.
+- **Flush retry:** failed flush leaves rows in outbox; next alarm retries successfully; outbox drains to 0.
 - **Zero billing side effects:** 10k `apply()` calls create no pgledger entries, open no Postgres connection from the DO, invoke no `LedgerService` / `RatingService` method. Regression guard for 6.7.1.
 
-### 6.7.10 — Load validation experiment (the gate for Phase 7)
+### 6.7.9 — Load validation experiment (the gate for Phase 7)
 
 Intent: before declaring 6.7 done, prove the simplified DO holds up under
 agent-scale load. Phase 7 does not open until this slice passes.
 
 Setup: single DO instance pinned to one `(customer, meter)`. Representative
-AI-pricing rate card (tiered per-token). Event cost `$0.001`. 10,000
+AI-pricing price config (tiered per-token). Event cost `$0.001`. 10,000
 events/sec sustained for 60 seconds (600k total) from a synthetic loadgen
 hitting the ingestion adapter. Tinybird `entitlement_meter_fact_v2` ready.
 
@@ -279,15 +273,13 @@ Targets:
 | `LedgerService` calls from DO | 0 | Stale import or call site |
 | `RatingService` calls from DO | 0 | Stale import; rating must be local |
 | pgledger entries during run | 0 | Per-event path still wired; 6.7.1 incomplete |
-| Tinybird flush success | 100% | Investigate DLQ backlog |
+| Tinybird flush success | 100% | Investigate outbox depth |
 | Outbox depth post-burst | 0 within 2× flush interval | Flush bottleneck |
-| Tinybird DLQ entries | 0 | Flush failed during run |
-| Spend cap enforcement | priced facts above cap denied `SPEND_CAP_EXCEEDED` | 6.7.4 incomplete |
-| Idempotency replay | duplicate key returns stored result, no extra outbox row | 6.7.6 incomplete |
+| Idempotency replay | duplicate key returns stored result, no extra outbox row | 6.7.5 incomplete |
 
 Failure-mode playbook:
 
-- **p99 > 50 ms** → instrument `applyEventSync` stage-by-stage (rate lookup, delta compute, SQLite write). One is the culprit.
+- **p99 > 50 ms** → instrument `applyEventSync` stage-by-stage (price config lookup, delta compute, SQLite write). One is the culprit.
 - **Outbox grows monotonically during burst** → Tinybird flush is the bottleneck. Tune `FLUSH_INTERVAL_MS` and batch size.
 - **Any pgledger entry appears** → 6.7.1 missed a call site. `rg "ledger|LedgerService|billMeterFact" apps/api/src/ingestion/entitlements/` must be empty.
 - **Postgres connection from DO** → `createConnection` survived. `rg "createConnection" apps/api/src/ingestion/entitlements/` must be empty.
@@ -301,13 +293,14 @@ without this baseline.
 
 - Per-event ledger writes. Phase 7 owns this via the reservation primitive.
 - Reprocessing path for mid-period price changes. Known gap.
-- Cross-meter spend aggregation. Per-meter is definitive.
+- Spend caps (per-meter or cross-meter). Phase 7 owns spend enforcement.
 - Moving subscription billing to a queue. Period-close stays synchronous.
 - Backward compatibility for the DO's v1 outbox payload or for deleted use cases.
+- Tier breakdown in the outbox payload. Internal to pricing math.
 
 ## Risks
 
-**DO rate card drifts from plan version.** `pinnedPlanVersionId` is checked
+**DO price config drifts from plan version.** `pinnedPlanVersionId` is checked
 on every `apply()`. Plan-version change = new entitlement = new DO instance.
 
 **Agent meter usage produces no ledger entries during the 6.7 → 7 gap.**
@@ -325,9 +318,9 @@ Single rollout, no feature flag. DO self-destructs at
 `periodEndAt + MAX_EVENT_AGE_MS`, so new code takes effect per-entitlement
 on the next activation.
 
-1. Migration adds `meter_pricing` and `spend_cap_*` columns.
+1. Migration adds `meter_pricing` columns.
 2. Deploy DO code and the Tinybird `entitlement_meter_fact_v2` datasource.
-3. Run slice 6.7.10 against staging. Must pass.
+3. Run slice 6.7.9 against staging. Must pass.
 4. Production deploy. Existing DOs run pre-6.7 code until they self-destruct.
 5. After 24h, drop v1 Tinybird datasource and the v1 flush branch.
 

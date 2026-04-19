@@ -15,6 +15,13 @@
       "when": 1775686216949,
       "tag": "0001_orange_smiling_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776816000000,
+      "tag": "0002_shiny_puck",
+      "breakpoints": true
     }
   ]
 }

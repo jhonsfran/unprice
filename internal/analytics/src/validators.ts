@@ -171,6 +171,13 @@ export const entitlementMeterFactSchemaV1 = z.object({
   value_after: z.number(),
 })
 
+export const entitlementMeterFactSchemaV2 = entitlementMeterFactSchemaV1.extend({
+  feature_plan_version_id: z.string().nullable().optional(),
+  amount_cents: z.number().int().nonnegative(),
+  currency: z.string().length(3),
+  priced_at: z.number().int(),
+})
+
 export const auditLogSchemaV1 = z.object({
   workspace_id: z.string(),
   audit_log_id: z.string(),
@@ -343,6 +350,7 @@ export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
 export type AnalyticsEntitlementMeterFact = z.infer<typeof entitlementMeterFactSchemaV1>
+export type AnalyticsEntitlementMeterFactV2 = z.infer<typeof entitlementMeterFactSchemaV2>
 
 // Plan conversion response schemas
 export const planConversionResponseSchema = z.object({

@@ -1,4 +1,8 @@
-import type { MeterConfig, OverageStrategy } from "@unprice/db/validators"
+import type {
+  ConfigFeatureVersionType,
+  MeterConfig,
+  OverageStrategy,
+} from "@unprice/db/validators"
 import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { vi } from "vitest"
@@ -38,14 +42,15 @@ type ApplyInput = {
   featureSlug: string
   idempotencyKey: string
   limit?: number | null
-  meters: MeterConfig[]
+  meter: MeterConfig
+  priceConfig: ConfigFeatureVersionType
   now: number
   overageStrategy?: OverageStrategy
   periodEndAt: number
   periodKey: string
   projectId: string
   streamId: string
-  featurePlanVersionId: string | null
+  featurePlanVersionId: string
 }
 
 type ApplyResult = {
@@ -295,31 +300,30 @@ function applyToWindow(params: {
     updatedAt: number
   }> = []
 
-  for (const meter of input.meters) {
-    const meterKey = deriveMeterKey(meter)
-    const previous = window.get(meterKey) ?? {
-      updatedAt: Number.NEGATIVE_INFINITY,
-      value: 0,
-    }
-    const nextValue = computeNextMeterValue({
-      eventTimestamp: input.event.timestamp,
-      meter,
-      previous,
-      properties: input.event.properties,
-    })
-    const delta = nextValue - previous.value
-    const updatedAt =
-      meter.aggregationMethod === "latest" && input.event.timestamp < previous.updatedAt
-        ? previous.updatedAt
-        : Math.max(previous.updatedAt, input.event.timestamp)
-
-    pendingUpdates.push({
-      meterKey,
-      nextValue,
-      delta,
-      updatedAt,
-    })
+  const meter = input.meter
+  const meterKey = deriveMeterKey(meter)
+  const previous = window.get(meterKey) ?? {
+    updatedAt: Number.NEGATIVE_INFINITY,
+    value: 0,
   }
+  const nextValue = computeNextMeterValue({
+    eventTimestamp: input.event.timestamp,
+    meter,
+    previous,
+    properties: input.event.properties,
+  })
+  const delta = nextValue - previous.value
+  const updatedAt =
+    meter.aggregationMethod === "latest" && input.event.timestamp < previous.updatedAt
+      ? previous.updatedAt
+      : Math.max(previous.updatedAt, input.event.timestamp)
+
+  pendingUpdates.push({
+    meterKey,
+    nextValue,
+    delta,
+    updatedAt,
+  })
 
   const limit = normalizeLimit(input.limit)
   const overageStrategy = input.overageStrategy ?? "none"

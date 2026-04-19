@@ -1,11 +1,16 @@
 import { DurableObject } from "cloudflare:workers"
 import {
   Analytics,
-  type AnalyticsEntitlementMeterFact,
-  entitlementMeterFactSchemaV1,
+  type AnalyticsEntitlementMeterFactV2,
+  entitlementMeterFactSchemaV2,
 } from "@unprice/analytics"
-import { createConnection } from "@unprice/db"
-import type { OverageStrategy } from "@unprice/db/validators"
+import { formatAmountDinero } from "@unprice/db/utils"
+import {
+  type ConfigFeatureVersionType,
+  type OverageStrategy,
+  calculatePricePerFeature,
+  configFeatureSchema,
+} from "@unprice/db/validators"
 import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
 import {
   AsyncMeterAggregationEngine,
@@ -15,21 +20,27 @@ import {
   MAX_EVENT_AGE_MS,
   type MeterConfig,
   deriveMeterKey,
+  findLimitExceededFact,
 } from "@unprice/services/entitlements"
-import { GrantsManager } from "@unprice/services/entitlements"
-import { findLimitExceededFact } from "@unprice/services/entitlements"
-import { LedgerGateway } from "@unprice/services/ledger"
-import { RatingService } from "@unprice/services/rating"
-import { type MeterBillingFact, billMeterFact } from "@unprice/services/use-cases"
-import { and, asc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm"
+import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { z } from "zod"
 import { apiDrain } from "~/observability"
-import { idempotencyKeysTable, meterFactsOutboxTable, meterStateTable } from "./db/schema"
-import { schema } from "./db/schema"
+import {
+  idempotencyKeysTable,
+  meterFactsOutboxTable,
+  meterPricingTable,
+  meterStateTable,
+  schema,
+} from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
+
+// All entitlements routed through this DO are usage-based
+// (IngestionService filters on featureType === "usage" + meterConfig).
+// We rate against the snapshotted price config as a usage feature.
+const DO_FEATURE_TYPE = "usage" as const
 
 class EntitlementWindowLimitExceededError extends Error {
   constructor(
@@ -45,6 +56,15 @@ class EntitlementWindowLimitExceededError extends Error {
   }
 }
 
+class MeterPricingMismatchError extends Error {
+  constructor(params: { meterKey: string; expected: string; received: string }) {
+    super(
+      `Plan version for meter ${params.meterKey} has changed: snapshotted ${params.expected}, got ${params.received}. A new entitlement requires a new DO instance.`
+    )
+    this.name = MeterPricingMismatchError.name
+  }
+}
+
 type ApplyResult = {
   allowed: boolean
   deniedReason?: "LIMIT_EXCEEDED"
@@ -57,7 +77,7 @@ const outboxFactSchema = z.object({
   idempotency_key: z.string(),
   project_id: z.string(),
   customer_id: z.string(),
-  currency: z.string().min(1),
+  currency: z.string().length(3),
   stream_id: z.string(),
   feature_plan_version_id: z.string().nullable().optional(),
   feature_slug: z.string(),
@@ -68,6 +88,8 @@ const outboxFactSchema = z.object({
   created_at: z.number(),
   delta: z.number(),
   value_after: z.number(),
+  amount_cents: z.number().int().nonnegative(),
+  priced_at: z.number().int(),
 })
 
 type OutboxFact = z.infer<typeof outboxFactSchema>
@@ -75,12 +97,6 @@ type OutboxFact = z.infer<typeof outboxFactSchema>
 type OutboxFlushRow = {
   id: number
   payload: string
-}
-
-type OutboxBillingRow = {
-  id: number
-  payload: string
-  currency: string
 }
 
 const rawEventSchema = z.object({
@@ -100,12 +116,13 @@ const applyInputSchema = z.object({
   idempotencyKey: z.string().min(1),
   projectId: z.string().min(1),
   customerId: z.string().min(1),
-  currency: z.string().min(1),
+  currency: z.string().length(3),
   streamId: z.string().min(1),
-  featurePlanVersionId: z.string().nullable().optional(),
+  featurePlanVersionId: z.string().min(1),
   featureSlug: z.string().min(1),
   periodKey: z.string().min(1),
-  meters: z.array(z.custom<MeterConfig>()),
+  meter: z.custom<MeterConfig>((val) => val != null && typeof val === "object"),
+  priceConfig: configFeatureSchema,
   limit: z.number().finite().nullable().optional(),
   overageStrategy: overageStrategySchema.optional(),
   enforceLimit: z.boolean(),
@@ -115,15 +132,16 @@ const applyInputSchema = z.object({
 
 type ApplyInput = z.infer<typeof applyInputSchema>
 
+const FLUSH_BATCH_SIZE = 1000
+const FLUSH_INTERVAL_MS = 30_000
+const IDEMPOTENCY_CLEANUP_BATCH_SIZE = 5000
+const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
+
 export class EntitlementWindowDO extends DurableObject {
   private readonly analytics: Analytics
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
-  private readonly fallbackAnalytics: AnalyticsEngineDataset | null
-  private readonly ledger: LedgerGateway
   private readonly logger: AppLogger
-  private readonly rating: RatingService
   private readonly ready: Promise<void>
-  private isAlarmScheduled = false
   private periodEndAt: number | null = null
 
   constructor(state: DurableObjectState, env: Env) {
@@ -159,36 +177,6 @@ export class EntitlementWindowDO extends DurableObject {
       logger: this.logger,
     })
 
-    const dbEnv =
-      env.APP_ENV === "production"
-        ? "production"
-        : env.APP_ENV === "preview"
-          ? "preview"
-          : "development"
-
-    const billingDb = createConnection({
-      env: dbEnv,
-      primaryDatabaseUrl: env.DATABASE_URL,
-      read1DatabaseUrl: env.DATABASE_READ1_URL,
-      read2DatabaseUrl: env.DATABASE_READ2_URL,
-      logger: env.DRIZZLE_LOG.toString() === "true",
-      singleton: false,
-    })
-    const grantsManager = new GrantsManager({
-      db: billingDb,
-      logger: this.logger,
-    })
-    this.rating = new RatingService({
-      logger: this.logger,
-      analytics: this.analytics,
-      grantsManager,
-    })
-    this.ledger = new LedgerGateway({
-      db: billingDb,
-      logger: this.logger,
-    })
-    this.fallbackAnalytics = env.FALLBACK_ANALYTICS ?? null
-
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(this.db, migrations)
@@ -198,9 +186,8 @@ export class EntitlementWindowDO extends DurableObject {
   public async apply(rawInput: ApplyInput): Promise<ApplyResult> {
     await this.ready
 
-    const input = this.parseApplyInput(rawInput)
+    const input = applyInputSchema.parse(rawInput)
 
-    // The DO has a idempotency key per period to deduplicate
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
 
@@ -211,30 +198,46 @@ export class EntitlementWindowDO extends DurableObject {
     let insertedFactCount = 0
 
     try {
-      // fan out pattern to avoid losing events if the transaction fails
       const result = this.db.transaction((tx) => {
         const existing = tx
-          .select({ result: idempotencyKeysTable.result })
+          .select({
+            allowed: idempotencyKeysTable.allowed,
+            deniedReason: idempotencyKeysTable.deniedReason,
+            denyMessage: idempotencyKeysTable.denyMessage,
+          })
           .from(idempotencyKeysTable)
           .where(eq(idempotencyKeysTable.eventId, idempotencyKey))
           .get()
 
-        if (existing?.result) {
-          // if exist we don't reprocess the meter
-          return this.parseStoredResult(existing.result)
+        if (existing) {
+          return {
+            allowed: existing.allowed,
+            deniedReason:
+              (existing.deniedReason as ApplyResult["deniedReason"] | null | undefined) ??
+              undefined,
+            message: existing.denyMessage ?? undefined,
+          }
         }
 
-        // create the adapter and the engine
+        const meterKey = deriveMeterKey(input.meter)
+
+        // Snapshot price config on first apply; verify on every subsequent call.
+        this.ensureMeterPricing(tx, {
+          meterKey,
+          priceConfig: input.priceConfig,
+          currency: input.currency,
+          pinnedPlanVersionId: input.featurePlanVersionId,
+          createdAt,
+        })
+
         const adapter = new DrizzleStorageAdapter(tx)
-        // create the engine
-        const engine = new AsyncMeterAggregationEngine(input.meters, adapter, input.now)
-        // apply the event
+        const engine = new AsyncMeterAggregationEngine([input.meter], adapter, input.now)
+
         const facts = engine.applyEventSync(input.event, {
           // A limit hit is still a valid ingestion event. We store the denied
           // result in the DO idempotency table so queue retries stay stable,
           // while the ingestion service treats the event as processed.
           beforePersist: (pendingFacts) => {
-            // only enforce the limits when needed
             if (!input.enforceLimit) {
               return
             }
@@ -245,7 +248,6 @@ export class EntitlementWindowDO extends DurableObject {
               overageStrategy: input.overageStrategy,
             })
 
-            // when enforcing limit we throw before persisting that to the state
             if (exceeded && typeof input.limit === "number" && Number.isFinite(input.limit)) {
               throw new EntitlementWindowLimitExceededError({
                 eventId: input.event.id,
@@ -258,50 +260,57 @@ export class EntitlementWindowDO extends DurableObject {
         })
 
         insertedFactCount = facts.length
-        const meterConfigsByKey = new Map(
-          input.meters.map((meter) => [deriveMeterKey(meter), meter])
-        )
 
-        // create the outbox batch of facts
         for (const fact of facts) {
-          const meterConfig = meterConfigsByKey.get(fact.meterKey)
-
-          if (!meterConfig) {
-            throw new Error(`Missing meter config for fact meter ${fact.meterKey}`)
-          }
-
-          const payload = this.buildOutboxFactPayload({
-            createdAt,
+          const amountCents = this.computeAmountCents({
             fact,
-            input,
-            meterConfig,
+            priceConfig: input.priceConfig,
           })
+
+          const payload: OutboxFact = {
+            id: [input.streamId, input.periodKey, input.event.id, fact.meterKey].join(":"),
+            event_id: input.event.id,
+            idempotency_key: input.idempotencyKey,
+            project_id: input.projectId,
+            customer_id: input.customerId,
+            currency: input.currency,
+            stream_id: input.streamId,
+            feature_plan_version_id: input.featurePlanVersionId,
+            feature_slug: input.featureSlug,
+            period_key: input.periodKey,
+            event_slug: input.event.slug,
+            aggregation_method: input.meter.aggregationMethod,
+            timestamp: input.event.timestamp,
+            created_at: createdAt,
+            delta: fact.delta,
+            value_after: fact.valueAfter,
+            amount_cents: amountCents,
+            priced_at: createdAt,
+          }
 
           tx.insert(meterFactsOutboxTable)
             .values({
               payload: JSON.stringify(payload),
               currency: payload.currency,
-              billedAt: null,
             })
             .run()
         }
-
-        const successResult: ApplyResult = { allowed: true }
 
         tx.insert(idempotencyKeysTable)
           .values({
             eventId: idempotencyKey,
             createdAt,
-            result: JSON.stringify(successResult),
+            allowed: true,
+            deniedReason: null,
+            denyMessage: null,
           })
           .run()
 
-        return successResult
+        return { allowed: true } as ApplyResult
       })
 
-      // if there are facts inserted lets set an alarm to flush to analytics
-      if (result.allowed && insertedFactCount > 0 && !this.isAlarmScheduled) {
-        await this.scheduleAlarm(Date.now() + 30_000)
+      if (result.allowed && insertedFactCount > 0) {
+        await this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS)
       }
 
       return result
@@ -318,7 +327,9 @@ export class EntitlementWindowDO extends DurableObject {
           .values({
             eventId: idempotencyKey,
             createdAt,
-            result: JSON.stringify(deniedResult),
+            allowed: false,
+            deniedReason: deniedResult.deniedReason ?? null,
+            denyMessage: deniedResult.message ?? null,
           })
           .run()
 
@@ -371,7 +382,6 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   async alarm(): Promise<void> {
-    this.isAlarmScheduled = false
     await this.ready
 
     const batch = this.db
@@ -381,36 +391,23 @@ export class EntitlementWindowDO extends DurableObject {
       })
       .from(meterFactsOutboxTable)
       .orderBy(asc(meterFactsOutboxTable.id))
-      .limit(1000)
+      .limit(FLUSH_BATCH_SIZE)
       .all()
-
-    let flushedBatchIds: number[] = []
-    let didFlushBatch = false
 
     if (batch.length > 0) {
-      // this needs to be reliable and idempotent
-      didFlushBatch = await this.flushToTinybird(batch)
-      flushedBatchIds = batch.map((row) => row.id)
-    }
+      const didFlush = await this.flushToTinybird(batch)
 
-    const unbilledBatch = this.db
-      .select({
-        id: meterFactsOutboxTable.id,
-        payload: meterFactsOutboxTable.payload,
-        currency: meterFactsOutboxTable.currency,
-      })
-      .from(meterFactsOutboxTable)
-      .where(isNull(meterFactsOutboxTable.billedAt))
-      .orderBy(asc(meterFactsOutboxTable.id))
-      .limit(1000)
-      .all()
-
-    if (unbilledBatch.length > 0) {
-      await this.processBillingBatch(unbilledBatch)
-    }
-
-    if (didFlushBatch && flushedBatchIds.length > 0) {
-      this.deleteFlushedAndBilledRows(flushedBatchIds)
+      if (didFlush) {
+        this.db
+          .delete(meterFactsOutboxTable)
+          .where(
+            inArray(
+              meterFactsOutboxTable.id,
+              batch.map((row) => row.id)
+            )
+          )
+          .run()
+      }
     }
 
     // Keep idempotency keys for MAX_EVENT_AGE_MS (30 days). Cleanup is chunked
@@ -420,7 +417,7 @@ export class EntitlementWindowDO extends DurableObject {
       .from(idempotencyKeysTable)
       .where(lt(idempotencyKeysTable.createdAt, Date.now() - MAX_EVENT_AGE_MS))
       .orderBy(asc(idempotencyKeysTable.createdAt))
-      .limit(5000)
+      .limit(IDEMPOTENCY_CLEANUP_BATCH_SIZE)
       .all()
 
     if (staleIdempotencyRows.length > 0) {
@@ -436,6 +433,11 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     const remainingOutboxCount = this.getOutboxCount()
+
+    this.logger.info("entitlement outbox depth", {
+      outbox_depth: remainingOutboxCount,
+      alert: remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD,
+    })
 
     if (!this.periodEndAt) {
       // We don't know when the period ends, and outbox is empty.
@@ -453,7 +455,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     if (remainingOutboxCount > 0) {
-      await this.scheduleAlarm(Date.now() + 30_000)
+      await this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS)
       return
     }
 
@@ -462,64 +464,89 @@ export class EntitlementWindowDO extends DurableObject {
     await this.scheduleAlarm(selfDestructAt)
   }
 
-  private parseApplyInput(input: ApplyInput): ApplyInput {
-    const result = applyInputSchema.safeParse(input)
+  private ensureMeterPricing(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    params: {
+      meterKey: string
+      priceConfig: ConfigFeatureVersionType
+      currency: string
+      pinnedPlanVersionId: string
+      createdAt: number
+    }
+  ): void {
+    const { meterKey, priceConfig, currency, pinnedPlanVersionId, createdAt } = params
 
-    if (!result.success) {
-      throw new TypeError("Invalid apply payload")
+    const existing = tx
+      .select({ pinnedPlanVersionId: meterPricingTable.pinnedPlanVersionId })
+      .from(meterPricingTable)
+      .where(eq(meterPricingTable.meterKey, meterKey))
+      .get()
+
+    if (existing) {
+      if (existing.pinnedPlanVersionId !== pinnedPlanVersionId) {
+        throw new MeterPricingMismatchError({
+          meterKey,
+          expected: existing.pinnedPlanVersionId,
+          received: pinnedPlanVersionId,
+        })
+      }
+      return
     }
 
-    return result.data
+    tx.insert(meterPricingTable)
+      .values({
+        meterKey,
+        currency,
+        priceConfig,
+        pinnedPlanVersionId,
+        createdAt,
+      })
+      .run()
   }
 
-  private parseStoredResult(result: string): ApplyResult {
-    const parsed = JSON.parse(result) as Partial<ApplyResult>
-    return {
-      allowed: parsed.allowed === true,
-      deniedReason: parsed.deniedReason,
-      message: parsed.message,
-    }
-  }
-
-  private buildOutboxFactPayload(params: {
-    createdAt: number
+  private computeAmountCents(params: {
     fact: Fact
-    input: ApplyInput
-    meterConfig: MeterConfig
-  }): OutboxFact {
-    const { createdAt, fact, input, meterConfig } = params
+    priceConfig: ConfigFeatureVersionType
+  }): number {
+    const { fact, priceConfig } = params
 
-    return outboxFactSchema.parse({
-      id: [input.streamId, input.periodKey, input.event.id, fact.meterKey].join(":"),
-      event_id: input.event.id,
-      idempotency_key: input.idempotencyKey,
-      project_id: input.projectId,
-      customer_id: input.customerId,
-      currency: input.currency,
-      stream_id: input.streamId,
-      feature_plan_version_id: input.featurePlanVersionId ?? null,
-      feature_slug: input.featureSlug,
-      period_key: input.periodKey,
-      event_slug: input.event.slug,
-      aggregation_method: meterConfig.aggregationMethod,
-      timestamp: input.event.timestamp,
-      created_at: createdAt,
-      delta: fact.delta,
-      value_after: fact.valueAfter,
+    // Corrections / zero-delta events don't move pricing.
+    if (fact.delta <= 0) {
+      return 0
+    }
+
+    const usageAfter = Math.max(0, fact.valueAfter)
+    const usageBefore = Math.max(0, fact.valueAfter - fact.delta)
+
+    const beforeResult = calculatePricePerFeature({
+      quantity: usageBefore,
+      featureType: DO_FEATURE_TYPE,
+      config: priceConfig,
     })
-  }
 
-  private parseOutboxFactPayload(payload: string): OutboxFact {
-    return outboxFactSchema.parse(JSON.parse(payload))
+    if (beforeResult.err) {
+      throw beforeResult.err
+    }
+
+    const afterResult = calculatePricePerFeature({
+      quantity: usageAfter,
+      featureType: DO_FEATURE_TYPE,
+      config: priceConfig,
+    })
+    if (afterResult.err) {
+      throw afterResult.err
+    }
+
+    const { amount: afterCents } = formatAmountDinero(afterResult.val.totalPrice.dinero)
+    const { amount: beforeCents } = formatAmountDinero(beforeResult.val.totalPrice.dinero)
+    return Math.max(0, afterCents - beforeCents)
   }
 
   private async flushToTinybird(batch: OutboxFlushRow[]): Promise<boolean> {
-    let facts: AnalyticsEntitlementMeterFact[]
+    let facts: AnalyticsEntitlementMeterFactV2[]
 
     try {
-      facts = batch.map((row) =>
-        entitlementMeterFactSchemaV1.parse(this.parseOutboxFactPayload(row.payload))
-      )
+      facts = batch.map((row) => entitlementMeterFactSchemaV2.parse(JSON.parse(row.payload)))
     } catch (error) {
       this.logger.error("Failed to parse entitlement meter fact outbox payload", {
         error: this.errorMessage(error),
@@ -529,7 +556,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     try {
-      const result = await this.analytics.ingestEntitlementMeterFacts(facts)
+      const result = await this.analytics.ingestEntitlementMeterFactsV2(facts)
       const successful = result?.successful_rows ?? 0
       const quarantined = result?.quarantined_rows ?? 0
 
@@ -549,132 +576,18 @@ export class EntitlementWindowDO extends DurableObject {
       })
     }
 
-    return this.writeBatchToFallbackAnalytics(facts)
-  }
-
-  private async processBillingBatch(rows: OutboxBillingRow[]): Promise<void> {
-    for (const row of rows) {
-      let parsedFact: OutboxFact | undefined
-
-      try {
-        parsedFact = this.parseOutboxFactPayload(row.payload)
-        const fact: MeterBillingFact = {
-          ...parsedFact,
-        }
-
-        const result = await billMeterFact(
-          {
-            services: {
-              rating: this.rating,
-              ledger: this.ledger,
-            },
-            logger: this.logger,
-          },
-          {
-            fact,
-          }
-        )
-
-        if (result.err) {
-          this.logger.error("Failed to process agent billing fact", {
-            outboxId: row.id,
-            projectId: fact.project_id,
-            customerId: fact.customer_id,
-            eventId: fact.event_id,
-            featureSlug: fact.feature_slug,
-            idempotencyKey: fact.idempotency_key,
-            error: this.errorMessage(result.err),
-          })
-          continue
-        }
-
-        this.db
-          .update(meterFactsOutboxTable)
-          .set({
-            billedAt: Date.now(),
-          })
-          .where(eq(meterFactsOutboxTable.id, row.id))
-          .run()
-      } catch (error) {
-        this.logger.error("Failed to parse or process unbilled meter fact row", {
-          outboxId: row.id,
-          customerId: parsedFact?.customer_id,
-          eventId: parsedFact?.event_id,
-          error: this.errorMessage(error),
-        })
-      }
-    }
-  }
-
-  private deleteFlushedAndBilledRows(flushedBatchIds: number[]): void {
-    const rowsToDelete = this.db
-      .select({
-        id: meterFactsOutboxTable.id,
-      })
-      .from(meterFactsOutboxTable)
-      .where(
-        and(
-          inArray(meterFactsOutboxTable.id, flushedBatchIds),
-          isNotNull(meterFactsOutboxTable.billedAt)
-        )
-      )
-      .all()
-
-    if (rowsToDelete.length === 0) {
-      return
-    }
-
-    this.db
-      .delete(meterFactsOutboxTable)
-      .where(
-        inArray(
-          meterFactsOutboxTable.id,
-          rowsToDelete.map((row) => row.id)
-        )
-      )
-      .run()
-  }
-
-  private async writeBatchToFallbackAnalytics(
-    facts: AnalyticsEntitlementMeterFact[]
-  ): Promise<boolean> {
-    if (!this.fallbackAnalytics) {
-      this.logger.error("Fallback analytics dataset is not configured", {
-        batchSize: facts.length,
-      })
-      return false
-    }
-
-    try {
-      for (const fact of facts) {
-        this.fallbackAnalytics.writeDataPoint({
-          indexes: [fact.project_id, fact.customer_id, fact.feature_slug],
-          doubles: [fact.timestamp, fact.created_at, fact.delta, fact.value_after],
-          blobs: [fact.id, fact.stream_id, JSON.stringify(fact)],
-        })
-      }
-
-      return true
-    } catch (error) {
-      this.logger.error("Failed to write entitlement meter facts to fallback analytics", {
-        error: this.errorMessage(error),
-        batchSize: facts.length,
-      })
-      return false
-    }
+    return false
   }
 
   private errorMessage(error: unknown): string {
     if (error instanceof Error) {
       return error.message
     }
-
     return String(error ?? "unknown error")
   }
 
   private getOutboxCount(): number {
     const row = this.db.select({ count: sql<number>`count(*)` }).from(meterFactsOutboxTable).get()
-
     return Number(row?.count ?? 0)
   }
 
@@ -682,7 +595,6 @@ export class EntitlementWindowDO extends DurableObject {
     if (typeof limit !== "number" || !Number.isFinite(limit)) {
       return null
     }
-
     return limit
   }
 
@@ -690,8 +602,9 @@ export class EntitlementWindowDO extends DurableObject {
     return `meter-state:${meterKey}`
   }
 
-  private async scheduleAlarm(scheduledAt: number): Promise<void> {
-    await this.ctx.storage.setAlarm(scheduledAt)
-    this.isAlarmScheduled = true
+  private async scheduleAlarm(target: number): Promise<void> {
+    const existing = await this.ctx.storage.getAlarm()
+    if (existing !== null && existing <= target) return
+    await this.ctx.storage.setAlarm(target)
   }
 }

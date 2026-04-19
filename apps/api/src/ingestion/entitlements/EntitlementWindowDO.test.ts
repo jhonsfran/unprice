@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 const TEST_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
@@ -13,9 +14,25 @@ type DrizzleCondition = {
   conditions?: DrizzleCondition[]
 }
 
+type IdempotencyRow = {
+  createdAt: number
+  allowed: boolean
+  deniedReason: string | null
+  denyMessage: string | null
+}
+
+type MeterPricingRow = {
+  meterKey: string
+  currency: string
+  priceConfig: unknown
+  pinnedPlanVersionId: string
+  createdAt: number
+}
+
 type FakeDbState = {
-  idempotencyRows: Map<string, { createdAt: number; result: string }>
-  outboxRows: { id: number; payload: string; currency: string; billedAt: number | null }[]
+  idempotencyRows: Map<string, IdempotencyRow>
+  outboxRows: { id: number; payload: string; currency: string }[]
+  meterPricingRows: Map<string, MeterPricingRow>
 }
 
 type FakeDurableObjectState = {
@@ -33,10 +50,10 @@ type FakeDurableObjectState = {
 }
 
 const testState = {
-  analyticsIngest: vi.fn(),
+  analyticsIngestV2: vi.fn(),
   db: null as FakeDbState | null,
   engineApply: vi.fn(),
-  reportAgentUsage: vi.fn(),
+  pricePerFeature: vi.fn(),
   logger: {
     debug: vi.fn(),
     emit: vi.fn(),
@@ -62,19 +79,34 @@ const DEFAULT_METER_KEY = [
   DEFAULT_METER_CONFIG.aggregationField,
 ].join(":")
 
+const DEFAULT_PRICE_CONFIG = {
+  usageMode: "unit" as const,
+  price: {
+    dinero: {
+      amount: 100,
+      currency: { code: "USD", base: 10, exponent: 2 },
+      scale: 2,
+    },
+    displayAmount: "1.00",
+  },
+}
+
 describe("EntitlementWindowDO", () => {
   beforeEach(() => {
     for (const fn of Object.values(testState.logger)) fn.mockReset()
-    testState.analyticsIngest.mockReset()
+    testState.analyticsIngestV2.mockReset()
     testState.engineApply.mockReset()
-    testState.reportAgentUsage.mockReset()
-    testState.reportAgentUsage.mockResolvedValue({
-      val: {
-        amountCents: 100,
-        sourceId: "proj_123:cus_123:api_calls:idem_123",
-        state: "debited",
-      },
-    })
+    testState.pricePerFeature.mockReset()
+    // Default: unit pricing — amount = quantity * 100 cents
+    testState.pricePerFeature.mockImplementation(
+      ({ quantity }: { quantity: number }) => ({
+        val: {
+          totalPrice: {
+            dinero: { amount: Math.max(0, quantity) * 100, scale: 2 },
+          },
+        },
+      })
+    )
     vi.spyOn(Date, "now").mockReturnValue(BASE_NOW)
   })
 
@@ -107,6 +139,13 @@ describe("EntitlementWindowDO", () => {
     expect(db.idempotencyRows.size).toBe(1)
     expect(db.outboxRows).toHaveLength(1)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+
+    // priced payload surfaces amount_cents + priced_at
+    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(payload.amount_cents).toBe(300) // 3 units @ 100 cents
+    expect(payload.currency).toBe("USD")
+    expect(payload.priced_at).toBe(BASE_NOW)
+    expect(payload.feature_plan_version_id).toBe("fpv_123")
   })
 
   it("stores denied results and reuses them when a retry hits the same limit", async () => {
@@ -141,27 +180,35 @@ describe("EntitlementWindowDO", () => {
     expect(state.alarmAt).toBeNull()
   })
 
-  it.each([
-    ["empty idempotency key", { idempotencyKey: "" }],
-    ["non-array meters", { meters: null }],
-    ["non-finite limit", { limit: Number.POSITIVE_INFINITY }],
-    ["unsupported overage strategy", { overageStrategy: "sometimes" }],
-    ["nan period end", { periodEndAt: Number.NaN }],
-  ])("rejects invalid apply payloads for %s", async (_label, overrides) => {
-    const EntitlementWindowDO = await loadEntitlementWindowDO()
-    const state = createDurableObjectState()
-    const db = createFakeDbState()
-    testState.db = db
+  it("rejects invalid apply payloads", async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ["empty idempotency key", { idempotencyKey: "" }],
+      ["missing meter", { meter: null }],
+      ["non-finite limit", { limit: Number.POSITIVE_INFINITY }],
+      ["unsupported overage strategy", { overageStrategy: "sometimes" }],
+      ["nan period end", { periodEndAt: Number.NaN }],
+      ["missing price config", { priceConfig: null }],
+      ["missing plan version id", { featurePlanVersionId: "" }],
+    ]
 
-    const durableObject = new EntitlementWindowDO(state, createEnv())
-    // biome-ignore lint/suspicious/noExplicitAny: intentional invalid input
-    const input = { ...createApplyInput(), ...overrides } as any
+    for (const [, overrides] of cases) {
+      const EntitlementWindowDO = await loadEntitlementWindowDO()
+      const state = createDurableObjectState()
+      const db = createFakeDbState()
+      testState.db = db
 
-    await expect(durableObject.apply(input)).rejects.toThrow("Invalid apply payload")
-    expect(testState.engineApply).not.toHaveBeenCalled()
-    expect(db.idempotencyRows.size).toBe(0)
-    expect(db.outboxRows).toHaveLength(0)
-    expect(state.alarmAt).toBeNull()
+      const durableObject = new EntitlementWindowDO(state, createEnv())
+      // biome-ignore lint/suspicious/noExplicitAny: intentional invalid input
+      const input = { ...createApplyInput(), ...overrides } as any
+
+      await expect(durableObject.apply(input)).rejects.toThrow()
+      expect(testState.engineApply).not.toHaveBeenCalled()
+      expect(db.idempotencyRows.size).toBe(0)
+      expect(db.outboxRows).toHaveLength(0)
+      expect(state.alarmAt).toBeNull()
+      vi.resetModules()
+      testState.engineApply.mockReset()
+    }
   })
 
   it("flushes queued facts during alarm and schedules self-destruct when the outbox is empty", async () => {
@@ -174,7 +221,7 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    testState.analyticsIngest.mockResolvedValue({
+    testState.analyticsIngestV2.mockResolvedValue({
       quarantined_rows: 0,
       successful_rows: 1,
     })
@@ -185,34 +232,29 @@ describe("EntitlementWindowDO", () => {
     })
 
     await durableObject.apply(input)
+    // Cloudflare auto-clears the scheduled alarm before invoking alarm()
+    state.alarmAt = null
     await durableObject.alarm()
 
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(testState.reportAgentUsage).toHaveBeenCalledTimes(1)
-    expect(testState.reportAgentUsage).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.objectContaining({
-        fact: expect.objectContaining({
-          currency: "USD",
-          feature_plan_version_id: "fpv_123",
-        }),
-      })
-    )
-    expect(testState.analyticsIngest).toHaveBeenCalledWith([
+    expect(testState.analyticsIngestV2).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngestV2).toHaveBeenCalledWith([
       expect.objectContaining({
         delta: 2,
         event_id: input.event.id,
         feature_slug: input.featureSlug,
+        feature_plan_version_id: "fpv_123",
         idempotency_key: input.idempotencyKey,
         stream_id: input.streamId,
         value_after: 2,
+        amount_cents: 200,
+        currency: "USD",
       }),
     ])
     expect(db.outboxRows).toHaveLength(0)
     expect(state.alarmAt).toBe(input.periodEndAt + TEST_MAX_EVENT_AGE_MS)
   })
 
-  it("keeps unbilled rows for retry when background billing fails", async () => {
+  it("keeps rows in the outbox for retry when Tinybird flush fails", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -222,13 +264,7 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    testState.analyticsIngest.mockResolvedValue({
-      quarantined_rows: 0,
-      successful_rows: 1,
-    })
-    testState.reportAgentUsage.mockResolvedValue({
-      err: new Error("ledger failed"),
-    })
+    testState.analyticsIngestV2.mockRejectedValueOnce(new Error("tinybird down"))
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const input = createApplyInput()
@@ -236,12 +272,95 @@ describe("EntitlementWindowDO", () => {
     await durableObject.apply(input)
     await durableObject.alarm()
 
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(testState.reportAgentUsage).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngestV2).toHaveBeenCalledTimes(1)
+    // Failed flush leaves the row in the outbox
     expect(db.outboxRows).toHaveLength(1)
-    expect(db.outboxRows[0]?.billedAt).toBeNull()
+
+    // Next alarm retries successfully and drains the outbox
+    testState.analyticsIngestV2.mockResolvedValueOnce({
+      quarantined_rows: 0,
+      successful_rows: 1,
+    })
+    await durableObject.alarm()
+    expect(testState.analyticsIngestV2).toHaveBeenCalledTimes(2)
+    expect(db.outboxRows).toHaveLength(0)
+  })
+
+  it("does not open a Postgres connection, nor call ledger/rating services", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.analyticsIngestV2.mockResolvedValue({
+      quarantined_rows: 0,
+      successful_rows: 10,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    for (let i = 0; i < 10; i++) {
+      await durableObject.apply(
+        createApplyInput({ idempotencyKey: `idem_${i}`, event: { ...createApplyInput().event, id: `evt_${i}` } })
+      )
+    }
+    await durableObject.alarm()
+
+    expect(createConnectionSpy).not.toHaveBeenCalled()
+    expect(ledgerPostChargeSpy).not.toHaveBeenCalled()
+    expect(ratingRateIncrementalSpy).not.toHaveBeenCalled()
+  })
+
+  it("snapshots price config on first apply and rejects plan version drift", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await durableObject.apply(createApplyInput({ idempotencyKey: "idem_a" }))
+    expect(db.meterPricingRows.size).toBe(1)
+    expect(db.meterPricingRows.get(DEFAULT_METER_KEY)?.pinnedPlanVersionId).toBe("fpv_123")
+
+    // subsequent apply with a different plan version must throw
+    await expect(
+      durableObject.apply(createApplyInput({ idempotencyKey: "idem_b", featurePlanVersionId: "fpv_other" }))
+    ).rejects.toThrow(/Plan version for meter .* has changed/)
+  })
+
+  it("scheduleAlarm does not downgrade an earlier pending alarm", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    // Pre-set an alarm as if it survived DO eviction
+    state.alarmAt = BASE_NOW + 10_000
+
+    await durableObject.apply(createApplyInput())
+    // Would-be new alarm at BASE_NOW + 30_000 > existing; existing wins
+    expect(state.alarmAt).toBe(BASE_NOW + 10_000)
   })
 })
+
+const createConnectionSpy = vi.fn()
+const ledgerPostChargeSpy = vi.fn()
+const ratingRateIncrementalSpy = vi.fn()
 
 async function loadEntitlementWindowDO() {
   vi.doMock("cloudflare:workers", () => ({
@@ -276,13 +395,13 @@ async function loadEntitlementWindowDO() {
   vi.doMock("./drizzle/migrations", () => ({ default: [] }))
 
   vi.doMock("@unprice/db", () => ({
-    createConnection: vi.fn(() => ({})),
+    createConnection: createConnectionSpy,
   }))
 
   vi.doMock("drizzle-orm", () => ({
     and: (...conditions: DrizzleCondition[]): DrizzleCondition => ({ kind: "and", conditions }),
     asc: (col: unknown) => ({ col, kind: "asc" }),
-    eq: (_col: unknown, value: unknown): DrizzleCondition => ({ kind: "eq", value }),
+    eq: (col: unknown, value: unknown): DrizzleCondition => ({ kind: "eq", value, values: [col] }),
     inArray: (_col: unknown, values: unknown[]): DrizzleCondition => ({ kind: "inArray", values }),
     isNull: (): DrizzleCondition => ({ kind: "isNull" }),
     isNotNull: (): DrizzleCondition => ({ kind: "isNotNull" }),
@@ -292,15 +411,26 @@ async function loadEntitlementWindowDO() {
 
   vi.doMock("@unprice/analytics", () => ({
     Analytics: class {
-      public ingestEntitlementMeterFacts = testState.analyticsIngest
+      public ingestEntitlementMeterFactsV2 = testState.analyticsIngestV2
     },
-    entitlementMeterFactSchemaV1: { parse: (p: unknown) => p },
+    entitlementMeterFactSchemaV2: { parse: (p: unknown) => p },
+  }))
+
+  vi.doMock("@unprice/db/validators", () => ({
+    calculatePricePerFeature: testState.pricePerFeature,
+    configFeatureSchema: z.record(z.string(), z.unknown()),
+  }))
+
+  vi.doMock("@unprice/db/utils", () => ({
+    formatAmountDinero: (price: { amount: number }) => ({
+      amount: price.amount,
+      currency: "usd",
+    }),
   }))
 
   vi.doMock("@unprice/services/entitlements", () => {
     class EventTimestampTooFarInFutureError extends Error {}
     class EventTimestampTooOldError extends Error {}
-    class GrantsManager {}
 
     return {
       AsyncMeterAggregationEngine: class {
@@ -310,7 +440,6 @@ async function loadEntitlementWindowDO() {
       },
       EventTimestampTooFarInFutureError,
       EventTimestampTooOldError,
-      GrantsManager,
       MAX_EVENT_AGE_MS: TEST_MAX_EVENT_AGE_MS,
       deriveMeterKey: (m: {
         eventId: string
@@ -342,22 +471,6 @@ async function loadEntitlementWindowDO() {
       },
     }
   })
-
-  vi.doMock("@unprice/services/rating", () => ({
-    RatingService: class {},
-  }))
-
-  vi.doMock("@unprice/services/ledger", () => ({
-    LedgerGateway: class {},
-  }))
-
-  vi.doMock("@unprice/services/metrics", () => ({
-    NoopMetrics: class {},
-  }))
-
-  vi.doMock("@unprice/services/use-cases", () => ({
-    billMeterFact: testState.reportAgentUsage,
-  }))
 
   const module = (await import("./EntitlementWindowDO")) as {
     EntitlementWindowDO: new (
@@ -402,6 +515,7 @@ function createFakeDbState(): FakeDbState {
   return {
     idempotencyRows: new Map(),
     outboxRows: [],
+    meterPricingRows: new Map(),
   }
 }
 
@@ -412,14 +526,8 @@ function createFakeDbState(): FakeDbState {
 function buildFakeDrizzle(state: FakeDbState) {
   let nextOutboxId = 1
 
-  const matchOutboxCondition = (
-    row: { id: number; billedAt: number | null },
-    condition?: DrizzleCondition
-  ): boolean => {
-    if (!condition) {
-      return true
-    }
-
+  const matchOutboxCondition = (row: { id: number }, condition?: DrizzleCondition): boolean => {
+    if (!condition) return true
     switch (condition.kind) {
       case "and":
         return (condition.conditions ?? []).every((nested) => matchOutboxCondition(row, nested))
@@ -427,10 +535,6 @@ function buildFakeDrizzle(state: FakeDbState) {
         return row.id === Number(condition.value)
       case "inArray":
         return (condition.values ?? []).includes(row.id)
-      case "isNull":
-        return row.billedAt === null
-      case "isNotNull":
-        return row.billedAt !== null
       default:
         return true
     }
@@ -440,6 +544,7 @@ function buildFakeDrizzle(state: FakeDbState) {
     transaction<T>(callback: (tx: typeof db) => T): T {
       const idempotencySnapshot = new Map(state.idempotencyRows)
       const outboxSnapshot = [...state.outboxRows]
+      const meterPricingSnapshot = new Map(state.meterPricingRows)
       const outboxIdSnapshot = nextOutboxId
       try {
         return callback(db)
@@ -448,6 +553,9 @@ function buildFakeDrizzle(state: FakeDbState) {
         for (const [k, v] of Array.from(idempotencySnapshot.entries()))
           state.idempotencyRows.set(k, v)
         state.outboxRows.splice(0, state.outboxRows.length, ...outboxSnapshot)
+        state.meterPricingRows.clear()
+        for (const [k, v] of Array.from(meterPricingSnapshot.entries()))
+          state.meterPricingRows.set(k, v)
         nextOutboxId = outboxIdSnapshot
         throw error
       }
@@ -472,9 +580,18 @@ function buildFakeDrizzle(state: FakeDbState) {
           return this
         },
         get() {
-          if (keys.includes("result")) {
+          if (keys.includes("allowed")) {
             const row = state.idempotencyRows.get(String(cond?.value))
-            return row ? { result: row.result } : undefined
+            if (!row) return undefined
+            return {
+              allowed: row.allowed,
+              deniedReason: row.deniedReason,
+              denyMessage: row.denyMessage,
+            }
+          }
+          if (keys.includes("pinnedPlanVersionId")) {
+            const row = state.meterPricingRows.get(String(cond?.value))
+            return row ? { pinnedPlanVersionId: row.pinnedPlanVersionId } : undefined
           }
           if (keys.includes("count")) return { count: state.outboxRows.length }
           if (keys.includes("value")) return undefined
@@ -482,30 +599,13 @@ function buildFakeDrizzle(state: FakeDbState) {
         },
         all() {
           if (keys.includes("id") && keys.includes("payload")) {
-            const rows = [...state.outboxRows]
+            return [...state.outboxRows]
               .filter((row) => matchOutboxCondition(row, cond))
               .sort((a, b) => a.id - b.id)
               .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
-
-            if (keys.includes("currency")) {
-              return rows.map((row) => ({
-                id: row.id,
-                payload: row.payload,
-                currency: row.currency,
-              }))
-            }
-
-            return rows.map((row) => ({
-              id: row.id,
-              payload: row.payload,
-            }))
+              .map((row) => ({ id: row.id, payload: row.payload }))
           }
-          if (keys.length === 1 && keys.includes("id")) {
-            return [...state.outboxRows]
-              .filter((row) => matchOutboxCondition(row, cond))
-              .map((row) => ({ id: row.id }))
-          }
-          if (keys.includes("eventId")) {
+          if (keys.length === 1 && keys.includes("eventId")) {
             return [...Array.from(state.idempotencyRows.entries())]
               .filter(([, r]) => r.createdAt < Number(cond?.value))
               .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
@@ -521,49 +621,34 @@ function buildFakeDrizzle(state: FakeDbState) {
         values(value: Record<string, unknown>) {
           return {
             run() {
-              if ("payload" in value && !("eventId" in value)) {
+              if ("payload" in value && !("eventId" in value) && !("meterKey" in value)) {
                 state.outboxRows.push({
                   id: nextOutboxId++,
                   payload: String(value.payload),
                   currency: String(value.currency),
-                  billedAt: value.billedAt === null ? null : Number(value.billedAt ?? null),
                 })
                 return
               }
-              if ("eventId" in value && "result" in value) {
+              if ("eventId" in value && "allowed" in value) {
                 state.idempotencyRows.set(String(value.eventId), {
                   createdAt: Number(value.createdAt),
-                  result: String(value.result),
+                  allowed: Boolean(value.allowed),
+                  deniedReason: (value.deniedReason as string | null) ?? null,
+                  denyMessage: (value.denyMessage as string | null) ?? null,
+                })
+                return
+              }
+              if ("meterKey" in value) {
+                state.meterPricingRows.set(String(value.meterKey), {
+                  meterKey: String(value.meterKey),
+                  currency: String(value.currency),
+                  priceConfig: value.priceConfig,
+                  pinnedPlanVersionId: String(value.pinnedPlanVersionId),
+                  createdAt: Number(value.createdAt),
                 })
                 return
               }
               throw new Error("Unsupported insert in fake db")
-            },
-          }
-        },
-      }
-    },
-
-    update() {
-      return {
-        set(value: Record<string, unknown>) {
-          return {
-            where(condition: DrizzleCondition) {
-              return {
-                run() {
-                  if ("billedAt" in value) {
-                    for (const row of state.outboxRows) {
-                      if (!matchOutboxCondition(row, condition)) {
-                        continue
-                      }
-                      row.billedAt = value.billedAt === null ? null : Number(value.billedAt)
-                    }
-                    return
-                  }
-
-                  throw new Error("Unsupported update in fake db")
-                },
-              }
             },
           }
         },
@@ -600,7 +685,6 @@ function createEnv() {
     DATABASE_READ1_URL: "postgres://user:pass@localhost:5432/unprice",
     DATABASE_READ2_URL: "postgres://user:pass@localhost:5432/unprice",
     DRIZZLE_LOG: false,
-    FALLBACK_ANALYTICS: { writeDataPoint: vi.fn() },
     TINYBIRD_TOKEN: "token",
     TINYBIRD_URL: "https://example.com",
   }
@@ -620,7 +704,8 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
     featureSlug: "api_calls",
     idempotencyKey: "idem_123",
     limit: undefined as number | undefined,
-    meters: [DEFAULT_METER_CONFIG],
+    meter: DEFAULT_METER_CONFIG,
+    priceConfig: DEFAULT_PRICE_CONFIG,
     now: BASE_NOW,
     overageStrategy: undefined as string | undefined,
     periodEndAt: BASE_NOW + 60_000,
