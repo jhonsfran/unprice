@@ -27,13 +27,7 @@ import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlit
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { z } from "zod"
 import { apiDrain } from "~/observability"
-import {
-  idempotencyKeysTable,
-  meterFactsOutboxTable,
-  meterPricingTable,
-  meterStateTable,
-  schema,
-} from "./db/schema"
+import { idempotencyKeysTable, meterFactsOutboxTable, meterWindowTable, schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
 
@@ -133,12 +127,24 @@ const FLUSH_INTERVAL_MS = 30_000
 const IDEMPOTENCY_CLEANUP_BATCH_SIZE = 5000
 const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
 
+type EnforcementCache = {
+  limit: number | null
+  usage: number
+  lastUpdate: number
+  isLimitReached: boolean
+}
+
 export class EntitlementWindowDO extends DurableObject {
   private readonly analytics: Analytics
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly logger: AppLogger
   private readonly ready: Promise<void>
-  private periodEndAt: number | null = null
+  // In-memory source of truth for enforcement checks. Populated by apply()
+  // after a successful commit with the limit/overageStrategy it received;
+  // on DO eviction the cache is lost and the next apply rebuilds it.
+  // periodEndAt is intentionally *not* cached in memory — alarm() reads it
+  // from SQLite directly since the path is rare (every 30s at most).
+  private cache: EnforcementCache | null = null
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env as unknown as Cloudflare.Env)
@@ -176,6 +182,25 @@ export class EntitlementWindowDO extends DurableObject {
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(this.db, migrations)
+
+      // Seed usage from SQLite if we already have a window row. limit and
+      // overageStrategy are not persisted, so we can't fully rehydrate
+      // isLimitReached — we leave the cache null and let the next apply()
+      // populate it with current caller context. Callers hitting
+      // getEnforcementState before the next apply see usage from SQLite
+      // and no limit enforcement (apply() will still enforce).
+      const row = this.db
+        .select({ usage: meterWindowTable.usage, updatedAt: meterWindowTable.updatedAt })
+        .from(meterWindowTable)
+        .get()
+      if (row) {
+        this.cache = {
+          limit: null,
+          usage: Number(row.usage),
+          lastUpdate: row.updatedAt ?? 0,
+          isLimitReached: false,
+        }
+      }
     })
   }
 
@@ -187,11 +212,8 @@ export class EntitlementWindowDO extends DurableObject {
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
 
-    if (this.periodEndAt === null) {
-      this.periodEndAt = input.periodEndAt
-    }
-
     let insertedFactCount = 0
+    let nextUsage: number | null = null
 
     try {
       const result = this.db.transaction((tx) => {
@@ -217,13 +239,16 @@ export class EntitlementWindowDO extends DurableObject {
 
         const meterKey = deriveMeterKey(input.meter)
 
-        // Snapshot price config on first apply. The streamId already guarantees
-        // meter/reset fungibility, so we don't pin the featurePlanVersionId —
-        // stacked grants from different fpvs are valid on the same stream.
-        this.ensureMeterPricing(tx, {
+        // Snapshot price config + periodEndAt on first apply; ensure the
+        // singleton window row exists before the engine's adapter UPDATEs
+        // its usage/updatedAt columns. The streamId already guarantees
+        // meter/reset fungibility, so we don't pin the featurePlanVersionId
+        // — stacked grants from different fpvs are valid on the same stream.
+        this.ensureMeterWindow(tx, {
           meterKey,
           priceConfig: input.priceConfig,
           currency: input.currency,
+          periodEndAt: input.periodEndAt,
           createdAt,
         })
 
@@ -259,6 +284,8 @@ export class EntitlementWindowDO extends DurableObject {
         insertedFactCount = facts.length
 
         for (const fact of facts) {
+          nextUsage = fact.valueAfter
+
           const amountMinor = this.computeAmountMinor({
             fact,
             priceConfig: input.priceConfig,
@@ -307,6 +334,20 @@ export class EntitlementWindowDO extends DurableObject {
         return { allowed: true } as ApplyResult
       })
 
+      // Commit succeeded — refresh the enforcement cache with this
+      // apply's context. Idempotent replays return early with facts = []
+      // and nextUsage stays null, so we keep the previous cache
+      // (SQLite wasn't touched either).
+      if (nextUsage !== null) {
+        const limit = this.normalizeLimit(input.limit)
+        this.cache = {
+          limit,
+          usage: nextUsage,
+          lastUpdate: createdAt,
+          isLimitReached: this.computeLimitReached(nextUsage, limit, input.overageStrategy),
+        }
+      }
+
       if (result.allowed && insertedFactCount > 0) {
         await this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS)
       }
@@ -345,38 +386,24 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  public async getEnforcementState(input: {
-    limit?: number | null
-    meterConfig: MeterConfig
-    overageStrategy?: OverageStrategy | null
-  }): Promise<{
+  public async getEnforcementState(): Promise<{
     isLimitReached: boolean
     limit: number | null
     usage: number
   }> {
     await this.ready
 
-    const stateRow = this.db
-      .select({
-        value: meterStateTable.value,
-      })
-      .from(meterStateTable)
-      .where(eq(meterStateTable.key, this.makeMeterStateKey(deriveMeterKey(input.meterConfig))))
-      .get()
-
-    const usage = Number(stateRow?.value ?? 0)
-    const limit = this.normalizeLimit(input.limit)
-    const isLimitReached =
-      typeof limit === "number" &&
-      Number.isFinite(limit) &&
-      input.overageStrategy !== "always" &&
-      usage >= limit
-
-    return {
-      usage,
-      limit,
-      isLimitReached,
+    if (this.cache) {
+      return {
+        usage: this.cache.usage,
+        limit: this.cache.limit,
+        isLimitReached: this.cache.isLimitReached,
+      }
     }
+
+    // No apply on this instance yet and no prior row in SQLite either —
+    // apply() will re-enforce with real context when it runs.
+    return { usage: 0, limit: null, isLimitReached: false }
   }
 
   async alarm(): Promise<void> {
@@ -437,14 +464,19 @@ export class EntitlementWindowDO extends DurableObject {
       alert: remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD,
     })
 
-    if (!this.periodEndAt) {
+    // Read periodEndAt from SQLite on demand — the alarm runs at most once
+    // per FLUSH_INTERVAL_MS, so avoiding an in-memory mirror removes a
+    // source of drift without any measurable cost.
+    const periodEndAt = this.readPeriodEndAt()
+
+    if (!periodEndAt) {
       // We don't know when the period ends, and outbox is empty.
       // Go to sleep. Next apply() will wake us up.
       return
     }
 
     // after the entitlement end we give 30 days to self destruct
-    const selfDestructAt = this.periodEndAt + MAX_EVENT_AGE_MS
+    const selfDestructAt = periodEndAt + MAX_EVENT_AGE_MS
 
     if (Date.now() > selfDestructAt && remainingOutboxCount === 0) {
       await this.ctx.storage.deleteAlarm()
@@ -462,19 +494,49 @@ export class EntitlementWindowDO extends DurableObject {
     await this.scheduleAlarm(selfDestructAt)
   }
 
-  private ensureMeterPricing(
+  private ensureMeterWindow(
     tx: DrizzleSqliteDODatabase<typeof schema>,
     params: {
       meterKey: string
       priceConfig: ConfigFeatureVersionType
       currency: string
+      periodEndAt: number
       createdAt: number
     }
   ): void {
-    tx.insert(meterPricingTable)
-      .values(params)
-      .onConflictDoNothing({ target: meterPricingTable.meterKey })
+    tx.insert(meterWindowTable)
+      .values({
+        meterKey: params.meterKey,
+        currency: params.currency,
+        priceConfig: params.priceConfig,
+        periodEndAt: params.periodEndAt,
+        usage: 0,
+        updatedAt: null,
+        createdAt: params.createdAt,
+      })
+      .onConflictDoNothing({ target: meterWindowTable.meterKey })
       .run()
+  }
+
+  private readPeriodEndAt(): number | null {
+    const row = this.db
+      .select({ periodEndAt: meterWindowTable.periodEndAt })
+      .from(meterWindowTable)
+      .get()
+    return row?.periodEndAt ?? null
+  }
+
+  private computeLimitReached(
+    usage: number,
+    limit: number | null,
+    overageStrategy: OverageStrategy | undefined
+  ): boolean {
+    return (
+      typeof limit === "number" &&
+      Number.isFinite(limit) &&
+      overageStrategy !== "always" &&
+      usage >= limit
+    )
   }
 
   // Returns a signed integer at LEDGER_SCALE. Negative values are legitimate
@@ -572,10 +634,6 @@ export class EntitlementWindowDO extends DurableObject {
       return null
     }
     return limit
-  }
-
-  private makeMeterStateKey(meterKey: string): string {
-    return `meter-state:${meterKey}`
   }
 
   private async scheduleAlarm(target: number): Promise<void> {

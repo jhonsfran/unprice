@@ -1,7 +1,22 @@
 import type { StorageAdapter } from "@unprice/services/entitlements"
-import { eq, like } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
-import { meterStateTable, type schema } from "./db/schema"
+import { meterWindowTable, type schema } from "./db/schema"
+
+// DO-local adapter: one row per DO (the single meter). The engine uses
+// opaque keyed storage via these methods, but the keys it writes always
+// have one of two prefixes — "meter-state:" (current value) or
+// "meter-state-updated-at:" (timestamp) — so we route them onto the
+// dedicated columns of the singleton meter_window row.
+const USAGE_PREFIX = "meter-state:"
+const UPDATED_AT_PREFIX = "meter-state-updated-at:"
+
+type Column = "usage" | "updatedAt"
+
+function columnFor(key: string): Column {
+  if (key.startsWith(UPDATED_AT_PREFIX)) return "updatedAt"
+  if (key.startsWith(USAGE_PREFIX)) return "usage"
+  throw new Error(`DrizzleStorageAdapter: unsupported key "${key}"`)
+}
 
 export class DrizzleStorageAdapter implements StorageAdapter {
   constructor(private db: DrizzleSqliteDODatabase<typeof schema>) {}
@@ -11,13 +26,14 @@ export class DrizzleStorageAdapter implements StorageAdapter {
   }
 
   getSync<T>(key: string): T | null {
+    const column = columnFor(key)
     const row = this.db
-      .select({ value: meterStateTable.value })
-      .from(meterStateTable)
-      .where(eq(meterStateTable.key, key))
+      .select({ usage: meterWindowTable.usage, updatedAt: meterWindowTable.updatedAt })
+      .from(meterWindowTable)
       .get()
-
-    return (row?.value as T | undefined) ?? null
+    if (!row) return null
+    const value = row[column]
+    return (value as T | null | undefined) ?? null
   }
 
   async put<T>(key: string, value: T): Promise<void> {
@@ -25,18 +41,13 @@ export class DrizzleStorageAdapter implements StorageAdapter {
   }
 
   putSync<T>(key: string, value: T): void {
+    const column = columnFor(key)
+    const numeric = Number(value)
+    // ensureMeterWindow inserts the singleton row before the engine runs,
+    // so this UPDATE always hits exactly one row.
     this.db
-      .insert(meterStateTable)
-      .values({
-        key,
-        value: Number(value),
-      })
-      .onConflictDoUpdate({
-        target: meterStateTable.key,
-        set: {
-          value: Number(value),
-        },
-      })
+      .update(meterWindowTable)
+      .set({ [column]: numeric })
       .run()
   }
 
@@ -45,12 +56,7 @@ export class DrizzleStorageAdapter implements StorageAdapter {
   }
 
   listSync<T>(prefix: string): T[] {
-    const rows = this.db
-      .select({ value: meterStateTable.value })
-      .from(meterStateTable)
-      .where(like(meterStateTable.key, `${prefix}%`))
-      .all()
-
-    return rows.map((row: { value: unknown }) => row.value as T)
+    const value = this.getSync<T>(prefix)
+    return value === null ? [] : [value]
   }
 }

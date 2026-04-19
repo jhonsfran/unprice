@@ -15,23 +15,24 @@ export const idempotencyKeysTable = sqliteTable("idempotency_keys", {
   denyMessage: text("deny_message"),
 })
 
-export const meterPricingTable = sqliteTable("meter_pricing", {
+// Singleton row per DO (one meter per EntitlementWindowDO). Holds the
+// snapshotted pricing + period boundary *and* the engine's running state
+// (usage, updatedAt). Replaces the prior `meter_pricing` + `meter_state`
+// split now that a DO only ever tracks one meter.
+export const meterWindowTable = sqliteTable("meter_window", {
   meterKey: text("meter_key").primaryKey(),
   currency: text("currency").notNull(),
   priceConfig: text("price_config", { mode: "json" }).$type<ConfigFeatureVersionType>().notNull(),
+  periodEndAt: integer("period_end_at"),
+  usage: real("usage").notNull().default(0),
+  updatedAt: integer("updated_at"),
   createdAt: integer("created_at").notNull(),
 })
 
-export const meterStateTable = sqliteTable("meter_state", {
-  key: text("key").primaryKey(),
-  value: real("value").notNull(),
-})
-
 export const schema = {
-  meterStateTable,
   meterFactsOutboxTable,
   idempotencyKeysTable,
-  meterPricingTable,
+  meterWindowTable,
 }
 
 export type SchemaIngestion = typeof schema

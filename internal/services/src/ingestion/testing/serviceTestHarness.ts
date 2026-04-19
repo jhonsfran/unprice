@@ -55,12 +55,6 @@ type ApplyResult = {
   message?: string
 }
 
-type EnforcementInput = {
-  limit?: number | null
-  meterConfig: MeterConfig
-  overageStrategy?: OverageStrategy | null
-}
-
 type EnforcementResult = {
   isLimitReached: boolean
   limit: number | null
@@ -72,9 +66,7 @@ type HarnessOptions = {
   customer?: {
     projectId: string
   } | null
-  getEnforcementState?: ReturnType<
-    typeof vi.fn<(input: EnforcementInput) => Promise<EnforcementResult>>
-  >
+  getEnforcementState?: ReturnType<typeof vi.fn<() => Promise<EnforcementResult>>>
   grants?: unknown[]
   apply?: ReturnType<typeof vi.fn<(input: ApplyInput) => Promise<ApplyResult>>>
   resolveFeatureStateError?: Error
@@ -104,7 +96,7 @@ export function createServiceHarness(options: HarnessOptions = {}) {
     .fn<(entries: IngestionAuditEntry[]) => Promise<IngestionAuditCommitResult>>()
     .mockResolvedValue(options.commitResult ?? { inserted: 1, duplicates: 0, conflicts: 0 })
   const apply = vi.fn<(input: ApplyInput) => Promise<ApplyResult>>()
-  const getEnforcementState = vi.fn<(input: EnforcementInput) => Promise<EnforcementResult>>()
+  const getEnforcementState = vi.fn<() => Promise<EnforcementResult>>()
   const waitUntil = vi.fn<(promise: Promise<unknown>) => void>()
 
   const getGrantsForCustomer = vi.fn().mockResolvedValue(
@@ -214,26 +206,25 @@ export function createServiceHarness(options: HarnessOptions = {}) {
           input,
         })
       },
-      getEnforcementState: async (input: EnforcementInput) => {
-        getEnforcementState(input)
+      getEnforcementState: async () => {
+        getEnforcementState()
 
         if (options.getEnforcementState) {
-          return options.getEnforcementState(input)
+          return options.getEnforcementState()
         }
 
+        // Mirror the real DO: we don't know which meter this caller cares
+        // about (the DO is single-meter and tracks its own usage), so we
+        // return the first (and typically only) meter state for this
+        // window. limit/isLimitReached are left unknown — the caller
+        // (IngestionService) recomputes against its resolved state.
         const meterWindow = meterWindowsByKey.get(windowKey)
-        const meterState = meterWindow?.get(deriveMeterKey(input.meterConfig))
-        const usage = Number(meterState?.value ?? 0)
-        const limit = normalizeLimit(input.limit)
-        const isLimitReached =
-          typeof limit === "number" &&
-          Number.isFinite(limit) &&
-          input.overageStrategy !== "always" &&
-          usage >= limit
+        const first = meterWindow?.values().next().value
+        const usage = Number(first?.value ?? 0)
 
         return {
-          isLimitReached,
-          limit,
+          isLimitReached: false,
+          limit: null,
           usage,
         }
       },

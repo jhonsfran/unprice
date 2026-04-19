@@ -29,17 +29,20 @@ type IdempotencyRow = {
   denyMessage: string | null
 }
 
-type MeterPricingRow = {
+type MeterWindowRow = {
   meterKey: string
   currency: string
   priceConfig: unknown
+  periodEndAt: number | null
+  usage: number
+  updatedAt: number | null
   createdAt: number
 }
 
 type FakeDbState = {
   idempotencyRows: Map<string, IdempotencyRow>
   outboxRows: { id: number; payload: string; currency: string }[]
-  meterPricingRows: Map<string, MeterPricingRow>
+  meterWindowRows: Map<string, MeterWindowRow>
 }
 
 type FakeDurableObjectState = {
@@ -387,8 +390,8 @@ describe("EntitlementWindowDO", () => {
     await durableObject.apply(
       createApplyInput({ idempotencyKey: "idem_a", featurePlanVersionId: "fpv_a" })
     )
-    expect(db.meterPricingRows.size).toBe(1)
-    const pricingRow = db.meterPricingRows.get(DEFAULT_METER_KEY)
+    expect(db.meterWindowRows.size).toBe(1)
+    const pricingRow = db.meterWindowRows.get(DEFAULT_METER_KEY)
     expect(pricingRow?.currency).toBe("USD")
     expect(pricingRow?.priceConfig).toEqual(DEFAULT_PRICE_CONFIG)
 
@@ -398,10 +401,128 @@ describe("EntitlementWindowDO", () => {
       createApplyInput({ idempotencyKey: "idem_b", featurePlanVersionId: "fpv_b" })
     )
 
-    expect(db.meterPricingRows.size).toBe(1)
+    expect(db.meterWindowRows.size).toBe(1)
     expect(db.outboxRows).toHaveLength(2)
     const fpvs = db.outboxRows.map((row) => JSON.parse(row.payload).feature_plan_version_id)
     expect(fpvs).toEqual(["fpv_a", "fpv_b"])
+  })
+
+  it("getEnforcementState returns safe defaults on a fresh DO", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    testState.db = createFakeDbState()
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    // No apply has run yet — cache is null, so the DO returns a conservative
+    // { usage: 0, limit: null, isLimitReached: false }. The caller recomputes
+    // isLimitReached against its own resolved state when needed.
+    const result = await durableObject.getEnforcementState()
+
+    expect(result).toEqual({ usage: 0, limit: null, isLimitReached: false })
+  })
+
+  it("getEnforcementState serves the post-apply enforcement cache (limit + usage + isLimitReached)", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    // Apply #1: usage 7 under limit 100 → not reached
+    testState.engineApply.mockImplementationOnce((_event, options?: PersistOptions) => {
+      const facts = [{ delta: 7, meterKey: DEFAULT_METER_KEY, valueAfter: 7 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    await durableObject.apply(createApplyInput({ limit: 100 }))
+    expect(await durableObject.getEnforcementState()).toEqual({
+      usage: 7,
+      limit: 100,
+      isLimitReached: false,
+    })
+
+    // Apply #2: usage 7 exactly at limit 7 → reached
+    testState.engineApply.mockImplementationOnce((_event, options?: PersistOptions) => {
+      const facts = [{ delta: 0, meterKey: DEFAULT_METER_KEY, valueAfter: 7 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    await durableObject.apply(createApplyInput({ idempotencyKey: "idem_2", limit: 7 }))
+    expect(await durableObject.getEnforcementState()).toEqual({
+      usage: 7,
+      limit: 7,
+      isLimitReached: true,
+    })
+
+    // Apply #3: overageStrategy "always" suppresses isLimitReached even past limit
+    testState.engineApply.mockImplementationOnce((_event, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 10 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    await durableObject.apply(
+      createApplyInput({ idempotencyKey: "idem_3", limit: 7, overageStrategy: "always" })
+    )
+    expect(await durableObject.getEnforcementState()).toEqual({
+      usage: 10,
+      limit: 7,
+      isLimitReached: false,
+    })
+  })
+
+  it("does not update the cache when apply is rolled back by LIMIT_EXCEEDED", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      // Engine would bump usage to 11, but beforePersist rejects it → tx rolls back.
+      const facts = [{ delta: 11, meterKey: DEFAULT_METER_KEY, valueAfter: 11 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const denied = await durableObject.apply(
+      createApplyInput({ enforceLimit: true, limit: 10 })
+    )
+    expect(denied.allowed).toBe(false)
+
+    // Cache was never populated because the tx threw before the post-commit flush.
+    const result = await durableObject.getEnforcementState()
+    expect(result).toEqual({ usage: 0, limit: null, isLimitReached: false })
+  })
+
+  it("rehydrates window state after eviction so alarm reads periodEndAt from SQLite", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 1 })
+
+    const input = createApplyInput({ periodEndAt: BASE_NOW + 60_000 })
+
+    // First DO instance performs the apply; periodEndAt lands in meter_window
+    // so it survives eviction.
+    const first = new EntitlementWindowDO(state, createEnv())
+    await first.apply(input)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.periodEndAt).toBe(input.periodEndAt)
+
+    // Simulate eviction: Cloudflare clears the alarm and evicts the DO.
+    state.alarmAt = null
+    const revived = new EntitlementWindowDO(state, createEnv())
+
+    await revived.alarm()
+
+    // alarm() now reads periodEndAt from SQLite on demand, so the self-destruct
+    // branch fires and schedules the next alarm at periodEndAt + MAX_EVENT_AGE_MS.
+    expect(state.alarmAt).toBe(input.periodEndAt + TEST_MAX_EVENT_AGE_MS)
   })
 
   it("scheduleAlarm does not downgrade an earlier pending alarm", async () => {
@@ -541,6 +662,11 @@ async function loadEntitlementWindowDO() {
       apply: (
         input: ReturnType<typeof createApplyInput>
       ) => Promise<{ allowed: boolean; deniedReason?: string; message?: string }>
+      getEnforcementState: () => Promise<{
+        isLimitReached: boolean
+        limit: number | null
+        usage: number
+      }>
     }
   }
 
@@ -575,7 +701,7 @@ function createFakeDbState(): FakeDbState {
   return {
     idempotencyRows: new Map(),
     outboxRows: [],
-    meterPricingRows: new Map(),
+    meterWindowRows: new Map(),
   }
 }
 
@@ -604,7 +730,7 @@ function buildFakeDrizzle(state: FakeDbState) {
     transaction<T>(callback: (tx: typeof db) => T): T {
       const idempotencySnapshot = new Map(state.idempotencyRows)
       const outboxSnapshot = [...state.outboxRows]
-      const meterPricingSnapshot = new Map(state.meterPricingRows)
+      const meterPricingSnapshot = new Map(state.meterWindowRows)
       const outboxIdSnapshot = nextOutboxId
       try {
         return callback(db)
@@ -613,9 +739,9 @@ function buildFakeDrizzle(state: FakeDbState) {
         for (const [k, v] of Array.from(idempotencySnapshot.entries()))
           state.idempotencyRows.set(k, v)
         state.outboxRows.splice(0, state.outboxRows.length, ...outboxSnapshot)
-        state.meterPricingRows.clear()
+        state.meterWindowRows.clear()
         for (const [k, v] of Array.from(meterPricingSnapshot.entries()))
-          state.meterPricingRows.set(k, v)
+          state.meterWindowRows.set(k, v)
         nextOutboxId = outboxIdSnapshot
         throw error
       }
@@ -650,7 +776,14 @@ function buildFakeDrizzle(state: FakeDbState) {
             }
           }
           if (keys.includes("count")) return { count: state.outboxRows.length }
-          if (keys.includes("value")) return undefined
+          if (keys.includes("periodEndAt") || keys.includes("usage")) {
+            // Single-meter DO → at most one meter_window row
+            const first = state.meterWindowRows.values().next().value
+            if (!first) return undefined
+            const row: Record<string, unknown> = {}
+            for (const key of keys) row[key] = (first as Record<string, unknown>)[key]
+            return row
+          }
           throw new Error(`Unsupported select().get(): ${keys}`)
         },
         all() {
@@ -699,11 +832,14 @@ function buildFakeDrizzle(state: FakeDbState) {
               }
               if ("meterKey" in value) {
                 const key = String(value.meterKey)
-                if (state.meterPricingRows.has(key)) return
-                state.meterPricingRows.set(key, {
+                if (state.meterWindowRows.has(key)) return
+                state.meterWindowRows.set(key, {
                   meterKey: key,
                   currency: String(value.currency),
                   priceConfig: value.priceConfig,
+                  periodEndAt: value.periodEndAt != null ? Number(value.periodEndAt) : null,
+                  usage: value.usage != null ? Number(value.usage) : 0,
+                  updatedAt: value.updatedAt != null ? Number(value.updatedAt) : null,
                   createdAt: Number(value.createdAt),
                 })
                 return

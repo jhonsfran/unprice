@@ -100,11 +100,7 @@ export type EntitlementWindowApplyInput = {
 
 export type EntitlementWindowController = {
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
-  getEnforcementState: (input: {
-    limit: IngestionResolvedState["limit"]
-    meterConfig: IngestionResolvedState["meterConfig"]
-    overageStrategy: IngestionResolvedState["overageStrategy"]
-  }) => Promise<{
+  getEnforcementState: () => Promise<{
     isLimitReached: boolean
     limit: number | null
     usage: number
@@ -430,18 +426,25 @@ export class IngestionService {
         projectId,
         streamId: state.streamId,
       })
-      .getEnforcementState({
-        limit: state.limit,
-        meterConfig: state.meterConfig,
-        overageStrategy: state.overageStrategy,
-      })
+      .getEnforcementState()
+
+    // The DO caches limit/overageStrategy from the last apply(). On a fresh
+    // or post-eviction DO that hasn't yet received an apply, it returns
+    // limit: null / isLimitReached: false — so we always source `limit` from
+    // the caller's resolved state and recompute isLimitReached against the
+    // usage the DO reports. apply() is still the hard enforcement point.
+    const isLimitReached =
+      state.overageStrategy !== "always" &&
+      typeof state.limit === "number" &&
+      Number.isFinite(state.limit) &&
+      enforcementState.usage >= state.limit
 
     return {
-      allowed: !enforcementState.isLimitReached,
+      allowed: !isLimitReached,
       featureSlug,
       featureType: "usage",
-      isLimitReached: enforcementState.isLimitReached,
-      limit: enforcementState.limit,
+      isLimitReached,
+      limit: state.limit,
       meterConfig: state.meterConfig,
       overageStrategy: state.overageStrategy,
       periodKey,
