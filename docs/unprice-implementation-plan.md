@@ -675,64 +675,362 @@ phase.
 
 ---
 
-## Phase 7: Credits, Wallets & Settlement Router
+## Phase 6.7: Simplify Agent Billing Pipeline
 
-> **PR title:** `feat: add credits, wallets, and settlement router`
+> **PR title:** `refactor: simplify entitlement DO and agent billing pipeline`
 >
-> **Goal:** Add **edge** prepaid credit enforcement (`WalletDO`), burn rates, and
-> settlement router wiring on top of **Phase 6.6** (`LedgerGateway`, split
-> `LedgerService` / `WalletService`, grants-as-accounts, `Dinero`). Introduce
-> invoice, wallet, and one-time settlement modes without re-implementing pgledger
-> wallet persistence.
+> **Goal:** Cut complexity from the existing `EntitlementWindowDO` and
+> `billMeterFact` path before building wallets. The DO stops being a billing
+> driver, the outbox becomes single-purpose, pricing is snapshotted onto the DO
+> so rating is pure math, per-meter spend caps land in the hot path, and the
+> billing worker moves to a CF Queue consumer. No wallets, no reservations, no
+> backward-compatibility shims — this phase rewrites the existing flow.
 >
-> **Prerequisite:** [docs/plans/unprice-phase-06.6-new-ledger.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-06.6-new-ledger.md)
+> **Prerequisite:** Phase 6 (agent billing foundation) and Phase 6.6 (pgledger
+> gateway) are required. Phase 6.7 rewrites the call sites they ship.
+>
+> **Branch:** `refactor/agent-billing-simplification`
+>
+> **Detailed plan:** [docs/plans/unprice-phase-06.7-agent-billing-simplification.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-06.7-agent-billing-simplification.md)
+
+### Why this phase exists
+
+`EntitlementWindowDO.alarm()` currently flushes analytics, drives billing into
+Postgres via `processBillingBatch`, reconciles `billedAt` in the outbox, and
+schedules self-destruct. Four concerns, one alarm, one DO wall-clock budget.
+Under load, billing backpressure blocks analytics flush and vice versa. Rating
+re-looks-up plan pricing every cycle. Spend caps don't exist — only unit caps.
+
+This must go before wallets. Reservation refills (Phase 7) need a DO that owns
+local priced consumption cleanly, with ledger writes happening outside the hot
+path. If billing still sits inside the alarm when refills arrive, every
+hot-path event contends with every cold-path ledger call for the same CPU
+budget.
+
+Field validation (April 2026): Lago writes `events_enriched` with fees computed
+in a post-process job; Flexprice writes `events_processed` with `qty_billable`,
+`unit_cost`, `cost`, `tier_snapshot`; Polar mirrors events to Tinybird from
+Postgres. Priced-fact-in-columnar-store is the dominant pattern. The DO's
+per-(customer, meter) sharding gives us synchronous admission the others do
+not have — that is the differentiator. Do not lose it by putting billing in
+the alarm.
+
+### Commits
+
+**6.7.1 — Delete billing from the DO alarm**
+
+Remove `processBillingBatch`, the `billMeterFact` import, and all
+`LedgerGateway` / `RatingService` / Postgres `createConnection` wiring from
+`EntitlementWindowDO`. The DO's only runtime deps become: `analytics`
+(Tinybird), `logger`, and a CF Queue producer.
+
+`alarm()` becomes: flush outbox to Tinybird, clean stale idempotency rows,
+schedule next alarm or self-destruct. Nothing else.
+
+Completion signal: searching the DO module for `createConnection`,
+`LedgerGateway`, or `RatingService` returns nothing.
+
+**6.7.2 — Snapshot pricing onto the DO at activation**
+
+Pass the full rate card (tiers, packages, free units, currency) to the DO
+alongside `meters` when the entitlement activates. Persist it in the DO's
+SQLite (new `meter_pricing` table keyed by meter). `applyEventSync` computes
+priced delta locally using the existing `calculatePricePerFeature` from
+`@unprice/db/validators/subscriptions/prices.ts`.
+
+Rate card is pinned to `featurePlanVersionId` (already on the DO). Plan version
+changes create a new entitlement — no mid-period drift.
+
+**6.7.3 — Priced fact becomes the outbox payload**
+
+Extend `OutboxFact` with `amount_cents`, `currency`, `tier_breakdown`, and
+`priced_at`. `buildOutboxFactPayload` fills them from the DO's local rate
+card. Tinybird and downstream billing become pure transport — no rating.
+
+Matches Flexprice `events_processed` and Lago `events_enriched` shapes.
+
+**6.7.4 — Per-meter spend cap enforcement**
+
+Add `spend_cap_cents` to `meterStateTable` (nullable — null means no cap).
+Track `spend_so_far_cents` alongside `value`. Extend `findLimitExceededFact`
+to check spend cap **and** unit cap. Spend caps are per-meter (definitive).
+No cross-meter aggregation, no fan-in DO.
+
+Denial reasons split: `LIMIT_EXCEEDED` (unit) vs `SPEND_CAP_EXCEEDED`.
+
+**6.7.5 — Single-purpose outbox**
+
+Drop `billedAt` from `meterFactsOutboxTable`. Drop
+`deleteFlushedAndBilledRows`. Outbox lifecycle is strictly
+`insert → flush-to-Tinybird → delete`. Monitor queue depth as the SLO.
+
+**6.7.6 — Idempotency table hygiene**
+
+Drop JSON-in-a-column (`idempotencyKeysTable.result`). Replace with columns:
+`allowed BOOLEAN`, `denied_reason TEXT NULL`, `deny_message TEXT NULL`. Remove
+`parseStoredResult` and the redundant `parseApplyInput` re-parse. Trust the
+boundary; Zod validates once at ingestion.
+
+**6.7.7 — Alarm scheduling correctness**
+
+Delete in-memory `isAlarmScheduled` — it lies after DO eviction. Use
+`ctx.storage.getAlarm()` for truth. Schedule via idempotent
+`min(existingAlarm, newTarget)`.
+
+**6.7.8 — Extract billing worker to CF Queue consumer**
+
+DO enqueues priced facts to a Cloudflare Queue alongside the SQLite outbox
+insert. Queue send lives in `waitUntil`; outbox insert is the durable commit.
+Consumer `bill-meter-fact-consumer.ts` lives in `apps/api/src/queues/`:
+
+- reads priced fact from Queue payload,
+- calls a new thin `ratePricedFact` wrapper in `RatingService` that validates
+  the DO-computed math against ledger invariants,
+- posts idempotent debit via `LedgerGateway.createTransfers` with
+  `sourceType: "meter_fact_v1"` and `sourceId: fact.id`.
+
+Queue gives us at-least-once delivery, automatic retry with DLQ, and
+backpressure isolation from the DO hot path.
+
+**6.7.9 — Fallback analytics: pick one**
+
+Current `fallbackAnalytics` is an unowned consistency mode (on Tinybird
+failure, write to Analytics Engine). Decide: **Tinybird + DLQ** (failed flush
+→ Queue DLQ → manual replay endpoint) or **dual-write always** (every flush
+writes to both; reconcile offline).
+
+Pick DLQ. Replay semantics are explicit, cost is lower, no silent divergence.
+Remove the per-flush fallback branch.
+
+**6.7.10 — Tests**
+
+- DO snapshot pricing parity (DO-computed price matches `RatingService` rate
+  for the same input).
+- Spend cap enforcement in hot path (unit cap + spend cap independent).
+- Idempotency table migration correctness.
+- Queue fan-out: at-least-once delivery, idempotent consumer, DLQ path.
+- Alarm correctness across simulated DO evictions.
+- Outbox depth stays bounded under sustained load.
+
+### Guardrails
+
+- Zero wallets, zero reservations, zero credits — Phase 7 territory.
+- No new pricing math — reuse `calculatePricePerFeature` and friends.
+- No backward-compatibility shims. Drop columns, rewrite consumers, migrate.
+- The DO must end this phase with no Postgres client. If `createConnection`
+  still appears in the DO module, the refactor is unfinished.
+- `RatingService` keeps `rateBillingPeriod` for subscription billing. Only the
+  event-time path moves to `ratePricedFact`-style validation.
+
+### Non-goals
+
+- Reprocessing path for price changes mid-period (Flexprice
+  `raw_events_reprocessing` equivalent) — future work, documented as a gap.
+- Cross-meter spend aggregation — per-meter is definitive.
+- Moving subscription billing to Queue-based — subscription rating stays
+  synchronous at period close.
+
+---
+
+## Phase 7: Credits, Wallets & Reservation-Based Allocation
+
+> **PR title:** `feat: add credits, wallets, and reservation-based allocation`
+>
+> **Goal:** Add prepaid wallets and credit grants using a **reservation /
+> allocation pattern** (Lago-style `wallet_transaction_consumption`). At
+> entitlement activation, the wallet funds a reservation; `EntitlementWindowDO`
+> consumes that reservation locally via the priced-fact path from Phase 6.7;
+> refill requests trigger additional wallet debits; unused allocation
+> reconciles back to the wallet at period end. Prepaid and postpaid collapse
+> to the same code path — the branch is at entitlement creation, not at
+> runtime.
+>
+> **Prerequisite:** Phase 6.6 (pgledger gateway) and Phase 6.7 (simplified DO).
+> Phase 7 cannot land cleanly without both — it extends the same DO, the same
+> outbox, and the same `LedgerGateway` those phases ship.
 >
 > **Branch:** `feat/credits-wallets`
 >
 > **Detailed plan:** [docs/plans/unprice-phase-07-credits-wallets.md](/Users/jhonsfran/repos/unprice/docs/plans/unprice-phase-07-credits-wallets.md)
 
+### Why this phase exists
+
+Credits are the dominant billing abstraction for AI products (OpenAI,
+Anthropic, Vercel, Netlify). When underlying model costs drop ~10× per year,
+the operator adjusts burn rate, not the customer contract. Prepaid balance
+also removes "blank-check anxiety" — a real adoption blocker for agent
+workloads.
+
+Architecturally, per-event Postgres ledger writes are infeasible at
+AI-workload throughput. Lago solves this with `WalletTransactionConsumption`
+(inbound allocation rows consumed FIFO by outbound rows). OpenMeter solves it
+with grants + replay. We take the Lago pattern because the DO holds hot
+state — replay is unnecessary and hard reservations are possible.
+
+### The primitive: reservation
+
+At entitlement activation, a worker pulls an allocation from the customer
+wallet ledger. One pgledger transfer: `customer:<id>:wallet` →
+`customer:<id>:entitlement_reserved:<entitlement_id>`. The DO receives
+`allocation_cents` and decrements locally per priced fact. When remaining
+drops below threshold, the DO requests a refill via a queue message. The
+refill worker debits wallet → reserved (one transfer). At period end, unused
+allocation flows back: `reserved → wallet` (one transfer).
+
+Ledger writes per customer per period: ~3–10, not millions.
+
+### Prepaid vs postpaid: one code path
+
+- **Prepaid (wallet-backed):** activation pulls allocation from wallet.
+  Insufficient balance = entitlement denied at creation, or reduced allocation
+  with auto-refill on top-up.
+- **Postpaid (invoice at period close):** activation creates an "∞ allocation"
+  backed by `house:postpaid_accrual`. Same DO code. Same refill machinery
+  (but refills always succeed). At period close, accrued amount rolls into
+  the invoice.
+
+The DO does not know or care which mode the entitlement is in. No runtime
+router. This replaces the old `SettlementRouter` concept with an
+**allocation strategy** chosen at entitlement creation time.
+
+### Credits alignment
+
+Credit grants are a **funding source** for reservations, alongside wallets:
+
+- Promo grants, manual credits, and plan-included credits all land as
+  pgledger accounts: `customer:<id>:credit:<grant_id>` with an expiry.
+- Reservation creation has a priority order (Lago pattern): expiring-soonest
+  first, then promo, then wallet.
+- On refill, the worker runs the same priority order. Credits burn before
+  wallet cash.
+- Grant expiry = transfer remaining balance → `house:expired_credits`. One
+  pgledger entry.
+
+This is OpenMeter grant semantics + Lago consumption ordering, running on
+pgledger's transfer primitive.
+
 ### Commits
 
-**7.1 — Add wallet, credit grant, and burn rate schemas**
+**7.1 — Wallet + credit grant schema**
 
-`wallets` (identity; no balance cache if Phase 6.6 already applied), `credit_grants`
-(`amount` numeric / Dinero; remaining from pgledger), `credit_burn_rates` with
-versioned burn rates (`effectiveAt`/`supersededAt`). Skip columns dropped in 6.6.
+- `wallets`: `(projectId, customerId, currency)` identity only. No balance
+  column; balance lives in pgledger.
+- `credit_grants`: grant metadata (source, expiry, priority, burn rate
+  multiplier), linked to a pgledger grant account.
+- `credit_burn_rates`: versioned multipliers with `effectiveAt` /
+  `supersededAt` (AI cost volatility fix).
+- House accounts seeded in 6.6: `house:credit_issuance`,
+  `house:expired_credits`, new `house:postpaid_accrual`.
 
-**7.2 — Add validators and migration**
+**7.2 — Reservation schema**
 
-**7.3 — Extend WalletService (after Phase 6.6)**
+- `entitlement_reservations`: `(entitlementId, ledgerTransferId,
+  allocationCents, consumedCents, status)` — mirrors Lago's
+  `WalletTransactionConsumption` shape.
+- `reservation_refills`: audit log of refill events (`requestedAt`,
+  `fundingSource`, `amountCents`, `completedAt`).
+- `funding_strategies` (enum or small table): priority order per grant type.
 
-`WalletService` already owns grants + **`LedgerGateway`** transfers from 6.6.
-Phase 7 adds DO-focused methods (`getActiveGrants` with live balances, flush
-validation / `GRANT_FLUSH_MISMATCH`) and ensures **`hasEnoughCredits`** remains on
-`WalletDO` only. **No** `LedgerService` dependency on `WalletService`; **no**
-`reconcileBalance` cache repair.
+**7.3 — Extend `WalletService` with allocation operations**
 
-**7.4 — Add SettlementRouter**
+New methods:
+- `createReservation({ entitlementId, requestedCents })` — runs funding
+  priority order, issues pgledger transfers, returns allocation size (may be
+  smaller than requested if funds short).
+- `refillReservation({ reservationId, requestedCents })` — same machinery,
+  idempotent by `(reservationId, requestSeq)`.
+- `reconcileReservation({ reservationId, actualConsumedCents })` —
+  period-end sweep; transfers unused back to source accounts in reverse
+  priority order.
+- `topUpWallet({ ... })` — credits wallet via checkout webhook; triggers
+  pending refills for reservations waiting on funds.
 
-Routes charges to `invoice`, `wallet`, or `one_time` settlement.
-Default: `invoice` for subscriptions, `wallet` for agent usage.
+No `LedgerService` dependency on `WalletService`. Both sit on
+`LedgerGateway`.
 
-**7.5 — Wire wallet settlement into agent billing**
+**7.4 — DO: allocation-aware hot path**
 
-Update `billMeterFact` to route **`Dinero`** through `SettlementRouter` so
-`invoice` vs `wallet` does not double-post ledger charges (see Phase 7 plan).
+Extend `EntitlementWindowDO` (post-6.7) with:
+- `allocation_cents` and `allocation_remaining_cents` in SQLite.
+- On each priced fact: `remaining -= amount_cents`. Deny if `remaining <= 0`
+  and no in-flight refill.
+- Request refill when `remaining < threshold × allocation_cents` (default
+  `0.2`, configurable per meter velocity).
+- Refill request: send to `reservation-refill-queue`; receive updated
+  allocation via DO RPC callback; apply atomically.
+- Refill-denied (wallet empty): continue serving until 0, then deny with
+  reason `WALLET_EMPTY`.
 
-**7.6 — Add credit purchase flow**
+Overdraft is bounded by refill chunk size, not eliminated. Document the
+bound: `max_overdraft ≈ refill_chunk × concurrent_meters_per_customer`.
 
-Use case: provider checkout → payment webhook → `WalletService.addCredits()`.
+**7.5 — Refill worker (Queue consumer)**
 
-**7.7 — Add API endpoints**
+`reservation-refill-consumer.ts` handles refill messages:
+- Serialize per-customer using a second DO (`CustomerFundingDO`) keyed by
+  customer — avoids races when multiple entitlements refill concurrently.
+- Runs funding priority order via `WalletService.refillReservation`.
+- On failure (wallet empty, grants expired), returns `DENIED` with reason;
+  the meter DO acks and stops requesting.
 
-Wallet balance, purchase, and grant history endpoints. Update SDK types.
+**7.6 — Credit purchase flow**
 
-**7.8 — Add UI**
+Webhook-driven (depends on Phase 5):
+- Customer initiates purchase via provider checkout.
+- Payment success webhook → `WalletService.topUpWallet` → pgledger transfer
+  `house:credit_issuance` → `customer:<id>:wallet`.
+- Top-up triggers pending-refill drain: any reservation waiting on funds
+  gets a refill attempt.
 
-Wallet dashboard, credit purchase flow, burn rate configuration, settlement
-preference per customer.
+**7.7 — Period-end reconciliation**
 
-**7.9 — Add tests**
+Cron at period boundary:
+- For each active reservation, read DO's `consumed_cents`.
+- `WalletService.reconcileReservation(actualConsumedCents)` — returns unused
+  to funding accounts.
+- Postpaid: accrued `consumed_cents` rolls into invoice line item.
+
+**7.8 — API endpoints**
+
+- `GET /v1/wallet` — balance per grant + wallet.
+- `POST /v1/wallet/top-up` — initiate provider checkout.
+- `GET /v1/wallet/reservations` — active reservations + refill history.
+- `GET /v1/wallet/grants` — credit grants with burn rates.
+
+SDK types updated.
+
+**7.9 — UI**
+
+Wallet dashboard, credit purchase flow, burn rate editor, reservation
+visibility ("X left of $Y allocated"), grant timeline.
+
+**7.10 — Tests**
+
+- Reservation priority order across wallet + multiple grants.
+- Refill idempotency under concurrent requests from multiple meter DOs.
+- Wallet-empty denial semantics.
+- Period-end reconciliation correctness.
+- Postpaid ∞-allocation behaves identically to prepaid in the DO.
+- Credit expiry → `house:expired_credits` transfer.
+- Burn rate multiplier applied at reservation time.
+
+### Guardrails
+
+- Reservation is the only primitive. No `SettlementRouter` that decides
+  per-event. Prepaid/postpaid is a reservation funding strategy chosen at
+  activation.
+- DO treats allocation as authoritative within its chunk. Ledger is
+  authoritative for funding. The reservation is the contract between them.
+- Refill chunk size is the overdraft bound. Tune per meter velocity, expose
+  to operator config.
+- Credit grants compose through the same priority machinery as wallets — one
+  funding algorithm, many funding sources.
+
+### Non-goals
+
+- ML-based refill chunk sizing.
+- Cross-currency wallets (same-currency reservations only).
+- Real-time spend enforcement beyond per-meter local caps — that's Phase 8.
 
 ---
 
@@ -921,9 +1219,15 @@ Phase 6.6: pgledger Ledger And Wallet Core
   WalletService; grants as accounts; Dinero at boundaries. See
   docs/plans/unprice-phase-06.6-new-ledger.md.
 
-Phase 7: Credits, Wallets & Settlement Router
-  WalletDO edge enforcement, burn rates, and settlement router on top of 6.6.
-  Invoice, wallet, and one-time settlement modes.
+Phase 6.7: Simplify Agent Billing Pipeline
+  Delete billing-from-alarm, snapshot pricing onto the DO, per-meter spend
+  caps, single-purpose outbox, CF Queue consumer for ledger writes. No
+  wallets yet — this is the cleanup that makes Phase 7 safe to land.
+
+Phase 7: Credits, Wallets & Reservation-Based Allocation
+  Reservation primitive (Lago-style consumption ledger) on top of pgledger.
+  Prepaid + postpaid collapse to one DO code path; credits are a funding
+  source. Refills via CF Queue + CustomerFundingDO serialization.
 
 Phase 8: Financial Guardrails & Spending Controls
   Prevent runaway agents with real-time financial enforcement, spending limits,
@@ -950,12 +1254,13 @@ Track B (Provider):
 Track C (Agent Billing):
   Phase 6 depends on Phases 1, 3, 4
   Phase 6.6 (pgledger — see plans/unprice-phase-06.6-new-ledger.md) depends on Phase 6
-  Phase 7 depends on Phases 5, 6, and Phase 6.6
+  Phase 6.7 (simplification) depends on Phase 6 and Phase 6.6
+  Phase 7 depends on Phases 5, 6, 6.6, and 6.7
 
 Track D (Advanced Billing):
-  Phase 8 depends on Phases 6, 6.6, 7
-  Phase 9 depends on Phases 6, 6.6, 7
-  Phase 10 depends on Phases 6, 6.6, 7
+  Phase 8 depends on Phases 6, 6.6, 6.7, 7
+  Phase 9 depends on Phases 6, 6.6, 6.7, 7
+  Phase 10 depends on Phases 6, 6.6, 6.7, 7
 ```
 
 Explicit dependency list:
@@ -967,11 +1272,15 @@ Explicit dependency list:
 6. Phase 6 depends on Phases 1, 3, and 4.
 7. Phase 6.6 (pgledger ledger + wallet core) depends on Phase 6 and supersedes
    hand-rolled ledger wallet columns from earlier plans.
-8. Phase 7 depends on Phases 5, 6, and **6.6** (edge wallet + router on top of gateway).
-9. Phases 8, 9, and 10 each depend on Phases 6, 6.6, and 7.
-10. Phases 8, 9, and 10 can run in parallel after 6, 6.6, and 7 complete.
+8. Phase 6.7 (agent billing simplification) depends on Phases 6 and 6.6. It
+   must land before Phase 7 so the DO is free of billing concerns before
+   reservation refills are added.
+9. Phase 7 depends on Phases 5, 6, 6.6, and **6.7** (reservation allocation on
+   top of a simplified DO + pgledger gateway).
+10. Phases 8, 9, and 10 each depend on Phases 6, 6.6, 6.7, and 7.
+11. Phases 8, 9, and 10 can run in parallel after 7 completes.
 
-Sequential execution order: 6 → 6.6 → 7 → 8 → 9 → 10
+Sequential execution order: 6 → 6.6 → 6.7 → 7 → 8 → 9 → 10
 
 ## Related Documents
 

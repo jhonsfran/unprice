@@ -1,900 +1,753 @@
-# Phase 7: Credits, Wallets & Settlement Router
+# Phase 7: Credits, Wallets & Reservation-Based Allocation
 
 Source: [../unprice-implementation-plan.md](../unprice-implementation-plan.md)
-PR title: `feat: add credits, wallets, and settlement router`
+PR title: `feat: add credits, wallets, and reservation-based allocation`
 Branch: `feat/credits-wallets`
 
-**Prerequisite:** [Phase 6.6 — pgledger + Dinero](./unprice-phase-06.6-new-ledger.md)
-must ship first. That phase installs pgledger via `migrate:custom`, ships the
-typed **`LedgerGateway`** with `Dinero<number>` end-to-end, rewrites
-`LedgerService` as a thin wrapper around the gateway, deletes the hand-rolled
-ledger tables, and publishes a set of **Hooks for Phase 7** — canonical
-`grantAccountKey`, `seedHouseAccounts` covering credit-issuance + expired
-house accounts, the `createTransfers` batch API, and `getAccountBalance`.
-
-Phase 7 is **greenfield** on top of that foundation. The previous wallet,
-credit-grant, settlement-router, and WalletDO code has been deleted from the
-tree. This phase builds all of it for the first time against the gateway.
+**Prerequisite:** [Phase 6.6 — pgledger gateway](./unprice-phase-06.6-new-ledger.md)
+ships the `LedgerGateway` and house accounts. [Phase 6.7 — agent billing
+simplification](./unprice-phase-06.7-agent-billing-simplification.md) strips
+billing, rating, and the Postgres client out of `EntitlementWindowDO`. Phase 7
+extends the simplified DO — it does not untangle a tangled one.
 
 ## Mission
 
-Build the credits product end-to-end: wallet + credit-grant schema, pure
-fold/decide logic over `Dinero<number>`, `WalletService` (Postgres +
-`LedgerGateway`), real-time `WalletDO` at the edge with outbox-based
-settlement, a **settlement router** that picks between `invoice`, `wallet`,
-and `one_time` modes, and the checkout/webhook path that funds grants.
+Add prepaid wallets and credit grants to Unprice using a **reservation /
+allocation** pattern. At entitlement activation, a worker pulls an allocation
+from the customer's funding accounts (wallet, credits) in priority order and
+hands a chunk of that allocation to `EntitlementWindowDO`. The DO decrements
+the allocation locally per priced fact. When remaining drops below threshold,
+the DO requests a refill. At period end, unused allocation reconciles back.
 
-Credits decouple customer-facing pricing from volatile underlying costs —
-critical for AI workloads where model costs drop an order of magnitude a year.
-The WalletDO mirrors the proven `EntitlementWindowDO` pattern: local SQLite
-for sub-millisecond gating, an outbox that flushes to
-`WalletService.deductCredits`, which applies the **same** `decideDeduct`
-plan through `LedgerGateway.createTransfers`.
+Ledger writes per customer per period: ~3–10. Not millions.
+
+The previous phase-7 framing (`WalletDO` + `SettlementRouter`) is superseded.
+A runtime router that decides per-event whether to write to the ledger is a
+sign the underlying primitive (reservation) hadn't been recognized yet. This
+rewrite removes it.
+
+## Outcome
+
+- `wallets`, `credit_grants`, `credit_burn_rates`, `entitlement_reservations`,
+  and `reservation_refills` tables exist.
+- `WalletService` owns allocation operations: `createReservation`,
+  `refillReservation`, `reconcileReservation`, `topUpWallet`.
+- `EntitlementWindowDO` gains `allocation_cents` and
+  `allocation_remaining_cents` in SQLite; hot path denies on either
+  `LIMIT_EXCEEDED`, `SPEND_CAP_EXCEEDED`, or `WALLET_EMPTY`.
+- A `CustomerFundingDO` (one per customer) serializes refills across all
+  meter DOs owned by that customer.
+- Prepaid and postpaid entitlements run the **same DO code path**. The branch
+  is at entitlement creation, not at runtime.
+- Credits are a funding source that composes through the same priority order
+  as wallets. Grant expiry transfers remaining balance to
+  `house:expired_credits`.
 
 ## Dependencies
 
-- **Phase 6.6** for `LedgerGateway`, `LedgerService`, `ledger/accounts.ts`
-  (includes `grantAccountKey`), `ledger/money.ts`, `ledger_idempotency`
-  table, pgledger install, and `seedHouseAccounts` covering
-  `house:credit_issuance` + `house:expired_credits`.
-- Phase 5 for settlement webhooks (credit purchase confirmation arrives as a
-  webhook event).
-- Phase 6 for `billMeterFact` and `EntitlementWindowDO.processBillingBatch`.
-  Phase 7 wires the wallet leg into that flow.
+- **Phase 5** for settlement webhooks (credit purchase confirmation).
+- **Phase 6.6** for `LedgerGateway.createTransfers` and seeded house
+  accounts (`house:credit_issuance`, `house:expired_credits`, and the new
+  `house:postpaid_accrual` seeded here).
+- **Phase 6.7** for a DO that already emits priced facts via CF Queue,
+  already enforces per-meter spend caps, and has no billing loop in its
+  alarm.
 
-Phases 4, 5, 6.5 wallet + settlement state that lived in earlier plan drafts:
-superseded. The branch starts from a tree with **no** wallet / settlement /
-WalletDO code.
-
-## Why This Phase Exists
-
-- Credits are the dominant billing abstraction for AI (OpenAI, Vercel,
-  Anthropic, Netlify all use them).
-- When model costs drop ~10× / year, the operator changes the burn rate, not
-  the customer contract.
-- Prepaid balance enables real-time spending enforcement (Phase 8).
-- Pure usage-based billing creates "blank-check anxiety" — a real adoption
-  blocker.
-- Reading wallet balance from Postgres on every meter event kills the
-  latency advantage of DOs; wallet state must live at the edge and flush
-  asynchronously.
+Phases 4, 5, 6.5 wallet/settlement scaffolding was removed from the tree in
+earlier cleanup. This phase does not resurrect it.
 
 ## Read First
 
-- [./unprice-phase-06.6-new-ledger.md](./unprice-phase-06.6-new-ledger.md)
-  — especially **The Model** (account taxonomy, burn flow, Dinero boundary)
-  and **Hooks for Phase 7**.
-- [../../internal/services/src/ledger/gateway.ts](../../internal/services/src/ledger/gateway.ts)
-  (after 6.6) — the only path to pgledger.
-- [../../internal/services/src/ledger/accounts.ts](../../internal/services/src/ledger/accounts.ts)
-  (after 6.6) — imports `grantAccountKey`, `customerAccountKey`,
-  `houseAccountKey`, `HOUSE_ACCOUNT_KINDS`.
-- [../../internal/services/src/ledger/service.ts](../../internal/services/src/ledger/service.ts)
-  (after 6.6) — the sibling service `WalletService` must **not** import.
-- [../../internal/services/src/use-cases/billing/bill-meter-fact.ts](../../internal/services/src/use-cases/billing/bill-meter-fact.ts)
-  (after 6.6) — takes `Dinero<number>`, still needs settlement routing.
-- [../../internal/services/src/use-cases/payment-provider/process-webhook-event.ts](../../internal/services/src/use-cases/payment-provider/process-webhook-event.ts)
-- [../../internal/services/src/payment-provider/interface.ts](../../internal/services/src/payment-provider/interface.ts)
 - [../../apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts](../../apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts)
-  — reference pattern for WalletDO (alarms, ready gate, drizzle SQLite,
-  outbox).
-- [../../apps/api/src/ingestion/entitlements/db/schema.ts](../../apps/api/src/ingestion/entitlements/db/schema.ts)
-  — DO SQLite schema pattern.
-- [`ricofritzsche/eventstore-typescript`](https://github.com/ricofritzsche/eventstore-typescript)
-  — fold/decide/shell pattern reference.
+  — post-6.7 shape. Phase 7 extends the SQLite schema and `applyEventSync`.
+- [../../internal/services/src/ledger/gateway.ts](../../internal/services/src/ledger/gateway.ts)
+  — the only path into pgledger.
+- [../../internal/services/src/ledger/accounts.ts](../../internal/services/src/ledger/accounts.ts)
+  — account key builders (`customerAccountKey`, `grantAccountKey`,
+  `houseAccountKey`).
+- [../../internal/services/src/use-cases/payment-provider/process-webhook-event.ts](../../internal/services/src/use-cases/payment-provider/process-webhook-event.ts)
+  — credit purchase webhook entry point.
 
-## Two-Layer Architecture: WalletDO + WalletService
+## The Reservation Primitive
 
-Both layers are built from scratch in this phase. They share pure fold/decide
-logic and both go through `LedgerGateway` for money movement — neither
-embeds pgledger SQL directly.
+The whole phase turns on one idea.
 
-```
-                       ┌──────────────────────────────────────┐
-  meter event          │       EntitlementWindowDO             │
-  ─────────────►       │  (limit check, meter state, outbox)  │
-                       └──────────┬───────────────────────────┘
-                                  │ alarm: processBillingBatch()
-                                  │ calls billMeterFact()
-                                  ▼
-                       ┌──────────────────────────────────────┐
-  balance check ──►    │            WalletDO                   │
-  deduct request ──►   │  (balance, grants, outbox)            │
-                       │  SQLite: wallet_state, credit_grants, │
-                       │          wallet_outbox, idemp_keys     │
-                       └──────────┬───────────────────────────┘
-                                  │ alarm: flushOutbox()
-                                  ▼
-                       ┌──────────────────────────────────────┐
-                       │     WalletService (Postgres)          │
-                       │  credit_grants rows +                 │
-                       │  LedgerGateway transfers / balances    │
-                       └──────────────────────────────────────┘
-```
+**A reservation is a chunk of funded money that the DO is authorized to
+consume locally, without phoning home per event.**
 
-| Layer | Responsibility | Storage | Latency |
-|-------|---------------|---------|---------|
-| **WalletDO** | Real-time balance enforcement, grant consumption plan, outbox | DO SQLite | < 1ms (co-located) |
-| **WalletService** | ACID settlement: `credit_grants` rows + `LedgerGateway` transfers (no cached `balance_cents`) | Postgres + pgledger | ~5-20ms |
-
-### Why two layers?
-
-1. **Speed.** `EntitlementWindowDO.processBillingBatch()` calls
-   `billMeterFact` which needs to check wallet balance and deduct credits.
-   If that hits Postgres per event, you add 5–20 ms per deduction on the
-   hot billing path — inside an alarm that processes batches of up to 1000.
-   With a WalletDO, the balance check and local deduction are
-   sub-millisecond DO-to-DO calls.
-2. **Consistency model matches metering.** Meters already accept "DO is
-   real-time truth, Postgres + pgledger is durable truth." The DO holds a
-   **cache** of grant remainders for ordering and gating; the outbox
-   ensures `WalletService` applies the same consumption lines to pgledger.
-   Same mental model, same failure modes, same recovery strategy.
-3. **Single-threaded serialization for free.** Cloudflare guarantees one
-   concurrent request per DO instance. No `SELECT ... FOR UPDATE`, no
-   deadlocks, no optimistic retry loops. One WalletDO per
-   `(customerId, currency)` is the natural serialization boundary.
-
-### Grant synchronization: push model
-
-When wallet state changes in Postgres (credit purchase confirmed, grant
-revoked, manual adjustment), the mutating code path pushes the update to the
-WalletDO:
+Creation:
 
 ```
-Stripe webhook → processWebhookEvent → WalletService.addCredits() (Postgres +
-  LedgerGateway: issuance → grant:<id>)
-                                             │
-                                             ▼
-                                        walletDO.sync({ grant, remaining… })
-                                        (push via DO stub fetch)
+wallet → reserved   (one pgledger transfer, amount = allocation_cents)
 ```
 
-The WalletDO exposes a `sync()` method that accepts grant additions,
-revocations, or a full state snapshot. On receipt, it updates its local
-SQLite tables and adjusts the cached balance. This keeps the DO fresh
-without polling.
-
-**Why push over pull:**
-- Pull requires the DO to wake up periodically and query Postgres —
-  wasteful when nothing changed, stale between polls.
-- Push is event-driven — the DO learns about changes the moment they
-  happen.
-- The mutating code path already knows what changed — it has the data in
-  hand.
-- Matches how `EntitlementWindowDO` receives its configuration: the caller
-  provides the state at call time, the DO doesn't fetch it.
-
-**Consistency guarantee:** The DO is eventually consistent with Postgres +
-pgledger. The push ensures convergence within the same request that caused
-the change. If a push fails (DO unavailable), the next deduction can carry
-a fallback `full_snapshot` from Postgres (grant rows + gateway balances).
-The outbox flush is the checkpoint: `WalletService` recomputes or validates
-consumption lines against **live grant account balances** from the gateway;
-mismatch → typed error (`GRANT_FLUSH_MISMATCH`) and DO `full_snapshot`
-recovery. No legacy `reconcileBalance` cache column exists to drift.
-
-### The fold/decide pattern in the DO
-
-Following the pattern from
-[`ricofritzsche/eventstore-typescript`](https://github.com/ricofritzsche/eventstore-typescript):
+Consumption:
 
 ```
-fold:    foldWalletState(grants[]) → { balance, grantsByPriority[], expired[] }
-decide:  decideDeduct(command, state) → Ok(ConsumptionPlan) | Err(InsufficientBalance)
-shell:   WalletDO.deduct() — read local SQLite, fold, decide, persist + outbox
+DO.apply(event)
+  ├─ compute priced fact (from Phase 6.7 snapshotted rate card)
+  ├─ allocation_remaining -= amount_cents  (DO SQLite, local)
+  └─ enqueue priced fact to billing queue
 ```
 
-The pure `foldWalletState` and `decideDeduct` functions live in
-`internal/services/src/wallet/core.ts`, take/return `Dinero<number>`, and
-are shared between the DO (edge, against SQLite-cached grants) and
-`WalletService` (Postgres, against gateway-read grant balances). Same
-business logic, two execution contexts. Unit-testable without any
-infrastructure.
-
-### Deduction flow (detailed)
+Refill (when `allocation_remaining < threshold × allocation_cents`):
 
 ```
-EntitlementWindowDO.processBillingBatch()
-  │
-  │  for each unbilled meter fact:
-  │    1. billMeterFact() → rate usage → Dinero amount
-  │    2. settlement router picks: invoice | wallet | one_time
-  │    3. if "invoice": LedgerService.postCharge (customer → house:revenue)
-  │       if "wallet":  walletDO.deduct({ amount: Dinero, sourceType, sourceId })
-  │       if "one_time": provider charge path
-  │
-  ▼
-WalletDO.deduct()
-  │  (single-threaded, no locks needed)
-  │
-  │  1. Read grants from local SQLite
-  │  2. fold: foldWalletState(grants) → state
-  │  3. decide: decideDeduct(command, state) → ConsumptionPlan
-  │     - FIFO by priority, then earliest expiry
-  │     - Skip expired grants
-  │     - Reject if insufficient balance (entire deduction fails)
-  │  4. Apply ConsumptionPlan to local SQLite (cached remaining per grant)
-  │  5. Write to wallet_outbox:
-  │     - { type: "deduction", amount, sourceType, sourceId, grantConsumptions[] }
-  │  6. Return Ok({ newBalance }) or Err(InsufficientBalance)
-  │
-  │  alarm (every 30s):
-  ▼
-WalletDO.flushOutbox()
-  │
-  │  for each outbox row:
-  │    WalletService.deductCredits() in Postgres (ACID)
-  │    - Validates grants + gateway balances; emits grant → house:revenue
-  │      transfers (source_type: "credit_burn") via LedgerGateway batch
-  │    - No wallets.balance_cents / credit_grants.remaining_cents columns
-  │    Mark outbox row as settled
-  │
-  │  Cleanup: delete settled + flushed rows
-  ▼
+DO → reservation-refill-queue → CustomerFundingDO → WalletService
+  WalletService:
+    wallet → reserved  (one pgledger transfer, amount = refill_chunk_cents)
+  returns new allocation_remaining to DO via RPC
 ```
 
-### Credit addition flow (push)
+Reconciliation (period end):
 
 ```
-Stripe webhook (payment.succeeded for credit purchase)
-  │
-  ▼
-processWebhookEvent()
-  │
-  ▼
-WalletService.addCredits() — Postgres ACID transaction:
-  │  1. gateway.seedHouseAccounts(projectId, currency)  // from 6.6
-  │  2. Insert credit_grants row (amount numeric / Dinero at scale 6)
-  │  3. gateway.createAccount(grantAccountKey(id), currency,
-  │     allow_negative=false)
-  │  4. gateway.createTransfer(house:credit_issuance → grant:<id>, …
-  │     source_type: "credit_purchase")
-  │
-  ▼
-walletDO.sync({ type: "grant_added", grant: { id, amount, remaining,
-  priority, expiresAt } })
-  │  (push via DO stub fetch; remaining = grant's initial amount)
-  │
-  ▼
-WalletDO.sync()
-  │  1. Insert/update grant in local credit_grants_local SQLite table
-  │  2. Recalculate cached balance from foldWalletState(all local grants)
-  │  3. Return Ok
+Cron reads DO.consumed_cents
+WalletService.reconcileReservation:
+  reserved → wallet   (one pgledger transfer, amount = allocation - consumed)
+```
+
+**Ledger writes per customer per period:** reservation creation (1) + N
+refills (typically 2–5) + reconciliation (1). The DO absorbs N-thousand
+events without touching Postgres.
+
+**Overdraft bound:** `refill_chunk × concurrent_meters_per_customer`. A
+customer with 3 hot meters and a $1 refill chunk can overrun by at most $3
+while refills race. Tune refill chunk per meter velocity.
+
+## Prepaid vs Postpaid: One Code Path
+
+The DO does not know which mode it is in. It decrements `allocation_remaining`
+and requests refills. The difference lives entirely in **how the reservation
+is funded**.
+
+### Prepaid (wallet-backed)
+
+Funding order at reservation creation:
+
+1. `customer:<id>:credit:<grant_id>` accounts (expiring-soonest first).
+2. `customer:<id>:wallet`.
+
+If the customer's total balance across credits + wallet is less than
+`requested_cents`, the reservation is created at whatever balance is
+available, and the DO denies `WALLET_EMPTY` once that's consumed.
+
+### Postpaid (invoice at period end)
+
+Funding order at reservation creation:
+
+1. `house:postpaid_accrual` — a house-side "we'll invoice for this later"
+   account. Always has infinite available balance.
+
+The DO sees the same `allocation_cents` primitive. Refills always succeed.
+At period end, `reserved` account balance equals consumed amount; that
+becomes an invoice line item. The funds move
+`reserved → customer:<id>:invoice_receivable` on invoice issuance, then
+`receivable → house:revenue` on payment.
+
+### Why this collapses cleanly
+
+The DO holds a reservation. The reservation holds money that was moved out
+of some funding source. Prepaid = funding source is the customer; postpaid =
+funding source is the house. Both are just pgledger accounts. The DO
+doesn't care.
+
+**This replaces the SettlementRouter.** There is no runtime decision per
+event. The decision is "which funding accounts to pull from" at reservation
+creation, and that's static per entitlement (derived from the plan version).
+
+## Credits as Funding Sources
+
+Credit grants are pgledger accounts, not a separate subsystem.
+
+### Grant issuance
+
+```
+house:credit_issuance → customer:<id>:credit:<grant_id>  (one transfer)
+```
+
+The `credit_grants` table records metadata:
+
+- `source` — `promo`, `manual`, `plan_included`, `purchased`.
+- `expiresAt` — nullable.
+- `priority` — integer; lower = consumed first.
+- `burnRateMultiplierBps` — e.g., `15000` = 1.5× wallet rate (AI cost
+  volatility fix; operator raises this when model costs spike).
+
+### Grant consumption
+
+When `WalletService.createReservation` or `refillReservation` runs, it
+queries all grant accounts for the customer, ordered by
+`(expiresAt ASC NULLS LAST, priority ASC)`. It transfers from grants first,
+wallet last. Grant balance = pgledger `getAccountBalance(grantAccountKey)`.
+No cached remaining column.
+
+### Grant expiry
+
+Cron at `expiresAt`:
+
+```
+customer:<id>:credit:<grant_id> → house:expired_credits  (one transfer)
+```
+
+One ledger entry per grant per expiry. No per-event accounting.
+
+### Burn rate multipliers
+
+When a grant with `burnRateMultiplierBps = 15000` funds a reservation, the
+reservation records `burn_rate_bps = 15000`. The DO's priced-fact math scales
+`amount_cents` by the multiplier before decrementing `allocation_remaining`.
+`$1.00` of consumption at 1.5× burns `$1.50` of allocation.
+
+This means: if you issued $10 of promo credits and the burn rate is 2×, the
+customer effectively gets $5 of usage. Operator adjusts the multiplier when
+underlying costs shift. Customer contract is unchanged.
+
+## The CustomerFundingDO
+
+One DO instance per customer. Its job: serialize refill requests across all
+meter DOs for that customer.
+
+### Why it exists
+
+`EntitlementWindowDO` is sharded per `(customer, meter)`. A customer with 5
+concurrent hot meters will have 5 DOs independently requesting refills. If
+they all hit `WalletService.refillReservation` concurrently, pgledger
+transfers work (pgledger handles concurrency correctly via row versioning),
+but you get thrashing: two refills race for the last dollar in the wallet,
+one succeeds, the other retries.
+
+`CustomerFundingDO` linearizes these requests. Each meter DO sends its
+refill request to the customer's funding DO. The funding DO calls
+`WalletService.refillReservation` one at a time, returns results to each
+meter DO. Race-free by construction.
+
+### Shape
+
+```ts
+export class CustomerFundingDO extends DurableObject {
+  // No persistent state — it's a serialization point.
+  // Refill state lives in pgledger (authoritative) and the meter DO
+  // (consumption tracking).
+
+  async requestRefill(input: {
+    reservationId: string
+    requestedCents: number
+  }): Promise<RefillResult> {
+    // Call WalletService.refillReservation
+    // Return allocation delta or DENIED
+  }
+}
+```
+
+No alarm, no SQLite. It's a mutex with RPC surface. Cloudflare bills per
+invocation, not per instance-hour, so one-per-customer is cheap.
+
+### Why not a Postgres advisory lock?
+
+- Adds a round-trip to Postgres before the refill transfer.
+- Works, but couples the serialization primitive to the DB connection pool.
+- DO-based serialization is co-located with the meter DOs that trigger it —
+  lower latency, no pool exhaustion under burst.
+
+## Architecture
+
+```
+                    ┌─────────────────────────────────────┐
+                    │     EntitlementWindowDO             │
+                    │  (per customer+meter, from 6.7)      │
+                    │                                      │
+  event ───────────►│  apply():                            │
+                    │    ├─ priced fact (snapshotted)      │
+                    │    ├─ allocation_remaining -= amt    │
+                    │    ├─ if remaining < threshold:       │
+                    │    │     request refill               │
+                    │    └─ emit priced fact → billing Q   │
+                    └────────┬─────────────────────────────┘
+                             │ refill request (RPC)
+                             ▼
+                    ┌─────────────────────────────────────┐
+                    │     CustomerFundingDO               │
+                    │  (per customer, serialization only) │
+                    └────────┬─────────────────────────────┘
+                             │ WalletService.refillReservation
+                             ▼
+                    ┌─────────────────────────────────────┐
+                    │         WalletService                │
+                    │  (Postgres + LedgerGateway)          │
+                    │                                      │
+                    │  funding priority:                   │
+                    │    1. credits (expiring first)       │
+                    │    2. wallet (prepaid)               │
+                    │       OR                             │
+                    │    1. house:postpaid_accrual         │
+                    │       (postpaid)                     │
+                    └────────┬─────────────────────────────┘
+                             │ createTransfers([])
+                             ▼
+                    ┌─────────────────────────────────────┐
+                    │      pgledger (via LedgerGateway)   │
+                    │  customer:<id>:wallet                │
+                    │  customer:<id>:credit:<grant_id>     │
+                    │  customer:<id>:reserved:<ent_id>     │
+                    │  house:credit_issuance               │
+                    │  house:expired_credits               │
+                    │  house:postpaid_accrual              │
+                    └─────────────────────────────────────┘
 ```
 
 ## Guardrails
 
-- `WalletService` does **not** import `LedgerService`. They are siblings;
-  both use `LedgerGateway` for pgledger. No peer-domain service
-  dependencies beyond the gateway and the DB.
-- Credit deductions are atomic. If balance is insufficient, reject entirely
-  (no partial deduction). Holds in both the DO (local SQLite transaction)
-  and Postgres (one `createTransfers` batch — pgledger rolls all lines back
-  on any line failure).
-- `Dinero<number>` at every service and use-case boundary. The DO stores
-  fixed-scale integers internally (same internal scale 6 as pgledger) for
-  SQLite-side integer math, and marshals to/from Dinero at RPC boundaries.
-- **pgledger is the source of truth for money in accounts.**
-  `credit_grants.amount` is the original grant face value (numeric,
-  scale 6); **remaining** is `gateway.getAccountBalance(grantAccountKey(id))`
-  — no `remaining_cents` / `balance_cents` columns. The DO's SQLite tables
-  are a performance cache for ordering and gating, rebuilt from Postgres +
-  gateway on `full_snapshot`.
-- `addCredits` uses `source_type: "credit_purchase"` and `deductCredits`
-  uses `source_type: "credit_burn"` — both as documented in 6.6's "The
-  Model". Idempotency rows live in the gateway's `ledger_idempotency`
-  table. The DO keeps its own idempotency keys for **edge** dedupe only.
-- `createAccount` for every `grant:*` account uses
-  `allow_negative_balance=false` (per 6.6 contract). Overdraw rejects at
-  the SQL boundary — we get an integrity check for free.
-- Burn rates are versioned with `effectiveAt` / `supersededAt`. Changing
-  a burn rate never modifies existing subscriptions or historical
-  transfers.
-- Use the name `CreditGrant` everywhere to avoid confusion with the
-  existing `GrantsManager` (which manages entitlement grants — a different
-  concept).
-- No `any`. Keep orchestration in use cases, not adapters.
-- The settlement router does **not** double-post. For `wallet` mode, the
-  customer receivable leg is skipped — only grant → revenue transfers run
-  (on DO outbox flush). For `invoice` mode, the wallet is untouched.
+- Reservation is the only primitive. No `SettlementRouter`. Prepaid/postpaid
+  is a funding strategy chosen at activation, not a runtime dispatch.
+- DO is authoritative for allocation consumption within its chunk. Ledger is
+  authoritative for funding. The reservation is the contract.
+- Refill chunk size is the overdraft bound. Expose it in operator config per
+  meter. Do not hardcode.
+- Credits flow through the same priority machinery as wallets. One algorithm,
+  many funding sources.
+- `WalletService` does not depend on `LedgerService`. Both sit on
+  `LedgerGateway`.
+- No cached `balance_cents` / `remaining_cents` columns anywhere. Balance
+  reads go through the gateway.
 
-## Primary Touchpoints
+## Execution Slices
 
-All wallet / settlement / WalletDO paths below are **new files** in this
-phase — the previous versions have been deleted from the tree.
+### 7.1 — Wallet + credit grant schema
 
-### DB layer
+**Tables:**
 
-- `internal/db/src/schema/wallets.ts` — new. `wallets` + `credit_grants`
-  tables.
-- `internal/db/src/schema/credit-burn-rates.ts` — new.
-- `internal/db/src/schema/invoices.ts` — drop the legacy `creditGrants` /
-  `invoiceCreditApplications` tables if they still exist at branch start
-  (6.6 may have left them). Remove relations.
-- `internal/db/src/validators/wallets.ts` — new. Drizzle-zod
-  `createSelectSchema` / `createInsertSchema` following the existing
-  validator pattern.
-- `internal/db/src/validators/credit-burn-rates.ts` — new.
-- `internal/db/src/utils/constants.ts` — verify `LEDGER_SETTLEMENT_TYPES`
-  already includes `"invoice" | "wallet" | "one_time"` (added in Phase 6.5).
-  No enum changes expected.
-- Migration: create the new tables and drop the legacy ones in one step.
+```sql
+CREATE TABLE wallets (
+  id              text PRIMARY KEY,
+  project_id      text NOT NULL,
+  customer_id     text NOT NULL,
+  currency        text NOT NULL,
+  ledger_account  text NOT NULL,  -- customer:<id>:wallet
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (project_id, customer_id, currency)
+);
 
-### Services
+CREATE TABLE credit_grants (
+  id                       text PRIMARY KEY,
+  project_id               text NOT NULL,
+  customer_id              text NOT NULL,
+  wallet_id                text NOT NULL REFERENCES wallets(id),
+  ledger_account           text NOT NULL,  -- customer:<id>:credit:<grant_id>
+  source                   credit_grant_source NOT NULL,
+  priority                 integer NOT NULL DEFAULT 100,
+  burn_rate_multiplier_bps integer NOT NULL DEFAULT 10000,
+  issued_amount_cents      bigint NOT NULL,
+  expires_at               timestamptz,
+  metadata                 jsonb NOT NULL DEFAULT '{}',
+  created_at               timestamptz NOT NULL DEFAULT now()
+);
 
-- `internal/services/src/wallet/core.ts` — new. Pure `foldWalletState`,
-  `decideDeduct` over `Dinero<number>`. Shared between WalletDO and
-  WalletService.
-- `internal/services/src/wallet/types.ts` — new. Shared edge + service
-  types (`WalletState`, `Grant`, `ConsumptionPlan`, `DeductCommand`,
-  `DeductResult`).
-- `internal/services/src/wallet/service.ts` — new. `addCredits`,
-  `deductCredits`, `getActiveGrants`, `getBalance`, `revokeGrant`. Deps:
-  `db`, `logger`, `metrics`, `ledgerGateway`. No import of
-  `LedgerService`.
-- `internal/services/src/wallet/errors.ts` — new.
-  `UnPriceWalletError` codes including `INSUFFICIENT_BALANCE`,
-  `GRANT_FLUSH_MISMATCH`, `GRANT_NOT_FOUND`, `WALLET_NOT_FOUND`.
-- `internal/services/src/wallet/index.ts` — new.
-- `internal/services/src/settlement/router.ts` — new. Thin dispatcher over
-  `LedgerService`, `WalletService`, and the provider runtime.
-- `internal/services/src/settlement/types.ts` — new.
-- `internal/services/src/settlement/index.ts` — new.
-- `internal/services/src/context.ts` — register `WalletService` and
-  `SettlementRouter` alongside existing services. Both receive the shared
-  `LedgerGateway` instance.
-
-### Use cases
-
-- `internal/services/src/use-cases/wallet/purchase-credits.ts` — new.
-  Accepts `{ walletId, amount: Dinero, currency, provider }`, creates a
-  provider checkout session, returns checkout URL.
-- `internal/services/src/use-cases/wallet/confirm-credit-purchase.ts` —
-  new. Called from the webhook handler. Calls `addCredits` + pushes
-  `walletDO.sync`.
-- `internal/services/src/use-cases/wallet/index.ts` — new.
-- `internal/services/src/use-cases/billing/bill-meter-fact.ts` — extend to
-  call `SettlementRouter.route` before any ledger write.
-
-### Edge (apps/api)
-
-- `apps/api/src/ingestion/wallet/WalletDO.ts` — new.
-- `apps/api/src/ingestion/wallet/db/schema.ts` — new (DO SQLite schema).
-- `apps/api/src/ingestion/wallet/drizzle/migrations/` — new (DO SQLite
-  migrations).
-- `apps/api/wrangler.jsonc` — register WalletDO binding + migration tag.
-- `apps/api/src/env.ts` — add `wallet` DO namespace to `Env`.
-- `apps/api/src/index.ts` — export WalletDO class.
-- `apps/api/src/middleware/init.ts` — expose `WalletService` and
-  `SettlementRouter` to route handlers.
-- `apps/api/src/hono/env.ts` — add wallet + settlement to the HonoEnv
-  services type.
-- `apps/api/src/routes/wallet/*.ts` — new wallet endpoints
-  (balance, purchase, grants).
-- `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` — extend to
-  accept the wallet DO stub in its constructor and pass it through to
-  `billMeterFact` so the settlement router can dispatch to wallet mode.
-
-### SDK + UI
-
-- `packages/api/src/openapi.d.ts` — SDK types for new routes.
-- Dashboard: wallet page, credit purchase flow, burn rate editor, settlement
-  preference toggle.
-
-## Execution Plan
-
-### Slice 1: Wallet + credit grant schema (Postgres)
-
-Create `internal/db/src/schema/wallets.ts`:
-
+CREATE TABLE credit_burn_rates (
+  id               text PRIMARY KEY,
+  project_id       text NOT NULL,
+  scope            credit_burn_rate_scope NOT NULL,  -- global, feature, plan
+  scope_id         text,
+  multiplier_bps   integer NOT NULL,
+  effective_at     timestamptz NOT NULL,
+  superseded_at    timestamptz
+);
 ```
-wallets(
-  id, projectId, customerId, currency,
-  createdAt, updatedAt
+
+**House accounts (seeded via 6.6 `seedHouseAccounts` extension):**
+
+- `house:credit_issuance`
+- `house:expired_credits`
+- `house:postpaid_accrual` (new in 7.1)
+
+**Validators:** export from `internal/db/src/validators.ts` barrel.
+
+### 7.2 — Reservation schema
+
+```sql
+CREATE TABLE entitlement_reservations (
+  id                   text PRIMARY KEY,
+  project_id           text NOT NULL,
+  customer_id          text NOT NULL,
+  entitlement_id       text NOT NULL,
+  ledger_account       text NOT NULL,  -- customer:<id>:reserved:<ent_id>
+  funding_strategy     funding_strategy NOT NULL,  -- prepaid, postpaid
+  allocation_cents     bigint NOT NULL,
+  consumed_cents       bigint NOT NULL DEFAULT 0,
+  status               reservation_status NOT NULL,  -- active, exhausted, reconciled
+  refill_threshold_bps integer NOT NULL DEFAULT 2000,  -- 20%
+  refill_chunk_cents   bigint NOT NULL,
+  created_at           timestamptz NOT NULL DEFAULT now(),
+  reconciled_at        timestamptz
+);
+
+CREATE TABLE reservation_refills (
+  id                  text PRIMARY KEY,
+  reservation_id      text NOT NULL REFERENCES entitlement_reservations(id),
+  request_seq         integer NOT NULL,  -- idempotency key within reservation
+  requested_cents     bigint NOT NULL,
+  granted_cents       bigint NOT NULL,  -- may be less if funds short
+  funding_breakdown   jsonb NOT NULL,   -- which accounts funded the refill
+  status              refill_status NOT NULL,  -- pending, complete, denied
+  denied_reason       text,
+  requested_at        timestamptz NOT NULL DEFAULT now(),
+  completed_at        timestamptz,
+  UNIQUE (reservation_id, request_seq)
+);
+```
+
+**Why `(reservation_id, request_seq)` unique:** at-least-once delivery from
+the meter DO means the same refill request may arrive twice. The DO
+increments `request_seq` locally and includes it in the message; duplicate
+messages no-op on the unique constraint.
+
+### 7.3 — `WalletService` allocation operations
+
+File: `internal/services/src/wallet/service.ts`.
+
+```ts
+class WalletService {
+  constructor(private deps: {
+    db: Database
+    logger: AppLogger
+    gateway: LedgerGateway
+  }) {}
+
+  async createReservation(input: {
+    entitlementId: string
+    fundingStrategy: "prepaid" | "postpaid"
+    requestedCents: number
+    refillChunkCents: number
+    refillThresholdBps: number
+  }): Promise<Result<Reservation, WalletError>> {
+    // 1. Resolve funding order (prepaid: credits by priority, then wallet;
+    //    postpaid: house:postpaid_accrual)
+    // 2. Query available balance per account via gateway
+    // 3. Build transfer list to move funds into reserved account
+    // 4. Call gateway.createTransfers — returns on success
+    // 5. Insert entitlement_reservations row
+    // 6. Return Reservation with allocation_cents (may be < requested)
+  }
+
+  async refillReservation(input: {
+    reservationId: string
+    requestSeq: number
+    requestedCents: number
+  }): Promise<Result<RefillResult, WalletError>> {
+    // 1. Upsert reservation_refills (request_seq unique → idempotent)
+    // 2. If already complete: return stored result
+    // 3. Run same funding priority order as createReservation
+    // 4. gateway.createTransfers — atomic
+    // 5. Update refill row, return RefillResult { grantedCents, breakdown }
+    //    OR denied reason (WALLET_EMPTY, GRANTS_EXHAUSTED)
+  }
+
+  async reconcileReservation(input: {
+    reservationId: string
+    actualConsumedCents: number
+  }): Promise<Result<void, WalletError>> {
+    // 1. Read allocation_cents from reservation row
+    // 2. unused = allocation - consumed
+    // 3. If unused > 0: transfer reserved → source accounts in reverse
+    //    priority order (wallet first, then highest-priority credits)
+    // 4. Mark reservation reconciled
+  }
+
+  async topUpWallet(input: {
+    walletId: string
+    amountCents: number
+    idempotencyKey: string  // usually provider payment id
+  }): Promise<Result<void, WalletError>> {
+    // 1. gateway.createTransfers: house:credit_issuance → wallet
+    // 2. Trigger pending-refill drain (any reservation in WAITING_FOR_FUNDS
+    //    gets a refill attempt via CustomerFundingDO)
+  }
+}
+```
+
+**No `LedgerService` import.** `WalletService` and `LedgerService` are
+siblings over `LedgerGateway`.
+
+### 7.4 — DO: allocation-aware hot path
+
+Extend `EntitlementWindowDO` SQLite schema:
+
+```ts
+export const allocationStateTable = sqliteTable("allocation_state", {
+  reservationId:        text("reservation_id").primaryKey(),
+  allocationCents:      integer("allocation_cents").notNull(),
+  allocationRemaining:  integer("allocation_remaining_cents").notNull(),
+  burnRateMultiplierBps:integer("burn_rate_multiplier_bps").notNull().default(10000),
+  refillThresholdBps:   integer("refill_threshold_bps").notNull(),
+  refillChunkCents:     integer("refill_chunk_cents").notNull(),
+  refillInFlight:       integer("refill_in_flight", { mode: "boolean" }).notNull().default(false),
+  refillRequestSeq:     integer("refill_request_seq").notNull().default(0),
+})
+```
+
+Extend `applyEventSync` `beforePersist` hook:
+
+```ts
+// After priced fact is computed (Phase 6.7)
+const scaledCents = Math.ceil(
+  pricedFact.amountCents * allocationState.burnRateMultiplierBps / 10000
 )
--- unique: (projectId, customerId, currency)
-```
 
-The wallet row is **identity + scoping** for grants. No `balance_cents` /
-lifetime columns — aggregate balance is
-`SUM(gateway.getAccountBalance(grantAccountKey(id)))` over active grants.
+if (allocationState.allocationRemaining < scaledCents) {
+  throw new EntitlementWindowWalletEmptyError({
+    eventId: event.id,
+    reservationId: allocationState.reservationId,
+  })
+}
 
-Add `credit_grants`:
+// Decrement locally
+allocationState.allocationRemaining -= scaledCents
 
-```
-credit_grants(
-  id, walletId, projectId,
-  amount,                 -- numeric, Dinero at internal scale 6 (face value)
-  sourceType,             -- "purchase" | "promotional" | "refund" | "manual"
-  sourceId,               -- payment intent id, promo code, etc.
-  expiresAt,              -- nullable, for time-limited promos
-  priority,               -- consumption order (lower = consumed first)
-  createdAt, revokedAt
+// Check refill threshold
+const threshold = Math.ceil(
+  allocationState.allocationCents * allocationState.refillThresholdBps / 10000
 )
--- remaining balance: pgledger account grantAccountKey(id), not a column
+if (allocationState.allocationRemaining < threshold && !allocationState.refillInFlight) {
+  allocationState.refillInFlight = true
+  allocationState.refillRequestSeq += 1
+  ctx.waitUntil(requestRefill(allocationState.refillRequestSeq))
+}
 ```
 
-Drop the legacy `creditGrants` / `invoiceCreditApplications` tables in
-`invoices.ts` if they still exist at branch start, together with their
-relations.
+`requestRefill` sends an RPC to the customer's funding DO:
 
-### Slice 2: Credit burn rates schema
-
-Create `internal/db/src/schema/credit-burn-rates.ts`:
-
-```
-credit_burn_rates(
-  id, projectId, planVersionFeatureId,
-  creditsPerUnit,         -- credits per 1 unit of this feature
-  effectiveAt,            -- when this rate takes effect
-  supersededAt,           -- when replaced by a newer rate
-  createdAt
-)
+```ts
+async requestRefill(requestSeq: number): Promise<void> {
+  const fundingDO = env.CUSTOMER_FUNDING_DO.get(
+    env.CUSTOMER_FUNDING_DO.idFromName(customerId)
+  )
+  const result = await fundingDO.requestRefill({
+    reservationId: allocationState.reservationId,
+    requestSeq,
+    requestedCents: allocationState.refillChunkCents,
+  })
+  applyRefillResult(result)  // updates SQLite atomically
+}
 ```
 
-The burn rate is a post-rating conversion layer. Pricing pipeline:
-`usage → RatingService.rateIncrementalUsage() → Dinero → burn rate (credits
-as Dinero) → WalletDO.deduct()`. The rate converts rated money to credit
-units in the wallet's currency. It does not replace rating — it sits after
-it.
+**Denial semantics:** `WALLET_EMPTY` joins the existing denial enum from 6.7
+(`LIMIT_EXCEEDED`, `SPEND_CAP_EXCEEDED`).
 
-### Slice 3: Settlement preference schema
+### 7.5 — Refill worker: `CustomerFundingDO`
 
-Add a settlement preference column on `subscriptionPhases` (or a new
-`customerBillingConfig` table, chosen to match existing conventions):
+File: `apps/api/src/durable-objects/CustomerFundingDO.ts`.
 
-```
-settlementPreference  -- "invoice" | "wallet" (nullable, defaults to "invoice")
-```
+```ts
+export class CustomerFundingDO extends DurableObject {
+  private walletService: WalletService
 
-Defaults:
+  constructor(state: DurableObjectState, env: Env) {
+    super(state, env)
+    // Construct WalletService with Postgres + LedgerGateway
+  }
 
-- Subscriptions: `"invoice"`.
-- Meter / agent usage: `"wallet"` (falls back to `"invoice"` if no wallet
-  exists for the `(customer, currency)` pair).
+  async requestRefill(input: {
+    reservationId: string
+    requestSeq: number
+    requestedCents: number
+  }): Promise<RefillResult> {
+    // Single-threaded by DO contract.
+    // Idempotent via request_seq on reservation_refills table.
+    return this.walletService.refillReservation(input)
+  }
 
-Run one migration covering the new tables, dropped legacy tables, and the
-preference column.
-
-### Slice 4: Validators
-
-Add validators for every new table (`wallets`, `credit_grants`,
-`credit_burn_rates`). Export from schema and validator barrels.
-
-### Slice 5: Pure wallet logic (fold/decide)
-
-Write `internal/services/src/wallet/core.ts` with:
-
-- `foldWalletState(grants: Grant[]): WalletState` — ordering (priority then
-  earliest expiry), expired-grant bucketing, aggregate balance as
-  `Dinero<number>`.
-- `decideDeduct(state, command): Result<ConsumptionPlan,
-  InsufficientBalance>` — `Dinero<number>` inputs, per-grant line amounts
-  as Dinero, no `bigint` cents anywhere in the public surface.
-- `WalletState`, `Grant`, `ConsumptionPlan`, `DeductCommand` types in
-  `wallet/types.ts`.
-
-Property tests in `wallet/core.test.ts` cover priority, expiry skipping,
-multi-grant spanning, insufficient-balance rejection (whole-or-nothing),
-zero amount no-op, sub-cent amounts (e.g. 0.000001 USD), and sum-of-lines
-equals request amount.
-
-### Slice 6: WalletService (Postgres + LedgerGateway)
-
-Write `internal/services/src/wallet/service.ts`. Constructor:
-`{ db, logger, metrics, ledgerGateway }` — no `LedgerService` dep.
-
-Methods:
-
-- `addCredits({ walletId, amount: Dinero, sourceType, sourceId, priority,
-  expiresAt, metadata })`:
-  1. `ledgerGateway.seedHouseAccounts(projectId, currency)` (idempotent).
-  2. Insert `credit_grants` row with `amount` as numeric Dinero at
-     scale 6.
-  3. `ledgerGateway.createAccount(grantAccountKey(id), currency,
-     allow_negative=false)`.
-  4. `ledgerGateway.createTransfer(houseAccountKey('credit_issuance', …),
-     grantAccountKey(id), amount, metadata={ source_type:'credit_purchase',
-     source_id, wallet_id, expires_at, priority })`.
-  5. Return `{ grantId, remaining: amount }`.
-- `deductCredits({ walletId, amount: Dinero, sourceType, sourceId,
-  grantConsumptions? })`:
-  - If `grantConsumptions` is supplied (DO flush): validate each line
-    against `ledgerGateway.getAccountBalance(grantAccountKey(lineGrantId))`.
-    On mismatch return `GRANT_FLUSH_MISMATCH` (typed error). On success,
-    emit one `ledgerGateway.createTransfers([...])` call with all lines;
-    `source_type:'credit_burn'`, `source_id: <meter fact source_id>`.
-  - If `grantConsumptions` is absent (direct server-side deduction):
-    load active grants + their live balances via the gateway, run
-    `foldWalletState` / `decideDeduct`, then emit the batch.
-- `getActiveGrants(walletId) → Grant[]` with `remaining: Dinero` populated
-  from `ledgerGateway.getAccountBalance(grantAccountKey(id))`. Used by the
-  DO's `full_snapshot` and dashboards.
-- `getBalance(walletId) → Dinero` — sum of active grant account balances
-  in the wallet's currency. Implemented via `getActiveGrants` plus an
-  in-memory reduce (one round trip per grant today; optimize to a SQL
-  batch helper in the gateway later if this becomes hot).
-- `revokeGrant(grantId)` — mark grant revoked, emit
-  `ledgerGateway.createTransfer(grantAccountKey(id) →
-  houseAccountKey('expired_credits', …), remaining,
-  source_type:'grant_revoke', source_id:'revoke:<id>:<now>')`.
-
-Register `WalletService` in `context.ts`.
-
-### Slice 7: WalletDO (edge-side, real-time enforcement)
-
-Create `apps/api/src/ingestion/wallet/WalletDO.ts` following the
-`EntitlementWindowDO` pattern.
-
-Public RPC methods accept/return `Dinero<number>` (or a JSON-serialized
-`{ amount, scale, currency }` snapshot matching gateway metadata). Inside
-SQLite, store fixed-scale integers (same scale 6 as pgledger) for fast
-integer math — convert only at the DO boundary.
-
-DO SQLite schema (`apps/api/src/ingestion/wallet/db/schema.ts`):
-
-```typescript
-export const walletStateTable = sqliteTable("wallet_state", {
-  key: text("key").primaryKey(),         // "balance" | "customerId" | "currency" | "walletId"
-  value: text("value").notNull(),
-})
-
-export const creditGrantsLocalTable = sqliteTable("credit_grants_local", {
-  id: text("id").primaryKey(),            // mirrors Postgres credit_grants.id
-  amountScale6: integer("amount_scale6").notNull(),      // face value × 10^6
-  remainingScale6: integer("remaining_scale6").notNull(),
-  currencyCode: text("currency_code").notNull(),
-  sourceType: text("source_type").notNull(),
-  sourceId: text("source_id"),
-  expiresAt: integer("expires_at"),       // epoch ms, nullable
-  priority: integer("priority").notNull(),
-  revokedAt: integer("revoked_at"),       // epoch ms, nullable
-  syncedAt: integer("synced_at").notNull(),
-})
-
-export const walletOutboxTable = sqliteTable("wallet_outbox", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  type: text("type").notNull(),           // "deduction" | "expiration"
-  payload: text("payload").notNull(),     // JSON: Dinero snapshot + lines
-  settledAt: integer("settled_at"),       // epoch ms, null until flushed
-})
-
-export const walletIdempotencyTable = sqliteTable("wallet_idempotency", {
-  key: text("key").primaryKey(),
-  createdAt: integer("created_at").notNull(),
-  result: text("result").notNull(),       // JSON: DeductResult
-})
+  async drainPendingRefills(input: {
+    walletId: string
+  }): Promise<void> {
+    // Called from WalletService.topUpWallet when wallet gains balance.
+    // Reads reservations in WAITING_FOR_FUNDS state, triggers refill for each.
+  }
+}
 ```
 
-WalletDO responsibilities (mirror `EntitlementWindowDO` infra — Drizzle
-SQLite, alarms, `ready` gate):
+**Why this DO owns Postgres access:** `EntitlementWindowDO` does not (Phase
+6.7 removed it). `CustomerFundingDO` is a cold-path DO; Postgres access is
+appropriate. Its alarm is unused — refills are request-driven.
 
-- `hasEnoughCredits(amount: Dinero)` — `foldWalletState` + compare to total
-  remaining.
-- `deduct({ amount: Dinero, sourceType, sourceId })` — SQLite transaction:
-  idempotency check → `foldWalletState` → `decideDeduct` → apply lines to
-  `remaining_scale6` → update cached aggregate → insert outbox row (payload
-  includes per-grant Dinero line items for `WalletService` to replay).
-- `sync(event)` — handle `grant_added` / `grant_revoked` / `full_snapshot`
-  from Postgres + gateway-backed balances.
-- `alarm` — drain outbox via
-  `walletService.deductCredits({ …, grantConsumptions })`. On
-  `GRANT_FLUSH_MISMATCH`: call `requestFullSync()` which replaces local
-  rows from `walletService.getActiveGrants()` (live gateway balances).
+### 7.6 — Credit purchase flow
 
-Construct `WalletService` with `LedgerGateway` inside the worker — same
-pattern as other DOs that use `@unprice/services` factories.
-
-Wrangler registration:
-
-```jsonc
-{ "name": "wallet", "class_name": "WalletDO" }
-```
-
-Migrations:
-
-```jsonc
-{ "tag": "vN", "new_sqlite_classes": ["WalletDO"] }
-```
-
-DO identity:
-`env.wallet.idFromName(`${customerId}:${currency}`)` — one WalletDO per
-customer per currency. Mirrors the EntitlementWindowDO pattern where
-identity is derived from the business key.
-
-### Slice 8: SettlementRouter
-
-Create `internal/services/src/settlement/router.ts`.
-
-The router decides how a rated charge settles **after** rating. Inputs:
-
-- `amount: Dinero<number>` (from `RatingService`).
-- Settlement preference (from subscription phase or customer config).
-- Context: `{ projectId, customerId, currency, sourceType, sourceId,
-  statementKey?, subscriptionId?, subscriptionItemId?,
-  featurePlanVersionId? }`.
-- Access to `LedgerService`, `WalletService`, WalletDO stub, provider
-  runtime.
-
-Modes:
-
-- `invoice` — `LedgerService.postCharge(...)`: customer → `house:revenue`,
-  same statement key carried in metadata. No wallet activity.
-- `wallet` — `walletDO.deduct({ amount: creditsDinero, … })` against the
-  `(customer, currency)` DO. **No** `postCharge`. Credit-burn transfers
-  run on outbox flush via `WalletService.deductCredits`.
-- `one_time` — provider charge via normalized provider runtime; ledger
-  handling per product rules (one `createTransfer` via LedgerGateway on
-  success with `source_type:'one_time_payment'`).
-
-Fallback: if `wallet` mode is selected but no wallet exists for the
-`(customer, currency)` pair, or `walletDO.hasEnoughCredits` returns
-`false`, the router falls back to `invoice` mode transparently.
-`hasEnoughCredits` is sub-millisecond, so the fallback decision is fast.
-
-### Slice 9: Wire wallet settlement into meter billing
-
-Update `bill-meter-fact.ts`:
-
-1. Rate usage — `RatingService.rateIncrementalUsage()` → `Dinero`.
-2. Call `SettlementRouter.route(...)` with the rated amount and the
-   preference.
-3. The router dispatches to exactly one of the three handlers.
-   `bill-meter-fact` itself does not write to the ledger — it delegates
-   to the router.
-
-Return type becomes `{ amount: Dinero<number>, sourceId, settlementMode:
-"invoice" | "wallet" | "one_time" | "noop", state }`.
-
-Update `BillMeterFactDeps` to include `settlement` service.
-`EntitlementWindowDO.processBillingBatch()` must pass the WalletDO stub
-down; extend its constructor with `env.wallet`.
-
-### Slice 10: Credit purchase flow
-
-Write `internal/services/src/use-cases/wallet/purchase-credits.ts`:
-
-- Accepts `{ walletId, amount: Dinero, currency, provider }`.
-- Creates a Stripe checkout session (or equivalent) for the credit pack.
-- Returns `{ checkoutUrl, sessionId }`. No ledger writes yet.
-
-Write `confirm-credit-purchase.ts`:
-
-- Called from `processWebhookEvent` on a credit-purchase payment success.
-- Calls `WalletService.addCredits({ sourceType: "purchase", sourceId:
-  providerInvoiceId, … })`.
-- Pushes `walletDO.sync({ type: "grant_added", grant })` with the new
-  grant including `remaining` set to the initial `amount`.
-- Idempotent — same `sourceId` returns the existing grant (gateway's
-  `ledger_idempotency` enforces this).
-
-Extend `processWebhookEvent` to route credit-purchase confirmations to
-this use case (new outcome type alongside invoice payment flow).
-
-### Slice 11: Grant expiry cron
-
-Daily job finds grant accounts where `expires_at < now()` and
-`gateway.getAccountBalance(grantAccountKey(id)) > 0`, emits
-`ledgerGateway.createTransfer(grantAccountKey(id) →
-houseAccountKey('expired_credits', …), remaining,
-source_type:'grant_expiry', source_id:'expire:<id>:<expires_at>')`.
-
-Also pushes `walletDO.sync({ type: "grant_revoked", grantId })` so the
-edge drops the expired grant from its local cache within the same run.
-
-### Slice 12: API endpoints
-
-New routes (POST, matching existing convention):
-
-- `POST /v1/wallet/balance` — reads from WalletDO for speed, falls back to
-  `WalletService.getBalance` if the DO is unavailable.
-- `POST /v1/wallet/purchase` — initiates credit purchase (returns checkout
-  URL).
-- `POST /v1/wallet/grants` — lists credit grants with `remaining` from
-  `LedgerGateway.getAccountBalance` per grant (plus Postgres rows for
-  metadata).
-
-Register in `apps/api/src/index.ts`. Expose `WalletService` +
-`SettlementRouter` via `apps/api/src/middleware/init.ts`. Update
-`apps/api/src/hono/env.ts`. Update `packages/api/` OpenAPI types.
-
-### Slice 13: UI — wallet dashboard & balance
-
-Wallet dashboard: current balance, grant history timeline (purchases /
-burns / expirations), burn rate over time chart. Customer billing page
-shows wallet balance alongside subscription status — if wallet-based,
-show "Credits remaining: $X" prominently.
-
-### Slice 14: UI — credit purchase flow
-
-Pack selection → Stripe checkout → confirmation callback → balance
-updated via DO push within seconds.
-
-### Slice 15: UI — burn rate & settlement config
-
-Per-feature credit cost editor on the plan-version feature configuration
-page. Shows current rate and effective date. Per-subscription (or
-per-customer) toggle between invoice and wallet settlement modes.
-
-### Slice 16: Tests
-
-**Pure-function unit tests** — `wallet/core.test.ts`. Priority / expiry /
-multi-grant / insufficient-balance / sub-cent Dinero cases.
-
-**WalletService integration tests** (Postgres + pgledger):
-
-- Wallet creation idempotency.
-- Credit grant with priority + expiry; balance via gateway.
-- FIFO / priority consumption order with sub-cent Dinero.
-- Expired grants skipped during deduction.
-- Atomic deduction (insufficient balance → full rollback; no partial
-  gateway batch).
-- `GRANT_FLUSH_MISMATCH` when outbox lines exceed live grant balance
-  (simulated revoke in Postgres between DO plan and flush).
-- `seedHouseAccounts` called from `addCredits` is safe under concurrent
-  first-use.
-
-**WalletDO tests** (miniflare / DO harness):
-
-- Deduction idempotency (same `sourceId` → same result).
-- Local aggregate tracks after sequential deductions.
-- Outbox rows created per deduction.
-- `sync({ grant_added })` → local remaining matches pushed Dinero.
-- `sync({ grant_revoked })` → revoked grant skipped.
-- `sync({ full_snapshot })` → local state matches `getActiveGrants()`
-  payload.
-- Alarm flush → `deductCredits` succeeds; pgledger grant balances update.
-- Flush failure → `GRANT_FLUSH_MISMATCH` → `full_snapshot` recovery path.
-
-**End-to-end tests:**
-
-- Settlement router per mode: `invoice` posts a single customer charge,
-  `wallet` posts zero customer charges and exactly-one burn batch per
-  meter event, `one_time` charges via provider runtime.
-- Purchase → webhook → `addCredits` → DO sync → `hasEnoughCredits` sees
-  the new grant.
-- `billMeterFact` + wallet mode → DO deduct → flush → gateway sums equal
-  the expected per-grant drawdowns.
-- Burn rate versioning: switching rates mid-period applies the new rate
-  only to events timestamped after `effectiveAt`.
-- Concurrent deductions serialized by DO — no double-burn.
-
-## Execution Order
+Webhook entry (depends on Phase 5):
 
 ```
-Slice 1 (schema) ──► Slice 2 (burn rates) ──► Slice 3 (settlement pref)
-                                           │
-Slice 4 (validators) ◄─────────────────────┤
-                                           │
-Slice 5 (pure fold/decide) ◄───────────────┤
-                                           │
-Slice 6 (WalletService) ◄──────────────────┤
-                                           │
-Slice 7 (WalletDO) ◄───────────────────────┤
-                                           │
-Slice 8 (SettlementRouter) ◄───────────────┤
-                                           │
-Slice 9 (wire meter billing) ◄─────────────┤
-                                           │
-Slice 10 (credit purchase + webhook) ◄─────┤
-                                           │
-Slice 11 (grant expiry cron) ◄─────────────┤
-                                           │
-Slice 12 (API endpoints) ◄─────────────────┤
-                                           │
-Slices 13-15 (UI) ◄────────────────────────┤
-                                           │
-Slice 16 (tests throughout)
+provider webhook
+  ↓
+processWebhookEvent use case
+  ↓
+if event.type === "checkout.completed" && metadata.kind === "credit_purchase":
+  WalletService.topUpWallet({
+    walletId: metadata.walletId,
+    amountCents: event.amount,
+    idempotencyKey: event.id,
+  })
+  ↓
+gateway.createTransfers([
+  { from: house:credit_issuance, to: customer:<id>:wallet, amount }
+])
+  ↓
+CustomerFundingDO.drainPendingRefills({ walletId })
 ```
 
-Slices 1–5 are P0 (data + pure logic).
-Slices 6–8 are P1 (the three services: wallet edge, wallet durable,
-router).
-Slices 9–11 are P2 (wiring into billing + purchase + expiry).
-Slice 12 is P3 (API).
-Slices 13–15 are P4 (UI).
-Slice 16 runs throughout (tests at each slice).
+Checkout initiation is a use case: `initiateCreditPurchase` → provider
+`createCheckoutSession` with metadata `{ kind: "credit_purchase", walletId }`.
 
-## Validation
+### 7.7 — Period-end reconciliation
 
-- `pnpm --filter @unprice/db generate`
-- `pnpm --filter @unprice/services test`
-- `pnpm --filter @unprice/services typecheck`
-- `pnpm --filter api test`
-- `pnpm --filter api type-check`
-- `pnpm --filter @unprice/api typecheck`
+Cron job `reconcile-reservations`:
 
-## Exit Criteria
+```
+SELECT * FROM entitlement_reservations
+WHERE status = 'active'
+  AND period_end_at < now()
+```
 
-- Customers can hold prepaid credit balances (aggregate from gateway
-  balances; no cached columns).
-- Credits are purchased via provider checkout and granted on payment
-  confirmation (`addCredits` + DO `sync`).
-- Agent / meter usage can be settled by wallet deduction or invoice
-  accumulation **without** double-posting meter charges.
-- Wallet deductions happen at the edge via WalletDO (sub-millisecond
-  balance checks, no Postgres round-trip on the hot path).
-- WalletDO and WalletService share the same pure `foldWalletState` /
-  `decideDeduct` logic.
-- Push-based grant synchronization: Postgres mutations push state to the
-  WalletDO within the same request.
-- Outbox pattern: DO deductions flush to `WalletService` →
-  `LedgerGateway.createTransfers` batched transfers.
-- Burn rates are versioned and can be changed without modifying existing
-  subscriptions.
-- Settlement router correctly routes charges to the configured mode with
-  transparent fallback from `wallet` to `invoice` when balance is
-  insufficient.
-- No `balance_cents` / `remaining_cents` columns exist. DO cache is
-  recoverable via `getActiveGrants` + `GRANT_FLUSH_MISMATCH` handling.
-- Legacy `creditGrants` / `invoiceCreditApplications` tables removed (if
-  still present at branch start).
-- SDK exposes wallet balance and purchase endpoints.
-- Dashboard shows wallet state and allows credit purchases.
+For each:
 
-## Out Of Scope
+```
+1. Read consumed_cents from the meter DO (RPC to EntitlementWindowDO)
+2. WalletService.reconcileReservation({ reservationId, consumedCents })
+3. If postpaid: create invoice line item from consumed_cents
+4. Mark reservation reconciled
+```
 
-- Wallet top-up subscriptions (recurring auto-purchase).
-- Credit transfer between customers.
-- Multi-currency wallet conversion.
-- Crypto-backed credit purchase (the `one_time` settlement mode leaves
-  room for this but implementation is not in scope).
-- Real-time spending caps / kill-switch at apply() time (Phase 8 — uses
-  the `WalletDO.hasEnoughCredits` method introduced here, but enforcement
-  policy and UX are Phase 8 scope).
+Runs hourly; reservations beyond period end are caught within an hour. Tight
+SLO is not required because the DO has already stopped accepting events for
+that period.
 
-## Design Decisions
+### 7.8 — API endpoints
 
-### Why not keep wallets in Postgres only?
+- `GET /v1/wallet` — wallet + all grant balances (via gateway).
+- `POST /v1/wallet/top-up` — returns provider checkout URL.
+- `GET /v1/wallet/reservations` — active reservations across entitlements,
+  with live `consumed_cents` from meter DO.
+- `GET /v1/wallet/grants` — grants with burn rates and expiry.
+- `POST /v1/admin/grants` (operator) — issue manual credit grant.
+- `PATCH /v1/admin/burn-rates` (operator) — adjust burn rate.
 
-`EntitlementWindowDO.processBillingBatch()` processes up to 1000 meter
-facts per alarm tick. Each fact that routes through wallet settlement
-needs a balance check + deduction. At ~10 ms per Postgres round-trip,
-that's 10 seconds of serial DB calls per batch — per customer per
-feature. The DO eliminates this bottleneck entirely: balance check +
-deduction are local SQLite operations within the same Cloudflare colo.
+SDK types updated for all of the above.
 
-### Why not put wallet state inside EntitlementWindowDO?
+### 7.9 — UI
 
-The `EntitlementWindowDO` is scoped per `(customer, feature, window)`. A
-wallet is scoped per `(customer, currency)`. If 5 features meter
-concurrently, 5 `EntitlementWindowDO`s would need independent wallet state
-copies — and they'd diverge immediately when any one of them deducts. A
-dedicated `WalletDO` per `(customer, currency)` is the natural
-serialization boundary.
+- **Wallet dashboard:** balance (wallet + grants), burn-down chart,
+  reservation summary ("X of $Y remaining on Feature Z").
+- **Credit purchase:** top-up form, package selection (operator-configured),
+  provider checkout redirect.
+- **Burn rate editor (operator):** scope (global / feature / plan), versioned
+  history, effective-at scheduling.
+- **Grant timeline:** issued / consumed / expired per grant.
+- **Reservation visibility (customer):** "$487 of $500 remaining. Auto-refill
+  triggers at $100."
 
-### Why push over pull for grant sync?
+### 7.10 — Tests
 
-Pull (DO polls Postgres periodically) is wasteful when nothing changed,
-stale between polls, and creates unnecessary Postgres load. Push is
-event-driven: the code path that mutates grants in Postgres already has
-the data in hand — it just forwards it to the DO. The DO learns about
-changes within the same request that caused them. If a push fails, the
-next deduction can carry a fallback `full_snapshot`, and the outbox flush
-serves as a consistency checkpoint.
+**Unit (service layer):**
 
-### What if the DO and Postgres disagree?
+- `createReservation`: funding priority order across wallet + 3 grants of
+  varying expiry and priority.
+- `refillReservation`: idempotency via `request_seq`.
+- `refillReservation`: funds short → returns grantedCents < requestedCents.
+- `reconcileReservation`: unused flows back in reverse priority order.
+- `topUpWallet`: triggers pending-refill drain.
 
-The outbox flush is the reconciliation point. When
-`WalletService.deductCredits()` validates outbox lines against live
-`LedgerGateway` grant balances, a revoke or concurrent burn in Postgres
-can make the DO plan stale — the service returns `GRANT_FLUSH_MISMATCH`.
-The DO then runs a `full_snapshot` from `getActiveGrants()` (Postgres rows
-+ gateway balances). This matches metering's model: the DO is optimistic,
-Postgres + pgledger is authoritative, and flush + snapshot are the
-convergence mechanisms. There is no separate `reconcileBalance` column
-drift repair.
+**Integration (DO):**
 
-### Why not let `WalletService` import `LedgerService`?
+- `apply` decrements allocation by `amount_cents × burn_rate_multiplier`.
+- Remaining below threshold → exactly one refill request (no duplicate
+  schedules while `refillInFlight = true`).
+- Wallet-empty denial: new events denied with `WALLET_EMPTY`, events in
+  flight complete.
+- Postpaid ∞-allocation: same DO code, refills always succeed, consumed
+  rolls into invoice.
 
-They are sibling capabilities, not a layered stack.
-`LedgerService` owns customer AR / house revenue posting.
-`WalletService` owns grant lifecycle and burn waterfalls. Both need
-pgledger access — they both depend on the same `LedgerGateway`. Letting
-`WalletService` call `LedgerService` would couple two domain services
-through a peer-service import and smuggle wallet-specific semantics into
-the customer-side API. A shared gateway keeps both services honest and
-independently testable. When a use case needs both in one DB transaction
-(rare), orchestration lives in the use case with two gateway calls in
-order.
+**E2E:**
+
+- Credit purchase → webhook → wallet credit → pending refill drains →
+  DO receives new allocation.
+- Period end → reconciliation → unused returns to wallet → next period
+  reservation starts fresh.
+- Grant expiry → balance transfers to `house:expired_credits`, DO's
+  allocation unaffected until next refill.
+
+## Non-Goals
+
+- ML-based refill chunk sizing. Ship static per-meter config; iterate from
+  data.
+- Cross-currency wallets. Same-currency reservations only. Cross-currency
+  requires FX accounts in pgledger and is future work.
+- Real-time cross-meter spend caps. Phase 8 territory — uses the Tinybird
+  aggregate path, not this ledger one.
+- "Best-effort" overdraft prevention. Refill chunk size is the bound.
+  Document it; do not try to eliminate it via distributed locks.
+
+## Risk & Mitigations
+
+**Risk: refill latency under burst.**
+A 10k-RPS meter with a 50% refill threshold can exhaust its 80% runway
+before the refill round-trips. Mitigation: per-meter `refill_threshold_bps`
+config. Hot meters use 80% threshold (refill early). Combined with larger
+chunks for high-velocity meters, the DO stays ahead.
+
+**Risk: refill races at wallet-empty boundary.**
+Two concurrent refill requests from different meter DOs on the same customer
+both observe "wallet has $5"; both try to pull $3. `CustomerFundingDO`
+serializes them — second request sees `$2` after the first completes.
+`refillReservation` handles partial fulfilment cleanly.
+
+**Risk: DO eviction loses `refillInFlight` flag.**
+The flag is SQLite, not in-memory. Survives eviction. If a DO evicts mid-RPC
+and the refill completes in pgledger, the next `apply()` reads the committed
+`allocation_remaining_cents` via a lightweight sync call to
+`CustomerFundingDO.syncReservation(reservationId)`. Once synced, flag clears.
+
+**Risk: grant expiry races consumption.**
+Grant expires while DO has a refill in flight funded by that grant. Mitigation:
+`refillReservation` reads grant balance via gateway at transfer time.
+Expired grants return 0 balance; refill proceeds with remaining sources. No
+data-loss window because the expiry cron only runs on already-expired grants
+(monotonic).
+
+**Risk: operator changes burn rate mid-period.**
+Active reservations carry a snapshot of `burn_rate_multiplier_bps` at
+reservation time. Burn rate changes take effect on the **next refill** (next
+chunk reflects new rate). This prevents retroactive burn-rate adjustments
+from breaking customer-facing consumption math.
+
+**Risk: postpaid `house:postpaid_accrual` grows unbounded.**
+Invoice issuance moves `reserved → receivable`, then payment moves
+`receivable → revenue`. Accrual account balance tracks
+invoiced-but-unpaid minus paid across the house — standard AR accounting.
+Alert on accrual balance above operator-defined threshold (liquidity
+concern, not data concern).
+
+## Rollout
+
+Single rollout, no feature flag. Phase 7 lands on a clean tree:
+
+1. Migration adds `wallets`, `credit_grants`, `credit_burn_rates`,
+   `entitlement_reservations`, `reservation_refills`.
+2. Migration seeds `house:postpaid_accrual`.
+3. Deploy `CustomerFundingDO` binding.
+4. Deploy DO with allocation-aware `apply` path.
+5. Activation workflow (existing) gains a reservation-creation step; flag
+   per-plan as "wallet-backed" or "postpaid" (default postpaid for existing
+   plans — behaves identically to pre-Phase-7 via infinite allocation).
+
+Existing active entitlements at cutover: run a one-time migration that
+creates a postpaid reservation per active entitlement with `allocation_cents
+= 0` initial, first event triggers refill, allocation grows from there.
+
+Existing entitlements do not pay any latency cost. The reservation is just a
+row pointing at `house:postpaid_accrual`.
+
+## Related
+
+- [Phase 6.6 — pgledger gateway](./unprice-phase-06.6-new-ledger.md)
+- [Phase 6.7 — agent billing simplification](./unprice-phase-06.7-agent-billing-simplification.md)
+- [Phase 8 — financial guardrails](./unprice-phase-08-financial-guardrails.md)
+  (cross-meter spend caps, circuit breakers)
+- [Competitor landscape](../ai-billing-competitor-landscape.md) — how Lago,
+  OpenMeter, Flexprice, Polar, Metronome approach these problems.
