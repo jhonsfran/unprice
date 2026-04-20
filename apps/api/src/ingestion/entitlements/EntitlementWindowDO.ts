@@ -193,6 +193,7 @@ export class EntitlementWindowDO extends DurableObject {
         .select({ usage: meterWindowTable.usage, updatedAt: meterWindowTable.updatedAt })
         .from(meterWindowTable)
         .get()
+
       if (row) {
         this.cache = {
           limit: null,
@@ -557,6 +558,8 @@ export class EntitlementWindowDO extends DurableObject {
     const usageAfter = Math.max(0, fact.valueAfter)
     const usageBefore = Math.max(0, fact.valueAfter - fact.delta)
 
+    // we calculate the before and the after because tier prices can
+    // fall in a different tier, so calculating deltas prices wouldn't be correct
     const beforeResult = calculatePricePerFeature({
       quantity: usageBefore,
       featureType: DO_FEATURE_TYPE,
