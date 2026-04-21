@@ -280,37 +280,43 @@ This is a rip-and-replace. No backward compatibility, no parallel tables, no dua
 - Delete the account-name constants for the above in `internal/services/src/ledger/accounts.ts`.
 - Delete any grant-reading code paths in `internal/services/src/billing/service.ts` and their callers.
 
-### 7.2 Naming (match the existing repo convention)
+### 7.2 Naming (dot form, scale 8, no currency in key)
 
-Keep the repo's existing colon-separated, project-scoped convention. Translate the design-doc names as:
+Account keys use the hierarchical dot notation from §2. Three segments. Currency lives as an account-level column, **not** a key segment (pgledger is single-currency per ledger; running multi-currency means multiple ledgers, not compound keys).
 
 ```
-customer:{projectId}:{customerId}:available:{currency}
-customer:{projectId}:{customerId}:reserved:{currency}
-customer:{projectId}:{customerId}:consumed:{currency}
-customer:{projectId}:{customerId}:receivable:{currency}
+customer.{customerId}.available
+customer.{customerId}.reserved
+customer.{customerId}.consumed
+customer.{customerId}.receivable           # Phase 8
 
-platform:{projectId}:funding_clearing:{currency}
-platform:{projectId}:refund_clearing:{currency}
-platform:{projectId}:writeoff:{currency}
-platform:{projectId}:adjustments:{currency}
-platform:{projectId}:revenue:{currency}
+platform.{projectId}.adjustments           # seeded in Phase 7
+platform.{projectId}.funding_clearing      # Phase 8
+platform.{projectId}.refund_clearing       # Phase 8
+platform.{projectId}.writeoff              # Phase 8
+platform.{projectId}.revenue               # Phase 8 (optional)
 ```
 
-Everywhere else in this document that reads `customer.{id}.available` / `platform.funding_clearing` / etc., substitute the corresponding colon form above. The dot form is illustrative only; the colon form is what gets written to pgledger.
+Scoping rules:
 
-Update `internal/services/src/ledger/accounts.ts` to emit these names and nothing else. Rename `house:` → `platform:` in the same pass.
+- `customer.*` keys do **not** include `projectId`. Customer ids (`cus_*` nanoids) are globally unique, so the project scope is carried as pgledger account metadata, not as a key segment.
+- `platform.*` keys **do** include `projectId`. Platform-side pools are per-tenant.
+- `provider.*` keys (if ever introduced; see §1.3) follow `provider.{vendor}.{role}` with no project scope.
+
+**Amount convention.** All balances and transfer amounts are integers at pgledger scale 8. One dollar is `100_000_000` minor units. Database columns on application tables that mirror ledger amounts are `bigint`. TypeScript field names use the `*Amount` suffix (never `*Cents`). Service boundaries use `Dinero<number>` configured at scale 8. Sub-cent pricing is representable without rounding.
+
+Update `internal/services/src/ledger/accounts.ts` to emit these dot-form names and nothing else. Delete every legacy colon-form / `house:*` / `grant:*` builder in the same pass.
 
 ### 7.3 Per-project, per-currency seeding
 
-- One pgledger ledger per currency (already implicit via pgledger single-currency accounts).
-- On project creation, seed all five `platform:{projectId}:*:{currency}` accounts for every supported currency. Extend `LedgerGateway.seedHouseAccounts` (`internal/services/src/ledger/gateway.ts`) and rename it to `seedPlatformAccounts`.
-- On first customer-touching event (recharge or reservation), lazily create all four `customer:{projectId}:{customerId}:*:{currency}` accounts in a single transaction. Extend `LedgerGateway.ensureCustomerAccount` to create the four-account bundle; rename to `ensureCustomerAccounts` (plural) to reflect the new shape.
+- One pgledger ledger per currency. Currency is an account-level column, not part of the key.
+- On project creation, seed `platform.{projectId}.adjustments` for every supported currency. The other platform accounts (`funding_clearing`, `refund_clearing`, `writeoff`, `revenue`) are seeded in Phase 8 when the flows that use them land. Extend `LedgerGateway.seedHouseAccounts` (`internal/services/src/ledger/gateway.ts`) and rename it to `seedPlatformAccounts`.
+- On first customer-touching event (top-up settlement or reservation activation), lazily create the three Phase 7 `customer.{customerId}.*` accounts (`available`, `reserved`, `consumed`) in a single transaction. `receivable` is deferred to Phase 8. Extend `LedgerGateway.ensureCustomerAccount` to create the three-account bundle; rename to `ensureCustomerAccounts` (plural) to reflect the new shape.
 
 ### 7.4 Normal-balance configuration
 
-- **Credit-normal:** `customer:...:available`, `customer:...:reserved`, `customer:...:consumed`, `platform:...:revenue`, `platform:...:refund_clearing`, `platform:...:adjustments`.
-- **Debit-normal:** `customer:...:receivable`, `platform:...:funding_clearing`, `platform:...:writeoff`.
+- **Credit-normal:** `customer.*.available`, `customer.*.reserved`, `customer.*.consumed`, `platform.*.revenue`, `platform.*.refund_clearing`, `platform.*.adjustments`.
+- **Debit-normal:** `customer.*.receivable`, `platform.*.funding_clearing`, `platform.*.writeoff`.
 
 Set these at account-creation time in the gateway. pgledger does not let you change normal balance after the fact without recreating the account.
 
@@ -318,41 +324,53 @@ Set these at account-creation time in the gateway. pgledger does not let you cha
 
 Enforce non-negativity on:
 
-- `customer:...:available`
-- `customer:...:reserved`
-- `customer:...:consumed`
-- `customer:...:receivable`
+- `customer.*.available`
+- `customer.*.reserved`
+- `customer.*.consumed`
+- `customer.*.receivable` *(Phase 8)*
 
-Enforce at the pgledger account level if the version in use supports it; otherwise enforce at the use-case layer with a pre-transfer balance check inside the same DB transaction (advisory lock on `customer_id`).
+Enforce at the pgledger account level if the version in use supports it; otherwise enforce at the use-case layer with a pre-transfer balance check inside the same DB transaction (`pg_advisory_xact_lock(hashtext('customer:' || customer_id))`).
 
 ### 7.6 Gateway API surface after the rewrite
 
-Replace the current `postCharge` / `postRefund` shape in `internal/services/src/ledger/gateway.ts` with a narrower primitive set that the use cases compose:
+The gateway collapses to **one** transfer primitive. The use-case / service layer (`WalletService` in Phase 7) composes that primitive for every flow in §3.
 
-- `transferAvailableToReserved(projectId, customerId, currency, amount, reservationId, idempotencyKey)`
-- `captureReservation(projectId, customerId, currency, reservedAmount, actualAmount, reservationId, idempotencyKey)` — atomically posts `reserved → consumed : actual` and `reserved → available : reserved − actual`
-- `releaseReservation(projectId, customerId, currency, amount, reservationId, idempotencyKey)`
-- `recharge(projectId, customerId, currency, amount, idempotencyKey)`
-- `refundToWallet(projectId, customerId, currency, amount, idempotencyKey)` / `refundExternal(...)`
-- `adjust(projectId, customerId, currency, signedAmount, actorId, reason, idempotencyKey)`
-- `settleReceivable(...)` / `writeOffReceivable(...)` — operator-only, rarely used
+```ts
+// internal/services/src/ledger/gateway.ts
+createTransferInTx(tx, {
+  fromAccountKey: string,
+  toAccountKey:   string,
+  amount:         bigint,           // scale 8
+  currency:       CurrencyCode,
+  metadata:       TransferMetadata, // { flow, idempotency_key, ...flow-specific }
+}): Promise<Result<TransferId, LedgerError>>
 
-Every method wraps its transfers in one pgledger transaction and writes an `unprice_ledger_idempotency` row.
+seedPlatformAccounts(projectId, currency): Promise<void>
+ensureCustomerAccounts(customerId, currency): Promise<void>
+getAccountBalance(accountKey): Promise<bigint>
+```
+
+Everything else — reserve, capture, release, recharge, refund, adjust, settle-receivable, write-off — is a `WalletService` method (or a use case) composed of `createTransferInTx` calls inside one Drizzle / pgledger transaction. Capture (`reserved → consumed : actual` plus `reserved → available : reserved − actual`) is two `createTransferInTx` calls, not a dedicated gateway method.
+
+Phase 7 ships `WalletService` with five methods: `transfer`, `createReservation`, `flushReservation`, `adjust`, `settleTopUp`. `refundToWallet` / `refundExternal`, `settleReceivable`, `writeOffReceivable`, and the `funding_clearing` / `refund_clearing` side of recharge land in Phase 8. See `./plans/unprice-phase-07-credits-wallets.md` §7.3 for the Phase 7 shape.
+
+Every `WalletService` method wraps its `createTransferInTx` calls in one pgledger transaction and writes an `unprice_ledger_idempotency` row keyed on `(source_type, source_id)`. Every method that touches a customer balance opens its transaction with `SELECT pg_advisory_xact_lock(hashtext('customer:' || customer_id))`.
 
 ### 7.7 Reconciliation
 
-Add a nightly job under `internal/jobs/` that checks the wallet identity (invariant 1 from section 4) for every active customer:
+Add a nightly job under `internal/jobs/` that checks the wallet identity (invariant 1 from section 4) for every active customer. In Phase 7 the identity simplifies to (no `receivable`, no `refund_clearing`, no external refunds yet):
 
 ```
-available + reserved + consumed − receivable
-  == Σ recharges + Σ positive_adjustments − Σ negative_adjustments − Σ external_refunds
+available + reserved + consumed
+  == Σ adjustments_in − Σ adjustments_out
 ```
 
-Emit a metric per customer and page on mismatch. This is the single canary that tells you whether the ledger is still correct.
+where both sums are over transfers touching `platform.{projectId}.adjustments` against that customer's accounts. Emit a metric per customer on mismatch; log with `reservation_id` context where applicable. No paging in Phase 7. The broader identity (including `receivable`, `funding_clearing`, and external refunds) lands in Phase 8 when those flows exist. See `./plans/unprice-phase-07-credits-wallets.md` §7.11 for the full cron spec (identity check + stranded-reservation sweep + stranded-topup sweep + invoice-projection orphan check).
 
 ### 7.8 What is explicitly out of scope
 
 - Provider-clearing / COGS accounts.
-- Soft-overage flows and the corresponding use cases (`settle-receivable` beyond the operator-only path, no automated receivable accrual).
+- Soft-overage flows and the corresponding use cases (`settle-receivable` beyond the operator-only path, no automated receivable accrual). `customer.*.receivable` is defined in the chart of accounts but is not written to in Phase 7; all `receivable` flows ship in Phase 8.
+- `platform.*.funding_clearing`, `platform.*.refund_clearing`, `platform.*.writeoff`, `platform.*.revenue` — defined in the chart of accounts, seeded and used starting in Phase 8. Phase 7 recharges issue from `platform.{projectId}.adjustments` with `metadata.source` distinguishing top-ups / promos / corrections.
 - The `credit_grants` table and grant-related ledger accounts (deleted, not migrated).
-- Any "wallet" Drizzle table — the wallet balance is `customer:...:available` in pgledger and nothing else. The only new Drizzle table is `reservations` (state machine), not `wallets`.
+- Any "wallet balance" Drizzle table — the spendable balance is `customer.{customerId}.available` in pgledger and nothing else. The two new Drizzle tables in Phase 7 are **state machines** that settle into the ledger: `entitlement_reservations` (reservation lifecycle) and `wallet_topups` (provider-initiated top-up lifecycle, webhook-settled). Neither holds authoritative balance.
