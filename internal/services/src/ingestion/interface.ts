@@ -18,6 +18,7 @@ export const INGESTION_REJECTION_REASONS = [
   "LIMIT_EXCEEDED",
   "NO_MATCHING_ENTITLEMENT",
   "UNROUTABLE_EVENT",
+  "WALLET_EMPTY",
 ] as const
 
 export type IngestionRejectionReason = (typeof INGESTION_REJECTION_REASONS)[number]

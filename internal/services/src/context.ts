@@ -16,6 +16,7 @@ import { ProjectService } from "./projects/service"
 import { RatingService } from "./rating/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
+import { WalletService } from "./wallet"
 import { WorkspaceService } from "./workspaces/service"
 
 /**
@@ -42,6 +43,7 @@ export interface ServiceContext {
   subscriptions: SubscriptionService
   entitlements: EntitlementService
   plans: PlanService
+  wallet: WalletService
 }
 
 /**
@@ -171,6 +173,12 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     ledgerService: ledger,
   })
 
+  const wallet = new WalletService({
+    db: deps.db,
+    logger: deps.logger,
+    ledgerGateway: ledger,
+  })
+
   const entitlements = new EntitlementService({
     db: deps.db,
     logger: deps.logger,
@@ -201,5 +209,6 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     subscriptions,
     entitlements,
     plans,
+    wallet,
   }
 }

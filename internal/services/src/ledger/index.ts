@@ -1,13 +1,17 @@
 export * from "./errors"
 export {
   LedgerGateway,
+  type CustomerAccountsBundle,
   type LedgerAccount,
   type LedgerEntry,
   type LedgerSource,
   type LedgerTransfer,
   type LedgerTransferRequest,
-  type PostChargeInput,
-  type PostRefundInput,
 } from "./gateway"
-export { customerAccountKey, grantAccountKey, houseAccountKey } from "./accounts"
-export type { HouseAccountKind } from "./accounts"
+export {
+  PLATFORM_FUNDING_KINDS,
+  customerAccountKeys,
+  customerAvailableKeys,
+  platformAccountKey,
+} from "./accounts"
+export type { CustomerAccountKeys, PlatformFundingKind } from "./accounts"

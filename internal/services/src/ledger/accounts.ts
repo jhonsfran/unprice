@@ -1,37 +1,49 @@
-import type { Currency } from "@unprice/db/validators"
-
 /**
- * Canonical account-key builders. Every account name pgledger stores is
- * built here so the format stays uniform across customer, house, and grant
- * accounts — callers never concatenate strings manually.
+ * Canonical account-key builders. Every account name pgledger stores is built
+ * here so the format stays uniform — callers never concatenate strings manually.
+ *
+ * Phase 7 introduces four customer sub-accounts (purchased / granted / reserved
+ * / consumed) and four typed platform funding sources (topup / promo /
+ * plan_credit / manual). The full Chart of Accounts lands in Phase 8; widen the
+ * union then.
  */
 
-export type HouseAccountKind = "revenue" | "credit_issuance" | "expired_credits" | "refunds"
+export type PlatformFundingKind = "topup" | "promo" | "plan_credit" | "manual"
 
-/**
- * Four canonical house accounts seeded per `(project, currency)` tuple.
- * `credit_issuance` and `expired_credits` currently receive no transfers —
- * they exist for the grant/wallet flows that compose on top.
- */
-export const HOUSE_ACCOUNT_KINDS: readonly HouseAccountKind[] = [
-  "revenue",
-  "credit_issuance",
-  "expired_credits",
-  "refunds",
+export const PLATFORM_FUNDING_KINDS: readonly PlatformFundingKind[] = [
+  "topup",
+  "promo",
+  "plan_credit",
+  "manual",
 ] as const
 
-export function houseAccountKey(
-  kind: HouseAccountKind,
-  projectId: string,
-  currency: Currency
-): string {
-  return `house:${kind}:${projectId}:${currency}`
+export function platformAccountKey(kind: PlatformFundingKind, projectId: string): string {
+  return `platform.${projectId}.funding.${kind}`
 }
 
-export function customerAccountKey(customerId: string, currency: Currency): string {
-  return `customer:${customerId}:${currency}`
+export type CustomerAccountKeys = {
+  purchased: string
+  granted: string
+  reserved: string
+  consumed: string
 }
 
-export function grantAccountKey(grantId: string): string {
-  return `grant:${grantId}`
+export function customerAccountKeys(customerId: string): CustomerAccountKeys {
+  return {
+    purchased: `customer.${customerId}.available.purchased`,
+    granted: `customer.${customerId}.available.granted`,
+    reserved: `customer.${customerId}.reserved`,
+    consumed: `customer.${customerId}.consumed`,
+  }
+}
+
+/**
+ * Available sub-accounts in drain priority order: granted drains first (funny
+ * money — use it or lose it), purchased drains second (real money — preserve).
+ */
+export function customerAvailableKeys(customerId: string): readonly [string, string] {
+  return [
+    `customer.${customerId}.available.granted`,
+    `customer.${customerId}.available.purchased`,
+  ] as const
 }

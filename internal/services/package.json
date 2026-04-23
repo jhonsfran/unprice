@@ -26,6 +26,8 @@
     "./billing": "./src/billing/index.ts",
     "./rating": "./src/rating/index.ts",
     "./entitlements": "./src/entitlements/index.ts",
+    "./wallet": "./src/wallet/index.ts",
+    "./wallet/local-reservation": "./src/wallet/local-reservation.ts",
     "./use-cases": "./src/use-cases/index.ts",
     "./env": "./env.ts"
   },

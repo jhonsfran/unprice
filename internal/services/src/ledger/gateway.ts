@@ -8,8 +8,11 @@ import type { Logger } from "@unprice/logs"
 import { fromLedgerAmount, toLedgerAmount } from "@unprice/money"
 import type { DbExecutor } from "../deps"
 import { toErrorContext } from "../utils/log-context"
-import { HOUSE_ACCOUNT_KINDS, customerAccountKey, houseAccountKey } from "./accounts"
-import { assertCurrencyMatch, assertPositiveAmount } from "./core"
+import {
+  PLATFORM_FUNDING_KINDS,
+  customerAccountKeys,
+  platformAccountKey,
+} from "./accounts"
 import { UnPriceLedgerError } from "./errors"
 
 /**
@@ -32,28 +35,6 @@ export interface LedgerTransferRequest {
    * can JOIN instead of scanning pgledger metadata JSONB.
    */
   statementKey?: string | null
-  metadata?: Record<string, unknown>
-  eventAt?: Date
-}
-
-export interface PostChargeInput {
-  projectId: string
-  customerId: string
-  currency: Currency
-  amount: Dinero<number>
-  source: LedgerSource
-  metadata?: Record<string, unknown>
-  statementKey?: string
-  eventAt?: Date
-}
-
-export interface PostRefundInput {
-  projectId: string
-  customerId: string
-  currency: Currency
-  amount: Dinero<number>
-  originalTransferId: string
-  source: LedgerSource
   metadata?: Record<string, unknown>
   eventAt?: Date
 }
@@ -92,6 +73,13 @@ export interface LedgerAccount {
   allowNegativeBalance: boolean
   allowPositiveBalance: boolean
   metadata: Record<string, unknown> | null
+}
+
+export interface CustomerAccountsBundle {
+  purchased: LedgerAccount
+  granted: LedgerAccount
+  reserved: LedgerAccount
+  consumed: LedgerAccount
 }
 
 type PgledgerTransferRow = {
@@ -165,11 +153,12 @@ export class LedgerGateway {
   }
 
   /**
-   * Idempotently ensures the four canonical house accounts exist for a
+   * Idempotently ensures the four typed platform funding accounts exist for a
    * `(project, currency)` tuple. Caches in-process per worker so repeat calls
-   * for the same tuple skip the round-trip.
+   * skip the round-trip. Credit-normal, non-negativity enforced by callers at
+   * the balance-moving layer — these sources hold net outstanding liability.
    */
-  public async seedHouseAccounts(
+  public async seedPlatformAccounts(
     projectId: string,
     currency: Currency
   ): Promise<Result<void, UnPriceLedgerError>> {
@@ -178,8 +167,8 @@ export class LedgerGateway {
 
     try {
       await this.db.transaction(async (tx) => {
-        for (const kind of HOUSE_ACCOUNT_KINDS) {
-          const name = houseAccountKey(kind, projectId, currency)
+        for (const kind of PLATFORM_FUNDING_KINDS) {
+          const name = platformAccountKey(kind, projectId)
           await this.ensureAccount(
             { name, currency, allowNegativeBalance: true, allowPositiveBalance: true },
             tx
@@ -189,7 +178,7 @@ export class LedgerGateway {
       this.seededProjects.add(cacheKey)
       return Ok(undefined)
     } catch (error) {
-      this.logger.error("ledger.seed_house_accounts_failed", {
+      this.logger.error("ledger.seed_platform_accounts_failed", {
         error: toErrorContext(error),
         projectId,
         currency,
@@ -199,104 +188,44 @@ export class LedgerGateway {
   }
 
   /**
-   * Ensures a customer account exists for the customer/currency. Customer
-   * accounts allow negative balance — a customer with outstanding receivables
-   * sits at a negative balance until the matching payment posts.
+   * Ensures the four customer sub-accounts exist for the customer/currency
+   * bundle: `available.purchased`, `available.granted`, `reserved`, `consumed`.
+   * All four are non-negative — draining below zero is a bug, not a feature.
    */
-  public async ensureCustomerAccount(
+  public async ensureCustomerAccounts(
     customerId: string,
     currency: Currency
-  ): Promise<Result<LedgerAccount, UnPriceLedgerError>> {
-    return this.createAccount({
-      name: customerAccountKey(customerId, currency),
-      currency,
-      allowNegativeBalance: true,
-      allowPositiveBalance: true,
-    })
-  }
-
-  /**
-   * Customer-facing charge: customer receivable → `house:revenue`. Validates
-   * amount + currency, ensures the backing accounts exist, and delegates to
-   * `createTransfer`, which claims the idempotency row and posts the pair of
-   * ledger entries inside a single transaction.
-   *
-   * Payment-side entries (cash clearing the receivable) are owned by the
-   * payout-reconciliation path, not this method — the ledger reflects
-   * accruals here; actual cash lands when the webhook adapter posts against
-   * the same customer account.
-   */
-  public async postCharge(
-    input: PostChargeInput
-  ): Promise<Result<LedgerTransfer, UnPriceLedgerError>> {
-    const validAmount = assertPositiveAmount(input.amount)
-    if (validAmount.err) return Err(validAmount.err)
-    const validCurrency = assertCurrencyMatch(input.amount, input.currency)
-    if (validCurrency.err) return Err(validCurrency.err)
-
-    const ensured = await this.ensureCustomerAndHouseAccounts(
-      input.projectId,
-      input.customerId,
-      input.currency
-    )
-    if (ensured.err) return Err(ensured.err)
-
-    return this.createTransfer({
-      projectId: input.projectId,
-      fromAccount: customerAccountKey(input.customerId, input.currency),
-      toAccount: houseAccountKey("revenue", input.projectId, input.currency),
-      amount: input.amount,
-      source: input.source,
-      statementKey: input.statementKey,
-      eventAt: input.eventAt,
-      metadata: {
-        ...(input.metadata ?? {}),
-        customer_id: input.customerId,
-      },
-    })
-  }
-
-  /**
-   * Customer-facing refund: `house:refunds` → customer receivable. Requires
-   * the original charge's transfer id so the refund chain is queryable from
-   * metadata. Partial refunds are allowed; the ledger does not track total
-   * refunded against a charge.
-   */
-  public async postRefund(
-    input: PostRefundInput
-  ): Promise<Result<LedgerTransfer, UnPriceLedgerError>> {
-    const validAmount = assertPositiveAmount(input.amount)
-    if (validAmount.err) return Err(validAmount.err)
-    const validCurrency = assertCurrencyMatch(input.amount, input.currency)
-    if (validCurrency.err) return Err(validCurrency.err)
-
-    const ensured = await this.ensureCustomerAndHouseAccounts(
-      input.projectId,
-      input.customerId,
-      input.currency
-    )
-    if (ensured.err) return Err(ensured.err)
-
-    return this.createTransfer({
-      projectId: input.projectId,
-      fromAccount: houseAccountKey("refunds", input.projectId, input.currency),
-      toAccount: customerAccountKey(input.customerId, input.currency),
-      amount: input.amount,
-      source: input.source,
-      eventAt: input.eventAt,
-      metadata: {
-        ...(input.metadata ?? {}),
-        customer_id: input.customerId,
-        original_transfer_id: input.originalTransferId,
-      },
-    })
-  }
-
-  public async getCustomerBalance(input: {
-    customerId: string
-    currency: Currency
-  }): Promise<Result<Dinero<number>, UnPriceLedgerError>> {
-    return this.getAccountBalance(customerAccountKey(input.customerId, input.currency))
+  ): Promise<Result<CustomerAccountsBundle, UnPriceLedgerError>> {
+    const keys = customerAccountKeys(customerId)
+    try {
+      const bundle = await this.db.transaction(async (tx) => {
+        const purchased = await this.ensureAccount(
+          { name: keys.purchased, currency, allowNegativeBalance: false, allowPositiveBalance: true },
+          tx
+        )
+        const granted = await this.ensureAccount(
+          { name: keys.granted, currency, allowNegativeBalance: false, allowPositiveBalance: true },
+          tx
+        )
+        const reserved = await this.ensureAccount(
+          { name: keys.reserved, currency, allowNegativeBalance: false, allowPositiveBalance: true },
+          tx
+        )
+        const consumed = await this.ensureAccount(
+          { name: keys.consumed, currency, allowNegativeBalance: false, allowPositiveBalance: true },
+          tx
+        )
+        return { purchased, granted, reserved, consumed }
+      })
+      return Ok(bundle)
+    } catch (error) {
+      this.logger.error("ledger.ensure_customer_accounts_failed", {
+        error: toErrorContext(error),
+        customerId,
+        currency,
+      })
+      return Err(new UnPriceLedgerError({ message: "LEDGER_TRANSFER_FAILED" }))
+    }
   }
 
   public async createAccount(opts: {
@@ -335,16 +264,34 @@ export class LedgerGateway {
   public async getAccountBalance(
     name: string
   ): Promise<Result<Dinero<number>, UnPriceLedgerError>> {
-    const accountResult = await this.getAccount(name)
-    if (accountResult.err) return Err(accountResult.err)
-    return Ok(accountResult.val.balance)
+    return this.getAccountBalanceIn(name, this.db)
+  }
+
+  /**
+   * Tx-aware variant — reads the balance inside an existing transaction so
+   * WalletService can check funds under the same advisory lock that guards
+   * the subsequent transfer.
+   */
+  public async getAccountBalanceIn(
+    name: string,
+    executor: DbExecutor
+  ): Promise<Result<Dinero<number>, UnPriceLedgerError>> {
+    try {
+      const account = await this.fetchAccountByName(name, executor)
+      if (!account) return Err(new UnPriceLedgerError({ message: "LEDGER_ACCOUNT_NOT_FOUND" }))
+      return Ok(account.balance)
+    } catch (error) {
+      this.logger.error("ledger.get_account_balance_failed", { error: toErrorContext(error), name })
+      return Err(new UnPriceLedgerError({ message: "LEDGER_GET_BALANCE_FAILED" }))
+    }
   }
 
   public async createTransfer(
-    request: LedgerTransferRequest
+    request: LedgerTransferRequest,
+    executor?: DbExecutor
   ): Promise<Result<LedgerTransfer, UnPriceLedgerError>> {
     try {
-      const transfer = await this.db.transaction(async (tx) => {
+      const run = async (tx: DbExecutor) => {
         const claim = await this.claimIdempotency(
           {
             projectId: request.projectId,
@@ -373,7 +320,9 @@ export class LedgerGateway {
           )
 
         return created
-      })
+      }
+
+      const transfer = executor ? await run(executor) : await this.db.transaction(run)
 
       return Ok(transfer)
     } catch (error) {
@@ -395,12 +344,13 @@ export class LedgerGateway {
    * transfer id is reused without inserting a new pgledger row for that line.
    */
   public async createTransfers(
-    requests: LedgerTransferRequest[]
+    requests: LedgerTransferRequest[],
+    executor?: DbExecutor
   ): Promise<Result<LedgerTransfer[], UnPriceLedgerError>> {
     if (requests.length === 0) return Ok([])
 
     try {
-      const transfers = await this.db.transaction(async (tx) => {
+      const run = async (tx: DbExecutor) => {
         const results: LedgerTransfer[] = new Array(requests.length)
         const toCreate: { index: number; request: LedgerTransferRequest }[] = []
 
@@ -441,7 +391,9 @@ export class LedgerGateway {
         }
 
         return results
-      })
+      }
+
+      const transfers = executor ? await run(executor) : await this.db.transaction(run)
 
       return Ok(transfers)
     } catch (error) {
@@ -550,18 +502,6 @@ export class LedgerGateway {
   // -------------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------------
-
-  private async ensureCustomerAndHouseAccounts(
-    projectId: string,
-    customerId: string,
-    currency: Currency
-  ): Promise<Result<void, UnPriceLedgerError>> {
-    const seedResult = await this.seedHouseAccounts(projectId, currency)
-    if (seedResult.err) return Err(seedResult.err)
-    const ensure = await this.ensureCustomerAccount(customerId, currency)
-    if (ensure.err) return Err(ensure.err)
-    return Ok(undefined)
-  }
 
   private async claimIdempotency(
     opts: {

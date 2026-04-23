@@ -227,19 +227,13 @@ export const DUE_BEHAVIOUR = ["cancel", "downgrade"] as const
 export const GRANT_TYPES = ["subscription", "manual", "promotion", "trial", "addon"] as const
 export const SUBJECT_TYPES = ["project", "plan", "plan_version", "customer"] as const
 export const INVOICE_STATUS = ["unpaid", "paid", "waiting", "void", "draft", "failed"] as const
-export const INVOICE_ITEM_KIND = [
-  "period",
-  "tax",
-  "discount",
-  "refund",
-  "adjustment",
-  "trial",
-] as const
 export const FEATURE_CONFIG_TYPES = ["feature", "addon"] as const
 export const COLLECTION_METHODS = ["charge_automatically", "send_invoice"] as const
 export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
 export const OVERAGE_STRATEGIES = ["none", "last-call", "always"] as const
+export const WALLET_TOPUP_STATUSES = ["pending", "completed", "failed", "expired"] as const
+export const WALLET_GRANT_SOURCES = ["promo", "plan_included", "trial", "manual"] as const
 
 export const TIER_MODES = Object.keys(TIER_MODES_MAP) as unknown as readonly [
   TierMode,

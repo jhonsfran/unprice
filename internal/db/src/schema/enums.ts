@@ -12,7 +12,6 @@ import {
   FEATURE_CONFIG_TYPES,
   FEATURE_TYPES,
   GRANT_TYPES,
-  INVOICE_ITEM_KIND,
   INVOICE_STATUS,
   OVERAGE_STRATEGIES,
   PAYMENT_PROVIDERS,
@@ -24,6 +23,8 @@ import {
   SUBSCRIPTION_STATUS,
   TIER_MODES,
   USAGE_MODES,
+  WALLET_GRANT_SOURCES,
+  WALLET_TOPUP_STATUSES,
   WHEN_TO_BILLING,
 } from "../utils"
 
@@ -49,5 +50,6 @@ export const billingIntervalEnum = pgEnum("billing_interval", BILLING_INTERVALS)
 export const planTypeEnum = pgEnum("plan_type", PLAN_TYPES)
 export const whenToBillEnum = pgEnum("when_to_bill", WHEN_TO_BILLING)
 export const collectionMethodEnum = pgEnum("collection_method", COLLECTION_METHODS)
-export const invoiceItemKindEnum = pgEnum("invoice_item_kind", INVOICE_ITEM_KIND)
 export const overageStrategyEnum = pgEnum("overage_strategy", OVERAGE_STRATEGIES)
+export const walletTopupStatusEnum = pgEnum("wallet_topup_status", WALLET_TOPUP_STATUSES)
+export const walletGrantSourceEnum = pgEnum("wallet_grant_source", WALLET_GRANT_SOURCES)

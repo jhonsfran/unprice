@@ -19,6 +19,12 @@ export const idempotencyKeysTable = sqliteTable("idempotency_keys", {
 // snapshotted pricing + period boundary *and* the engine's running state
 // (usage, updatedAt). Replaces the prior `meter_pricing` + `meter_state`
 // split now that a DO only ever tracks one meter.
+//
+// The reservation columns (Phase 7) mirror — in the DO's local SQLite — the
+// allocation that `WalletService.createReservation` / `flushReservation`
+// have moved into `customer.{cid}.reserved`. They exist so the hot path
+// can answer "can this event be funded?" without touching the ledger per
+// event. All amounts are pgledger scale-8 minor units (`$1 = 100_000_000`).
 export const meterWindowTable = sqliteTable("meter_window", {
   meterKey: text("meter_key").primaryKey(),
   currency: text("currency").notNull(),
@@ -27,6 +33,25 @@ export const meterWindowTable = sqliteTable("meter_window", {
   usage: real("usage").notNull().default(0),
   updatedAt: integer("updated_at"),
   createdAt: integer("created_at").notNull(),
+
+  // Reservation state (Phase 7).
+  reservationId: text("reservation_id"),
+  // Total money moved into `customer.{cid}.reserved` for this window.
+  allocationAmount: integer("allocation_amount").notNull().default(0),
+  // Cumulative money burned — incremented on every allowed apply().
+  consumedAmount: integer("consumed_amount").notNull().default(0),
+  // Cumulative amount the DO has successfully flushed to the ledger.
+  // `consumedAmount - flushedAmount` is the next flush leg size.
+  flushedAmount: integer("flushed_amount").notNull().default(0),
+  // Refill trigger: when `allocation - consumed < threshold`, request a refill.
+  refillThresholdBps: integer("refill_threshold_bps").notNull().default(2000),
+  refillChunkAmount: integer("refill_chunk_amount").notNull().default(0),
+  // Single-flight guard: prevents duplicate `ctx.waitUntil` refills.
+  refillInFlight: integer("refill_in_flight", { mode: "boolean" }).notNull().default(false),
+  // Idempotency sequence for flush+refill. Incremented at request time,
+  // persisted with the result so crashed flushes can be replayed.
+  flushSeq: integer("flush_seq").notNull().default(0),
+  pendingFlushSeq: integer("pending_flush_seq"),
 })
 
 export const schema = {

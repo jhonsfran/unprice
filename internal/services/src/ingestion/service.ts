@@ -118,7 +118,7 @@ export interface EntitlementWindowClient {
 
 type EntitlementWindowApplyResult = {
   allowed: boolean
-  deniedReason?: "LIMIT_EXCEEDED"
+  deniedReason?: "LIMIT_EXCEEDED" | "WALLET_EMPTY"
   message?: string
 }
 

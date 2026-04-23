@@ -22,6 +22,10 @@ import {
   deriveMeterKey,
   findLimitExceededFact,
 } from "@unprice/services/entitlements"
+import {
+  LocalReservation,
+  thresholdFromBps,
+} from "@unprice/services/wallet/local-reservation"
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -50,10 +54,40 @@ class EntitlementWindowLimitExceededError extends Error {
   }
 }
 
+// Raised when a priced event's cost exceeds the local reservation's
+// remaining allocation (Phase 7). The DO converts this into a denied
+// ApplyResult, persists the denial to the idempotency table, and returns
+// WALLET_EMPTY so retries are stable.
+class EntitlementWindowWalletEmptyError extends Error {
+  constructor(
+    public readonly params: {
+      eventId: string
+      meterKey: string
+      reservationId: string
+      cost: number
+      remaining: number
+    }
+  ) {
+    super(`Wallet empty for meter ${params.meterKey} (reservation ${params.reservationId})`)
+    this.name = EntitlementWindowWalletEmptyError.name
+  }
+}
+
+type DeniedReason = "LIMIT_EXCEEDED" | "WALLET_EMPTY"
+
 type ApplyResult = {
   allowed: boolean
-  deniedReason?: "LIMIT_EXCEEDED"
+  deniedReason?: DeniedReason
   message?: string
+}
+
+// Internal: bubbled out of the apply() transaction so the post-commit
+// scheduler can fire `ctx.waitUntil(requestFlushAndRefill(...))` without
+// holding the tx open. Amounts are pgledger scale-8 minor units.
+type RefillTrigger = {
+  flushSeq: number
+  flushAmount: number
+  refillChunkAmount: number
 }
 
 const outboxFactSchema = z.object({
@@ -215,6 +249,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     let insertedFactCount = 0
     let nextUsage: number | null = null
+    let refillTrigger: RefillTrigger | null = null
 
     try {
       const result = this.db.transaction((tx) => {
@@ -284,13 +319,69 @@ export class EntitlementWindowDO extends DurableObject {
 
         insertedFactCount = facts.length
 
-        for (const fact of facts) {
-          nextUsage = fact.valueAfter
+        // Price every fact once — the wallet check needs the summed cost
+        // and the outbox rows need the per-fact amount, so we compute both
+        // from the same pass. Negative amounts are valid (corrections).
+        const pricedFacts = facts.map((fact) => ({
+          fact,
+          amountMinor: this.computeAmountMinor({ fact, priceConfig: input.priceConfig }),
+        }))
 
-          const amountMinor = this.computeAmountMinor({
-            fact,
-            priceConfig: input.priceConfig,
-          })
+        // Phase 7 wallet check. Only engages when a reservation has been
+        // opened on this window (activation path, slice 7.12). Without a
+        // reservation the DO operates in the pre-wallet behaviour: no
+        // allocation tracking, no refill trigger.
+        const window = this.readWalletWindow(tx)
+        if (window?.reservationId && pricedFacts.length > 0) {
+          const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+
+          const local = new LocalReservation(
+            thresholdFromBps(window.allocationAmount, window.refillThresholdBps),
+            window.refillChunkAmount
+          )
+
+          const walletResult = local.applyUsage(
+            {
+              allocationAmount: window.allocationAmount,
+              consumedAmount: window.consumedAmount,
+            },
+            totalCost
+          )
+
+          if (!walletResult.isAllowed) {
+            throw new EntitlementWindowWalletEmptyError({
+              eventId: input.event.id,
+              meterKey,
+              reservationId: window.reservationId,
+              cost: totalCost,
+              remaining: window.allocationAmount - window.consumedAmount,
+            })
+          }
+
+          // Synchronous SQLite write before any post-commit action. On
+          // replay the idempotency row short-circuits above, so this only
+          // runs on the first-success path.
+          tx.update(meterWindowTable)
+            .set({ consumedAmount: walletResult.newState.consumedAmount })
+            .run()
+
+          if (walletResult.needsRefill && !window.refillInFlight) {
+            const nextSeq = window.flushSeq + 1
+            tx.update(meterWindowTable)
+              .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
+              .run()
+            refillTrigger = {
+              flushSeq: nextSeq,
+              // Flush leg = cumulative consumed - already flushed. Zero on the
+              // first refill means `flushReservation` skips the recognize leg.
+              flushAmount: walletResult.newState.consumedAmount - window.flushedAmount,
+              refillChunkAmount: walletResult.refillRequestAmount,
+            }
+          }
+        }
+
+        for (const { fact, amountMinor } of pricedFacts) {
+          nextUsage = fact.valueAfter
 
           const payload: OutboxFact = {
             id: [input.streamId, input.periodKey, input.event.id, fact.meterKey].join(":"),
@@ -353,12 +444,40 @@ export class EntitlementWindowDO extends DurableObject {
         await this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS)
       }
 
+      // Flush+refill must happen after commit so the new consumed/refill
+      // state is visible to `requestFlushAndRefill`, and must outlive the
+      // request via `ctx.waitUntil` so it continues after apply() returns.
+      if (refillTrigger) {
+        this.ctx.waitUntil(this.requestFlushAndRefill(refillTrigger))
+      }
+
       return result
     } catch (error) {
       if (error instanceof EntitlementWindowLimitExceededError) {
         const deniedResult: ApplyResult = {
           allowed: false,
           deniedReason: "LIMIT_EXCEEDED",
+          message: error.message,
+        }
+
+        this.db
+          .insert(idempotencyKeysTable)
+          .values({
+            eventId: idempotencyKey,
+            createdAt,
+            allowed: false,
+            deniedReason: deniedResult.deniedReason ?? null,
+            denyMessage: deniedResult.message ?? null,
+          })
+          .run()
+
+        return deniedResult
+      }
+
+      if (error instanceof EntitlementWindowWalletEmptyError) {
+        const deniedResult: ApplyResult = {
+          allowed: false,
+          deniedReason: "WALLET_EMPTY",
           message: error.message,
         }
 
@@ -525,6 +644,67 @@ export class EntitlementWindowDO extends DurableObject {
       .from(meterWindowTable)
       .get()
     return row?.periodEndAt ?? null
+  }
+
+  // Read the reservation-relevant fields in one shot. Returns `null` when
+  // no window row exists yet (pre-first-apply). A row with a null
+  // `reservationId` means the DO is operating without a reservation —
+  // callers must treat that as "skip wallet check".
+  private readWalletWindow(
+    tx: DrizzleSqliteDODatabase<typeof schema>
+  ): {
+    reservationId: string | null
+    allocationAmount: number
+    consumedAmount: number
+    flushedAmount: number
+    refillThresholdBps: number
+    refillChunkAmount: number
+    refillInFlight: boolean
+    flushSeq: number
+  } | null {
+    const row = tx
+      .select({
+        reservationId: meterWindowTable.reservationId,
+        allocationAmount: meterWindowTable.allocationAmount,
+        consumedAmount: meterWindowTable.consumedAmount,
+        flushedAmount: meterWindowTable.flushedAmount,
+        refillThresholdBps: meterWindowTable.refillThresholdBps,
+        refillChunkAmount: meterWindowTable.refillChunkAmount,
+        refillInFlight: meterWindowTable.refillInFlight,
+        flushSeq: meterWindowTable.flushSeq,
+      })
+      .from(meterWindowTable)
+      .get()
+
+    if (!row) return null
+
+    return {
+      reservationId: row.reservationId ?? null,
+      allocationAmount: Number(row.allocationAmount ?? 0),
+      consumedAmount: Number(row.consumedAmount ?? 0),
+      flushedAmount: Number(row.flushedAmount ?? 0),
+      refillThresholdBps: Number(row.refillThresholdBps ?? 0),
+      refillChunkAmount: Number(row.refillChunkAmount ?? 0),
+      refillInFlight: Boolean(row.refillInFlight),
+      flushSeq: Number(row.flushSeq ?? 0),
+    }
+  }
+
+  // TODO(7.5): Replace with in-process WalletService.flushReservation call.
+  //
+  // Until slice 7.5 wires the wallet service, this stub logs an error and
+  // marks the window as needing recovery. **Do not silently clear the
+  // refill flag** — that would let the DO drain its allocation without
+  // ever refilling, hitting WALLET_EMPTY on the next apply(). Instead we
+  // leave `refillInFlight = true` so subsequent apply() calls don't
+  // re-trigger, and surface the problem via logs.
+  private async requestFlushAndRefill(_trigger: RefillTrigger): Promise<void> {
+    await Promise.resolve()
+    this.logger.error("flush+refill requested but wallet service not wired (slice 7.5)", {
+      flushSeq: _trigger.flushSeq,
+      flushAmount: _trigger.flushAmount,
+      refillChunkAmount: _trigger.refillChunkAmount,
+    })
   }
 
   private computeLimitReached(

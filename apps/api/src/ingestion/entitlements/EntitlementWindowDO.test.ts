@@ -37,7 +37,36 @@ type MeterWindowRow = {
   usage: number
   updatedAt: number | null
   createdAt: number
+  // Phase 7 reservation columns; null/zero until activation sets them.
+  reservationId?: string | null
+  allocationAmount?: number
+  consumedAmount?: number
+  flushedAmount?: number
+  refillThresholdBps?: number
+  refillChunkAmount?: number
+  refillInFlight?: boolean
+  flushSeq?: number
+  pendingFlushSeq?: number | null
 }
+
+const METER_WINDOW_KEYS = new Set<string>([
+  "meterKey",
+  "currency",
+  "priceConfig",
+  "periodEndAt",
+  "usage",
+  "updatedAt",
+  "createdAt",
+  "reservationId",
+  "allocationAmount",
+  "consumedAmount",
+  "flushedAmount",
+  "refillThresholdBps",
+  "refillChunkAmount",
+  "refillInFlight",
+  "flushSeq",
+  "pendingFlushSeq",
+])
 
 type FakeDbState = {
   idempotencyRows: Map<string, IdempotencyRow>
@@ -51,6 +80,11 @@ type FakeDurableObjectState = {
   deletedAll: boolean
   id: { toString: () => string }
   blockConcurrencyWhile: <T>(cb: () => Promise<T> | T) => Promise<T>
+  // Phase 7: apply() schedules flush+refill via ctx.waitUntil. We record
+  // the scheduled promise so tests can assert the refill was triggered and
+  // await its completion before making assertions on db state.
+  waitUntilPromises: Promise<unknown>[]
+  waitUntil: (promise: Promise<unknown>) => void
   storage: {
     deleteAlarm: () => Promise<void>
     deleteAll: () => Promise<void>
@@ -544,6 +578,180 @@ describe("EntitlementWindowDO", () => {
     // Would-be new alarm at BASE_NOW + 30_000 > existing; existing wins
     expect(state.alarmAt).toBe(BASE_NOW + 10_000)
   })
+
+  // ---------------------------------------------------------------------
+  // Phase 7 — wallet hot path. These exercise the reservation-aware
+  // branch of apply(): the window row must be seeded with a reservation
+  // for the branch to engage; otherwise the DO keeps its pre-wallet
+  // behaviour (covered by the earlier tests in this suite).
+  // ---------------------------------------------------------------------
+
+  it("skips the wallet check when the window has no reservation (pre-activation)", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toEqual({ allowed: true })
+    expect(state.waitUntilPromises).toHaveLength(0)
+    // Reservation fields are left at schema defaults (unset in the fake row).
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)
+    expect(row?.reservationId ?? null).toBeNull()
+    expect(row?.consumedAmount ?? 0).toBe(0)
+  })
+
+  it("denies with WALLET_EMPTY when the priced cost exceeds remaining allocation", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    // Pre-seed the meter_window row as if activation had opened a reservation
+    // with a $2 allocation, fully consumed but for 10 minor units (< $3 cost).
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      reservationId: "res_abc",
+      allocationAmount: 2 * 100_000_000,
+      consumedAmount: 2 * 100_000_000 - 10,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const first = await durableObject.apply(createApplyInput())
+    const second = await durableObject.apply(createApplyInput())
+
+    expect(first).toEqual({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+      message: expect.stringContaining("res_abc"),
+    })
+    // Replay returns the stored denial, no second engine invocation.
+    expect(second).toEqual(first)
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(db.idempotencyRows.size).toBe(1)
+    expect(db.outboxRows).toHaveLength(0)
+    // No wallet update committed — transaction rolled back.
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(
+      2 * 100_000_000 - 10
+    )
+    expect(state.waitUntilPromises).toHaveLength(0)
+  })
+
+  it("deducts consumedAmount and triggers flush+refill when remaining falls below threshold", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    // Allocation $5, threshold 50% ($2.50), chunk $2.50. A $5 event consumes
+    // everything; new remaining = 0 < threshold → refill fires.
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 2.5 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toEqual({ allowed: true })
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    // 5 events @ $1.00 = $5.00 at LEDGER_SCALE=8.
+    expect(row.consumedAmount).toBe(5 * 100_000_000)
+    // Refill was scheduled via ctx.waitUntil; the stub body (slice 7.5 will
+    // replace it) settles synchronously on the microtask queue, so by the
+    // time this assertion runs the single-flight flag has already cleared.
+    expect(state.waitUntilPromises).toHaveLength(1)
+
+    await Promise.all(state.waitUntilPromises)
+    const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(after.refillInFlight).toBe(false)
+    expect(after.pendingFlushSeq).toBeNull()
+  })
+
+  it("does not re-trigger refill when one is already in flight", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      reservationId: "res_abc",
+      allocationAmount: 2 * 100_000_000,
+      consumedAmount: 100_000_000, // $1 already consumed, $1 remaining
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 100_000_000,
+      refillInFlight: true, // a prior refill is still running
+      flushSeq: 3,
+      pendingFlushSeq: 4,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toEqual({ allowed: true })
+    // consumedAmount still advances; only the refill trigger is suppressed.
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(
+      2 * 100_000_000
+    )
+    expect(state.waitUntilPromises).toHaveLength(0)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.pendingFlushSeq).toBe(4)
+  })
 })
 
 const createConnectionSpy = vi.fn()
@@ -680,6 +888,10 @@ function createDurableObjectState(): FakeDurableObjectState {
     deletedAll: false,
     id: { toString: () => "do_123" },
     blockConcurrencyWhile: async <T>(cb: () => Promise<T> | T) => await cb(),
+    waitUntilPromises: [],
+    waitUntil: (promise: Promise<unknown>) => {
+      state.waitUntilPromises.push(promise)
+    },
     storage: {
       deleteAlarm: async () => {
         state.deletedAlarm = true
@@ -776,7 +988,7 @@ function buildFakeDrizzle(state: FakeDbState) {
             }
           }
           if (keys.includes("count")) return { count: state.outboxRows.length }
-          if (keys.includes("periodEndAt") || keys.includes("usage")) {
+          if (keys.every((k) => METER_WINDOW_KEYS.has(k))) {
             // Single-meter DO → at most one meter_window row
             const first = state.meterWindowRows.values().next().value
             if (!first) return undefined
@@ -848,6 +1060,27 @@ function buildFakeDrizzle(state: FakeDbState) {
             },
           }
           return builder
+        },
+      }
+    },
+
+    update() {
+      // The DO's wallet path updates the singleton meter_window row with
+      // reservation state; the engine adapter (mocked out elsewhere) used
+      // to hit this too. We treat it as a merge over the single row —
+      // there's no .where() needed to disambiguate.
+      return {
+        set(patch: Record<string, unknown>) {
+          return {
+            where() {
+              return this
+            },
+            run() {
+              const first = state.meterWindowRows.values().next().value
+              if (!first) return
+              Object.assign(first, patch)
+            },
+          }
         },
       }
     },
