@@ -11,6 +11,7 @@ import type { Metrics } from "@unprice/services/metrics"
 import type { PlanService } from "@unprice/services/plans"
 import type { ProjectService } from "@unprice/services/projects"
 import type { SubscriptionService } from "@unprice/services/subscriptions"
+import type { WalletService } from "@unprice/services/wallet"
 import type { EvlogVariables } from "evlog/hono"
 import type { Env } from "~/env"
 import type { IngestionService } from "~/ingestion/service"
@@ -27,6 +28,7 @@ export type DomainServiceContext = {
   project: ProjectService
   apikey: ApiKeysService
   ledger: LedgerGateway
+  wallet: WalletService
 }
 
 /**

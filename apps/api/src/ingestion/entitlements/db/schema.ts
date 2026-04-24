@@ -59,6 +59,21 @@ export const meterWindowTable = sqliteTable("meter_window", {
   // persisted with the result so crashed flushes can be replayed.
   flushSeq: integer("flush_seq").notNull().default(0),
   pendingFlushSeq: integer("pending_flush_seq"),
+
+  // Alarm-driven final flush (Phase 7.7). Any of three triggers
+  // converges on `finalFlush`: period end, 24h inactivity, or a caller-
+  // initiated deletion.
+  //
+  // `last_event_at` is stamped by apply() on every successful commit so
+  // alarm() can detect the inactivity window without an extra query.
+  // `deletion_requested` is flipped by `requestDeletion()` RPC; alarm()
+  // drains the reservation and then nukes storage.
+  // `recovery_required` is a terminal guard: if finalFlush fails in a way
+  // that shouldn't be auto-retried, alarm() keeps scheduling itself but
+  // skips the flush until an operator intervenes.
+  lastEventAt: integer("last_event_at"),
+  deletionRequested: integer("deletion_requested", { mode: "boolean" }).notNull().default(false),
+  recoveryRequired: integer("recovery_required", { mode: "boolean" }).notNull().default(false),
 })
 
 export const schema = {

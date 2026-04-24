@@ -206,6 +206,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       customer: svcCtx.customers,
       plans: svcCtx.plans,
       ledger: svcCtx.ledger,
+      wallet: svcCtx.wallet,
     })
 
     metrics.emit({

@@ -6,6 +6,7 @@ import m0003 from './0003_natural_boom_boom.sql';
 import m0004 from './0004_jazzy_warlock.sql';
 import m0005 from './0005_overrated_mindworm.sql';
 import m0006 from './0006_wooden_ken_ellis.sql';
+import m0007 from './0007_jittery_typhoid_mary.sql';
 
   export default {
     journal,
@@ -16,6 +17,8 @@ m0002,
 m0003,
 m0004,
 m0005,
-m0006
+m0006,
+m0007
     }
   }
+  

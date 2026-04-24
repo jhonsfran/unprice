@@ -131,6 +131,9 @@ describe("processWebhookEvent", () => {
   let subscriptions: {
     reconcilePaymentOutcome: ReturnType<typeof vi.fn>
   }
+  let wallet: {
+    settleTopUp: ReturnType<typeof vi.fn>
+  }
   beforeEach(() => {
     const setup = createDbMocks()
     db = setup.db
@@ -145,6 +148,12 @@ describe("processWebhookEvent", () => {
     subscriptions = {
       reconcilePaymentOutcome: vi.fn().mockResolvedValue({ val: { status: "active" } }),
     }
+
+    wallet = {
+      settleTopUp: vi.fn().mockResolvedValue({
+        val: { topupId: "wtup_test", ledgerTransferId: "tr_test" },
+      }),
+    }
   })
 
   it("returns provider error when signature verification fails", async () => {
@@ -157,6 +166,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          wallet: wallet as unknown as never,
         },
         db,
         logger,
@@ -204,6 +214,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          wallet: wallet as unknown as never,
         },
         db,
         logger,
@@ -265,6 +276,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          wallet: wallet as unknown as never,
         },
         db,
         logger,
@@ -334,6 +346,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          wallet: wallet as unknown as never,
         },
         db,
         logger,
@@ -399,6 +412,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          wallet: wallet as unknown as never,
         },
         db,
         logger,
@@ -469,6 +483,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          wallet: wallet as unknown as never,
         },
         db,
         logger,
@@ -532,6 +547,7 @@ describe("processWebhookEvent", () => {
         services: {
           customers: customers as unknown as never,
           subscriptions: subscriptions as unknown as never,
+          wallet: wallet as unknown as never,
         },
         db,
         logger,

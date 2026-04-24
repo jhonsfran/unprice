@@ -162,6 +162,11 @@ const FLUSH_BATCH_SIZE = 1000
 const FLUSH_INTERVAL_MS = 30_000
 const IDEMPOTENCY_CLEANUP_BATCH_SIZE = 5000
 const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
+// 24h of radio silence closes out a live reservation even if the period
+// hasn't ended. The final flush returns remaining reserved funds to
+// `available.purchased`; a future apply() on this DO runs without a
+// reservation until activateEntitlement opens a new one.
+const INACTIVITY_THRESHOLD_MS = 24 * 60 * 60 * 1000
 
 type EnforcementCache = {
   limit: number | null
@@ -460,6 +465,11 @@ export class EntitlementWindowDO extends DurableObject {
           })
           .run()
 
+        // Stamp the inactivity watermark on every successful commit. alarm()
+        // uses `now - lastEventAt > INACTIVITY_THRESHOLD_MS` to decide when to
+        // close out a dormant reservation without waiting for period end.
+        tx.update(meterWindowTable).set({ lastEventAt: createdAt }).run()
+
         return { allowed: true } as ApplyResult
       })
 
@@ -629,6 +639,36 @@ export class EntitlementWindowDO extends DurableObject {
       alert: remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD,
     })
 
+    // Phase 7.7 final-flush detection. Any of three triggers converges on
+    // the same flush path: period end, 24h inactivity, or an explicit
+    // deletion request. A DO without a reservation (or one marked
+    // `recoveryRequired`) skips the flush — there's nothing to close out
+    // or the last attempt failed terminally and an operator has to look.
+    const window = this.readWalletWindow(this.db)
+    const now = Date.now()
+
+    if (window?.reservationId && !window.recoveryRequired) {
+      const isPeriodEnd =
+        window.periodEndAt !== null && now >= window.periodEndAt
+      const isInactive =
+        window.lastEventAt !== null && now - window.lastEventAt > INACTIVITY_THRESHOLD_MS
+      const isDeletionPending = window.deletionRequested
+
+      if (isPeriodEnd || isInactive || isDeletionPending) {
+        await this.finalFlush(window)
+
+        if (isDeletionPending) {
+          // Flush result is best-effort under deletion — whether it
+          // succeeded or not, the caller asked us to die. A failure has
+          // already been logged inside finalFlush; the ledger idempotency
+          // row lets an operator replay the capture if needed.
+          await this.ctx.storage.deleteAlarm()
+          await this.ctx.storage.deleteAll()
+          return
+        }
+      }
+    }
+
     // Read periodEndAt from SQLite on demand — the alarm runs at most once
     // per FLUSH_INTERVAL_MS, so avoiding an in-memory mirror removes a
     // source of drift without any measurable cost.
@@ -643,20 +683,107 @@ export class EntitlementWindowDO extends DurableObject {
     // after the entitlement end we give 30 days to self destruct
     const selfDestructAt = periodEndAt + MAX_EVENT_AGE_MS
 
-    if (Date.now() > selfDestructAt && remainingOutboxCount === 0) {
+    if (now > selfDestructAt && remainingOutboxCount === 0) {
       await this.ctx.storage.deleteAlarm()
       await this.ctx.storage.deleteAll()
       return
     }
 
     if (remainingOutboxCount > 0) {
-      await this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS)
+      await this.scheduleAlarm(now + FLUSH_INTERVAL_MS)
       return
     }
 
     // Outbox is empty, but we haven't reached self-destruct time.
     // Schedule one final alarm to wake up and die.
     await this.scheduleAlarm(selfDestructAt)
+  }
+
+  // Public RPC: mark this DO for teardown at the next alarm. We don't
+  // delete immediately because there may be a live reservation holding
+  // funds in `customer.{cid}.reserved` that must be captured + refunded
+  // first. The alarm loop picks up `deletionRequested` on its next wake,
+  // runs finalFlush, then calls `ctx.storage.deleteAll()`.
+  public async requestDeletion(): Promise<void> {
+    await this.ready
+    this.db.update(meterWindowTable).set({ deletionRequested: true }).run()
+    // Pull the alarm in: don't wait for the next natural FLUSH_INTERVAL_MS
+    // tick if one isn't already imminent.
+    await this.scheduleAlarm(Date.now())
+  }
+
+  // Slice 7.7 final flush: recognize the unflushed tail of consumed and
+  // return any reserved remainder back to `available.purchased`. Runs
+  // inside alarm() under the DO's single-threaded guarantee, so no
+  // in-flight guard is needed — but we still bump `flushSeq` and park
+  // `pendingFlushSeq` so a DO evicted mid-call can replay the same
+  // ledger idempotency key on wake (see the constructor's recovery
+  // path). WalletService treats `flushAmount == 0` as "skip the
+  // recognize leg", so a no-activity period end or a deletion without
+  // any events is cheap — only the refund leg fires.
+  private async finalFlush(window: NonNullable<ReturnType<typeof this.readWalletWindow>>): Promise<void> {
+    if (!window.reservationId || !window.projectId || !window.customerId) {
+      this.logger.error("final flush requested without a reservation", {
+        reservationId: window.reservationId,
+        projectId: window.projectId,
+        customerId: window.customerId,
+      })
+      return
+    }
+
+    const unflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
+    const nextSeq = window.flushSeq + 1
+
+    this.db.update(meterWindowTable).set({ pendingFlushSeq: nextSeq }).run()
+
+    try {
+      const walletService = this.getWalletService()
+      const result = await walletService.flushReservation({
+        projectId: window.projectId,
+        customerId: window.customerId,
+        currency: window.currency as Currency,
+        reservationId: window.reservationId,
+        flushSeq: nextSeq,
+        flushAmount: unflushed,
+        refillChunkAmount: 0,
+        statementKey: `${window.reservationId}:${window.periodEndAt ?? 0}`,
+        final: true,
+      })
+
+      if (result.err) {
+        this.logger.error("final flush failed", {
+          error: result.err.message,
+          flushSeq: nextSeq,
+          reservationId: window.reservationId,
+        })
+        // Leave pendingFlushSeq set so the next alarm tick (or a DO
+        // restart) retries with the same seq — the ledger idempotency
+        // key keeps replays safe.
+        return
+      }
+
+      // Reservation closed. Clear the id so future apply()s on this DO
+      // skip the wallet check until activateEntitlement opens a new one,
+      // and roll the flush bookkeeping forward. We don't zero
+      // consumed/allocation: they're historical totals and a reconciler
+      // reading SQLite shouldn't lose them.
+      this.db
+        .update(meterWindowTable)
+        .set({
+          reservationId: null,
+          flushedAmount: window.flushedAmount + result.val.flushedAmount,
+          flushSeq: nextSeq,
+          pendingFlushSeq: null,
+          refillInFlight: false,
+        })
+        .run()
+    } catch (error) {
+      this.logger.error("final flush threw unexpectedly", {
+        error: this.errorMessage(error),
+        flushSeq: nextSeq,
+        reservationId: window.reservationId,
+      })
+    }
   }
 
   private ensureMeterWindow(
@@ -713,6 +840,9 @@ export class EntitlementWindowDO extends DurableObject {
     refillInFlight: boolean
     flushSeq: number
     pendingFlushSeq: number | null
+    lastEventAt: number | null
+    deletionRequested: boolean
+    recoveryRequired: boolean
   } | null {
     const row = tx
       .select({
@@ -729,6 +859,9 @@ export class EntitlementWindowDO extends DurableObject {
         refillInFlight: meterWindowTable.refillInFlight,
         flushSeq: meterWindowTable.flushSeq,
         pendingFlushSeq: meterWindowTable.pendingFlushSeq,
+        lastEventAt: meterWindowTable.lastEventAt,
+        deletionRequested: meterWindowTable.deletionRequested,
+        recoveryRequired: meterWindowTable.recoveryRequired,
       })
       .from(meterWindowTable)
       .get()
@@ -749,6 +882,9 @@ export class EntitlementWindowDO extends DurableObject {
       refillInFlight: Boolean(row.refillInFlight),
       flushSeq: Number(row.flushSeq ?? 0),
       pendingFlushSeq: row.pendingFlushSeq ?? null,
+      lastEventAt: row.lastEventAt ?? null,
+      deletionRequested: Boolean(row.deletionRequested),
+      recoveryRequired: Boolean(row.recoveryRequired),
     }
   }
 

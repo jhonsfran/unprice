@@ -130,6 +130,10 @@ export class StripePaymentProvider implements PaymentProviderInterface {
   public async createSession(
     opts: CreateSessionOpts
   ): Promise<Result<PaymentProviderCreateSession, FetchError>> {
+    if (opts.kind === "wallet_topup") {
+      return this.createWalletTopupSession(opts)
+    }
+
     try {
       // check if customer has a payment method already
       if (this.providerCustomerId) {
@@ -171,7 +175,12 @@ export class StripePaymentProvider implements PaymentProviderInterface {
 
       if (!session.url) return Ok({ success: false as const, url: "", customerId: "" })
 
-      return Ok({ success: true as const, url: session.url, customerId: opts.customerId })
+      return Ok({
+        success: true as const,
+        url: session.url,
+        customerId: opts.customerId,
+        sessionId: session.id,
+      })
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
@@ -186,6 +195,78 @@ export class StripePaymentProvider implements PaymentProviderInterface {
           retry: true,
         })
       )
+    }
+  }
+
+  private async createWalletTopupSession(
+    opts: CreateSessionOpts
+  ): Promise<Result<PaymentProviderCreateSession, FetchError>> {
+    if (!opts.amount || opts.amount <= 0) {
+      return Err(
+        new FetchError({
+          message: "wallet_topup requires a positive amount",
+          retry: false,
+        })
+      )
+    }
+
+    // scale-8 minor → Stripe minor (e.g. USD cents). $1 = 100_000_000 scale-8
+    // = 100 cents; factor = 1e6.
+    const unitAmount = Math.round(opts.amount / 1_000_000)
+
+    try {
+      const session = await this.client.checkout.sessions.create({
+        mode: "payment",
+        client_reference_id: opts.customerId,
+        customer_email: opts.email,
+        success_url: opts.successUrl,
+        cancel_url: opts.cancelUrl,
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: opts.currency.toLowerCase(),
+              unit_amount: unitAmount,
+              product_data: {
+                name: opts.description ?? "Wallet top-up",
+              },
+            },
+          },
+        ],
+        metadata: {
+          ...(opts.metadata ?? {}),
+          // Defense-in-depth duplicates of what the caller should already
+          // include; harmless if overlapping.
+          kind: "wallet_topup",
+          customerId: opts.customerId,
+          projectId: opts.projectId,
+        },
+        payment_intent_data: {
+          metadata: {
+            ...(opts.metadata ?? {}),
+            kind: "wallet_topup",
+            customerId: opts.customerId,
+            projectId: opts.projectId,
+          },
+        },
+      })
+
+      if (!session.url) return Ok({ success: false as const, url: "", customerId: opts.customerId })
+
+      return Ok({
+        success: true as const,
+        url: session.url,
+        customerId: opts.customerId,
+        sessionId: session.id,
+      })
+    } catch (error) {
+      const e = error as Stripe.errors.StripeError
+      this.logger.error("Error creating wallet topup session", {
+        error: toErrorContext(e),
+        customerId: opts.customerId,
+        projectId: opts.projectId,
+      })
+      return Err(new FetchError({ message: e.message, retry: true }))
     }
   }
 
@@ -700,6 +781,24 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     const paymentFailureCode = object?.last_payment_error_code
     const paymentFailureMessage = object?.last_payment_error_message
 
+    const metadataRaw = object?.metadata
+    const metadata: Record<string, string> | undefined =
+      metadataRaw && typeof metadataRaw === "object"
+        ? Object.fromEntries(
+            Object.entries(metadataRaw as Record<string, unknown>).filter(
+              (entry): entry is [string, string] => typeof entry[1] === "string"
+            )
+          )
+        : undefined
+
+    const isCheckoutSession = event.eventType.startsWith("checkout.session.")
+    const providerSessionId = isCheckoutSession && typeof object?.id === "string" ? object.id : undefined
+
+    // Stripe's amount_total is in the currency's smallest unit (cents).
+    // Convert to scale-8 minor by multiplying by 1e6.
+    const amountTotal = typeof object?.amount_total === "number" ? object.amount_total : undefined
+    const amountPaid = typeof amountTotal === "number" ? amountTotal * 1_000_000 : undefined
+
     const customerId =
       typeof customerValue === "string"
         ? customerValue
@@ -736,6 +835,14 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         case "invoice.paid":
         case "invoice.payment_succeeded":
           return "payment.succeeded"
+        case "checkout.session.completed":
+        case "checkout.session.async_payment_succeeded":
+          // Only treat checkout completions as payment events when the
+          // Stripe `payment_status` confirms settlement; async flows can
+          // complete with `payment_status: "unpaid"` before settlement.
+          return object?.payment_status === "paid" ? "payment.succeeded" : "noop"
+        case "checkout.session.async_payment_failed":
+          return "payment.failed"
         case "invoice.payment_failed":
           return "payment.failed"
         case "charge.refunded":
@@ -759,6 +866,9 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       subscriptionId,
       invoiceId,
       invoiceUrl,
+      providerSessionId,
+      amountPaid,
+      metadata,
       failureCode:
         typeof failureCode === "string"
           ? failureCode

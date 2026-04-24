@@ -1,7 +1,7 @@
 import { type Database, and, eq } from "@unprice/db"
 import { webhookEvents } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import type { PaymentProvider } from "@unprice/db/validators"
+import type { Currency, PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
@@ -13,7 +13,7 @@ import type {
 } from "../../payment-provider/interface"
 
 type ProcessWebhookEventDeps = {
-  services: Pick<ServiceContext, "customers" | "subscriptions">
+  services: Pick<ServiceContext, "customers" | "subscriptions" | "wallet">
   db: Database
   logger: Logger
 }
@@ -31,6 +31,7 @@ type ProcessWebhookEventOutcome =
   | "payment_failed"
   | "payment_reversed"
   | "payment_dispute_reversed"
+  | "wallet_topup_settled"
   | "ignored"
 
 type ProcessWebhookEventOutput = {
@@ -40,12 +41,14 @@ type ProcessWebhookEventOutput = {
   outcome: ProcessWebhookEventOutcome
   invoiceId?: string
   subscriptionId?: string
+  topupId?: string
 }
 
 type ApplyWebhookEventOutput = {
   outcome: ProcessWebhookEventOutcome
   invoiceId?: string
   subscriptionId?: string
+  topupId?: string
 }
 
 const PROCESSING_WEBHOOK_STATUSES = new Set(["processed", "processing"] as const)
@@ -125,6 +128,68 @@ function nextPaymentAttempts({
   return [...(currentAttempts ?? []), { status, createdAt: now }]
 }
 
+async function applyWalletTopupSettlement({
+  deps,
+  projectId,
+  normalizedEvent,
+}: {
+  deps: ProcessWebhookEventDeps
+  projectId: string
+  normalizedEvent: NormalizedProviderWebhook
+}): Promise<Result<ApplyWebhookEventOutput, FetchError>> {
+  const metadata = normalizedEvent.metadata ?? {}
+  const providerSessionId = normalizedEvent.providerSessionId
+  const paidAmount = normalizedEvent.amountPaid
+  const customerId = metadata.customer_id
+  const currency = metadata.currency as Currency | undefined
+  const metadataProjectId = metadata.project_id
+
+  // Defense-in-depth: projectId comes from the webhook URL. If the metadata
+  // disagrees, someone is replaying a session against the wrong project.
+  if (metadataProjectId && metadataProjectId !== projectId) {
+    deps.logger.error("wallet topup webhook project_id mismatch", {
+      expectedProjectId: projectId,
+      metadataProjectId,
+      eventId: normalizedEvent.eventId,
+    })
+    return Ok({ outcome: "ignored" })
+  }
+
+  if (!providerSessionId || !customerId || !currency || typeof paidAmount !== "number") {
+    deps.logger.error("wallet topup webhook missing required fields", {
+      hasProviderSessionId: Boolean(providerSessionId),
+      hasCustomerId: Boolean(customerId),
+      hasCurrency: Boolean(currency),
+      hasPaidAmount: typeof paidAmount === "number",
+      eventId: normalizedEvent.eventId,
+    })
+    return Ok({ outcome: "ignored" })
+  }
+
+  const { err, val } = await deps.services.wallet.settleTopUp({
+    projectId,
+    customerId,
+    currency,
+    providerSessionId,
+    paidAmount,
+    idempotencyKey: `topup:${normalizedEvent.eventId}`,
+  })
+
+  if (err) {
+    return Err(
+      new FetchError({
+        message: `Wallet top-up settlement failed: ${err.message}`,
+        retry: false,
+      })
+    )
+  }
+
+  return Ok({
+    outcome: "wallet_topup_settled",
+    topupId: val.topupId,
+  })
+}
+
 async function applyWebhookEvent({
   deps,
   projectId,
@@ -141,6 +206,16 @@ async function applyWebhookEvent({
     return Ok({
       outcome,
     })
+  }
+
+  // Wallet top-up settlement: checkout.session.completed (or equivalent)
+  // with our wallet_topup metadata. Short-circuits before the invoice
+  // branch — these events never carry an invoiceId.
+  if (
+    normalizedEvent.eventType === "payment.succeeded" &&
+    normalizedEvent.metadata?.kind === "wallet_topup"
+  ) {
+    return applyWalletTopupSettlement({ deps, projectId, normalizedEvent })
   }
 
   if (!normalizedEvent.invoiceId) {
@@ -477,6 +552,7 @@ export async function processWebhookEvent(
       outcome: applied.val.outcome,
       invoiceId: applied.val.invoiceId,
       subscriptionId: applied.val.subscriptionId,
+      topupId: applied.val.topupId,
     })
   } catch (error) {
     const failure = toFailureError(error)

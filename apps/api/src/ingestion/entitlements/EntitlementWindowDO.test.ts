@@ -49,6 +49,10 @@ type MeterWindowRow = {
   refillInFlight?: boolean
   flushSeq?: number
   pendingFlushSeq?: number | null
+  // Phase 7.7 alarm trigger columns.
+  lastEventAt?: number | null
+  deletionRequested?: boolean
+  recoveryRequired?: boolean
 }
 
 const METER_WINDOW_KEYS = new Set<string>([
@@ -70,6 +74,9 @@ const METER_WINDOW_KEYS = new Set<string>([
   "refillInFlight",
   "flushSeq",
   "pendingFlushSeq",
+  "lastEventAt",
+  "deletionRequested",
+  "recoveryRequired",
 ])
 
 type FakeDbState = {
@@ -1038,6 +1045,311 @@ describe("EntitlementWindowDO", () => {
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)
     expect(row?.projectId).toBe("proj_123")
     expect(row?.customerId).toBe("cus_123")
+  })
+
+  // ---- Phase 7.7: alarm-driven final flush ---------------------------------
+
+  it("stamps lastEventAt on every successful apply", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const before = Date.now()
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.apply(createApplyInput())
+    const after = Date.now()
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)
+    expect(row?.lastEventAt).toBeGreaterThanOrEqual(before)
+    expect(row?.lastEventAt).toBeLessThanOrEqual(after)
+  })
+
+  it("alarm runs a final flush when the period has ended", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 0,
+        flushedAmount: 2 * 100_000_000,
+        refundedAmount: 3 * 100_000_000,
+        drainLegs: [],
+      },
+    })
+
+    const periodEndAt = Date.now() - 1000
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt,
+      usage: 0,
+      updatedAt: null,
+      createdAt: periodEndAt - 60_000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 2 * 100_000_000,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 3,
+      pendingFlushSeq: null,
+      lastEventAt: periodEndAt - 1000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "res_abc",
+        flushSeq: 4,
+        flushAmount: 2 * 100_000_000,
+        refillChunkAmount: 0,
+        final: true,
+        statementKey: `res_abc:${periodEndAt}`,
+      })
+    )
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.reservationId).toBeNull()
+    expect(row.flushedAmount).toBe(2 * 100_000_000)
+    expect(row.flushSeq).toBe(4)
+    expect(row.pendingFlushSeq).toBeNull()
+    expect(state.deletedAll).toBe(false)
+  })
+
+  it("alarm runs a final flush when the DO has been inactive for >24h", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 0,
+        flushedAmount: 0,
+        refundedAmount: 5 * 100_000_000,
+        drainLegs: [],
+      },
+    })
+
+    const now = Date.now()
+    // Inactivity > 24h; period hasn't ended yet.
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: now + 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: now - 48 * 60 * 60 * 1000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      lastEventAt: now - 25 * 60 * 60 * 1000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    // No unflushed consumption, but the final flush still fires to return
+    // reserved funds to available.purchased.
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ final: true, flushAmount: 0 })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
+  })
+
+  it("alarm captures reservation then deletes storage when deletion is requested", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 0,
+        flushedAmount: 1 * 100_000_000,
+        refundedAmount: 4 * 100_000_000,
+        drainLegs: [],
+      },
+    })
+
+    const now = Date.now()
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: now + 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: now - 1000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 1 * 100_000_000,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      lastEventAt: now - 500,
+      deletionRequested: true,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ final: true, flushAmount: 1 * 100_000_000 })
+    )
+    expect(state.deletedAlarm).toBe(true)
+    expect(state.deletedAll).toBe(true)
+  })
+
+  it("alarm skips final flush when recoveryRequired is set", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+
+    const periodEndAt = Date.now() - 1000
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt,
+      usage: 0,
+      updatedAt: null,
+      createdAt: periodEndAt - 60_000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      lastEventAt: periodEndAt - 500,
+      deletionRequested: false,
+      recoveryRequired: true,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    // The row still holds the reservation for an operator to inspect.
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBe("res_abc")
+  })
+
+  it("alarm preserves pendingFlushSeq when the final flush call errors", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+    testState.flushReservation.mockResolvedValue({
+      err: { message: "LEDGER_DOWN" },
+      val: null,
+    })
+
+    const periodEndAt = Date.now() - 1000
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt,
+      usage: 0,
+      updatedAt: null,
+      createdAt: periodEndAt - 60_000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 2 * 100_000_000,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 3,
+      pendingFlushSeq: null,
+      lastEventAt: periodEndAt - 500,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    // Reservation stays open so the next alarm tick can retry the same seq.
+    expect(row.reservationId).toBe("res_abc")
+    expect(row.pendingFlushSeq).toBe(4)
+    expect(row.flushSeq).toBe(3)
+    expect(row.flushedAmount).toBe(0)
+  })
+
+  it("requestDeletion sets the deletion flag and pulls the alarm in", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: Date.now() + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: Date.now(),
+      deletionRequested: false,
+    })
+    state.alarmAt = Date.now() + 30_000
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.requestDeletion()
+
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.deletionRequested).toBe(true)
+    // scheduleAlarm only downgrades; our requested time (now) is <= existing,
+    // so the earlier alarm takes effect.
+    expect(state.alarmAt).toBeLessThanOrEqual(Date.now() + 30_000)
   })
 })
 

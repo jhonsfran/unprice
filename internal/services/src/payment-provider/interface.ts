@@ -6,6 +6,12 @@ export interface PaymentProviderCreateSession {
   success: boolean
   url: string
   customerId: string
+  /**
+   * Provider-side checkout session identifier. Populated when a session
+   * was created (setup or wallet_topup); undefined for billing-portal
+   * branches where no new session is created.
+   */
+  sessionId?: string
 }
 
 export interface PaymentProviderGetSession {
@@ -20,6 +26,14 @@ export interface GetSessionOpts {
   sessionId: string
 }
 
+/**
+ * Discriminates between the two session flavors driven through the same
+ * provider primitive. `setup` (default) creates a payment-method setup
+ * session for future subscription charges. `wallet_topup` creates a
+ * one-off payment session whose settlement credits the customer wallet.
+ */
+export type CreateSessionKind = "setup" | "wallet_topup"
+
 export interface CreateSessionOpts {
   currency: string
   customerId: string
@@ -27,6 +41,18 @@ export interface CreateSessionOpts {
   email: string
   successUrl: string
   cancelUrl: string
+  /** Defaults to "setup" when omitted. */
+  kind?: CreateSessionKind
+  /**
+   * Amount in pgledger scale-8 minor units. Required when
+   * `kind === "wallet_topup"`. Providers convert to their own scale
+   * at the boundary.
+   */
+  amount?: number
+  /** Arbitrary metadata propagated through the provider back via webhook. */
+  metadata?: Record<string, string>
+  /** Line-item description shown on the checkout page. */
+  description?: string
 }
 
 export interface SignUpOpts {
@@ -78,6 +104,19 @@ export type NormalizedProviderWebhook = {
   invoiceUrl?: string
   failureCode?: string
   failureMessage?: string
+  /**
+   * Provider-side session identifier for checkout.session events. Used to
+   * match a wallet top-up against its `wallet_topups` row.
+   */
+  providerSessionId?: string
+  /** Amount settled by the provider, in pgledger scale-8 minor units. */
+  amountPaid?: number
+  /**
+   * Metadata propagated from the session/payment intent. For wallet
+   * top-ups this carries `kind`, `topup_id`, `customer_id`, `project_id`,
+   * `currency`.
+   */
+  metadata?: Record<string, string>
   payload: unknown
 }
 

@@ -69,10 +69,17 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
     opts: CreateSessionOpts
   ): Promise<Result<PaymentProviderCreateSession, FetchError>> {
     this.logger.info("Sandbox: createSession", opts as unknown as Record<string, unknown>)
+    // Deterministic session id for the sandbox — derived from the caller's
+    // topup_id when present so test harnesses can settle without a real
+    // provider roundtrip.
+    const sessionId = opts.metadata?.topup_id
+      ? `sandbox_session_${opts.metadata.topup_id}`
+      : `sandbox_session_${newId("event")}`
     return Ok({
       success: true,
       url: opts.successUrl,
       customerId: opts.customerId,
+      sessionId,
     })
   }
 
@@ -269,6 +276,16 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
       }
     })()
 
+    const metadataRaw = payload.metadata
+    const metadata: Record<string, string> | undefined =
+      metadataRaw && typeof metadataRaw === "object"
+        ? Object.fromEntries(
+            Object.entries(metadataRaw as Record<string, unknown>).filter(
+              (entry): entry is [string, string] => typeof entry[1] === "string"
+            )
+          )
+        : undefined
+
     return Ok({
       provider: this.provider,
       eventId: event.eventId,
@@ -280,6 +297,10 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
         typeof payload.subscriptionId === "string" ? payload.subscriptionId : undefined,
       invoiceId: typeof payload.invoiceId === "string" ? payload.invoiceId : undefined,
       invoiceUrl: typeof payload.invoiceUrl === "string" ? payload.invoiceUrl : undefined,
+      providerSessionId:
+        typeof payload.providerSessionId === "string" ? payload.providerSessionId : undefined,
+      amountPaid: typeof payload.amountPaid === "number" ? payload.amountPaid : undefined,
+      metadata,
       failureCode: typeof payload.failureCode === "string" ? payload.failureCode : undefined,
       failureMessage:
         typeof payload.failureMessage === "string" ? payload.failureMessage : undefined,
