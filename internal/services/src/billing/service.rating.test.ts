@@ -12,6 +12,7 @@ import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { UnPriceRatingError } from "../rating/errors"
 import type { RatingService } from "../rating/service"
+import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
 describe("BillingService rating delegation", () => {
@@ -32,6 +33,7 @@ describe("BillingService rating delegation", () => {
       grantsManager: {} as GrantsManager,
       ratingService,
       ledgerService: {} as LedgerGateway,
+      walletService: {} as WalletService,
     })
 
   it("delegates calculateFeaturePrice to RatingService.rateBillingPeriod", async () => {

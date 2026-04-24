@@ -1,12 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import {
   customerSelectSchema,
-  featureSelectBaseSchema,
-  invoiceItemSelectSchema,
-  planSelectBaseSchema,
-  planVersionFeatureSelectBaseSchema,
-  planVersionSelectBaseSchema,
-  selectBillingPeriodSchema,
   subscriptionInvoiceSelectSchema,
   subscriptionSelectSchema,
 } from "@unprice/db/validators"
@@ -17,19 +11,6 @@ const getInvoiceByIdOutputSchema = z.object({
   invoice: subscriptionInvoiceSelectSchema.extend({
     customer: customerSelectSchema,
     subscription: subscriptionSelectSchema,
-    invoiceItems: invoiceItemSelectSchema
-      .extend({
-        billingPeriod: selectBillingPeriodSchema.nullable(),
-        featurePlanVersion: planVersionFeatureSelectBaseSchema
-          .extend({
-            feature: featureSelectBaseSchema,
-            planVersion: planVersionSelectBaseSchema.extend({
-              plan: planSelectBaseSchema,
-            }),
-          })
-          .nullable(),
-      })
-      .array(),
   }),
 })
 

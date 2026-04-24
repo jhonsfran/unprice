@@ -20,6 +20,12 @@ import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
+import {
+  type ActivateSubscriptionDeps,
+  activateSubscription,
+} from "../use-cases/subscription/activate"
+import { deriveActivationInputsFromPlan } from "../use-cases/subscription/derive-activation-inputs"
+import type { WalletService } from "../wallet"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
   canRenew,
@@ -68,6 +74,7 @@ export class SubscriptionMachine {
   private grantService: GrantsManager
   private ratingService: RatingService
   private ledgerService: LedgerGateway
+  private walletService: WalletService | null
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -84,6 +91,7 @@ export class SubscriptionMachine {
     customer,
     ratingService,
     ledgerService,
+    walletService,
     now,
     db,
     repo,
@@ -95,6 +103,7 @@ export class SubscriptionMachine {
     customer: CustomerService
     ratingService: RatingService
     ledgerService: LedgerGateway
+    walletService?: WalletService
     now: number
     db: Database
     repo: SubscriptionRepository
@@ -107,6 +116,10 @@ export class SubscriptionMachine {
     this.customerService = customer
     this.ratingService = ratingService
     this.ledgerService = ledgerService
+    // Nullable on purpose: older callers that don't wire wallet through
+    // skip the `activating` state via a guard; once every caller passes
+    // walletService this can become required. See `shouldActivate`.
+    this.walletService = walletService ?? null
     this.db = db
     this.repo = repo
     this.machine = this.createMachineSubscription()
@@ -176,6 +189,88 @@ export class SubscriptionMachine {
             })
 
             return result
+          }
+        ),
+        activateSubscription: fromPromise(
+          async ({
+            input,
+          }: {
+            input: {
+              context: SubscriptionContext
+              db: Database
+              walletService: WalletService | null
+              ledgerService: LedgerGateway
+              logger: Logger
+            }
+          }) => {
+            // If wallet is not wired in for this machine instance, the
+            // activating state is a no-op pass-through. Callers that
+            // upgrade to Phase 7 activation wire walletService through
+            // SubscriptionMachine.create.
+            if (!input.walletService) {
+              return {
+                skipped: true as const,
+                grantsIssued: [] as Array<{ grantId: string; amount: number }>,
+              }
+            }
+
+            const derived = await deriveActivationInputsFromPlan(input.db, {
+              subscriptionId: input.context.subscriptionId,
+              projectId: input.context.projectId,
+            })
+
+            if (!derived) {
+              return {
+                skipped: true as const,
+                grantsIssued: [] as Array<{ grantId: string; amount: number }>,
+              }
+            }
+
+            // Base fee is charged by `invoiceSubscription` (purchased →
+            // consumed transfer per billing period). Setting it to 0
+            // here avoids double-charging — the activating state only
+            // owns the two Phase-7 primitives invoicing doesn't:
+            // plan-included credits and per-meter reservations.
+            const periodStartAt = new Date(
+              input.context.subscription.currentCycleStartAt ?? input.context.now
+            )
+            const periodEndAt = new Date(
+              input.context.subscription.currentCycleEndAt ?? input.context.now
+            )
+
+            const deps: ActivateSubscriptionDeps = {
+              services: {
+                wallet: input.walletService,
+                ledger: input.ledgerService,
+                // activateSubscription only calls `services.wallet` and
+                // `services.ledger`; the `subscriptions` field on the
+                // Pick type is never dereferenced.
+                subscriptions: undefined as never,
+              },
+              db: input.db,
+              logger: input.logger,
+            }
+
+            const result = await activateSubscription(deps, {
+              subscriptionId: input.context.subscriptionId,
+              projectId: input.context.projectId,
+              periodStartAt,
+              periodEndAt,
+              idempotencyKey: `cycle:${input.context.subscriptionId}:${periodStartAt.toISOString()}`,
+              baseFeeAmount: 0,
+              planIncludedCredits: derived.planIncludedCredits,
+              reservations: derived.reservations,
+            })
+
+            if (result.err) {
+              throw result.err
+            }
+
+            return {
+              skipped: false as const,
+              grantsIssued: result.val.grantsIssued,
+              reservations: result.val.reservations,
+            }
           }
         ),
         renewSubscription: fromPromise(
@@ -420,7 +515,7 @@ export class SubscriptionMachine {
               ledgerService: this.ledgerService,
             }),
             onDone: {
-              target: "active",
+              target: "activating",
               actions: [
                 assign({
                   subscription: ({ event, context }) => {
@@ -473,7 +568,7 @@ export class SubscriptionMachine {
               repo: this.repo,
             }),
             onDone: {
-              target: "active",
+              target: "activating",
               actions: [
                 assign({
                   subscription: ({ event, context }) => {
@@ -498,6 +593,37 @@ export class SubscriptionMachine {
                   }
                 },
               }),
+            },
+          },
+        },
+        activating: {
+          tags: ["machine", "transition"],
+          description:
+            "Issues plan-included credits and opens per-meter reservations for the current billing period. Phase 7 activation hook — runs after invoicing or renewal, before the subscription enters `active`. No-op when walletService isn't wired in.",
+          invoke: {
+            id: "activateSubscription",
+            src: "activateSubscription",
+            input: ({ context }) => ({
+              context,
+              db: this.db,
+              walletService: this.walletService,
+              ledgerService: this.ledgerService,
+              logger: this.logger,
+            }),
+            onDone: {
+              target: "active",
+              actions: ["logStateTransition"],
+            },
+            onError: {
+              target: "error",
+              actions: [
+                assign({
+                  error: ({ event }) => ({
+                    message: `Activation failed: ${(event.error as Error)?.message ?? "Unknown error"}`,
+                  }),
+                }),
+                "logStateTransition",
+              ],
             },
           },
         },
@@ -797,6 +923,7 @@ export class SubscriptionMachine {
     customer: CustomerService
     ratingService: RatingService
     ledgerService: LedgerGateway
+    walletService?: WalletService
     now: number
     db: Database
     repo: SubscriptionRepository

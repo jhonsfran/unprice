@@ -7,6 +7,7 @@ import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { BillingService } from "../billing/service"
+import { WalletService } from "../wallet"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
@@ -380,14 +381,20 @@ describe("SubscriptionService - grant lifecycle", () => {
     const customerService = new CustomerService({ ...serviceDeps, paymentProviderResolver })
     const grantsManager = new GrantsManager({ db: mockDb, logger: mockLogger })
     const ratingService = new RatingService({ ...serviceDeps, grantsManager })
+    const ledgerGateway = new LedgerGateway({
+      db: mockDb,
+      logger: mockLogger,
+    })
     const billingService = new BillingService({
       ...serviceDeps,
       customerService,
       grantsManager,
       ratingService,
-      ledgerService: new LedgerGateway({
+      ledgerService: ledgerGateway,
+      walletService: new WalletService({
         db: mockDb,
         logger: mockLogger,
+        ledgerGateway,
       }),
     })
     subscriptionService = new SubscriptionService({

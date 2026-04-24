@@ -184,7 +184,10 @@ export class WalletService {
     this.ledger = deps.ledgerGateway
   }
 
-  public async transfer(input: WalletTransferInput): Promise<Result<void, UnPriceWalletError>> {
+  public async transfer(
+    input: WalletTransferInput,
+    executor?: DbExecutor
+  ): Promise<Result<void, UnPriceWalletError>> {
     if (input.amount <= 0) {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
     }
@@ -202,29 +205,31 @@ export class WalletService {
       }
     }
 
+    const run = async (tx: DbExecutor): Promise<Result<void, UnPriceWalletError>> => {
+      await this.lockCustomer(tx, input.customerId)
+
+      const statementKey =
+        typeof input.metadata.statement_key === "string" ? input.metadata.statement_key : null
+
+      const transferResult = await this.ledger.createTransfer(
+        {
+          projectId: input.projectId,
+          fromAccount: input.fromAccountKey,
+          toAccount: input.toAccountKey,
+          amount: fromLedgerMinor(input.amount, input.currency),
+          source: { type: "wallet_transfer", id: input.idempotencyKey },
+          statementKey,
+          metadata: input.metadata,
+        },
+        tx
+      )
+
+      if (transferResult.err) return Err(this.wrapLedgerError(transferResult.err))
+      return Ok(undefined)
+    }
+
     try {
-      return await this.db.transaction(async (tx) => {
-        await this.lockCustomer(tx, input.customerId)
-
-        const statementKey =
-          typeof input.metadata.statement_key === "string" ? input.metadata.statement_key : null
-
-        const transferResult = await this.ledger.createTransfer(
-          {
-            projectId: input.projectId,
-            fromAccount: input.fromAccountKey,
-            toAccount: input.toAccountKey,
-            amount: fromLedgerMinor(input.amount, input.currency),
-            source: { type: "wallet_transfer", id: input.idempotencyKey },
-            statementKey,
-            metadata: input.metadata,
-          },
-          tx
-        )
-
-        if (transferResult.err) return Err(this.wrapLedgerError(transferResult.err))
-        return Ok(undefined)
-      })
+      return executor ? await run(executor as DbExecutor) : await this.db.transaction(run)
     } catch (error) {
       return this.handleUnexpected("wallet.transfer_failed", error, {
         customerId: input.customerId,
@@ -234,7 +239,8 @@ export class WalletService {
   }
 
   public async createReservation(
-    input: CreateReservationInput
+    input: CreateReservationInput,
+    executor?: DbExecutor
   ): Promise<Result<CreateReservationOutput, UnPriceWalletError>> {
     if (input.requestedAmount <= 0) {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
@@ -242,94 +248,98 @@ export class WalletService {
 
     const keys = customerAccountKeys(input.customerId)
 
-    try {
-      return await this.db.transaction(async (tx) => {
-        await this.lockCustomer(tx, input.customerId)
+    const run = async (
+      tx: DbExecutor
+    ): Promise<Result<CreateReservationOutput, UnPriceWalletError>> => {
+      await this.lockCustomer(tx, input.customerId)
 
-        const { drained: grantedDrained, legs: grantLegs } = await this.drainGrantedFIFO(
-          tx,
-          input.customerId,
-          input.projectId,
-          input.requestedAmount
-        )
+      const { drained: grantedDrained, legs: grantLegs } = await this.drainGrantedFIFO(
+        tx as Transaction,
+        input.customerId,
+        input.projectId,
+        input.requestedAmount
+      )
 
-        const stillNeeded = input.requestedAmount - grantedDrained
-        const purchasedBalance = await this.readBalance(tx, keys.purchased)
-        const purchasedDrained = Math.max(0, Math.min(stillNeeded, purchasedBalance))
+      const stillNeeded = input.requestedAmount - grantedDrained
+      const purchasedBalance = await this.readBalance(tx, keys.purchased)
+      const purchasedDrained = Math.max(0, Math.min(stillNeeded, purchasedBalance))
 
-        const allocationAmount = grantedDrained + purchasedDrained
-        const reservationId = newId("entitlement_reservation")
+      const allocationAmount = grantedDrained + purchasedDrained
+      const reservationId = newId("entitlement_reservation")
 
-        const transfers: LedgerTransferRequest[] = []
+      const transfers: LedgerTransferRequest[] = []
 
-        if (grantedDrained > 0) {
-          transfers.push({
-            projectId: input.projectId,
-            fromAccount: keys.granted,
-            toAccount: keys.reserved,
-            amount: fromLedgerMinor(grantedDrained, input.currency),
-            source: {
-              type: "wallet_reserve_granted",
-              id: input.idempotencyKey,
-            },
-            metadata: {
-              flow: "reserve",
-              drain_source: "granted",
-              reservation_id: reservationId,
-              entitlement_id: input.entitlementId,
-              grant_ids: grantLegs.map((l) => l.grantId).filter((id): id is string => !!id),
-              idempotency_key: input.idempotencyKey,
-            },
-          })
-        }
-
-        if (purchasedDrained > 0) {
-          transfers.push({
-            projectId: input.projectId,
-            fromAccount: keys.purchased,
-            toAccount: keys.reserved,
-            amount: fromLedgerMinor(purchasedDrained, input.currency),
-            source: {
-              type: "wallet_reserve_purchased",
-              id: input.idempotencyKey,
-            },
-            metadata: {
-              flow: "reserve",
-              drain_source: "purchased",
-              reservation_id: reservationId,
-              entitlement_id: input.entitlementId,
-              idempotency_key: input.idempotencyKey,
-            },
-          })
-        }
-
-        if (transfers.length > 0) {
-          const transferResult = await this.ledger.createTransfers(transfers, tx)
-          if (transferResult.err) return Err(this.wrapLedgerError(transferResult.err))
-        }
-
-        await tx.insert(entitlementReservations).values({
-          id: reservationId,
+      if (grantedDrained > 0) {
+        transfers.push({
           projectId: input.projectId,
-          customerId: input.customerId,
-          entitlementId: input.entitlementId,
-          allocationAmount,
-          consumedAmount: 0,
-          refillThresholdBps: input.refillThresholdBps,
-          refillChunkAmount: input.refillChunkAmount,
-          periodStartAt: input.periodStartAt,
-          periodEndAt: input.periodEndAt,
+          fromAccount: keys.granted,
+          toAccount: keys.reserved,
+          amount: fromLedgerMinor(grantedDrained, input.currency),
+          source: {
+            type: "wallet_reserve_granted",
+            id: input.idempotencyKey,
+          },
+          metadata: {
+            flow: "reserve",
+            drain_source: "granted",
+            reservation_id: reservationId,
+            entitlement_id: input.entitlementId,
+            grant_ids: grantLegs.map((l) => l.grantId).filter((id): id is string => !!id),
+            idempotency_key: input.idempotencyKey,
+          },
         })
+      }
 
-        const drainLegs: DrainLeg[] = [
-          ...grantLegs,
-          ...(purchasedDrained > 0
-            ? [{ source: "purchased" as const, amount: purchasedDrained }]
-            : []),
-        ]
+      if (purchasedDrained > 0) {
+        transfers.push({
+          projectId: input.projectId,
+          fromAccount: keys.purchased,
+          toAccount: keys.reserved,
+          amount: fromLedgerMinor(purchasedDrained, input.currency),
+          source: {
+            type: "wallet_reserve_purchased",
+            id: input.idempotencyKey,
+          },
+          metadata: {
+            flow: "reserve",
+            drain_source: "purchased",
+            reservation_id: reservationId,
+            entitlement_id: input.entitlementId,
+            idempotency_key: input.idempotencyKey,
+          },
+        })
+      }
 
-        return Ok({ reservationId, allocationAmount, drainLegs })
+      if (transfers.length > 0) {
+        const transferResult = await this.ledger.createTransfers(transfers, tx)
+        if (transferResult.err) return Err(this.wrapLedgerError(transferResult.err))
+      }
+
+      await tx.insert(entitlementReservations).values({
+        id: reservationId,
+        projectId: input.projectId,
+        customerId: input.customerId,
+        entitlementId: input.entitlementId,
+        allocationAmount,
+        consumedAmount: 0,
+        refillThresholdBps: input.refillThresholdBps,
+        refillChunkAmount: input.refillChunkAmount,
+        periodStartAt: input.periodStartAt,
+        periodEndAt: input.periodEndAt,
       })
+
+      const drainLegs: DrainLeg[] = [
+        ...grantLegs,
+        ...(purchasedDrained > 0
+          ? [{ source: "purchased" as const, amount: purchasedDrained }]
+          : []),
+      ]
+
+      return Ok({ reservationId, allocationAmount, drainLegs })
+    }
+
+    try {
+      return executor ? await run(executor) : await this.db.transaction(run)
     } catch (error) {
       return this.handleUnexpected("wallet.create_reservation_failed", error, {
         customerId: input.customerId,
@@ -518,7 +528,10 @@ export class WalletService {
     }
   }
 
-  public async adjust(input: AdjustInput): Promise<Result<AdjustOutput, UnPriceWalletError>> {
+  public async adjust(
+    input: AdjustInput,
+    executor?: DbExecutor
+  ): Promise<Result<AdjustOutput, UnPriceWalletError>> {
     if (input.signedAmount === 0) {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
     }
@@ -527,15 +540,17 @@ export class WalletService {
     const isPositive = input.signedAmount > 0
     const absAmount = Math.abs(input.signedAmount)
 
-    try {
-      return await this.db.transaction(async (tx) => {
-        await this.lockCustomer(tx, input.customerId)
+    const run = async (tx: DbExecutor): Promise<Result<AdjustOutput, UnPriceWalletError>> => {
+      await this.lockCustomer(tx, input.customerId)
 
-        if (isPositive) {
-          return await this.adjustPositive(tx, input, absAmount, keys)
-        }
-        return await this.adjustNegative(tx, input, absAmount, keys)
-      })
+      if (isPositive) {
+        return await this.adjustPositive(tx as Transaction, input, absAmount, keys)
+      }
+      return await this.adjustNegative(tx as Transaction, input, absAmount, keys)
+    }
+
+    try {
+      return executor ? await run(executor) : await this.db.transaction(run)
     } catch (error) {
       return this.handleUnexpected("wallet.adjust_failed", error, {
         customerId: input.customerId,

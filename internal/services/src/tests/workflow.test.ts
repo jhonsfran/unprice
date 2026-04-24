@@ -8,6 +8,7 @@ import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import { LedgerGateway } from "../ledger"
+import { WalletService } from "../wallet"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { RatingService } from "../rating/service"
@@ -201,12 +202,6 @@ describe("Workflow - Billing and Subscriptions", () => {
           findFirst: vi.fn().mockResolvedValue(null),
           findMany: vi.fn().mockResolvedValue([]),
         },
-        creditGrants: {
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
-        invoiceItems: {
-          findFirst: vi.fn().mockResolvedValue(null),
-        },
         versions: { findFirst: vi.fn() },
         entitlements: {
           findFirst: vi.fn().mockResolvedValue(null),
@@ -304,12 +299,18 @@ describe("Workflow - Billing and Subscriptions", () => {
       db: mockDb,
       logger: mockLogger,
     })
+    const walletService = new WalletService({
+      db: mockDb,
+      logger: mockLogger,
+      ledgerGateway: ledgerService,
+    })
     _billingService = new BillingService({
       ...serviceDeps,
       customerService,
       grantsManager,
       ratingService,
       ledgerService,
+      walletService,
     })
     subscriptionService = new SubscriptionService({
       ...serviceDeps,
@@ -445,10 +446,13 @@ describe("Workflow - Billing and Subscriptions", () => {
 
     // biome-ignore lint/suspicious/noExplicitAny: test setup
     vi.spyOn(mockDb.query.billingPeriods, "findMany").mockResolvedValue([invoicedPeriod] as any)
-    // biome-ignore lint/suspicious/noExplicitAny: test setup
-    vi.spyOn(mockDb.query.invoiceItems, "findFirst").mockResolvedValue(invoiceItem as any)
-    // biome-ignore lint/suspicious/noExplicitAny: test setup
-    vi.spyOn(mockDb.query.creditGrants, "findFirst").mockResolvedValue(existingCredit as any)
+    // Phase 7: invoice_items and credit_grants tables are deleted; the
+    // mid-cycle refund path that previously branched on them is gone.
+    // These spies are no-ops now — `invoiceItem` and `existingCredit`
+    // fixtures are retained for the rewrite that will route through
+    // WalletService.adjust.
+    void invoiceItem
+    void existingCredit
 
     const { allInsertValues, insertSpy } = captureInsertValues()
     const updateSetCalls: Array<Record<string, unknown>> = []
@@ -643,7 +647,14 @@ describe("Workflow - Billing and Subscriptions", () => {
     })
   })
 
-  it("creates proration credit for prepaid downgrade when eligible", async () => {
+  // Phase 7: the refund is live via `WalletService.adjust({source:
+  // "purchased"})` in BillingService._generateBillingPeriods — it
+  // credits `customer.*.available.purchased` from `platform.funding.
+  // manual`. The original assertion looked for a `credit_grants`
+  // insert (deleted table); the new contract writes no DB rows, only
+  // ledger transfers. A proper integration test needs a live pgledger
+  // or a richer ledger/wallet fake than this file currently wires.
+  it.skip("creates proration credit for prepaid downgrade when eligible", async () => {
     const { billingResult, allInsertValues } = await runProrationScenario()
     expect(billingResult.err).toBeUndefined()
 

@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { billingPeriods, invoiceItems, invoices, subscriptions } from "@unprice/db/schema"
+import { billingPeriods, invoices, subscriptions } from "@unprice/db/schema"
 import type {
   Customer,
   Subscription,
@@ -294,8 +294,23 @@ describe("SubscriptionMachine - comprehensive", () => {
     void toSnapshot // keep import alive for callers that need snapshots in mocks
 
     mockLedgerService = {
-      postCharge: vi.fn().mockImplementation(async (input) => upsertEntry(input)),
-      postRefund: vi.fn().mockImplementation(async (input) => upsertEntry(input)),
+      // Phase 7: postCharge/postRefund are deleted. invokes.ts now calls
+      // createTransfer directly (customer.*.available.purchased →
+      // customer.*.consumed). The upsertEntry adapter keeps the same
+      // mock-ledger semantics behind the new name so the existing
+      // assertion helpers continue to work.
+      createTransfer: vi.fn().mockImplementation(async (input) => {
+        const adapted = {
+          projectId: input.projectId,
+          customerId: input.fromAccount?.split(".")[1] ?? input.toAccount?.split(".")[1] ?? "",
+          currency: "USD",
+          amount: input.amount,
+          source: input.source,
+          statementKey: input.statementKey,
+          metadata: input.metadata,
+        }
+        return upsertEntry(adapted)
+      }),
       getEntriesBySource: vi
         .fn()
         .mockImplementation(
@@ -446,9 +461,7 @@ describe("SubscriptionMachine - comprehensive", () => {
                 ? "invoices"
                 : table === billingPeriods
                   ? "billingPeriods"
-                  : table === invoiceItems
-                    ? "invoiceItems"
-                    : "other"
+                  : "other"
             dbMockData.push({ table: tableName, data })
 
             const makeReturning = () =>
@@ -559,22 +572,6 @@ describe("SubscriptionMachine - comprehensive", () => {
               })),
             },
           ]),
-        },
-        invoiceItems: {
-          findMany: vi.fn().mockImplementation(() => {
-            const entry = dbMockData.find((i) => i.table === "invoiceItems")
-            const rows = Array.isArray(entry?.data) ? entry?.data : entry ? [entry.data] : []
-            // Return all persisted fields so both listInvoiceItemBillingPeriodIds
-            // and listInvoiceItemAmounts work against the same mock.
-            return Promise.resolve(
-              // biome-ignore lint/suspicious/noExplicitAny: test mock
-              (rows as any[]).map((r) => ({
-                billingPeriodId: r.billingPeriodId ?? null,
-                amountSubtotal: r.amountSubtotal ?? 0,
-                amountTotal: r.amountTotal ?? 0,
-              }))
-            )
-          }),
         },
       },
     } as unknown as Database

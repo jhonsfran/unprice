@@ -20,6 +20,7 @@ import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
 import type { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
+import type { WalletService } from "../wallet"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { LedgerGateway } from "../ledger"
@@ -71,6 +72,7 @@ export class SubscriptionService {
   private readonly billingService: BillingService
   private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
+  private readonly walletService: WalletService | undefined
 
   constructor({
     db,
@@ -84,6 +86,7 @@ export class SubscriptionService {
     billingService,
     ratingService,
     ledgerService,
+    walletService,
   }: {
     db: Database
     repo: SubscriptionRepository
@@ -97,6 +100,7 @@ export class SubscriptionService {
     billingService: BillingService
     ratingService: RatingService
     ledgerService: LedgerGateway
+    walletService?: WalletService
   }) {
     this.db = db
     this.repo = repo
@@ -109,6 +113,7 @@ export class SubscriptionService {
     this.billingService = billingService
     this.ratingService = ratingService
     this.ledgerService = ledgerService
+    this.walletService = walletService
   }
 
   private setLockContext(context: {
@@ -1542,6 +1547,7 @@ export class SubscriptionService {
       customer: this.customerService,
       ratingService: this.ratingService,
       ledgerService: this.ledgerService,
+      walletService: this.walletService,
       db: this.db,
       repo: this.repo,
     })

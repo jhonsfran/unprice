@@ -146,6 +146,12 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     grantsManager,
   })
 
+  const wallet = new WalletService({
+    db: deps.db,
+    logger: deps.logger,
+    ledgerGateway: ledger,
+  })
+
   const billing = new BillingService({
     db: deps.db,
     logger: deps.logger,
@@ -157,6 +163,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     grantsManager,
     ratingService: rating,
     ledgerService: ledger,
+    walletService: wallet,
   })
 
   const subscriptions = new SubscriptionService({
@@ -171,12 +178,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     billingService: billing,
     ratingService: rating,
     ledgerService: ledger,
-  })
-
-  const wallet = new WalletService({
-    db: deps.db,
-    logger: deps.logger,
-    ledgerGateway: ledger,
+    walletService: wallet,
   })
 
   const entitlements = new EntitlementService({

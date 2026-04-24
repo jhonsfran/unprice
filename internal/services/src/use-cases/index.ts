@@ -1,6 +1,14 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
+export { activateSubscription } from "./subscription/activate"
 export { createSubscription } from "./subscription/create"
+export {
+  deriveActivationInputsFromPlan,
+  sizeReservation,
+  MINIMUM_FLOOR_AMOUNT,
+  CEILING_AMOUNT,
+  DEFAULT_REFILL_THRESHOLD_BPS,
+} from "./subscription/derive-activation-inputs"
 export { duplicatePlanVersion } from "./plan-version/duplicate"
 export { inviteMember } from "./workspace/invite-member"
 export { resendInvite } from "./workspace/resend-invite"

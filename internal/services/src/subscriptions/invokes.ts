@@ -8,7 +8,7 @@ import { toZonedTime } from "date-fns-tz"
 import { isNegative } from "dinero.js"
 import { DrizzleBillingRepository } from "../billing/repository.drizzle"
 import type { CustomerService } from "../customers/service"
-import type { LedgerEntry, LedgerGateway } from "../ledger"
+import { type LedgerEntry, type LedgerGateway, customerAccountKeys } from "../ledger"
 import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
 import type { SubscriptionRepository } from "./repository"
@@ -323,14 +323,26 @@ export async function invoiceSubscription({
         continue
       }
 
-      const postResult = await ledgerService.postCharge({
+      // Phase 7: flat subscription fees are a direct consumption —
+      // `customer.*.available.purchased → customer.*.consumed`. The
+      // `kind: "subscription"` + `statement_key` metadata pair makes the
+      // transfer a valid invoice line per the projection contract
+      // (slice 7.8). If the customer has no purchased balance, the
+      // transfer fails atomically (pgledger non-negativity) and the
+      // scheduler surfaces the error.
+      const postResult = await ledgerService.createTransfer({
         projectId: period.projectId,
-        customerId: period.customerId,
-        currency: phase.planVersion.currency,
+        fromAccount: customerAccountKeys(period.customerId).purchased,
+        toAccount: customerAccountKeys(period.customerId).consumed,
         amount: totalAmount,
         source: { type: sourceType, id: sourceId },
         statementKey: period.statementKey,
-        metadata: entryMetadata,
+        metadata: {
+          ...entryMetadata,
+          flow: "subscription",
+          kind: "subscription",
+          statement_key: period.statementKey,
+        },
         eventAt: new Date(now),
       })
 
@@ -449,10 +461,7 @@ export async function invoiceSubscription({
           pastDueAt: pastDueAt,
           dueAt: dueAt,
           paidAt: null,
-          subtotalCents: 0,
-          paymentAttempts: [],
-          totalCents: 0,
-          amountCreditUsed: 0,
+          totalAmount: 0,
           issueDate: null,
           metadata: { note: "Invoiced by scheduler" },
         })
@@ -476,76 +485,26 @@ export async function invoiceSubscription({
           return
         }
 
-        const projectedInvoiceItems = ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
-          const meta = entry.metadata as Record<string, unknown> | null
-          const prorationRaw = meta?.proration_factor
-          const prorationFactor =
-            typeof prorationRaw === "number" && Number.isFinite(prorationRaw) ? prorationRaw : 1
-
-          const unitSnap = meta?.unit_amount_snapshot as
-            | { amount: number; scale: number; currency: { code: string; exponent: number } }
-            | undefined
-          const unitAmountCents = unitSnap ? convertSnapshotToProviderCents(unitSnap) : 0
-          const lineCents = formatAmountForProvider(entry.amount).amount
-          const description = (meta?.description as string | undefined) ?? null
-
-          return {
-            id: newId("invoice_item"),
-            invoiceId: invoice.id,
-            featurePlanVersionId: (meta?.feature_plan_version_id as string | undefined) ?? null,
-            subscriptionItemId: (meta?.subscription_item_id as string | undefined) ?? null,
-            billingPeriodId: (meta?.billing_period_id as string | undefined) ?? null,
-            projectId: periodItemGroup.projectId,
-            quantity: Math.max(0, Math.trunc((meta?.quantity as number | undefined) ?? 0)),
-            cycleStartAt: (meta?.cycle_start_at as number | undefined) ?? statementStartAt,
-            cycleEndAt: (meta?.cycle_end_at as number | undefined) ?? statementEndAt,
-            kind: ((meta?.invoice_item_kind as string | undefined) ?? "period") as
-              | "period"
-              | "tax"
-              | "discount"
-              | "refund"
-              | "adjustment"
-              | "trial",
-            unitAmountCents,
-            amountSubtotal: lineCents,
-            amountTotal: lineCents,
-            prorationFactor,
-            description,
-            itemProviderId: null,
-            ledgerTransferId: entry.transferId,
-          }
-        })
-
-        await txBillingRepo.createInvoiceItemsBatch({ items: projectedInvoiceItems })
-
-        // Compute and persist invoice totals from the projected items.
-        const itemAmounts = await txBillingRepo.listInvoiceItemAmounts({
-          invoiceId: invoice.id,
-          projectId: phase.projectId,
-        })
-
-        const subtotalCents = itemAmounts.reduce((sum, item) => sum + (item.amountSubtotal ?? 0), 0)
-        const totalCents = itemAmounts.reduce((sum, item) => sum + (item.amountTotal ?? 0), 0)
+        // Phase 7: no `invoice_items` table. The invoice total is the sum
+        // of ledger entries credited to `customer.*.consumed` under this
+        // statement_key — same entries the API projects on read
+        // (slice 7.8). We sum here to stamp `invoices.totalAmount` for
+        // fast header reads; lines are re-derived from the ledger.
+        const totalAmount = ledgerEntriesToInvoice.reduce(
+          (sum: number, entry: LedgerEntry) => sum + formatAmountForProvider(entry.amount).amount,
+          0
+        )
 
         await txBillingRepo.updateInvoice({
           invoiceId: invoice.id,
           projectId: phase.projectId,
           data: {
-            subtotalCents,
-            totalCents,
+            totalAmount,
             updatedAtM: now,
           },
         })
 
-        const invoiceItemsInserted = await txBillingRepo.listInvoiceItemBillingPeriodIds({
-          invoiceId: invoice.id,
-          projectId: phase.projectId,
-        })
-
-        const periodIdsToMark = invoiceItemsInserted
-          .map((item) => item.billingPeriodId)
-          .filter((id): id is string => id !== null)
-
+        const periodIdsToMark = billingPeriodsToInvoice.map((p) => p.id)
         if (periodIdsToMark.length > 0) {
           await txBillingRepo.markPeriodsInvoiced({
             projectId: phase.projectId,
@@ -554,9 +513,6 @@ export async function invoiceSubscription({
             invoiceId: invoice.id,
           })
         }
-
-        // No "settle" step in the new ledger — entries point at this invoice
-        // via the shared statement_key in metadata.
       } catch (error) {
         logger.error("Error while invoicing phase", {
           phaseId: phase.id,

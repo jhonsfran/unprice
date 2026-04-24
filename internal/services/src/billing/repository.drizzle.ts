@@ -1,24 +1,18 @@
 import { type Database, and, eq, inArray, lte, sql } from "@unprice/db"
-import { billingPeriods, invoiceItems, invoices } from "@unprice/db/schema"
-import type { BillingPeriod, InvoiceItem, SubscriptionInvoice } from "@unprice/db/validators"
+import { billingPeriods, invoices } from "@unprice/db/schema"
+import type { BillingPeriod, SubscriptionInvoice } from "@unprice/db/validators"
 import type {
-  BatchUpdateInvoiceItemAmountsInput,
   BillingPeriodWithItem,
   BillingRepository,
   CapPendingPeriodsAtPhaseEndInput,
   CreateInvoiceInput,
-  CreateInvoiceItemsBatchInput,
   CreatePeriodsBatchInput,
   FindInvoiceByIdInput,
   FindInvoiceByProviderIdInput,
   FindInvoiceByStatementKeyInput,
-  FindInvoiceItemByBillingPeriodInput,
   FindInvoiceWithDetailsInput,
   GetLastPeriodForItemInput,
-  InvoiceItemForCreditCheck,
   InvoiceWithDetails,
-  ListInvoiceItemAmountsInput,
-  ListInvoiceItemBillingPeriodIdsInput,
   ListInvoicedPeriodsExceedingPhaseEndInput,
   ListPendingPeriodGroupsInput,
   ListPendingPeriodsForStatementInput,
@@ -26,7 +20,6 @@ import type {
   PeriodGroupRow,
   ShortenBillingPeriodInput,
   UpdateInvoiceInput,
-  UpdateInvoiceItemProviderIdInput,
   VoidPendingPeriodsInput,
 } from "./repository"
 
@@ -241,18 +234,7 @@ export class DrizzleBillingRepository implements BillingRepository {
     input: FindInvoiceWithDetailsInput
   ): Promise<InvoiceWithDetails | null> {
     const result = await this.db.query.invoices.findFirst({
-      with: {
-        customer: true,
-        invoiceItems: {
-          with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
-          },
-        },
-      },
+      with: { customer: true },
       where: (inv, ops) =>
         ops.and(ops.eq(inv.id, input.invoiceId), ops.eq(inv.projectId, input.projectId)),
     })
@@ -281,117 +263,4 @@ export class DrizzleBillingRepository implements BillingRepository {
     return (result as SubscriptionInvoice) ?? null
   }
 
-  async createInvoiceItemsBatch(input: CreateInvoiceItemsBatchInput): Promise<void> {
-    if (input.items.length === 0) return
-    await this.db
-      .insert(invoiceItems)
-      .values(input.items)
-      .onConflictDoNothing({
-        target: [invoiceItems.projectId, invoiceItems.invoiceId, invoiceItems.billingPeriodId],
-        where: sql`${invoiceItems.billingPeriodId} IS NOT NULL`,
-      })
-  }
-
-  async listInvoiceItemBillingPeriodIds(
-    input: ListInvoiceItemBillingPeriodIdsInput
-  ): Promise<Array<{ billingPeriodId: string | null }>> {
-    return this.db.query.invoiceItems.findMany({
-      columns: { billingPeriodId: true },
-      where: (item, ops) =>
-        ops.and(ops.eq(item.invoiceId, input.invoiceId), ops.eq(item.projectId, input.projectId)),
-    })
-  }
-
-  async batchUpdateInvoiceItemAmounts(input: BatchUpdateInvoiceItemAmountsInput): Promise<void> {
-    if (input.updates.length === 0) return
-
-    const quantityChunks = [sql`(case`]
-    const totalAmountChunks = [sql`(case`]
-    const unitAmountChunks = [sql`(case`]
-    const subtotalAmountChunks = [sql`(case`]
-    const descriptionChunks = [sql`(case`]
-
-    for (const item of input.updates) {
-      quantityChunks.push(
-        sql`when ${invoiceItems.id} = ${item.id} then cast(${item.quantity} as int)`
-      )
-      totalAmountChunks.push(
-        sql`when ${invoiceItems.id} = ${item.id} then cast(${item.totalAmount} as int)`
-      )
-      unitAmountChunks.push(
-        sql`when ${invoiceItems.id} = ${item.id} then cast(${item.unitAmount} as int)`
-      )
-      subtotalAmountChunks.push(
-        sql`when ${invoiceItems.id} = ${item.id} then cast(${item.subtotalAmount} as int)`
-      )
-      descriptionChunks.push(
-        sql`when ${invoiceItems.id} = ${item.id} then ${item.description ?? null}`
-      )
-    }
-
-    quantityChunks.push(sql`end)`)
-    totalAmountChunks.push(sql`end)`)
-    unitAmountChunks.push(sql`end)`)
-    subtotalAmountChunks.push(sql`end)`)
-    descriptionChunks.push(sql`end)`)
-
-    await this.db
-      .update(invoiceItems)
-      .set({
-        quantity: sql.join(quantityChunks, sql.raw(" ")),
-        unitAmountCents: sql.join(unitAmountChunks, sql.raw(" ")),
-        amountTotal: sql.join(totalAmountChunks, sql.raw(" ")),
-        amountSubtotal: sql.join(subtotalAmountChunks, sql.raw(" ")),
-        description: sql.join(descriptionChunks, sql.raw(" ")),
-      })
-      .where(
-        and(
-          eq(invoiceItems.invoiceId, input.invoiceId),
-          eq(invoiceItems.projectId, input.projectId),
-          inArray(invoiceItems.id, input.itemIds)
-        )
-      )
-  }
-
-  async listInvoiceItemAmounts(
-    input: ListInvoiceItemAmountsInput
-  ): Promise<Array<Pick<InvoiceItem, "amountSubtotal" | "amountTotal">>> {
-    return this.db.query.invoiceItems.findMany({
-      columns: { amountSubtotal: true, amountTotal: true },
-      where: (item, ops) =>
-        ops.and(ops.eq(item.projectId, input.projectId), ops.eq(item.invoiceId, input.invoiceId)),
-    })
-  }
-
-  async updateInvoiceItemProviderId(input: UpdateInvoiceItemProviderIdInput): Promise<void> {
-    await this.db
-      .update(invoiceItems)
-      .set({ itemProviderId: input.itemProviderId })
-      .where(and(eq(invoiceItems.id, input.itemId), eq(invoiceItems.projectId, input.projectId)))
-  }
-
-  async findInvoiceItemByBillingPeriod(
-    input: FindInvoiceItemByBillingPeriodInput
-  ): Promise<InvoiceItemForCreditCheck | null> {
-    const result = await this.db.query.invoiceItems.findFirst({
-      with: {
-        invoice: {
-          columns: { status: true },
-        },
-        subscriptionItem: {
-          with: {
-            featurePlanVersion: {
-              columns: { featureType: true, billingConfig: true },
-            },
-          },
-        },
-      },
-      where: (ii, ops) =>
-        ops.and(
-          ops.eq(ii.billingPeriodId, input.billingPeriodId),
-          ops.eq(ii.projectId, input.projectId)
-        ),
-    })
-    return (result as InvoiceItemForCreditCheck) ?? null
-  }
 }

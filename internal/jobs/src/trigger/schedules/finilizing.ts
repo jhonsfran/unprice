@@ -18,15 +18,6 @@ export const finilizingSchedule = schedules.task({
     const openInvoices = await db.query.invoices.findMany({
       with: {
         customer: true,
-        invoiceItems: {
-          with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
-          },
-        },
       },
       where: (inv, { and, eq, inArray, lte, or, isNull }) =>
         or(

@@ -707,21 +707,6 @@ export class CustomerService {
         with: {
           customer: true,
           subscription: true,
-          invoiceItems: {
-            with: {
-              featurePlanVersion: {
-                with: {
-                  planVersion: {
-                    with: {
-                      plan: true,
-                    },
-                  },
-                  feature: true,
-                },
-              },
-              billingPeriod: true,
-            },
-          },
         },
         where: (table, { eq, and }) =>
           and(

@@ -116,18 +116,6 @@ function sanitizeWebhookHeaders(
   return sanitized
 }
 
-function nextPaymentAttempts({
-  currentAttempts,
-  status,
-  now,
-}: {
-  currentAttempts: { status: string; createdAt: number }[] | null
-  status: string
-  now: number
-}): { status: string; createdAt: number }[] {
-  return [...(currentAttempts ?? []), { status, createdAt: now }]
-}
-
 async function applyWalletTopupSettlement({
   deps,
   projectId,
@@ -238,7 +226,6 @@ async function applyWebhookEvent({
   }
 
   if (normalizedEvent.eventType === "payment.succeeded") {
-    const alreadyPaid = invoice.status === "paid"
     await billingRepo.updateInvoice({
       invoiceId: invoice.id,
       projectId,
@@ -246,13 +233,6 @@ async function applyWebhookEvent({
         status: "paid",
         paidAt: invoice.paidAt ?? normalizedEvent.occurredAt,
         invoicePaymentProviderUrl: normalizedEvent.invoiceUrl ?? invoice.invoicePaymentProviderUrl,
-        paymentAttempts: alreadyPaid
-          ? invoice.paymentAttempts
-          : nextPaymentAttempts({
-              currentAttempts: invoice.paymentAttempts ?? null,
-              status: "paid",
-              now,
-            }),
         metadata: {
           ...(invoice.metadata ?? {}),
           reason: "payment_received",
@@ -297,11 +277,6 @@ async function applyWebhookEvent({
       data: {
         status: "paid",
         paidAt: invoice.paidAt ?? normalizedEvent.occurredAt,
-        paymentAttempts: nextPaymentAttempts({
-          currentAttempts: invoice.paymentAttempts ?? null,
-          status: "paid",
-          now,
-        }),
         metadata: {
           ...(invoice.metadata ?? {}),
           reason: "payment_received",
@@ -346,11 +321,6 @@ async function applyWebhookEvent({
     projectId,
     data: {
       status: failedStatus,
-      paymentAttempts: nextPaymentAttempts({
-        currentAttempts: invoice.paymentAttempts ?? null,
-        status: failedStatus,
-        now,
-      }),
       metadata: {
         ...(invoice.metadata ?? {}),
         reason: "payment_failed",
