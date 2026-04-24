@@ -37,7 +37,9 @@ type MeterWindowRow = {
   usage: number
   updatedAt: number | null
   createdAt: number
-  // Phase 7 reservation columns; null/zero until activation sets them.
+  // Phase 7 identity + reservation columns; null/zero until activation sets them.
+  projectId?: string | null
+  customerId?: string | null
   reservationId?: string | null
   allocationAmount?: number
   consumedAmount?: number
@@ -57,6 +59,8 @@ const METER_WINDOW_KEYS = new Set<string>([
   "usage",
   "updatedAt",
   "createdAt",
+  "projectId",
+  "customerId",
   "reservationId",
   "allocationAmount",
   "consumedAmount",
@@ -98,6 +102,7 @@ const testState = {
   db: null as FakeDbState | null,
   engineApply: vi.fn(),
   pricePerFeature: vi.fn(),
+  flushReservation: vi.fn(),
   logger: {
     debug: vi.fn(),
     emit: vi.fn(),
@@ -144,6 +149,13 @@ describe("EntitlementWindowDO", () => {
     testState.analyticsIngest.mockReset()
     testState.engineApply.mockReset()
     testState.pricePerFeature.mockReset()
+    testState.flushReservation.mockReset()
+    // Default: flush+refill settles with zero runway so tests that don't
+    // opt into the wallet path stay identical to their pre-7.5 shape.
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: { grantedAmount: 0, flushedAmount: 0, refundedAmount: 0, drainLegs: [] },
+    })
     // Default: unit pricing — amount = quantity * $1.00. We return fake Dinero
     // objects (toJSON + currency snapshot) so the real diffLedgerMinor /
     // transformScale pipeline can rescale them to LEDGER_SCALE (6).
@@ -682,6 +694,8 @@ describe("EntitlementWindowDO", () => {
       usage: 0,
       updatedAt: null,
       createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -722,6 +736,10 @@ describe("EntitlementWindowDO", () => {
       return facts
     })
 
+    // Fixture represents an in-flight refill within the SAME DO instance —
+    // flushSeq and pendingFlushSeq are aligned so crash recovery (which
+    // fires on pendingFlushSeq > flushSeq) stays out of the way; we're
+    // validating apply()'s single-flight guard, not the recovery path.
     db.meterWindowRows.set(DEFAULT_METER_KEY, {
       meterKey: DEFAULT_METER_KEY,
       currency: "USD",
@@ -730,6 +748,8 @@ describe("EntitlementWindowDO", () => {
       usage: 0,
       updatedAt: null,
       createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
       reservationId: "res_abc",
       allocationAmount: 2 * 100_000_000,
       consumedAmount: 100_000_000, // $1 already consumed, $1 remaining
@@ -737,7 +757,7 @@ describe("EntitlementWindowDO", () => {
       refillThresholdBps: 5000,
       refillChunkAmount: 100_000_000,
       refillInFlight: true, // a prior refill is still running
-      flushSeq: 3,
+      flushSeq: 4,
       pendingFlushSeq: 4,
     })
 
@@ -751,6 +771,273 @@ describe("EntitlementWindowDO", () => {
     )
     expect(state.waitUntilPromises).toHaveLength(0)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.pendingFlushSeq).toBe(4)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.flushSeq).toBe(4)
+  })
+
+  // ---------------------------------------------------------------------
+  // Phase 7.5 — in-process flush+refill. These exercise the real
+  // requestFlushAndRefill path: the DO calls WalletService.flushReservation
+  // (mocked), then folds the returned allocation/flush deltas back into
+  // SQLite. We assert both the happy path (grantedAmount extends runway,
+  // flushSeq advances, pendingFlushSeq clears) and the failure modes
+  // (error result + thrown error both clear refillInFlight but preserve
+  // pendingFlushSeq so crash recovery / the next apply can retry).
+  // ---------------------------------------------------------------------
+
+  it("folds flushReservation results into SQLite on a successful flush+refill", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    // Grant 4 new dollars of runway, recognize the 5-dollar flush leg.
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 4 * 100_000_000,
+        flushedAmount: 5 * 100_000_000,
+        refundedAmount: 0,
+        drainLegs: [],
+      },
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 7,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+    expect(result).toEqual({ allowed: true })
+    await Promise.all(state.waitUntilPromises)
+
+    // Contract with WalletService: projectId/customerId/currency come from
+    // the persisted window, statementKey is "{reservationId}:{periodEndAt}",
+    // final=false (this is a mid-period flush).
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith({
+      projectId: "proj_123",
+      customerId: "cus_123",
+      currency: "USD",
+      reservationId: "res_abc",
+      flushSeq: 8,
+      flushAmount: 5 * 100_000_000,
+      refillChunkAmount: 4 * 100_000_000,
+      statementKey: `res_abc:${BASE_NOW + 60_000}`,
+      final: false,
+    })
+
+    const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    // Allocation extended by grantedAmount; flushed catches up to consumed.
+    expect(after.allocationAmount).toBe(9 * 100_000_000)
+    expect(after.flushedAmount).toBe(5 * 100_000_000)
+    expect(after.flushSeq).toBe(8)
+    expect(after.pendingFlushSeq).toBeNull()
+    expect(after.refillInFlight).toBe(false)
+  })
+
+  it("clears refillInFlight but preserves pendingFlushSeq when flushReservation returns an error", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.flushReservation.mockResolvedValue({
+      err: { message: "WALLET_LEDGER_FAILED" },
+      val: null,
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 7,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.apply(createApplyInput())
+    await Promise.all(state.waitUntilPromises)
+
+    const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    // No allocation/flush advance on failure — caller retries with same seq.
+    expect(after.allocationAmount).toBe(5 * 100_000_000)
+    expect(after.flushedAmount).toBe(0)
+    expect(after.flushSeq).toBe(7)
+    // pendingFlushSeq (set to 8 by apply()) is preserved so crash recovery
+    // re-issues the same seq; refillInFlight clears so apply() can retry.
+    expect(after.pendingFlushSeq).toBe(8)
+    expect(after.refillInFlight).toBe(false)
+  })
+
+  it("clears refillInFlight when flushReservation throws unexpectedly", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.flushReservation.mockRejectedValue(new Error("neon connection refused"))
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.apply(createApplyInput())
+    await Promise.all(state.waitUntilPromises)
+
+    const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(after.refillInFlight).toBe(false)
+    // apply() already set pendingFlushSeq to 1; the thrown flush leaves it.
+    expect(after.pendingFlushSeq).toBe(1)
+    expect(after.flushSeq).toBe(0)
+  })
+
+  it("re-issues a pending flush on DO wake when pendingFlushSeq > flushSeq (crash recovery)", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 2 * 100_000_000,
+        flushedAmount: 100_000_000,
+        refundedAmount: 0,
+        drainLegs: [],
+      },
+    })
+
+    // Simulate a DO that was evicted mid-flush: pendingFlushSeq (5) runs
+    // ahead of the committed flushSeq (4), and the window already records
+    // $1 of unflushed consumption.
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 3 * 100_000_000,
+      consumedAmount: 100_000_000,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 2 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 4,
+      pendingFlushSeq: 5,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    // The recovery check runs inside blockConcurrencyWhile (the DO's
+    // `ready` promise). Drive that to completion through a public method
+    // that awaits `ready` before we inspect the scheduled waitUntils.
+    await durableObject.getEnforcementState()
+    await Promise.all(state.waitUntilPromises)
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    // Retry replays the SAME seq (5), not a new one. flushAmount is
+    // re-derived from consumed - flushed = $1.
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flushSeq: 5,
+        flushAmount: 100_000_000,
+        refillChunkAmount: 2 * 100_000_000,
+      })
+    )
+
+    // Post-recovery state: seq caught up, pending cleared, runway extended.
+    const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(after.flushSeq).toBe(5)
+    expect(after.pendingFlushSeq).toBeNull()
+    expect(after.allocationAmount).toBe(5 * 100_000_000)
+    expect(after.flushedAmount).toBe(100_000_000)
+    // Lazy Neon connection was opened once for the flush call.
+    expect(durableObject).toBeDefined()
+  })
+
+  it("persists projectId and customerId into meter_window on first apply", async () => {
+    // Identity fields are what flushReservation needs to call the ledger
+    // without re-threading apply's input — guard that ensureMeterWindow
+    // actually seeds them on the first insert.
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.apply(createApplyInput())
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)
+    expect(row?.projectId).toBe("proj_123")
+    expect(row?.customerId).toBe("cus_123")
   })
 })
 
@@ -792,6 +1079,19 @@ async function loadEntitlementWindowDO() {
 
   vi.doMock("@unprice/db", () => ({
     createConnection: createConnectionSpy,
+  }))
+
+  // Phase 7.5: the DO lazy-instantiates a WalletService on first refill.
+  // We mock the service and its ledger dep so tests can drive the flush
+  // outcome without a real Postgres connection.
+  vi.doMock("@unprice/services/ledger", () => ({
+    LedgerGateway: class {},
+  }))
+
+  vi.doMock("@unprice/services/wallet", () => ({
+    WalletService: class {
+      public flushReservation = testState.flushReservation
+    },
   }))
 
   vi.doMock("drizzle-orm", () => ({
@@ -1053,6 +1353,8 @@ function buildFakeDrizzle(state: FakeDbState) {
                   usage: value.usage != null ? Number(value.usage) : 0,
                   updatedAt: value.updatedAt != null ? Number(value.updatedAt) : null,
                   createdAt: Number(value.createdAt),
+                  projectId: (value.projectId as string | null | undefined) ?? null,
+                  customerId: (value.customerId as string | null | undefined) ?? null,
                 })
                 return
               }

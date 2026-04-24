@@ -36,7 +36,7 @@ export interface CaptureMath {
  * of the current allocation into an absolute scale-8 amount. Used by the DO
  * when instantiating `LocalReservation`: thresholds are configured as bps
  * so they stay sensible as allocation grows via refills, while the hot
- * path compares against an absolute `remaining < thresholdAmount`.
+ * path compares against an absolute `remaining < thresholdAmount`. This keeps the math safe
  */
 export function thresholdFromBps(allocationAmount: number, bps: number): number {
   if (allocationAmount <= 0 || bps <= 0) return 0

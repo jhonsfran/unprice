@@ -34,6 +34,13 @@ export const meterWindowTable = sqliteTable("meter_window", {
   updatedAt: integer("updated_at"),
   createdAt: integer("created_at").notNull(),
 
+  // Customer / project identity (Phase 7). Seeded from the first apply() —
+  // the DO already receives these on every call, we persist them so the
+  // wallet flush path (and alarm() in 7.7) can issue a ledger call without
+  // carrying apply's input forward.
+  projectId: text("project_id"),
+  customerId: text("customer_id"),
+
   // Reservation state (Phase 7).
   reservationId: text("reservation_id"),
   // Total money moved into `customer.{cid}.reserved` for this window.

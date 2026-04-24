@@ -4,6 +4,8 @@ import {
   type AnalyticsEntitlementMeterFact,
   entitlementMeterFactSchemaV1,
 } from "@unprice/analytics"
+import { createConnection } from "@unprice/db"
+import type { Currency } from "@unprice/db/validators"
 import {
   type ConfigFeatureVersionType,
   type OverageStrategy,
@@ -22,14 +24,14 @@ import {
   deriveMeterKey,
   findLimitExceededFact,
 } from "@unprice/services/entitlements"
-import {
-  LocalReservation,
-  thresholdFromBps,
-} from "@unprice/services/wallet/local-reservation"
+import { LedgerGateway } from "@unprice/services/ledger"
+import { WalletService } from "@unprice/services/wallet"
+import { LocalReservation, thresholdFromBps } from "@unprice/services/wallet/local-reservation"
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { z } from "zod"
+import type { Env } from "~/env"
 import { apiDrain } from "~/observability"
 import { idempotencyKeysTable, meterFactsOutboxTable, meterWindowTable, schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
@@ -173,15 +175,21 @@ export class EntitlementWindowDO extends DurableObject {
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly logger: AppLogger
   private readonly ready: Promise<void>
+  private readonly runtimeEnv: Env
   // In-memory source of truth for enforcement checks. Populated by apply()
   // after a successful commit with the limit/overageStrategy it received;
   // on DO eviction the cache is lost and the next apply rebuilds it.
   // periodEndAt is intentionally *not* cached in memory — alarm() reads it
   // from SQLite directly since the path is rare (every 30s at most).
   private cache: EnforcementCache | null = null
+  // Lazily constructed on the first flush+refill call so a DO that never
+  // opens a reservation never opens a Postgres connection.
+  private walletService: WalletService | null = null
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env as unknown as Cloudflare.Env)
+
+    this.runtimeEnv = env
 
     const requestId = this.ctx.id.toString()
     const { logger } = createStandaloneRequestLogger(
@@ -236,6 +244,31 @@ export class EntitlementWindowDO extends DurableObject {
           isLimitReached: false,
         }
       }
+
+      // Crash recovery (Phase 7.5). If the DO was evicted mid-flush, the
+      // SQLite row still carries `pending_flush_seq > flush_seq`. Re-issue
+      // the flush with the same seq — WalletService dedupes via the ledger
+      // idempotency key `flush:{reservationId}:{flushSeq}`, so a duplicate
+      // call after a successful commit is a no-op. `flushAmount` is
+      // re-derived from `consumed - flushed` because we don't persist the
+      // pending flush amount separately; any events accepted after the
+      // failed flush are folded into the retry, which is correct.
+      const window = this.readWalletWindow(this.db)
+      if (
+        window?.reservationId &&
+        window.pendingFlushSeq !== null &&
+        window.pendingFlushSeq !== undefined &&
+        window.pendingFlushSeq > window.flushSeq
+      ) {
+        const flushAmount = Math.max(0, window.consumedAmount - window.flushedAmount)
+        this.ctx.waitUntil(
+          this.requestFlushAndRefill({
+            flushSeq: window.pendingFlushSeq,
+            flushAmount,
+            refillChunkAmount: window.refillChunkAmount,
+          })
+        )
+      }
     })
   }
 
@@ -282,6 +315,8 @@ export class EntitlementWindowDO extends DurableObject {
         // — stacked grants from different fpvs are valid on the same stream.
         this.ensureMeterWindow(tx, {
           meterKey,
+          projectId: input.projectId,
+          customerId: input.customerId,
           priceConfig: input.priceConfig,
           currency: input.currency,
           periodEndAt: input.periodEndAt,
@@ -367,9 +402,11 @@ export class EntitlementWindowDO extends DurableObject {
 
           if (walletResult.needsRefill && !window.refillInFlight) {
             const nextSeq = window.flushSeq + 1
+
             tx.update(meterWindowTable)
               .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
               .run()
+
             refillTrigger = {
               flushSeq: nextSeq,
               // Flush leg = cumulative consumed - already flushed. Zero on the
@@ -460,6 +497,7 @@ export class EntitlementWindowDO extends DurableObject {
           message: error.message,
         }
 
+        // limit exceeded is a valid state
         this.db
           .insert(idempotencyKeysTable)
           .values({
@@ -481,6 +519,9 @@ export class EntitlementWindowDO extends DurableObject {
           message: error.message,
         }
 
+        // wallet empty is a valid state as well.
+        // TODO: probably we need to check the edge case where the reservation is not enough but
+        // there is still balance in the wallet
         this.db
           .insert(idempotencyKeysTable)
           .values({
@@ -513,6 +554,7 @@ export class EntitlementWindowDO extends DurableObject {
   }> {
     await this.ready
 
+    // cache is populated at initialization
     if (this.cache) {
       return {
         usage: this.cache.usage,
@@ -540,6 +582,8 @@ export class EntitlementWindowDO extends DurableObject {
       .all()
 
     if (batch.length > 0) {
+      // this can create double counting on fail but tinybird has
+      // dedupe protection, also the arch reads the last event value_after
       const didFlush = await this.flushToTinybird(batch)
 
       if (didFlush) {
@@ -579,6 +623,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     const remainingOutboxCount = this.getOutboxCount()
 
+    // keep an eye on this
     this.logger.info("entitlement outbox depth", {
       outbox_depth: remainingOutboxCount,
       alert: remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD,
@@ -618,6 +663,8 @@ export class EntitlementWindowDO extends DurableObject {
     tx: DrizzleSqliteDODatabase<typeof schema>,
     params: {
       meterKey: string
+      projectId: string
+      customerId: string
       priceConfig: ConfigFeatureVersionType
       currency: string
       periodEndAt: number
@@ -627,6 +674,8 @@ export class EntitlementWindowDO extends DurableObject {
     tx.insert(meterWindowTable)
       .values({
         meterKey: params.meterKey,
+        projectId: params.projectId,
+        customerId: params.customerId,
         currency: params.currency,
         priceConfig: params.priceConfig,
         periodEndAt: params.periodEndAt,
@@ -650,9 +699,11 @@ export class EntitlementWindowDO extends DurableObject {
   // no window row exists yet (pre-first-apply). A row with a null
   // `reservationId` means the DO is operating without a reservation —
   // callers must treat that as "skip wallet check".
-  private readWalletWindow(
-    tx: DrizzleSqliteDODatabase<typeof schema>
-  ): {
+  private readWalletWindow(tx: DrizzleSqliteDODatabase<typeof schema>): {
+    projectId: string | null
+    customerId: string | null
+    currency: string
+    periodEndAt: number | null
     reservationId: string | null
     allocationAmount: number
     consumedAmount: number
@@ -661,9 +712,14 @@ export class EntitlementWindowDO extends DurableObject {
     refillChunkAmount: number
     refillInFlight: boolean
     flushSeq: number
+    pendingFlushSeq: number | null
   } | null {
     const row = tx
       .select({
+        projectId: meterWindowTable.projectId,
+        customerId: meterWindowTable.customerId,
+        currency: meterWindowTable.currency,
+        periodEndAt: meterWindowTable.periodEndAt,
         reservationId: meterWindowTable.reservationId,
         allocationAmount: meterWindowTable.allocationAmount,
         consumedAmount: meterWindowTable.consumedAmount,
@@ -672,6 +728,7 @@ export class EntitlementWindowDO extends DurableObject {
         refillChunkAmount: meterWindowTable.refillChunkAmount,
         refillInFlight: meterWindowTable.refillInFlight,
         flushSeq: meterWindowTable.flushSeq,
+        pendingFlushSeq: meterWindowTable.pendingFlushSeq,
       })
       .from(meterWindowTable)
       .get()
@@ -679,6 +736,10 @@ export class EntitlementWindowDO extends DurableObject {
     if (!row) return null
 
     return {
+      projectId: row.projectId ?? null,
+      customerId: row.customerId ?? null,
+      currency: String(row.currency ?? ""),
+      periodEndAt: row.periodEndAt ?? null,
       reservationId: row.reservationId ?? null,
       allocationAmount: Number(row.allocationAmount ?? 0),
       consumedAmount: Number(row.consumedAmount ?? 0),
@@ -687,24 +748,101 @@ export class EntitlementWindowDO extends DurableObject {
       refillChunkAmount: Number(row.refillChunkAmount ?? 0),
       refillInFlight: Boolean(row.refillInFlight),
       flushSeq: Number(row.flushSeq ?? 0),
+      pendingFlushSeq: row.pendingFlushSeq ?? null,
     }
   }
 
-  // TODO(7.5): Replace with in-process WalletService.flushReservation call.
+  // Slice 7.5. Calls WalletService.flushReservation in-process and folds the returned
+  // allocation/flush delta back into the DO's SQLite state.
   //
-  // Until slice 7.5 wires the wallet service, this stub logs an error and
-  // marks the window as needing recovery. **Do not silently clear the
-  // refill flag** — that would let the DO drain its allocation without
-  // ever refilling, hitting WALLET_EMPTY on the next apply(). Instead we
-  // leave `refillInFlight = true` so subsequent apply() calls don't
-  // re-trigger, and surface the problem via logs.
-  private async requestFlushAndRefill(_trigger: RefillTrigger): Promise<void> {
-    await Promise.resolve()
-    this.logger.error("flush+refill requested but wallet service not wired (slice 7.5)", {
-      flushSeq: _trigger.flushSeq,
-      flushAmount: _trigger.flushAmount,
-      refillChunkAmount: _trigger.refillChunkAmount,
+  // `flushSeq` is the idempotency seal: the ledger dedupes on
+  // `flush:{reservationId}:{flushSeq}`, so replays after a crash produce
+  // the same outcome. On error we only clear `refillInFlight` — the
+  // `pendingFlushSeq` stays set so crash recovery (or the next apply()
+  // that observes `pendingFlushSeq > flushSeq`) can retry with the same
+  // seq. Crucially we do not advance `flushedAmount` on failure: the next
+  // retry re-derives `flushAmount` from `consumedAmount - flushedAmount`.
+  private async requestFlushAndRefill(trigger: RefillTrigger): Promise<void> {
+    const window = this.readWalletWindow(this.db)
+
+    if (!window?.reservationId || !window.projectId || !window.customerId) {
+      this.logger.error("flush+refill requested without a reservation", {
+        flushSeq: trigger.flushSeq,
+        flushAmount: trigger.flushAmount,
+        refillChunkAmount: trigger.refillChunkAmount,
+      })
+      this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
+      return
+    }
+
+    try {
+      const walletService = this.getWalletService()
+      const result = await walletService.flushReservation({
+        projectId: window.projectId,
+        customerId: window.customerId,
+        currency: window.currency as Currency,
+        reservationId: window.reservationId,
+        flushSeq: trigger.flushSeq,
+        flushAmount: trigger.flushAmount,
+        refillChunkAmount: trigger.refillChunkAmount,
+        // We keep stable statement for invoicing
+        statementKey: `${window.reservationId}:${window.periodEndAt ?? 0}`,
+        final: false,
+      })
+
+      if (result.err) {
+        this.logger.error("flush+refill failed", {
+          error: result.err.message,
+          flushSeq: trigger.flushSeq,
+          reservationId: window.reservationId,
+        })
+        // Clear the single-flight flag so apply() can re-trigger on the
+        // next event; leave pendingFlushSeq set so crash recovery picks up
+        // the same seq after an eviction.
+        this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
+        return
+      }
+
+      this.db
+        .update(meterWindowTable)
+        .set({
+          allocationAmount: window.allocationAmount + result.val.grantedAmount,
+          flushedAmount: window.flushedAmount + result.val.flushedAmount,
+          flushSeq: trigger.flushSeq,
+          pendingFlushSeq: null,
+          refillInFlight: false,
+        })
+        .run()
+    } catch (error) {
+      this.logger.error("flush+refill threw unexpectedly", {
+        error: this.errorMessage(error),
+        flushSeq: trigger.flushSeq,
+      })
+      this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
+    }
+  }
+
+  // Construct the wallet service on first use. Each DO instance opens at
+  // most one connection — pool lifetime is the DO's lifetime.
+  private getWalletService(): WalletService {
+    if (this.walletService) return this.walletService
+
+    const db = createConnection({
+      env: this.runtimeEnv.APP_ENV,
+      primaryDatabaseUrl: this.runtimeEnv.DATABASE_URL,
+      read1DatabaseUrl: this.runtimeEnv.DATABASE_READ1_URL,
+      read2DatabaseUrl: this.runtimeEnv.DATABASE_READ2_URL,
+      logger: this.runtimeEnv.DRIZZLE_LOG?.toString() === "true",
+      singleton: false,
     })
+
+    const ledger = new LedgerGateway({ db, logger: this.logger })
+    this.walletService = new WalletService({
+      db,
+      logger: this.logger,
+      ledgerGateway: ledger,
+    })
+    return this.walletService
   }
 
   private computeLimitReached(

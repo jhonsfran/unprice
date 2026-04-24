@@ -8,11 +8,11 @@ import { fromLedgerMinor, toLedgerMinor } from "@unprice/money"
 
 import type { DbExecutor, Transaction } from "../deps"
 import {
-  customerAccountKeys,
   type LedgerGateway,
   type LedgerSource,
   type LedgerTransferRequest,
   type PlatformFundingKind,
+  customerAccountKeys,
   platformAccountKey,
 } from "../ledger"
 import { UnPriceLedgerError } from "../ledger"
@@ -167,9 +167,7 @@ export class WalletService {
     this.ledger = deps.ledgerGateway
   }
 
-  public async transfer(
-    input: WalletTransferInput
-  ): Promise<Result<void, UnPriceWalletError>> {
+  public async transfer(input: WalletTransferInput): Promise<Result<void, UnPriceWalletError>> {
     if (input.amount <= 0) {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
     }
@@ -191,9 +189,8 @@ export class WalletService {
       return await this.db.transaction(async (tx) => {
         await this.lockCustomer(tx, input.customerId)
 
-        const statementKey = typeof input.metadata.statement_key === "string"
-          ? input.metadata.statement_key
-          : null
+        const statementKey =
+          typeof input.metadata.statement_key === "string" ? input.metadata.statement_key : null
 
         const transferResult = await this.ledger.createTransfer(
           {
@@ -334,7 +331,9 @@ export class WalletService {
     const keys = customerAccountKeys(input.customerId)
 
     try {
+      // all happen in the same trasaction for atomicity
       return await this.db.transaction(async (tx) => {
+        // avoid concurrent reservations fighting for the last cent
         await this.lockCustomer(tx, input.customerId)
 
         const reservation = await tx.query.entitlementReservations.findFirst({
@@ -347,10 +346,9 @@ export class WalletService {
         if (!reservation) {
           return Err(new UnPriceWalletError({ message: "WALLET_RESERVATION_NOT_FOUND" }))
         }
+
         if (reservation.reconciledAt) {
-          return Err(
-            new UnPriceWalletError({ message: "WALLET_RESERVATION_ALREADY_RECONCILED" })
-          )
+          return Err(new UnPriceWalletError({ message: "WALLET_RESERVATION_ALREADY_RECONCILED" }))
         }
 
         const transfers: LedgerTransferRequest[] = []
@@ -366,6 +364,7 @@ export class WalletService {
             source: { type: "wallet_flush_consume", id: idemBase },
             statementKey: input.statementKey,
             metadata: {
+              // TODO: should I add source Id? for intance DO id can help for debugging
               flow: "flush",
               kind: "usage",
               reservation_id: input.reservationId,
@@ -381,6 +380,7 @@ export class WalletService {
         let grantedAmount = 0
         let refundedAmount = 0
 
+        // handling final flush from sources. Happens when the source close the billing cycle.
         if (input.final) {
           // Read reserved balance before the batch executes. This is safe
           // because pgledger enforces non-negative on the account — if
@@ -389,7 +389,9 @@ export class WalletService {
           // snapshot minus flushAmount, which is correct: any shortfall
           // means refund = 0 (no money to return).
           const reservedBalance = await this.readBalance(tx, keys.reserved)
+          // math is precise since scale is 8
           const refund = Math.max(0, reservedBalance - input.flushAmount)
+
           if (refund > 0) {
             transfers.push({
               projectId: input.projectId,
@@ -435,6 +437,7 @@ export class WalletService {
               },
             })
           }
+
           if (purchasedDrained > 0) {
             transfers.push({
               projectId: input.projectId,
@@ -467,6 +470,8 @@ export class WalletService {
         const newConsumed = reservation.consumedAmount + input.flushAmount
         const newAllocation = reservation.allocationAmount + grantedAmount
 
+        // update the reservation so we have a way to say the current status of the system
+        // withput waiting for sources to report
         await tx
           .update(entitlementReservations)
           .set({
@@ -496,9 +501,7 @@ export class WalletService {
     }
   }
 
-  public async adjust(
-    input: AdjustInput
-  ): Promise<Result<AdjustOutput, UnPriceWalletError>> {
+  public async adjust(input: AdjustInput): Promise<Result<AdjustOutput, UnPriceWalletError>> {
     if (input.signedAmount === 0) {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
     }
@@ -596,12 +599,7 @@ export class WalletService {
             settledAmount: input.paidAmount,
             ledgerTransferId: transferResult.val.id,
           })
-          .where(
-            and(
-              eq(walletTopups.id, topup.id),
-              eq(walletTopups.projectId, topup.projectId)
-            )
-          )
+          .where(and(eq(walletTopups.id, topup.id), eq(walletTopups.projectId, topup.projectId)))
 
         return Ok({ topupId: topup.id, ledgerTransferId: transferResult.val.id })
       })
@@ -628,10 +626,7 @@ export class WalletService {
     }
 
     const keys = customerAccountKeys(input.customerId)
-    const toAccount = platformAccountKey(
-      GRANT_SOURCE_TO_PLATFORM[input.source],
-      input.projectId
-    )
+    const toAccount = platformAccountKey(GRANT_SOURCE_TO_PLATFORM[input.source], input.projectId)
 
     const transferResult = await this.ledger.createTransfer(
       {
@@ -847,12 +842,7 @@ export class WalletService {
       await tx
         .update(walletGrants)
         .set({ remainingAmount: grant.remainingAmount - drain })
-        .where(
-          and(
-            eq(walletGrants.id, grant.id),
-            eq(walletGrants.projectId, grant.projectId)
-          )
-        )
+        .where(and(eq(walletGrants.id, grant.id), eq(walletGrants.projectId, grant.projectId)))
 
       legs.push({
         source: "granted",
@@ -874,14 +864,10 @@ export class WalletService {
   }
 
   private async lockCustomer(tx: DbExecutor, customerId: string): Promise<void> {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`customer:${customerId}`}))`
-    )
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`customer:${customerId}`}))`)
   }
 
-  private missingConsumedMetadata(
-    metadata: Record<string, unknown>
-  ): string[] | null {
+  private missingConsumedMetadata(metadata: Record<string, unknown>): string[] | null {
     const missing: string[] = []
     if (typeof metadata.statement_key !== "string" || metadata.statement_key.length === 0) {
       missing.push("statement_key")
@@ -930,9 +916,7 @@ export class WalletService {
       return Err(this.wrapLedgerError(error))
     }
     this.logger.error(event, { error: toErrorContext(error), ...context })
-    return Err(
-      new UnPriceWalletError({ message: "WALLET_LEDGER_FAILED", context: { event } })
-    )
+    return Err(new UnPriceWalletError({ message: "WALLET_LEDGER_FAILED", context: { event } }))
   }
 }
 
