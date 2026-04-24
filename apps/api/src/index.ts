@@ -37,6 +37,8 @@ import { apiEvlog } from "~/observability"
 import { registerGetRealtimeTicketV1 } from "./routes/analitycs/getRealtimeTicketV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
 import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
+import { registerGetInvoiceV1 } from "./routes/invoices/getInvoiceV1"
+import { registerGetWalletV1 } from "./routes/wallet/getWalletV1"
 
 const app = newApp()
 
@@ -149,6 +151,12 @@ registerGetRealtimeTicketV1(app)
 
 // Lakehouse routes
 registerGetLakehouseFilePlanV1(app)
+
+// Wallet routes
+registerGetWalletV1(app)
+
+// Invoice routes
+registerGetInvoiceV1(app)
 
 // Export handler
 const handler = {

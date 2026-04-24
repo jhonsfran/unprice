@@ -1,7 +1,7 @@
 import { type Database, and, asc, eq, gt, isNull, sql } from "@unprice/db"
 import { entitlementReservations, walletGrants, walletTopups } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import type { Currency, WalletGrantSource } from "@unprice/db/validators"
+import type { Currency, WalletGrant, WalletGrantSource } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromLedgerMinor, toLedgerMinor } from "@unprice/money"
@@ -129,6 +129,23 @@ export interface ExpireGrantInput {
   amount: number
   source: WalletGrantSource
   idempotencyKey: string
+}
+
+export interface GetWalletStateInput {
+  projectId: string
+  customerId: string
+}
+
+export interface WalletBalances {
+  purchased: number
+  granted: number
+  reserved: number
+  consumed: number
+}
+
+export interface WalletStateOutput {
+  balances: WalletBalances
+  grants: WalletGrant[]
 }
 
 const GRANT_SOURCE_TO_PLATFORM: Record<WalletGrantSource, PlatformFundingKind> = {
@@ -648,6 +665,52 @@ export class WalletService {
 
     if (transferResult.err) return Err(this.wrapLedgerError(transferResult.err))
     return Ok(undefined)
+  }
+
+  /**
+   * Read-only snapshot of the customer's wallet: the four sub-account
+   * balances and the list of active grants (not expired, not voided,
+   * `remaining_amount > 0`). Missing ledger accounts report zero — a
+   * customer who has never transacted is not an error, just an empty
+   * wallet. No advisory lock: balances are eventually consistent with
+   * in-flight writes, which is what a read endpoint wants.
+   */
+  public async getWalletState(
+    input: GetWalletStateInput
+  ): Promise<Result<WalletStateOutput, UnPriceWalletError>> {
+    const keys = customerAccountKeys(input.customerId)
+
+    try {
+      const [purchased, granted, reserved, consumed, grants] = await Promise.all([
+        this.readBalance(this.db, keys.purchased),
+        this.readBalance(this.db, keys.granted),
+        this.readBalance(this.db, keys.reserved),
+        this.readBalance(this.db, keys.consumed),
+        this.db.query.walletGrants.findMany({
+          where: and(
+            eq(walletGrants.customerId, input.customerId),
+            eq(walletGrants.projectId, input.projectId),
+            isNull(walletGrants.expiredAt),
+            isNull(walletGrants.voidedAt),
+            gt(walletGrants.remainingAmount, 0)
+          ),
+          orderBy: [
+            sql`COALESCE(${walletGrants.expiresAt}, 'infinity'::timestamptz) ASC`,
+            asc(walletGrants.createdAt),
+          ],
+        }),
+      ])
+
+      return Ok({
+        balances: { purchased, granted, reserved, consumed },
+        grants,
+      })
+    } catch (error) {
+      return this.handleUnexpected("wallet.get_state_failed", error, {
+        customerId: input.customerId,
+        projectId: input.projectId,
+      })
+    }
   }
 
   // -------------------------------------------------------------------------

@@ -18,8 +18,11 @@ export {
   type ExpireGrantInput,
   type FlushReservationInput,
   type FlushReservationOutput,
+  type GetWalletStateInput,
   type SettleTopUpInput,
   type SettleTopUpOutput,
+  type WalletBalances,
   type WalletDeps,
+  type WalletStateOutput,
   type WalletTransferInput,
 } from "./service"

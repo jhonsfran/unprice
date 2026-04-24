@@ -82,6 +82,26 @@ export interface CustomerAccountsBundle {
   consumed: LedgerAccount
 }
 
+/**
+ * A single invoice line projected from the ledger. The contract:
+ *
+ *   "A transfer is an invoice line iff it credits `customer.{cid}.consumed`
+ *    AND carries `metadata.statement_key` AND `metadata.kind`."
+ *
+ * Not a stored table — materialized on read from `pgledger_entries_view`.
+ */
+export interface InvoiceLine {
+  entryId: string
+  statementKey: string
+  kind: string
+  description: string | null
+  quantity: number | null
+  amount: Dinero<number>
+  currency: Currency
+  createdAt: Date
+  metadata: Record<string, unknown> | null
+}
+
 type PgledgerTransferRow = {
   id: string
   from_account_id: string
@@ -499,6 +519,57 @@ export class LedgerGateway {
     }
   }
 
+  /**
+   * Invoice line projection — the ledger is the single source of truth.
+   *
+   * Returns every transfer that credits a `customer.*.consumed` account
+   * under the given `(projectId, statementKey)` tuple, provided the
+   * transfer carries a `kind` in metadata. The `statement_key` side of
+   * the contract is satisfied structurally by the idempotency join.
+   *
+   * Filters applied inline (no materialized view):
+   *   - `i.project_id / i.statement_key` — from the indexed idempotency row
+   *   - credit leg only (`e.amount > 0`)
+   *   - destination is a customer consumed sub-account
+   *   - `metadata.kind` is set (transfers without `kind` are internal, not
+   *     invoice lines — e.g. reservation/refill movements)
+   */
+  public async getInvoiceLines(opts: {
+    projectId: string
+    statementKey: string
+  }): Promise<Result<InvoiceLine[], UnPriceLedgerError>> {
+    try {
+      const result = await this.db.execute<{
+        id: string
+        amount: string
+        created_at: Date
+        metadata: Record<string, unknown> | null
+        currency: string
+      }>(
+        sql`
+          SELECT e.id, e.amount, e.created_at, e.metadata, a.currency
+          FROM unprice_ledger_idempotency i
+          INNER JOIN pgledger_entries_view  e ON e.transfer_id = i.transfer_id
+          INNER JOIN pgledger_accounts_view a ON a.id          = e.account_id
+          WHERE i.project_id            = ${opts.projectId}
+            AND i.statement_key         = ${opts.statementKey}
+            AND e.amount                > 0
+            AND a.name                  LIKE 'customer.%.consumed'
+            AND (e.metadata->>'kind') IS NOT NULL
+          ORDER BY e.created_at ASC, e.id ASC
+        `
+      )
+
+      return Ok(result.rows.map((row) => this.toInvoiceLine(row, opts.statementKey)))
+    } catch (error) {
+      this.logger.error("ledger.get_invoice_lines_failed", {
+        error: toErrorContext(error),
+        ...opts,
+      })
+      return Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" }))
+    }
+  }
+
   // -------------------------------------------------------------------------
   // Internal helpers
   // -------------------------------------------------------------------------
@@ -716,5 +787,40 @@ export class LedgerGateway {
       eventAt: row.event_at,
       metadata: row.metadata,
     }
+  }
+
+  private toInvoiceLine(
+    row: {
+      id: string
+      amount: string
+      created_at: Date
+      metadata: Record<string, unknown> | null
+      currency: string
+    },
+    statementKey: string
+  ): InvoiceLine {
+    const currency = asCurrency(row.currency)
+    const metadata = row.metadata ?? {}
+    return {
+      entryId: row.id,
+      statementKey,
+      kind: String(metadata.kind ?? ""),
+      description:
+        typeof metadata.description === "string" ? metadata.description : null,
+      quantity: this.parseQuantity(metadata.quantity),
+      amount: fromLedgerAmount(row.amount, currency),
+      currency,
+      createdAt: row.created_at,
+      metadata: row.metadata,
+    }
+  }
+
+  private parseQuantity(value: unknown): number | null {
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string") {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+    return null
   }
 }
