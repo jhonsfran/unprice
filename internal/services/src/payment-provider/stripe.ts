@@ -7,7 +7,6 @@ import type { Result } from "@unprice/error"
 import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { Stripe } from "@unprice/stripe"
-import { toErrorContext } from "../utils/log-context"
 import { UnPricePaymentProviderError } from "./errors"
 import type {
   AddInvoiceItemOpts,
@@ -113,8 +112,8 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
-      this.logger.error("Error creating session", {
-        error: toErrorContext(e),
+      this.logger.error(e, {
+        context: "Error creating session",
         ...opts,
       })
 
@@ -184,8 +183,8 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
-      this.logger.error("Error creating session", {
-        error: toErrorContext(e),
+      this.logger.error(e, {
+        context: "Error creating session",
         ...opts,
       })
 
@@ -261,8 +260,8 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       })
     } catch (error) {
       const e = error as Stripe.errors.StripeError
-      this.logger.error("Error creating wallet topup session", {
-        error: toErrorContext(e),
+      this.logger.error(e, {
+        context: "Error creating wallet topup session",
         customerId: opts.customerId,
         projectId: opts.projectId,
       })
@@ -284,7 +283,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
-      this.logger.error("Error getting session", { error: toErrorContext(e), ...opts })
+      this.logger.error(e, { context: "Error getting session", ...opts })
 
       return Err(new FetchError({ message: e.message, retry: false }))
     }
@@ -317,8 +316,8 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Error
 
-      this.logger.error("Error listing payment methods", {
-        error: toErrorContext(e),
+      this.logger.error(e, {
+        context: "Error listing payment methods",
         ...opts,
       })
 
@@ -378,7 +377,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       .catch((error) => {
         const e = error as Stripe.errors.StripeError
 
-        this.logger.error("Error creating invoice", { error: toErrorContext(e), ...opts })
+        this.logger.error(e, { context: "Error creating invoice", ...opts })
 
         return Err(new FetchError({ message: e.message, retry: false }))
       })
@@ -429,7 +428,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       .catch((error) => {
         const e = error as Stripe.errors.StripeError
 
-        this.logger.error("Error updating invoice", { error: toErrorContext(e), ...opts })
+        this.logger.error(e, { context: "Error updating invoice", ...opts })
 
         return Err(new FetchError({ message: e.message, retry: false }))
       })
@@ -501,7 +500,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       .catch((error) => {
         const e = error as Stripe.errors.StripeError
 
-        this.logger.error("Error adding invoice item", { error: toErrorContext(e), ...opts })
+        this.logger.error(e, { context: "Error adding invoice item", ...opts })
 
         return Err(new FetchError({ message: e.message, retry: false }))
       })
@@ -539,7 +538,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       .catch((error) => {
         const e = error as Stripe.errors.StripeError
 
-        this.logger.error("Error adding invoice item", { error: toErrorContext(e), ...opts })
+        this.logger.error(e, { context: "Error adding invoice item", ...opts })
 
         return Err(new FetchError({ message: e.message, retry: false }))
       })
@@ -567,7 +566,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
-      this.logger.error("Error collecting payment", { error: toErrorContext(e), ...opts })
+      this.logger.error(e, { context: "Error collecting payment", ...opts })
 
       return Err(new FetchError({ message: e.message, retry: false }))
     }
@@ -634,7 +633,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
-      this.logger.error("Error getting invoice status", { error: toErrorContext(e), ...opts })
+      this.logger.error(e, { context: "Error getting invoice status", ...opts })
 
       return Err(new FetchError({ message: e.message, retry: false }))
     }
@@ -664,7 +663,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
-      this.logger.error("Error getting invoice", { error: toErrorContext(e), ...opts })
+      this.logger.error(e, { context: "Error getting invoice", ...opts })
 
       return Err(
         new FetchError({
@@ -685,7 +684,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
-      this.logger.error("Error sending invoice", { error: toErrorContext(e), ...opts })
+      this.logger.error(e, { context: "Error sending invoice", ...opts })
 
       return Err(new FetchError({ message: e.message, retry: false }))
     }
@@ -701,7 +700,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     } catch (error) {
       const e = error as Stripe.errors.StripeError
 
-      this.logger.error("Error finalizing invoice", { error: toErrorContext(e), ...opts })
+      this.logger.error(e, { context: "Error finalizing invoice", ...opts })
 
       return Err(new FetchError({ message: e.message, retry: false }))
     }
@@ -755,8 +754,8 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       })
     } catch (error) {
       const e = error as Error
-      this.logger.error("Error verifying stripe webhook", {
-        error: toErrorContext(e),
+      this.logger.error(e, {
+        context: "Error verifying stripe webhook",
       })
       return Err(new FetchError({ message: e.message, retry: false }))
     }

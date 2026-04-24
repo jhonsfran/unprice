@@ -120,8 +120,8 @@ export async function duplicatePlanVersion(
     })
   } catch (error) {
     const e = error as Error
-    deps.logger.error("error duplicating plan version", {
-      error: toErrorContext(e),
+    deps.logger.error(e, {
+      context: "error duplicating plan version",
       projectId,
       planVersionId: id,
     })

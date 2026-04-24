@@ -748,11 +748,12 @@ export class EntitlementWindowDO extends DurableObject {
         refillChunkAmount: 0,
         statementKey: `${window.reservationId}:${window.periodEndAt ?? 0}`,
         final: true,
+        sourceId: this.ctx.id.toString(),
       })
 
       if (result.err) {
-        this.logger.error("final flush failed", {
-          error: result.err.message,
+        this.logger.error(result.err, {
+          context: "final flush failed",
           flushSeq: nextSeq,
           reservationId: window.reservationId,
         })
@@ -778,8 +779,8 @@ export class EntitlementWindowDO extends DurableObject {
         })
         .run()
     } catch (error) {
-      this.logger.error("final flush threw unexpectedly", {
-        error: this.errorMessage(error),
+      this.logger.error(error, {
+        context: "final flush threw unexpectedly",
         flushSeq: nextSeq,
         reservationId: window.reservationId,
       })
@@ -921,14 +922,14 @@ export class EntitlementWindowDO extends DurableObject {
         flushSeq: trigger.flushSeq,
         flushAmount: trigger.flushAmount,
         refillChunkAmount: trigger.refillChunkAmount,
-        // We keep stable statement for invoicing
         statementKey: `${window.reservationId}:${window.periodEndAt ?? 0}`,
         final: false,
+        sourceId: this.ctx.id.toString(),
       })
 
       if (result.err) {
-        this.logger.error("flush+refill failed", {
-          error: result.err.message,
+        this.logger.error(result.err, {
+          context: "flush+refill failed",
           flushSeq: trigger.flushSeq,
           reservationId: window.reservationId,
         })
@@ -950,8 +951,8 @@ export class EntitlementWindowDO extends DurableObject {
         })
         .run()
     } catch (error) {
-      this.logger.error("flush+refill threw unexpectedly", {
-        error: this.errorMessage(error),
+      this.logger.error(error, {
+        context: "flush+refill threw unexpectedly",
         flushSeq: trigger.flushSeq,
       })
       this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
@@ -1043,8 +1044,8 @@ export class EntitlementWindowDO extends DurableObject {
     try {
       facts = batch.map((row) => entitlementMeterFactSchemaV1.parse(JSON.parse(row.payload)))
     } catch (error) {
-      this.logger.error("Failed to parse entitlement meter fact outbox payload", {
-        error: this.errorMessage(error),
+      this.logger.error(error, {
+        context: "Failed to parse entitlement meter fact outbox payload",
         batchSize: batch.length,
       })
       return false
@@ -1065,8 +1066,8 @@ export class EntitlementWindowDO extends DurableObject {
         quarantined,
       })
     } catch (error) {
-      this.logger.error("Failed to ingest entitlement meter facts to Tinybird", {
-        error: this.errorMessage(error),
+      this.logger.error(error, {
+        context: "Failed to ingest entitlement meter facts to Tinybird",
         batchSize: facts.length,
       })
     }

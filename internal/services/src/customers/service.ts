@@ -110,8 +110,8 @@ export class CustomerService {
         }
       })
       .catch((e) => {
-        this.logger.error("error getting getActiveSubscriptionData from db", {
-          error: toErrorContext(e),
+        this.logger.error(e, {
+          context: "error getting getActiveSubscriptionData from db",
         })
 
         return null
@@ -188,8 +188,8 @@ export class CustomerService {
     })
 
     if (err) {
-      this.logger.error("error getting getCustomersProjectData", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting getCustomersProjectData",
       })
 
       return Err(
@@ -292,8 +292,8 @@ export class CustomerService {
     })
 
     if (err) {
-      this.logger.error("error getting getCustomerData", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting getCustomerData",
       })
 
       return Err(
@@ -356,8 +356,8 @@ export class CustomerService {
     })
 
     if (err) {
-      this.logger.error("error getting getCustomerByExternalIdData", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting getCustomerByExternalIdData",
       })
 
       return Err(
@@ -397,8 +397,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error getting customer by id in project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting customer by id in project",
         projectId,
         customerId: id,
       })
@@ -465,8 +465,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error updating customer record", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating customer record",
         projectId,
         customerId: id,
       })
@@ -566,8 +566,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error checking customer existence by email", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error checking customer existence by email",
         projectId,
       })
       return Err(err)
@@ -596,8 +596,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error getting customer by email", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting customer by email",
         projectId,
       })
       return Err(err)
@@ -645,8 +645,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error getting customer subscriptions", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting customer subscriptions",
         customerId,
         projectId,
       })
@@ -682,8 +682,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error getting customer invoices", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting customer invoices",
         customerId,
         projectId,
       })
@@ -723,8 +723,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error getting invoice by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting invoice by id",
         customerId,
         projectId,
       })
@@ -802,8 +802,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error listing customers by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing customers by project",
         projectId,
       })
       return Err(err)
@@ -858,8 +858,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error creating customer", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating customer",
         projectId,
         email,
       })
@@ -899,8 +899,8 @@ export class CustomerService {
     )
 
     if (err) {
-      this.logger.error("error deleting customer", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error deleting customer",
         projectId,
         customerId: id,
       })
@@ -981,8 +981,8 @@ export class CustomerService {
     })
 
     if (err) {
-      this.logger.error("error getting customer subscription", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting customer subscription",
       })
 
       return Err(
@@ -1233,11 +1233,11 @@ export class CustomerService {
       })
 
       if (err) {
-        this.logger.error("payment provider error", {
+        this.logger.error(err, {
           customerId: providerCustomerId,
           projectId,
           provider,
-          error: toErrorContext(err),
+          context: "payment provider error",
         })
         return []
       }
@@ -1246,11 +1246,11 @@ export class CustomerService {
     } catch (err) {
       const error = err as Error
 
-      this.logger.error("payment provider error", {
+      this.logger.error(error, {
         customerId: providerCustomerId,
         projectId,
         provider,
-        error: toErrorContext(error),
+        context: "payment provider error",
       })
       return []
     }
@@ -1321,8 +1321,8 @@ export class CustomerService {
     })
 
     if (err) {
-      this.logger.error("error getting payment methods", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting payment methods",
       })
 
       return Err(

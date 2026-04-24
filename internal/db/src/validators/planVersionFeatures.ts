@@ -93,16 +93,16 @@ export const dineroSchema = z
       return z.NEVER
     }
 
-    const priceCents = data.displayAmount
+    const priceDisplay = data.displayAmount
 
     // only rely on the currency code because the scale is not always the same
     const currencyDinero = currencies[data.dinero.currency.code as keyof typeof currencies]
 
     // recalculate the scale base on the currency
-    const precision = priceCents.split(".")[1]?.length ?? currencyDinero.exponent
+    const precision = priceDisplay.split(".")[1]?.length ?? currencyDinero.exponent
 
     // convert the price to the smallest unit
-    const amount = Math.round(Number(priceCents) * 10 ** precision)
+    const amount = Math.round(Number(priceDisplay) * 10 ** precision)
 
     const price = dinero({
       amount: amount,
@@ -117,7 +117,7 @@ export const dineroSchema = z
       // every downstream consumer (CalculatedPrice, test fixtures, etc.).
       return {
         dinero: price.toJSON() as z.infer<typeof dineroSnapshotSchema>,
-        displayAmount: priceCents,
+        displayAmount: priceDisplay,
       }
     } catch {
       ctx.addIssue({

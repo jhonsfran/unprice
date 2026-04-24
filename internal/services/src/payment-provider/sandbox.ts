@@ -102,10 +102,10 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
       {
         id: "pm_sandbox_1234",
         name: "Sandbox Card",
-        last4: "4242",
+        last4: "0000",
         expMonth: 12,
         expYear: 2030,
-        brand: "visa",
+        brand: "sandox",
       },
     ])
   }

@@ -173,13 +173,10 @@ export async function renewSubscription(opts: {
       currentCycleEndAt: current.end,
     }
   } catch (error) {
-    logger.error(
-      `Error while renewing subscription ${error instanceof Error ? error.message : "unknown error"}`,
-      {
-        error: toErrorContext(error),
-        subscriptionId: subscription.id,
-      }
-    )
+    logger.error(error, {
+      context: "Error while renewing subscription",
+      subscriptionId: subscription.id,
+    })
     throw error
   }
 }
@@ -261,11 +258,11 @@ export async function invoiceSubscription({
       })
 
       if (ratingResult.err) {
-        logger.error("Error while rating billing period before ledger posting", {
+        logger.error(ratingResult.err, {
           billingPeriodId: period.id,
           phaseId: phase.id,
           statementKey: period.statementKey,
-          error: toErrorContext(ratingResult.err),
+          context: "Error while rating billing period before ledger posting",
         })
         throw ratingResult.err
       }
@@ -347,11 +344,11 @@ export async function invoiceSubscription({
       })
 
       if (postResult.err) {
-        logger.error("Error while posting rated period to ledger", {
+        logger.error(postResult.err, {
           billingPeriodId: period.id,
           phaseId: phase.id,
           statementKey: period.statementKey,
-          error: toErrorContext(postResult.err),
+          context: "Error while posting rated period to ledger",
         })
         throw postResult.err
       }
@@ -366,10 +363,10 @@ export async function invoiceSubscription({
     })
 
     if (statementEntriesResult.err) {
-      logger.error("Error while loading statement-key ledger entries", {
+      logger.error(statementEntriesResult.err, {
         phaseId: phase.id,
         statementKey: periodItemGroup.statementKey,
-        error: toErrorContext(statementEntriesResult.err),
+        context: "Error while loading statement-key ledger entries",
       })
       throw statementEntriesResult.err
     }
@@ -514,11 +511,11 @@ export async function invoiceSubscription({
           })
         }
       } catch (error) {
-        logger.error("Error while invoicing phase", {
+        logger.error(error, {
           phaseId: phase.id,
           statementStartAt: statementStartAt,
           statementEndAt: statementEndAt,
-          error: toErrorContext(error),
+          context: "Error while invoicing phase",
         })
 
         // Drizzle auto-rolls back on throw — no explicit tx.rollback() needed.
@@ -533,17 +530,4 @@ export async function invoiceSubscription({
   }
 }
 
-// Convert a Dinero scale-N snapshot back into the provider scale-2 cent value
-// invoice_items expect. The snapshot's `currency.exponent` carries the target
-// scale (e.g. 2 for USD); rounding mirrors `formatAmountForProvider`'s behavior.
-function convertSnapshotToProviderCents(snapshot: {
-  amount: number
-  scale: number
-  currency: { exponent: number }
-}): number {
-  const targetScale = snapshot.currency.exponent
-  const diff = snapshot.scale - targetScale
-  if (diff <= 0) return snapshot.amount
-  const divisor = 10 ** diff
-  return Math.round(snapshot.amount / divisor)
-}
+

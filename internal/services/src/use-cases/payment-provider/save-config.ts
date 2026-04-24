@@ -38,8 +38,8 @@ export async function savePaymentProviderConfig(
   )
 
   if (encryptErr) {
-    deps.logger.error("error encrypting payment provider key", {
-      error: toErrorContext(encryptErr),
+    deps.logger.error(encryptErr, {
+      context: "error encrypting payment provider key",
       projectId,
       paymentProvider,
     })
@@ -63,8 +63,8 @@ export async function savePaymentProviderConfig(
     )
 
     if (err) {
-      deps.logger.error("error encrypting payment provider webhook secret", {
-        error: toErrorContext(err),
+      deps.logger.error(err, {
+        context: "error encrypting payment provider webhook secret",
         projectId,
         paymentProvider,
       })
@@ -114,8 +114,8 @@ export async function savePaymentProviderConfig(
   )
 
   if (err) {
-    deps.logger.error("error saving payment provider config", {
-      error: toErrorContext(err),
+    deps.logger.error(err, {
+      context: "error saving payment provider config",
       projectId,
       paymentProvider,
     })

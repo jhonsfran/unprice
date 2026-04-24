@@ -198,8 +198,8 @@ export class LedgerGateway {
       this.seededProjects.add(cacheKey)
       return Ok(undefined)
     } catch (error) {
-      this.logger.error("ledger.seed_platform_accounts_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.seed_platform_accounts_failed",
         projectId,
         currency,
       })
@@ -239,8 +239,8 @@ export class LedgerGateway {
       })
       return Ok(bundle)
     } catch (error) {
-      this.logger.error("ledger.ensure_customer_accounts_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.ensure_customer_accounts_failed",
         customerId,
         currency,
       })
@@ -259,8 +259,8 @@ export class LedgerGateway {
       const account = await this.ensureAccount(opts, this.db)
       return Ok(account)
     } catch (error) {
-      this.logger.error("ledger.create_account_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.create_account_failed",
         name: opts.name,
       })
       return Err(new UnPriceLedgerError({ message: "LEDGER_TRANSFER_FAILED" }))
@@ -276,7 +276,7 @@ export class LedgerGateway {
       if (!row) return Err(new UnPriceLedgerError({ message: "LEDGER_ACCOUNT_NOT_FOUND" }))
       return Ok(this.toAccount(row))
     } catch (error) {
-      this.logger.error("ledger.get_account_failed", { error: toErrorContext(error), name })
+      this.logger.error(error, { context: "ledger.get_account_failed", name })
       return Err(new UnPriceLedgerError({ message: "LEDGER_GET_BALANCE_FAILED" }))
     }
   }
@@ -301,7 +301,7 @@ export class LedgerGateway {
       if (!account) return Err(new UnPriceLedgerError({ message: "LEDGER_ACCOUNT_NOT_FOUND" }))
       return Ok(account.balance)
     } catch (error) {
-      this.logger.error("ledger.get_account_balance_failed", { error: toErrorContext(error), name })
+      this.logger.error(error, { context: "ledger.get_account_balance_failed", name })
       return Err(new UnPriceLedgerError({ message: "LEDGER_GET_BALANCE_FAILED" }))
     }
   }
@@ -347,8 +347,8 @@ export class LedgerGateway {
       return Ok(transfer)
     } catch (error) {
       if (error instanceof UnPriceLedgerError) return Err(error)
-      this.logger.error("ledger.create_transfer_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.create_transfer_failed",
         projectId: request.projectId,
         sourceType: request.source.type,
         sourceId: request.source.id,
@@ -418,8 +418,8 @@ export class LedgerGateway {
       return Ok(transfers)
     } catch (error) {
       if (error instanceof UnPriceLedgerError) return Err(error)
-      this.logger.error("ledger.create_transfers_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.create_transfers_failed",
         count: requests.length,
       })
       return Err(new UnPriceLedgerError({ message: "LEDGER_BATCH_FAILED" }))
@@ -447,8 +447,8 @@ export class LedgerGateway {
       )
       return Ok(result.rows.map((row) => this.toEntry(row, asCurrency(row.currency))))
     } catch (error) {
-      this.logger.error("ledger.get_entries_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.get_entries_failed",
         accountName: opts.accountName,
       })
       return Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" }))
@@ -482,8 +482,8 @@ export class LedgerGateway {
       )
       return Ok(result.rows.map((row) => this.toEntry(row, asCurrency(row.currency))))
     } catch (error) {
-      this.logger.error("ledger.get_entries_by_source_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.get_entries_by_source_failed",
         ...opts,
       })
       return Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" }))
@@ -511,8 +511,8 @@ export class LedgerGateway {
       )
       return Ok(result.rows.map((row) => this.toEntry(row, asCurrency(row.currency))))
     } catch (error) {
-      this.logger.error("ledger.get_entries_by_statement_key_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.get_entries_by_statement_key_failed",
         ...opts,
       })
       return Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" }))
@@ -562,8 +562,8 @@ export class LedgerGateway {
 
       return Ok(result.rows.map((row) => this.toInvoiceLine(row, opts.statementKey)))
     } catch (error) {
-      this.logger.error("ledger.get_invoice_lines_failed", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "ledger.get_invoice_lines_failed",
         ...opts,
       })
       return Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" }))

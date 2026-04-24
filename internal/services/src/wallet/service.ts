@@ -1,4 +1,4 @@
-import { type Database, and, asc, eq, gt, isNull, sql } from "@unprice/db"
+import { type Database, and, asc, eq, gt, isNull, or, sql } from "@unprice/db"
 import { entitlementReservations, walletGrants, walletTopups } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { Currency, WalletGrant, WalletGrantSource } from "@unprice/db/validators"
@@ -77,6 +77,7 @@ export interface FlushReservationInput {
   refillChunkAmount: number
   statementKey: string
   final: boolean
+  sourceId?: string
 }
 
 export interface FlushReservationOutput {
@@ -358,7 +359,7 @@ export class WalletService {
     const keys = customerAccountKeys(input.customerId)
 
     try {
-      // all happen in the same trasaction for atomicity
+      // all happen in the same transaction for atomicity
       return await this.db.transaction(async (tx) => {
         // avoid concurrent reservations fighting for the last cent
         await this.lockCustomer(tx, input.customerId)
@@ -391,8 +392,8 @@ export class WalletService {
             source: { type: "wallet_flush_consume", id: idemBase },
             statementKey: input.statementKey,
             metadata: {
-              // TODO: should I add source Id? for intance DO id can help for debugging
               flow: "flush",
+              ...(input.sourceId ? { source_id: input.sourceId } : {}),
               kind: "usage",
               reservation_id: input.reservationId,
               flush_seq: input.flushSeq,
@@ -895,13 +896,17 @@ export class WalletService {
     projectId: string,
     requestedAmount: number
   ): Promise<{ drained: number; legs: DrainLeg[] }> {
+    const now = new Date()
     const activeGrants = await tx.query.walletGrants.findMany({
       where: and(
         eq(walletGrants.customerId, customerId),
         eq(walletGrants.projectId, projectId),
         isNull(walletGrants.expiredAt),
         isNull(walletGrants.voidedAt),
-        gt(walletGrants.remainingAmount, 0)
+        gt(walletGrants.remainingAmount, 0),
+        // Belt-and-suspenders: skip grants whose expiry has passed even if
+        // the nightly cron hasn't marked them yet
+        or(isNull(walletGrants.expiresAt), gt(walletGrants.expiresAt, now))
       ),
       orderBy: [
         // soonest-expiring first; never-expiring last

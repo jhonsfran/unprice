@@ -37,8 +37,8 @@ export async function setOnboardingCompleted(
   )
 
   if (err) {
-    deps.logger.error("error setting onboarding completed", {
-      error: toErrorContext(err),
+    deps.logger.error(err, {
+      context: "error setting onboarding completed",
       userId,
     })
     return Err(err)

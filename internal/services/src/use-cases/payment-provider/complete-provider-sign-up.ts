@@ -152,8 +152,8 @@ export async function completeProviderSignUp(
   )
 
   if (customerSessionErr) {
-    deps.logger.error("Error loading customer session for provider sign up", {
-      error: toErrorContext(customerSessionErr),
+    deps.logger.error(customerSessionErr, {
+      context: "Error loading customer session for provider sign up",
       projectId,
       customerSessionId: metadata.data.customerSessionId,
       provider,
@@ -214,8 +214,8 @@ export async function completeProviderSignUp(
       )
     }
 
-    deps.logger.error("Error upserting customer for provider sign up", {
-      error: toErrorContext(error),
+    deps.logger.error(error, {
+      context: "Error upserting customer for provider sign up",
       projectId,
       customerSessionId: customerSession.id,
       provider,
@@ -276,8 +276,8 @@ export async function completeProviderSignUp(
   )
 
   if (providerMappingErr) {
-    deps.logger.error("Error upserting customer provider mapping", {
-      error: toErrorContext(providerMappingErr),
+    deps.logger.error(providerMappingErr, {
+      context: "Error upserting customer provider mapping",
       projectId,
       customerId: customerUnprice.id,
       provider,

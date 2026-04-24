@@ -128,11 +128,10 @@ export async function keyAuth(c: Context<HonoEnv>) {
         limiter: c.env.RL_FREE_6000_60s,
       })
     } catch (rateLimitError) {
-      logger.error("apikey rate limit check failed", {
+      logger.error(rateLimitError instanceof Error ? rateLimitError.message : String(rateLimitError ?? ""), {
         path: requestPath,
         workspaceId: key.project.workspaceId,
-        error:
-          rateLimitError instanceof Error ? rateLimitError.message : String(rateLimitError ?? ""),
+        context: "apikey rate limit check failed",
       })
     }
   }

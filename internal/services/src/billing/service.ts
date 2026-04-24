@@ -24,25 +24,12 @@ import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
 import type { RatedCharge, RatingInput } from "../rating/types"
-import { SubscriptionMachine } from "../subscriptions/machine"
+import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
-import { SubscriptionLock } from "../subscriptions/subscriptionLock"
-import { toErrorContext } from "../utils/log-context"
+import { withLockedMachine } from "../subscriptions/withLockedMachine"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
 import { DrizzleBillingRepository } from "./repository.drizzle"
-
-interface ComputeInvoiceItemsResult {
-  id: string
-  totalAmount: number
-  unitAmount: number
-  subtotalAmount: number
-  quantity: number
-  prorate: number
-  description?: string
-  cycleStartAt: number
-  cycleEndAt: number
-}
 
 type ComputeCurrentUsageResult = RatedCharge
 
@@ -114,149 +101,33 @@ export class BillingService {
     subscriptionId: string
     projectId: string
     now: number
-    // new options
     lock?: boolean
     ttlMs?: number
     db?: Database
     dryRun?: boolean
     run: (m: SubscriptionMachine) => Promise<T>
   }): Promise<T> {
-    const {
-      subscriptionId,
-      projectId,
-      now,
-      run,
-      lock: shouldLock = true,
-      ttlMs = 30_000,
-      db,
-      dryRun = false,
-    } = args
-
-    const trx = db ?? this.db
-
-    // create the lock if it should be locked
-    const lock =
-      shouldLock && !dryRun ? new SubscriptionLock({ db: trx, projectId, subscriptionId }) : null
-
-    if (lock) {
-      const acquired = await lock.acquire({
-        ttlMs,
-        now,
-        staleTakeoverMs: 120_000,
-        ownerStaleMs: ttlMs,
-      })
-      this.setLockContext({
-        type: "normal",
-        resource: "subscription",
-        action: "acquire",
-        acquired,
-        ttl_ms: ttlMs,
-      })
-      if (!acquired) {
-        this.logger.warn("subscription lock acquire returned false; lock may be held", {
-          subscriptionId,
-          projectId,
-          ttlMs,
-        })
-      }
-      if (!acquired) throw new UnPriceBillingError({ message: "SUBSCRIPTION_BUSY" })
-    }
-
-    // heartbeat to keep the lock alive for long transitions
-    const stopHeartbeat = lock
-      ? (() => {
-          let stopped = false
-          const startedAt = Date.now()
-          const renewEveryMs = Math.max(1_000, Math.floor(ttlMs / 2))
-          const maxHoldMs = Math.max(ttlMs * 10, 2 * 60_000) // cap renewals to avoid indefinite locks
-
-          const interval = setInterval(async () => {
-            if (stopped) return
-            const elapsed = Date.now() - startedAt
-            if (elapsed > maxHoldMs) {
-              this.setLockContext({
-                type: "normal",
-                resource: "subscription",
-                action: "heartbeat_stopped",
-                acquired: false,
-                ttl_ms: ttlMs,
-                max_hold_ms: maxHoldMs,
-              })
-              this.logger.warn("subscription lock heartbeat maxHoldMs reached; stopping renew", {
-                subscriptionId,
-                projectId,
-                ttlMs,
-                maxHoldMs,
-              })
-              stopped = true
-              clearInterval(interval)
-              return
-            }
-            try {
-              const ok = await lock.extend({ ttlMs })
-              if (!ok) {
-                this.setLockContext({
-                  type: "normal",
-                  resource: "subscription",
-                  action: "extend",
-                  acquired: false,
-                  ttl_ms: ttlMs,
-                })
-                this.logger.warn("subscription lock extend returned false; lock may be lost", {
-                  subscriptionId,
-                  projectId,
-                })
-              }
-            } catch (e) {
-              this.setLockContext({
-                type: "normal",
-                resource: "subscription",
-                action: "extend_error",
-                acquired: false,
-                ttl_ms: ttlMs,
-              })
-              this.logger.error("subscription lock heartbeat extend failed", {
-                error: toErrorContext(e),
-                subscriptionId,
-                projectId,
-              })
-            }
-          }, renewEveryMs)
-
-          return () => {
-            stopped = true
-            clearInterval(interval)
-          }
-        })()
-      : () => {}
-
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      customer: this.customerService,
-      ratingService: this.ratingService,
-      ledgerService: this.ledgerService,
-      walletService: this.walletService,
-      db: trx,
-      repo: new DrizzleSubscriptionRepository(trx),
-      dryRun,
-    })
-
-    if (err) {
-      stopHeartbeat()
-      if (lock) await lock.release()
-      throw err
-    }
+    const trx = args.db ?? this.db
 
     try {
-      return await run(machine)
-    } finally {
-      await machine.shutdown()
-      stopHeartbeat()
-      if (lock) await lock.release()
+      return await withLockedMachine({
+        ...args,
+        db: trx,
+        repo: new DrizzleSubscriptionRepository(trx),
+        logger: this.logger,
+        analytics: this.analytics,
+        customer: this.customerService,
+        ratingService: this.ratingService,
+        ledgerService: this.ledgerService,
+        walletService: this.walletService,
+        setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
+          this.setLockContext(ctx),
+      })
+    } catch (e) {
+      if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
+        throw new UnPriceBillingError({ message: "SUBSCRIPTION_BUSY" })
+      }
+      throw e
     }
   }
 
@@ -365,7 +236,6 @@ export class BillingService {
       return Err(new UnPriceBillingError({ message: "Invoice not found" }))
     }
 
-    const MAX_PAYMENT_ATTEMPTS = 10
     const invoicePaymentProviderId = invoice.invoicePaymentProviderId
     const paymentMethodId = invoice.paymentMethodId
 
@@ -845,10 +715,10 @@ export class BillingService {
 
         return updatedInvoice
       } catch (error) {
-        this.logger.error("Error finalizing invoice", {
+        this.logger.error(error, {
+          context: "Error finalizing invoice",
           invoiceId: openInvoiceData.id,
           projectId: openInvoiceData.projectId,
-          error: toErrorContext(error),
         })
         tx.rollback()
         throw error
@@ -992,8 +862,8 @@ export class BillingService {
                     tx
                   )
                   if (err) {
-                    this.logger.error("billing.mid_cycle_refund_failed", {
-                      error: toErrorContext(err),
+                    this.logger.error(err, {
+                      context: "billing.mid_cycle_refund_failed",
                       periodId: period.id,
                       phaseId: phase.id,
                     })
@@ -1072,7 +942,7 @@ export class BillingService {
                   invoiceAt,
                   whenToBill,
                   invoiceId: null,
-                  amountEstimateCents: null,
+                  amountEstimate: null,
                   reason: w.isTrial ? ("trial" as const) : ("normal" as const),
                 }
               })
@@ -1092,17 +962,14 @@ export class BillingService {
         return Ok({ phasesProcessed: phases.length, cyclesCreated })
       })
       .catch((error) => {
-        this.logger.error(
-          `Error in billing period backfill transaction, ${error instanceof Error ? error.message : String(error)}`,
-          {
-            error,
-            subscriptionId,
-            projectId,
-            now,
-            phases: phases.length,
-            cyclesCreated,
-          }
-        )
+        this.logger.error(error, {
+          context: "Error in billing period backfill transaction",
+          subscriptionId,
+          projectId,
+          now,
+          phases: phases.length,
+          cyclesCreated,
+        })
 
         return Err(
           new UnPriceBillingError({
@@ -1225,10 +1092,10 @@ export class BillingService {
     })
 
     if (grantsErr) {
-      this.logger.error("Failed to get grants for customer", {
+      this.logger.error(grantsErr, {
+        context: "Failed to get grants for customer",
         customerId,
         projectId,
-        error: toErrorContext(grantsErr),
       })
       return Err(new UnPriceBillingError({ message: grantsErr.message }))
     }
@@ -1276,9 +1143,9 @@ export class BillingService {
       })
 
       if (computedStateResult.err) {
-        this.logger.error("Failed to compute entitlement state", {
+        this.logger.error(computedStateResult.err, {
+          context: "Failed to compute entitlement state",
           featureSlug,
-          error: toErrorContext(computedStateResult.err),
         })
         continue
       }
@@ -1292,9 +1159,9 @@ export class BillingService {
       })
 
       if (billingWindowResult.err) {
-        this.logger.error("Failed to calculate billing window", {
+        this.logger.error(billingWindowResult.err, {
+          context: "Failed to calculate billing window",
           featureSlug,
-          error: toErrorContext(billingWindowResult.err),
         })
         continue
       }
@@ -1371,8 +1238,8 @@ export class BillingService {
           })
 
         if (usageErr) {
-          this.logger.error("Failed to batch fetch usage data", {
-            error: toErrorContext(usageErr),
+          this.logger.error(usageErr, {
+            context: "Failed to batch fetch usage data",
             windowKey,
           })
           // Continue with other windows, but log error
@@ -1403,9 +1270,9 @@ export class BillingService {
       })
 
       if (calculationResult.err) {
-        this.logger.error("Failed to calculate feature price", {
+        this.logger.error(calculationResult.err, {
+          context: "Failed to calculate feature price",
           featureSlug,
-          error: toErrorContext(calculationResult.err),
         })
         continue
       }

@@ -351,8 +351,8 @@ export class PlanService {
     })
 
     if (err) {
-      this.logger.error("error getting list of plans", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting list of plans",
       })
 
       return Err(
@@ -415,8 +415,8 @@ export class PlanService {
     })
 
     if (err) {
-      this.logger.error("error getting plan version", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan version",
       })
 
       return Err(
@@ -460,8 +460,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan by id",
         planId: id,
         projectId,
       })
@@ -490,8 +490,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan by slug", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan by slug",
         slug,
         projectId,
       })
@@ -542,8 +542,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error removing plan", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error removing plan",
         projectId,
         planId: id,
       })
@@ -658,8 +658,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error updating plan record", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating plan record",
         projectId,
         planId: id,
       })
@@ -740,8 +740,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error listing plans by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing plans by project",
         projectId,
       })
       return Err(err)
@@ -783,8 +783,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error checking plan exists", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error checking plan exists",
         projectId,
         slug,
       })
@@ -858,8 +858,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan versions by slug", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan versions by slug",
         projectId,
         slug,
       })
@@ -947,8 +947,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan subscriptions by slug", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan subscriptions by slug",
         projectId,
         slug,
       })
@@ -986,8 +986,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan by id",
         projectId,
         planId,
       })
@@ -1017,8 +1017,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan version by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan version by id",
         projectId,
         planVersionId,
       })
@@ -1068,8 +1068,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan version by id with details", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan version by id with details",
         projectId,
         planVersionId,
       })
@@ -1112,8 +1112,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan version for duplication", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan version for duplication",
         projectId,
         planVersionId,
       })
@@ -1210,8 +1210,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error creating plan version", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating plan version",
         projectId,
         planId,
       })
@@ -1301,8 +1301,8 @@ export class PlanService {
       )
 
       if (err) {
-        this.logger.error("error updating published plan version", {
-          error: toErrorContext(err),
+        this.logger.error(err, {
+          context: "error updating published plan version",
           projectId,
           planVersionId: id,
         })
@@ -1506,8 +1506,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error updating draft plan version", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating draft plan version",
         projectId,
         planVersionId: id,
       })
@@ -1618,8 +1618,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error deactivating plan version", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error deactivating plan version",
         projectId,
         planVersionId: id,
       })
@@ -1681,8 +1681,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error removing plan version", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error removing plan version",
         projectId,
         planVersionId: id,
       })
@@ -1737,8 +1737,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error getting plan version feature by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting plan version feature by id",
         projectId,
         planVersionFeatureId: id,
       })
@@ -1804,8 +1804,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error listing plan version features by plan version id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing plan version features by plan version id",
         projectId,
         planVersionId,
       })
@@ -1985,8 +1985,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error creating plan version feature", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating plan version feature",
         projectId,
         planVersionId,
         featureId,
@@ -2195,8 +2195,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error updating plan version feature", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating plan version feature",
         projectId,
         planVersionFeatureId: id,
         planVersionId,
@@ -2277,8 +2277,8 @@ export class PlanService {
     )
 
     if (err) {
-      this.logger.error("error removing plan version feature", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error removing plan version feature",
         projectId,
         planVersionFeatureId: id,
       })

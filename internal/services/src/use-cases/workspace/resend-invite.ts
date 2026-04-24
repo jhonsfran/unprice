@@ -64,8 +64,8 @@ export async function resendInvite(
     })
   } catch (error) {
     const e = error as Error
-    deps.logger.error("error resending workspace invite", {
-      error: toErrorContext(e),
+    deps.logger.error(e, {
+      context: "error resending workspace invite",
       workspaceId: workspace.id,
       email,
     })

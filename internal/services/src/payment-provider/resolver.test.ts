@@ -103,7 +103,7 @@ describe("PaymentProviderResolver", () => {
         id: "evt_1",
         type: "sandbox.test",
       }),
-      signature: "sandbox-secret",
+      signature: "sandbox_webhook_secret",
     })
 
     expect(verifyOk?.err).toBeUndefined()
@@ -119,9 +119,9 @@ describe("PaymentProviderResolver", () => {
     expect(verifyErr?.err).toBeDefined()
   })
 
-  it("returns CUSTOMER_NOT_FOUND when customer does not exist", async () => {
+  it("resolves sandbox without a paymentProviderConfig row", async () => {
     const db = createMockDb()
-    db.query.customers.findFirst = vi.fn().mockResolvedValue(null)
+    db.query.paymentProviderConfig.findFirst = vi.fn().mockResolvedValue(null)
 
     const resolver = new PaymentProviderResolver({
       db,
@@ -129,13 +129,12 @@ describe("PaymentProviderResolver", () => {
     })
 
     const resolved = await resolver.resolve({
-      customerId: "cus_missing",
+      customerId: "cus_1",
       projectId: "proj_1",
       provider: "sandbox",
     })
 
-    expect(resolved.val).toBeUndefined()
-    expect(resolved.err).toBeDefined()
-    expect(resolved.err?.message).toContain("Customer not found")
+    expect(resolved.err).toBeUndefined()
+    expect(resolved.val?.getCustomerId()).toBe("provider_customer_1")
   })
 })

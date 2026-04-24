@@ -93,12 +93,18 @@ export async function publishPlanVersion(
 
   if (paymentMethodRequired) {
     const { err: validatePaymentMethodErr } = await deps.services.customers.getPaymentProvider({
-      customerId: workspaceUnPriceCustomerId,
       projectId,
       provider: planVersionData.paymentProvider,
     })
 
     if (validatePaymentMethodErr) {
+      deps.logger.error(validatePaymentMethodErr, {
+        context: "error validating payment provider for plan version publish",
+        projectId,
+        planVersionId: id,
+        provider: planVersionData.paymentProvider,
+      })
+
       return Ok({
         state: "payment_provider_error",
       })
@@ -175,8 +181,8 @@ export async function publishPlanVersion(
     })
   } catch (error) {
     const publishErr = error as Error
-    deps.logger.error("error publishing plan version", {
-      error: toErrorContext(publishErr),
+    deps.logger.error(publishErr, {
+      context: "error publishing plan version",
       projectId,
       planVersionId: id,
     })

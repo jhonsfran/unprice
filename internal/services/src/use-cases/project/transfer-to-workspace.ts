@@ -81,8 +81,8 @@ export async function transferToWorkspace(
     })
   } catch (error) {
     const e = error as Error
-    deps.logger.error("error transferring project to workspace", {
-      error: toErrorContext(e),
+    deps.logger.error(e, {
+      context: "error transferring project to workspace",
       projectId: project.id,
       targetWorkspaceId,
     })

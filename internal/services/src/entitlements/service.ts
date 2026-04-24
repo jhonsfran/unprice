@@ -232,10 +232,10 @@ export class EntitlementService {
         })
 
         if (usageErr) {
-          this.logger.error("Failed to get current usage", {
+          this.logger.error(usageErr, {
             customerId,
             projectId,
-            error: toErrorContext(usageErr),
+            context: "Failed to get current usage",
           })
           return null
         }
@@ -289,10 +289,10 @@ export class EntitlementService {
     )
 
     if (aclErr) {
-      this.logger.error("Failed to check if customer is blocked", {
+      this.logger.error(aclErr, {
         customerId,
         projectId,
-        error: toErrorContext(aclErr),
+        context: "Failed to check if customer is blocked",
       })
       return null
     }

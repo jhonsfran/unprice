@@ -631,6 +631,10 @@ export class SubscriptionMachine {
           tags: ["subscription"],
           description: "Subscription is active",
           on: {
+            ACTIVATE: {
+              target: "activating",
+              actions: "logStateTransition",
+            },
             CANCEL: {
               target: "canceling",
               actions: "logStateTransition",
@@ -888,11 +892,11 @@ export class SubscriptionMachine {
 
           lastPersisted = currentState as SubscriptionStatus
         } catch (err) {
-          this.logger.error("Failed to update subscription status", {
+          this.logger.error(err as Error, {
             subscriptionId: this.subscriptionId,
             projectId: this.projectId,
             state: currentState,
-            error: (err as Error).message,
+            context: "Failed to update subscription status",
           })
         }
       },
@@ -1020,6 +1024,15 @@ export class SubscriptionMachine {
 
   public async invoice(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
     return this.sendAndWait({ type: "INVOICE" }, { tag: "subscription", timeout: 30000 })
+  }
+
+  /**
+   * Triggers Phase 7 wallet activation (plan credits + reservations)
+   * for an already-active subscription. Used when a subscription is
+   * created directly as active (e.g. sandbox provider, no trial).
+   */
+  public async activate(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
+    return this.sendAndWait({ type: "ACTIVATE" }, { tag: "subscription", timeout: 15000 })
   }
 
   public async reportPaymentSuccess({

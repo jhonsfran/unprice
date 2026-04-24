@@ -99,7 +99,7 @@ export interface CreatePeriodsBatchInput {
     invoiceAt: number
     whenToBill: "pay_in_advance" | "pay_in_arrear"
     invoiceId: string | null
-    amountEstimateCents: number | null
+    amountEstimate: number | null
     reason: "normal" | "mid_cycle_change" | "trial" | null
   }>
 }

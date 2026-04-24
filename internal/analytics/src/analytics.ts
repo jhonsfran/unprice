@@ -402,12 +402,8 @@ export class Analytics {
       project_id: projectId,
       period_key: periodKey,
     }).catch((error) => {
-      this.logger.error("Error getting features usage", {
-        error: {
-          message: error instanceof Error ? error.message : String(error),
-          type: error instanceof Error ? error.name : undefined,
-          stack: error instanceof Error ? error.stack : undefined,
-        },
+      this.logger.error(error, {
+        context: "Error getting features usage",
         customerId,
         projectId,
         periodKey,

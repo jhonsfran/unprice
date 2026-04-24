@@ -382,12 +382,8 @@ export class GrantsManager {
 
       return Ok(customerGrants)
     } catch (error) {
-      this.logger.error("Error getting phase-owned grants", {
-        error: {
-          message: error instanceof Error ? error.message : String(error),
-          type: error instanceof Error ? error.name : undefined,
-          stack: error instanceof Error ? error.stack : undefined,
-        },
+      this.logger.error(error, {
+        context: "Error getting phase-owned grants",
         projectId,
         customerId,
         subscriptionPhaseId,
@@ -591,12 +587,8 @@ export class GrantsManager {
         planVersion: currentPhase?.planVersion ?? null,
       })
     } catch (error) {
-      this.logger.error("Error getting grants for customer", {
-        error: {
-          message: error instanceof Error ? error.message : String(error),
-          type: error instanceof Error ? error.name : undefined,
-          stack: error instanceof Error ? error.stack : undefined,
-        },
+      this.logger.error(error, {
+        context: "Error getting grants for customer",
         customerId,
         projectId,
       })
@@ -871,12 +863,8 @@ export class GrantsManager {
         })
         .returning()
         .catch((error) => {
-          this.logger.error("Error creating grants", {
-            error: {
-              message: error instanceof Error ? error.message : String(error),
-              type: error instanceof Error ? error.name : undefined,
-              stack: error instanceof Error ? error.stack : undefined,
-            },
+          this.logger.error(error, {
+            context: "Error creating grants",
             grantId: newGrant.id,
           })
 
@@ -896,12 +884,8 @@ export class GrantsManager {
 
       return Ok(insertedGrants)
     } catch (error) {
-      this.logger.error("Error creating grants", {
-        error: {
-          message: error instanceof Error ? error.message : String(error),
-          type: error instanceof Error ? error.name : undefined,
-          stack: error instanceof Error ? error.stack : undefined,
-        },
+      this.logger.error(error, {
+        context: "Error creating grants",
         grantId: newGrant.id,
       })
 
@@ -972,12 +956,8 @@ export class GrantsManager {
       })
 
       if (createGrantResult.err) {
-        this.logger.error("Failed to renew grant", {
-          error: {
-            message: createGrantResult.err.message,
-            type: createGrantResult.err.name,
-            stack: createGrantResult.err.stack,
-          },
+        this.logger.error(createGrantResult.err, {
+          context: "Failed to renew grant",
           grantId: grant.id,
           subjectId: grant.subjectId,
         })

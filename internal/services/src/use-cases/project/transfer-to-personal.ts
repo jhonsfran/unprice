@@ -94,8 +94,8 @@ export async function transferToPersonal(
     })
   } catch (error) {
     const e = error as Error
-    deps.logger.error("error transferring project to personal workspace", {
-      error: toErrorContext(e),
+    deps.logger.error(e, {
+      context: "error transferring project to personal workspace",
       projectId: project.id,
       userId,
     })

@@ -7,7 +7,6 @@ import { toLedgerMinor } from "@unprice/money"
 import type { ServiceContext } from "../../context"
 import { customerAccountKeys } from "../../ledger"
 import { UnPriceSubscriptionError } from "../../subscriptions/errors"
-import { toErrorContext } from "../../utils/log-context"
 import type { AdjustSource, DrainLeg, UnPriceWalletError } from "../../wallet"
 
 export type ActivateSubscriptionDeps = {
@@ -295,8 +294,8 @@ export async function activateSubscription(
     if (error instanceof ActivationAbortError) {
       return Err(error.inner)
     }
-    deps.logger.error("subscription.activate.transaction_failed", {
-      error: toErrorContext(error),
+    deps.logger.error(error, {
+      context: "subscription.activate.transaction_failed",
       subscriptionId: input.subscriptionId,
     })
     return Err(

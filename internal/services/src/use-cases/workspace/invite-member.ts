@@ -133,8 +133,8 @@ export async function inviteMember(
     })
   } catch (error) {
     const e = error as Error
-    deps.logger.error("error inviting workspace member", {
-      error: toErrorContext(e),
+    deps.logger.error(e, {
+      context: "error inviting workspace member",
       workspaceId: workspace.id,
       userId,
       email,

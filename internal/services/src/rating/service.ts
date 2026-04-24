@@ -207,13 +207,13 @@ export class RatingService {
       )
 
       if (usageErr) {
-        this.logger.error("Failed to get usage for feature", {
+        this.logger.error(usageErr, {
           featureSlug,
           customerId,
           projectId,
           billingStartAt,
           billingEndAt,
-          error: toErrorContext(usageErr),
+          context: "Failed to get usage for feature",
         })
         return Err(new UnPriceRatingError({ message: usageErr.message }))
       }
@@ -399,11 +399,11 @@ export class RatingService {
       )
 
       if (grantsErr) {
-        this.logger.error("Failed to get grants for customer", {
+        this.logger.error(grantsErr, {
           customerId,
           projectId,
           featureSlug,
-          error: toErrorContext(grantsErr),
+          context: "Failed to get grants for customer",
         })
         return Err(new UnPriceRatingError({ message: grantsErr.message }))
       }
@@ -428,11 +428,11 @@ export class RatingService {
       })
 
       if (computedStateResult.err) {
-        this.logger.error("Failed to compute entitlement state", {
+        this.logger.error(computedStateResult.err, {
           featureSlug,
           customerId,
           projectId,
-          error: toErrorContext(computedStateResult.err),
+          context: "Failed to compute entitlement state",
         })
         return Err(new UnPriceRatingError({ message: computedStateResult.err.message }))
       }
@@ -633,11 +633,11 @@ export class RatingService {
         await this.grantsManager.getGrantsForCustomer(grantsLookupInput)
 
       if (grantsErr) {
-        this.logger.error("Failed to get grants for customer", {
+        this.logger.error(grantsErr, {
           customerId,
           projectId,
           featureSlug,
-          error: toErrorContext(grantsErr),
+          context: "Failed to get grants for customer",
         })
         return Err(new UnPriceRatingError({ message: grantsErr.message }))
       }
@@ -670,11 +670,11 @@ export class RatingService {
       })
 
       if (computedStateResult.err) {
-        this.logger.error("Failed to compute entitlement state for incremental rating", {
+        this.logger.error(computedStateResult.err, {
           featureSlug,
           customerId,
           projectId,
-          error: toErrorContext(computedStateResult.err),
+          context: "Failed to compute entitlement state for incremental rating",
         })
         return Err(new UnPriceRatingError({ message: computedStateResult.err.message }))
       }

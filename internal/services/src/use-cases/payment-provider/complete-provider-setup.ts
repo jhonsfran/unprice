@@ -130,8 +130,8 @@ export async function completeProviderSetup(
   )
 
   if (customerErr) {
-    deps.logger.error("Error finding customer for provider setup", {
-      error: toErrorContext(customerErr),
+    deps.logger.error(customerErr, {
+      context: "Error finding customer for provider setup",
       projectId,
       customerId: metadata.data.customerId,
       provider,
@@ -187,8 +187,8 @@ export async function completeProviderSetup(
   )
 
   if (providerMappingErr) {
-    deps.logger.error("Error updating provider mapping for setup", {
-      error: toErrorContext(providerMappingErr),
+    deps.logger.error(providerMappingErr, {
+      context: "Error updating provider mapping for setup",
       projectId,
       customerId: customerData.id,
       provider,

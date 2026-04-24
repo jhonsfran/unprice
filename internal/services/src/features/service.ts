@@ -58,8 +58,8 @@ export class FeatureService {
     )
 
     if (err) {
-      this.logger.error("error creating feature record", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating feature record",
         projectId,
         slug,
       })
@@ -99,8 +99,8 @@ export class FeatureService {
     )
 
     if (err) {
-      this.logger.error("error removing feature", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error removing feature",
         projectId,
         featureId: id,
       })
@@ -142,8 +142,8 @@ export class FeatureService {
     )
 
     if (err) {
-      this.logger.error("error checking feature existence by slug", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error checking feature existence by slug",
         projectId,
       })
       return Err(err)
@@ -172,8 +172,8 @@ export class FeatureService {
     )
 
     if (err) {
-      this.logger.error("error getting feature by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting feature by id",
         projectId,
         featureId,
       })
@@ -203,8 +203,8 @@ export class FeatureService {
     )
 
     if (err) {
-      this.logger.error("error getting feature by slug", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting feature by slug",
         projectId,
         slug,
       })
@@ -240,8 +240,8 @@ export class FeatureService {
     )
 
     if (err) {
-      this.logger.error("error searching features by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error searching features by project",
         projectId,
       })
       return Err(err)
@@ -268,8 +268,8 @@ export class FeatureService {
     )
 
     if (err) {
-      this.logger.error("error listing features by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing features by project",
         projectId,
       })
       return Err(err)
@@ -326,8 +326,8 @@ export class FeatureService {
     )
 
     if (err) {
-      this.logger.error("error updating feature record", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating feature record",
         projectId,
         featureId: id,
       })

@@ -157,8 +157,8 @@ export async function initiateTopup(
   )
 
   if (insertErr) {
-    deps.logger.error("Failed to persist wallet_topups row after creating session", {
-      error: toErrorContext(insertErr),
+    deps.logger.error(insertErr, {
+      context: "Failed to persist wallet_topups row after creating session",
       topupId,
       providerSessionId: session.sessionId,
       projectId: input.projectId,

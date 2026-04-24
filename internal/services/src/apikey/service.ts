@@ -102,8 +102,8 @@ export class ApiKeysService {
     )
 
     if (err) {
-      this.logger.error("error listing api keys by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing api keys by project",
         projectId,
       })
       return Err(err)
@@ -156,8 +156,8 @@ export class ApiKeysService {
     )
 
     if (err) {
-      this.logger.error("error creating api key", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating api key",
         projectId,
       })
       return Err(err)
@@ -201,8 +201,8 @@ export class ApiKeysService {
     )
 
     if (err) {
-      this.logger.error("error revoking api keys", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error revoking api keys",
         projectId,
       })
       return Err(err)
@@ -291,8 +291,8 @@ export class ApiKeysService {
       })
       .catch((e) => {
         this.logger.set({ error: toErrorContext(e) })
-        this.logger.error(`Error fetching apikey from db: ${e.message}`, {
-          error: toErrorContext(e),
+        this.logger.error(e, {
+          context: `Error fetching apikey from db: ${e.message}`,
           keyHash,
         })
 
@@ -395,8 +395,8 @@ export class ApiKeysService {
           skipCache: false,
         }
       ).catch(async (err) => {
-        this.logger.error(`verify error, retrying without cache, ${err.message}`, {
-          error: toErrorContext(err),
+        this.logger.error(err, {
+          context: `verify error, retrying without cache, ${err.message}`,
         })
 
         await this.cache.apiKeyByHash.remove(await this.hash(req.key))
@@ -411,8 +411,8 @@ export class ApiKeysService {
       })
 
       if (result.err) {
-        this.logger.error("Error verifying apikey after retrying without cache", {
-          error: toErrorContext(result.err),
+        this.logger.error(result.err, {
+          context: "Error verifying apikey after retrying without cache",
         })
 
         return result
@@ -459,8 +459,8 @@ export class ApiKeysService {
       return Ok(apiKey)
     } catch (e) {
       const error = e as Error
-      this.logger.error("Unhandled error while getting the apikey", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "Unhandled error while getting the apikey",
       })
 
       return Err(
@@ -561,8 +561,8 @@ export class ApiKeysService {
     )
 
     if (err) {
-      this.logger.error("error binding customer to api key", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error binding customer to api key",
         projectId,
         apikeyId,
         customerId,
@@ -609,8 +609,8 @@ export class ApiKeysService {
     )
 
     if (err) {
-      this.logger.error("error unbinding customer from api key", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error unbinding customer from api key",
         projectId,
         apikeyId,
       })

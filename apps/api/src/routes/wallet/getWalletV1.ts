@@ -1,6 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
 import { walletGrantSourceSchema } from "@unprice/db/validators"
-import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
@@ -31,30 +31,27 @@ const walletResponseSchema = z.object({
 })
 
 export const route = createRoute({
-  path: "/v1/wallet/getWallet",
+  path: "/v1/wallet",
   operationId: "wallet.getWallet",
   summary: "get wallet state",
   description:
     "Snapshot of the four customer sub-account balances (purchased, granted, reserved, consumed) plus the list of active wallet grants. Amounts are at pgledger scale 8 ($1 = 100_000_000).",
-  method: "post",
+  method: "get",
   tags,
   request: {
-    body: jsonContentRequired(
-      z.object({
-        customerId: z.string().openapi({
-          description: "The customer ID",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
-        }),
-        projectId: z
-          .string()
-          .openapi({
-            description: "The project ID",
-            example: "prj_1H7KQFLr7RepUyQBKdnvY",
-          })
-          .optional(),
+    query: z.object({
+      customerId: z.string().openapi({
+        description: "The customer ID",
+        example: "cus_1H7KQFLr7RepUyQBKdnvY",
       }),
-      "Body of the request"
-    ),
+      projectId: z
+        .string()
+        .openapi({
+          description: "The project ID",
+          example: "prj_1H7KQFLr7RepUyQBKdnvY",
+        })
+        .optional(),
+    }),
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(walletResponseSchema, "The wallet state for a customer"),
@@ -62,16 +59,14 @@ export const route = createRoute({
   },
 })
 
-export type GetWalletRequest = z.infer<
-  (typeof route.request.body)["content"]["application/json"]["schema"]
->
+export type GetWalletRequest = z.infer<typeof route.request.query>
 export type GetWalletResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
 
 export const registerGetWalletV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, projectId } = c.req.valid("json")
+    const { customerId, projectId } = c.req.valid("query")
     const { wallet } = c.get("services")
 
     const key = await keyAuth(c)

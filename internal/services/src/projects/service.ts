@@ -134,8 +134,8 @@ export class ProjectService {
     })
 
     if (err) {
-      this.logger.error("error getting project features", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting project features",
       })
 
       return Err(
@@ -187,8 +187,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error getting project by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting project by id",
         workspaceId,
         projectId,
       })
@@ -211,8 +211,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error getting main project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting main project",
       })
       return Err(err)
     }
@@ -237,8 +237,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error getting main project by slug", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting main project by slug",
         slug,
       })
       return Err(err)
@@ -270,8 +270,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error getting project by slug", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting project by slug",
         workspaceId,
         slug,
       })
@@ -305,8 +305,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error listing projects by workspace", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing projects by workspace",
         workspaceId,
       })
       return Err(err)
@@ -352,8 +352,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error listing active workspace projects", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing active workspace projects",
         workspaceId,
       })
       return Err(err)
@@ -421,8 +421,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error creating project record", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating project record",
         workspaceId,
       })
       return Err(err)
@@ -480,8 +480,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error deleting project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error deleting project",
         projectId,
       })
       return Err(err)
@@ -543,8 +543,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error updating project record", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating project record",
         projectId: id,
       })
       return Err(err)
@@ -589,8 +589,8 @@ export class ProjectService {
     )
 
     if (err) {
-      this.logger.error("error getting payment provider config", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting payment provider config",
         projectId,
         paymentProvider,
       })

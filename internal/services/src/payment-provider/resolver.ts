@@ -5,8 +5,10 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
 import { UnPriceCustomerError } from "../customers/errors"
-import { toErrorContext } from "../utils/log-context"
 import { PaymentProviderService } from "./service"
+
+const SANDBOX_TOKEN = "sandbox_token"
+const SANDBOX_WEBHOOK_SECRET = "sandbox_webhook_secret"
 
 export class PaymentProviderResolver {
   private readonly db: Database
@@ -26,20 +28,8 @@ export class PaymentProviderResolver {
     projectId: string
     provider: PaymentProvider
   }): Promise<Result<PaymentProviderService, FetchError | UnPriceCustomerError>> {
-    if (customerId) {
-      const customerData = await this.db.query.customers.findFirst({
-        where: (customer, { and, eq }) =>
-          and(eq(customer.id, customerId), eq(customer.projectId, projectId)),
-      })
-
-      if (!customerData) {
-        return Err(
-          new UnPriceCustomerError({
-            code: "CUSTOMER_NOT_FOUND",
-            message: "Customer not found",
-          })
-        )
-      }
+    if (provider === "sandbox") {
+      return this.resolveSandbox({ customerId, projectId })
     }
 
     const { err: configErr, val: config } = await wrapResult(
@@ -59,8 +49,8 @@ export class PaymentProviderResolver {
     )
 
     if (configErr) {
-      this.logger.error("error getting payment provider config", {
-        error: toErrorContext(configErr),
+      this.logger.error(configErr, {
+        context: "error getting payment provider config",
         customerId,
         projectId,
         provider,
@@ -69,6 +59,11 @@ export class PaymentProviderResolver {
     }
 
     if (!config) {
+      this.logger.warn("payment provider config not found or not active", {
+        customerId,
+        projectId,
+        provider,
+      })
       return Err(
         new UnPriceCustomerError({
           code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
@@ -90,8 +85,8 @@ export class PaymentProviderResolver {
     )
 
     if (decryptErr) {
-      this.logger.error("error decrypting payment provider token", {
-        error: toErrorContext(decryptErr),
+      this.logger.error(decryptErr, {
+        context: "error decrypting payment provider token",
         customerId,
         projectId,
         provider,
@@ -109,8 +104,8 @@ export class PaymentProviderResolver {
     )
 
     if (webhookSecretErr) {
-      this.logger.error("error decrypting payment provider webhook secret", {
-        error: toErrorContext(webhookSecretErr),
+      this.logger.error(webhookSecretErr, {
+        context: "error decrypting payment provider webhook secret",
         customerId,
         projectId,
         provider,
@@ -137,8 +132,8 @@ export class PaymentProviderResolver {
     )
 
     if (providerMappingErr) {
-      this.logger.error("error getting customer provider mapping", {
-        error: toErrorContext(providerMappingErr),
+      this.logger.error(providerMappingErr, {
+        context: "error getting customer provider mapping",
         customerId,
         projectId,
         provider,
@@ -153,6 +148,52 @@ export class PaymentProviderResolver {
         paymentProvider: provider,
         token: decryptedKey,
         webhookSecret: webhookSecret ?? undefined,
+      })
+    )
+  }
+
+  private async resolveSandbox({
+    customerId,
+    projectId,
+  }: {
+    customerId?: string
+    projectId: string
+  }): Promise<Result<PaymentProviderService, FetchError>> {
+    const { err: providerMappingErr, val: providerMapping } = await wrapResult(
+      customerId
+        ? this.db.query.customerProviderIds.findFirst({
+            where: (mapping, { and, eq }) =>
+              and(
+                eq(mapping.projectId, projectId),
+                eq(mapping.customerId, customerId),
+                eq(mapping.provider, "sandbox")
+              ),
+          })
+        : Promise.resolve(undefined),
+      (error) =>
+        new FetchError({
+          message: `error getting customer provider mapping: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (providerMappingErr) {
+      this.logger.error(providerMappingErr, {
+        context: "error getting customer provider mapping",
+        customerId,
+        projectId,
+        provider: "sandbox",
+      })
+      return Err(providerMappingErr)
+    }
+
+    return Ok(
+      new PaymentProviderService({
+        providerCustomerId: providerMapping?.providerCustomerId ?? undefined,
+        logger: this.logger,
+        paymentProvider: "sandbox",
+        token: SANDBOX_TOKEN,
+        webhookSecret: SANDBOX_WEBHOOK_SECRET,
       })
     )
   }

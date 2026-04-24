@@ -88,8 +88,8 @@ export const getLatestEvents = protectedProjectProcedure
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
 
-      opts.ctx.logger.error("getLatestEvents failed", {
-        error: errorMessage,
+      opts.ctx.logger.error(err, {
+        context: "getLatestEvents failed",
         project_id,
         isTimeout: errorMessage.includes("timeout"),
       })

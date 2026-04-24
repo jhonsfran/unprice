@@ -208,11 +208,11 @@ describe("RatingService", () => {
     expect(mockGetGrantsForCustomer).not.toHaveBeenCalled()
     expect(mockAnalytics.getUsageBillingFeatures).not.toHaveBeenCalled()
 
-    const totalCents = result.val!.reduce(
+    const totalAmount = result.val!.reduce(
       (total, item) => total + formatAmountForProvider(item.price.totalPrice.dinero).amount,
       0
     )
-    expect(totalCents).toBe(700)
+    expect(totalAmount).toBe(700)
   })
 
   it("returns empty list when no grants match the feature", async () => {

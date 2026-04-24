@@ -29,10 +29,10 @@ import { getPaymentProviderCapabilities } from "../payment-provider/service"
 import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceSubscriptionError } from "./errors"
-import { SubscriptionMachine } from "./machine"
+import type { SubscriptionMachine } from "./machine"
 import type { SubscriptionRepository } from "./repository"
-import { SubscriptionLock } from "./subscriptionLock"
 import type { SusbriptionMachineStatus } from "./types"
+import { withLockedMachine } from "./withLockedMachine"
 
 type PhaseGrantType = Extract<GrantType, "trial" | "subscription">
 
@@ -1348,8 +1348,8 @@ export class SubscriptionService {
       const subscriptionData = await this.repo.findSubscriptionFull({ subscriptionId })
       return Ok(subscriptionData ?? null)
     } catch (err) {
-      this.logger.error("error getting subscription by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting subscription by id",
         subscriptionId,
       })
       return Err(
@@ -1387,8 +1387,8 @@ export class SubscriptionService {
         pageCount: result.pageCount,
       })
     } catch (err) {
-      this.logger.error("error listing subscriptions by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing subscriptions by project",
         projectId,
       })
 
@@ -1415,8 +1415,8 @@ export class SubscriptionService {
 
       return Ok(subscriptionData)
     } catch (err) {
-      this.logger.error("error listing subscriptions by plan version", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing subscriptions by plan version",
         planVersionId,
         projectId,
       })
@@ -1433,137 +1433,28 @@ export class SubscriptionService {
     subscriptionId: string
     projectId: string
     now: number
-    // new options
     lock?: boolean
     ttlMs?: number
     run: (m: SubscriptionMachine) => Promise<T>
   }): Promise<T> {
-    const { subscriptionId, projectId, now, run, lock: shouldLock = true, ttlMs = 30_000 } = args
-
-    // create the lock if it should be locked
-    const lock = shouldLock
-      ? new SubscriptionLock({ db: this.db, projectId, subscriptionId })
-      : null
-
-    if (lock) {
-      const acquired = await lock.acquire({
-        ttlMs,
-        now,
-        staleTakeoverMs: 120_000,
-        ownerStaleMs: ttlMs,
-      })
-      this.setLockContext({
-        type: "normal",
-        resource: "subscription",
-        action: "acquire",
-        acquired,
-        ttl_ms: ttlMs,
-      })
-
-      if (!acquired) {
-        this.logger.warn("subscription lock acquire returned false; lock may be held", {
-          subscriptionId,
-          projectId,
-          ttlMs,
-        })
-      }
-      if (!acquired) throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
-    }
-
-    // heartbeat to keep the lock alive for long transitions
-    const stopHeartbeat = lock
-      ? (() => {
-          let stopped = false
-          const startedAt = Date.now()
-          const renewEveryMs = Math.max(1_000, Math.floor(ttlMs / 2))
-          const maxHoldMs = Math.max(ttlMs * 10, 2 * 60_000) // cap renewals to avoid indefinite locks
-
-          const interval = setInterval(async () => {
-            if (stopped) return
-            const elapsed = Date.now() - startedAt
-            if (elapsed > maxHoldMs) {
-              this.setLockContext({
-                type: "normal",
-                resource: "subscription",
-                action: "heartbeat_stopped",
-                acquired: false,
-                ttl_ms: ttlMs,
-                max_hold_ms: maxHoldMs,
-              })
-              this.logger.warn("subscription lock heartbeat maxHoldMs reached; stopping renew", {
-                subscriptionId,
-                projectId,
-                ttlMs,
-                maxHoldMs,
-              })
-              stopped = true
-              clearInterval(interval)
-              return
-            }
-            try {
-              const ok = await lock.extend({ ttlMs })
-              if (!ok) {
-                this.setLockContext({
-                  type: "normal",
-                  resource: "subscription",
-                  action: "extend",
-                  acquired: false,
-                  ttl_ms: ttlMs,
-                })
-                this.logger.warn("subscription lock extend returned false; lock may be lost", {
-                  subscriptionId,
-                  projectId,
-                })
-              }
-            } catch (e) {
-              this.setLockContext({
-                type: "normal",
-                resource: "subscription",
-                action: "extend_error",
-                acquired: false,
-                ttl_ms: ttlMs,
-              })
-              this.logger.error("subscription lock heartbeat extend failed", {
-                error: toErrorContext(e),
-                subscriptionId,
-                projectId,
-              })
-            }
-          }, renewEveryMs)
-
-          return () => {
-            stopped = true
-            clearInterval(interval)
-          }
-        })()
-      : () => {}
-
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      customer: this.customerService,
-      ratingService: this.ratingService,
-      ledgerService: this.ledgerService,
-      walletService: this.walletService,
-      db: this.db,
-      repo: this.repo,
-    })
-
-    if (err) {
-      stopHeartbeat()
-      if (lock) await lock.release()
-      throw err
-    }
-
     try {
-      return await run(machine)
-    } finally {
-      await machine.shutdown()
-      stopHeartbeat()
-      if (lock) await lock.release()
+      return await withLockedMachine({
+        ...args,
+        db: this.db,
+        repo: this.repo,
+        logger: this.logger,
+        analytics: this.analytics,
+        customer: this.customerService,
+        ratingService: this.ratingService,
+        ledgerService: this.ledgerService,
+        walletService: this.walletService,
+        setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) => this.setLockContext(ctx),
+      })
+    } catch (e) {
+      if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
+        throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
+      }
+      throw e
     }
   }
 
@@ -1590,6 +1481,39 @@ export class SubscriptionService {
       return Ok({ status })
     } catch (e) {
       return Err(e as UnPriceSubscriptionError)
+    }
+  }
+
+  public async activateWallet({
+    subscriptionId,
+    projectId,
+    now = Date.now(),
+  }: {
+    subscriptionId: string
+    projectId: string
+    now?: number
+  }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError> | null> {
+    if (!this.walletService) return null
+
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        lock: false,
+        run: async (machine) => {
+          const result = await machine.activate()
+          if (result.err) throw result.err
+          return result.val
+        },
+      })
+      return Ok({ status })
+    } catch (e) {
+      return Err(
+        e instanceof UnPriceSubscriptionError
+          ? e
+          : new UnPriceSubscriptionError({ message: (e as Error).message })
+      )
     }
   }
 
