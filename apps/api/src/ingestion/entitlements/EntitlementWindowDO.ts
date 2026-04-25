@@ -35,7 +35,7 @@ import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlit
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { z } from "zod"
 import type { Env } from "~/env"
-import { createDoLogger } from "~/observability"
+import { createDoLogger, runDoOperation } from "~/observability"
 import { idempotencyKeysTable, meterFactsOutboxTable, meterWindowTable, schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
@@ -288,6 +288,18 @@ export class EntitlementWindowDO extends DurableObject {
   public async apply(rawInput: ApplyInput): Promise<ApplyResult> {
     await this.ready
 
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "entitlementwindow",
+        operation: "apply",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+      },
+      async () => this.applyInner(rawInput)
+    )
+  }
+
+  private async applyInner(rawInput: ApplyInput): Promise<ApplyResult> {
     const startTime = Date.now()
     const input = applyInputSchema.parse(rawInput)
 
@@ -694,6 +706,7 @@ export class EntitlementWindowDO extends DurableObject {
       wideEvent.usage_after = nextUsage
       wideEvent.cost_minor = totalCost
       wideEvent.reservation_engaged = reservationEngaged
+
       // refillTrigger is assigned inside a transaction callback, which
       // defeats TS flow analysis here — it still thinks the value is `null`.
       const trigger = refillTrigger as RefillTrigger | null
@@ -743,6 +756,18 @@ export class EntitlementWindowDO extends DurableObject {
   async alarm(): Promise<void> {
     await this.ready
 
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "entitlementwindow",
+        operation: "alarm",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+      },
+      async () => this.alarmInner()
+    )
+  }
+
+  private async alarmInner(): Promise<void> {
     const startTime = Date.now()
     const wideEvent: Record<string, unknown> = {
       operation: "alarm",
@@ -991,6 +1016,27 @@ export class EntitlementWindowDO extends DurableObject {
   private async finalFlush(
     window: NonNullable<ReturnType<typeof this.readWalletWindow>>
   ): Promise<void> {
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "entitlementwindow",
+        operation: "final_flush",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+        baseFields: {
+          reservation_id: window.reservationId,
+          project_id: window.projectId,
+          customer_id: window.customerId,
+          currency: window.currency,
+          period_end_at: window.periodEndAt,
+        },
+      },
+      async () => this.finalFlushInner(window)
+    )
+  }
+
+  private async finalFlushInner(
+    window: NonNullable<ReturnType<typeof this.readWalletWindow>>
+  ): Promise<void> {
     const startTime = Date.now()
     const wideEvent: Record<string, unknown> = {
       operation: "final_flush",
@@ -1198,6 +1244,23 @@ export class EntitlementWindowDO extends DurableObject {
   // seq. Crucially we do not advance `flushedAmount` on failure: the next
   // retry re-derives `flushAmount` from `consumedAmount - flushedAmount`.
   private async requestFlushAndRefill(trigger: RefillTrigger): Promise<void> {
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "entitlementwindow",
+        operation: "flush_refill",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+        baseFields: {
+          flush_seq: trigger.flushSeq,
+          flush_amount: trigger.flushAmount,
+          refill_chunk_amount: trigger.refillChunkAmount,
+        },
+      },
+      async () => this.requestFlushAndRefillInner(trigger)
+    )
+  }
+
+  private async requestFlushAndRefillInner(trigger: RefillTrigger): Promise<void> {
     const startTime = Date.now()
     const window = this.readWalletWindow(this.db)
 
@@ -1386,24 +1449,25 @@ export class EntitlementWindowDO extends DurableObject {
     // concern wallet enforcement; preserve consumedAmount/flushedAmount/
     // flushSeq because the existing flush bookkeeping is still in flight.
     // For a fresh reservation, reset the bookkeeping to zero.
-    const reservationUpdate = result.val.reused === "active"
-      ? {
-          reservationId: result.val.reservationId,
-          allocationAmount: result.val.allocationAmount,
-          refillThresholdBps: sizing.refillThresholdBps,
-          refillChunkAmount: sizing.refillChunkAmount,
-        }
-      : {
-          reservationId: result.val.reservationId,
-          allocationAmount: result.val.allocationAmount,
-          consumedAmount: 0,
-          flushedAmount: 0,
-          flushSeq: 0,
-          pendingFlushSeq: null,
-          refillThresholdBps: sizing.refillThresholdBps,
-          refillChunkAmount: sizing.refillChunkAmount,
-          refillInFlight: false,
-        }
+    const reservationUpdate =
+      result.val.reused === "active"
+        ? {
+            reservationId: result.val.reservationId,
+            allocationAmount: result.val.allocationAmount,
+            refillThresholdBps: sizing.refillThresholdBps,
+            refillChunkAmount: sizing.refillChunkAmount,
+          }
+        : {
+            reservationId: result.val.reservationId,
+            allocationAmount: result.val.allocationAmount,
+            consumedAmount: 0,
+            flushedAmount: 0,
+            flushSeq: 0,
+            pendingFlushSeq: null,
+            refillThresholdBps: sizing.refillThresholdBps,
+            refillChunkAmount: sizing.refillChunkAmount,
+            refillInFlight: false,
+          }
 
     this.db.update(meterWindowTable).set(reservationUpdate).run()
 

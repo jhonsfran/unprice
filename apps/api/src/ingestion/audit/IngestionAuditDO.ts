@@ -6,7 +6,7 @@ import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
 import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
-import { createDoLogger } from "~/observability"
+import { createDoLogger, runDoOperation } from "~/observability"
 import { ingestionAuditTable, schema } from "./db/schema"
 import migrations from "./drizzle/migrations"
 
@@ -86,6 +86,19 @@ export class IngestionAuditDO extends DurableObject {
       return { inserted: 0, duplicates: 0, conflicts: 0 }
     }
 
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "ingestionaudit",
+        operation: "commit",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+        baseFields: { entry_count: entries.length },
+      },
+      async () => this.commitInner(entries)
+    )
+  }
+
+  private async commitInner(entries: LedgerEntry[]): Promise<CommitResult> {
     let inserted = 0
     let duplicates = 0
     let conflicts = 0
@@ -131,12 +144,26 @@ export class IngestionAuditDO extends DurableObject {
       await this.ensureAlarm()
     }
 
+    this.logger.set({ inserted, duplicates, conflicts })
+    this.logger.info("ingestion audit commit", { inserted, duplicates, conflicts })
     return { inserted, duplicates, conflicts }
   }
 
   async alarm(): Promise<void> {
     await this.ready
 
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "ingestionaudit",
+        operation: "alarm",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+      },
+      async () => this.alarmInner()
+    )
+  }
+
+  private async alarmInner(): Promise<void> {
     const published = await this.publishUnpublishedRows()
     this.cleanupExpiredRows()
     this.checkStuckRows()
@@ -147,13 +174,18 @@ export class IngestionAuditDO extends DurableObject {
       .where(isNull(ingestionAuditTable.publishedAt))
       .get()
 
-    if (hasUnpublished && hasUnpublished.cnt > 0) {
+    const remaining = hasUnpublished?.cnt ?? 0
+    this.logger.set({ published, unpublished_remaining: remaining })
+
+    if (remaining > 0) {
       if (published) {
         await this.ensureAlarm()
       } else {
         await this.ctx.storage.setAlarm(Date.now() + ALARM_RETRY_DELAY_MS)
       }
     }
+
+    this.logger.info("ingestion audit alarm", { published, unpublished_remaining: remaining })
   }
 
   private async publishUnpublishedRows(): Promise<boolean> {
