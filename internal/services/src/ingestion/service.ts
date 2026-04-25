@@ -26,8 +26,8 @@ import {
 } from "./interface"
 import {
   type IngestionQueueMessage,
-  computeResolvedStatePeriodEndAt,
   computeResolvedStatePeriodKey,
+  computeResolvedStatePeriodWindow,
 } from "./message"
 export type IngestionCandidateGrants = Parameters<
   GrantsManager["resolveIngestionStatesFromGrants"]
@@ -91,6 +91,7 @@ export type EntitlementWindowApplyInput = {
   priceConfig: ConfigFeatureVersionType
   now: number
   overageStrategy: IngestionResolvedState["overageStrategy"]
+  periodStartAt: number
   periodEndAt: number
   periodKey: string
   projectId: string
@@ -1012,10 +1013,10 @@ export class IngestionService {
       return null
     }
 
-    const periodEndAt = computeResolvedStatePeriodEndAt(state, message.timestamp)
+    const periodWindow = computeResolvedStatePeriodWindow(state, message.timestamp)
 
-    if (periodEndAt === null) {
-      this.logger.debug("period end doesn't exist")
+    if (!periodWindow) {
+      this.logger.debug("period window doesn't exist")
       return null
     }
 
@@ -1047,7 +1048,8 @@ export class IngestionService {
       overageStrategy: state.overageStrategy,
       enforceLimit,
       now: message.receivedAt,
-      periodEndAt,
+      periodStartAt: periodWindow.start,
+      periodEndAt: periodWindow.end,
     })
   }
 

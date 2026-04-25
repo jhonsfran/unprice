@@ -7,13 +7,28 @@ import { type Dinero, toSnapshot } from "dinero.js"
 import type { Logger } from "@unprice/logs"
 import { fromLedgerAmount, toLedgerAmount } from "@unprice/money"
 import type { DbExecutor } from "../deps"
-import { toErrorContext } from "../utils/log-context"
 import {
   PLATFORM_FUNDING_KINDS,
+  type PlatformFundingKind,
   customerAccountKeys,
   platformAccountKey,
 } from "./accounts"
 import { UnPriceLedgerError } from "./errors"
+
+/**
+ * If `name` is a `platform.{projectId}.funding.{kind}` account belonging
+ * to the given project and `kind` is a known funding kind, returns the
+ * kind. Returns `null` for any non-platform account or a project mismatch.
+ */
+function parsePlatformFundingAccountName(
+  name: string,
+  projectId: string
+): PlatformFundingKind | null {
+  for (const kind of PLATFORM_FUNDING_KINDS) {
+    if (name === platformAccountKey(kind, projectId)) return kind
+  }
+  return null
+}
 
 /**
  * Source identity for a ledger transfer. The pair `(sourceType, sourceId)` is
@@ -73,13 +88,6 @@ export interface LedgerAccount {
   allowNegativeBalance: boolean
   allowPositiveBalance: boolean
   metadata: Record<string, unknown> | null
-}
-
-export interface CustomerAccountsBundle {
-  purchased: LedgerAccount
-  granted: LedgerAccount
-  reserved: LedgerAccount
-  consumed: LedgerAccount
 }
 
 /**
@@ -166,6 +174,7 @@ export class LedgerGateway {
   private readonly db: Database
   private readonly logger: Logger
   private readonly seededProjects = new Set<string>()
+  private readonly seededCustomers = new Set<string>()
 
   constructor(opts: { db: Database; logger: Logger }) {
     this.db = opts.db
@@ -211,33 +220,65 @@ export class LedgerGateway {
    * Ensures the four customer sub-accounts exist for the customer/currency
    * bundle: `available.purchased`, `available.granted`, `reserved`, `consumed`.
    * All four are non-negative — draining below zero is a bug, not a feature.
+   * Caches in-process per worker so subsequent calls for the same
+   * `(customer, currency)` skip the round-trip.
    */
   public async ensureCustomerAccounts(
     customerId: string,
     currency: Currency
-  ): Promise<Result<CustomerAccountsBundle, UnPriceLedgerError>> {
+  ): Promise<Result<void, UnPriceLedgerError>> {
+    const cacheKey = `${customerId}:${currency}`
+    if (this.seededCustomers.has(cacheKey)) return Ok(undefined)
+
     const keys = customerAccountKeys(customerId)
     try {
-      const bundle = await this.db.transaction(async (tx) => {
-        const purchased = await this.ensureAccount(
-          { name: keys.purchased, currency, allowNegativeBalance: false, allowPositiveBalance: true },
+      await this.db.transaction(async (tx) => {
+        await this.ensureAccount(
+          {
+            name: keys.purchased,
+            currency,
+            allowNegativeBalance: false,
+            allowPositiveBalance: true,
+          },
           tx
         )
-        const granted = await this.ensureAccount(
+        await this.ensureAccount(
           { name: keys.granted, currency, allowNegativeBalance: false, allowPositiveBalance: true },
           tx
         )
-        const reserved = await this.ensureAccount(
-          { name: keys.reserved, currency, allowNegativeBalance: false, allowPositiveBalance: true },
+        await this.ensureAccount(
+          {
+            name: keys.reserved,
+            currency,
+            allowNegativeBalance: false,
+            allowPositiveBalance: true,
+          },
           tx
         )
-        const consumed = await this.ensureAccount(
-          { name: keys.consumed, currency, allowNegativeBalance: false, allowPositiveBalance: true },
+        await this.ensureAccount(
+          {
+            name: keys.consumed,
+            currency,
+            allowNegativeBalance: false,
+            allowPositiveBalance: true,
+          },
           tx
         )
-        return { purchased, granted, reserved, consumed }
+        // Debit-normal: goes negative when the customer is invoiced (we
+        // record what they owe), zeroes back when payment lands via
+        // `topup → receivable`. Cleared once invoice is paid in full.
+        await this.ensureAccount(
+          {
+            name: keys.receivable,
+            currency,
+            allowNegativeBalance: true,
+            allowPositiveBalance: true,
+          },
+          tx
+        )
       })
-      return Ok(bundle)
+      this.seededCustomers.add(cacheKey)
+      return Ok(undefined)
     } catch (error) {
       this.logger.error(error, {
         context: "ledger.ensure_customer_accounts_failed",
@@ -617,20 +658,19 @@ export class LedgerGateway {
     request: LedgerTransferRequest,
     tx: DbExecutor
   ): Promise<LedgerTransfer> {
-    const fromAccount = await this.fetchAccountByName(request.fromAccount, tx)
-    if (!fromAccount) {
-      throw new UnPriceLedgerError({
-        message: "LEDGER_ACCOUNT_NOT_FOUND",
-        context: { accountName: request.fromAccount },
-      })
-    }
-    const toAccount = await this.fetchAccountByName(request.toAccount, tx)
-    if (!toAccount) {
-      throw new UnPriceLedgerError({
-        message: "LEDGER_ACCOUNT_NOT_FOUND",
-        context: { accountName: request.toAccount },
-      })
-    }
+    const amountCurrencyForResolve = toSnapshot(request.amount).currency.code
+    const fromAccount = await this.resolveTransferAccount(
+      request.fromAccount,
+      asCurrency(amountCurrencyForResolve),
+      request.projectId,
+      tx
+    )
+    const toAccount = await this.resolveTransferAccount(
+      request.toAccount,
+      asCurrency(amountCurrencyForResolve),
+      request.projectId,
+      tx
+    )
 
     const amountCurrency = toSnapshot(request.amount).currency.code
 
@@ -708,6 +748,47 @@ export class LedgerGateway {
       createdAt: row.created_at,
       eventAt: row.event_at,
     }
+  }
+
+  /**
+   * Resolves a transfer-side account by name, idempotently creating
+   * `platform.{projectId}.funding.{kind}` accounts on demand. The auto-create
+   * path covers two cases:
+   *
+   *  - new projects whose funding accounts have never been seeded
+   *  - existing projects against which a new funding kind has been added
+   *    (e.g. `credit_line`) since their last seed
+   *
+   * Customer-side accounts (`customer.{id}.*`) are not auto-created here —
+   * those are seeded explicitly by `ensureCustomerAccounts` so the bundle is
+   * resolved and cached at the right boundary.
+   */
+  private async resolveTransferAccount(
+    name: string,
+    currency: Currency,
+    projectId: string,
+    tx: DbExecutor
+  ): Promise<LedgerAccount> {
+    const existing = await this.fetchAccountByName(name, tx)
+    if (existing) return existing
+
+    const platformFundingKind = parsePlatformFundingAccountName(name, projectId)
+    if (platformFundingKind) {
+      return await this.ensureAccount(
+        {
+          name,
+          currency,
+          allowNegativeBalance: true,
+          allowPositiveBalance: true,
+        },
+        tx
+      )
+    }
+
+    throw new UnPriceLedgerError({
+      message: "LEDGER_ACCOUNT_NOT_FOUND",
+      context: { accountName: name },
+    })
   }
 
   private async fetchAccountByName(name: string, tx: DbExecutor): Promise<LedgerAccount | null> {
@@ -805,8 +886,7 @@ export class LedgerGateway {
       entryId: row.id,
       statementKey,
       kind: String(metadata.kind ?? ""),
-      description:
-        typeof metadata.description === "string" ? metadata.description : null,
+      description: typeof metadata.description === "string" ? metadata.description : null,
       quantity: this.parseQuantity(metadata.quantity),
       amount: fromLedgerAmount(row.amount, currency),
       currency,

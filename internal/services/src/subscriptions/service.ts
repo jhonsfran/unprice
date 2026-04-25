@@ -20,7 +20,6 @@ import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
 import type { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
-import type { WalletService } from "../wallet"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { LedgerGateway } from "../ledger"
@@ -28,6 +27,7 @@ import type { Metrics } from "../metrics"
 import { getPaymentProviderCapabilities } from "../payment-provider/service"
 import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
+import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
 import type { SubscriptionMachine } from "./machine"
 import type { SubscriptionRepository } from "./repository"
@@ -956,7 +956,21 @@ export class SubscriptionService {
       const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
 
       if (isActivePhase) {
-        const status = trialUnitsToUse > 0 ? "trialing" : "active"
+        // Status decision tree, in priority order:
+        //   trialing       — plan grants trial units (and a payment method
+        //                    is on file if the plan requires one).
+        //   pending_payment — pay_in_advance plan that requires a payment
+        //                    method but no funds have settled yet. The
+        //                    bootstrap topup/invoice will fire
+        //                    PAYMENT_SUCCESS to flip us to `active`.
+        //   active         — pay_in_arrear plans (DO drains the credit_line
+        //                    grant) and free / no-payment-method plans.
+        const isAdvancePending =
+          versionData.whenToBill === "pay_in_advance" &&
+          paymentMethodRequired &&
+          (!paymentMethodId || paymentMethodId === "")
+        const status =
+          trialUnitsToUse > 0 ? "trialing" : isAdvancePending ? "pending_payment" : "active"
         await txRepo.updateSubscription({
           subscriptionId,
           projectId,
@@ -1448,7 +1462,8 @@ export class SubscriptionService {
         ratingService: this.ratingService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,
-        setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) => this.setLockContext(ctx),
+        setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
+          this.setLockContext(ctx),
       })
     } catch (e) {
       if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {

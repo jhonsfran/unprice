@@ -98,6 +98,11 @@ if ! command -v docker-compose &> /dev/null; then
   exit 1
 fi
 
+if ! command -v ol &> /dev/null || ! ol --help > /dev/null 2>&1; then
+  echo "OpenLogs CLI (ol) could not be found or is not working"
+  exit 1
+fi
+
 if ! command -v tb &> /dev/null; then
   echo "Tinybird CLI could not be found"
   exit 1
@@ -152,8 +157,8 @@ if [ "$MODE_ID" = "dev" ]; then
   # check if tinybird is running
   if [ "$RESTART_TINYBIRD" = "true" ]; then
     TB_RESTARTED=true
-    # restart tinybird
-    tb local restart && tb update
+    # restart tinybird local runtime
+    tb local restart
   fi
 
   # check if tinybird http://localhost:7181 is running
@@ -179,20 +184,17 @@ if [ "$MODE_ID" = "dev" ]; then
 
   # We need to override on development some variables so we can work with local first tools.
   # TB_TOKEN=$(curl -s http://localhost:7181/tokens | jq -r ".workspace_admin_token")
-  TB_TOKEN=$(tb --output=json info | jq .local.token | tr -d '"')
+  TB_TOKEN=$(tb --local --output=json info | jq .local.token | tr -d '"')
+  TB_LOCAL_WORKSPACE=$(tb --local --output=json info | jq .local.workspace_name | tr -d '"')
+  echo "Using Tinybird local workspace: $TB_LOCAL_WORKSPACE"
 
   # auth tb with the admin token
   echo "Authenticating Tinybird"
   # tb auth --token $TB_TOKEN --host $TB_HOST
 
-  echo "Building Tinybird"
-  if [ "$TB_RESTARTED" = true ]; then
-    # build the project
-    tb build
-
-    # deploy the project
-    tb deploy
-  fi
+  echo "Building and deploying Tinybird to local runtime"
+  tb --local build
+  tb --local deploy
 
   cd ../../
 
@@ -225,7 +227,7 @@ elif [ "$MODE_ID" = "preview" ]; then
   cd internal/analytics
 
   # auth tb with the admin token
-  tb login --token $TB_ADMIN_TOKEN --host $TB_HOST
+  tb --cloud login --token $TB_ADMIN_TOKEN --host $TB_HOST
 
   cd ../../
 

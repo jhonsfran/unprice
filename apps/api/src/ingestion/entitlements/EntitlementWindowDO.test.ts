@@ -51,6 +51,7 @@ type MeterWindowRow = {
   pendingFlushSeq?: number | null
   // Phase 7.7 alarm trigger columns.
   lastEventAt?: number | null
+  lastFlushedAt?: number | null
   deletionRequested?: boolean
   recoveryRequired?: boolean
 }
@@ -75,6 +76,7 @@ const METER_WINDOW_KEYS = new Set<string>([
   "flushSeq",
   "pendingFlushSeq",
   "lastEventAt",
+  "lastFlushedAt",
   "deletionRequested",
   "recoveryRequired",
 ])
@@ -110,6 +112,10 @@ const testState = {
   engineApply: vi.fn(),
   pricePerFeature: vi.fn(),
   flushReservation: vi.fn(),
+  // Phase 7.13 — lazy reservation bootstrap. Default returns a healthy
+  // reservation so existing tests that don't care about the wallet path stay
+  // green; tests that exercise WALLET_EMPTY override per-test.
+  createReservation: vi.fn(),
   logger: {
     debug: vi.fn(),
     emit: vi.fn(),
@@ -157,11 +163,23 @@ describe("EntitlementWindowDO", () => {
     testState.engineApply.mockReset()
     testState.pricePerFeature.mockReset()
     testState.flushReservation.mockReset()
+    testState.createReservation.mockReset()
     // Default: flush+refill settles with zero runway so tests that don't
     // opt into the wallet path stay identical to their pre-7.5 shape.
     testState.flushReservation.mockResolvedValue({
       err: null,
       val: { grantedAmount: 0, flushedAmount: 0, refundedAmount: 0, drainLegs: [] },
+    })
+    // Default: lazy bootstrap returns a healthy reservation. Tests that need
+    // the WALLET_EMPTY surface (allocationAmount: 0) or wallet-error paths
+    // override this per-test.
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_lazy_default",
+        allocationAmount: 1_000_000_000, // $10, the sizing ceiling
+        drainLegs: [],
+      },
     })
     // Default: unit pricing — amount = quantity * $1.00. We return fake Dinero
     // objects (toJSON + currency snapshot) so the real diffLedgerMinor /
@@ -358,7 +376,10 @@ describe("EntitlementWindowDO", () => {
       }),
     ])
     expect(db.outboxRows).toHaveLength(0)
-    expect(state.alarmAt).toBe(input.periodEndAt + TEST_MAX_EVENT_AGE_MS)
+    // The default mocked apply opens a wallet reservation, so alarm() re-arms
+    // at the time-based flush deadline (5 min in non-dev) rather than the
+    // distant self-destruct. The flush deadline wins because it's sooner.
+    expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
   })
 
   it("keeps rows in the outbox for retry when Tinybird flush fails", async () => {
@@ -393,11 +414,16 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(0)
   })
 
-  it("does not open a Postgres connection, nor call ledger/rating services", async () => {
+  it("does not call ledger/rating services for free features (no lazy reservation needed)", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
+    // Free feature: marginal price is 0, so the lazy bootstrap is skipped
+    // and the DO never touches Postgres or the wallet path.
+    testState.pricePerFeature.mockImplementation(() => ({
+      val: { totalPrice: { dinero: fakeDinero(0, 2) } },
+    }))
     testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
       const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
       options?.beforePersist?.(facts)
@@ -420,6 +446,7 @@ describe("EntitlementWindowDO", () => {
     await durableObject.alarm()
 
     expect(createConnectionSpy).not.toHaveBeenCalled()
+    expect(testState.createReservation).not.toHaveBeenCalled()
     expect(ledgerPostChargeSpy).not.toHaveBeenCalled()
     expect(ratingRateIncrementalSpy).not.toHaveBeenCalled()
   })
@@ -524,25 +551,25 @@ describe("EntitlementWindowDO", () => {
     })
   })
 
-  it("does not update the cache when apply is rolled back by LIMIT_EXCEEDED", async () => {
+  it("does not stamp cache when an oversized event is rejected but committed usage is below limit", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
     testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
-      // Engine would bump usage to 11, but beforePersist rejects it → tx rolls back.
+      // Engine would bump usage 0 → 11, but beforePersist rejects it → tx rolls back.
       const facts = [{ delta: 11, meterKey: DEFAULT_METER_KEY, valueAfter: 11 }]
       options?.beforePersist?.(facts)
       return facts
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    const denied = await durableObject.apply(
-      createApplyInput({ enforceLimit: true, limit: 10 })
-    )
+    const denied = await durableObject.apply(createApplyInput({ enforceLimit: true, limit: 10 }))
     expect(denied.allowed).toBe(false)
 
-    // Cache was never populated because the tx threw before the post-commit flush.
+    // Pre-event committed usage is 0, well below limit 10 — only this single
+    // event's delta would have crossed it. The reservation stays open and
+    // the cache stays clean so future smaller events can still be applied.
     const result = await durableObject.getEnforcementState()
     expect(result).toEqual({ usage: 0, limit: null, isLimitReached: false })
   })
@@ -573,9 +600,10 @@ describe("EntitlementWindowDO", () => {
 
     await revived.alarm()
 
-    // alarm() now reads periodEndAt from SQLite on demand, so the self-destruct
-    // branch fires and schedules the next alarm at periodEndAt + MAX_EVENT_AGE_MS.
-    expect(state.alarmAt).toBe(input.periodEndAt + TEST_MAX_EVENT_AGE_MS)
+    // The revived DO sees a still-open reservation in SQLite and re-arms
+    // alarm() at the time-based flush deadline (5 min in non-dev) — the
+    // soonest deadline among self-destruct and the freshness floor.
+    expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
   })
 
   it("scheduleAlarm does not downgrade an earlier pending alarm", async () => {
@@ -605,7 +633,7 @@ describe("EntitlementWindowDO", () => {
   // behaviour (covered by the earlier tests in this suite).
   // ---------------------------------------------------------------------
 
-  it("skips the wallet check when the window has no reservation (pre-activation)", async () => {
+  it("opens a reservation lazily on first priced apply (Phase 7.13)", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -615,16 +643,69 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_lazy",
+        allocationAmount: 5 * 100_000_000,
+        drainLegs: [],
+      },
+    })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(createApplyInput())
 
     expect(result).toEqual({ allowed: true })
-    expect(state.waitUntilPromises).toHaveLength(0)
-    // Reservation fields are left at schema defaults (unset in the fake row).
+    // Bootstrap fired with the period window from the input.
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(testState.createReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj_123",
+        customerId: "cus_123",
+        currency: "USD",
+        entitlementId: "fpv_123",
+      })
+    )
+    // The reservation is persisted onto the window so subsequent events use
+    // the in-tx LocalReservation check directly.
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)
-    expect(row?.reservationId ?? null).toBeNull()
-    expect(row?.consumedAmount ?? 0).toBe(0)
+    expect(row?.reservationId).toBe("res_lazy")
+    expect(row?.allocationAmount).toBe(5 * 100_000_000)
+  })
+
+  it("denies with WALLET_EMPTY when the lazy bootstrap allocation is 0", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    // Wallet has nothing to back the reservation — allocation comes back 0.
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_empty",
+        allocationAmount: 0,
+        drainLegs: [],
+      },
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
+    // Denial is durable: subsequent retries hit the idempotency cache and
+    // skip the wallet entirely.
+    expect(db.idempotencyRows.get("idem_123")).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
   })
 
   it("denies with WALLET_EMPTY when the priced cost exceeds remaining allocation", async () => {
@@ -674,9 +755,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.idempotencyRows.size).toBe(1)
     expect(db.outboxRows).toHaveLength(0)
     // No wallet update committed — transaction rolled back.
-    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(
-      2 * 100_000_000 - 10
-    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(2 * 100_000_000 - 10)
     expect(state.waitUntilPromises).toHaveLength(0)
   })
 
@@ -773,9 +852,7 @@ describe("EntitlementWindowDO", () => {
 
     expect(result).toEqual({ allowed: true })
     // consumedAmount still advances; only the refill trigger is suppressed.
-    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(
-      2 * 100_000_000
-    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(2 * 100_000_000)
     expect(state.waitUntilPromises).toHaveLength(0)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.pendingFlushSeq).toBe(4)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.flushSeq).toBe(4)
@@ -852,6 +929,7 @@ describe("EntitlementWindowDO", () => {
       refillChunkAmount: 4 * 100_000_000,
       statementKey: `res_abc:${BASE_NOW + 60_000}`,
       final: false,
+      sourceId: "do_123",
     })
 
     const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
@@ -1403,7 +1481,22 @@ async function loadEntitlementWindowDO() {
   vi.doMock("@unprice/services/wallet", () => ({
     WalletService: class {
       public flushReservation = testState.flushReservation
+      public createReservation = testState.createReservation
     },
+  }))
+
+  // sizeReservation lives in its own module specifically so the DO can
+  // import it without pulling the use-cases barrel and its drizzle
+  // relations chain. Mock with a tiny pure stub.
+  vi.doMock("@unprice/services/wallet/reservation-sizing", () => ({
+    sizeReservation: (price: number) => ({
+      requestedAmount: Math.max(price * 1000, 100_000_000),
+      refillThresholdBps: 2000,
+      refillChunkAmount: Math.max(1, Math.floor(Math.max(price * 1000, 100_000_000) / 4)),
+    }),
+    MINIMUM_FLOOR_AMOUNT: 100_000_000,
+    CEILING_AMOUNT: 1_000_000_000,
+    DEFAULT_REFILL_THRESHOLD_BPS: 2000,
   }))
 
   vi.doMock("drizzle-orm", () => ({
@@ -1752,6 +1845,7 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
     priceConfig: DEFAULT_PRICE_CONFIG,
     now: BASE_NOW,
     overageStrategy: undefined as string | undefined,
+    periodStartAt: BASE_NOW - 60_000,
     periodEndAt: BASE_NOW + 60_000,
     periodKey: "period_2026_03",
     projectId: "proj_123",

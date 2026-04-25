@@ -214,6 +214,7 @@ export const STATUS_PLAN = ["draft", "published"] as const
 export const SUBSCRIPTION_STATUS = [
   "active", // the subscription is active
   "trialing", // the subscription is trialing
+  "pending_payment", // pay-in-advance plan waiting on first payment webhook before becoming active
   "canceled", // the subscription is cancelled
   "expired", // the subscription has expired - no auto-renew
   "past_due", // the subscription is past due - payment pending
@@ -233,7 +234,13 @@ export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
 export const OVERAGE_STRATEGIES = ["none", "last-call", "always"] as const
 export const WALLET_TOPUP_STATUSES = ["pending", "completed", "failed", "expired"] as const
-export const WALLET_GRANT_SOURCES = ["promo", "plan_included", "trial", "manual"] as const
+export const WALLET_GRANT_SOURCES = [
+  "promo",
+  "plan_included",
+  "trial",
+  "manual",
+  "credit_line",
+] as const
 
 export const TIER_MODES = Object.keys(TIER_MODES_MAP) as unknown as readonly [
   TierMode,

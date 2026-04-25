@@ -11,8 +11,8 @@
     "analyze": "ANALYZE=true pnpm --filter nextjs run build",
     "preview": "next build && next start",
     "clean": "git clean -xdf .next .turbo node_modules && rm -rf .turbo && rm -rf node_modules && rm -rf .next",
-    "dev:turbo": "next dev --turbo",
-    "dev": "next dev",
+    "dev:turbo": "openlogs --name nextjs --text-only --out-dir '../../.openlogs' next dev --turbo",
+    "dev": "openlogs --name nextjs --text-only --out-dir '../../.openlogs' next dev",
     "fmt": "pnpm biome format . --write && pnpm biome check . --write",
     "start": "next start",
     "typecheck": "tsc --noEmit"

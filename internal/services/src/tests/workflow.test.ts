@@ -8,13 +8,13 @@ import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import { LedgerGateway } from "../ledger"
-import { WalletService } from "../wallet"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
 import { RatingService } from "../rating/service"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { SubscriptionService } from "../subscriptions/service"
 import { createClock } from "../test-utils"
+import { WalletService } from "../wallet"
 
 vi.mock("../env", () => ({
   env: {

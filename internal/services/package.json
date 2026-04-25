@@ -28,6 +28,7 @@
     "./entitlements": "./src/entitlements/index.ts",
     "./wallet": "./src/wallet/index.ts",
     "./wallet/local-reservation": "./src/wallet/local-reservation.ts",
+    "./wallet/reservation-sizing": "./src/wallet/reservation-sizing.ts",
     "./use-cases": "./src/use-cases/index.ts",
     "./env": "./env.ts"
   },

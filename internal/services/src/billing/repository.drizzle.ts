@@ -262,5 +262,4 @@ export class DrizzleBillingRepository implements BillingRepository {
     })
     return (result as SubscriptionInvoice) ?? null
   }
-
 }

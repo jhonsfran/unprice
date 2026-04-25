@@ -2,12 +2,11 @@ import { type Database, and, eq, sql } from "@unprice/db"
 import { subscriptions } from "@unprice/db/schema"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { toLedgerMinor } from "@unprice/money"
 
 import type { ServiceContext } from "../../context"
-import { customerAccountKeys } from "../../ledger"
 import { UnPriceSubscriptionError } from "../../subscriptions/errors"
-import type { AdjustSource, DrainLeg, UnPriceWalletError } from "../../wallet"
+import { toErrorContext } from "../../utils/log-context"
+import type { AdjustSource, UnPriceWalletError } from "../../wallet"
 
 export type ActivateSubscriptionDeps = {
   services: Pick<ServiceContext, "subscriptions" | "wallet" | "ledger">
@@ -15,19 +14,26 @@ export type ActivateSubscriptionDeps = {
   logger: Logger
 }
 
-export interface ActivationPlanCredit {
-  /** Credit amount in pgledger scale 8. */
+/**
+ * One additive grant to issue at activation. Each entry creates one
+ * `wallet_grants` row (`adjust(signedAmount > 0, expiresAt = periodEndAt)`).
+ *
+ * Sources:
+ * - `plan_included` — flat plan-included credit baked into the plan version
+ * - `trial` — trial credits issued when the subscription enters `trialing`
+ * - `credit_line` — postpaid spending cap for `pay_in_arrear` plans;
+ *    issued at activation and at each renewal, expires at periodEndAt.
+ *    The DO drains it like any other granted balance, and period-end
+ *    invoicing charges the consumed amount against the customer's saved
+ *    payment method (success → reissue, failure → past_due, no reissue).
+ * - `promo` / `manual` — admin-driven, included for completeness; not
+ *    typically derived from the plan.
+ */
+export interface ActivationGrant {
+  /** Credit amount in pgledger scale 8. Must be > 0. */
   amount: number
-  /** Which platform funding source this credit came from. */
-  source: Extract<AdjustSource, "plan_included" | "promo" | "trial" | "manual">
+  source: Extract<AdjustSource, "plan_included" | "trial" | "credit_line" | "promo" | "manual">
   reason?: string
-}
-
-export interface ActivationReservationSpec {
-  entitlementId: string
-  requestedAmount: number
-  refillThresholdBps: number
-  refillChunkAmount: number
 }
 
 export interface ActivateSubscriptionInput {
@@ -37,62 +43,37 @@ export interface ActivateSubscriptionInput {
   periodEndAt: Date
   idempotencyKey: string
   /**
-   * Plan-included credits to issue at activation. Each entry creates a
-   * `wallet_grants` row that expires at `periodEndAt` (you use them or
-   * lose them). Pass an empty list for plans without included credits.
+   * Additive wallet grants to issue at activation. Each entry creates one
+   * `wallet_grants` row that expires at `periodEndAt`. This is the only
+   * money movement activation owns — base fees and usage are settled by
+   * the invoicing flow at period boundaries; usage reservations are
+   * created lazily by the EntitlementWindowDO on first priced event.
    */
-  planIncludedCredits?: ActivationPlanCredit[]
-  /**
-   * Flat per-period base fee in pgledger scale 8. Drains from
-   * `customer.*.available.purchased` into `customer.*.consumed` with
-   * `kind: "subscription"`. Omit or pass 0 for zero-fee plans.
-   */
-  baseFeeAmount?: number
-  /**
-   * One entry per metered entitlement that needs a reservation for
-   * this billing period. Compute `requestedAmount` per the plan's
-   * sizing formula (see plan §"Reservation Sizing"): clamp
-   * `price_per_event * 1000` between the min floor and ceiling.
-   */
-  reservations?: ActivationReservationSpec[]
+  grants?: ActivationGrant[]
 }
 
-export interface ActivatedReservation {
-  entitlementId: string
-  reservationId: string
-  allocationAmount: number
-  drainLegs: DrainLeg[]
-}
-
-export interface ActivatedGrant {
+export interface IssuedGrant {
   grantId: string
   amount: number
+  source: ActivationGrant["source"]
 }
 
 export interface ActivateSubscriptionOutput {
   subscriptionId: string
-  reservations: ActivatedReservation[]
-  grantsIssued: ActivatedGrant[]
-  baseFeeCharged: number
+  grantsIssued: IssuedGrant[]
 }
 
 /**
- * Owns the transition to `active` for a new billing period. Per the
- * plan (§7.12), this is the **only** caller of
- * `walletService.createReservation`.
+ * Issues additive wallet grants for a billing period and flips the
+ * subscription to `active`. Phase 7 scope: grants-only.
  *
- * All balance-changing steps execute inside a single `db.transaction`.
- * `WalletService` exposes executor-accepting overloads on `adjust`,
- * `transfer`, and `createReservation`, so the credits, base fee, and
- * reservations all share the outer tx — any step that fails rolls
- * back every ledger entry and every `wallet_grants` /
- * `entitlement_reservations` row written earlier in the activation.
- * The advisory lock is acquired once inside the tx and re-entered as
- * a no-op by each wallet call (session-scoped locks stack freely).
+ * Reservations are created lazily by the EntitlementWindowDO on first
+ * priced usage event — they're not opened here. Base fees settle through
+ * the invoicing flow at period boundaries — also not transferred here.
  *
- * Ordering: plan credits → base fee → reservations → markActive.
- * Plan credits come first so they're available to be drained by the
- * reservations that follow (priority drain: granted before purchased).
+ * Single transaction, single advisory lock per customer. Any grant
+ * failing aborts the tx (no partial activation). Idempotency suffix
+ * `:grant:{i}` keeps retries convergent on the same `wallet_grants` row.
  */
 export async function activateSubscription(
   deps: ActivateSubscriptionDeps,
@@ -105,10 +86,6 @@ export async function activateSubscription(
     },
   })
 
-  // 1. Load subscription to resolve customerId, currency, and to
-  //    confirm it exists in this project. Pure read — no lock
-  //    needed; the authoritative serialization happens under the
-  //    customer advisory lock inside the transaction.
   const subscription = await deps.db.query.subscriptions.findFirst({
     with: {
       customer: { columns: { id: true, defaultCurrency: true } },
@@ -128,146 +105,42 @@ export async function activateSubscription(
 
   const customerId = subscription.customer.id
   const currency = subscription.customer.defaultCurrency
-
-  const credits = input.planIncludedCredits ?? []
-  const reservations = input.reservations ?? []
-  const baseFeeAmount = input.baseFeeAmount ?? 0
-
-  // 2. Pre-flight zero-balance policy. Fails fast for clearly-empty
-  //    wallets before we open the tx. The authoritative check happens
-  //    atomically inside each ledger transfer where pgledger enforces
-  //    non-negativity — this is just an early-exit for the common case.
-  const preflightErr = await checkPreflight(deps, {
-    customerId,
-    baseFeeAmount,
-    plannedCredits: credits.reduce((sum, c) => sum + c.amount, 0),
-    totalReservationRequested: reservations.reduce((sum, r) => sum + r.requestedAmount, 0),
-  })
-
-  if (preflightErr) {
-    return Err(preflightErr)
-  }
+  const grants = (input.grants ?? []).filter((g) => g.amount > 0)
 
   try {
     return await deps.db.transaction(async (tx) => {
-      // Single advisory lock held for the whole activation — the
-      // nested wallet calls will try to re-acquire and no-op because
-      // Postgres session-scoped advisory locks are re-entrant.
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`customer:${customerId}`}))`)
 
-      const grantsIssued: ActivatedGrant[] = []
-      const reservationsOut: ActivatedReservation[] = []
+      const grantsIssued: IssuedGrant[] = []
 
-      // 3. Issue plan-included credits (one wallet_grants row per entry).
-      //    Each grant gets a deterministic idempotency suffix so retries
-      //    of the same activation converge on the same grant row.
-      for (let i = 0; i < credits.length; i++) {
-        const credit = credits[i]!
+      for (let i = 0; i < grants.length; i++) {
+        const grant = grants[i]!
         const { val, err } = await deps.services.wallet.adjust(
           {
             projectId: input.projectId,
             customerId,
             currency,
-            signedAmount: credit.amount,
+            signedAmount: grant.amount,
             actorId: "system:subscription-activation",
-            reason: credit.reason ?? `Plan activation credit (${credit.source})`,
-            source: credit.source,
-            idempotencyKey: `activate:${input.idempotencyKey}:credit:${i}`,
+            reason: grant.reason ?? `Plan activation grant (${grant.source})`,
+            source: grant.source,
+            idempotencyKey: `activate:${input.idempotencyKey}:grant:${i}`,
             expiresAt: input.periodEndAt,
           },
           tx
         )
         if (err) {
-          // Abort the whole tx — rolls back any earlier ledger entries
-          // and wallet_grants rows written by this activation.
           throw new ActivationAbortError(err)
         }
         if (val.grantId) {
-          grantsIssued.push({ grantId: val.grantId, amount: val.clampedAmount })
-        }
-      }
-
-      // 4. Charge flat base fee (purchased → consumed). `kind: "subscription"`
-      //    and `statement_key` satisfy the invoice projection contract so
-      //    the base fee shows up as an invoice line (slice 7.8).
-      if (baseFeeAmount > 0) {
-        const keys = customerAccountKeys(customerId)
-        const statementKey = `subscription:${input.subscriptionId}:${input.periodStartAt.toISOString()}`
-
-        const { err } = await deps.services.wallet.transfer(
-          {
-            projectId: input.projectId,
-            customerId,
-            currency,
-            fromAccountKey: keys.purchased,
-            toAccountKey: keys.consumed,
-            amount: baseFeeAmount,
-            metadata: {
-              flow: "subscription",
-              kind: "subscription",
-              statement_key: statementKey,
-              subscription_id: input.subscriptionId,
-              period_start_at: input.periodStartAt.toISOString(),
-              period_end_at: input.periodEndAt.toISOString(),
-              description: "Base subscription fee",
-            },
-            idempotencyKey: `activate:${input.idempotencyKey}:base_fee`,
-          },
-          tx
-        )
-        if (err) throw new ActivationAbortError(err)
-      }
-
-      // 5. Open a reservation per metered entitlement. Drains `granted`
-      //    first (the credits we just issued), then `purchased` —
-      //    WalletService.createReservation enforces the priority order.
-      for (const spec of reservations) {
-        const { val, err } = await deps.services.wallet.createReservation(
-          {
-            projectId: input.projectId,
-            customerId,
-            currency,
-            entitlementId: spec.entitlementId,
-            requestedAmount: spec.requestedAmount,
-            refillThresholdBps: spec.refillThresholdBps,
-            refillChunkAmount: spec.refillChunkAmount,
-            periodStartAt: input.periodStartAt,
-            periodEndAt: input.periodEndAt,
-            idempotencyKey: `activate:${input.idempotencyKey}:reserve:${spec.entitlementId}`,
-          },
-          tx
-        )
-        if (err) throw new ActivationAbortError(err)
-
-        // Partial fulfillment means insufficient funds. Zero-balance
-        // policy: all-or-nothing. No partial activation.
-        if (val.allocationAmount < spec.requestedAmount) {
-          deps.logger.error("subscription.activate.partial_reservation", {
-            entitlementId: spec.entitlementId,
-            requested: spec.requestedAmount,
-            allocated: val.allocationAmount,
+          grantsIssued.push({
+            grantId: val.grantId,
+            amount: val.clampedAmount,
+            source: grant.source,
           })
-          throw new ActivationAbortError(
-            new UnPriceSubscriptionError({
-              message: "Insufficient funds: reservation partially filled",
-              context: {
-                entitlementId: spec.entitlementId,
-                requestedAmount: spec.requestedAmount,
-                allocationAmount: val.allocationAmount,
-              },
-            })
-          )
         }
-
-        reservationsOut.push({
-          entitlementId: spec.entitlementId,
-          reservationId: val.reservationId,
-          allocationAmount: val.allocationAmount,
-          drainLegs: val.drainLegs,
-        })
       }
 
-      // 6. Flip the subscription to active + stamp the billing cycle.
       await tx
         .update(subscriptions)
         .set({
@@ -285,17 +158,15 @@ export async function activateSubscription(
 
       return Ok({
         subscriptionId: input.subscriptionId,
-        reservations: reservationsOut,
         grantsIssued,
-        baseFeeCharged: baseFeeAmount,
       })
     })
   } catch (error) {
     if (error instanceof ActivationAbortError) {
       return Err(error.inner)
     }
-    deps.logger.error(error, {
-      context: "subscription.activate.transaction_failed",
+    deps.logger.error("subscription.activate.transaction_failed", {
+      error: toErrorContext(error),
       subscriptionId: input.subscriptionId,
     })
     return Err(
@@ -310,73 +181,9 @@ export async function activateSubscription(
   }
 }
 
-/**
- * Abort carrier for rolling back the activation tx while preserving
- * the typed domain error. Drizzle rolls the tx back when the callback
- * throws; this class makes it possible to unwrap the original
- * `UnPriceSubscriptionError | UnPriceWalletError` in the outer
- * `catch` and return it as a typed `Err(...)`.
- */
 class ActivationAbortError extends Error {
   constructor(public readonly inner: UnPriceSubscriptionError | UnPriceWalletError) {
     super(inner.message)
     this.name = "ActivationAbortError"
   }
-}
-
-/**
- * Best-effort balance check before opening any ledger transfers. We
- * do not take the advisory lock here — this read can race with
- * concurrent writes. The authoritative non-negativity check happens
- * inside each `WalletService` method's transaction (pgledger enforces
- * non-negative customer balances at the account level). The value of
- * this pre-check is failing fast for clearly-empty wallets before
- * creating `wallet_grants` rows and running retries.
- */
-async function checkPreflight(
-  deps: ActivateSubscriptionDeps,
-  input: {
-    customerId: string
-    baseFeeAmount: number
-    plannedCredits: number
-    totalReservationRequested: number
-  }
-): Promise<UnPriceSubscriptionError | null> {
-  const keys = customerAccountKeys(input.customerId)
-
-  const purchasedResult = await deps.services.ledger.getAccountBalance(keys.purchased)
-  const grantedResult = await deps.services.ledger.getAccountBalance(keys.granted)
-
-  // Missing accounts mean the customer has never transacted — treat
-  // both balances as zero. That's the right answer for the math.
-  const purchased = purchasedResult.err ? 0 : toLedgerMinor(purchasedResult.val)
-  const granted = grantedResult.err ? 0 : toLedgerMinor(grantedResult.val)
-
-  // Base fee always drains purchased. Reservations drain granted first
-  // (including the credits we are about to issue), then purchased.
-  const effectiveGranted = granted + input.plannedCredits
-  const effectivePurchased = purchased - input.baseFeeAmount
-
-  if (effectivePurchased < 0) {
-    return new UnPriceSubscriptionError({
-      message: "Insufficient funds: base fee exceeds available purchased balance",
-      context: {
-        required: input.baseFeeAmount,
-        available: purchased,
-      },
-    })
-  }
-
-  if (effectiveGranted + effectivePurchased < input.totalReservationRequested) {
-    return new UnPriceSubscriptionError({
-      message: "Insufficient funds: total reservation requested exceeds available balance",
-      context: {
-        required: input.totalReservationRequested,
-        availableGranted: effectiveGranted,
-        availablePurchased: effectivePurchased,
-      },
-    })
-  }
-
-  return null
 }

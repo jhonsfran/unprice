@@ -7,7 +7,6 @@ import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
-import { toErrorContext } from "../../utils/log-context"
 
 type CompleteProviderSetupDeps = {
   services: Pick<ServiceContext, "customers">

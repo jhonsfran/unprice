@@ -6,7 +6,6 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
-import { toErrorContext } from "../../utils/log-context"
 
 type InitiateTopupDeps = {
   services: Pick<ServiceContext, "customers">

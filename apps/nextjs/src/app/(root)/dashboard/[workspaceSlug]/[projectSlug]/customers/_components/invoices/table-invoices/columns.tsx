@@ -2,7 +2,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 
-import { formatMoney } from "@unprice/money"
+import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Checkbox } from "@unprice/ui/checkbox"
@@ -107,7 +107,10 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />,
     cell: ({ row }) => (
       <Badge>
-        {formatMoney((row.original.totalCents / 100).toString(), row.original.currency)}
+        {formatMoney(
+          toDecimal(fromLedgerMinor(row.original.totalAmount, row.original.currency)),
+          row.original.currency
+        )}
       </Badge>
     ),
     size: 20,

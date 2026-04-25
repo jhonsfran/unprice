@@ -175,10 +175,10 @@ export function computeResolvedStatePeriodKey(
   })
 }
 
-export function computeResolvedStatePeriodEndAt(
+export function computeResolvedStatePeriodWindow(
   state: Pick<IngestionResolvedState, "resetConfig" | "streamEndAt" | "streamStartAt">,
   timestamp: number
-): number | null {
+): { start: number; end: number } | null {
   if (timestamp < state.streamStartAt) {
     return null
   }
@@ -202,7 +202,7 @@ export function computeResolvedStatePeriodEndAt(
       },
     })
 
-    return cycle?.end ?? null
+    return cycle ? { start: cycle.start, end: cycle.end } : null
   }
 
   const cycle = calculateCycleWindow({
@@ -219,7 +219,14 @@ export function computeResolvedStatePeriodEndAt(
     },
   })
 
-  return cycle?.end ?? null
+  return cycle ? { start: cycle.start, end: cycle.end } : null
+}
+
+export function computeResolvedStatePeriodEndAt(
+  state: Pick<IngestionResolvedState, "resetConfig" | "streamEndAt" | "streamStartAt">,
+  timestamp: number
+): number | null {
+  return computeResolvedStatePeriodWindow(state, timestamp)?.end ?? null
 }
 
 export function filterMatchingEntitlements(params: {

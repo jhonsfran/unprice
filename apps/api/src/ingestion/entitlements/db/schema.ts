@@ -74,6 +74,12 @@ export const meterWindowTable = sqliteTable("meter_window", {
   lastEventAt: integer("last_event_at"),
   deletionRequested: integer("deletion_requested", { mode: "boolean" }).notNull().default(false),
   recoveryRequired: integer("recovery_required", { mode: "boolean" }).notNull().default(false),
+
+  // Timestamp of the last successful (final or non-final) flush. Used by
+  // alarm() to enforce a maximum interval between ledger updates so cold
+  // meters — those that never cross the refill threshold — still surface
+  // their consumption to the wallet on a predictable cadence.
+  lastFlushedAt: integer("last_flushed_at"),
 })
 
 export const schema = {

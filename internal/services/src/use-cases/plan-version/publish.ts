@@ -5,7 +5,6 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { isZero } from "dinero.js"
 import type { ServiceContext } from "../../context"
-import { toErrorContext } from "../../utils/log-context"
 
 type PublishPlanVersionDeps = {
   services: Pick<ServiceContext, "customers">

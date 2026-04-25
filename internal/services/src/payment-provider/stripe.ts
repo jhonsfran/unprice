@@ -791,7 +791,8 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         : undefined
 
     const isCheckoutSession = event.eventType.startsWith("checkout.session.")
-    const providerSessionId = isCheckoutSession && typeof object?.id === "string" ? object.id : undefined
+    const providerSessionId =
+      isCheckoutSession && typeof object?.id === "string" ? object.id : undefined
 
     // Stripe's amount_total is in the currency's smallest unit (cents).
     // Convert to scale-8 minor by multiplying by 1e6.

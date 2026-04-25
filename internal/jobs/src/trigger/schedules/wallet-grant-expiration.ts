@@ -1,11 +1,11 @@
 import { logger, schedules } from "@trigger.dev/sdk/v3"
+import { Analytics } from "@unprice/analytics"
 import { and, eq, gt, isNull, lte, sql } from "@unprice/db"
 import { customers, walletGrants } from "@unprice/db/schema"
-import { createServiceContext } from "@unprice/services/context"
-import { CacheService } from "@unprice/services/cache"
-import { NoopMetrics } from "@unprice/services/metrics"
-import { Analytics } from "@unprice/analytics"
 import { createStandaloneRequestLogger } from "@unprice/observability"
+import { CacheService } from "@unprice/services/cache"
+import { createServiceContext } from "@unprice/services/context"
+import { NoopMetrics } from "@unprice/services/metrics"
 import { env } from "../../env"
 import { db } from "../db"
 
@@ -89,10 +89,7 @@ export const walletGrantExpirationSchedule = schedules.task({
           // grant between the outer query and here. If already expired,
           // already voided, or fully consumed, skip.
           const current = await tx.query.walletGrants.findFirst({
-            where: and(
-              eq(walletGrants.id, grant.id),
-              eq(walletGrants.projectId, grant.projectId)
-            ),
+            where: and(eq(walletGrants.id, grant.id), eq(walletGrants.projectId, grant.projectId)),
           })
 
           if (!current) {
@@ -166,10 +163,7 @@ export const walletGrantExpirationSchedule = schedules.task({
               expiredAt: now,
             })
             .where(
-              and(
-                eq(walletGrants.id, current.id),
-                eq(walletGrants.projectId, current.projectId)
-              )
+              and(eq(walletGrants.id, current.id), eq(walletGrants.projectId, current.projectId))
             )
 
           expiredCount += 1

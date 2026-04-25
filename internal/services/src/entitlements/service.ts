@@ -14,7 +14,6 @@ import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import type { Metrics } from "../metrics"
 import { cachedQuery } from "../utils/cached-query"
-import { toErrorContext } from "../utils/log-context"
 import { UnPriceEntitlementError } from "./errors"
 import type { GrantsManager } from "./grants"
 

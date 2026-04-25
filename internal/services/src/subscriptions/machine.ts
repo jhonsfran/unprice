@@ -210,7 +210,7 @@ export class SubscriptionMachine {
             if (!input.walletService) {
               return {
                 skipped: true as const,
-                grantsIssued: [] as Array<{ grantId: string; amount: number }>,
+                grantsIssued: [] as Array<{ grantId: string; amount: number; source: string }>,
               }
             }
 
@@ -222,15 +222,15 @@ export class SubscriptionMachine {
             if (!derived) {
               return {
                 skipped: true as const,
-                grantsIssued: [] as Array<{ grantId: string; amount: number }>,
+                grantsIssued: [] as Array<{ grantId: string; amount: number; source: string }>,
               }
             }
 
-            // Base fee is charged by `invoiceSubscription` (purchased →
-            // consumed transfer per billing period). Setting it to 0
-            // here avoids double-charging — the activating state only
-            // owns the two Phase-7 primitives invoicing doesn't:
-            // plan-included credits and per-meter reservations.
+            // Phase 7: activation issues period grants only.
+            // - Reservations: lazy in EntitlementWindowDO on first priced event.
+            // - Base fees / usage: settled by `invoiceSubscription` at period
+            //   boundaries.
+            // - Trial credits: issued at `trialing` entry, not here.
             const periodStartAt = new Date(
               input.context.subscription.currentCycleStartAt ?? input.context.now
             )
@@ -242,9 +242,9 @@ export class SubscriptionMachine {
               services: {
                 wallet: input.walletService,
                 ledger: input.ledgerService,
-                // activateSubscription only calls `services.wallet` and
-                // `services.ledger`; the `subscriptions` field on the
-                // Pick type is never dereferenced.
+                // activateSubscription only calls `services.wallet`; the
+                // `subscriptions` and `ledger` fields on the Pick type
+                // are not dereferenced.
                 subscriptions: undefined as never,
               },
               db: input.db,
@@ -257,9 +257,7 @@ export class SubscriptionMachine {
               periodStartAt,
               periodEndAt,
               idempotencyKey: `cycle:${input.context.subscriptionId}:${periodStartAt.toISOString()}`,
-              baseFeeAmount: 0,
-              planIncludedCredits: derived.planIncludedCredits,
-              reservations: derived.reservations,
+              grants: derived.grants,
             })
 
             if (result.err) {
@@ -269,7 +267,6 @@ export class SubscriptionMachine {
             return {
               skipped: false as const,
               grantsIssued: result.val.grantsIssued,
-              reservations: result.val.reservations,
             }
           }
         ),
@@ -402,6 +399,11 @@ export class SubscriptionMachine {
               actions: "logStateTransition",
             },
             {
+              target: "pending_payment",
+              guard: ({ context }) => context.subscription.status === "pending_payment",
+              actions: "logStateTransition",
+            },
+            {
               target: "past_due",
               guard: ({ context }) => context.subscription.status === "past_due",
               actions: "logStateTransition",
@@ -498,6 +500,31 @@ export class SubscriptionMachine {
                 }),
               },
             ],
+          },
+        },
+        pending_payment: {
+          tags: ["subscription"],
+          description:
+            "Pay-in-advance plan waiting on the first payment provider webhook before the subscription becomes active. Customer cannot consume usage yet — the EntitlementWindowDO denies events while the wallet is empty.",
+          on: {
+            // First successful payment of the bootstrap invoice settles the
+            // wallet topup; the webhook fires PAYMENT_SUCCESS, which moves us
+            // into `activating` to issue period grants and flip to `active`.
+            PAYMENT_SUCCESS: {
+              target: "activating",
+              actions: "logStateTransition",
+            },
+            // Provider declined the first payment. Surface as `past_due` so
+            // the same retry/dunning flow that handles renewal failures kicks
+            // in — no special-case path for first-payment failure.
+            PAYMENT_FAILURE: {
+              target: "past_due",
+              actions: "logStateTransition",
+            },
+            CANCEL: {
+              target: "canceling",
+              actions: "logStateTransition",
+            },
           },
         },
         invoicing: {

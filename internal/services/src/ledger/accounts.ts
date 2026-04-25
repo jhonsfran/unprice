@@ -8,13 +8,14 @@
  * union then.
  */
 
-export type PlatformFundingKind = "topup" | "promo" | "plan_credit" | "manual"
+export type PlatformFundingKind = "topup" | "promo" | "plan_credit" | "manual" | "credit_line"
 
 export const PLATFORM_FUNDING_KINDS: readonly PlatformFundingKind[] = [
   "topup",
   "promo",
   "plan_credit",
   "manual",
+  "credit_line",
 ] as const
 
 export function platformAccountKey(kind: PlatformFundingKind, projectId: string): string {
@@ -26,6 +27,7 @@ export type CustomerAccountKeys = {
   granted: string
   reserved: string
   consumed: string
+  receivable: string
 }
 
 export function customerAccountKeys(customerId: string): CustomerAccountKeys {
@@ -34,6 +36,7 @@ export function customerAccountKeys(customerId: string): CustomerAccountKeys {
     granted: `customer.${customerId}.available.granted`,
     reserved: `customer.${customerId}.reserved`,
     consumed: `customer.${customerId}.consumed`,
+    receivable: `customer.${customerId}.receivable`,
   }
 }
 

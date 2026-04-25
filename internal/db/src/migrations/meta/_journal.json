@@ -15,6 +15,20 @@
       "when": 1776804713944,
       "tag": "0001_crazy_naoko",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777071488954,
+      "tag": "0002_credit_line_pending_payment",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777118400000,
+      "tag": "0003_partial_reservation_unique",
+      "breakpoints": true
     }
   ]
 }

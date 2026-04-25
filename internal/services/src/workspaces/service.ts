@@ -12,7 +12,6 @@ import type {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { z } from "zod"
-import { toErrorContext } from "../utils/log-context"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
 type WorkspaceMember = z.infer<typeof listMembersSchema>

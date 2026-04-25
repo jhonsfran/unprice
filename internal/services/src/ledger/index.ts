@@ -1,7 +1,6 @@
 export * from "./errors"
 export {
   LedgerGateway,
-  type CustomerAccountsBundle,
   type InvoiceLine,
   type LedgerAccount,
   type LedgerEntry,

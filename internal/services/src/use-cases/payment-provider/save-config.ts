@@ -5,7 +5,6 @@ import type { PaymentProvider, PaymentProviderConfig } from "@unprice/db/validat
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { env } from "../../../env"
-import { toErrorContext } from "../../utils/log-context"
 
 type SavePaymentProviderConfigDeps = {
   db: Database

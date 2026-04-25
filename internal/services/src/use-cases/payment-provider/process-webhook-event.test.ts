@@ -133,6 +133,8 @@ describe("processWebhookEvent", () => {
   }
   let wallet: {
     settleTopUp: ReturnType<typeof vi.fn>
+    settleReceivable: ReturnType<typeof vi.fn>
+    adjust: ReturnType<typeof vi.fn>
   }
   beforeEach(() => {
     const setup = createDbMocks()
@@ -152,6 +154,12 @@ describe("processWebhookEvent", () => {
     wallet = {
       settleTopUp: vi.fn().mockResolvedValue({
         val: { topupId: "wtup_test", ledgerTransferId: "tr_test" },
+      }),
+      settleReceivable: vi.fn().mockResolvedValue({
+        val: { ledgerTransferId: "tr_recv_test" },
+      }),
+      adjust: vi.fn().mockResolvedValue({
+        val: { clampedAmount: 0, unclampedRemainder: 0 },
       }),
     }
   })

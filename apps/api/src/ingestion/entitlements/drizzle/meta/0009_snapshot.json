@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "70c44050-92d6-4e09-9a81-a1cf74b2cc6d",
-  "prevId": "a7e0c3d2-8f11-4a1b-9c2d-7e5f3a1b6c9d",
+  "id": "cc27f530-7641-4404-987d-e350f24dcdb2",
+  "prevId": "70c44050-92d6-4e09-9a81-a1cf74b2cc6d",
   "tables": {
     "idempotency_keys": {
       "name": "idempotency_keys",
@@ -239,6 +239,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
+        },
+        "last_flushed_at": {
+          "name": "last_flushed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},

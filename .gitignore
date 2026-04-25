@@ -99,3 +99,5 @@ internal/lakehouse/lakenv/*
 **/__pycache__/**
 **/.venv/**
 .sisyphus
+
+.openlogs

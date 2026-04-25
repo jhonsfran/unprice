@@ -11,6 +11,7 @@ import type {
   NormalizedProviderWebhook,
   PaymentProviderWebhookHeaders,
 } from "../../payment-provider/interface"
+import { settlePrepaidInvoiceToWallet } from "./settle-prepaid-invoice-to-wallet"
 
 type ProcessWebhookEventDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions" | "wallet">
@@ -242,9 +243,18 @@ async function applyWebhookEvent({
       },
     })
 
-    // Payment-side ledger entries (cash clearing the customer receivable) are
-    // owned by the payout-reconciliation adapter, not this webhook path.
-    // Invoice status above captures the payment state for downstream consumers.
+    const settled = await settlePrepaidInvoiceToWallet({
+      walletService: deps.services.wallet,
+      invoice,
+    })
+    if (settled.err) {
+      return Err(
+        new FetchError({
+          message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+          retry: false,
+        })
+      )
+    }
 
     const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
       projectId,
@@ -286,9 +296,18 @@ async function applyWebhookEvent({
       },
     })
 
-    // As with payment.succeeded, the payout-reconciliation adapter owns
-    // the ledger-side accounting; the invoice status captures the dispute
-    // resolution.
+    const settled = await settlePrepaidInvoiceToWallet({
+      walletService: deps.services.wallet,
+      invoice,
+    })
+    if (settled.err) {
+      return Err(
+        new FetchError({
+          message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+          retry: false,
+        })
+      )
+    }
 
     const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
       projectId,

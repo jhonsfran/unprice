@@ -27,6 +27,9 @@ import {
 import { LedgerGateway } from "@unprice/services/ledger"
 import { WalletService } from "@unprice/services/wallet"
 import { LocalReservation, thresholdFromBps } from "@unprice/services/wallet/local-reservation"
+// Pure helper — direct path avoids the use-cases barrel and the
+// drizzle relations import chain it transitively pulls in.
+import { sizeReservation } from "@unprice/services/wallet/reservation-sizing"
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -153,6 +156,7 @@ const applyInputSchema = z.object({
   overageStrategy: overageStrategySchema.optional(),
   enforceLimit: z.boolean(),
   now: z.number(),
+  periodStartAt: z.number().finite(),
   periodEndAt: z.number().finite(),
 })
 
@@ -167,6 +171,19 @@ const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
 // `available.purchased`; a future apply() on this DO runs without a
 // reservation until activateEntitlement opens a new one.
 const INACTIVITY_THRESHOLD_MS = 24 * 60 * 60 * 1000
+
+// Maximum time the DO will let consumed-but-unflushed activity sit in
+// `customer.{cid}.reserved` without recognising it in the ledger. Cold
+// meters that never cross `refillThresholdBps` would otherwise stay
+// invisible until period_end / inactivity; this caps that delay so
+// dashboards and reconcilers see a freshness floor instead.
+//
+// Tight in dev (30s) so the user sees movement quickly while debugging;
+// 5 min in deployed environments balances ledger freshness against the
+// per-flush Postgres roundtrip cost on cold meters.
+function maxFlushIntervalMs(env: Env): number {
+  return env.NODE_ENV === "development" ? 30_000 : 5 * 60_000
+}
 
 type EnforcementCache = {
   limit: number | null
@@ -284,6 +301,46 @@ export class EntitlementWindowDO extends DurableObject {
 
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
+
+    // Idempotency short-circuit before any wallet I/O. A retried event with a
+    // cached result must not re-call wallet.createReservation.
+    const cachedResult = this.lookupCachedIdempotencyResult(idempotencyKey)
+    if (cachedResult) {
+      return cachedResult
+    }
+
+    // Phase 7.13 — lazy reservation bootstrap. If this DO has never opened a
+    // reservation for the current period (or the previous one closed at period
+    // end / inactivity), open one now against the customer wallet. The
+    // reservation row is the contract the in-tx LocalReservation check needs;
+    // without it the DO falls through to pre-wallet behavior (no enforcement).
+    //
+    // Out-of-tx because Postgres ↔ SQLite can't share a single transaction.
+    // The DO is single-writer per (customer, stream, period), so there's no
+    // race with a concurrent apply().
+    const preWindow = this.readWalletWindow(this.db)
+    // Skip the wallet round-trip when the cache already says this stream is
+    // capped — the in-tx limit check will re-deny, and bootstrapping a fresh
+    // reservation only to immediately close it on the next limit hit is
+    // pure churn against the customer wallet.
+    if ((!preWindow || preWindow.reservationId === null) && !this.cache?.isLimitReached) {
+      const denial = await this.bootstrapReservation(input)
+      if (denial) {
+        // Persist the denial idempotently so retries return the same answer
+        // without re-calling the wallet. The DO's normal denial-cache pattern.
+        this.db
+          .insert(idempotencyKeysTable)
+          .values({
+            eventId: idempotencyKey,
+            createdAt,
+            allowed: false,
+            deniedReason: denial.deniedReason ?? null,
+            denyMessage: denial.message ?? null,
+          })
+          .run()
+        return denial
+      }
+    }
 
     let insertedFactCount = 0
     let nextUsage: number | null = null
@@ -519,6 +576,37 @@ export class EntitlementWindowDO extends DurableObject {
           })
           .run()
 
+        // Distinguish two cases:
+        //   (a) The *committed* usage is already at or above the limit. Every
+        //       future event on this period will also fail the limit check.
+        //       The reservation is dead weight — close it so the remainder
+        //       returns to `available.purchased`.
+        //   (b) Committed usage is still below the limit, but this single
+        //       event's delta would have pushed past it (e.g. a one-shot
+        //       large delta on an otherwise-quiet period). Future smaller
+        //       events can still draw on this reservation, so we leave it
+        //       open and only deny *this* event.
+        const previousUsage = this.cache?.usage ?? 0
+        const trulyCapped =
+          input.overageStrategy !== "always" &&
+          typeof input.limit === "number" &&
+          Number.isFinite(input.limit) &&
+          previousUsage >= input.limit
+
+        if (trulyCapped) {
+          this.cache = {
+            limit: input.limit ?? null,
+            usage: previousUsage,
+            lastUpdate: createdAt,
+            isLimitReached: true,
+          }
+
+          const window = this.readWalletWindow(this.db)
+          if (window?.reservationId) {
+            await this.finalFlush(window)
+          }
+        }
+
         return deniedResult
       }
 
@@ -648,8 +736,7 @@ export class EntitlementWindowDO extends DurableObject {
     const now = Date.now()
 
     if (window?.reservationId && !window.recoveryRequired) {
-      const isPeriodEnd =
-        window.periodEndAt !== null && now >= window.periodEndAt
+      const isPeriodEnd = window.periodEndAt !== null && now >= window.periodEndAt
       const isInactive =
         window.lastEventAt !== null && now - window.lastEventAt > INACTIVITY_THRESHOLD_MS
       const isDeletionPending = window.deletionRequested
@@ -666,6 +753,49 @@ export class EntitlementWindowDO extends DurableObject {
           await this.ctx.storage.deleteAll()
           return
         }
+      }
+    }
+
+    // Time-based flush: if a reservation is still open with unflushed
+    // consumption that hasn't been recognised in the ledger for longer
+    // than the max flush interval, push a non-final flush so cold meters
+    // surface their consumption on a predictable cadence rather than
+    // waiting for the refill threshold or period_end.
+    //
+    // Re-read the window because finalFlush above may have closed it.
+    // `refillInFlight` guards against a concurrent apply()-triggered refill
+    // (single-threaded per DO, but the apply path's `ctx.waitUntil` can
+    // outlive the request and we don't want the alarm to race it).
+    const flushIntervalMs = maxFlushIntervalMs(this.runtimeEnv)
+    const postFlushWindow = this.readWalletWindow(this.db)
+    if (
+      postFlushWindow?.reservationId &&
+      !postFlushWindow.recoveryRequired &&
+      !postFlushWindow.refillInFlight
+    ) {
+      const unflushed = Math.max(
+        0,
+        postFlushWindow.consumedAmount - postFlushWindow.flushedAmount
+      )
+      const elapsedSinceLastFlush =
+        postFlushWindow.lastFlushedAt !== null
+          ? now - postFlushWindow.lastFlushedAt
+          : Number.POSITIVE_INFINITY
+
+      if (unflushed > 0 && elapsedSinceLastFlush >= flushIntervalMs) {
+        const nextSeq = postFlushWindow.flushSeq + 1
+        this.db
+          .update(meterWindowTable)
+          .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
+          .run()
+        await this.requestFlushAndRefill({
+          flushSeq: nextSeq,
+          flushAmount: unflushed,
+          // Time-driven flush is purely about ledger freshness — don't
+          // top up allocation here. The DO's own refill trigger handles
+          // that when the threshold is actually crossed.
+          refillChunkAmount: 0,
+        })
       }
     }
 
@@ -689,14 +819,31 @@ export class EntitlementWindowDO extends DurableObject {
       return
     }
 
+    // Pick the soonest among: outbox drain, time-based flush deadline,
+    // self-destruct. Re-read the window because the time-flush above may
+    // have just updated `lastFlushedAt`.
+    const finalWindow = this.readWalletWindow(this.db)
+    const candidates: number[] = []
+
     if (remainingOutboxCount > 0) {
-      await this.scheduleAlarm(now + FLUSH_INTERVAL_MS)
+      candidates.push(now + FLUSH_INTERVAL_MS)
+    }
+
+    if (finalWindow?.reservationId && !finalWindow.recoveryRequired) {
+      const baseline = finalWindow.lastFlushedAt ?? now
+      candidates.push(baseline + flushIntervalMs)
+    }
+
+    if (candidates.length === 0) {
+      // Nothing pending — wake up at self-destruct time and die.
+      await this.scheduleAlarm(selfDestructAt)
       return
     }
 
-    // Outbox is empty, but we haven't reached self-destruct time.
-    // Schedule one final alarm to wake up and die.
-    await this.scheduleAlarm(selfDestructAt)
+    const target = Math.min(...candidates, selfDestructAt)
+    // Never schedule in the past — at minimum wait one tick so we don't
+    // hot-loop the alarm on a baseline that's already overdue.
+    await this.scheduleAlarm(Math.max(now + 1_000, target))
   }
 
   // Public RPC: mark this DO for teardown at the next alarm. We don't
@@ -721,7 +868,9 @@ export class EntitlementWindowDO extends DurableObject {
   // path). WalletService treats `flushAmount == 0` as "skip the
   // recognize leg", so a no-activity period end or a deletion without
   // any events is cheap — only the refund leg fires.
-  private async finalFlush(window: NonNullable<ReturnType<typeof this.readWalletWindow>>): Promise<void> {
+  private async finalFlush(
+    window: NonNullable<ReturnType<typeof this.readWalletWindow>>
+  ): Promise<void> {
     if (!window.reservationId || !window.projectId || !window.customerId) {
       this.logger.error("final flush requested without a reservation", {
         reservationId: window.reservationId,
@@ -776,6 +925,7 @@ export class EntitlementWindowDO extends DurableObject {
           flushSeq: nextSeq,
           pendingFlushSeq: null,
           refillInFlight: false,
+          lastFlushedAt: Date.now(),
         })
         .run()
     } catch (error) {
@@ -842,6 +992,7 @@ export class EntitlementWindowDO extends DurableObject {
     flushSeq: number
     pendingFlushSeq: number | null
     lastEventAt: number | null
+    lastFlushedAt: number | null
     deletionRequested: boolean
     recoveryRequired: boolean
   } | null {
@@ -861,6 +1012,7 @@ export class EntitlementWindowDO extends DurableObject {
         flushSeq: meterWindowTable.flushSeq,
         pendingFlushSeq: meterWindowTable.pendingFlushSeq,
         lastEventAt: meterWindowTable.lastEventAt,
+        lastFlushedAt: meterWindowTable.lastFlushedAt,
         deletionRequested: meterWindowTable.deletionRequested,
         recoveryRequired: meterWindowTable.recoveryRequired,
       })
@@ -884,6 +1036,7 @@ export class EntitlementWindowDO extends DurableObject {
       flushSeq: Number(row.flushSeq ?? 0),
       pendingFlushSeq: row.pendingFlushSeq ?? null,
       lastEventAt: row.lastEventAt ?? null,
+      lastFlushedAt: row.lastFlushedAt ?? null,
       deletionRequested: Boolean(row.deletionRequested),
       recoveryRequired: Boolean(row.recoveryRequired),
     }
@@ -948,6 +1101,7 @@ export class EntitlementWindowDO extends DurableObject {
           flushSeq: trigger.flushSeq,
           pendingFlushSeq: null,
           refillInFlight: false,
+          lastFlushedAt: Date.now(),
         })
         .run()
     } catch (error) {
@@ -956,6 +1110,201 @@ export class EntitlementWindowDO extends DurableObject {
         flushSeq: trigger.flushSeq,
       })
       this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
+    }
+  }
+
+  // Looks up a previously committed idempotency result for this event id.
+  // Used to short-circuit retries before any wallet I/O — the in-tx check
+  // in apply() catches concurrent retries that race past this read.
+  private lookupCachedIdempotencyResult(eventId: string): ApplyResult | null {
+    const row = this.db
+      .select({
+        allowed: idempotencyKeysTable.allowed,
+        deniedReason: idempotencyKeysTable.deniedReason,
+        denyMessage: idempotencyKeysTable.denyMessage,
+      })
+      .from(idempotencyKeysTable)
+      .where(eq(idempotencyKeysTable.eventId, eventId))
+      .get()
+
+    if (!row) return null
+
+    return {
+      allowed: row.allowed,
+      deniedReason:
+        (row.deniedReason as ApplyResult["deniedReason"] | null | undefined) ?? undefined,
+      message: row.denyMessage ?? undefined,
+    }
+  }
+
+  // Phase 7.13 — opens the per-(stream, period) reservation lazily on first
+  // priced apply(). Returns a denial result when the wallet has no available
+  // balance to back the reservation; returns `null` on success (or when the
+  // feature is free, in which case no reservation is needed).
+  //
+  // The reservation row is durable: even an allocation of 0 is persisted so
+  // subsequent events on this DO short-circuit through the in-tx
+  // LocalReservation check (which denies because allocation==0). The DO
+  // doesn't re-attempt to grow allocation mid-period — that's what the
+  // refill flush path is for, and refill only triggers from positive usage.
+  // Customers who want service after running the wallet to 0 must wait for
+  // the next period or top up (which clears `purchased` and the next
+  // bootstrap on the next period picks it up).
+  private async bootstrapReservation(input: ApplyInput): Promise<ApplyResult | null> {
+    const pricePerEvent = this.computeMarginalPriceMinor(input.priceConfig)
+
+    // The next event lands in a free portion of the curve — flat-free plan,
+    // included-quantity tier still has runway, etc. No wallet engagement
+    // needed for this event; a later apply() that crosses into a paid tier
+    // will re-probe and bootstrap then.
+    if (pricePerEvent <= 0) return null
+
+    const sizing = sizeReservation(pricePerEvent)
+    const walletService = this.getWalletService()
+
+    const result = await walletService.createReservation({
+      projectId: input.projectId,
+      customerId: input.customerId,
+      currency: input.currency as Currency,
+      entitlementId: input.featurePlanVersionId,
+      requestedAmount: sizing.requestedAmount,
+      refillThresholdBps: sizing.refillThresholdBps,
+      refillChunkAmount: sizing.refillChunkAmount,
+      periodStartAt: new Date(input.periodStartAt),
+      periodEndAt: new Date(input.periodEndAt),
+      // The (project, entitlement, period_start) unique index is the real
+      // dedupe — this key just tags ledger entries for traceability.
+      idempotencyKey: `do_lazy:${input.streamId}:${input.periodStartAt}`,
+    })
+
+    if (result.err) {
+      this.logger.error(this.errorMessage(result.err), {
+        context: "lazy reservation bootstrap failed",
+        customerId: input.customerId,
+        projectId: input.projectId,
+        streamId: input.streamId,
+        entitlementId: input.featurePlanVersionId,
+      })
+      return {
+        allowed: false,
+        deniedReason: "WALLET_EMPTY",
+        message: result.err.message,
+      }
+    }
+
+    const meterKey = deriveMeterKey(input.meter)
+
+    // Insert-or-update the meter window with the new reservation. The window
+    // may not exist yet (first apply() in this DO's lifetime) — ensure it
+    // first, then write the reservation columns.
+    this.ensureMeterWindow(this.db, {
+      meterKey,
+      projectId: input.projectId,
+      customerId: input.customerId,
+      priceConfig: input.priceConfig,
+      currency: input.currency,
+      periodEndAt: input.periodEndAt,
+      createdAt: Date.now(),
+    })
+
+    // For a reused active reservation, only refresh the columns that
+    // concern wallet enforcement; preserve consumedAmount/flushedAmount/
+    // flushSeq because the existing flush bookkeeping is still in flight.
+    // For a fresh reservation, reset the bookkeeping to zero.
+    const reservationUpdate = result.val.reused === "active"
+      ? {
+          reservationId: result.val.reservationId,
+          allocationAmount: result.val.allocationAmount,
+          refillThresholdBps: sizing.refillThresholdBps,
+          refillChunkAmount: sizing.refillChunkAmount,
+        }
+      : {
+          reservationId: result.val.reservationId,
+          allocationAmount: result.val.allocationAmount,
+          consumedAmount: 0,
+          flushedAmount: 0,
+          flushSeq: 0,
+          pendingFlushSeq: null,
+          refillThresholdBps: sizing.refillThresholdBps,
+          refillChunkAmount: sizing.refillChunkAmount,
+          refillInFlight: false,
+        }
+
+    this.db.update(meterWindowTable).set(reservationUpdate).run()
+
+    if (result.val.allocationAmount <= 0) {
+      // Wallet had no available funds — the reservation row exists with
+      // allocation=0 so future events on this DO go through the standard
+      // in-tx WALLET_EMPTY denial path. Surface the denial for this event
+      // too so the caller doesn't think a free apply happened.
+      return {
+        allowed: false,
+        deniedReason: "WALLET_EMPTY",
+        message: "Wallet has no available balance to back the reservation",
+      }
+    }
+
+    return null
+  }
+
+  // Worst-case per-event price at scale-8, used to size the lazy
+  // reservation. Probes the local marginal at `currentUsage → currentUsage+1`
+  // and *also* at every tier boundary in the price config. The boundary
+  // probe matters because crossing into a tier with a `flatPrice` produces a
+  // single-event jump that's invisible to a steady-state probe within either
+  // tier — e.g. a config with `tier 1: 1-30 @ $0` and `tier 2: 31+ @ $1
+  // flat + $0.001/unit` shows marginal = $0.001 if you only probe inside
+  // tier 2, but the actual cost of the event taking usage 30→31 is $1.001.
+  // Sizing by the local marginal alone produces a $1 reservation that the
+  // first paid event blows past with WALLET_EMPTY.
+  //
+  // Returning 0 means "no event on this curve can ever cost anything" — the
+  // bootstrap legitimately skips and the wallet never engages.
+  private computeMarginalPriceMinor(priceConfig: ConfigFeatureVersionType): number {
+    const currentUsage = Math.max(0, this.cache?.usage ?? 0)
+
+    let maxMarginal = this.probeMarginal(priceConfig, currentUsage, currentUsage + 1)
+
+    // Walk every tier's `firstUnit` boundary. This catches both the boundary
+    // we're about to cross *and* boundaries further up the curve, so the
+    // reservation we open now stays sized correctly across future crossings
+    // without re-bootstrapping.
+    const tiers = "tiers" in priceConfig ? priceConfig.tiers : undefined
+    if (Array.isArray(tiers)) {
+      for (const tier of tiers) {
+        const firstUnit = tier?.firstUnit
+        if (typeof firstUnit !== "number" || firstUnit < 1) continue
+        const crossing = this.probeMarginal(priceConfig, firstUnit - 1, firstUnit)
+        if (crossing > maxMarginal) maxMarginal = crossing
+      }
+    }
+
+    return maxMarginal
+  }
+
+  private probeMarginal(
+    priceConfig: ConfigFeatureVersionType,
+    before: number,
+    after: number
+  ): number {
+    try {
+      const beforeResult = calculatePricePerFeature({
+        quantity: before,
+        featureType: DO_FEATURE_TYPE,
+        config: priceConfig,
+      })
+      if (beforeResult.err) return 0
+
+      const afterResult = calculatePricePerFeature({
+        quantity: after,
+        featureType: DO_FEATURE_TYPE,
+        config: priceConfig,
+      })
+      if (afterResult.err) return 0
+
+      return diffLedgerMinor(afterResult.val.totalPrice.dinero, beforeResult.val.totalPrice.dinero)
+    } catch {
+      return 0
     }
   }
 

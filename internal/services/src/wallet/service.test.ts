@@ -70,6 +70,7 @@ function createDb(state: FakeState): Database {
   const tx = {
     query: {
       walletGrants: {
+        findFirst: vi.fn(async () => state.grants[state.grants.length - 1] ?? null),
         findMany: vi.fn(async () => {
           // emulate FIFO drain lookup: expired_at IS NULL, voided_at IS NULL,
           // remaining_amount > 0, ordered by expiresAt NULLS LAST then createdAt.
@@ -96,17 +97,44 @@ function createDb(state: FakeState): Database {
     insert(table: unknown) {
       const name = tableName(table)
       return {
-        values: vi.fn(async (values: Record<string, unknown>) => {
-          state.inserts.push({ table: name, values })
-          if (name === "walletGrants") {
-            state.grants.push({
-              ...(values as unknown as FakeGrant),
-            })
-          } else if (name === "entitlementReservations") {
-            state.reservations.push({
-              ...(values as unknown as FakeReservation),
-            })
+        values: vi.fn((values: Record<string, unknown>) => {
+          const record = () => {
+            state.inserts.push({ table: name, values })
+            if (name === "walletGrants") {
+              const grant = { ...(values as unknown as FakeGrant) }
+              const dup = state.grants.find(
+                (g) =>
+                  g.customerId === grant.customerId &&
+                  g.ledgerTransferId === grant.ledgerTransferId
+              )
+              if (dup) return { inserted: false, row: dup }
+              state.grants.push(grant)
+              return { inserted: true, row: grant }
+            }
+            if (name === "entitlementReservations") {
+              state.reservations.push({
+                ...(values as unknown as FakeReservation),
+              })
+            }
+            return { inserted: true, row: values as unknown as FakeGrant }
           }
+
+          const thenable: any = {
+            onConflictDoNothing: () => ({
+              returning: vi.fn(async () => {
+                const result = record()
+                return result.inserted ? [{ id: (result.row as FakeGrant).id }] : []
+              }),
+            }),
+            then: (resolve: (v: unknown) => void, reject: (e: unknown) => void) => {
+              try {
+                resolve(record())
+              } catch (e) {
+                reject(e)
+              }
+            },
+          }
+          return thenable
         }),
       }
     },
@@ -132,8 +160,9 @@ function createDb(state: FakeState): Database {
 function createLedger(state: FakeState): LedgerGateway {
   let transferIdSeq = 0
   const nextId = () => `pgle_${++transferIdSeq}`
-  const makeTransfer = (req: LedgerTransferRequest) => ({
-    id: nextId(),
+  const idempotencyCache = new Map<string, ReturnType<typeof makeTransfer>>()
+  const makeTransfer = (req: LedgerTransferRequest, id: string) => ({
+    id,
     fromAccountId: `acct_from_${req.fromAccount}`,
     toAccountId: `acct_to_${req.toAccount}`,
     amount: req.amount,
@@ -149,24 +178,43 @@ function createLedger(state: FakeState): LedgerGateway {
     state.balances[req.toAccount] = (state.balances[req.toAccount] ?? 0) + minor
   }
 
+  const idempotencyKey = (req: LedgerTransferRequest) =>
+    `${req.projectId}|${req.source.type}|${req.source.id}`
+
   return {
     createTransfer: vi.fn(async (req: LedgerTransferRequest) => {
+      const key = idempotencyKey(req)
+      const existing = idempotencyCache.get(key)
+      if (existing) return Ok(existing)
       state.transfers.push(req)
       apply(req)
-      return Ok(makeTransfer(req))
+      const transfer = makeTransfer(req, nextId())
+      idempotencyCache.set(key, transfer)
+      return Ok(transfer)
     }),
     createTransfers: vi.fn(async (reqs: LedgerTransferRequest[]) => {
       state.transferBatches += 1
+      const out: ReturnType<typeof makeTransfer>[] = []
       for (const req of reqs) {
+        const key = idempotencyKey(req)
+        const existing = idempotencyCache.get(key)
+        if (existing) {
+          out.push(existing)
+          continue
+        }
         state.transfers.push(req)
         apply(req)
+        const transfer = makeTransfer(req, nextId())
+        idempotencyCache.set(key, transfer)
+        out.push(transfer)
       }
-      return Ok(reqs.map(makeTransfer))
+      return Ok(out)
     }),
     getAccountBalanceIn: vi.fn(async (name: string) => {
       const minor = state.balances[name] ?? 0
       return Ok(fromLedgerMinor(minor, "USD"))
     }),
+    ensureCustomerAccounts: vi.fn(async () => Ok(undefined)),
   } as unknown as LedgerGateway
 }
 
@@ -659,6 +707,42 @@ describe("WalletService.adjust", () => {
       toAccount: keys.purchased,
     })
     expect(state.inserts.find((i) => i.table === "walletGrants")).toBeUndefined()
+  })
+
+  it("replay with same idempotencyKey reuses the existing wallet_grants row", async () => {
+    const { state, wallet } = buildService()
+
+    const first = await wallet.adjust({
+      projectId,
+      customerId,
+      currency: "USD",
+      signedAmount: 5 * DOLLAR,
+      actorId: "system:subscription-activation",
+      reason: "Plan activation grant (credit_line)",
+      source: "credit_line",
+      idempotencyKey: "activate:cycle:sub_1:2026-04-25T00:00:00.000Z:grant:0",
+      expiresAt: new Date("2026-05-25"),
+    })
+    expect(first.err).toBeUndefined()
+    expect(first.val?.grantId).toBeDefined()
+
+    const second = await wallet.adjust({
+      projectId,
+      customerId,
+      currency: "USD",
+      signedAmount: 5 * DOLLAR,
+      actorId: "system:subscription-activation",
+      reason: "Plan activation grant (credit_line)",
+      source: "credit_line",
+      idempotencyKey: "activate:cycle:sub_1:2026-04-25T00:00:00.000Z:grant:0",
+      expiresAt: new Date("2026-05-25"),
+    })
+
+    expect(second.err).toBeUndefined()
+    expect(second.val?.grantId).toBe(first.val?.grantId)
+    // exactly one ledger transfer + one wallet_grants row across both calls
+    expect(state.transfers).toHaveLength(1)
+    expect(state.grants).toHaveLength(1)
   })
 
   it("plan_included grant drains the plan_credit platform source", async () => {

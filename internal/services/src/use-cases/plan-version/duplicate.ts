@@ -4,7 +4,6 @@ import { newId } from "@unprice/db/utils"
 import type { PlanVersion } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { toErrorContext } from "../../utils/log-context"
 
 type DuplicatePlanVersionDeps = {
   db: Database

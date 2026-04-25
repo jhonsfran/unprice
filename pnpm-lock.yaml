@@ -932,6 +932,9 @@ importers:
       '@unprice/email':
         specifier: workspace:^
         version: link:../email
+      '@unprice/money':
+        specifier: workspace:^
+        version: link:../money
       '@unprice/observability':
         specifier: workspace:^
         version: link:../observability

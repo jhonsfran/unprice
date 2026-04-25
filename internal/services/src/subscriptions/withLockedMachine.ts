@@ -57,9 +57,7 @@ export async function withLockedMachine<T>(args: {
   } = args
 
   const lock =
-    shouldLock && !dryRun
-      ? new SubscriptionLock({ db, projectId, subscriptionId })
-      : null
+    shouldLock && !dryRun ? new SubscriptionLock({ db, projectId, subscriptionId }) : null
 
   if (lock) {
     const acquired = await lock.acquire({

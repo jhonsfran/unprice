@@ -6,7 +6,6 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { z } from "zod"
 import type { Cache } from "../../cache/service"
-import { toErrorContext } from "../../utils/log-context"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
 

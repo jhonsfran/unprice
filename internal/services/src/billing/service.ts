@@ -27,6 +27,7 @@ import type { RatedCharge, RatingInput } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { withLockedMachine } from "../subscriptions/withLockedMachine"
+import { settlePrepaidInvoiceToWallet } from "../use-cases/payment-provider/settle-prepaid-invoice-to-wallet"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
 import { DrizzleBillingRepository } from "./repository.drizzle"
@@ -442,6 +443,20 @@ export class BillingService {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
         }
 
+        if (statusInvoice.val.status === "paid") {
+          const settled = await settlePrepaidInvoiceToWallet({
+            walletService: this.walletService,
+            invoice: updatedInvoice,
+          })
+          if (settled.err) {
+            return Err(
+              new UnPriceBillingError({
+                message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
+              })
+            )
+          }
+        }
+
         return Ok(updatedInvoice)
       }
 
@@ -493,6 +508,25 @@ export class BillingService {
 
       if (!updatedInvoice) {
         return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+      }
+
+      // Synchronous providers (Sandbox today) confirm payment inline rather
+      // than via webhook, so the wallet settlement that the webhook handler
+      // does for Stripe must happen here too — otherwise pay-in-advance
+      // plans never get their `purchased` runway credited and the next
+      // usage event hits the DO with an empty wallet.
+      if (paymentStatus === "paid") {
+        const settled = await settlePrepaidInvoiceToWallet({
+          walletService: this.walletService,
+          invoice: updatedInvoice,
+        })
+        if (settled.err) {
+          return Err(
+            new UnPriceBillingError({
+              message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
+            })
+          )
+        }
       }
 
       return Ok(updatedInvoice)

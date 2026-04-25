@@ -10,7 +10,6 @@ import { DrizzleBillingRepository } from "../billing/repository.drizzle"
 import type { CustomerService } from "../customers/service"
 import { type LedgerEntry, type LedgerGateway, customerAccountKeys } from "../ledger"
 import type { RatingService } from "../rating/service"
-import { toErrorContext } from "../utils/log-context"
 import type { SubscriptionRepository } from "./repository"
 import type { SubscriptionContext } from "./types"
 
@@ -320,16 +319,17 @@ export async function invoiceSubscription({
         continue
       }
 
-      // Phase 7: flat subscription fees are a direct consumption —
-      // `customer.*.available.purchased → customer.*.consumed`. The
-      // `kind: "subscription"` + `statement_key` metadata pair makes the
-      // transfer a valid invoice line per the projection contract
-      // (slice 7.8). If the customer has no purchased balance, the
-      // transfer fails atomically (pgledger non-negativity) and the
-      // scheduler surfaces the error.
+      // Flat fees and rated period charges debit `customer.*.receivable`
+      // (debit-normal, allow-negative) and credit `consumed`. Receivable
+      // goes negative = customer owes us. The post-payment settlement
+      // posts `topup → receivable` to zero it out. This decouples invoice
+      // creation from cash-on-hand: invoices can be drafted before any
+      // payment, and `purchased` stays a strict cash-only account.
+      // The `kind: "subscription"` + `statement_key` metadata pair keeps
+      // the transfer projectable as an invoice line (slice 7.8).
       const postResult = await ledgerService.createTransfer({
         projectId: period.projectId,
-        fromAccount: customerAccountKeys(period.customerId).purchased,
+        fromAccount: customerAccountKeys(period.customerId).receivable,
         toAccount: customerAccountKeys(period.customerId).consumed,
         amount: totalAmount,
         source: { type: sourceType, id: sourceId },
@@ -529,5 +529,3 @@ export async function invoiceSubscription({
     subscription,
   }
 }
-
-

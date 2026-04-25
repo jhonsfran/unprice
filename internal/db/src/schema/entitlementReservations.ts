@@ -55,12 +55,14 @@ export const entitlementReservations = pgTableProject(
       columns: [table.id, table.projectId],
       name: "entitlement_reservations_pkey",
     }),
-    // One active reservation per entitlement per period.
-    entitlementPeriod: uniqueIndex("entitlement_reservations_entitlement_period_idx").on(
-      table.projectId,
-      table.entitlementId,
-      table.periodStartAt
-    ),
+    // At most one *active* reservation per (project, entitlement, period).
+    // The partial predicate is essential: a closed (reconciled) reservation
+    // shouldn't block re-bootstrapping a new one for the same period — that
+    // happens after a final flush (limit-exceeded close, inactivity, etc.)
+    // followed by a fresh apply() on the DO.
+    entitlementPeriod: uniqueIndex("entitlement_reservations_entitlement_period_idx")
+      .on(table.projectId, table.entitlementId, table.periodStartAt)
+      .where(sql`${table.reconciledAt} IS NULL`),
     customerId: index("entitlement_reservations_customer_idx").on(
       table.projectId,
       table.customerId

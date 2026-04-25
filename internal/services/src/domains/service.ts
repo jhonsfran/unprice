@@ -3,7 +3,6 @@ import { domains as domainsTable } from "@unprice/db/schema"
 import type { Domain } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { toErrorContext } from "../utils/log-context"
 
 export class DomainService {
   private readonly db: Database

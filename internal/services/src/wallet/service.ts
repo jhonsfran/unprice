@@ -65,6 +65,12 @@ export interface CreateReservationOutput {
   reservationId: string
   allocationAmount: number
   drainLegs: DrainLeg[]
+  // Set to "active" when an existing active reservation row was found for
+  // this (project, entitlement, period_start_at) tuple instead of a fresh
+  // insert. The DO uses this to preserve flush bookkeeping (consumed,
+  // flushed, flushSeq) on rehydration. Closed reservations are ignored
+  // — the partial unique index lets us INSERT a fresh row alongside them.
+  reused?: "active"
 }
 
 export interface FlushReservationInput {
@@ -87,7 +93,13 @@ export interface FlushReservationOutput {
   drainLegs: DrainLeg[]
 }
 
-export type AdjustSource = "promo" | "purchased" | "plan_included" | "manual" | "trial"
+export type AdjustSource =
+  | "promo"
+  | "purchased"
+  | "plan_included"
+  | "manual"
+  | "trial"
+  | "credit_line"
 
 export interface AdjustInput {
   projectId: string
@@ -119,6 +131,19 @@ export interface SettleTopUpInput {
 
 export interface SettleTopUpOutput {
   topupId: string
+  ledgerTransferId: string
+}
+
+export interface SettleReceivableInput {
+  projectId: string
+  customerId: string
+  currency: Currency
+  paidAmount: number
+  idempotencyKey: string
+  metadata?: Record<string, unknown>
+}
+
+export interface SettleReceivableOutput {
   ledgerTransferId: string
 }
 
@@ -154,6 +179,7 @@ const GRANT_SOURCE_TO_PLATFORM: Record<WalletGrantSource, PlatformFundingKind> =
   plan_included: "plan_credit",
   trial: "promo",
   manual: "manual",
+  credit_line: "credit_line",
 }
 
 /**
@@ -206,6 +232,9 @@ export class WalletService {
       }
     }
 
+    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    if (seeded.err) return seeded
+
     const run = async (tx: DbExecutor): Promise<Result<void, UnPriceWalletError>> => {
       await this.lockCustomer(tx, input.customerId)
 
@@ -249,10 +278,37 @@ export class WalletService {
 
     const keys = customerAccountKeys(input.customerId)
 
+    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    if (seeded.err) return seeded
+
     const run = async (
       tx: DbExecutor
     ): Promise<Result<CreateReservationOutput, UnPriceWalletError>> => {
       await this.lockCustomer(tx, input.customerId)
+
+      // Idempotency: if an *active* reservation already exists for this
+      // (project, entitlement, period_start_at), hand it back so the DO can
+      // rehydrate. The partial unique index on the table only covers active
+      // rows (`WHERE reconciled_at IS NULL`), so closed reservations don't
+      // collide and we can safely INSERT a fresh one when there's no active
+      // peer — this is the post-final-flush replay path.
+      const existing = await (tx as Transaction).query.entitlementReservations.findFirst({
+        where: and(
+          eq(entitlementReservations.projectId, input.projectId),
+          eq(entitlementReservations.entitlementId, input.entitlementId),
+          eq(entitlementReservations.periodStartAt, input.periodStartAt),
+          isNull(entitlementReservations.reconciledAt)
+        ),
+      })
+
+      if (existing) {
+        return Ok({
+          reservationId: existing.id,
+          allocationAmount: existing.allocationAmount,
+          drainLegs: [],
+          reused: "active",
+        })
+      }
 
       const { drained: grantedDrained, legs: grantLegs } = await this.drainGrantedFIFO(
         tx as Transaction,
@@ -357,6 +413,9 @@ export class WalletService {
     }
 
     const keys = customerAccountKeys(input.customerId)
+
+    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    if (seeded.err) return seeded
 
     try {
       // all happen in the same transaction for atomicity
@@ -541,6 +600,9 @@ export class WalletService {
     const isPositive = input.signedAmount > 0
     const absAmount = Math.abs(input.signedAmount)
 
+    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    if (seeded.err) return seeded
+
     const run = async (tx: DbExecutor): Promise<Result<AdjustOutput, UnPriceWalletError>> => {
       await this.lockCustomer(tx, input.customerId)
 
@@ -568,6 +630,9 @@ export class WalletService {
     }
 
     const keys = customerAccountKeys(input.customerId)
+
+    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    if (seeded.err) return seeded
 
     try {
       return await this.db.transaction(async (tx) => {
@@ -639,6 +704,62 @@ export class WalletService {
     } catch (error) {
       return this.handleUnexpected("wallet.settle_topup_failed", error, {
         providerSessionId: input.providerSessionId,
+        projectId: input.projectId,
+      })
+    }
+  }
+
+  /**
+   * Zeroes out the receivable a customer accrued when an invoice was drafted
+   * (`receivable → consumed` debited receivable into the negative). On
+   * confirmed payment, post `platform.topup → customer.receivable` to bring
+   * the receivable balance back toward zero. Idempotency is keyed on the
+   * caller-supplied key (typically `invoice_receivable:{invoiceId}`) via the
+   * ledger's `source.type + source.id` uniqueness — duplicate webhook
+   * deliveries reuse the existing transfer instead of double-settling.
+   */
+  public async settleReceivable(
+    input: SettleReceivableInput
+  ): Promise<Result<SettleReceivableOutput, UnPriceWalletError>> {
+    if (input.paidAmount <= 0) {
+      return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
+    }
+
+    const keys = customerAccountKeys(input.customerId)
+
+    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    if (seeded.err) return seeded
+
+    try {
+      return await this.db.transaction(async (tx) => {
+        await this.lockCustomer(tx, input.customerId)
+
+        const fromAccount = platformAccountKey("topup", input.projectId)
+
+        const transferResult = await this.ledger.createTransfer(
+          {
+            projectId: input.projectId,
+            fromAccount,
+            toAccount: keys.receivable,
+            amount: fromLedgerMinor(input.paidAmount, input.currency),
+            source: { type: "wallet_settle_receivable", id: input.idempotencyKey },
+            metadata: {
+              flow: "settle_receivable",
+              source: "receivable",
+              external_ref: input.idempotencyKey,
+              ...(input.metadata ?? {}),
+            },
+          },
+          tx
+        )
+
+        if (transferResult.err) return Err(this.wrapLedgerError(transferResult.err))
+
+        return Ok({ ledgerTransferId: transferResult.val.id })
+      })
+    } catch (error) {
+      return this.handleUnexpected("wallet.settle_receivable_failed", error, {
+        customerId: input.customerId,
         projectId: input.projectId,
       })
     }
@@ -786,23 +907,59 @@ export class WalletService {
     )
     if (transferResult.err) return Err(this.wrapLedgerError(transferResult.err))
 
-    await tx.insert(walletGrants).values({
-      id: grantId,
-      projectId: input.projectId,
-      customerId: input.customerId,
-      source: input.source as WalletGrantSource,
-      issuedAmount: amount,
-      remainingAmount: amount,
-      expiresAt: input.expiresAt ?? null,
-      ledgerTransferId: transferResult.val.id,
-      metadata: this.sanitizeGrantMetadata({
-        actor_id: input.actorId,
-        reason: input.reason,
-        ...(input.metadata ?? {}),
-      }),
+    // Idempotent insert: the unique index `wallet_grants_ledger_transfer_idx`
+    // on (customer_id, ledger_transfer_id) means a replay (same idempotency
+    // key → same ledger transfer) must reuse the prior grant row instead of
+    // inserting a fresh one. ON CONFLICT DO NOTHING + fallback lookup keeps
+    // both the first call and any retry returning the same grantId.
+    const inserted = await tx
+      .insert(walletGrants)
+      .values({
+        id: grantId,
+        projectId: input.projectId,
+        customerId: input.customerId,
+        source: input.source as WalletGrantSource,
+        issuedAmount: amount,
+        remainingAmount: amount,
+        expiresAt: input.expiresAt ?? null,
+        ledgerTransferId: transferResult.val.id,
+        metadata: this.sanitizeGrantMetadata({
+          actor_id: input.actorId,
+          reason: input.reason,
+          ...(input.metadata ?? {}),
+        }),
+      })
+      .onConflictDoNothing({
+        target: [walletGrants.customerId, walletGrants.ledgerTransferId],
+      })
+      .returning({ id: walletGrants.id })
+
+    if (inserted.length > 0) {
+      return Ok({ clampedAmount: amount, unclampedRemainder: 0, grantId: inserted[0]!.id })
+    }
+
+    const existing = await tx.query.walletGrants.findFirst({
+      columns: { id: true },
+      where: and(
+        eq(walletGrants.customerId, input.customerId),
+        eq(walletGrants.projectId, input.projectId),
+        eq(walletGrants.ledgerTransferId, transferResult.val.id)
+      ),
     })
 
-    return Ok({ clampedAmount: amount, unclampedRemainder: 0, grantId })
+    if (!existing) {
+      return Err(
+        new UnPriceWalletError({
+          message: "WALLET_LEDGER_FAILED",
+          context: {
+            event: "wallet.adjust_grant_lookup_missing",
+            ledgerTransferId: transferResult.val.id,
+          },
+        })
+      )
+    }
+
+    return Ok({ clampedAmount: amount, unclampedRemainder: 0, grantId: existing.id })
   }
 
   private async adjustNegative(
@@ -948,6 +1105,21 @@ export class WalletService {
 
   private async lockCustomer(tx: DbExecutor, customerId: string): Promise<void> {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`customer:${customerId}`}))`)
+  }
+
+  /**
+   * Idempotently seeds the four `customer.{id}.*` ledger accounts before any
+   * balance-changing operation. Cached in the gateway, so the round-trip
+   * happens once per `(customer, currency)` per worker. Runs outside the
+   * caller's transaction because seeding opens its own.
+   */
+  private async ensureCustomerSeeded(
+    customerId: string,
+    currency: Currency
+  ): Promise<Result<void, UnPriceWalletError>> {
+    const result = await this.ledger.ensureCustomerAccounts(customerId, currency)
+    if (result.err) return Err(this.wrapLedgerError(result.err))
+    return Ok(undefined)
   }
 
   private missingConsumedMetadata(metadata: Record<string, unknown>): string[] | null {
