@@ -4,7 +4,7 @@ import {
   DEFAULT_REFILL_THRESHOLD_BPS,
   MINIMUM_FLOOR_AMOUNT,
   sizeReservation,
-} from "./derive-activation-inputs"
+} from "./derive-provision-inputs"
 
 const DOLLAR = 100_000_000
 

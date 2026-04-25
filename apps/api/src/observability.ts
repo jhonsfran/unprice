@@ -3,6 +3,7 @@ import {
   type AppLogger,
   createAppLogger,
   createDrain,
+  createStandaloneRequestLogger,
   initObservability,
 } from "@unprice/observability"
 import type { WideEventLogger } from "@unprice/observability"
@@ -39,4 +40,13 @@ export function createApiLogger(requestLogger: WideEventLogger, requestId?: stri
     flush: apiDrain?.flush,
     requestId,
   })
+}
+
+// DO-side counterpart to `createApiLogger`. Durable Objects don't run inside
+// a Hono request, so there's no `c.get("log")` WideEventLogger to feed in —
+// we build the request logger from scratch via `createStandaloneRequestLogger`
+// and reuse the same drain as the Hono path.
+export function createDoLogger(requestId: string): AppLogger {
+  const { logger } = createStandaloneRequestLogger({ requestId }, { flush: apiDrain?.flush })
+  return logger
 }

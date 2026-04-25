@@ -1,12 +1,12 @@
 import type { Pipeline } from "cloudflare:pipelines"
 import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
-import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
+import type { AppLogger } from "@unprice/observability"
 import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
 import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
-import { apiDrain } from "~/observability"
+import { createDoLogger } from "~/observability"
 import { ingestionAuditTable, schema } from "./db/schema"
 import migrations from "./drizzle/migrations"
 
@@ -47,9 +47,7 @@ export class IngestionAuditDO extends DurableObject {
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
 
     const requestId = this.ctx.id.toString()
-    const { logger } = createStandaloneRequestLogger({ requestId }, { flush: apiDrain?.flush })
-
-    this.logger = logger
+    this.logger = createDoLogger(requestId)
     this.logger.set({
       requestId,
       service: "ingestionaudit",

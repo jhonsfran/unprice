@@ -277,6 +277,10 @@ describe("processWebhookEvent", () => {
       paymentAttempts: [],
       metadata: {},
       invoicePaymentProviderUrl: null,
+      totalAmount: 5_000_000_000,
+      currency: "USD",
+      whenToBill: "pay_in_advance",
+      customerId: "cus_1",
     })
 
     const result = await processWebhookEvent(
@@ -309,6 +313,20 @@ describe("processWebhookEvent", () => {
       })
     )
     expect(dbMocks.update).toHaveBeenCalled()
+    expect(wallet.settleReceivable).toHaveBeenCalledTimes(1)
+    expect(wallet.settleReceivable).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj_1",
+        customerId: "cus_1",
+        paidAmount: 5_000_000_000,
+        idempotencyKey: "invoice_receivable:inv_1",
+      })
+    )
+    // Regression: invoice settlement must not double-fund usage runway by
+    // posting `topup → purchased`. The customer's allowance is granted at
+    // activation (`credit_line → granted`); funding `purchased` here would
+    // duplicate the flat-fee dollars.
+    expect(wallet.adjust).not.toHaveBeenCalled()
   })
 
   it("transitions invoice to unpaid on payment failure and notifies subscription machine", async () => {

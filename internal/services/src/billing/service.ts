@@ -27,10 +27,11 @@ import type { RatedCharge, RatingInput } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
 import { withLockedMachine } from "../subscriptions/withLockedMachine"
-import { settlePrepaidInvoiceToWallet } from "../use-cases/payment-provider/settle-prepaid-invoice-to-wallet"
+import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
 import { DrizzleBillingRepository } from "./repository.drizzle"
+import { billingStrategyFor } from "./strategy"
 
 type ComputeCurrentUsageResult = RatedCharge
 
@@ -512,9 +513,8 @@ export class BillingService {
 
       // Synchronous providers (Sandbox today) confirm payment inline rather
       // than via webhook, so the wallet settlement that the webhook handler
-      // does for Stripe must happen here too — otherwise pay-in-advance
-      // plans never get their `purchased` runway credited and the next
-      // usage event hits the DO with an empty wallet.
+      // does for Stripe must happen here too — otherwise the receivable IOU
+      // opened at invoice creation never gets cleared.
       if (paymentStatus === "paid") {
         const settled = await settlePrepaidInvoiceToWallet({
           walletService: this.walletService,
@@ -946,11 +946,13 @@ export class BillingService {
             const billingPeriodValues = await Promise.all(
               windows.map(async (w) => {
                 const whenToBill = phase.planVersion.whenToBill
-                const invoiceAt = w.isTrial
-                  ? w.end
-                  : whenToBill === "pay_in_advance"
-                    ? w.start
-                    : w.end
+                // BILL phase trigger maps directly to the cycle boundary that
+                // becomes the period's `invoiceAt`. Trial periods always
+                // invoice at cycle end (zero-amount, just for closure).
+                const billsAtPeriodStart = whenToBill
+                  ? billingStrategyFor(whenToBill).billPhaseTrigger === "period_start"
+                  : false
+                const invoiceAt = w.isTrial ? w.end : billsAtPeriodStart ? w.start : w.end
                 const statementKey = await this.computeStatementKey({
                   projectId: phase.projectId,
                   customerId: phase.subscription.customerId,

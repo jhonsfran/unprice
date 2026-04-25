@@ -11,7 +11,7 @@ import type {
   NormalizedProviderWebhook,
   PaymentProviderWebhookHeaders,
 } from "../../payment-provider/interface"
-import { settlePrepaidInvoiceToWallet } from "./settle-prepaid-invoice-to-wallet"
+import { settlePrepaidInvoiceToWallet } from "../billing/settle-invoice"
 
 type ProcessWebhookEventDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions" | "wallet">

@@ -22,6 +22,7 @@ import type {
   UpdateInvoiceInput,
   VoidPendingPeriodsInput,
 } from "./repository"
+import { billingStrategyFor } from "./strategy"
 
 type DbExecutor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0]
 
@@ -121,12 +122,16 @@ export class DrizzleBillingRepository implements BillingRepository {
   }
 
   async capPendingPeriodsAtPhaseEnd(input: CapPendingPeriodsAtPhaseEndInput): Promise<void> {
+    // Periods billed at period_end need their `invoiceAt` capped so they
+    // don't fire after the phase has been shortened. Period-start invoicing
+    // already fired at cycle start, so leave it alone.
+    const capStrategy = billingStrategyFor(input.whenToBill)
     await this.db
       .update(billingPeriods)
       .set({
         cycleEndAt: sql`LEAST(${billingPeriods.cycleEndAt}, ${input.phaseEndAt})`,
         invoiceAt:
-          input.whenToBill === "pay_in_arrear"
+          capStrategy.billPhaseTrigger === "period_end"
             ? sql`LEAST(${billingPeriods.invoiceAt}, ${input.phaseEndAt})`
             : billingPeriods.invoiceAt,
       })

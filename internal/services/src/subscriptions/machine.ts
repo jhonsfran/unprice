@@ -23,8 +23,8 @@ import type { RatingService } from "../rating/service"
 import {
   type ActivateSubscriptionDeps,
   activateSubscription,
-} from "../use-cases/subscription/activate"
-import { deriveActivationInputsFromPlan } from "../use-cases/subscription/derive-activation-inputs"
+} from "../use-cases/billing/provision-period"
+import { deriveActivationInputsFromPlan } from "../use-cases/billing/derive-provision-inputs"
 import type { WalletService } from "../wallet"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
@@ -35,6 +35,7 @@ import {
   isCurrentPhaseNull,
   isSubscriptionActive,
   isTrialExpired,
+  isWalletOnlyBilling,
 } from "./guards"
 import { invoiceSubscription, loadSubscription, renewSubscription } from "./invokes"
 import type { SubscriptionRepository } from "./repository"
@@ -301,6 +302,7 @@ export class SubscriptionMachine {
         isCurrentPhaseNull: isCurrentPhaseNull,
         isSubscriptionActive: isSubscriptionActive,
         isAdvanceBilling: isAdvanceBilling,
+        isWalletOnlyBilling: isWalletOnlyBilling,
       },
       actions: {
         logStateTransition: ({ context, event }) =>
@@ -769,6 +771,18 @@ export class SubscriptionMachine {
             ],
             INVOICE: [
               {
+                // Wallet-only subscriptions never invoice — usage drains the
+                // wallet directly. Reject INVOICE so a stray scheduler tick
+                // can't push the machine through the BILL phase.
+                guard: "isWalletOnlyBilling",
+                target: "error",
+                actions: assign({
+                  error: () => ({
+                    message: "Cannot invoice wallet-only subscription (BILL phase is skipped)",
+                  }),
+                }),
+              },
+              {
                 guard: and(["hasValidPaymentMethod"]),
                 target: "invoicing",
                 actions: "logStateTransition",
@@ -842,6 +856,15 @@ export class SubscriptionMachine {
               actions: "logStateTransition",
             },
             INVOICE: [
+              {
+                guard: "isWalletOnlyBilling",
+                target: "error",
+                actions: assign({
+                  error: () => ({
+                    message: "Cannot invoice wallet-only subscription (BILL phase is skipped)",
+                  }),
+                }),
+              },
               {
                 guard: and(["hasValidPaymentMethod"]),
                 target: "invoicing",

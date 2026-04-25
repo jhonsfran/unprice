@@ -1,6 +1,6 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
-export { activateSubscription } from "./subscription/activate"
+export { activateSubscription } from "./billing/provision-period"
 export { createSubscription } from "./subscription/create"
 export {
   deriveActivationInputsFromPlan,
@@ -8,7 +8,8 @@ export {
   MINIMUM_FLOOR_AMOUNT,
   CEILING_AMOUNT,
   DEFAULT_REFILL_THRESHOLD_BPS,
-} from "./subscription/derive-activation-inputs"
+} from "./billing/derive-provision-inputs"
+export { settlePrepaidInvoiceToWallet } from "./billing/settle-invoice"
 export { duplicatePlanVersion } from "./plan-version/duplicate"
 export { inviteMember } from "./workspace/invite-member"
 export { resendInvite } from "./workspace/resend-invite"

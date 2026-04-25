@@ -1,4 +1,5 @@
 import type { Logger } from "@unprice/logs"
+import { billingStrategyFor } from "../billing/strategy"
 import type { SubscriptionContext } from "./types"
 
 /**
@@ -28,7 +29,17 @@ export const isAutoRenewEnabled = (input: { context: SubscriptionContext }): boo
 export const isAdvanceBilling = (input: { context: SubscriptionContext }): boolean => {
   const currentPhase = input.context.currentPhase
   if (!currentPhase) return false
-  return currentPhase.planVersion.whenToBill === "pay_in_advance"
+  return billingStrategyFor(currentPhase.planVersion.whenToBill).billPhaseTrigger === "period_start"
+}
+
+/**
+ * Wallet-only mode: subscription has no invoice arc. RENEW skips the BILL
+ * and SETTLE phases entirely; the customer's wallet is the source of funds.
+ */
+export const isWalletOnlyBilling = (input: { context: SubscriptionContext }): boolean => {
+  const currentPhase = input.context.currentPhase
+  if (!currentPhase) return false
+  return billingStrategyFor(currentPhase.planVersion.whenToBill).billPhaseTrigger === "never"
 }
 
 export const isSubscriptionActive = (input: { context: SubscriptionContext }): boolean => {

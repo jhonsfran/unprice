@@ -1404,6 +1404,298 @@ describe("EntitlementWindowDO", () => {
     expect(row.flushedAmount).toBe(0)
   })
 
+  // ---------------------------------------------------------------------
+  // Volume-tier with per-tier flat fee.
+  //   tier 1: 1..30  @ €0/unit  + €0    flat
+  //   tier 2: 31..∞ @ €0.001/unit + €1   flat
+  // In volume mode, when usage crosses into tier 2 the *entire* reading is
+  // priced at tier-2 rates: 31 units → 31×€0.001 + €1 = €1.031. The DO
+  // captures this as a single boundary-crossing delta:
+  //   price(31) − price(30) = €1.031 − €0 = €1.031
+  // Subsequent events inside tier 2 only see the per-unit increment
+  // because the flat fee already accrued at the crossing event. Together
+  // these tests pin the contract that the realtime pricing path includes
+  // the per-tier flat fee, not just the per-unit rate.
+  // ---------------------------------------------------------------------
+
+  // Mirrors the volume-tier behaviour of the real `calculatePricePerFeature`
+  // for the user's exact config, so the DO sees realistic before/after
+  // dineros and `diffLedgerMinor` produces real ledger-scale amounts.
+  // €0.001/unit is stored at scale-3, €1 flat at scale-2; dinero rescales
+  // both to scale-3 on add → q + 1000 minor units at scale-3.
+  const VOLUME_FLAT_TIER_PRICE_CONFIG = {
+    tierMode: "volume" as const,
+    usageMode: "tier" as const,
+    tiers: [
+      {
+        firstUnit: 1,
+        lastUnit: 30,
+        unitPrice: {
+          dinero: { amount: 0, currency: { code: "EUR", base: 10, exponent: 2 }, scale: 2 },
+          displayAmount: "0.00",
+        },
+        flatPrice: {
+          dinero: { amount: 0, currency: { code: "EUR", base: 10, exponent: 2 }, scale: 2 },
+          displayAmount: "0.00",
+        },
+      },
+      {
+        firstUnit: 31,
+        lastUnit: null,
+        unitPrice: {
+          dinero: { amount: 1, currency: { code: "EUR", base: 10, exponent: 2 }, scale: 3 },
+          displayAmount: "0.001",
+        },
+        flatPrice: {
+          dinero: { amount: 100, currency: { code: "EUR", base: 10, exponent: 2 }, scale: 2 },
+          displayAmount: "1",
+        },
+      },
+    ],
+  }
+
+  function priceVolumeFlatTier(quantity: number): Dinero<number> {
+    const q = Math.max(0, quantity)
+    if (q === 0 || q <= 30) return fakeDinero(0, 2)
+    // tier 2: q × 0.001 + 1.00. At common scale-3 → q + 1000 minor units.
+    return fakeDinero(q + 1000, 3)
+  }
+
+  function mockVolumeFlatTierPricing() {
+    testState.pricePerFeature.mockImplementation(({ quantity }: { quantity: number }) => ({
+      val: { totalPrice: { dinero: priceVolumeFlatTier(quantity) } },
+    }))
+  }
+
+  it("prices the tier-2 boundary-crossing event including the tier flat fee", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    mockVolumeFlatTierPricing()
+
+    // Engine reports the cumulative jump 30 → 31 (delta=1, valueAfter=31).
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 31 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    // Pre-seed a reservation with plenty of allocation so the wallet check
+    // passes and we can assert on the priced amount written to the outbox.
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "EUR",
+      priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 30,
+      updatedAt: BASE_NOW - 1_000,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 10 * 100_000_000, // €10 — enough for a €1.031 hit
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 250_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+        currency: "EUR",
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+
+    // €1.031 = 1 × 10^8 + 31 × 10^5 = 103_100_000 minor units at LEDGER_SCALE=8.
+    // This is what proves the flat fee is captured: a unit-price-only
+    // calculation would emit only 31 × 10^5 = 3_100_000.
+    expect(db.outboxRows).toHaveLength(1)
+    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(payload.amount).toBe(103_100_000)
+    expect(payload.amount_scale).toBe(8)
+    expect(payload.currency).toBe("EUR")
+    expect(payload.value_after).toBe(31)
+    expect(payload.delta).toBe(1)
+
+    // LocalReservation deducts the full €1.031 from the allocation,
+    // proving the wallet path also sees the flat fee, not just the unit rate.
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.consumedAmount).toBe(103_100_000)
+  })
+
+  it("prices subsequent in-tier events at only the per-unit rate (flat fee already accrued)", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    mockVolumeFlatTierPricing()
+
+    // Engine reports 31 → 32 (already inside tier 2).
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 32 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "EUR",
+      priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 31,
+      updatedAt: BASE_NOW - 1_000,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 10 * 100_000_000,
+      // Flat fee was already deducted on the previous (boundary) event.
+      consumedAmount: 103_100_000,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 250_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+        currency: "EUR",
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+
+    // €0.001 = 100_000 minor units at scale-8. The flat fee is NOT charged
+    // again — it accrued once at the 30→31 boundary. The diff approach
+    // (price(after) − price(before)) is what makes this correct.
+    expect(db.outboxRows).toHaveLength(1)
+    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(payload.amount).toBe(100_000)
+    expect(payload.value_after).toBe(32)
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.consumedAmount).toBe(103_100_000 + 100_000)
+  })
+
+  it("captures the flat fee when a single event jumps the customer from 0 straight into tier 2", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    mockVolumeFlatTierPricing()
+
+    // Single event with delta=50 lands the customer straight in tier 2
+    // without any prior tier-1 activity. The diff is price(50) − price(0).
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 50, meterKey: DEFAULT_METER_KEY, valueAfter: 50 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "EUR",
+      priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 250_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+        currency: "EUR",
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+
+    // €1.05 = 50 × €0.001 + €1 flat = 1_050_000 × 100 = 105_000_000 minor
+    // units at scale-8.
+    expect(db.outboxRows).toHaveLength(1)
+    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(payload.amount).toBe(105_000_000)
+    expect(payload.delta).toBe(50)
+  })
+
+  it("sizes the bootstrap reservation using the tier-boundary marginal (not the local marginal at usage=0)", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    mockVolumeFlatTierPricing()
+
+    // First event ever for this DO; bootstrap path runs because no
+    // preWindow exists yet. Engine reports a tier-1 event (cost €0).
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_lazy",
+        allocationAmount: 5 * 100_000_000,
+        drainLegs: [],
+      },
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+        currency: "EUR",
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+
+    // The bootstrap probes price(31) − price(30) = €1.031 = 103_100_000
+    // as the maximum marginal across the curve, then sizes the reservation
+    // from there. The mocked sizeReservation returns
+    // `requestedAmount = max(price × 1000, $1)`, so the call argument is
+    // 103_100_000 × 1000 = 103_100_000_000. A naive local-marginal sizing
+    // (probing only at currentUsage=0 → 1, both in tier 1 at €0) would
+    // size from 0 and floor to the $1 minimum (100_000_000) — that's the
+    // regression these assertions guard against.
+    const call = testState.createReservation.mock.calls[0]?.[0] as { requestedAmount: number }
+    expect(call.requestedAmount).toBe(103_100_000_000)
+
+    // The boundary event itself was tier-1 (€0), so no debit on the reservation.
+    expect(db.outboxRows).toHaveLength(1)
+    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(payload.amount).toBe(0)
+    expect(payload.value_after).toBe(1)
+  })
+
   it("requestDeletion sets the deletion flag and pulls the alarm in", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -1445,11 +1737,11 @@ async function loadEntitlementWindowDO() {
     },
   }))
 
-  vi.doMock("@unprice/observability", () => ({
-    createStandaloneRequestLogger: vi.fn(() => ({ logger: testState.logger })),
-  }))
+  vi.doMock("@unprice/observability", () => ({}))
 
-  vi.doMock("~/observability", () => ({ apiDrain: null }))
+  vi.doMock("~/observability", () => ({
+    createDoLogger: vi.fn(() => testState.logger),
+  }))
 
   vi.doMock("drizzle-orm/durable-sqlite", () => ({
     drizzle: vi.fn(() => {

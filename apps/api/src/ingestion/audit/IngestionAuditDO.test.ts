@@ -279,14 +279,10 @@ async function loadIngestionAuditDO() {
     parseLakehouseEvent: vi.fn((_source: string, payload: unknown) => payload),
   }))
 
-  vi.doMock("@unprice/observability", () => ({
-    createStandaloneRequestLogger: vi.fn(() => ({
-      logger: testState.logger,
-    })),
-  }))
+  vi.doMock("@unprice/observability", () => ({}))
 
   vi.doMock("~/observability", () => ({
-    apiDrain: null,
+    createDoLogger: vi.fn(() => testState.logger),
   }))
 
   vi.doMock("drizzle-orm/durable-sqlite", () => ({

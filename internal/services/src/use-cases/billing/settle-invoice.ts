@@ -3,17 +3,22 @@ import { Err, Ok, type Result } from "@unprice/error"
 import type { WalletService } from "../../wallet"
 import type { UnPriceWalletError } from "../../wallet/errors"
 
-// On confirmed payment, two things land in the ledger:
+// Invoice settlement posts a single ledger transfer:
 //
-// 1) `topup → receivable` always — clears the negative balance the invoice
-//    drafted into `customer.*.receivable` (debited at invoice creation in
-//    `invoiceSubscription`). Applies to both `pay_in_advance` and
-//    `pay_in_arrear`: the receivable was opened the same way for both.
+//   topup → receivable   (amount = invoice.totalAmount)
 //
-// 2) `topup → purchased` only for `pay_in_advance` — funds the customer's
-//    usage runway for the period they just paid for. Pay-in-arrears doesn't
-//    materialize runway: usage during the period drains `granted` (credit_line)
-//    and is reconciled at the next period close.
+// This clears the receivable IOU that `invoiceSubscription` opened when it
+// debited `customer.*.receivable` at invoice creation. Behavior is identical
+// for `pay_in_advance` and `pay_in_arrear` — both modes draft the invoice the
+// same way, so both settle the same way.
+//
+// Usage runway is NOT funded here. The customer's per-period usage allowance
+// is issued at activation time as a `credit_line → granted` grant (see
+// `derive-activation-inputs.ts`); the DO drains it on each priced event.
+// Funding `customer.*.available.purchased` from invoice settlement would
+// double-count the flat-fee dollars (paying $50 in subscription fee should
+// not also grant $50 of usage runway). The `purchased` account is reserved
+// for explicit customer wallet top-ups, which are a separate operation.
 //
 // Provider-agnostic: called from the async webhook path (Stripe) and the
 // sync `_collectInvoicePayment` path (Sandbox + any future synchronous
@@ -21,10 +26,6 @@ import type { UnPriceWalletError } from "../../wallet/errors"
 // so duplicate payment.succeeded webhooks for the same invoice — common
 // with providers that emit both `invoice.paid` and `payment_intent.succeeded`
 // — converge on the same ledger row instead of double-settling.
-//
-// TODO: payment.reversed should claw back both transfers. Skipped for now
-// because the runway funds may already have been consumed; needs a separate
-// path that handles partial clawback.
 export async function settlePrepaidInvoiceToWallet({
   walletService,
   invoice,
@@ -53,25 +54,6 @@ export async function settlePrepaidInvoiceToWallet({
 
   if (settled.err) {
     return Err(settled.err)
-  }
-
-  if (invoice.whenToBill !== "pay_in_advance") {
-    return Ok(undefined)
-  }
-
-  const runway = await walletService.adjust({
-    projectId: invoice.projectId,
-    customerId: invoice.customerId,
-    currency,
-    signedAmount: invoice.totalAmount,
-    actorId: "system:invoice-settlement",
-    reason: "Prepaid invoice payment funds usage runway",
-    source: "purchased",
-    idempotencyKey: `invoice_purchased:${invoice.id}`,
-  })
-
-  if (runway.err) {
-    return Err(runway.err)
   }
 
   return Ok(undefined)

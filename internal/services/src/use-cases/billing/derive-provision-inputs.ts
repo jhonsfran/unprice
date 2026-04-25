@@ -1,5 +1,5 @@
 import type { Database } from "@unprice/db"
-import type { ActivationGrant } from "./activate"
+import type { ActivationGrant } from "./provision-period"
 
 // Re-exports for callers that already import sizing constants from this
 // module. The canonical home is `wallet/reservation-sizing` so the DO can

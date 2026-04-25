@@ -10,7 +10,7 @@
     "deploy:prod": "wrangler deploy --env prod",
     "dev:remote": "wrangler dev -e dev --remote",
     "dev": "sh dev.sh",
-    "dev:wrangler": "openlogs --name api --text-only --out-dir '../../.openlogs' wrangler dev src/index.ts -e dev",
+    "dev:wrangler": "openlogs --name api --raw-only --no-history --out-dir '../../.openlogs' wrangler dev src/index.ts -e dev",
     "start": "wrangler dev -e dev",
     "test": "vitest run",
     "test:file": "vitest run \"$@\"",

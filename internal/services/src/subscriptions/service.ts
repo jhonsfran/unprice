@@ -19,6 +19,7 @@ import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
 import type { BillingService } from "../billing/service"
+import { billingStrategyFor } from "../billing/strategy"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
@@ -959,14 +960,21 @@ export class SubscriptionService {
         // Status decision tree, in priority order:
         //   trialing       — plan grants trial units (and a payment method
         //                    is on file if the plan requires one).
-        //   pending_payment — pay_in_advance plan that requires a payment
-        //                    method but no funds have settled yet. The
-        //                    bootstrap topup/invoice will fire
-        //                    PAYMENT_SUCCESS to flip us to `active`.
+        //   pending_payment — invoice-driven mode that bills upfront and
+        //                    requires a payment method but no funds have
+        //                    settled yet. The bootstrap topup/invoice will
+        //                    fire PAYMENT_SUCCESS to flip us to `active`.
         //   active         — pay_in_arrear plans (DO drains the credit_line
-        //                    grant) and free / no-payment-method plans.
+        //                    grant), wallet-only plans, and free / no-
+        //                    payment-method plans.
+        // versionData.whenToBill is non-null in the schema (default
+        // "pay_in_advance"), but some legacy/test fixtures omit it. Treat
+        // missing as "not advance billing" — same as the prior `===` check.
+        const versionStrategy = versionData.whenToBill
+          ? billingStrategyFor(versionData.whenToBill)
+          : null
         const isAdvancePending =
-          versionData.whenToBill === "pay_in_advance" &&
+          versionStrategy?.billPhaseTrigger === "period_start" &&
           paymentMethodRequired &&
           (!paymentMethodId || paymentMethodId === "")
         const status =

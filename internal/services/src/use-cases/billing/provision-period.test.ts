@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { ServiceContext } from "../../context"
 import type { LedgerGateway } from "../../ledger"
 import { UnPriceWalletError, type WalletService } from "../../wallet"
-import { activateSubscription } from "./activate"
+import { activateSubscription } from "./provision-period"
 
 // ---------------------------------------------------------------------------
 // Phase 7 activation is grants-only:

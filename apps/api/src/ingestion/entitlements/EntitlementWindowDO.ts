@@ -13,7 +13,7 @@ import {
   configFeatureSchema,
 } from "@unprice/db/validators"
 import { LEDGER_SCALE, diffLedgerMinor } from "@unprice/money"
-import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
+import type { AppLogger } from "@unprice/observability"
 import {
   AsyncMeterAggregationEngine,
   EventTimestampTooFarInFutureError,
@@ -35,7 +35,7 @@ import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlit
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { z } from "zod"
 import type { Env } from "~/env"
-import { apiDrain } from "~/observability"
+import { createDoLogger } from "~/observability"
 import { idempotencyKeysTable, meterFactsOutboxTable, meterWindowTable, schema } from "./db/schema"
 import { DrizzleStorageAdapter } from "./drizzle-adapter"
 import migrations from "./drizzle/migrations"
@@ -214,16 +214,7 @@ export class EntitlementWindowDO extends DurableObject {
     this.runtimeEnv = env
 
     const requestId = this.ctx.id.toString()
-    const { logger } = createStandaloneRequestLogger(
-      {
-        requestId,
-      },
-      {
-        flush: apiDrain?.flush,
-      }
-    )
-
-    this.logger = logger
+    this.logger = createDoLogger(requestId)
     this.logger.set({
       requestId,
       service: "entitlementwindow",
@@ -297,351 +288,434 @@ export class EntitlementWindowDO extends DurableObject {
   public async apply(rawInput: ApplyInput): Promise<ApplyResult> {
     await this.ready
 
+    const startTime = Date.now()
     const input = applyInputSchema.parse(rawInput)
 
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
+    const meterKey = deriveMeterKey(input.meter)
 
-    // Idempotency short-circuit before any wallet I/O. A retried event with a
-    // cached result must not re-call wallet.createReservation.
-    const cachedResult = this.lookupCachedIdempotencyResult(idempotencyKey)
-    if (cachedResult) {
-      return cachedResult
+    // One canonical log line per apply() — populated as we go, emitted in
+    // the finally block so every code path (success, denial, throw) lands
+    // in the same wide event.
+    const wideEvent: Record<string, unknown> = {
+      operation: "apply",
+      event_id: input.event.id,
+      event_slug: input.event.slug,
+      event_timestamp: input.event.timestamp,
+      idempotency_key: idempotencyKey,
+      project_id: input.projectId,
+      customer_id: input.customerId,
+      currency: input.currency,
+      stream_id: input.streamId,
+      feature_plan_version_id: input.featurePlanVersionId,
+      feature_slug: input.featureSlug,
+      period_key: input.periodKey,
+      period_start_at: input.periodStartAt,
+      period_end_at: input.periodEndAt,
+      meter_key: meterKey,
+      aggregation_method: input.meter.aggregationMethod,
+      enforce_limit: input.enforceLimit,
+      limit: input.limit ?? null,
+      overage_strategy: input.overageStrategy ?? null,
+      usage_before: this.cache?.usage ?? null,
+      cache_limit_reached_before: this.cache?.isLimitReached ?? false,
     }
 
-    // Phase 7.13 — lazy reservation bootstrap. If this DO has never opened a
-    // reservation for the current period (or the previous one closed at period
-    // end / inactivity), open one now against the customer wallet. The
-    // reservation row is the contract the in-tx LocalReservation check needs;
-    // without it the DO falls through to pre-wallet behavior (no enforcement).
-    //
-    // Out-of-tx because Postgres ↔ SQLite can't share a single transaction.
-    // The DO is single-writer per (customer, stream, period), so there's no
-    // race with a concurrent apply().
-    const preWindow = this.readWalletWindow(this.db)
-    // Skip the wallet round-trip when the cache already says this stream is
-    // capped — the in-tx limit check will re-deny, and bootstrapping a fresh
-    // reservation only to immediately close it on the next limit hit is
-    // pure churn against the customer wallet.
-    if ((!preWindow || preWindow.reservationId === null) && !this.cache?.isLimitReached) {
-      const denial = await this.bootstrapReservation(input)
-      if (denial) {
-        // Persist the denial idempotently so retries return the same answer
-        // without re-calling the wallet. The DO's normal denial-cache pattern.
-        this.db
-          .insert(idempotencyKeysTable)
-          .values({
-            eventId: idempotencyKey,
-            createdAt,
-            allowed: false,
-            deniedReason: denial.deniedReason ?? null,
-            denyMessage: denial.message ?? null,
-          })
-          .run()
-        return denial
-      }
-    }
-
+    let result: ApplyResult | undefined
+    let thrown: unknown
     let insertedFactCount = 0
     let nextUsage: number | null = null
     let refillTrigger: RefillTrigger | null = null
+    let totalCost = 0
+    let reservationEngaged = false
 
     try {
-      const result = this.db.transaction((tx) => {
-        const existing = tx
-          .select({
-            allowed: idempotencyKeysTable.allowed,
-            deniedReason: idempotencyKeysTable.deniedReason,
-            denyMessage: idempotencyKeysTable.denyMessage,
-          })
-          .from(idempotencyKeysTable)
-          .where(eq(idempotencyKeysTable.eventId, idempotencyKey))
-          .get()
+      // Idempotency short-circuit before any wallet I/O. A retried event with a
+      // cached result must not re-call wallet.createReservation.
+      const cachedResult = this.lookupCachedIdempotencyResult(idempotencyKey)
+      if (cachedResult) {
+        wideEvent.idempotent_replay = true
+        result = cachedResult
+        return cachedResult
+      }
+      wideEvent.idempotent_replay = false
 
-        if (existing) {
-          return {
-            allowed: existing.allowed,
-            deniedReason:
-              (existing.deniedReason as ApplyResult["deniedReason"] | null | undefined) ??
-              undefined,
-            message: existing.denyMessage ?? undefined,
-          }
-        }
+      // Phase 7.13 — lazy reservation bootstrap. If this DO has never opened a
+      // reservation for the current period (or the previous one closed at period
+      // end / inactivity), open one now against the customer wallet. The
+      // reservation row is the contract the in-tx LocalReservation check needs;
+      // without it the DO falls through to pre-wallet behavior (no enforcement).
+      //
+      // Out-of-tx because Postgres ↔ SQLite can't share a single transaction.
+      // The DO is single-writer per (customer, stream, period), so there's no
+      // race with a concurrent apply().
+      const preWindow = this.readWalletWindow(this.db)
+      // Skip the wallet round-trip when the cache already says this stream is
+      // capped — the in-tx limit check will re-deny, and bootstrapping a fresh
+      // reservation only to immediately close it on the next limit hit is
+      // pure churn against the customer wallet.
+      const needsBootstrap =
+        (!preWindow || preWindow.reservationId === null) && !this.cache?.isLimitReached
+      wideEvent.bootstrap_attempted = needsBootstrap
 
-        const meterKey = deriveMeterKey(input.meter)
-
-        // Snapshot price config + periodEndAt on first apply; ensure the
-        // singleton window row exists before the engine's adapter UPDATEs
-        // its usage/updatedAt columns. The streamId already guarantees
-        // meter/reset fungibility, so we don't pin the featurePlanVersionId
-        // — stacked grants from different fpvs are valid on the same stream.
-        this.ensureMeterWindow(tx, {
-          meterKey,
-          projectId: input.projectId,
-          customerId: input.customerId,
-          priceConfig: input.priceConfig,
-          currency: input.currency,
-          periodEndAt: input.periodEndAt,
-          createdAt,
-        })
-
-        const adapter = new DrizzleStorageAdapter(tx)
-        const engine = new AsyncMeterAggregationEngine([input.meter], adapter, input.now)
-
-        const facts = engine.applyEventSync(input.event, {
-          // A limit hit is still a valid ingestion event. We store the denied
-          // result in the DO idempotency table so queue retries stay stable,
-          // while the ingestion service treats the event as processed.
-          beforePersist: (pendingFacts) => {
-            if (!input.enforceLimit) {
-              return
-            }
-
-            const exceeded = findLimitExceededFact({
-              facts: pendingFacts,
-              limit: input.limit,
-              overageStrategy: input.overageStrategy,
+      if (needsBootstrap) {
+        const denial = await this.bootstrapReservation(input)
+        if (denial) {
+          wideEvent.bootstrap_outcome = "denied"
+          // Persist the denial idempotently so retries return the same answer
+          // without re-calling the wallet. The DO's normal denial-cache pattern.
+          this.db
+            .insert(idempotencyKeysTable)
+            .values({
+              eventId: idempotencyKey,
+              createdAt,
+              allowed: false,
+              deniedReason: denial.deniedReason ?? null,
+              denyMessage: denial.message ?? null,
             })
+            .run()
+          result = denial
+          return denial
+        }
+        wideEvent.bootstrap_outcome = "success"
+      } else {
+        wideEvent.bootstrap_outcome = preWindow?.reservationId
+          ? "reservation_already_open"
+          : "skipped_capped"
+      }
 
-            if (exceeded && typeof input.limit === "number" && Number.isFinite(input.limit)) {
-              throw new EntitlementWindowLimitExceededError({
-                eventId: input.event.id,
-                meterKey: exceeded.meterKey,
+      try {
+        const txResult = this.db.transaction((tx) => {
+          const existing = tx
+            .select({
+              allowed: idempotencyKeysTable.allowed,
+              deniedReason: idempotencyKeysTable.deniedReason,
+              denyMessage: idempotencyKeysTable.denyMessage,
+            })
+            .from(idempotencyKeysTable)
+            .where(eq(idempotencyKeysTable.eventId, idempotencyKey))
+            .get()
+
+          if (existing) {
+            return {
+              allowed: existing.allowed,
+              deniedReason:
+                (existing.deniedReason as ApplyResult["deniedReason"] | null | undefined) ??
+                undefined,
+              message: existing.denyMessage ?? undefined,
+            }
+          }
+
+          // Snapshot price config + periodEndAt on first apply; ensure the
+          // singleton window row exists before the engine's adapter UPDATEs
+          // its usage/updatedAt columns. The streamId already guarantees
+          // meter/reset fungibility, so we don't pin the featurePlanVersionId
+          // — stacked grants from different fpvs are valid on the same stream.
+          this.ensureMeterWindow(tx, {
+            meterKey,
+            projectId: input.projectId,
+            customerId: input.customerId,
+            priceConfig: input.priceConfig,
+            currency: input.currency,
+            periodEndAt: input.periodEndAt,
+            createdAt,
+          })
+
+          const adapter = new DrizzleStorageAdapter(tx)
+          const engine = new AsyncMeterAggregationEngine([input.meter], adapter, input.now)
+
+          const facts = engine.applyEventSync(input.event, {
+            // A limit hit is still a valid ingestion event. We store the denied
+            // result in the DO idempotency table so queue retries stay stable,
+            // while the ingestion service treats the event as processed.
+            beforePersist: (pendingFacts) => {
+              if (!input.enforceLimit) {
+                return
+              }
+
+              const exceeded = findLimitExceededFact({
+                facts: pendingFacts,
                 limit: input.limit,
-                valueAfter: exceeded.valueAfter,
+                overageStrategy: input.overageStrategy,
+              })
+
+              if (exceeded && typeof input.limit === "number" && Number.isFinite(input.limit)) {
+                throw new EntitlementWindowLimitExceededError({
+                  eventId: input.event.id,
+                  meterKey: exceeded.meterKey,
+                  limit: input.limit,
+                  valueAfter: exceeded.valueAfter,
+                })
+              }
+            },
+          })
+
+          insertedFactCount = facts.length
+
+          // Price every fact once — the wallet check needs the summed cost
+          // and the outbox rows need the per-fact amount, so we compute both
+          // from the same pass. Negative amounts are valid (corrections).
+          const pricedFacts = facts.map((fact) => ({
+            fact,
+            amountMinor: this.computeAmountMinor({ fact, priceConfig: input.priceConfig }),
+          }))
+
+          // Phase 7 wallet check. Only engages when a reservation has been
+          // opened on this window (activation path, slice 7.12). Without a
+          // reservation the DO operates in the pre-wallet behaviour: no
+          // allocation tracking, no refill trigger.
+          const window = this.readWalletWindow(tx)
+          if (window?.reservationId && pricedFacts.length > 0) {
+            reservationEngaged = true
+            totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+
+            const local = new LocalReservation(
+              thresholdFromBps(window.allocationAmount, window.refillThresholdBps),
+              window.refillChunkAmount
+            )
+
+            const walletResult = local.applyUsage(
+              {
+                allocationAmount: window.allocationAmount,
+                consumedAmount: window.consumedAmount,
+              },
+              totalCost
+            )
+
+            if (!walletResult.isAllowed) {
+              throw new EntitlementWindowWalletEmptyError({
+                eventId: input.event.id,
+                meterKey,
+                reservationId: window.reservationId,
+                cost: totalCost,
+                remaining: window.allocationAmount - window.consumedAmount,
               })
             }
-          },
-        })
 
-        insertedFactCount = facts.length
-
-        // Price every fact once — the wallet check needs the summed cost
-        // and the outbox rows need the per-fact amount, so we compute both
-        // from the same pass. Negative amounts are valid (corrections).
-        const pricedFacts = facts.map((fact) => ({
-          fact,
-          amountMinor: this.computeAmountMinor({ fact, priceConfig: input.priceConfig }),
-        }))
-
-        // Phase 7 wallet check. Only engages when a reservation has been
-        // opened on this window (activation path, slice 7.12). Without a
-        // reservation the DO operates in the pre-wallet behaviour: no
-        // allocation tracking, no refill trigger.
-        const window = this.readWalletWindow(tx)
-        if (window?.reservationId && pricedFacts.length > 0) {
-          const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
-
-          const local = new LocalReservation(
-            thresholdFromBps(window.allocationAmount, window.refillThresholdBps),
-            window.refillChunkAmount
-          )
-
-          const walletResult = local.applyUsage(
-            {
-              allocationAmount: window.allocationAmount,
-              consumedAmount: window.consumedAmount,
-            },
-            totalCost
-          )
-
-          if (!walletResult.isAllowed) {
-            throw new EntitlementWindowWalletEmptyError({
-              eventId: input.event.id,
-              meterKey,
-              reservationId: window.reservationId,
-              cost: totalCost,
-              remaining: window.allocationAmount - window.consumedAmount,
-            })
-          }
-
-          // Synchronous SQLite write before any post-commit action. On
-          // replay the idempotency row short-circuits above, so this only
-          // runs on the first-success path.
-          tx.update(meterWindowTable)
-            .set({ consumedAmount: walletResult.newState.consumedAmount })
-            .run()
-
-          if (walletResult.needsRefill && !window.refillInFlight) {
-            const nextSeq = window.flushSeq + 1
-
+            // Synchronous SQLite write before any post-commit action. On
+            // replay the idempotency row short-circuits above, so this only
+            // runs on the first-success path.
             tx.update(meterWindowTable)
-              .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
+              .set({ consumedAmount: walletResult.newState.consumedAmount })
               .run()
 
-            refillTrigger = {
-              flushSeq: nextSeq,
-              // Flush leg = cumulative consumed - already flushed. Zero on the
-              // first refill means `flushReservation` skips the recognize leg.
-              flushAmount: walletResult.newState.consumedAmount - window.flushedAmount,
-              refillChunkAmount: walletResult.refillRequestAmount,
+            if (walletResult.needsRefill && !window.refillInFlight) {
+              const nextSeq = window.flushSeq + 1
+
+              tx.update(meterWindowTable)
+                .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
+                .run()
+
+              refillTrigger = {
+                flushSeq: nextSeq,
+                // Flush leg = cumulative consumed - already flushed. Zero on the
+                // first refill means `flushReservation` skips the recognize leg.
+                flushAmount: walletResult.newState.consumedAmount - window.flushedAmount,
+                refillChunkAmount: walletResult.refillRequestAmount,
+              }
             }
           }
-        }
 
-        for (const { fact, amountMinor } of pricedFacts) {
-          nextUsage = fact.valueAfter
+          for (const { fact, amountMinor } of pricedFacts) {
+            nextUsage = fact.valueAfter
 
-          const payload: OutboxFact = {
-            id: [input.streamId, input.periodKey, input.event.id, fact.meterKey].join(":"),
-            event_id: input.event.id,
-            idempotency_key: input.idempotencyKey,
-            project_id: input.projectId,
-            customer_id: input.customerId,
-            currency: input.currency,
-            stream_id: input.streamId,
-            feature_plan_version_id: input.featurePlanVersionId,
-            feature_slug: input.featureSlug,
-            period_key: input.periodKey,
-            event_slug: input.event.slug,
-            aggregation_method: input.meter.aggregationMethod,
-            timestamp: input.event.timestamp,
-            created_at: createdAt,
-            delta: fact.delta,
-            value_after: fact.valueAfter,
-            amount: amountMinor,
-            amount_scale: LEDGER_SCALE,
-            priced_at: createdAt,
+            const payload: OutboxFact = {
+              id: [input.streamId, input.periodKey, input.event.id, fact.meterKey].join(":"),
+              event_id: input.event.id,
+              idempotency_key: input.idempotencyKey,
+              project_id: input.projectId,
+              customer_id: input.customerId,
+              currency: input.currency,
+              stream_id: input.streamId,
+              feature_plan_version_id: input.featurePlanVersionId,
+              feature_slug: input.featureSlug,
+              period_key: input.periodKey,
+              event_slug: input.event.slug,
+              aggregation_method: input.meter.aggregationMethod,
+              timestamp: input.event.timestamp,
+              created_at: createdAt,
+              delta: fact.delta,
+              value_after: fact.valueAfter,
+              amount: amountMinor,
+              amount_scale: LEDGER_SCALE,
+              priced_at: createdAt,
+            }
+
+            tx.insert(meterFactsOutboxTable)
+              .values({
+                payload: JSON.stringify(payload),
+                currency: payload.currency,
+              })
+              .run()
           }
 
-          tx.insert(meterFactsOutboxTable)
+          tx.insert(idempotencyKeysTable)
             .values({
-              payload: JSON.stringify(payload),
-              currency: payload.currency,
+              eventId: idempotencyKey,
+              createdAt,
+              allowed: true,
+              deniedReason: null,
+              denyMessage: null,
             })
             .run()
-        }
 
-        tx.insert(idempotencyKeysTable)
-          .values({
-            eventId: idempotencyKey,
-            createdAt,
-            allowed: true,
-            deniedReason: null,
-            denyMessage: null,
-          })
-          .run()
+          // Stamp the inactivity watermark on every successful commit. alarm()
+          // uses `now - lastEventAt > INACTIVITY_THRESHOLD_MS` to decide when to
+          // close out a dormant reservation without waiting for period end.
+          tx.update(meterWindowTable).set({ lastEventAt: createdAt }).run()
 
-        // Stamp the inactivity watermark on every successful commit. alarm()
-        // uses `now - lastEventAt > INACTIVITY_THRESHOLD_MS` to decide when to
-        // close out a dormant reservation without waiting for period end.
-        tx.update(meterWindowTable).set({ lastEventAt: createdAt }).run()
+          return { allowed: true } as ApplyResult
+        })
 
-        return { allowed: true } as ApplyResult
-      })
-
-      // Commit succeeded — refresh the enforcement cache with this
-      // apply's context. Idempotent replays return early with facts = []
-      // and nextUsage stays null, so we keep the previous cache
-      // (SQLite wasn't touched either).
-      if (nextUsage !== null) {
-        const limit = this.normalizeLimit(input.limit)
-        this.cache = {
-          limit,
-          usage: nextUsage,
-          lastUpdate: createdAt,
-          isLimitReached: this.computeLimitReached(nextUsage, limit, input.overageStrategy),
-        }
-      }
-
-      if (result.allowed && insertedFactCount > 0) {
-        await this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS)
-      }
-
-      // Flush+refill must happen after commit so the new consumed/refill
-      // state is visible to `requestFlushAndRefill`, and must outlive the
-      // request via `ctx.waitUntil` so it continues after apply() returns.
-      if (refillTrigger) {
-        this.ctx.waitUntil(this.requestFlushAndRefill(refillTrigger))
-      }
-
-      return result
-    } catch (error) {
-      if (error instanceof EntitlementWindowLimitExceededError) {
-        const deniedResult: ApplyResult = {
-          allowed: false,
-          deniedReason: "LIMIT_EXCEEDED",
-          message: error.message,
-        }
-
-        // limit exceeded is a valid state
-        this.db
-          .insert(idempotencyKeysTable)
-          .values({
-            eventId: idempotencyKey,
-            createdAt,
-            allowed: false,
-            deniedReason: deniedResult.deniedReason ?? null,
-            denyMessage: deniedResult.message ?? null,
-          })
-          .run()
-
-        // Distinguish two cases:
-        //   (a) The *committed* usage is already at or above the limit. Every
-        //       future event on this period will also fail the limit check.
-        //       The reservation is dead weight — close it so the remainder
-        //       returns to `available.purchased`.
-        //   (b) Committed usage is still below the limit, but this single
-        //       event's delta would have pushed past it (e.g. a one-shot
-        //       large delta on an otherwise-quiet period). Future smaller
-        //       events can still draw on this reservation, so we leave it
-        //       open and only deny *this* event.
-        const previousUsage = this.cache?.usage ?? 0
-        const trulyCapped =
-          input.overageStrategy !== "always" &&
-          typeof input.limit === "number" &&
-          Number.isFinite(input.limit) &&
-          previousUsage >= input.limit
-
-        if (trulyCapped) {
+        // Commit succeeded — refresh the enforcement cache with this
+        // apply's context. Idempotent replays return early with facts = []
+        // and nextUsage stays null, so we keep the previous cache
+        // (SQLite wasn't touched either).
+        if (nextUsage !== null) {
+          const limit = this.normalizeLimit(input.limit)
           this.cache = {
-            limit: input.limit ?? null,
-            usage: previousUsage,
+            limit,
+            usage: nextUsage,
             lastUpdate: createdAt,
-            isLimitReached: true,
-          }
-
-          const window = this.readWalletWindow(this.db)
-          if (window?.reservationId) {
-            await this.finalFlush(window)
+            isLimitReached: this.computeLimitReached(nextUsage, limit, input.overageStrategy),
           }
         }
 
-        return deniedResult
-      }
-
-      if (error instanceof EntitlementWindowWalletEmptyError) {
-        const deniedResult: ApplyResult = {
-          allowed: false,
-          deniedReason: "WALLET_EMPTY",
-          message: error.message,
+        if (txResult.allowed && insertedFactCount > 0) {
+          await this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS)
         }
 
-        // wallet empty is a valid state as well.
-        // TODO: probably we need to check the edge case where the reservation is not enough but
-        // there is still balance in the wallet
-        this.db
-          .insert(idempotencyKeysTable)
-          .values({
-            eventId: idempotencyKey,
-            createdAt,
+        // Flush+refill must happen after commit so the new consumed/refill
+        // state is visible to `requestFlushAndRefill`, and must outlive the
+        // request via `ctx.waitUntil` so it continues after apply() returns.
+        if (refillTrigger) {
+          this.ctx.waitUntil(this.requestFlushAndRefill(refillTrigger))
+        }
+
+        result = txResult
+        return txResult
+      } catch (error) {
+        if (error instanceof EntitlementWindowLimitExceededError) {
+          const deniedResult: ApplyResult = {
             allowed: false,
-            deniedReason: deniedResult.deniedReason ?? null,
-            denyMessage: deniedResult.message ?? null,
-          })
-          .run()
+            deniedReason: "LIMIT_EXCEEDED",
+            message: error.message,
+          }
 
-        return deniedResult
-      }
+          // limit exceeded is a valid state
+          this.db
+            .insert(idempotencyKeysTable)
+            .values({
+              eventId: idempotencyKey,
+              createdAt,
+              allowed: false,
+              deniedReason: deniedResult.deniedReason ?? null,
+              denyMessage: deniedResult.message ?? null,
+            })
+            .run()
 
-      if (
-        error instanceof EventTimestampTooFarInFutureError ||
-        error instanceof EventTimestampTooOldError
-      ) {
+          // Distinguish two cases:
+          //   (a) The *committed* usage is already at or above the limit. Every
+          //       future event on this period will also fail the limit check.
+          //       The reservation is dead weight — close it so the remainder
+          //       returns to `available.purchased`.
+          //   (b) Committed usage is still below the limit, but this single
+          //       event's delta would have pushed past it (e.g. a one-shot
+          //       large delta on an otherwise-quiet period). Future smaller
+          //       events can still draw on this reservation, so we leave it
+          //       open and only deny *this* event.
+          const previousUsage = this.cache?.usage ?? 0
+          const trulyCapped =
+            input.overageStrategy !== "always" &&
+            typeof input.limit === "number" &&
+            Number.isFinite(input.limit) &&
+            previousUsage >= input.limit
+
+          wideEvent.truly_capped = trulyCapped
+
+          if (trulyCapped) {
+            this.cache = {
+              limit: input.limit ?? null,
+              usage: previousUsage,
+              lastUpdate: createdAt,
+              isLimitReached: true,
+            }
+
+            const window = this.readWalletWindow(this.db)
+            if (window?.reservationId) {
+              await this.finalFlush(window)
+            }
+          }
+
+          result = deniedResult
+          return deniedResult
+        }
+
+        if (error instanceof EntitlementWindowWalletEmptyError) {
+          const deniedResult: ApplyResult = {
+            allowed: false,
+            deniedReason: "WALLET_EMPTY",
+            message: error.message,
+          }
+
+          // wallet empty is a valid state as well.
+          // TODO: probably we need to check the edge case where the reservation is not enough but
+          // there is still balance in the wallet
+          this.db
+            .insert(idempotencyKeysTable)
+            .values({
+              eventId: idempotencyKey,
+              createdAt,
+              allowed: false,
+              deniedReason: deniedResult.deniedReason ?? null,
+              denyMessage: deniedResult.message ?? null,
+            })
+            .run()
+
+          result = deniedResult
+          return deniedResult
+        }
+
+        if (
+          error instanceof EventTimestampTooFarInFutureError ||
+          error instanceof EventTimestampTooOldError
+        ) {
+          throw error
+        }
+
         throw error
       }
-
+    } catch (error) {
+      thrown = error
       throw error
+    } finally {
+      wideEvent.fact_count = insertedFactCount
+      wideEvent.usage_after = nextUsage
+      wideEvent.cost_minor = totalCost
+      wideEvent.reservation_engaged = reservationEngaged
+      // refillTrigger is assigned inside a transaction callback, which
+      // defeats TS flow analysis here — it still thinks the value is `null`.
+      const trigger = refillTrigger as RefillTrigger | null
+      wideEvent.refill_triggered = trigger !== null
+      if (trigger) {
+        wideEvent.refill_seq = trigger.flushSeq
+        wideEvent.refill_chunk_amount = trigger.refillChunkAmount
+        wideEvent.refill_flush_amount = trigger.flushAmount
+      }
+      wideEvent.duration_ms = Date.now() - startTime
+
+      if (result) {
+        wideEvent.allowed = result.allowed
+        wideEvent.denied_reason = result.deniedReason ?? null
+        wideEvent.outcome = result.allowed ? "success" : "denied"
+      } else if (thrown) {
+        wideEvent.outcome = "error"
+        wideEvent.error_type = thrown instanceof Error ? thrown.name : "unknown"
+        wideEvent.error_message = thrown instanceof Error ? thrown.message : String(thrown)
+      }
+
+      this.logger.info("entitlement apply", wideEvent)
     }
   }
 
@@ -669,181 +743,227 @@ export class EntitlementWindowDO extends DurableObject {
   async alarm(): Promise<void> {
     await this.ready
 
-    const batch = this.db
-      .select({
-        id: meterFactsOutboxTable.id,
-        payload: meterFactsOutboxTable.payload,
-      })
-      .from(meterFactsOutboxTable)
-      .orderBy(asc(meterFactsOutboxTable.id))
-      .limit(FLUSH_BATCH_SIZE)
-      .all()
+    const startTime = Date.now()
+    const wideEvent: Record<string, unknown> = {
+      operation: "alarm",
+    }
 
-    if (batch.length > 0) {
-      // this can create double counting on fail but tinybird has
-      // dedupe protection, also the arch reads the last event value_after
-      const didFlush = await this.flushToTinybird(batch)
+    let thrown: unknown
 
-      if (didFlush) {
+    try {
+      const batch = this.db
+        .select({
+          id: meterFactsOutboxTable.id,
+          payload: meterFactsOutboxTable.payload,
+        })
+        .from(meterFactsOutboxTable)
+        .orderBy(asc(meterFactsOutboxTable.id))
+        .limit(FLUSH_BATCH_SIZE)
+        .all()
+
+      wideEvent.outbox_batch_size = batch.length
+      let outboxFlushed = false
+
+      if (batch.length > 0) {
+        // this can create double counting on fail but tinybird has
+        // dedupe protection, also the arch reads the last event value_after
+        outboxFlushed = await this.flushToTinybird(batch)
+
+        if (outboxFlushed) {
+          this.db
+            .delete(meterFactsOutboxTable)
+            .where(
+              inArray(
+                meterFactsOutboxTable.id,
+                batch.map((row) => row.id)
+              )
+            )
+            .run()
+        }
+      }
+      wideEvent.outbox_flushed = outboxFlushed
+
+      // Keep idempotency keys for MAX_EVENT_AGE_MS (30 days). Cleanup is chunked
+      // to avoid long synchronous SQLite write locks during large backlogs.
+      const staleIdempotencyRows = this.db
+        .select({ eventId: idempotencyKeysTable.eventId })
+        .from(idempotencyKeysTable)
+        .where(lt(idempotencyKeysTable.createdAt, Date.now() - MAX_EVENT_AGE_MS))
+        .orderBy(asc(idempotencyKeysTable.createdAt))
+        .limit(IDEMPOTENCY_CLEANUP_BATCH_SIZE)
+        .all()
+
+      wideEvent.idempotency_cleaned = staleIdempotencyRows.length
+
+      if (staleIdempotencyRows.length > 0) {
         this.db
-          .delete(meterFactsOutboxTable)
+          .delete(idempotencyKeysTable)
           .where(
             inArray(
-              meterFactsOutboxTable.id,
-              batch.map((row) => row.id)
+              idempotencyKeysTable.eventId,
+              staleIdempotencyRows.map((row) => row.eventId)
             )
           )
           .run()
       }
-    }
 
-    // Keep idempotency keys for MAX_EVENT_AGE_MS (30 days). Cleanup is chunked
-    // to avoid long synchronous SQLite write locks during large backlogs.
-    const staleIdempotencyRows = this.db
-      .select({ eventId: idempotencyKeysTable.eventId })
-      .from(idempotencyKeysTable)
-      .where(lt(idempotencyKeysTable.createdAt, Date.now() - MAX_EVENT_AGE_MS))
-      .orderBy(asc(idempotencyKeysTable.createdAt))
-      .limit(IDEMPOTENCY_CLEANUP_BATCH_SIZE)
-      .all()
+      const remainingOutboxCount = this.getOutboxCount()
+      wideEvent.outbox_remaining = remainingOutboxCount
+      wideEvent.outbox_alert = remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD
 
-    if (staleIdempotencyRows.length > 0) {
-      this.db
-        .delete(idempotencyKeysTable)
-        .where(
-          inArray(
-            idempotencyKeysTable.eventId,
-            staleIdempotencyRows.map((row) => row.eventId)
-          )
-        )
-        .run()
-    }
+      // Phase 7.7 final-flush detection. Any of three triggers converges on
+      // the same flush path: period end, 24h inactivity, or an explicit
+      // deletion request. A DO without a reservation (or one marked
+      // `recoveryRequired`) skips the flush — there's nothing to close out
+      // or the last attempt failed terminally and an operator has to look.
+      const window = this.readWalletWindow(this.db)
+      const now = Date.now()
 
-    const remainingOutboxCount = this.getOutboxCount()
+      wideEvent.reservation_id = window?.reservationId ?? null
+      wideEvent.recovery_required = window?.recoveryRequired ?? false
 
-    // keep an eye on this
-    this.logger.info("entitlement outbox depth", {
-      outbox_depth: remainingOutboxCount,
-      alert: remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD,
-    })
+      if (window?.reservationId && !window.recoveryRequired) {
+        const isPeriodEnd = window.periodEndAt !== null && now >= window.periodEndAt
+        const isInactive =
+          window.lastEventAt !== null && now - window.lastEventAt > INACTIVITY_THRESHOLD_MS
+        const isDeletionPending = window.deletionRequested
 
-    // Phase 7.7 final-flush detection. Any of three triggers converges on
-    // the same flush path: period end, 24h inactivity, or an explicit
-    // deletion request. A DO without a reservation (or one marked
-    // `recoveryRequired`) skips the flush — there's nothing to close out
-    // or the last attempt failed terminally and an operator has to look.
-    const window = this.readWalletWindow(this.db)
-    const now = Date.now()
+        if (isPeriodEnd || isInactive || isDeletionPending) {
+          wideEvent.final_flush_reason = isDeletionPending
+            ? "deletion"
+            : isPeriodEnd
+              ? "period_end"
+              : "inactivity"
+          await this.finalFlush(window)
 
-    if (window?.reservationId && !window.recoveryRequired) {
-      const isPeriodEnd = window.periodEndAt !== null && now >= window.periodEndAt
-      const isInactive =
-        window.lastEventAt !== null && now - window.lastEventAt > INACTIVITY_THRESHOLD_MS
-      const isDeletionPending = window.deletionRequested
-
-      if (isPeriodEnd || isInactive || isDeletionPending) {
-        await this.finalFlush(window)
-
-        if (isDeletionPending) {
-          // Flush result is best-effort under deletion — whether it
-          // succeeded or not, the caller asked us to die. A failure has
-          // already been logged inside finalFlush; the ledger idempotency
-          // row lets an operator replay the capture if needed.
-          await this.ctx.storage.deleteAlarm()
-          await this.ctx.storage.deleteAll()
-          return
+          if (isDeletionPending) {
+            // Flush result is best-effort under deletion — whether it
+            // succeeded or not, the caller asked us to die. A failure has
+            // already been logged inside finalFlush; the ledger idempotency
+            // row lets an operator replay the capture if needed.
+            wideEvent.self_destruct = true
+            wideEvent.outcome = "deleted"
+            await this.ctx.storage.deleteAlarm()
+            await this.ctx.storage.deleteAll()
+            return
+          }
         }
       }
-    }
 
-    // Time-based flush: if a reservation is still open with unflushed
-    // consumption that hasn't been recognised in the ledger for longer
-    // than the max flush interval, push a non-final flush so cold meters
-    // surface their consumption on a predictable cadence rather than
-    // waiting for the refill threshold or period_end.
-    //
-    // Re-read the window because finalFlush above may have closed it.
-    // `refillInFlight` guards against a concurrent apply()-triggered refill
-    // (single-threaded per DO, but the apply path's `ctx.waitUntil` can
-    // outlive the request and we don't want the alarm to race it).
-    const flushIntervalMs = maxFlushIntervalMs(this.runtimeEnv)
-    const postFlushWindow = this.readWalletWindow(this.db)
-    if (
-      postFlushWindow?.reservationId &&
-      !postFlushWindow.recoveryRequired &&
-      !postFlushWindow.refillInFlight
-    ) {
-      const unflushed = Math.max(
-        0,
-        postFlushWindow.consumedAmount - postFlushWindow.flushedAmount
-      )
-      const elapsedSinceLastFlush =
-        postFlushWindow.lastFlushedAt !== null
-          ? now - postFlushWindow.lastFlushedAt
-          : Number.POSITIVE_INFINITY
+      // Time-based flush: if a reservation is still open with unflushed
+      // consumption that hasn't been recognised in the ledger for longer
+      // than the max flush interval, push a non-final flush so cold meters
+      // surface their consumption on a predictable cadence rather than
+      // waiting for the refill threshold or period_end.
+      //
+      // Re-read the window because finalFlush above may have closed it.
+      // `refillInFlight` guards against a concurrent apply()-triggered refill
+      // (single-threaded per DO, but the apply path's `ctx.waitUntil` can
+      // outlive the request and we don't want the alarm to race it).
+      const flushIntervalMs = maxFlushIntervalMs(this.runtimeEnv)
+      const postFlushWindow = this.readWalletWindow(this.db)
+      let timeFlushTriggered = false
+      if (
+        postFlushWindow?.reservationId &&
+        !postFlushWindow.recoveryRequired &&
+        !postFlushWindow.refillInFlight
+      ) {
+        const unflushed = Math.max(
+          0,
+          postFlushWindow.consumedAmount - postFlushWindow.flushedAmount
+        )
+        const elapsedSinceLastFlush =
+          postFlushWindow.lastFlushedAt !== null
+            ? now - postFlushWindow.lastFlushedAt
+            : Number.POSITIVE_INFINITY
 
-      if (unflushed > 0 && elapsedSinceLastFlush >= flushIntervalMs) {
-        const nextSeq = postFlushWindow.flushSeq + 1
-        this.db
-          .update(meterWindowTable)
-          .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
-          .run()
-        await this.requestFlushAndRefill({
-          flushSeq: nextSeq,
-          flushAmount: unflushed,
-          // Time-driven flush is purely about ledger freshness — don't
-          // top up allocation here. The DO's own refill trigger handles
-          // that when the threshold is actually crossed.
-          refillChunkAmount: 0,
-        })
+        if (unflushed > 0 && elapsedSinceLastFlush >= flushIntervalMs) {
+          timeFlushTriggered = true
+          const nextSeq = postFlushWindow.flushSeq + 1
+          wideEvent.time_flush_seq = nextSeq
+          wideEvent.time_flush_amount = unflushed
+          this.db
+            .update(meterWindowTable)
+            .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
+            .run()
+          await this.requestFlushAndRefill({
+            flushSeq: nextSeq,
+            flushAmount: unflushed,
+            // Time-driven flush is purely about ledger freshness — don't
+            // top up allocation here. The DO's own refill trigger handles
+            // that when the threshold is actually crossed.
+            refillChunkAmount: 0,
+          })
+        }
       }
+      wideEvent.time_flush_triggered = timeFlushTriggered
+
+      // Read periodEndAt from SQLite on demand — the alarm runs at most once
+      // per FLUSH_INTERVAL_MS, so avoiding an in-memory mirror removes a
+      // source of drift without any measurable cost.
+      const periodEndAt = this.readPeriodEndAt()
+      wideEvent.period_end_at = periodEndAt
+
+      if (!periodEndAt) {
+        // We don't know when the period ends, and outbox is empty.
+        // Go to sleep. Next apply() will wake us up.
+        wideEvent.outcome = "idle"
+        return
+      }
+
+      // after the entitlement end we give 30 days to self destruct
+      const selfDestructAt = periodEndAt + MAX_EVENT_AGE_MS
+
+      if (now > selfDestructAt && remainingOutboxCount === 0) {
+        wideEvent.self_destruct = true
+        wideEvent.outcome = "deleted"
+        await this.ctx.storage.deleteAlarm()
+        await this.ctx.storage.deleteAll()
+        return
+      }
+
+      // Pick the soonest among: outbox drain, time-based flush deadline,
+      // self-destruct. Re-read the window because the time-flush above may
+      // have just updated `lastFlushedAt`.
+      const finalWindow = this.readWalletWindow(this.db)
+      const candidates: number[] = []
+
+      if (remainingOutboxCount > 0) {
+        candidates.push(now + FLUSH_INTERVAL_MS)
+      }
+
+      if (finalWindow?.reservationId && !finalWindow.recoveryRequired) {
+        const baseline = finalWindow.lastFlushedAt ?? now
+        candidates.push(baseline + flushIntervalMs)
+      }
+
+      if (candidates.length === 0) {
+        // Nothing pending — wake up at self-destruct time and die.
+        wideEvent.next_alarm_at = selfDestructAt
+        wideEvent.outcome = "scheduled"
+        await this.scheduleAlarm(selfDestructAt)
+        return
+      }
+
+      const target = Math.min(...candidates, selfDestructAt)
+      // Never schedule in the past — at minimum wait one tick so we don't
+      // hot-loop the alarm on a baseline that's already overdue.
+      const scheduled = Math.max(now + 1_000, target)
+      wideEvent.next_alarm_at = scheduled
+      wideEvent.outcome = "scheduled"
+      await this.scheduleAlarm(scheduled)
+    } catch (error) {
+      thrown = error
+      throw error
+    } finally {
+      wideEvent.duration_ms = Date.now() - startTime
+      if (thrown) {
+        wideEvent.outcome = "error"
+        wideEvent.error_type = thrown instanceof Error ? thrown.name : "unknown"
+        wideEvent.error_message = thrown instanceof Error ? thrown.message : String(thrown)
+      }
+      this.logger.info("entitlement alarm", wideEvent)
     }
-
-    // Read periodEndAt from SQLite on demand — the alarm runs at most once
-    // per FLUSH_INTERVAL_MS, so avoiding an in-memory mirror removes a
-    // source of drift without any measurable cost.
-    const periodEndAt = this.readPeriodEndAt()
-
-    if (!periodEndAt) {
-      // We don't know when the period ends, and outbox is empty.
-      // Go to sleep. Next apply() will wake us up.
-      return
-    }
-
-    // after the entitlement end we give 30 days to self destruct
-    const selfDestructAt = periodEndAt + MAX_EVENT_AGE_MS
-
-    if (now > selfDestructAt && remainingOutboxCount === 0) {
-      await this.ctx.storage.deleteAlarm()
-      await this.ctx.storage.deleteAll()
-      return
-    }
-
-    // Pick the soonest among: outbox drain, time-based flush deadline,
-    // self-destruct. Re-read the window because the time-flush above may
-    // have just updated `lastFlushedAt`.
-    const finalWindow = this.readWalletWindow(this.db)
-    const candidates: number[] = []
-
-    if (remainingOutboxCount > 0) {
-      candidates.push(now + FLUSH_INTERVAL_MS)
-    }
-
-    if (finalWindow?.reservationId && !finalWindow.recoveryRequired) {
-      const baseline = finalWindow.lastFlushedAt ?? now
-      candidates.push(baseline + flushIntervalMs)
-    }
-
-    if (candidates.length === 0) {
-      // Nothing pending — wake up at self-destruct time and die.
-      await this.scheduleAlarm(selfDestructAt)
-      return
-    }
-
-    const target = Math.min(...candidates, selfDestructAt)
-    // Never schedule in the past — at minimum wait one tick so we don't
-    // hot-loop the alarm on a baseline that's already overdue.
-    await this.scheduleAlarm(Math.max(now + 1_000, target))
   }
 
   // Public RPC: mark this DO for teardown at the next alarm. We don't
@@ -871,21 +991,34 @@ export class EntitlementWindowDO extends DurableObject {
   private async finalFlush(
     window: NonNullable<ReturnType<typeof this.readWalletWindow>>
   ): Promise<void> {
-    if (!window.reservationId || !window.projectId || !window.customerId) {
-      this.logger.error("final flush requested without a reservation", {
-        reservationId: window.reservationId,
-        projectId: window.projectId,
-        customerId: window.customerId,
-      })
-      return
+    const startTime = Date.now()
+    const wideEvent: Record<string, unknown> = {
+      operation: "final_flush",
+      reservation_id: window.reservationId,
+      project_id: window.projectId,
+      customer_id: window.customerId,
+      currency: window.currency,
+      period_end_at: window.periodEndAt,
     }
 
-    const unflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
-    const nextSeq = window.flushSeq + 1
-
-    this.db.update(meterWindowTable).set({ pendingFlushSeq: nextSeq }).run()
-
     try {
+      if (!window.reservationId || !window.projectId || !window.customerId) {
+        this.logger.error("final flush requested without a reservation", {
+          reservationId: window.reservationId,
+          projectId: window.projectId,
+          customerId: window.customerId,
+        })
+        wideEvent.outcome = "no_reservation"
+        return
+      }
+
+      const unflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
+      const nextSeq = window.flushSeq + 1
+      wideEvent.flush_seq = nextSeq
+      wideEvent.flush_amount = unflushed
+
+      this.db.update(meterWindowTable).set({ pendingFlushSeq: nextSeq }).run()
+
       const walletService = this.getWalletService()
       const result = await walletService.flushReservation({
         projectId: window.projectId,
@@ -909,6 +1042,8 @@ export class EntitlementWindowDO extends DurableObject {
         // Leave pendingFlushSeq set so the next alarm tick (or a DO
         // restart) retries with the same seq — the ledger idempotency
         // key keeps replays safe.
+        wideEvent.outcome = "wallet_error"
+        wideEvent.error_message = result.err.message
         return
       }
 
@@ -928,12 +1063,22 @@ export class EntitlementWindowDO extends DurableObject {
           lastFlushedAt: Date.now(),
         })
         .run()
+
+      wideEvent.flushed_amount = result.val.flushedAmount
+      wideEvent.flushed_after = window.flushedAmount + result.val.flushedAmount
+      wideEvent.outcome = "success"
     } catch (error) {
       this.logger.error(error, {
         context: "final flush threw unexpectedly",
-        flushSeq: nextSeq,
+        flushSeq: window.flushSeq + 1,
         reservationId: window.reservationId,
       })
+      wideEvent.outcome = "exception"
+      wideEvent.error_type = error instanceof Error ? error.name : "unknown"
+      wideEvent.error_message = error instanceof Error ? error.message : String(error)
+    } finally {
+      wideEvent.duration_ms = Date.now() - startTime
+      this.logger.info("entitlement final_flush", wideEvent)
     }
   }
 
@@ -1053,19 +1198,35 @@ export class EntitlementWindowDO extends DurableObject {
   // seq. Crucially we do not advance `flushedAmount` on failure: the next
   // retry re-derives `flushAmount` from `consumedAmount - flushedAmount`.
   private async requestFlushAndRefill(trigger: RefillTrigger): Promise<void> {
+    const startTime = Date.now()
     const window = this.readWalletWindow(this.db)
 
-    if (!window?.reservationId || !window.projectId || !window.customerId) {
-      this.logger.error("flush+refill requested without a reservation", {
-        flushSeq: trigger.flushSeq,
-        flushAmount: trigger.flushAmount,
-        refillChunkAmount: trigger.refillChunkAmount,
-      })
-      this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
-      return
+    const wideEvent: Record<string, unknown> = {
+      operation: "flush_refill",
+      flush_seq: trigger.flushSeq,
+      flush_amount: trigger.flushAmount,
+      refill_chunk_amount: trigger.refillChunkAmount,
+      reservation_id: window?.reservationId ?? null,
+      project_id: window?.projectId ?? null,
+      customer_id: window?.customerId ?? null,
+      currency: window?.currency ?? null,
+      allocation_before: window?.allocationAmount ?? null,
+      consumed_before: window?.consumedAmount ?? null,
+      flushed_before: window?.flushedAmount ?? null,
     }
 
     try {
+      if (!window?.reservationId || !window.projectId || !window.customerId) {
+        this.logger.error("flush+refill requested without a reservation", {
+          flushSeq: trigger.flushSeq,
+          flushAmount: trigger.flushAmount,
+          refillChunkAmount: trigger.refillChunkAmount,
+        })
+        this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
+        wideEvent.outcome = "no_reservation"
+        return
+      }
+
       const walletService = this.getWalletService()
       const result = await walletService.flushReservation({
         projectId: window.projectId,
@@ -1090,6 +1251,8 @@ export class EntitlementWindowDO extends DurableObject {
         // next event; leave pendingFlushSeq set so crash recovery picks up
         // the same seq after an eviction.
         this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
+        wideEvent.outcome = "wallet_error"
+        wideEvent.error_message = result.err.message
         return
       }
 
@@ -1104,12 +1267,24 @@ export class EntitlementWindowDO extends DurableObject {
           lastFlushedAt: Date.now(),
         })
         .run()
+
+      wideEvent.granted_amount = result.val.grantedAmount
+      wideEvent.flushed_amount = result.val.flushedAmount
+      wideEvent.allocation_after = window.allocationAmount + result.val.grantedAmount
+      wideEvent.flushed_after = window.flushedAmount + result.val.flushedAmount
+      wideEvent.outcome = "success"
     } catch (error) {
       this.logger.error(error, {
         context: "flush+refill threw unexpectedly",
         flushSeq: trigger.flushSeq,
       })
       this.db.update(meterWindowTable).set({ refillInFlight: false }).run()
+      wideEvent.outcome = "exception"
+      wideEvent.error_type = error instanceof Error ? error.name : "unknown"
+      wideEvent.error_message = error instanceof Error ? error.message : String(error)
+    } finally {
+      wideEvent.duration_ms = Date.now() - startTime
+      this.logger.info("entitlement flush_refill", wideEvent)
     }
   }
 

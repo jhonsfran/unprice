@@ -4,10 +4,10 @@
  * reconciler / tooling that needs to derive a reservation shape from a
  * per-event price. All values at pgledger scale 8.
  *
- * Lifted out of `use-cases/subscription/derive-activation-inputs` so the
- * DO can import without pulling the full use-cases barrel — the barrel
- * transitively imports drizzle-orm relations, which the DO test stack
- * doesn't (and shouldn't) mock.
+ * Lifted out of `use-cases/billing/derive-provision-inputs` so the DO can
+ * import without pulling the full use-cases barrel — the barrel transitively
+ * imports drizzle-orm relations, which the DO test stack doesn't (and
+ * shouldn't) mock.
  *
  * Formula:
  *   initial_allocation_amount = clamp(price_per_event * 1000, $1, $10)
