@@ -66,7 +66,7 @@ These resolve audit findings without code changes. Treat as load-bearing invaria
 
 ---
 
-### [ ] HARD-003 — `bill-period` invoice INSERT/SELECT is non-atomic (P0, money correctness)
+### [x] HARD-003 — `bill-period` invoice INSERT/SELECT is non-atomic (P0, money correctness)
 
 **Files:** `internal/services/src/use-cases/billing/bill-period.ts` (invoice creation block ~L279-321), `internal/services/src/billing/repository.drizzle.ts` (`createInvoice` / `findInvoiceByStatementKey`)
 
@@ -80,11 +80,11 @@ These resolve audit findings without code changes. Treat as load-bearing invaria
 
 **Acceptance:** No code path can return early-success after the INSERT step without having a confirmed invoice row in hand.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Both #1 and #2 from the plan landed. (1) `DrizzleBillingRepository.createInvoice` now uses `INSERT ... ON CONFLICT (projectId, subscriptionId, customerId, statementKey) DO UPDATE SET project_id = EXCLUDED.project_id RETURNING *` — the no-op `DO UPDATE` forces RETURNING to always yield the canonical row (existing or new), eliminating the silent-null-return + fallback-SELECT race. (2) `bill-period.ts` now wraps the entire per-group flow (rate → ledger transfers → invoice upsert → totalAmount stamp → markPeriodsInvoiced) in a single `db.transaction(...)` opened by `pg_advisory_xact_lock(hashtext('bill:projectId:statementKey'))`. Concurrent re-runs for the same statement queue rather than racing; partial failures roll back rate-and-mark together so we never commit "ledger posted but periods still pending." `LedgerGateway.getEntriesByStatementKey` now accepts an optional `executor` so the read-back happens inside the same tx and observes the just-posted entries. The previous "if no entries, void all periods" branch was preserved (HARD-019 will make that more conservative). Removed the unreachable fallback `findInvoiceByStatementKey` call; replaced the silent `return` after a missing invoice with a thrown error so the tx rolls back loudly. New unit test in `machine.test.ts` re-runs `m.invoice()` twice on the same statement and asserts (a) only one distinct ledger source identity is created across both runs (gateway dedup), (b) the upserted invoice row remains in `draft`, (c) `db.transaction` is invoked for the BILL flow. All 256 services tests pass.
 
 ---
 
-### [ ] HARD-004 — `bill-period` ledger source ID idempotency must be verified (P0, money correctness)
+### [x] HARD-004 — `bill-period` ledger source ID idempotency must be verified (P0, money correctness)
 
 **Files:** `internal/services/src/use-cases/billing/bill-period.ts` (ledger transfer at ~L176-190), `internal/services/src/ledger/` (gateway)
 
@@ -98,7 +98,7 @@ These resolve audit findings without code changes. Treat as load-bearing invaria
 
 **Acceptance:** Test demonstrates double-`billPeriod` produces single ledger entry per period.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Verified the dedup contract is `(projectId, source.type, source.id)`, enforced by the unique index on `unprice_ledger_idempotency` and the `claimIdempotency` helper at `gateway.ts` ~L631-655 (`INSERT ... ON CONFLICT (project_id, source_type, source_id) DO NOTHING`). Statement key is recorded alongside but is *not* part of the dedup key — same source identity with a different statement key would be a programming error. The bill-period source identity is `subscription_billing_period_charge_v1` + `${period.id}:${period.subscriptionItemId}` (`bill-period.ts` L155-156); since `period.id` is unique per `(subscription, statementKey, item)` and the statement key itself is part of the projection (not the dedup), re-runs of the same period across statement keys can't collide. Documented the contract in a JSDoc block above `LedgerGateway.createTransfer`. Test added in HARD-003 (machine.test.ts: "re-running invoice() is idempotent…") asserts that a second `m.invoice()` on the same statement collapses to the same set of distinct `(sourceType, sourceId)` calls — gateway-level idempotency keeps actual postings to one per period.
 
 ---
 

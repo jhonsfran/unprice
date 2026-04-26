@@ -1,4 +1,4 @@
-import type { Database } from "@unprice/db"
+import { type Database, sql } from "@unprice/db"
 import { type Dinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
@@ -71,294 +71,301 @@ export async function billPeriod({
       continue
     }
 
-    const billingPeriodsToInvoice = await billingRepo.listPendingPeriodsForStatement({
-      projectId: periodItemGroup.projectId,
-      subscriptionId: periodItemGroup.subscriptionId,
-      subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
-      statementKey: periodItemGroup.statementKey,
-    })
+    // Serialize concurrent re-runs for the same statement and wrap the entire
+    // BILL flow (rate → ledger transfers → invoice upsert → mark periods
+    // invoiced) in a single transaction. The advisory lock is keyed on
+    // statement_key so two parallel `billPeriod` calls for the same statement
+    // queue rather than racing. Ledger transfer idempotency is the source of
+    // truth for "did we already post this charge?" — the lock + transaction
+    // guarantee atomicity across the rate/post/invoice/mark steps so we never
+    // commit a partial state (e.g. ledger posted but periods still pending).
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`bill:${periodItemGroup.projectId}:${periodItemGroup.statementKey}`}))`
+      )
 
-    if (billingPeriodsToInvoice.length === 0) {
-      continue
-    }
+      const txBillingRepo = new DrizzleBillingRepository(tx)
 
-    // 1) Rate each pending period and post deterministic ledger entries first.
-    //    Entries are tagged with the statement_key so the invoicing query below
-    //    can enumerate them via the gateway's metadata-filtered view.
-    for (const period of billingPeriodsToInvoice) {
-      const feature = period.subscriptionItem.featurePlanVersion.feature
-      const nonUsageQuantity = period.subscriptionItem.units ?? 0
-      const usageData =
-        period.subscriptionItem.featurePlanVersion.featureType === "usage"
-          ? undefined
-          : [{ featureSlug: feature.slug, usage: nonUsageQuantity }]
-
-      const ratingResult = await ratingService.rateBillingPeriod({
-        projectId: period.projectId,
-        customerId: period.customerId,
-        featureSlug: feature.slug,
-        startAt: period.cycleStartAt,
-        endAt: period.cycleEndAt,
-        usageData,
-      })
-
-      if (ratingResult.err) {
-        logger.error(ratingResult.err, {
-          billingPeriodId: period.id,
-          phaseId: phase.id,
-          statementKey: period.statementKey,
-          context: "Error while rating billing period before ledger posting",
-        })
-        throw ratingResult.err
-      }
-
-      const ratedCharges = ratingResult.val
-      const firstCharge = ratedCharges[0]
-
-      const totalAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
-        if (sum === null) return charge.price.totalPrice.dinero
-        // biome-ignore lint/suspicious/noExplicitAny: dinero add typing
-        return (require("dinero.js") as any).add(sum, charge.price.totalPrice.dinero)
-      }, null)
-
-      const unitAmount = firstCharge ? firstCharge.price.unitPrice.dinero : null
-      const ratedQuantity = ratedCharges.reduce((sum, charge) => sum + Math.max(0, charge.usage), 0)
-      const quantity = ratedCharges.length > 0 ? Math.trunc(ratedQuantity) : nonUsageQuantity
-      const rawProrationFactor = firstCharge?.prorate
-      const prorationFactor =
-        period.type === "trial"
-          ? 0
-          : typeof rawProrationFactor === "number" && Number.isFinite(rawProrationFactor)
-            ? rawProrationFactor
-            : 1
-      const sourceType = "subscription_billing_period_charge_v1"
-      const sourceId = `${period.id}:${period.subscriptionItemId}`
-      const entryMetadata = {
-        subscription_id: period.subscriptionId,
-        subscription_phase_id: period.subscriptionPhaseId,
-        subscription_item_id: period.subscriptionItemId,
-        billing_period_id: period.id,
-        feature_plan_version_id: period.subscriptionItem.featurePlanVersion.id,
-        invoice_item_kind: (period.type === "trial" ? "trial" : "period") as "trial" | "period",
-        cycle_start_at: period.cycleStartAt,
-        cycle_end_at: period.cycleEndAt,
-        quantity,
-        unit_amount_snapshot: unitAmount ? toSnapshot(unitAmount) : null,
-        proration_factor: prorationFactor,
-        description: feature.title,
-      }
-
-      // Trial / zero-amount periods don't post to the ledger — pgledger
-      // rejects non-positive transfers and there's no receivable to record.
-      if (!totalAmount || isZero(totalAmount)) {
-        continue
-      }
-
-      if (isNegative(totalAmount)) {
-        // Negative period totals would require issuing credits from a grant
-        // account, which isn't wired up at the ledger layer. Skip here and
-        // let the wallet layer post credits against the customer account.
-        logger.warn("Skipping negative billing period — credits land in wallet flow", {
-          billingPeriodId: period.id,
-          phaseId: phase.id,
-        })
-        continue
-      }
-
-      // Flat fees and rated period charges debit `customer.*.receivable`
-      // (debit-normal, allow-negative) and credit `consumed`. Receivable
-      // goes negative = customer owes us. The post-payment settlement
-      // posts `topup → receivable` to zero it out. This decouples invoice
-      // creation from cash-on-hand: invoices can be drafted before any
-      // payment, and `purchased` stays a strict cash-only account.
-      // The `kind: "subscription"` + `statement_key` metadata pair keeps
-      // the transfer projectable as an invoice line (slice 7.8).
-      const postResult = await ledgerService.createTransfer({
-        projectId: period.projectId,
-        fromAccount: customerAccountKeys(period.customerId).receivable,
-        toAccount: customerAccountKeys(period.customerId).consumed,
-        amount: totalAmount,
-        source: { type: sourceType, id: sourceId },
-        statementKey: period.statementKey,
-        metadata: {
-          ...entryMetadata,
-          flow: "subscription",
-          kind: "subscription",
-          statement_key: period.statementKey,
-        },
-        eventAt: new Date(now),
-      })
-
-      if (postResult.err) {
-        logger.error(postResult.err, {
-          billingPeriodId: period.id,
-          phaseId: phase.id,
-          statementKey: period.statementKey,
-          context: "Error while posting rated period to ledger",
-        })
-        throw postResult.err
-      }
-    }
-
-    // 2) Build invoice lines from entries that share this statement_key.
-    //    The new ledger has no settlement table — invoice → ledger linkage
-    //    lives in the entry's metadata (`statement_key`, `billing_period_id`).
-    const statementEntriesResult = await ledgerService.getEntriesByStatementKey({
-      projectId: periodItemGroup.projectId,
-      statementKey: periodItemGroup.statementKey,
-    })
-
-    if (statementEntriesResult.err) {
-      logger.error(statementEntriesResult.err, {
-        phaseId: phase.id,
-        statementKey: periodItemGroup.statementKey,
-        context: "Error while loading statement-key ledger entries",
-      })
-      throw statementEntriesResult.err
-    }
-
-    const ledgerEntriesToInvoice = statementEntriesResult.val.filter(
-      (entry: LedgerEntry) =>
-        (entry.metadata as Record<string, unknown> | null)?.billing_period_id != null
-    )
-
-    if (ledgerEntriesToInvoice.length === 0) {
-      await billingRepo.voidPendingPeriods({
+      const billingPeriodsToInvoice = await txBillingRepo.listPendingPeriodsForStatement({
         projectId: periodItemGroup.projectId,
         subscriptionId: periodItemGroup.subscriptionId,
         subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
         statementKey: periodItemGroup.statementKey,
       })
 
-      continue
-    }
+      if (billingPeriodsToInvoice.length === 0) {
+        return
+      }
 
-    const statementStartAt = Math.min(
-      ...ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
-        const meta = entry.metadata as Record<string, unknown> | null
-        return (meta?.cycle_start_at as number | undefined) ?? periodItemGroup.invoiceAt
-      })
-    )
-    const statementEndAt = Math.max(
-      ...ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
-        const meta = entry.metadata as Record<string, unknown> | null
-        return (meta?.cycle_end_at as number | undefined) ?? periodItemGroup.invoiceAt
-      })
-    )
+      // 1) Rate each pending period and post deterministic ledger entries
+      //    first. Entries are tagged with statement_key so the invoicing
+      //    query below can enumerate them via the gateway's
+      //    metadata-filtered view. Ledger transfers dedupe on
+      //    (sourceType, sourceId), so re-runs after a partial failure never
+      //    double-post (HARD-004).
+      for (const period of billingPeriodsToInvoice) {
+        const feature = period.subscriptionItem.featurePlanVersion.feature
+        const nonUsageQuantity = period.subscriptionItem.units ?? 0
+        const usageData =
+          period.subscriptionItem.featurePlanVersion.featureType === "usage"
+            ? undefined
+            : [{ featureSlug: feature.slug, usage: nonUsageQuantity }]
 
-    await db.transaction(async (tx) => {
-      try {
-        const txBillingRepo = new DrizzleBillingRepository(tx)
-        const invoiceAt = periodItemGroup.invoiceAt
-        const strategy = billingStrategyForInterval(
-          phase.planVersion.whenToBill,
-          phase.planVersion.billingConfig.billingInterval
-        )
-
-        const timezone = phase.subscription.timezone
-        const date = toZonedTime(new Date(invoiceAt), timezone)
-        const statementDateString = ["minute"].includes(
-          phase.planVersion.billingConfig.billingInterval
-        )
-          ? format(date, "MMMM d, yyyy hh:mm a")
-          : format(date, "MMMM d, yyyy")
-
-        // BILL phase: invoice-driven modes always have a non-null offset.
-        // wallet-only mode never reaches this code path (BILL is skipped via
-        // the machine guard).
-        const dueAt = invoiceAt + (strategy.invoiceDueOffsetMs ?? 0)
-
-        const pastDueAt = calculateDateAt({
-          startDate: dueAt,
-          config: {
-            interval: phase.planVersion.billingConfig.billingInterval,
-            units: phase.planVersion.gracePeriod,
-          },
+        const ratingResult = await ratingService.rateBillingPeriod({
+          projectId: period.projectId,
+          customerId: period.customerId,
+          featureSlug: feature.slug,
+          startAt: period.cycleStartAt,
+          endAt: period.cycleEndAt,
+          usageData,
         })
 
-        let invoice = await txBillingRepo.createInvoice({
-          id: newId("invoice"),
-          projectId: phase.projectId,
-          subscriptionId: phase.subscriptionId,
-          customerId: phase.subscription.customerId,
-          requiredPaymentMethod: phase.planVersion.paymentMethodRequired,
-          paymentMethodId: phase.paymentMethodId ?? null,
-          status: "draft",
-          statementDateString: statementDateString,
-          statementKey: periodItemGroup.statementKey,
-          statementStartAt: statementStartAt,
-          statementEndAt: statementEndAt,
-          whenToBill: phase.planVersion.whenToBill,
-          collectionMethod: phase.planVersion.collectionMethod,
-          invoicePaymentProviderId: "",
-          invoicePaymentProviderUrl: "",
-          paymentProvider: phase.paymentProvider,
-          currency: phase.planVersion.currency,
-          pastDueAt: pastDueAt,
-          dueAt: dueAt,
-          paidAt: null,
-          totalAmount: 0,
-          issueDate: null,
-          metadata: { note: "Invoiced by scheduler" },
-        })
-
-        if (!invoice) {
-          invoice = await txBillingRepo.findInvoiceByStatementKey({
-            statementKey: periodItemGroup.statementKey,
-            projectId: phase.projectId,
-            subscriptionId: phase.subscriptionId,
-            customerId: phase.subscription.customerId,
-          })
-        }
-
-        if (!invoice) {
-          logger.error("Invoice not created", {
+        if (ratingResult.err) {
+          logger.error(ratingResult.err, {
+            billingPeriodId: period.id,
             phaseId: phase.id,
-            statementStartAt: statementStartAt,
-            statementEndAt: statementEndAt,
+            statementKey: period.statementKey,
+            context: "Error while rating billing period before ledger posting",
           })
-
-          return
+          throw ratingResult.err
         }
 
-        // Phase 7: no `invoice_items` table. The invoice total is the sum
-        // of ledger entries credited to `customer.*.consumed` under this
-        // statement_key — same entries the API projects on read
-        // (slice 7.8). We sum here to stamp `invoices.totalAmount` for
-        // fast header reads; lines are re-derived from the ledger.
-        const totalAmount = ledgerEntriesToInvoice.reduce(
-          (sum: number, entry: LedgerEntry) => sum + formatAmountForProvider(entry.amount).amount,
+        const ratedCharges = ratingResult.val
+        const firstCharge = ratedCharges[0]
+
+        const totalAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
+          if (sum === null) return charge.price.totalPrice.dinero
+          // biome-ignore lint/suspicious/noExplicitAny: dinero add typing
+          return (require("dinero.js") as any).add(sum, charge.price.totalPrice.dinero)
+        }, null)
+
+        const unitAmount = firstCharge ? firstCharge.price.unitPrice.dinero : null
+        const ratedQuantity = ratedCharges.reduce(
+          (sum, charge) => sum + Math.max(0, charge.usage),
           0
         )
-
-        await txBillingRepo.updateInvoice({
-          invoiceId: invoice.id,
-          projectId: phase.projectId,
-          data: {
-            totalAmount,
-            updatedAtM: now,
-          },
-        })
-
-        const periodIdsToMark = billingPeriodsToInvoice.map((p) => p.id)
-        if (periodIdsToMark.length > 0) {
-          await txBillingRepo.markPeriodsInvoiced({
-            projectId: phase.projectId,
-            subscriptionId: phase.subscriptionId,
-            periodIds: periodIdsToMark,
-            invoiceId: invoice.id,
-          })
+        const quantity = ratedCharges.length > 0 ? Math.trunc(ratedQuantity) : nonUsageQuantity
+        const rawProrationFactor = firstCharge?.prorate
+        const prorationFactor =
+          period.type === "trial"
+            ? 0
+            : typeof rawProrationFactor === "number" && Number.isFinite(rawProrationFactor)
+              ? rawProrationFactor
+              : 1
+        const sourceType = "subscription_billing_period_charge_v1"
+        const sourceId = `${period.id}:${period.subscriptionItemId}`
+        const entryMetadata = {
+          subscription_id: period.subscriptionId,
+          subscription_phase_id: period.subscriptionPhaseId,
+          subscription_item_id: period.subscriptionItemId,
+          billing_period_id: period.id,
+          feature_plan_version_id: period.subscriptionItem.featurePlanVersion.id,
+          invoice_item_kind: (period.type === "trial" ? "trial" : "period") as "trial" | "period",
+          cycle_start_at: period.cycleStartAt,
+          cycle_end_at: period.cycleEndAt,
+          quantity,
+          unit_amount_snapshot: unitAmount ? toSnapshot(unitAmount) : null,
+          proration_factor: prorationFactor,
+          description: feature.title,
         }
-      } catch (error) {
-        logger.error(error, {
+
+        // Trial / zero-amount periods don't post to the ledger — pgledger
+        // rejects non-positive transfers and there's no receivable to record.
+        if (!totalAmount || isZero(totalAmount)) {
+          continue
+        }
+
+        if (isNegative(totalAmount)) {
+          // Negative period totals would require issuing credits from a grant
+          // account, which isn't wired up at the ledger layer. Skip here and
+          // let the wallet layer post credits against the customer account.
+          logger.warn("Skipping negative billing period — credits land in wallet flow", {
+            billingPeriodId: period.id,
+            phaseId: phase.id,
+          })
+          continue
+        }
+
+        // Flat fees and rated period charges debit `customer.*.receivable`
+        // (debit-normal, allow-negative) and credit `consumed`. Receivable
+        // goes negative = customer owes us. The post-payment settlement
+        // posts `topup → receivable` to zero it out. This decouples invoice
+        // creation from cash-on-hand: invoices can be drafted before any
+        // payment, and `purchased` stays a strict cash-only account.
+        // The `kind: "subscription"` + `statement_key` metadata pair keeps
+        // the transfer projectable as an invoice line (slice 7.8).
+        const postResult = await ledgerService.createTransfer(
+          {
+            projectId: period.projectId,
+            fromAccount: customerAccountKeys(period.customerId).receivable,
+            toAccount: customerAccountKeys(period.customerId).consumed,
+            amount: totalAmount,
+            source: { type: sourceType, id: sourceId },
+            statementKey: period.statementKey,
+            metadata: {
+              ...entryMetadata,
+              flow: "subscription",
+              kind: "subscription",
+              statement_key: period.statementKey,
+            },
+            eventAt: new Date(now),
+          },
+          tx
+        )
+
+        if (postResult.err) {
+          logger.error(postResult.err, {
+            billingPeriodId: period.id,
+            phaseId: phase.id,
+            statementKey: period.statementKey,
+            context: "Error while posting rated period to ledger",
+          })
+          throw postResult.err
+        }
+      }
+
+      // 2) Build invoice lines from entries that share this statement_key.
+      //    The new ledger has no settlement table — invoice → ledger linkage
+      //    lives in the entry's metadata (`statement_key`, `billing_period_id`).
+      const statementEntriesResult = await ledgerService.getEntriesByStatementKey(
+        {
+          projectId: periodItemGroup.projectId,
+          statementKey: periodItemGroup.statementKey,
+        },
+        tx
+      )
+
+      if (statementEntriesResult.err) {
+        logger.error(statementEntriesResult.err, {
           phaseId: phase.id,
-          statementStartAt: statementStartAt,
-          statementEndAt: statementEndAt,
-          context: "Error while invoicing phase",
+          statementKey: periodItemGroup.statementKey,
+          context: "Error while loading statement-key ledger entries",
+        })
+        throw statementEntriesResult.err
+      }
+
+      const ledgerEntriesToInvoice = statementEntriesResult.val.filter(
+        (entry: LedgerEntry) =>
+          (entry.metadata as Record<string, unknown> | null)?.billing_period_id != null
+      )
+
+      if (ledgerEntriesToInvoice.length === 0) {
+        await txBillingRepo.voidPendingPeriods({
+          projectId: periodItemGroup.projectId,
+          subscriptionId: periodItemGroup.subscriptionId,
+          subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
+          statementKey: periodItemGroup.statementKey,
         })
 
-        // Drizzle auto-rolls back on throw — no explicit tx.rollback() needed.
-        throw error
+        return
+      }
+
+      const statementStartAt = Math.min(
+        ...ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
+          const meta = entry.metadata as Record<string, unknown> | null
+          return (meta?.cycle_start_at as number | undefined) ?? periodItemGroup.invoiceAt
+        })
+      )
+      const statementEndAt = Math.max(
+        ...ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
+          const meta = entry.metadata as Record<string, unknown> | null
+          return (meta?.cycle_end_at as number | undefined) ?? periodItemGroup.invoiceAt
+        })
+      )
+
+      const invoiceAt = periodItemGroup.invoiceAt
+      const strategy = billingStrategyForInterval(
+        phase.planVersion.whenToBill,
+        phase.planVersion.billingConfig.billingInterval
+      )
+
+      const timezone = phase.subscription.timezone
+      const date = toZonedTime(new Date(invoiceAt), timezone)
+      const statementDateString = ["minute"].includes(
+        phase.planVersion.billingConfig.billingInterval
+      )
+        ? format(date, "MMMM d, yyyy hh:mm a")
+        : format(date, "MMMM d, yyyy")
+
+      // BILL phase: invoice-driven modes always have a non-null offset.
+      // wallet-only mode never reaches this code path (BILL is skipped via
+      // the machine guard).
+      const dueAt = invoiceAt + (strategy.invoiceDueOffsetMs ?? 0)
+
+      const pastDueAt = calculateDateAt({
+        startDate: dueAt,
+        config: {
+          interval: phase.planVersion.billingConfig.billingInterval,
+          units: phase.planVersion.gracePeriod,
+        },
+      })
+
+      // Atomic upsert with RETURNING — the unique key
+      // (projectId, subscriptionId, customerId, statementKey) makes this the
+      // single canonical row per statement; no fallback SELECT is needed.
+      const invoice = await txBillingRepo.createInvoice({
+        id: newId("invoice"),
+        projectId: phase.projectId,
+        subscriptionId: phase.subscriptionId,
+        customerId: phase.subscription.customerId,
+        requiredPaymentMethod: phase.planVersion.paymentMethodRequired,
+        paymentMethodId: phase.paymentMethodId ?? null,
+        status: "draft",
+        statementDateString: statementDateString,
+        statementKey: periodItemGroup.statementKey,
+        statementStartAt: statementStartAt,
+        statementEndAt: statementEndAt,
+        whenToBill: phase.planVersion.whenToBill,
+        collectionMethod: phase.planVersion.collectionMethod,
+        invoicePaymentProviderId: "",
+        invoicePaymentProviderUrl: "",
+        paymentProvider: phase.paymentProvider,
+        currency: phase.planVersion.currency,
+        pastDueAt: pastDueAt,
+        dueAt: dueAt,
+        paidAt: null,
+        totalAmount: 0,
+        issueDate: null,
+        metadata: { note: "Invoiced by scheduler" },
+      })
+
+      if (!invoice) {
+        // With ON CONFLICT DO UPDATE ... RETURNING, this branch is
+        // unreachable barring DB driver pathology. Treat as fatal so the tx
+        // rolls back and the caller retries — silent return previously
+        // stranded periods in `pending`.
+        throw new Error(
+          `Invoice upsert returned no row for statement ${periodItemGroup.statementKey}`
+        )
+      }
+
+      // Phase 7: no `invoice_items` table. The invoice total is the sum
+      // of ledger entries credited to `customer.*.consumed` under this
+      // statement_key — same entries the API projects on read
+      // (slice 7.8). We sum here to stamp `invoices.totalAmount` for
+      // fast header reads; lines are re-derived from the ledger.
+      const totalAmountForInvoice = ledgerEntriesToInvoice.reduce(
+        (sum: number, entry: LedgerEntry) => sum + formatAmountForProvider(entry.amount).amount,
+        0
+      )
+
+      await txBillingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId: phase.projectId,
+        data: {
+          totalAmount: totalAmountForInvoice,
+          updatedAtM: now,
+        },
+      })
+
+      const periodIdsToMark = billingPeriodsToInvoice.map((p) => p.id)
+      if (periodIdsToMark.length > 0) {
+        await txBillingRepo.markPeriodsInvoiced({
+          projectId: phase.projectId,
+          subscriptionId: phase.subscriptionId,
+          periodIds: periodIdsToMark,
+          invoiceId: invoice.id,
+        })
       }
     })
   }

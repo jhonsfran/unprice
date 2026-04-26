@@ -347,6 +347,21 @@ export class LedgerGateway {
     }
   }
 
+  /**
+   * Idempotency contract — `(projectId, source.type, source.id)` is the
+   * dedup key. The unique index on
+   * `unprice_ledger_idempotency(project_id, source_type, source_id)` is the
+   * single source of truth: a re-issued transfer with the same source
+   * identity returns the original `LedgerTransfer` without inserting a new
+   * row in `pgledger_entries`. Callers that re-run a workflow after a
+   * partial failure rely on this to never double-post.
+   *
+   * Statement key is recorded alongside but is NOT part of the dedup key —
+   * it indexes which statement a transfer rolls up to (used by
+   * `getEntriesByStatementKey` / `getInvoiceLines`). Two transfers with
+   * the same `(source.type, source.id)` but different statement keys are
+   * a programming error.
+   */
   public async createTransfer(
     request: LedgerTransferRequest,
     executor?: DbExecutor
@@ -531,12 +546,16 @@ export class LedgerGateway {
     }
   }
 
-  public async getEntriesByStatementKey(opts: {
-    projectId: string
-    statementKey: string
-  }): Promise<Result<LedgerEntry[], UnPriceLedgerError>> {
+  public async getEntriesByStatementKey(
+    opts: {
+      projectId: string
+      statementKey: string
+    },
+    executor?: DbExecutor
+  ): Promise<Result<LedgerEntry[], UnPriceLedgerError>> {
     try {
-      const result = await this.db.execute<PgledgerEntryRow & { currency: string }>(
+      const exec = executor ?? this.db
+      const result = await exec.execute<PgledgerEntryRow & { currency: string }>(
         sql`
           SELECT e.id, e.account_id, e.transfer_id, e.amount,
                  e.account_previous_balance, e.account_current_balance,

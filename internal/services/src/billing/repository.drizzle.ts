@@ -198,16 +198,24 @@ export class DrizzleBillingRepository implements BillingRepository {
   }
 
   async createInvoice(input: CreateInvoiceInput): Promise<SubscriptionInvoice | null> {
+    // ON CONFLICT DO UPDATE with a no-op SET so RETURNING always yields the
+    // row (existing or newly inserted). The previous DO NOTHING + fallback
+    // SELECT pattern had a window where the SELECT could miss a concurrently
+    // committed row, which would silently return early from billPeriod and
+    // strand periods in `pending`. The unique key
+    // (projectId, subscriptionId, customerId, statementKey) guarantees a
+    // single canonical invoice per statement.
     const rows = await this.db
       .insert(invoices)
       .values(input)
-      .onConflictDoNothing({
+      .onConflictDoUpdate({
         target: [
           invoices.projectId,
           invoices.subscriptionId,
           invoices.customerId,
           invoices.statementKey,
         ],
+        set: { projectId: sql`${invoices.projectId}` },
       })
       .returning()
     return (rows[0] as SubscriptionInvoice) ?? null
