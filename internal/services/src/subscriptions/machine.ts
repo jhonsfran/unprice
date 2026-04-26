@@ -20,11 +20,11 @@ import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
+import { deriveActivationInputsFromPlan } from "../use-cases/billing/derive-provision-inputs"
 import {
   type ActivateSubscriptionDeps,
   activateSubscription,
 } from "../use-cases/billing/provision-period"
-import { deriveActivationInputsFromPlan } from "../use-cases/billing/derive-provision-inputs"
 import type { WalletService } from "../wallet"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {

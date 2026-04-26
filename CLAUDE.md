@@ -22,3 +22,9 @@ Business operations live in `internal/services/src/use-cases/{domain}/{operation
 - Adapters (tRPC routers, Hono routes, jobs) call use cases or simple service methods
 - Adapters NEVER access ctx.db directly — always go through a service or use case
 - For any given operation, there is ONE canonical owner (use case or service method)
+
+## TypeScript
+
+- Never use `any`. Not in production code, not in tests, not in mocks. If a real type isn't reachable, use `unknown` plus a narrowing check, or define a precise local type. `any` silently disables type checking in the surrounding scope and is rejected by `pnpm fmt`/biome.
+- Prefer `unknown` for parameters that genuinely accept arbitrary input, then narrow before use.
+- A targeted `// biome-ignore lint/...: <reason>` is acceptable when the only correct shape conflicts with a lint rule (e.g., mocking a thenable query builder). Always include the reason. Never reach for `any` to silence the linter.

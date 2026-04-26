@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto"
 import { newId } from "@unprice/db/utils"
 import type { Currency } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
@@ -24,6 +25,19 @@ import type {
   VerifiedProviderWebhook,
   VerifyWebhookOpts,
 } from "./interface"
+
+// Compares two strings in constant time. Length mismatches still run a
+// fixed-length compare to avoid leaking length via timing.
+function constantTimeStringEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder()
+  const aBuf = enc.encode(a)
+  const bBuf = enc.encode(b)
+  if (aBuf.byteLength !== bBuf.byteLength) {
+    timingSafeEqual(aBuf, aBuf)
+    return false
+  }
+  return timingSafeEqual(aBuf, bBuf)
+}
 
 export class SandboxPaymentProvider implements PaymentProviderInterface {
   public readonly provider = "sandbox"
@@ -235,8 +249,28 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
   ): Promise<Result<VerifiedProviderWebhook, FetchError | UnPricePaymentProviderError>> {
     const signature = opts.signature ?? opts.headers?.["sandbox-signature"]
     const signatureToUse = Array.isArray(signature) ? signature.at(0) : signature
+    const secret = opts.secret ?? this.webhookSecret
 
-    if (this.webhookSecret && signatureToUse && signatureToUse !== this.webhookSecret) {
+    if (!secret) {
+      this.logger.warn("sandbox webhook rejected: secret not configured", {
+        provider: this.provider,
+      })
+      return Err(
+        new UnPricePaymentProviderError({ message: "Sandbox webhook secret not configured" })
+      )
+    }
+
+    if (!signatureToUse) {
+      this.logger.warn("sandbox webhook rejected: missing signature", {
+        provider: this.provider,
+      })
+      return Err(new UnPricePaymentProviderError({ message: "Missing sandbox webhook signature" }))
+    }
+
+    if (!constantTimeStringEqual(signatureToUse, secret)) {
+      this.logger.warn("sandbox webhook rejected: invalid signature", {
+        provider: this.provider,
+      })
       return Err(new UnPricePaymentProviderError({ message: "Invalid sandbox webhook signature" }))
     }
 

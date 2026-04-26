@@ -22,8 +22,12 @@ vi.mock("@unprice/db/utils", async (importOriginal) => {
             return "decrypted-key"
           }
 
-          if (ciphertext === "encrypted-webhook") {
-            return "sandbox-secret"
+          if (ciphertext === "encrypted-webhook-a") {
+            return "secret-a"
+          }
+
+          if (ciphertext === "encrypted-webhook-b") {
+            return "secret-b"
           }
 
           return "decrypted-value"
@@ -44,45 +48,48 @@ function createMockLogger(): Logger {
   } as unknown as Logger
 }
 
-function createMockDb(): Database {
+function createMockDb(overrides?: {
+  paymentProviderConfig?: Record<string, unknown> | null
+  customerProviderIds?: Record<string, unknown> | null
+}): Database {
   return {
     query: {
-      customers: {
-        findFirst: vi.fn().mockResolvedValue({
-          id: "cus_1",
-          projectId: "proj_1",
-        }),
-      },
       customerProviderIds: {
-        findFirst: vi.fn().mockResolvedValue({
-          id: "cp_1",
-          projectId: "proj_1",
-          customerId: "cus_1",
-          provider: "sandbox",
-          providerCustomerId: "provider_customer_1",
-          metadata: {
-            setupSessionId: "sess_1",
-          },
-        }),
+        findFirst: vi.fn().mockResolvedValue(
+          overrides?.customerProviderIds ?? {
+            id: "cp_1",
+            projectId: "proj_1",
+            customerId: "cus_1",
+            provider: "sandbox",
+            providerCustomerId: "provider_customer_1",
+            metadata: {
+              setupSessionId: "sess_1",
+            },
+          }
+        ),
       },
       paymentProviderConfig: {
-        findFirst: vi.fn().mockResolvedValue({
-          id: "ppc_1",
-          projectId: "proj_1",
-          paymentProvider: "sandbox",
-          key: "encrypted-key",
-          keyIv: "iv-key",
-          webhookSecret: "encrypted-webhook",
-          webhookSecretIv: "iv-webhook",
-          active: true,
-        }),
+        findFirst: vi.fn().mockResolvedValue(
+          overrides?.paymentProviderConfig === null
+            ? null
+            : (overrides?.paymentProviderConfig ?? {
+                id: "ppc_1",
+                projectId: "proj_1",
+                paymentProvider: "sandbox",
+                key: "encrypted-key",
+                keyIv: "iv-key",
+                webhookSecret: "encrypted-webhook-a",
+                webhookSecretIv: "iv-webhook-a",
+                active: true,
+              })
+        ),
       },
     },
   } as unknown as Database
 }
 
 describe("PaymentProviderResolver", () => {
-  it("resolves provider customer id from mapping table and decrypts webhook secret", async () => {
+  it("resolves a configured sandbox provider and verifies webhooks against the operator-set secret", async () => {
     const resolver = new PaymentProviderResolver({
       db: createMockDb(),
       logger: createMockLogger(),
@@ -99,32 +106,56 @@ describe("PaymentProviderResolver", () => {
     expect(resolved.val?.getCustomerId()).toBe("provider_customer_1")
 
     const verifyOk = await resolved.val?.verifyWebhook({
-      rawBody: JSON.stringify({
-        id: "evt_1",
-        type: "sandbox.test",
-      }),
-      signature: "sandbox_webhook_secret",
+      rawBody: JSON.stringify({ id: "evt_1", type: "sandbox.test" }),
+      signature: "secret-a",
     })
 
     expect(verifyOk?.err).toBeUndefined()
 
-    const verifyErr = await resolved.val?.verifyWebhook({
-      rawBody: JSON.stringify({
-        id: "evt_1",
-        type: "sandbox.test",
-      }),
+    const verifyWrong = await resolved.val?.verifyWebhook({
+      rawBody: JSON.stringify({ id: "evt_1", type: "sandbox.test" }),
       signature: "invalid-secret",
     })
 
-    expect(verifyErr?.err).toBeDefined()
+    expect(verifyWrong?.err).toBeDefined()
+
+    const verifyMissing = await resolved.val?.verifyWebhook({
+      rawBody: JSON.stringify({ id: "evt_1", type: "sandbox.test" }),
+    })
+
+    expect(verifyMissing?.err).toBeDefined()
   })
 
-  it("resolves sandbox without a paymentProviderConfig row", async () => {
-    const db = createMockDb()
-    db.query.paymentProviderConfig.findFirst = vi.fn().mockResolvedValue(null)
-
+  it("returns PAYMENT_PROVIDER_CONFIG_NOT_FOUND when sandbox is unconfigured", async () => {
     const resolver = new PaymentProviderResolver({
-      db,
+      db: createMockDb({ paymentProviderConfig: null }),
+      logger: createMockLogger(),
+    })
+
+    const resolved = await resolver.resolve({
+      customerId: "cus_1",
+      projectId: "proj_1",
+      provider: "sandbox",
+    })
+
+    expect(resolved.err).toBeDefined()
+    expect(resolved.err?.message).toMatch(/Payment provider config not found/)
+  })
+
+  it("rejects webhook verification when sandbox config has no webhook secret", async () => {
+    const resolver = new PaymentProviderResolver({
+      db: createMockDb({
+        paymentProviderConfig: {
+          id: "ppc_1",
+          projectId: "proj_1",
+          paymentProvider: "sandbox",
+          key: "encrypted-key",
+          keyIv: "iv-key",
+          webhookSecret: null,
+          webhookSecretIv: null,
+          active: true,
+        },
+      }),
       logger: createMockLogger(),
     })
 
@@ -135,6 +166,73 @@ describe("PaymentProviderResolver", () => {
     })
 
     expect(resolved.err).toBeUndefined()
-    expect(resolved.val?.getCustomerId()).toBe("provider_customer_1")
+
+    const verify = await resolved.val?.verifyWebhook({
+      rawBody: JSON.stringify({ id: "evt_1", type: "sandbox.test" }),
+      signature: "anything",
+    })
+
+    expect(verify?.err).toBeDefined()
+    expect(verify?.err?.message).toMatch(/secret not configured/)
+  })
+
+  it("isolates webhook secrets per project", async () => {
+    const dbA = createMockDb({
+      paymentProviderConfig: {
+        id: "ppc_a",
+        projectId: "proj_a",
+        paymentProvider: "sandbox",
+        key: "encrypted-key",
+        keyIv: "iv-key",
+        webhookSecret: "encrypted-webhook-a",
+        webhookSecretIv: "iv-webhook-a",
+        active: true,
+      },
+    })
+    const dbB = createMockDb({
+      paymentProviderConfig: {
+        id: "ppc_b",
+        projectId: "proj_b",
+        paymentProvider: "sandbox",
+        key: "encrypted-key",
+        keyIv: "iv-key",
+        webhookSecret: "encrypted-webhook-b",
+        webhookSecretIv: "iv-webhook-b",
+        active: true,
+      },
+    })
+
+    const resolverA = new PaymentProviderResolver({ db: dbA, logger: createMockLogger() })
+    const resolverB = new PaymentProviderResolver({ db: dbB, logger: createMockLogger() })
+
+    const resolvedA = await resolverA.resolve({ projectId: "proj_a", provider: "sandbox" })
+    const resolvedB = await resolverB.resolve({ projectId: "proj_b", provider: "sandbox" })
+
+    // Project A's secret must not authenticate a project B webhook.
+    const crossA = await resolvedB.val?.verifyWebhook({
+      rawBody: JSON.stringify({ id: "evt_1", type: "sandbox.test" }),
+      signature: "secret-a",
+    })
+    expect(crossA?.err).toBeDefined()
+
+    // Project B's secret must not authenticate a project A webhook.
+    const crossB = await resolvedA.val?.verifyWebhook({
+      rawBody: JSON.stringify({ id: "evt_1", type: "sandbox.test" }),
+      signature: "secret-b",
+    })
+    expect(crossB?.err).toBeDefined()
+
+    // Each project's own secret authenticates its own webhook.
+    const okA = await resolvedA.val?.verifyWebhook({
+      rawBody: JSON.stringify({ id: "evt_1", type: "sandbox.test" }),
+      signature: "secret-a",
+    })
+    expect(okA?.err).toBeUndefined()
+
+    const okB = await resolvedB.val?.verifyWebhook({
+      rawBody: JSON.stringify({ id: "evt_1", type: "sandbox.test" }),
+      signature: "secret-b",
+    })
+    expect(okB?.err).toBeUndefined()
   })
 })

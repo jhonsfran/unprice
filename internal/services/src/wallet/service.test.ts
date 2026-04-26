@@ -104,8 +104,7 @@ function createDb(state: FakeState): Database {
               const grant = { ...(values as unknown as FakeGrant) }
               const dup = state.grants.find(
                 (g) =>
-                  g.customerId === grant.customerId &&
-                  g.ledgerTransferId === grant.ledgerTransferId
+                  g.customerId === grant.customerId && g.ledgerTransferId === grant.ledgerTransferId
               )
               if (dup) return { inserted: false, row: dup }
               state.grants.push(grant)
@@ -119,14 +118,28 @@ function createDb(state: FakeState): Database {
             return { inserted: true, row: values as unknown as FakeGrant }
           }
 
-          const thenable: any = {
+          // Drizzle's insert query builder is itself a PromiseLike: callers
+          // can either `await db.insert(t).values(v)` directly or chain
+          // `.onConflictDoNothing().returning()`. The mock supports both, and
+          // `record()` is invoked exactly once on whichever terminal path the
+          // caller takes (we do not eagerly resolve).
+          type FakeInsertOutcome = { inserted: boolean; row: FakeGrant | FakeReservation }
+          type FakeInsertChain = {
+            onConflictDoNothing: () => { returning: () => Promise<{ id: string }[]> }
+            then: (
+              resolve: (value: FakeInsertOutcome) => void,
+              reject: (reason: unknown) => void
+            ) => void
+          }
+          const thenable: FakeInsertChain = {
             onConflictDoNothing: () => ({
               returning: vi.fn(async () => {
                 const result = record()
                 return result.inserted ? [{ id: (result.row as FakeGrant).id }] : []
               }),
             }),
-            then: (resolve: (v: unknown) => void, reject: (e: unknown) => void) => {
+            // biome-ignore lint/suspicious/noThenProperty: drizzle query builders are PromiseLike — `await tx.insert(...).values(...)` requires a `then`, so the mock must implement the thenable protocol exactly as the real builder does.
+            then: (resolve, reject) => {
               try {
                 resolve(record())
               } catch (e) {

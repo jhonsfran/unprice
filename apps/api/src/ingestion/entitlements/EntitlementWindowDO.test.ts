@@ -1741,6 +1741,10 @@ async function loadEntitlementWindowDO() {
 
   vi.doMock("~/observability", () => ({
     createDoLogger: vi.fn(() => testState.logger),
+    runDoOperation: vi.fn(
+      async <T>(_params: unknown, fn: (logger: typeof testState.logger) => Promise<T>) =>
+        fn(testState.logger)
+    ),
   }))
 
   vi.doMock("drizzle-orm/durable-sqlite", () => ({

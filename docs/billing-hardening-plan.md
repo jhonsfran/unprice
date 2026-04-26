@@ -28,7 +28,7 @@ These resolve audit findings without code changes. Treat as load-bearing invaria
 
 ## Tickets
 
-### [ ] HARD-001 — Sandbox webhook signature must always be verified (P0, security)
+### [x] HARD-001 — Sandbox webhook signature must always be verified (P0, security)
 
 **Files:** `internal/services/src/payment-provider/sandbox.ts` (around the `verifyWebhook` impl, ~L233-258)
 
@@ -44,7 +44,7 @@ These resolve audit findings without code changes. Treat as load-bearing invaria
 - Forged sandbox webhook against a project with a secret returns 401 and no DB writes occur.
 - Existing sandbox tests still pass without exposing the secret in fixtures.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Sandbox webhook authentication is now per-project, operator-configured, and always verified. (1) Removed the shared `SANDBOX_WEBHOOK_SECRET` constant and the `resolveSandbox` special-case in `PaymentProviderResolver`; sandbox now flows through the same `paymentProviderConfig` lookup as Stripe, so the operator-set webhook secret from the existing `saveConfig` UI is what authenticates webhooks. Cross-tenant forgery is closed because each project resolves to its own DB-encrypted secret. (2) `SandboxPaymentProvider.verifyWebhook` now rejects when the secret is unset, the signature is missing, or the signature mismatches; comparison uses `node:crypto.timingSafeEqual`. (3) Reject paths log a warn-level audit line. (4) New tests cover: missing-secret-not-configured, missing-signature, wrong-signature, length-mismatch, header-vs-arg signature, and per-project isolation (project A's secret cannot authenticate a project B webhook and vice versa). The schema column `webhookSecret` stays nullable (existing Stripe behavior); enforcement happens at verify time, which is when the security boundary actually matters.
 
 ---
 
