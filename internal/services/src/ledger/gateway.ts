@@ -46,8 +46,8 @@ export interface LedgerTransferRequest {
   amount: Dinero<number>
   source: LedgerSource
   /**
-   * Stored on the idempotency row (indexed) so `getEntriesByStatementKey`
-   * can JOIN instead of scanning pgledger metadata JSONB.
+   * Stored on the idempotency row (indexed) so `getInvoiceLines` can JOIN
+   * instead of scanning pgledger metadata JSONB.
    */
   statementKey?: string | null
   metadata?: Record<string, unknown>
@@ -358,9 +358,8 @@ export class LedgerGateway {
    *
    * Statement key is recorded alongside but is NOT part of the dedup key —
    * it indexes which statement a transfer rolls up to (used by
-   * `getEntriesByStatementKey` / `getInvoiceLines`). Two transfers with
-   * the same `(source.type, source.id)` but different statement keys are
-   * a programming error.
+   * `getInvoiceLines`). Two transfers with the same `(source.type, source.id)`
+   * but different statement keys are a programming error.
    */
   public async createTransfer(
     request: LedgerTransferRequest,
@@ -546,39 +545,6 @@ export class LedgerGateway {
     }
   }
 
-  public async getEntriesByStatementKey(
-    opts: {
-      projectId: string
-      statementKey: string
-    },
-    executor?: DbExecutor
-  ): Promise<Result<LedgerEntry[], UnPriceLedgerError>> {
-    try {
-      const exec = executor ?? this.db
-      const result = await exec.execute<PgledgerEntryRow & { currency: string }>(
-        sql`
-          SELECT e.id, e.account_id, e.transfer_id, e.amount,
-                 e.account_previous_balance, e.account_current_balance,
-                 e.account_version, e.created_at, e.event_at, e.metadata,
-                 a.currency
-          FROM unprice_ledger_idempotency i
-          INNER JOIN pgledger_entries_view e  ON e.transfer_id = i.transfer_id
-          INNER JOIN pgledger_accounts_view a ON a.id = e.account_id
-          WHERE i.project_id    = ${opts.projectId}
-            AND i.statement_key = ${opts.statementKey}
-          ORDER BY e.created_at ASC, e.id ASC
-        `
-      )
-      return Ok(result.rows.map((row) => this.toEntry(row, asCurrency(row.currency))))
-    } catch (error) {
-      this.logger.error(error, {
-        context: "ledger.get_entries_by_statement_key_failed",
-        ...opts,
-      })
-      return Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" }))
-    }
-  }
-
   /**
    * Invoice line projection — the ledger is the single source of truth.
    *
@@ -594,12 +560,16 @@ export class LedgerGateway {
    *   - `metadata.kind` is set (transfers without `kind` are internal, not
    *     invoice lines — e.g. reservation/refill movements)
    */
-  public async getInvoiceLines(opts: {
-    projectId: string
-    statementKey: string
-  }): Promise<Result<InvoiceLine[], UnPriceLedgerError>> {
+  public async getInvoiceLines(
+    opts: {
+      projectId: string
+      statementKey: string
+    },
+    executor?: DbExecutor
+  ): Promise<Result<InvoiceLine[], UnPriceLedgerError>> {
     try {
-      const result = await this.db.execute<{
+      const exec = executor ?? this.db
+      const result = await exec.execute<{
         id: string
         amount: string
         created_at: Date

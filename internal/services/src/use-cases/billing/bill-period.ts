@@ -2,13 +2,13 @@ import { type Database, sql } from "@unprice/db"
 import { type Dinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
-import { formatAmountForProvider } from "@unprice/money"
+import { add, formatAmountForProvider } from "@unprice/money"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { isNegative } from "dinero.js"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { billingStrategyForInterval } from "../../billing/strategy"
-import { type LedgerEntry, type LedgerGateway, customerAccountKeys } from "../../ledger"
+import { type InvoiceLine, type LedgerGateway, customerAccountKeys } from "../../ledger"
 import type { RatingService } from "../../rating/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
 import type { SubscriptionContext } from "../../subscriptions/types"
@@ -135,8 +135,7 @@ export async function billPeriod({
 
         const totalAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
           if (sum === null) return charge.price.totalPrice.dinero
-          // biome-ignore lint/suspicious/noExplicitAny: dinero add typing
-          return (require("dinero.js") as any).add(sum, charge.price.totalPrice.dinero)
+          return add(sum, charge.price.totalPrice.dinero)
         }, null)
 
         const unitAmount = firstCharge ? firstCharge.price.unitPrice.dinero : null
@@ -224,10 +223,16 @@ export async function billPeriod({
         }
       }
 
-      // 2) Build invoice lines from entries that share this statement_key.
-      //    The new ledger has no settlement table — invoice → ledger linkage
-      //    lives in the entry's metadata (`statement_key`, `billing_period_id`).
-      const statementEntriesResult = await ledgerService.getEntriesByStatementKey(
+      // 2) Project invoice lines from the ledger. `getInvoiceLines` returns
+      //    one row per credit-leg transfer landing on `customer.*.consumed`
+      //    under this `(projectId, statement_key)` — i.e. exactly what an
+      //    invoice should show. Same primitive used by the read-side API
+      //    (`getInvoiceV1`, `getInvoiceById`) and by `_upsertPaymentProviderInvoice`
+      //    when it `addInvoiceItem`s to Stripe, so the customer-facing invoice
+      //    matches our local invoice byte-for-byte. The `billing_period_id`
+      //    filter scopes us to bill-period-emitted lines (vs wallet usage
+      //    lines that may share the statement key).
+      const linesResult = await ledgerService.getInvoiceLines(
         {
           projectId: periodItemGroup.projectId,
           statementKey: periodItemGroup.statementKey,
@@ -235,21 +240,21 @@ export async function billPeriod({
         tx
       )
 
-      if (statementEntriesResult.err) {
-        logger.error(statementEntriesResult.err, {
+      if (linesResult.err) {
+        logger.error(linesResult.err, {
           phaseId: phase.id,
           statementKey: periodItemGroup.statementKey,
-          context: "Error while loading statement-key ledger entries",
+          context: "Error while loading statement-key invoice lines",
         })
-        throw statementEntriesResult.err
+        throw linesResult.err
       }
 
-      const ledgerEntriesToInvoice = statementEntriesResult.val.filter(
-        (entry: LedgerEntry) =>
-          (entry.metadata as Record<string, unknown> | null)?.billing_period_id != null
+      const linesToInvoice = linesResult.val.filter(
+        (line: InvoiceLine) =>
+          (line.metadata as Record<string, unknown> | null)?.billing_period_id != null
       )
 
-      if (ledgerEntriesToInvoice.length === 0) {
+      if (linesToInvoice.length === 0) {
         await txBillingRepo.voidPendingPeriods({
           projectId: periodItemGroup.projectId,
           subscriptionId: periodItemGroup.subscriptionId,
@@ -261,14 +266,14 @@ export async function billPeriod({
       }
 
       const statementStartAt = Math.min(
-        ...ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
-          const meta = entry.metadata as Record<string, unknown> | null
+        ...linesToInvoice.map((line: InvoiceLine) => {
+          const meta = line.metadata as Record<string, unknown> | null
           return (meta?.cycle_start_at as number | undefined) ?? periodItemGroup.invoiceAt
         })
       )
       const statementEndAt = Math.max(
-        ...ledgerEntriesToInvoice.map((entry: LedgerEntry) => {
-          const meta = entry.metadata as Record<string, unknown> | null
+        ...linesToInvoice.map((line: InvoiceLine) => {
+          const meta = line.metadata as Record<string, unknown> | null
           return (meta?.cycle_end_at as number | undefined) ?? periodItemGroup.invoiceAt
         })
       )
@@ -340,14 +345,19 @@ export async function billPeriod({
       }
 
       // Phase 7: no `invoice_items` table. The invoice total is the sum
-      // of ledger entries credited to `customer.*.consumed` under this
-      // statement_key — same entries the API projects on read
-      // (slice 7.8). We sum here to stamp `invoices.totalAmount` for
-      // fast header reads; lines are re-derived from the ledger.
-      const totalAmountForInvoice = ledgerEntriesToInvoice.reduce(
-        (sum: number, entry: LedgerEntry) => sum + formatAmountForProvider(entry.amount).amount,
-        0
+      // of credit-leg ledger transfers landing on `customer.*.consumed`
+      // under this statement_key — same projection the API uses on read
+      // (slice 7.8). We sum the line Dineros (which are at `LEDGER_SCALE = 8`)
+      // and quantize once at the boundary via `formatAmountForProvider` so
+      // `invoices.totalAmount` is in currency minor units (cents) — matching
+      // what the payment provider receives in `addInvoiceItem` /
+      // `createInvoice`. Summing `.toJSON().amount` per-line would yield
+      // scale-8 minor units, not cents.
+      const totalDinero = linesToInvoice.reduce<Dinero<number> | null>(
+        (sum, line) => (sum === null ? line.amount : add(sum, line.amount)),
+        null
       )
+      const totalAmountForInvoice = totalDinero ? formatAmountForProvider(totalDinero).amount : 0
 
       await txBillingRepo.updateInvoice({
         invoiceId: invoice.id,

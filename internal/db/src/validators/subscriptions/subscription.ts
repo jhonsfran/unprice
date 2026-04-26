@@ -50,6 +50,23 @@ export const invoiceMetadataSchema = z.object({
   note: z.string().optional().describe("Note about the invoice"),
   reason: reasonSchema.optional().describe("Reason for the invoice"),
   credits: z.string().optional().describe("Credits applied to the invoice"),
+  finalizeAttempts: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Number of times the finalize cron has attempted to push this invoice to the provider"
+    ),
+  lastFinalizeError: z
+    .string()
+    .optional()
+    .describe("Last error message from the finalize cron — operator-visible only"),
+  lastFinalizeAttemptAt: z
+    .number()
+    .int()
+    .optional()
+    .describe("Epoch ms timestamp of the last finalize attempt"),
 })
 
 export const subscriptionMetadataSchema = z.object({

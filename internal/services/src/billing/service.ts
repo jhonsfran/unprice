@@ -16,6 +16,7 @@ import {
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { formatAmountForProvider } from "@unprice/money"
 import { addDays } from "date-fns"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
@@ -584,8 +585,8 @@ export class BillingService {
   }): Promise<
     Result<
       {
-        providerInvoiceId?: string
-        providerInvoiceUrl?: string
+        providerInvoiceId: string | null
+        providerInvoiceUrl: string | null
         invoiceId: string
         status: InvoiceStatus
       },
@@ -599,37 +600,80 @@ export class BillingService {
         now,
         lock: false, // no need to lock it here
         run: async (machine) => {
-          const fin = await this._finalizeInvoice({
+          const { err: openInvoiceDataErr, val: openInvoiceData } = await this.getOpenInvoiceData({
             subscriptionId,
             projectId,
             now,
             invoiceId,
           })
 
-          if (fin.err) {
-            throw fin.err
+          if (openInvoiceDataErr) {
+            throw openInvoiceDataErr
           }
 
-          const providerInvoiceData = await this._upsertPaymentProviderInvoice({
-            invoiceId: fin.val.id,
-            projectId,
+          // Already past draft (and provider id stamped if non-zero) → no-op.
+          // The dedup check on `status !== "draft"` is the source of truth;
+          // a draft row is the *only* state where finalize work is allowed.
+          if (openInvoiceData.status !== "draft") {
+            return {
+              providerInvoiceId: openInvoiceData.invoicePaymentProviderId,
+              providerInvoiceUrl: openInvoiceData.invoicePaymentProviderUrl,
+              invoiceId: openInvoiceData.id,
+              status: openInvoiceData.status,
+            }
+          }
+
+          // For non-zero invoices we push to the payment provider FIRST and
+          // then flip local status, so a partial failure (provider error) leaves
+          // the row in `draft` and the existing `finilizingSchedule` cron picks
+          // it up on the next tick. If the provider id is already stamped (a
+          // previous attempt succeeded at create+finalize but crashed before
+          // the local status flip), we skip the provider work and proceed
+          // straight to the status flip — `paymentProviderService.createInvoice`
+          // is not idempotent on Stripe, so we must not call it twice.
+          let providerInvoiceId = openInvoiceData.invoicePaymentProviderId
+          let providerInvoiceUrl = openInvoiceData.invoicePaymentProviderUrl
+          const skipProvider = openInvoiceData.totalAmount === 0
+
+          if (!skipProvider && !providerInvoiceId) {
+            const upserted = await this._upsertPaymentProviderInvoice({
+              invoice: openInvoiceData,
+              now,
+            })
+
+            if (upserted.err) {
+              await this._bumpFinalizeAttempt({
+                invoice: openInvoiceData,
+                lastError: upserted.err.message,
+              })
+              await machine.reportInvoiceFailure({
+                invoiceId: openInvoiceData.id,
+                error: upserted.err.message,
+              })
+              throw upserted.err
+            }
+
+            providerInvoiceId = upserted.val.providerInvoiceId ?? null
+            providerInvoiceUrl = upserted.val.providerInvoiceUrl ?? null
+          }
+
+          const fin = await this._finalizeInvoice({
+            invoice: openInvoiceData,
+            providerInvoiceId,
+            providerInvoiceUrl,
+            now,
           })
 
-          if (providerInvoiceData.err) {
-            // report failed invoice
-            await machine.reportInvoiceFailure({
-              invoiceId: fin.val.id,
-              error: providerInvoiceData.err.message,
-            })
-            throw providerInvoiceData.err
+          if (fin.err) {
+            throw fin.err
           }
 
           // report successful invoice
           await machine.reportInvoiceSuccess({ invoiceId: fin.val.id })
 
           return {
-            providerInvoiceId: providerInvoiceData.val.providerInvoiceId,
-            providerInvoiceUrl: providerInvoiceData.val.providerInvoiceUrl,
+            providerInvoiceId,
+            providerInvoiceUrl,
             invoiceId: fin.val.id,
             status: fin.val.status,
           }
@@ -694,50 +738,37 @@ export class BillingService {
    * `LedgerGateway.getInvoiceLines`), not assembled from an `invoice_items`
    * table. Finalization here is a header-only transition: move the invoice
    * from `draft` to `unpaid` (or `void` when `totalAmount === 0`) and
-   * stamp `issueDate`. Totals are materialized at `invoices.totalAmount`
-   * when the ledger entries are written (slice 7.12 activation hook).
+   * stamp `issueDate`. Provider-side invoice creation runs separately in
+   * `_upsertPaymentProviderInvoice` (called *before* this method by the
+   * public `finalizeInvoice` wrapper) so a provider failure leaves the row
+   * in `draft` for the cron to retry.
    */
   private async _finalizeInvoice({
-    subscriptionId,
-    projectId,
+    invoice,
+    providerInvoiceId,
+    providerInvoiceUrl,
     now,
-    invoiceId,
   }: {
-    subscriptionId: string
-    projectId: string
+    invoice: SubscriptionInvoice
+    providerInvoiceId: string | null
+    providerInvoiceUrl: string | null
     now: number
-    invoiceId: string
   }): Promise<Result<SubscriptionInvoice, UnPriceBillingError>> {
-    const { err: openInvoiceDataErr, val: openInvoiceData } = await this.getOpenInvoiceData({
-      subscriptionId,
-      projectId,
-      now,
-      invoiceId,
-    })
-
-    if (openInvoiceDataErr) {
-      return Err(openInvoiceDataErr)
-    }
-
-    // Already processed.
-    if (openInvoiceData.invoicePaymentProviderId || openInvoiceData.status !== "draft") {
-      return Ok(openInvoiceData)
-    }
-
     const result = await this.db.transaction(async (tx) => {
       try {
         const txBillingRepo = new DrizzleBillingRepository(tx)
-        const statusInvoice =
-          openInvoiceData.totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
+        const statusInvoice = invoice.totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
 
         const updatedInvoice = await txBillingRepo.updateInvoice({
-          invoiceId: openInvoiceData.id,
-          projectId,
+          invoiceId: invoice.id,
+          projectId: invoice.projectId,
           data: {
             status: statusInvoice,
             issueDate: now,
+            ...(providerInvoiceId ? { invoicePaymentProviderId: providerInvoiceId } : {}),
+            ...(providerInvoiceUrl ? { invoicePaymentProviderUrl: providerInvoiceUrl } : {}),
             metadata: {
-              ...(openInvoiceData.metadata ?? {}),
+              ...(invoice.metadata ?? {}),
               note: "Finalized by scheduler",
             },
           },
@@ -751,8 +782,8 @@ export class BillingService {
       } catch (error) {
         this.logger.error(error, {
           context: "Error finalizing invoice",
-          invoiceId: openInvoiceData.id,
-          projectId: openInvoiceData.projectId,
+          invoiceId: invoice.id,
+          projectId: invoice.projectId,
         })
         tx.rollback()
         throw error
@@ -762,16 +793,188 @@ export class BillingService {
     return Ok(result)
   }
 
-  private async _upsertPaymentProviderInvoice(_opts: {
-    invoiceId: string
-    projectId: string
+  /**
+   * Provider-side invoice creation: resolve the configured payment provider,
+   * `createInvoice` → `addInvoiceItem` per ledger line → `finalizeInvoice`,
+   * and return the provider's invoice id/url so the local row can stamp them.
+   *
+   * Idempotency contract:
+   *   - This method is only called when the local row is in `draft` AND
+   *     `invoicePaymentProviderId` is empty. The caller filters those.
+   *   - On error, the caller bumps `metadata.finalizeAttempts` and leaves
+   *     the row in `draft`. The next `finilizingSchedule` cron tick retries.
+   *   - We persist the provider id immediately after `createInvoice`
+   *     succeeds, *before* `addInvoiceItem`/`finalizeInvoice`, so that a
+   *     mid-flight crash doesn't orphan a Stripe invoice. A retry sees the
+   *     id stamped and skips this method entirely (the public wrapper just
+   *     does the local status flip — the partial Stripe invoice must be
+   *     reconciled out-of-band, e.g. via the future HARD-013 reconciler).
+   */
+  private async _upsertPaymentProviderInvoice({
+    invoice,
+    now,
+  }: {
+    invoice: SubscriptionInvoice & { customer: Customer }
+    now: number
   }): Promise<
     Result<
-      { providerInvoiceId?: string; providerInvoiceUrl?: string },
+      { providerInvoiceId: string; providerInvoiceUrl: string },
       UnPriceBillingError | FetchError
     >
   > {
-    return Ok({ providerInvoiceId: "", providerInvoiceUrl: "" })
+    const billingRepo = new DrizzleBillingRepository(this.db)
+
+    const { val: paymentProviderService, err: paymentProviderErr } =
+      await this.customerService.getPaymentProvider({
+        customerId: invoice.customerId,
+        projectId: invoice.projectId,
+        provider: invoice.paymentProvider,
+      })
+
+    if (paymentProviderErr) {
+      return Err(new UnPriceBillingError({ message: paymentProviderErr.message }))
+    }
+
+    // Project the ledger lines that will become provider invoice items. Same
+    // primitive the read-side API uses (`getInvoiceV1`, `getInvoiceById`), so
+    // what we send to Stripe matches what we display to the customer.
+    const linesResult = await this.ledgerService.getInvoiceLines({
+      projectId: invoice.projectId,
+      statementKey: invoice.statementKey,
+    })
+
+    if (linesResult.err) {
+      return Err(new UnPriceBillingError({ message: linesResult.err.message }))
+    }
+
+    const lines = linesResult.val.filter(
+      (line) => (line.metadata as Record<string, unknown> | null)?.billing_period_id != null
+    )
+
+    if (lines.length === 0) {
+      // Nothing to push. A non-zero `totalAmount` with no lines is a data
+      // integrity error — surface it loudly rather than silently creating an
+      // empty Stripe invoice.
+      return Err(
+        new UnPriceBillingError({
+          message: `No ledger lines for invoice ${invoice.id} (statement ${invoice.statementKey})`,
+        })
+      )
+    }
+
+    // 1) Create the provider invoice header.
+    const created = await paymentProviderService.createInvoice({
+      currency: invoice.currency,
+      customerName: invoice.customer.name ?? invoice.customer.email,
+      email: invoice.customer.email,
+      collectionMethod: invoice.collectionMethod,
+      description: `Statement ${invoice.statementDateString}`,
+      dueDate: invoice.dueAt,
+    })
+
+    if (created.err) {
+      return Err(created.err)
+    }
+
+    const providerInvoiceId = created.val.invoiceId
+    const providerInvoiceUrl = created.val.invoiceUrl
+
+    // Persist the provider id immediately so a crash in the next steps
+    // doesn't orphan the Stripe invoice from this row.
+    await billingRepo.updateInvoice({
+      invoiceId: invoice.id,
+      projectId: invoice.projectId,
+      data: {
+        invoicePaymentProviderId: providerInvoiceId,
+        invoicePaymentProviderUrl: providerInvoiceUrl,
+        updatedAtM: now,
+      },
+    })
+
+    // 2) Push one item per ledger line. Ledger amounts are at `LEDGER_SCALE = 8`;
+    //    `formatAmountForProvider` quantizes to currency minor units (cents)
+    //    — the only shape Stripe accepts.
+    for (const line of lines) {
+      const meta = (line.metadata as Record<string, unknown> | null) ?? {}
+      const totalMinor = formatAmountForProvider(line.amount).amount
+      const cycleStart = meta.cycle_start_at as number | undefined
+      const cycleEnd = meta.cycle_end_at as number | undefined
+      const prorationFactor = meta.proration_factor as number | undefined
+
+      const itemResult = await paymentProviderService.addInvoiceItem({
+        invoiceId: providerInvoiceId,
+        name: line.description ?? "Subscription charge",
+        description: line.description ?? undefined,
+        isProrated: typeof prorationFactor === "number" && prorationFactor !== 1,
+        totalAmount: totalMinor,
+        quantity: line.quantity ?? 1,
+        currency: line.currency,
+        period:
+          typeof cycleStart === "number" && typeof cycleEnd === "number"
+            ? { start: cycleStart, end: cycleEnd }
+            : undefined,
+        metadata: {
+          billing_period_id: String(meta.billing_period_id ?? ""),
+          subscription_id: String(meta.subscription_id ?? ""),
+          subscription_item_id: String(meta.subscription_item_id ?? ""),
+          kind: line.kind,
+        },
+      })
+
+      if (itemResult.err) {
+        return Err(itemResult.err)
+      }
+    }
+
+    // 3) Finalize so the invoice is visible/collectible. Sandbox treats this
+    //    as a no-op; Stripe transitions `draft` → `open`.
+    const finalizeResult = await paymentProviderService.finalizeInvoice({
+      invoiceId: providerInvoiceId,
+    })
+
+    if (finalizeResult.err) {
+      return Err(finalizeResult.err)
+    }
+
+    return Ok({ providerInvoiceId, providerInvoiceUrl })
+  }
+
+  /**
+   * Records a failed finalize attempt in `invoice.metadata` so operators can
+   * spot stuck invoices via the `finilizingSchedule` warn log. Best-effort:
+   * a failure here is logged but doesn't fail the parent (the parent already
+   * threw with the real error).
+   */
+  private async _bumpFinalizeAttempt({
+    invoice,
+    lastError,
+  }: {
+    invoice: SubscriptionInvoice
+    lastError: string
+  }): Promise<void> {
+    try {
+      const billingRepo = new DrizzleBillingRepository(this.db)
+      const meta = (invoice.metadata ?? {}) as Record<string, unknown>
+      const prev = typeof meta.finalizeAttempts === "number" ? meta.finalizeAttempts : 0
+      await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
+        data: {
+          metadata: {
+            ...meta,
+            finalizeAttempts: prev + 1,
+            lastFinalizeError: lastError,
+            lastFinalizeAttemptAt: Date.now(),
+          },
+        },
+      })
+    } catch (error) {
+      this.logger.error(error as Error, {
+        context: "Failed to record finalize attempt",
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
+      })
+    }
   }
 
   /**

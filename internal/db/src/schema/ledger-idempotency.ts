@@ -17,9 +17,9 @@ import { cuid } from "../utils/fields"
  * one logical transfer per source — concurrent or replayed writes converge.
  *
  * `statement_key` is stored here (not in pgledger JSONB metadata) so
- * `getEntriesByStatementKey` can join through an indexed column instead of
- * scanning metadata. Same rationale applies to `(source_type, source_id)` —
- * the table doubles as the index for source-keyed entry lookups.
+ * `getInvoiceLines` can join through an indexed column instead of scanning
+ * metadata. Same rationale applies to `(source_type, source_id)` — the
+ * table doubles as the index for source-keyed entry lookups.
  */
 export const ledgerIdempotency = pgTableProject(
   "ledger_idempotency",

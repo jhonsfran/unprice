@@ -14,7 +14,7 @@ import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { CustomerService } from "../customers/service"
-import type { LedgerEntry, LedgerGateway } from "../ledger"
+import type { InvoiceLine, LedgerEntry, LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
 import { db } from "../utils/db"
 import { SubscriptionMachine } from "./machine"
@@ -326,13 +326,27 @@ describe("SubscriptionMachine - comprehensive", () => {
             return Ok(entries)
           }
         ),
-      getEntriesByStatementKey: vi
+      getInvoiceLines: vi
         .fn()
         .mockImplementation(async (input: { projectId: string; statementKey: string }) => {
-          const entries = [...postedLedgerEntries.values()]
+          const lines = [...postedLedgerEntries.values()]
             .filter((e) => e.projectId === input.projectId && e.statementKey === input.statementKey)
-            .map(toLedgerEntry)
-          return Ok(entries)
+            .map(
+              (e): InvoiceLine => ({
+                entryId: e.id,
+                statementKey: input.statementKey,
+                kind: String(
+                  (e.metadata as Record<string, unknown> | null)?.kind ?? "subscription"
+                ),
+                description: null,
+                quantity: null,
+                amount: e.amount,
+                currency: e.currency as InvoiceLine["currency"],
+                createdAt: new Date(),
+                metadata: e.metadata,
+              })
+            )
+          return Ok(lines)
         }),
       getCustomerBalance: vi
         .fn()
