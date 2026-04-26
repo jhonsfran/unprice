@@ -48,7 +48,7 @@ These resolve audit findings without code changes. Treat as load-bearing invaria
 
 ---
 
-### [ ] HARD-002 — Concurrent webhook re-delivery race in `applyWebhookEvent` (P0, money correctness)
+### [x] HARD-002 — Concurrent webhook re-delivery race in `applyWebhookEvent` (P0, money correctness)
 
 **Files:** `internal/services/src/use-cases/payment-provider/process-webhook-event.ts` (the dedup gate, ~L450-514, and `applyWebhookEvent` callsite ~L509-514)
 
@@ -62,7 +62,7 @@ These resolve audit findings without code changes. Treat as load-bearing invaria
 
 **Acceptance:** Two concurrent identical webhooks → one applies, one returns `duplicate`, no double state transition.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Wrapped the entire dedup gate + `applyWebhookEvent` body in a single `deps.db.transaction(...)` and serialized concurrent re-deliveries with `pg_try_advisory_xact_lock(hashtext('webhook:projectId:provider:providerEventId'))` at the top of the tx (`process-webhook-event.ts`). Two simultaneous deliveries now race only at the lock: one acquires and runs end-to-end, the other returns `duplicate` immediately with **zero** DB writes (no INSERT into `webhook_events`, no invoice update, no `settleReceivable`, no `reconcilePaymentOutcome`). Re-deliveries arriving after the original commits hit the same lock, then see `status='processed'` inside the tx and bail. Replaced unguarded `updateInvoice` calls with a new repo method `updateInvoiceIfStatus(allowedFromStatuses)` that filters by current status: `payment.succeeded` only transitions from `{draft, waiting, unpaid, failed}`, `payment.dispute_reversed` from `{unpaid, failed}`, `payment.failed` from `{draft, waiting, unpaid, failed}`, `payment.reversed` from `{paid}`. When the conditional update returns 0 rows (invoice already in target state or in a disallowed state), the handler logs a `warn` and skips downstream side effects; both `settleReceivable` and `reconcilePaymentOutcome` are already idempotent, but skipping is cleaner and gives operators a clear "late delivery" signal. The retry-after-failure path (status='failed' on the existing row) is preserved through the same lock — only one retry can claim it at a time. Tests: existing 7 scenarios kept, plus 2 new — concurrent-lock-rejection asserts no writes occur for the loser; state-machine-guard asserts that a `payment.succeeded` for an already-`paid` invoice neither calls `settleReceivable` nor `reconcilePaymentOutcome`. All 255 services tests pass.
 
 ---
 
@@ -605,3 +605,39 @@ Before any AI agent picks these up, surface to the team:
 - If the plan in a ticket is wrong (you found a better approach during implementation), leave the box unchecked, append `Plan revision needed:` with your reasoning, and stop. A human will review.
 - Don't add new sections to this doc. New issues go in new tickets at the bottom.
 - After finsihing each point wait for a human to review and commit.
+- **Do not pick up `BACKLOG-*` tickets** as part of this plan. They are scheduled to be revisited only after every `HARD-*` ticket is closed.
+
+---
+
+## Backlog (NOT part of this plan — pick up after every HARD-* is closed)
+
+These tickets capture follow-up work surfaced during plan review. They are intentionally **deferred** until the active plan is fully resolved. AI agents working through `HARD-*` tickets must skip these — they are listed here only to avoid losing the context that produced them.
+
+### [ ] BACKLOG-001 — Ack-then-process webhook redesign (P3, scalability/reliability)
+
+**Status:** Backlog. Do not implement until all `HARD-*` tickets are closed. Captured 2026-04-26 during HARD-002 review.
+
+**Context for future pickup:** Today the entire webhook pipeline (verify → advisory lock → INSERT webhook_events → invoice update → wallet settle → subscription state machine → mark processed → COMMIT) runs **synchronously inside the provider's HTTP request**. With HARD-002 in place this is correct under concurrency, and Neon's connection pooler mitigates the per-request connection cost, so this is not a current operational pain point. The reasons it is worth revisiting later:
+
+1. **Provider HTTP timeout is the processing-time ceiling.** Stripe's webhook timeout is ~30s. Healthy paths today are well under that, but the current design has no headroom — a slow ledger gateway, a cold subscription machine, or a momentary DB stall can push a webhook past the limit. When that happens the provider considers the delivery failed and retries even though our processing committed; the duplicate is caught by HARD-002's idempotency layers but is wasted work.
+2. **The current retry story relies entirely on the provider re-delivering.** If processing throws, `webhook_events.status='failed'` and we return 500. The next attempt only happens if/when Stripe re-delivers (up to 3 days). After that the event is dead. HARD-006 plans an internal sweeper that partially closes this gap, and HARD-013 plans a pull-based reconciler — together they cover the *missed/lost* case. But neither addresses the *slow-but-eventually-succeeds* case where the provider gives up before our handler returns.
+3. **Connection-pool sensitivity at scale.** Holding a tx + advisory lock for the full pipeline ties up a Postgres connection per in-flight webhook. Neon's pooler covers us today; if webhook volume grows by 10×–100× this becomes a saturation risk independent of HARD-012's Hyperdrive plan.
+
+**Strategy when picked up:**
+
+The standard pattern from production billing systems (Stripe Sigma, Lago, Adyen): **persist the raw event synchronously, ack 200 OK, process asynchronously**.
+
+1. **Sync portion (target <100ms):** verify signature, INSERT into `webhook_events` with `status='pending'`, return 200 OK to the provider. No invoice update, no ledger work, no subscription transitions in the request handler.
+2. **Async worker (queue-driven):** a job (Cloudflare Queue, Trigger.dev — already in use elsewhere in this repo) drains `webhook_events WHERE status='pending'` and runs the current `applyWebhookEvent` body. The advisory lock + state-machine guards from HARD-002 stay as-is — they just execute in the worker rather than in the HTTP handler.
+3. **Worker retry policy:** the worker owns the retry policy (exponential backoff, max attempts, eventual escalation). Decouples our processing time from the provider's timeout entirely. This subsumes HARD-006's sweeper for `status='failed'` because the worker IS the retry mechanism.
+4. **Reconciler stays.** HARD-013's pull-based reconciler is still required as a backstop for events the provider never delivered (or delivered before signature config rotated). It is independent of this redesign.
+
+**Cross-references at pickup time:**
+- HARD-006 (settlement retry) becomes redundant — fold into the worker retry policy. Re-evaluate whether HARD-006's resolution is still needed once this lands.
+- HARD-013 (reconciler) is complementary — both should ship.
+- HARD-014 (audit DO commit synchronicity) interacts: the worker-side path needs to preserve audit-DO commit ordering. Re-read both tickets together.
+- HARD-012 (Hyperdrive) is reduced in urgency once the sync handler stops holding long DB transactions, but is not eliminated.
+
+**Trigger to pull this off the backlog:** any of (a) repeated reports of provider-retried webhooks where our log shows the original succeeded, (b) p99 webhook handler latency above ~3s, (c) post-mortem with "stuck in `failed` and provider stopped retrying" as a contributing factor.
+
+**Resolution:** _(fill in if/when picked up)_

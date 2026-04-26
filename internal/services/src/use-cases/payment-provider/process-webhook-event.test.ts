@@ -25,67 +25,81 @@ function createLogger(): Logger {
   } as unknown as Logger
 }
 
-function createDbMocks() {
-  const updateReturning = vi.fn().mockResolvedValue([{ id: "inv_1", status: "paid" }])
-  const updateWhere = vi.fn().mockReturnValue({
-    returning: updateReturning,
-  })
-  const updateSet = vi.fn().mockReturnValue({
-    where: updateWhere,
-  })
-  const update = vi.fn().mockReturnValue({
-    set: updateSet,
-  })
+type LockOutcome = { acquired: boolean }
 
-  const insertOnConflict = vi.fn().mockResolvedValue(undefined)
-  const insertValues = vi.fn().mockReturnValue({
-    onConflictDoNothing: insertOnConflict,
-  })
-  const insert = vi.fn().mockReturnValue({
-    values: insertValues,
-  })
+function createDbMocks(opts?: {
+  lockAcquired?: boolean
+  webhookEventState?: { id: string; status: string; attempts: number } | null
+  invoice?: Record<string, unknown> | null
+  updateInvoiceReturns?: Array<Record<string, unknown>>
+}) {
+  const lockAcquired = opts?.lockAcquired ?? true
+  const webhookEventState = opts?.webhookEventState
+  const invoice = opts?.invoice ?? null
+  const updateInvoiceReturns = opts?.updateInvoiceReturns ?? [{ id: "inv_1", status: "paid" }]
 
+  // db-level update (used by DrizzleBillingRepository.updateInvoiceIfStatus)
+  const updateReturning = vi.fn().mockResolvedValue(updateInvoiceReturns)
+  const updateWhere = vi.fn().mockReturnValue({ returning: updateReturning })
+  const updateSet = vi.fn().mockReturnValue({ where: updateWhere })
+  const update = vi.fn().mockReturnValue({ set: updateSet })
+
+  // tx-level: insert webhook_events
+  const txInsertOnConflict = vi.fn().mockResolvedValue(undefined)
+  const txInsertValues = vi.fn().mockReturnValue({ onConflictDoNothing: txInsertOnConflict })
+  const txInsert = vi.fn().mockReturnValue({ values: txInsertValues })
+
+  // tx-level: update webhook_events status
   const txUpdateWhere = vi.fn().mockResolvedValue(undefined)
-  const txUpdateSet = vi.fn().mockReturnValue({
-    where: txUpdateWhere,
-  })
-  const txUpdate = vi.fn().mockReturnValue({
-    set: txUpdateSet,
+  const txUpdateSet = vi.fn().mockReturnValue({ where: txUpdateWhere })
+  const txUpdate = vi.fn().mockReturnValue({ set: txUpdateSet })
+
+  // tx-level: try-advisory-xact-lock
+  const txExecute = vi.fn().mockImplementation(async () => ({
+    rows: [{ acquired: lockAcquired } satisfies LockOutcome],
+  }))
+
+  // tx-level: webhook_events lookup
+  const txWebhookFindFirst = vi.fn().mockImplementation(async () => {
+    if (typeof webhookEventState === "undefined") {
+      // Default: return the row we just inserted (matches newWebhookEventId).
+      return {
+        id: "webhook_event_new",
+        status: "processing",
+        attempts: 1,
+      }
+    }
+    return webhookEventState
   })
 
   const txQuery = {
-    ledgerEntries: {
-      findMany: vi.fn().mockResolvedValue([]),
-    },
-    ledgers: {
-      findFirst: vi.fn().mockResolvedValue(null),
+    webhookEvents: {
+      findFirst: txWebhookFindFirst,
     },
   }
+
+  // db-level: invoices.findFirst (used by repo.findInvoiceByProviderId)
+  const invoicesFindFirst = vi.fn().mockResolvedValue(invoice)
 
   const query = {
     webhookEvents: {
       findFirst: vi.fn(),
     },
     invoices: {
-      findFirst: vi.fn(),
-    },
-    ledgerEntries: {
-      findMany: vi.fn(),
-    },
-    ledgers: {
-      findFirst: vi.fn(),
+      findFirst: invoicesFindFirst,
     },
   }
 
   const transaction = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) =>
     cb({
-      query: txQuery,
+      execute: txExecute,
+      insert: txInsert,
       update: txUpdate,
+      query: txQuery,
     })
   )
 
   const db = {
-    insert,
     update,
     query,
     transaction,
@@ -94,19 +108,21 @@ function createDbMocks() {
   return {
     db,
     mocks: {
-      insert,
-      insertValues,
-      insertOnConflict,
       update,
       updateSet,
       updateWhere,
       updateReturning,
       query,
+      invoicesFindFirst,
       transaction,
-      txQuery,
+      txExecute,
+      txInsert,
+      txInsertValues,
+      txInsertOnConflict,
       txUpdate,
       txUpdateSet,
       txUpdateWhere,
+      txWebhookFindFirst,
     },
   }
 }
@@ -123,8 +139,6 @@ describe("processWebhookEvent", () => {
 
   let paymentProvider: PaymentProviderService
   let logger: Logger
-  let db: Database
-  let dbMocks: ReturnType<typeof createDbMocks>["mocks"]
   let customers: {
     getPaymentProvider: ReturnType<typeof vi.fn>
   }
@@ -136,10 +150,8 @@ describe("processWebhookEvent", () => {
     settleReceivable: ReturnType<typeof vi.fn>
     adjust: ReturnType<typeof vi.fn>
   }
+
   beforeEach(() => {
-    const setup = createDbMocks()
-    db = setup.db
-    dbMocks = setup.mocks
     logger = createLogger()
     paymentProvider = createPaymentProviderService()
 
@@ -164,31 +176,79 @@ describe("processWebhookEvent", () => {
     }
   })
 
+  function callServices(db: Database) {
+    return {
+      services: {
+        customers: customers as unknown as never,
+        subscriptions: subscriptions as unknown as never,
+        wallet: wallet as unknown as never,
+      },
+      db,
+      logger,
+    }
+  }
+
   it("returns provider error when signature verification fails", async () => {
     ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
       err: new Error("Missing webhook signature"),
     })
+    const { db, mocks } = createDbMocks()
 
-    const result = await processWebhookEvent(
-      {
-        services: {
-          customers: customers as unknown as never,
-          subscriptions: subscriptions as unknown as never,
-          wallet: wallet as unknown as never,
-        },
-        db,
-        logger,
-      },
-      {
-        projectId: "proj_1",
-        provider,
-        rawBody: JSON.stringify({ id: "evt_1", type: "invoice.paid" }),
-        headers: {},
-      }
-    )
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_1", type: "invoice.paid" }),
+      headers: {},
+    })
 
     expect(result.err).toBeInstanceOf(UnPriceCustomerError)
-    expect(dbMocks.insert).not.toHaveBeenCalled()
+    expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it("returns duplicate when advisory lock is held by a concurrent worker", async () => {
+    // Simulates two simultaneous deliveries: this caller fails to acquire
+    // the lock because another worker already holds it. Critical regression
+    // guard: no INSERT, no invoice update, no settle, no reconcile.
+    ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
+      val: {
+        eventId: "evt_concurrent",
+        eventType: "invoice.paid",
+        occurredAt: Date.now(),
+        payload: {},
+      },
+    })
+    ;(paymentProvider.normalizeWebhook as ReturnType<typeof vi.fn>).mockReturnValue({
+      val: {
+        provider,
+        eventId: "evt_concurrent",
+        eventType: "payment.succeeded",
+        providerEventType: "invoice.paid",
+        occurredAt: Date.now(),
+        invoiceId: "in_provider_1",
+        payload: {},
+      },
+    })
+
+    const { db, mocks } = createDbMocks({
+      lockAcquired: false,
+      webhookEventState: { id: "webhook_event_existing", status: "processing", attempts: 1 },
+    })
+
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_concurrent", type: "invoice.paid" }),
+      headers: { "stripe-signature": "sig" },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.status).toBe("duplicate")
+    expect(result.val?.webhookEventId).toBe("webhook_event_existing")
+    expect(mocks.txInsert).not.toHaveBeenCalled()
+    expect(mocks.txUpdate).not.toHaveBeenCalled()
+    expect(mocks.update).not.toHaveBeenCalled()
+    expect(wallet.settleReceivable).not.toHaveBeenCalled()
+    expect(subscriptions.reconcilePaymentOutcome).not.toHaveBeenCalled()
   })
 
   it("returns duplicate when webhook event already processed", async () => {
@@ -211,35 +271,21 @@ describe("processWebhookEvent", () => {
       },
     })
 
-    dbMocks.query.webhookEvents.findFirst.mockResolvedValue({
-      id: "webhook_event_existing",
-      status: "processed",
-      attempts: 1,
+    const { db, mocks } = createDbMocks({
+      webhookEventState: { id: "webhook_event_existing", status: "processed", attempts: 1 },
     })
 
-    const result = await processWebhookEvent(
-      {
-        services: {
-          customers: customers as unknown as never,
-          subscriptions: subscriptions as unknown as never,
-          wallet: wallet as unknown as never,
-        },
-        db,
-        logger,
-      },
-      {
-        projectId: "proj_1",
-        provider,
-        rawBody: JSON.stringify({ id: "evt_1", type: "invoice.paid" }),
-        headers: {
-          "stripe-signature": "sig",
-        },
-      }
-    )
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_1", type: "invoice.paid" }),
+      headers: { "stripe-signature": "sig" },
+    })
 
     expect(result.err).toBeUndefined()
     expect(result.val?.status).toBe("duplicate")
-    expect(dbMocks.query.invoices.findFirst).not.toHaveBeenCalled()
+    expect(mocks.invoicesFindFirst).not.toHaveBeenCalled()
+    expect(mocks.update).not.toHaveBeenCalled()
   })
 
   it("marks invoice paid and confirms pending settlement on payment success", async () => {
@@ -263,45 +309,30 @@ describe("processWebhookEvent", () => {
       },
     })
 
-    dbMocks.query.webhookEvents.findFirst.mockResolvedValue({
-      id: "webhook_event_new",
-      status: "processing",
-      attempts: 1,
-    })
-    dbMocks.query.invoices.findFirst.mockResolvedValue({
-      id: "inv_1",
-      projectId: "proj_1",
-      subscriptionId: "sub_1",
-      status: "unpaid",
-      paidAt: null,
-      paymentAttempts: [],
-      metadata: {},
-      invoicePaymentProviderUrl: null,
-      totalAmount: 5_000_000_000,
-      currency: "USD",
-      whenToBill: "pay_in_advance",
-      customerId: "cus_1",
+    const { db, mocks } = createDbMocks({
+      invoice: {
+        id: "inv_1",
+        projectId: "proj_1",
+        subscriptionId: "sub_1",
+        status: "unpaid",
+        paidAt: null,
+        paymentAttempts: [],
+        metadata: {},
+        invoicePaymentProviderUrl: null,
+        totalAmount: 5_000_000_000,
+        currency: "USD",
+        whenToBill: "pay_in_advance",
+        customerId: "cus_1",
+      },
+      updateInvoiceReturns: [{ id: "inv_1", status: "paid" }],
     })
 
-    const result = await processWebhookEvent(
-      {
-        services: {
-          customers: customers as unknown as never,
-          subscriptions: subscriptions as unknown as never,
-          wallet: wallet as unknown as never,
-        },
-        db,
-        logger,
-      },
-      {
-        projectId: "proj_1",
-        provider,
-        rawBody: JSON.stringify({ id: "evt_paid", type: "invoice.paid" }),
-        headers: {
-          "stripe-signature": "sig",
-        },
-      }
-    )
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_paid", type: "invoice.paid" }),
+      headers: { "stripe-signature": "sig" },
+    })
 
     expect(result.err).toBeUndefined()
     expect(result.val?.status).toBe("processed")
@@ -312,7 +343,7 @@ describe("processWebhookEvent", () => {
         subscriptionId: "sub_1",
       })
     )
-    expect(dbMocks.update).toHaveBeenCalled()
+    expect(mocks.update).toHaveBeenCalled()
     expect(wallet.settleReceivable).toHaveBeenCalledTimes(1)
     expect(wallet.settleReceivable).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -327,6 +358,62 @@ describe("processWebhookEvent", () => {
     // activation (`credit_line → granted`); funding `purchased` here would
     // duplicate the flat-fee dollars.
     expect(wallet.adjust).not.toHaveBeenCalled()
+  })
+
+  it("skips downstream side effects when invoice already in target state (state-machine guard)", async () => {
+    // Late or out-of-order webhook: invoice already paid. The conditional
+    // update returns 0 rows; we must not call settleReceivable or
+    // reconcilePaymentOutcome a second time.
+    ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
+      val: {
+        eventId: "evt_late",
+        eventType: "invoice.paid",
+        occurredAt: Date.now(),
+        payload: {},
+      },
+    })
+    ;(paymentProvider.normalizeWebhook as ReturnType<typeof vi.fn>).mockReturnValue({
+      val: {
+        provider,
+        eventId: "evt_late",
+        eventType: "payment.succeeded",
+        providerEventType: "invoice.paid",
+        occurredAt: Date.now(),
+        invoiceId: "in_provider_1",
+        payload: {},
+      },
+    })
+
+    const { db } = createDbMocks({
+      invoice: {
+        id: "inv_1",
+        projectId: "proj_1",
+        subscriptionId: "sub_1",
+        status: "paid",
+        paidAt: Date.now(),
+        paymentAttempts: [],
+        metadata: {},
+        invoicePaymentProviderUrl: null,
+        totalAmount: 5_000_000_000,
+        currency: "USD",
+        whenToBill: "pay_in_advance",
+        customerId: "cus_1",
+      },
+      updateInvoiceReturns: [], // conditional update doesn't match
+    })
+
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_late", type: "invoice.paid" }),
+      headers: { "stripe-signature": "sig" },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.status).toBe("processed")
+    expect(result.val?.outcome).toBe("payment_succeeded")
+    expect(wallet.settleReceivable).not.toHaveBeenCalled()
+    expect(subscriptions.reconcilePaymentOutcome).not.toHaveBeenCalled()
   })
 
   it("transitions invoice to unpaid on payment failure and notifies subscription machine", async () => {
@@ -351,41 +438,26 @@ describe("processWebhookEvent", () => {
       },
     })
 
-    dbMocks.query.webhookEvents.findFirst.mockResolvedValue({
-      id: "webhook_event_new",
-      status: "processing",
-      attempts: 1,
-    })
-    dbMocks.query.invoices.findFirst.mockResolvedValue({
-      id: "inv_1",
-      projectId: "proj_1",
-      subscriptionId: "sub_1",
-      status: "unpaid",
-      paidAt: null,
-      paymentAttempts: [],
-      metadata: {},
-      invoicePaymentProviderUrl: null,
+    const { db } = createDbMocks({
+      invoice: {
+        id: "inv_1",
+        projectId: "proj_1",
+        subscriptionId: "sub_1",
+        status: "unpaid",
+        paidAt: null,
+        paymentAttempts: [],
+        metadata: {},
+        invoicePaymentProviderUrl: null,
+      },
+      updateInvoiceReturns: [{ id: "inv_1", status: "unpaid" }],
     })
 
-    const result = await processWebhookEvent(
-      {
-        services: {
-          customers: customers as unknown as never,
-          subscriptions: subscriptions as unknown as never,
-          wallet: wallet as unknown as never,
-        },
-        db,
-        logger,
-      },
-      {
-        projectId: "proj_1",
-        provider,
-        rawBody: JSON.stringify({ id: "evt_fail", type: "invoice.payment_failed" }),
-        headers: {
-          "stripe-signature": "sig",
-        },
-      }
-    )
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_fail", type: "invoice.payment_failed" }),
+      headers: { "stripe-signature": "sig" },
+    })
 
     expect(result.err).toBeUndefined()
     expect(result.val?.outcome).toBe("payment_failed")
@@ -417,44 +489,33 @@ describe("processWebhookEvent", () => {
       },
     })
 
-    dbMocks.query.webhookEvents.findFirst.mockResolvedValue({
-      id: "webhook_event_new",
-      status: "processing",
-      attempts: 1,
-    })
-    dbMocks.query.invoices.findFirst.mockResolvedValue({
-      id: "inv_1",
-      projectId: "proj_1",
-      subscriptionId: "sub_1",
-      status: "failed",
-      paidAt: null,
-      paymentAttempts: [{ status: "failed", createdAt: Date.now() }],
-      metadata: {},
-      invoicePaymentProviderUrl: null,
+    const { db } = createDbMocks({
+      invoice: {
+        id: "inv_1",
+        projectId: "proj_1",
+        subscriptionId: "sub_1",
+        status: "failed",
+        paidAt: null,
+        paymentAttempts: [{ status: "failed", createdAt: Date.now() }],
+        metadata: {},
+        invoicePaymentProviderUrl: null,
+        totalAmount: 1000,
+        currency: "USD",
+        customerId: "cus_1",
+        whenToBill: "pay_in_advance",
+      },
+      updateInvoiceReturns: [{ id: "inv_1", status: "paid" }],
     })
 
-    const result = await processWebhookEvent(
-      {
-        services: {
-          customers: customers as unknown as never,
-          subscriptions: subscriptions as unknown as never,
-          wallet: wallet as unknown as never,
-        },
-        db,
-        logger,
-      },
-      {
-        projectId: "proj_1",
-        provider,
-        rawBody: JSON.stringify({
-          id: "evt_dispute_reversed",
-          type: "charge.dispute.funds_reinstated",
-        }),
-        headers: {
-          "stripe-signature": "sig",
-        },
-      }
-    )
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({
+        id: "evt_dispute_reversed",
+        type: "charge.dispute.funds_reinstated",
+      }),
+      headers: { "stripe-signature": "sig" },
+    })
 
     expect(result.err).toBeUndefined()
     expect(result.val?.outcome).toBe("payment_dispute_reversed")
@@ -488,46 +549,38 @@ describe("processWebhookEvent", () => {
       },
     })
 
-    dbMocks.query.webhookEvents.findFirst.mockResolvedValue({
-      id: "webhook_event_existing_failed",
-      status: "failed",
-      attempts: 1,
-    })
-    dbMocks.query.invoices.findFirst.mockResolvedValue({
-      id: "inv_1",
-      projectId: "proj_1",
-      subscriptionId: "sub_1",
-      status: "unpaid",
-      paidAt: null,
-      paymentAttempts: [],
-      metadata: {},
-      invoicePaymentProviderUrl: null,
+    const { db, mocks } = createDbMocks({
+      webhookEventState: { id: "webhook_event_existing_failed", status: "failed", attempts: 1 },
+      invoice: {
+        id: "inv_1",
+        projectId: "proj_1",
+        subscriptionId: "sub_1",
+        status: "unpaid",
+        paidAt: null,
+        paymentAttempts: [],
+        metadata: {},
+        invoicePaymentProviderUrl: null,
+        totalAmount: 1000,
+        currency: "USD",
+        customerId: "cus_1",
+        whenToBill: "pay_in_advance",
+      },
+      updateInvoiceReturns: [{ id: "inv_1", status: "paid" }],
     })
 
-    const result = await processWebhookEvent(
-      {
-        services: {
-          customers: customers as unknown as never,
-          subscriptions: subscriptions as unknown as never,
-          wallet: wallet as unknown as never,
-        },
-        db,
-        logger,
-      },
-      {
-        projectId: "proj_1",
-        provider,
-        rawBody: JSON.stringify({ id: "evt_retry", type: "invoice.paid" }),
-        headers: {
-          "stripe-signature": "sig",
-        },
-      }
-    )
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_retry", type: "invoice.paid" }),
+      headers: { "stripe-signature": "sig" },
+    })
 
     expect(result.err).toBeUndefined()
     expect(result.val?.status).toBe("processed")
     expect(result.val?.webhookEventId).toBe("webhook_event_existing_failed")
-    expect(dbMocks.update).toHaveBeenCalled()
+    // The retry path must bump attempts on the existing row + final mark
+    // it processed.
+    expect(mocks.txUpdate).toHaveBeenCalled()
   })
 
   it("reopens settlement on payment reversal events", async () => {
@@ -552,41 +605,26 @@ describe("processWebhookEvent", () => {
       },
     })
 
-    dbMocks.query.webhookEvents.findFirst.mockResolvedValue({
-      id: "webhook_event_new",
-      status: "processing",
-      attempts: 1,
-    })
-    dbMocks.query.invoices.findFirst.mockResolvedValue({
-      id: "inv_1",
-      projectId: "proj_1",
-      subscriptionId: "sub_1",
-      status: "paid",
-      paidAt: Date.now(),
-      paymentAttempts: [],
-      metadata: {},
-      invoicePaymentProviderUrl: null,
+    const { db } = createDbMocks({
+      invoice: {
+        id: "inv_1",
+        projectId: "proj_1",
+        subscriptionId: "sub_1",
+        status: "paid",
+        paidAt: Date.now(),
+        paymentAttempts: [],
+        metadata: {},
+        invoicePaymentProviderUrl: null,
+      },
+      updateInvoiceReturns: [{ id: "inv_1", status: "failed" }],
     })
 
-    const result = await processWebhookEvent(
-      {
-        services: {
-          customers: customers as unknown as never,
-          subscriptions: subscriptions as unknown as never,
-          wallet: wallet as unknown as never,
-        },
-        db,
-        logger,
-      },
-      {
-        projectId: "proj_1",
-        provider,
-        rawBody: JSON.stringify({ id: "evt_reversed", type: "charge.refunded" }),
-        headers: {
-          "stripe-signature": "sig",
-        },
-      }
-    )
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_reversed", type: "charge.refunded" }),
+      headers: { "stripe-signature": "sig" },
+    })
 
     expect(result.err).toBeUndefined()
     expect(result.val?.outcome).toBe("payment_reversed")

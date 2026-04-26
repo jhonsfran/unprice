@@ -1,7 +1,7 @@
-import { type Database, and, eq } from "@unprice/db"
+import { type Database, and, eq, sql } from "@unprice/db"
 import { webhookEvents } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import type { Currency, PaymentProvider } from "@unprice/db/validators"
+import type { Currency, InvoiceStatus, PaymentProvider } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
@@ -52,7 +52,19 @@ type ApplyWebhookEventOutput = {
   topupId?: string
 }
 
-const PROCESSING_WEBHOOK_STATUSES = new Set(["processed", "processing"] as const)
+// Invoice statuses from which each payment-event transition is permitted.
+// Encodes the webhook → invoice state machine. Anything outside these sets
+// means the transition has already happened (or never can), and the side
+// effects after the update are no-ops.
+const PAYMENT_SUCCEEDED_FROM: ReadonlyArray<InvoiceStatus> = [
+  "draft",
+  "waiting",
+  "unpaid",
+  "failed",
+]
+const PAYMENT_DISPUTE_REVERSED_FROM: ReadonlyArray<InvoiceStatus> = ["unpaid", "failed"]
+const PAYMENT_FAILED_FROM: ReadonlyArray<InvoiceStatus> = ["draft", "waiting", "unpaid", "failed"]
+const PAYMENT_REVERSED_FROM: ReadonlyArray<InvoiceStatus> = ["paid"]
 
 function toFailureError(error: unknown): FetchError {
   if (error instanceof FetchError) {
@@ -115,6 +127,29 @@ function sanitizeWebhookHeaders(
     sanitized[key] = value
   }
   return sanitized
+}
+
+type DbTx = Parameters<Parameters<Database["transaction"]>[0]>[0]
+
+// Acquires a transaction-scoped advisory lock keyed on the webhook event
+// identity. Released automatically at tx commit/rollback. Returns false if
+// another transaction currently holds the lock — that caller is processing
+// the same webhook concurrently, and we exit as a duplicate.
+async function tryAcquireWebhookLock({
+  tx,
+  projectId,
+  provider,
+  providerEventId,
+}: {
+  tx: DbTx
+  projectId: string
+  provider: PaymentProvider
+  providerEventId: string
+}): Promise<boolean> {
+  const result = await tx.execute<{ acquired: boolean }>(
+    sql`SELECT pg_try_advisory_xact_lock(hashtext(${`webhook:${projectId}:${provider}:${providerEventId}`})) AS acquired`
+  )
+  return Boolean(result.rows[0]?.acquired ?? false)
 }
 
 async function applyWalletTopupSettlement({
@@ -227,9 +262,10 @@ async function applyWebhookEvent({
   }
 
   if (normalizedEvent.eventType === "payment.succeeded") {
-    await billingRepo.updateInvoice({
+    const updated = await billingRepo.updateInvoiceIfStatus({
       invoiceId: invoice.id,
       projectId,
+      allowedFromStatuses: PAYMENT_SUCCEEDED_FROM,
       data: {
         status: "paid",
         paidAt: invoice.paidAt ?? normalizedEvent.occurredAt,
@@ -242,6 +278,22 @@ async function applyWebhookEvent({
         updatedAtM: now,
       },
     })
+
+    if (!updated) {
+      // Already paid (or in a terminal/disallowed state). Settle + reconcile
+      // are idempotent, but we still log for incident review since this is a
+      // late or out-of-order webhook delivery.
+      deps.logger.warn("webhook payment.succeeded skipped: invoice not in expected state", {
+        invoiceId: invoice.id,
+        currentStatus: invoice.status,
+        eventId: normalizedEvent.eventId,
+      })
+      return Ok({
+        outcome,
+        invoiceId: invoice.id,
+        subscriptionId: invoice.subscriptionId,
+      })
+    }
 
     const settled = await settlePrepaidInvoiceToWallet({
       walletService: deps.services.wallet,
@@ -281,9 +333,10 @@ async function applyWebhookEvent({
   }
 
   if (normalizedEvent.eventType === "payment.dispute_reversed") {
-    await billingRepo.updateInvoice({
+    const updated = await billingRepo.updateInvoiceIfStatus({
       invoiceId: invoice.id,
       projectId,
+      allowedFromStatuses: PAYMENT_DISPUTE_REVERSED_FROM,
       data: {
         status: "paid",
         paidAt: invoice.paidAt ?? normalizedEvent.occurredAt,
@@ -295,6 +348,19 @@ async function applyWebhookEvent({
         updatedAtM: now,
       },
     })
+
+    if (!updated) {
+      deps.logger.warn("webhook payment.dispute_reversed skipped: invoice not in expected state", {
+        invoiceId: invoice.id,
+        currentStatus: invoice.status,
+        eventId: normalizedEvent.eventId,
+      })
+      return Ok({
+        outcome,
+        invoiceId: invoice.id,
+        subscriptionId: invoice.subscriptionId,
+      })
+    }
 
     const settled = await settlePrepaidInvoiceToWallet({
       walletService: deps.services.wallet,
@@ -333,11 +399,14 @@ async function applyWebhookEvent({
     })
   }
 
-  const failedStatus = normalizedEvent.eventType === "payment.failed" ? "unpaid" : "failed"
+  const isPaymentFailed = normalizedEvent.eventType === "payment.failed"
+  const failedStatus: InvoiceStatus = isPaymentFailed ? "unpaid" : "failed"
+  const allowedFrom = isPaymentFailed ? PAYMENT_FAILED_FROM : PAYMENT_REVERSED_FROM
 
-  await billingRepo.updateInvoice({
+  const updated = await billingRepo.updateInvoiceIfStatus({
     invoiceId: invoice.id,
     projectId,
+    allowedFromStatuses: allowedFrom,
     data: {
       status: failedStatus,
       metadata: {
@@ -352,6 +421,22 @@ async function applyWebhookEvent({
       updatedAtM: now,
     },
   })
+
+  if (!updated) {
+    deps.logger.warn(
+      `webhook ${normalizedEvent.eventType} skipped: invoice not in expected state`,
+      {
+        invoiceId: invoice.id,
+        currentStatus: invoice.status,
+        eventId: normalizedEvent.eventId,
+      }
+    )
+    return Ok({
+      outcome,
+      invoiceId: invoice.id,
+      subscriptionId: invoice.subscriptionId,
+    })
+  }
 
   // Refund accounting (revenue → customer reverse transfers) is owned by
   // the wallet layer. The invoice's failed/unpaid status above already
@@ -440,130 +525,207 @@ export async function processWebhookEvent(
     )
   }
 
-  const webhookEventId = newId("event")
+  const newWebhookEventId = newId("event")
   const signature = pickProviderSignature({
     provider: input.provider,
     headers: input.headers,
   })
   const sanitizedHeaders = sanitizeWebhookHeaders(input.headers)
 
-  await deps.db
-    .insert(webhookEvents)
-    .values({
-      id: webhookEventId,
-      projectId: input.projectId,
-      provider: input.provider,
-      providerEventId: normalizedWebhook.eventId,
-      rawPayload: input.rawBody,
-      signature,
-      headers: sanitizedHeaders,
-      status: "processing",
-      attempts: 1,
-      errorPayload: null,
-    })
-    .onConflictDoNothing()
+  // Mutual exclusion + state-machine guards. The whole gate (insert /
+  // dedup / mark processing / apply / mark processed) runs in a single
+  // transaction holding `pg_try_advisory_xact_lock`. The lock is keyed on
+  // (projectId, provider, providerEventId) and released at commit. Two
+  // concurrent identical webhooks → only one acquires the lock; the other
+  // bails immediately with `duplicate` and writes nothing. Re-deliveries
+  // arriving after the original commits see `status='processed'` and bail
+  // at the dedup check below.
+  type GateResult =
+    | { kind: "duplicate"; webhookEventId: string }
+    | { kind: "applied"; webhookEventId: string; applied: ApplyWebhookEventOutput }
+    | { kind: "failure"; webhookEventId: string; error: FetchError }
 
-  const storedEvent = await deps.db.query.webhookEvents.findFirst({
-    where: (table, ops) =>
-      ops.and(
-        ops.eq(table.projectId, input.projectId),
-        ops.eq(table.provider, input.provider),
-        ops.eq(table.providerEventId, normalizedWebhook.eventId)
-      ),
-  })
-
-  if (!storedEvent) {
-    return Err(
-      new FetchError({
-        message: "Failed to persist webhook event",
-        retry: false,
-      })
-    )
-  }
-
-  if (storedEvent.id !== webhookEventId) {
-    if (PROCESSING_WEBHOOK_STATUSES.has(storedEvent.status as "processed" | "processing")) {
-      return Ok({
-        webhookEventId: storedEvent.id,
-        providerEventId: normalizedWebhook.eventId,
-        status: "duplicate",
-        outcome: normalizeOutcome(normalizedWebhook.eventType),
-      })
-    }
-
-    await deps.db
-      .update(webhookEvents)
-      .set({
-        status: "processing",
-        attempts: (storedEvent.attempts ?? 0) + 1,
-        errorPayload: null,
-        processedAtM: null,
-        updatedAtM: now,
-      })
-      .where(
-        and(eq(webhookEvents.projectId, input.projectId), eq(webhookEvents.id, storedEvent.id))
-      )
-  }
-
+  let gateResult: GateResult
   try {
-    const applied = await applyWebhookEvent({
-      deps,
-      projectId: input.projectId,
-      normalizedEvent: normalizedWebhook,
-      now,
-    })
-
-    if (applied.err) {
-      throw applied.err
-    }
-
-    const persistedWebhookEventId = storedEvent.id
-
-    await deps.db
-      .update(webhookEvents)
-      .set({
-        status: "processed",
-        processedAtM: now,
-        errorPayload: null,
-        updatedAtM: now,
+    gateResult = await deps.db.transaction(async (tx) => {
+      const acquired = await tryAcquireWebhookLock({
+        tx,
+        projectId: input.projectId,
+        provider: input.provider,
+        providerEventId: normalizedWebhook.eventId,
       })
-      .where(
-        and(
-          eq(webhookEvents.projectId, input.projectId),
-          eq(webhookEvents.id, persistedWebhookEventId)
-        )
-      )
 
-    return Ok({
-      webhookEventId: persistedWebhookEventId,
-      providerEventId: normalizedWebhook.eventId,
-      status: "processed",
-      outcome: applied.val.outcome,
-      invoiceId: applied.val.invoiceId,
-      subscriptionId: applied.val.subscriptionId,
-      topupId: applied.val.topupId,
+      if (!acquired) {
+        // Another worker is currently processing this exact event. Look up
+        // the existing row id (if any) for the response — best-effort, it
+        // may not yet be visible if the holder hasn't reached its INSERT.
+        const existing = await tx.query.webhookEvents.findFirst({
+          where: (table, ops) =>
+            ops.and(
+              ops.eq(table.projectId, input.projectId),
+              ops.eq(table.provider, input.provider),
+              ops.eq(table.providerEventId, normalizedWebhook.eventId)
+            ),
+        })
+        deps.logger.warn("webhook concurrent delivery rejected as duplicate", {
+          projectId: input.projectId,
+          provider: input.provider,
+          providerEventId: normalizedWebhook.eventId,
+        })
+        return {
+          kind: "duplicate" as const,
+          webhookEventId: existing?.id ?? newWebhookEventId,
+        }
+      }
+
+      await tx
+        .insert(webhookEvents)
+        .values({
+          id: newWebhookEventId,
+          projectId: input.projectId,
+          provider: input.provider,
+          providerEventId: normalizedWebhook.eventId,
+          rawPayload: input.rawBody,
+          signature,
+          headers: sanitizedHeaders,
+          status: "processing",
+          attempts: 1,
+          errorPayload: null,
+        })
+        .onConflictDoNothing()
+
+      const storedEvent = await tx.query.webhookEvents.findFirst({
+        where: (table, ops) =>
+          ops.and(
+            ops.eq(table.projectId, input.projectId),
+            ops.eq(table.provider, input.provider),
+            ops.eq(table.providerEventId, normalizedWebhook.eventId)
+          ),
+      })
+
+      if (!storedEvent) {
+        return {
+          kind: "failure" as const,
+          webhookEventId: newWebhookEventId,
+          error: new FetchError({
+            message: "Failed to persist webhook event",
+            retry: false,
+          }),
+        }
+      }
+
+      // Already-finalized event. Holding the advisory lock means we are the
+      // only writer right now; status='processed' is authoritative and we
+      // must not re-apply.
+      if (storedEvent.status === "processed") {
+        return { kind: "duplicate" as const, webhookEventId: storedEvent.id }
+      }
+
+      // Either we just inserted (status='processing'), or this is a retry
+      // of a prior failed/abandoned attempt. Bump attempts and proceed.
+      if (storedEvent.id !== newWebhookEventId) {
+        await tx
+          .update(webhookEvents)
+          .set({
+            status: "processing",
+            attempts: (storedEvent.attempts ?? 0) + 1,
+            errorPayload: null,
+            processedAtM: null,
+            updatedAtM: now,
+          })
+          .where(
+            and(eq(webhookEvents.projectId, input.projectId), eq(webhookEvents.id, storedEvent.id))
+          )
+      }
+
+      try {
+        const applied = await applyWebhookEvent({
+          deps,
+          projectId: input.projectId,
+          normalizedEvent: normalizedWebhook,
+          now,
+        })
+
+        if (applied.err) {
+          // Surface to outer catch so we mark webhook_events.failed.
+          throw applied.err
+        }
+
+        await tx
+          .update(webhookEvents)
+          .set({
+            status: "processed",
+            processedAtM: now,
+            errorPayload: null,
+            updatedAtM: now,
+          })
+          .where(
+            and(eq(webhookEvents.projectId, input.projectId), eq(webhookEvents.id, storedEvent.id))
+          )
+
+        return {
+          kind: "applied" as const,
+          webhookEventId: storedEvent.id,
+          applied: applied.val,
+        }
+      } catch (error) {
+        // Persist the failure inside the same tx so the row reflects the
+        // latest attempt before we commit and release the lock. The next
+        // delivery will see status='failed' and the framework retry path
+        // can re-enter once the provider re-delivers.
+        const failure = toFailureError(error)
+
+        await tx
+          .update(webhookEvents)
+          .set({
+            status: "failed",
+            processedAtM: now,
+            updatedAtM: now,
+            errorPayload: {
+              message: failure.message,
+              details: {
+                providerEventId: normalizedWebhook.eventId,
+                providerEventType: normalizedWebhook.providerEventType,
+              },
+            },
+          })
+          .where(
+            and(eq(webhookEvents.projectId, input.projectId), eq(webhookEvents.id, storedEvent.id))
+          )
+
+        return {
+          kind: "failure" as const,
+          webhookEventId: storedEvent.id,
+          error: failure,
+        }
+      }
     })
   } catch (error) {
-    const failure = toFailureError(error)
-
-    await deps.db
-      .update(webhookEvents)
-      .set({
-        status: "failed",
-        processedAtM: now,
-        updatedAtM: now,
-        errorPayload: {
-          message: failure.message,
-          details: {
-            providerEventId: normalizedWebhook.eventId,
-            providerEventType: normalizedWebhook.providerEventType,
-          },
-        },
-      })
-      .where(
-        and(eq(webhookEvents.projectId, input.projectId), eq(webhookEvents.id, storedEvent.id))
-      )
-
-    return Err(failure)
+    // Tx-level failure (e.g. DB connection blew up before our internal
+    // try/catch could persist `failed`). Surface so the queue retries.
+    return Err(toFailureError(error))
   }
+
+  if (gateResult.kind === "duplicate") {
+    return Ok({
+      webhookEventId: gateResult.webhookEventId,
+      providerEventId: normalizedWebhook.eventId,
+      status: "duplicate",
+      outcome: normalizeOutcome(normalizedWebhook.eventType),
+    })
+  }
+
+  if (gateResult.kind === "failure") {
+    return Err(gateResult.error)
+  }
+
+  return Ok({
+    webhookEventId: gateResult.webhookEventId,
+    providerEventId: normalizedWebhook.eventId,
+    status: "processed",
+    outcome: gateResult.applied.outcome,
+    invoiceId: gateResult.applied.invoiceId,
+    subscriptionId: gateResult.applied.subscriptionId,
+    topupId: gateResult.applied.topupId,
+  })
 }

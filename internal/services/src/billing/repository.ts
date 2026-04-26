@@ -3,6 +3,7 @@ import type {
   CollectionMethod,
   Currency,
   Customer,
+  InvoiceStatus,
   PaymentProvider,
   SubscriptionInvoice,
 } from "@unprice/db/validators"
@@ -172,6 +173,13 @@ export interface UpdateInvoiceInput {
   >
 }
 
+export interface UpdateInvoiceIfStatusInput {
+  invoiceId: string
+  projectId: string
+  allowedFromStatuses: ReadonlyArray<InvoiceStatus>
+  data: UpdateInvoiceInput["data"]
+}
+
 export interface FindInvoiceByProviderIdInput {
   projectId: string
   invoicePaymentProviderId: string
@@ -213,6 +221,16 @@ export interface BillingRepository {
   findInvoiceWithDetails(input: FindInvoiceWithDetailsInput): Promise<InvoiceWithDetails | null>
 
   updateInvoice(input: UpdateInvoiceInput): Promise<SubscriptionInvoice | null>
+
+  /**
+   * Conditional update used by webhook handlers: applies `data` only when the
+   * invoice is currently in one of `allowedFromStatuses`. Returns `null` when
+   * no row matched (e.g. invoice already in target state, or in a terminal
+   * state not allowed by the transition). Callers MUST treat null as "skip
+   * downstream side effects" — the transition either already happened or is
+   * disallowed by the state machine.
+   */
+  updateInvoiceIfStatus(input: UpdateInvoiceIfStatusInput): Promise<SubscriptionInvoice | null>
 
   findInvoiceByProviderId(input: FindInvoiceByProviderIdInput): Promise<SubscriptionInvoice | null>
 }

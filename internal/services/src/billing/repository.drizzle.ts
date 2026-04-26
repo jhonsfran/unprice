@@ -1,5 +1,6 @@
 import { type Database, and, eq, inArray, lte, sql } from "@unprice/db"
 import { billingPeriods, invoices } from "@unprice/db/schema"
+import type { InvoiceStatus } from "@unprice/db/validators"
 import type { BillingPeriod, SubscriptionInvoice } from "@unprice/db/validators"
 import type {
   BillingPeriodWithItem,
@@ -251,6 +252,29 @@ export class DrizzleBillingRepository implements BillingRepository {
       .update(invoices)
       .set(input.data)
       .where(and(eq(invoices.id, input.invoiceId), eq(invoices.projectId, input.projectId)))
+      .returning()
+    return (rows[0] as SubscriptionInvoice) ?? null
+  }
+
+  async updateInvoiceIfStatus(input: {
+    invoiceId: string
+    projectId: string
+    allowedFromStatuses: ReadonlyArray<InvoiceStatus>
+    data: UpdateInvoiceInput["data"]
+  }): Promise<SubscriptionInvoice | null> {
+    if (input.allowedFromStatuses.length === 0) {
+      return null
+    }
+    const rows = await this.db
+      .update(invoices)
+      .set(input.data)
+      .where(
+        and(
+          eq(invoices.id, input.invoiceId),
+          eq(invoices.projectId, input.projectId),
+          inArray(invoices.status, input.allowedFromStatuses as InvoiceStatus[])
+        )
+      )
       .returning()
     return (rows[0] as SubscriptionInvoice) ?? null
   }
