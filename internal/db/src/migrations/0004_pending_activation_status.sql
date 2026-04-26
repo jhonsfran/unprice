@@ -1,0 +1,1 @@
+ALTER TYPE "public"."subscription_status_v3" ADD VALUE 'pending_activation' BEFORE 'canceled';

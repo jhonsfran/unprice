@@ -29,6 +29,13 @@
       "when": 1777118400000,
       "tag": "0003_partial_reservation_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777723200000,
+      "tag": "0004_pending_activation_status",
+      "breakpoints": true
     }
   ]
 }

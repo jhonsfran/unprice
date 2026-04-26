@@ -23,6 +23,7 @@ initObservability({
     environment: env.APP_ENV,
     version: env.VERSION ?? "unknown",
   },
+  // pretty: false,
   drain: apiDrain,
   sampling: {
     rates: {

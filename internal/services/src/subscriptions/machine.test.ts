@@ -7,7 +7,7 @@ import type {
   SubscriptionPhaseExtended,
   SubscriptionStatus,
 } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
+import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { type Dinero, dinero, toSnapshot } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
@@ -17,8 +17,25 @@ import type { CustomerService } from "../customers/service"
 import type { InvoiceLine, LedgerEntry, LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
 import { db } from "../utils/db"
+import { UnPriceWalletError, type WalletService } from "../wallet"
 import { SubscriptionMachine } from "./machine"
 import { DrizzleSubscriptionRepository } from "./repository.drizzle"
+
+// Allow individual tests to control what activation inputs the machine
+// derives. Default is "no grants" so the existing tests keep skipping
+// activation work; HARD-007 tests override this with non-empty grants.
+const deriveActivationMock = vi.hoisted(() =>
+  vi.fn(async () => ({ grants: [] as Array<{ amount: number; source: string }> }))
+)
+
+vi.mock("../use-cases/billing/derive-provision-inputs", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../use-cases/billing/derive-provision-inputs")>()
+  return {
+    ...actual,
+    deriveActivationInputsFromPlan: deriveActivationMock,
+  }
+})
 
 vi.mock("../../env", () => ({
   env: { ENCRYPTION_KEY: "test_encryption_key" },
@@ -611,6 +628,7 @@ describe("SubscriptionMachine - comprehensive", () => {
     projectId: string
     now?: number
     db?: Database
+    walletService?: WalletService
   }) =>
     SubscriptionMachine.create({
       subscriptionId: input.subscriptionId,
@@ -621,6 +639,7 @@ describe("SubscriptionMachine - comprehensive", () => {
       customer: mockCustomerService,
       ratingService: mockRatingService,
       ledgerService: mockLedgerService,
+      walletService: input.walletService,
       db: input.db ?? mockDb,
       repo: new DrizzleSubscriptionRepository(input.db ?? mockDb),
     })
@@ -880,6 +899,102 @@ describe("SubscriptionMachine - comprehensive", () => {
     expect(invoice).toMatchObject({ status: "draft", subscriptionId: sub.id })
 
     await m.shutdown()
+  })
+
+  it("HARD-007: activate failure parks the subscription in pending_activation, retry from there reaches active", async () => {
+    const { sub } = buildMockSubscription({ status: "active", autoRenew: true, trialEnded: true })
+    setupDbMocks(sub)
+
+    // Two grants — adjust() fails on grant #2 of 2. The activation tx should
+    // roll back, the machine's `activating.onError` parks us in
+    // pending_activation, and the subscriber persists that status to the DB.
+    deriveActivationMock.mockResolvedValue({
+      grants: [
+        { amount: 5_00_000_000, source: "plan_included" },
+        { amount: 50_00_000_000, source: "credit_line" },
+      ],
+    })
+
+    let adjustCalls = 0
+    const failingWallet = {
+      adjust: vi.fn(async (input: { signedAmount: number }) => {
+        adjustCalls++
+        if (adjustCalls === 2) {
+          return Err(new UnPriceWalletError({ message: "WALLET_LEDGER_FAILED" }))
+        }
+        return Ok({
+          grantId: `wgr_${adjustCalls}`,
+          clampedAmount: input.signedAmount,
+          unclampedRemainder: 0,
+        })
+      }),
+    } as unknown as WalletService
+
+    const created = await createMachine({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+      walletService: failingWallet,
+    })
+    expect(created.err).toBeUndefined()
+    if (created.err) return
+    const m = created.val
+    expect(m.getState()).toBe("active")
+
+    const r1 = await m.activate()
+    expect(r1.err).toBeUndefined()
+    expect(m.getState()).toBe("pending_activation")
+
+    // The subscriber persists every subscription-tagged transition. Confirm
+    // the final persisted status reflects the parked state, not "active".
+    const subUpdate = dbMockData.find(
+      (u) => u.table === "subscriptions" && u.data.status === "pending_activation"
+    )
+    expect(subUpdate).toBeDefined()
+
+    // First grant attempt was rolled back by tx — only the second adjust
+    // call recorded the failure. (provision-period.test.ts already covers
+    // the no-status-flip / no-second-grant invariants on the use-case
+    // layer; here we assert the machine routed the failure to the new
+    // recoverable state.)
+    expect(adjustCalls).toBe(2)
+
+    // Sweeper-style retry: switch wallet to a non-failing impl and re-fire
+    // ACTIVATE. Real path uses per-grant idempotency keys to converge on
+    // the same wallet_grants rows; the mock just confirms the transition.
+    await m.shutdown()
+
+    let retryCalls = 0
+    const goodWallet = {
+      adjust: vi.fn(async (input: { signedAmount: number }) => {
+        retryCalls++
+        return Ok({
+          grantId: `wgr_retry_${retryCalls}`,
+          clampedAmount: input.signedAmount,
+          unclampedRemainder: 0,
+        })
+      }),
+    } as unknown as WalletService
+
+    // Re-seed the in-memory subscription to reflect the persisted state.
+    sub.status = "pending_activation"
+    setupDbMocks(sub)
+
+    const retried = await createMachine({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+      walletService: goodWallet,
+    })
+    expect(retried.err).toBeUndefined()
+    if (retried.err) return
+    const m2 = retried.val
+    expect(m2.getState()).toBe("pending_activation")
+
+    const r2 = await m2.activate()
+    expect(r2.err).toBeUndefined()
+    expect(m2.getState()).toBe("active")
+    expect(retryCalls).toBe(2)
+
+    await m2.shutdown()
   })
 
   it("trialing renew before trial end returns error", async () => {

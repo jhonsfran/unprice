@@ -100,15 +100,18 @@ export async function createSubscription(
     })
 
     if (activateResult?.err) {
-      // Activation failures are non-fatal at sub-create — the customer can
-      // still see the subscription, and a retry (manual or via the next
-      // billing tick) re-attempts the grants. Reservations don't depend on
-      // grants existing yet (the DO will open one against `purchased` if
-      // it's funded, or deny with WALLET_EMPTY if it isn't).
+      // The activating XState actor parks failed activations in
+      // `pending_activation` (HARD-007); the machine subscriber has already
+      // persisted that status to the DB before we return here. The bouncer
+      // / ACL layer denies ingestion while in that state, and the
+      // `subscription.activation` sweeper retries grant issuance until it
+      // succeeds. We keep the subscription record (rollback would discard a
+      // freshly-minted Stripe customer mapping and leave the user without
+      // visibility) but log loudly so ops can correlate retries.
       deps.logger.error(activateResult.err, {
         subscriptionId: subscription.id,
         projectId,
-        context: "wallet activation failed after subscription create",
+        context: "wallet activation failed; subscription parked in pending_activation",
       })
     }
   }

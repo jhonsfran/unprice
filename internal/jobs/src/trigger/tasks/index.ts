@@ -1,3 +1,4 @@
+export * from "./activation"
 export * from "./billing"
 export * from "./renew"
 export * from "./finilize"

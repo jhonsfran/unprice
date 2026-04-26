@@ -11,7 +11,7 @@ import { createCallerFactory, createTRPCContext } from "@unprice/trpc"
 import { appRouter } from "@unprice/trpc/routes"
 import { cookies, headers } from "next/headers"
 import { cache } from "react"
-import { getRequestLoggers, withEvlog } from "~/lib/evlog"
+import { getRequestLoggers, withEvlog } from "~/lib/observability"
 import { createQueryClient } from "./shared"
 
 /**

@@ -215,6 +215,7 @@ export const SUBSCRIPTION_STATUS = [
   "active", // the subscription is active
   "trialing", // the subscription is trialing
   "pending_payment", // pay-in-advance plan waiting on first payment webhook before becoming active
+  "pending_activation", // wallet activation (period grants) failed at create or renew; retry sweeper re-attempts. Ingestion is blocked until grants are issued.
   "canceled", // the subscription is cancelled
   "expired", // the subscription has expired - no auto-renew
   "past_due", // the subscription is past due - payment pending

@@ -6,7 +6,7 @@ import { lambdaRouter } from "@unprice/trpc/router/lambda"
 import { geolocation } from "@vercel/functions"
 
 import { CorsOptions, setCorsHeaders } from "~/app/api/_enableCors"
-import { getRequestLoggers, withEvlog } from "~/lib/evlog"
+import { getRequestLoggers, withEvlog } from "~/lib/observability"
 
 export const preferredRegion = ["fra1"]
 export const runtime = "nodejs"

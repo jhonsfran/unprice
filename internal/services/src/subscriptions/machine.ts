@@ -406,6 +406,11 @@ export class SubscriptionMachine {
               actions: "logStateTransition",
             },
             {
+              target: "pending_activation",
+              guard: ({ context }) => context.subscription.status === "pending_activation",
+              actions: "logStateTransition",
+            },
+            {
               target: "past_due",
               guard: ({ context }) => context.subscription.status === "past_due",
               actions: "logStateTransition",
@@ -643,8 +648,14 @@ export class SubscriptionMachine {
               target: "active",
               actions: ["logStateTransition"],
             },
+            // Activation failure is recoverable: park the subscription in
+            // `pending_activation` (a tagged subscription state, so the
+            // status persists to the DB) and let the activation sweeper
+            // retry. The previous `error` (final) target left the machine
+            // dead while the DB row stayed `active` — paid plans then had
+            // no grants and ingestion saw a green light. See HARD-007.
             onError: {
-              target: "error",
+              target: "pending_activation",
               actions: [
                 assign({
                   error: ({ event }) => ({
@@ -653,6 +664,25 @@ export class SubscriptionMachine {
                 }),
                 "logStateTransition",
               ],
+            },
+          },
+        },
+        pending_activation: {
+          tags: ["subscription"],
+          description:
+            "Wallet activation failed (period grants could not be issued). The subscription is parked here until the activation sweeper retries successfully. Ingestion is denied while in this state.",
+          on: {
+            // Sweeper / manual retry path. Re-enters `activating` which
+            // re-runs grant issuance under the same advisory lock; grant
+            // idempotency keys keep retries convergent on the same
+            // wallet_grants rows.
+            ACTIVATE: {
+              target: "activating",
+              actions: "logStateTransition",
+            },
+            CANCEL: {
+              target: "canceling",
+              actions: "logStateTransition",
             },
           },
         },
@@ -939,6 +969,33 @@ export class SubscriptionMachine {
               active: !["expired", "canceled"].includes(currentState),
             },
           })
+
+          // Keep the ACL cache in sync. The bouncer reads from it (Edge,
+          // ~0-10ms latency) and denies/allows ingestion based on the
+          // subscriptionStatus. Without this, transitions like
+          // active → pending_activation / past_due would only take effect
+          // after the SWR TTL elapses, leaving the customer's events
+          // unblocked for the cache window. Best-effort: failures here
+          // do not roll back the persisted status — the cache will catch
+          // up on the next miss.
+          const customerId = snapshot.context.customer?.id
+          if (customerId) {
+            try {
+              await this.customerService.updateAccessControlList({
+                customerId,
+                projectId: this.projectId,
+                updates: { subscriptionStatus: currentState as SubscriptionStatus },
+              })
+            } catch (cacheErr) {
+              this.logger.warn("Failed to refresh ACL cache after status change", {
+                subscriptionId: this.subscriptionId,
+                projectId: this.projectId,
+                customerId,
+                state: currentState,
+                error: (cacheErr as Error).message,
+              })
+            }
+          }
 
           lastPersisted = currentState as SubscriptionStatus
         } catch (err) {

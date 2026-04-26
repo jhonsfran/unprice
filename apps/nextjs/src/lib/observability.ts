@@ -22,6 +22,7 @@ export const { withEvlog, useLogger, log, createError, createEvlogError } = crea
     version: env.VERCEL_DEPLOYMENT_ID ?? "unknown",
   },
   drain,
+  // pretty: false,
   sampling: {
     rates: {
       info: env.APP_ENV === "production" ? 10 : 100,
