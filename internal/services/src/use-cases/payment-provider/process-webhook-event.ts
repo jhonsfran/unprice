@@ -262,6 +262,33 @@ async function applyWebhookEvent({
   }
 
   if (normalizedEvent.eventType === "payment.succeeded") {
+    // Order: settle → invoice status → subscription reconcile.
+    //
+    // Each operation is independently idempotent (settle is keyed on
+    // `invoice_receivable:{invoiceId}` in the ledger, the invoice status
+    // update is gated by `allowedFromStatuses`, and reconcile is gated by
+    // `metadata.subscriptionReconciledOutcome`). Doing settle first means
+    // that if the wallet ledger is unavailable, the invoice stays in
+    // `finalized` / `unpaid` and the webhook returns failed — Stripe (or
+    // any other provider) re-delivers and we replay cleanly. The previous
+    // ordering (status='paid' first) left invoices reconciled-as-paid but
+    // with the receivable still on the wallet's books on settle failure,
+    // and the subsequent retry took the `!updated` early-exit branch
+    // because the invoice was already in the target state — settlement
+    // never recovered without manual operator action.
+    const settled = await settlePrepaidInvoiceToWallet({
+      walletService: deps.services.wallet,
+      invoice,
+    })
+    if (settled.err) {
+      return Err(
+        new FetchError({
+          message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+          retry: false,
+        })
+      )
+    }
+
     const updated = await billingRepo.updateInvoiceIfStatus({
       invoiceId: invoice.id,
       projectId,
@@ -280,21 +307,39 @@ async function applyWebhookEvent({
     })
 
     if (!updated) {
-      // Already paid (or in a terminal/disallowed state). Settle + reconcile
-      // are idempotent, but we still log for incident review since this is a
-      // late or out-of-order webhook delivery.
-      deps.logger.warn("webhook payment.succeeded skipped: invoice not in expected state", {
+      // Late delivery — the invoice already transitioned (e.g., a previous
+      // attempt of this same event committed the status flip but failed at
+      // reconcile). Don't bail — fall through so reconcile gets another shot.
+      deps.logger.warn("webhook payment.succeeded: invoice already in target state", {
         invoiceId: invoice.id,
         currentStatus: invoice.status,
         eventId: normalizedEvent.eventId,
       })
-      return Ok({
-        outcome,
-        invoiceId: invoice.id,
-        subscriptionId: invoice.subscriptionId,
-      })
     }
 
+    const reconciled = await reconcilePaymentOutcomeOnce({
+      deps,
+      billingRepo,
+      invoiceId: invoice.id,
+      projectId: invoice.projectId,
+      subscriptionId: invoice.subscriptionId,
+      currentMetadata: updated?.metadata ?? invoice.metadata,
+      outcome: "success",
+      eventId: normalizedEvent.eventId,
+      now,
+    })
+    if (reconciled.err) {
+      return Err(reconciled.err)
+    }
+
+    return Ok({
+      outcome,
+      invoiceId: invoice.id,
+      subscriptionId: invoice.subscriptionId,
+    })
+  }
+
+  if (normalizedEvent.eventType === "payment.dispute_reversed") {
     const settled = await settlePrepaidInvoiceToWallet({
       walletService: deps.services.wallet,
       invoice,
@@ -308,31 +353,6 @@ async function applyWebhookEvent({
       )
     }
 
-    const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
-      projectId,
-      subscriptionId: invoice.subscriptionId,
-      invoiceId: invoice.id,
-      outcome: "success",
-      now,
-    })
-
-    if (subscriptionOutcome.err) {
-      return Err(
-        new FetchError({
-          message: subscriptionOutcome.err.message,
-          retry: false,
-        })
-      )
-    }
-
-    return Ok({
-      outcome,
-      invoiceId: invoice.id,
-      subscriptionId: invoice.subscriptionId,
-    })
-  }
-
-  if (normalizedEvent.eventType === "payment.dispute_reversed") {
     const updated = await billingRepo.updateInvoiceIfStatus({
       invoiceId: invoice.id,
       projectId,
@@ -350,46 +370,26 @@ async function applyWebhookEvent({
     })
 
     if (!updated) {
-      deps.logger.warn("webhook payment.dispute_reversed skipped: invoice not in expected state", {
+      deps.logger.warn("webhook payment.dispute_reversed: invoice already in target state", {
         invoiceId: invoice.id,
         currentStatus: invoice.status,
         eventId: normalizedEvent.eventId,
       })
-      return Ok({
-        outcome,
-        invoiceId: invoice.id,
-        subscriptionId: invoice.subscriptionId,
-      })
     }
 
-    const settled = await settlePrepaidInvoiceToWallet({
-      walletService: deps.services.wallet,
-      invoice,
-    })
-    if (settled.err) {
-      return Err(
-        new FetchError({
-          message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
-          retry: false,
-        })
-      )
-    }
-
-    const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
-      projectId,
-      subscriptionId: invoice.subscriptionId,
+    const reconciled = await reconcilePaymentOutcomeOnce({
+      deps,
+      billingRepo,
       invoiceId: invoice.id,
+      projectId: invoice.projectId,
+      subscriptionId: invoice.subscriptionId,
+      currentMetadata: updated?.metadata ?? invoice.metadata,
       outcome: "success",
+      eventId: normalizedEvent.eventId,
       now,
     })
-
-    if (subscriptionOutcome.err) {
-      return Err(
-        new FetchError({
-          message: subscriptionOutcome.err.message,
-          retry: false,
-        })
-      )
+    if (reconciled.err) {
+      return Err(reconciled.err)
     }
 
     return Ok({
@@ -402,6 +402,11 @@ async function applyWebhookEvent({
   const isPaymentFailed = normalizedEvent.eventType === "payment.failed"
   const failedStatus: InvoiceStatus = isPaymentFailed ? "unpaid" : "failed"
   const allowedFrom = isPaymentFailed ? PAYMENT_FAILED_FROM : PAYMENT_REVERSED_FROM
+  const failureMessage =
+    normalizedEvent.failureMessage ??
+    (normalizedEvent.eventType === "payment.reversed"
+      ? "Payment reversed by provider"
+      : "Payment failed from provider webhook")
 
   const updated = await billingRepo.updateInvoiceIfStatus({
     invoiceId: invoice.id,
@@ -412,29 +417,17 @@ async function applyWebhookEvent({
       metadata: {
         ...(invoice.metadata ?? {}),
         reason: "payment_failed",
-        note:
-          normalizedEvent.failureMessage ??
-          (normalizedEvent.eventType === "payment.reversed"
-            ? "Payment reversed by provider"
-            : "Payment failed from provider webhook"),
+        note: failureMessage,
       },
       updatedAtM: now,
     },
   })
 
   if (!updated) {
-    deps.logger.warn(
-      `webhook ${normalizedEvent.eventType} skipped: invoice not in expected state`,
-      {
-        invoiceId: invoice.id,
-        currentStatus: invoice.status,
-        eventId: normalizedEvent.eventId,
-      }
-    )
-    return Ok({
-      outcome,
+    deps.logger.warn(`webhook ${normalizedEvent.eventType}: invoice already in target state`, {
       invoiceId: invoice.id,
-      subscriptionId: invoice.subscriptionId,
+      currentStatus: invoice.status,
+      eventId: normalizedEvent.eventId,
     })
   }
 
@@ -442,16 +435,80 @@ async function applyWebhookEvent({
   // the wallet layer. The invoice's failed/unpaid status above already
   // reflects the reversal for downstream consumers.
 
+  const reconciled = await reconcilePaymentOutcomeOnce({
+    deps,
+    billingRepo,
+    invoiceId: invoice.id,
+    projectId: invoice.projectId,
+    subscriptionId: invoice.subscriptionId,
+    currentMetadata: updated?.metadata ?? invoice.metadata,
+    outcome: "failure",
+    failureMessage,
+    eventId: normalizedEvent.eventId,
+    now,
+  })
+  if (reconciled.err) {
+    return Err(reconciled.err)
+  }
+
+  return Ok({
+    outcome,
+    invoiceId: invoice.id,
+    subscriptionId: invoice.subscriptionId,
+  })
+}
+
+// Idempotent wrapper around `subscriptions.reconcilePaymentOutcome`. The
+// subscription state machine is NOT a strict no-op when sent the same
+// PAYMENT_SUCCESS twice (in `active` it can self-transition to `renewing`
+// at end-of-cycle). To keep replay safe we record the outcome on the
+// invoice metadata and skip the machine call if the same outcome is
+// already recorded. A genuinely new outcome (success → failure, or
+// failure → success after dispute reversal) bypasses the marker because
+// the recorded outcome differs from the incoming one.
+async function reconcilePaymentOutcomeOnce({
+  deps,
+  billingRepo,
+  invoiceId,
+  projectId,
+  subscriptionId,
+  currentMetadata,
+  outcome,
+  failureMessage,
+  eventId,
+  now,
+}: {
+  deps: ProcessWebhookEventDeps
+  billingRepo: DrizzleBillingRepository
+  invoiceId: string
+  projectId: string
+  subscriptionId: string
+  currentMetadata: unknown
+  outcome: "success" | "failure"
+  failureMessage?: string
+  eventId: string
+  now: number
+}): Promise<Result<void, FetchError>> {
+  const metadata = (currentMetadata ?? {}) as {
+    subscriptionReconciledOutcome?: "success" | "failure"
+  } & Record<string, unknown>
+
+  if (metadata.subscriptionReconciledOutcome === outcome) {
+    deps.logger.info("webhook reconcile skipped: subscription already reconciled with outcome", {
+      invoiceId,
+      subscriptionId,
+      outcome,
+      eventId,
+    })
+    return Ok(undefined)
+  }
+
   const subscriptionOutcome = await deps.services.subscriptions.reconcilePaymentOutcome({
     projectId,
-    subscriptionId: invoice.subscriptionId,
-    invoiceId: invoice.id,
-    outcome: "failure",
-    failureMessage:
-      normalizedEvent.failureMessage ??
-      (normalizedEvent.eventType === "payment.reversed"
-        ? "Payment reversed by provider"
-        : "Payment failed from provider webhook"),
+    subscriptionId,
+    invoiceId,
+    outcome,
+    failureMessage,
     now,
   })
 
@@ -464,11 +521,36 @@ async function applyWebhookEvent({
     )
   }
 
-  return Ok({
-    outcome,
-    invoiceId: invoice.id,
-    subscriptionId: invoice.subscriptionId,
-  })
+  // Persist the marker so a webhook retry that lands here after a previous
+  // attempt's reconcile committed (but its overall apply step failed
+  // afterward) skips the machine call instead of replaying a redundant
+  // PAYMENT_SUCCESS / PAYMENT_FAILURE event. Best-effort: a marker write
+  // failure does not roll back the reconcile and does not fail the webhook
+  // — replay-safety is restored on the next retry. Logged for ops.
+  try {
+    await billingRepo.updateInvoice({
+      invoiceId,
+      projectId,
+      data: {
+        metadata: {
+          ...metadata,
+          subscriptionReconciledAt: now,
+          subscriptionReconciledOutcome: outcome,
+        },
+        updatedAtM: now,
+      },
+    })
+  } catch (markerError) {
+    deps.logger.warn("webhook reconcile marker write failed (best-effort)", {
+      invoiceId,
+      subscriptionId,
+      outcome,
+      eventId,
+      error: markerError instanceof Error ? markerError.message : String(markerError),
+    })
+  }
+
+  return Ok(undefined)
 }
 
 export async function processWebhookEvent(

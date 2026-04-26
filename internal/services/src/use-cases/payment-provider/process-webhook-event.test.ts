@@ -360,10 +360,14 @@ describe("processWebhookEvent", () => {
     expect(wallet.adjust).not.toHaveBeenCalled()
   })
 
-  it("skips downstream side effects when invoice already in target state (state-machine guard)", async () => {
-    // Late or out-of-order webhook: invoice already paid. The conditional
-    // update returns 0 rows; we must not call settleReceivable or
-    // reconcilePaymentOutcome a second time.
+  it("retries idempotent settle + reconcile when invoice is already paid but reconcile marker is missing (HARD-006)", async () => {
+    // Late delivery / Stripe retry after a previous attempt committed the
+    // invoice status flip but failed before the reconcile step. The next
+    // delivery must NOT bail out — it must replay both settle (idempotent
+    // at the ledger via `invoice_receivable:{id}`) and reconcile, so the
+    // subscription state machine actually advances. Pre-HARD-006 the
+    // handler short-circuited on `!updated` and the receivable + machine
+    // state stayed inconsistent until manual replay.
     ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
       val: {
         eventId: "evt_late",
@@ -384,7 +388,7 @@ describe("processWebhookEvent", () => {
       },
     })
 
-    const { db } = createDbMocks({
+    const { db, mocks } = createDbMocks({
       invoice: {
         id: "inv_1",
         projectId: "proj_1",
@@ -399,7 +403,7 @@ describe("processWebhookEvent", () => {
         whenToBill: "pay_in_advance",
         customerId: "cus_1",
       },
-      updateInvoiceReturns: [], // conditional update doesn't match
+      updateInvoiceReturns: [], // conditional update doesn't match — already paid
     })
 
     const result = await processWebhookEvent(callServices(db), {
@@ -412,7 +416,145 @@ describe("processWebhookEvent", () => {
     expect(result.err).toBeUndefined()
     expect(result.val?.status).toBe("processed")
     expect(result.val?.outcome).toBe("payment_succeeded")
-    expect(wallet.settleReceivable).not.toHaveBeenCalled()
+    // settle is idempotent on its own ledger source.id and must run so a
+    // prior attempt that crashed before settle is recoverable.
+    expect(wallet.settleReceivable).toHaveBeenCalledTimes(1)
+    // reconcile runs because the invoice has no reconcile marker yet —
+    // a previous attempt clearly didn't reach the marker write.
+    expect(subscriptions.reconcilePaymentOutcome).toHaveBeenCalledTimes(1)
+    expect(subscriptions.reconcilePaymentOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: "success",
+        subscriptionId: "sub_1",
+        invoiceId: "inv_1",
+      })
+    )
+    // After reconcile succeeds we stamp the marker via updateInvoice so the
+    // next replay short-circuits at the marker check below.
+    expect(mocks.update).toHaveBeenCalled()
+  })
+
+  it("skips reconcile when invoice already carries a matching reconcile marker (HARD-006 idempotency)", async () => {
+    // Replay arrives after a prior delivery completed reconcile and stamped
+    // metadata.subscriptionReconciledOutcome='success'. settle still runs
+    // (idempotent ledger no-op) but reconcile must be a no-op so we don't
+    // re-fire PAYMENT_SUCCESS at the subscription machine — at end-of-cycle
+    // that would erroneously trigger a second `renewing` transition.
+    ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
+      val: {
+        eventId: "evt_replay",
+        eventType: "invoice.paid",
+        occurredAt: Date.now(),
+        payload: {},
+      },
+    })
+    ;(paymentProvider.normalizeWebhook as ReturnType<typeof vi.fn>).mockReturnValue({
+      val: {
+        provider,
+        eventId: "evt_replay",
+        eventType: "payment.succeeded",
+        providerEventType: "invoice.paid",
+        occurredAt: Date.now(),
+        invoiceId: "in_provider_1",
+        payload: {},
+      },
+    })
+
+    const { db } = createDbMocks({
+      invoice: {
+        id: "inv_1",
+        projectId: "proj_1",
+        subscriptionId: "sub_1",
+        status: "paid",
+        paidAt: Date.now(),
+        paymentAttempts: [],
+        metadata: {
+          subscriptionReconciledAt: Date.now() - 60_000,
+          subscriptionReconciledOutcome: "success",
+        },
+        invoicePaymentProviderUrl: null,
+        totalAmount: 5_000_000_000,
+        currency: "USD",
+        whenToBill: "pay_in_advance",
+        customerId: "cus_1",
+      },
+      updateInvoiceReturns: [], // already paid
+    })
+
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_replay", type: "invoice.paid" }),
+      headers: { "stripe-signature": "sig" },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.status).toBe("processed")
+    expect(result.val?.outcome).toBe("payment_succeeded")
+    // settle stays idempotent at the ledger level — calling it is fine.
+    expect(wallet.settleReceivable).toHaveBeenCalledTimes(1)
+    // reconcile must NOT run a second time when the invoice marker matches.
+    expect(subscriptions.reconcilePaymentOutcome).not.toHaveBeenCalled()
+  })
+
+  it("settle failure leaves invoice unchanged and surfaces an error so the provider retry can recover (HARD-006)", async () => {
+    // Pre-HARD-006 ordering: invoice flipped to 'paid' before settle, so a
+    // settle failure left invoice=paid + receivable still on the wallet's
+    // books AND the next retry took the `!updated` early exit. Post-HARD-006:
+    // settle runs first, an error short-circuits before any invoice mutation,
+    // and the webhook returns failed so the provider re-delivers cleanly.
+    ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
+      val: {
+        eventId: "evt_settle_fail",
+        eventType: "invoice.paid",
+        occurredAt: Date.now(),
+        payload: {},
+      },
+    })
+    ;(paymentProvider.normalizeWebhook as ReturnType<typeof vi.fn>).mockReturnValue({
+      val: {
+        provider,
+        eventId: "evt_settle_fail",
+        eventType: "payment.succeeded",
+        providerEventType: "invoice.paid",
+        occurredAt: Date.now(),
+        invoiceId: "in_provider_1",
+        payload: {},
+      },
+    })
+
+    wallet.settleReceivable.mockResolvedValueOnce({
+      err: { message: "ledger gateway unavailable" },
+    })
+
+    const { db, mocks } = createDbMocks({
+      invoice: {
+        id: "inv_1",
+        projectId: "proj_1",
+        subscriptionId: "sub_1",
+        status: "unpaid",
+        paidAt: null,
+        paymentAttempts: [],
+        metadata: {},
+        invoicePaymentProviderUrl: null,
+        totalAmount: 5_000_000_000,
+        currency: "USD",
+        whenToBill: "pay_in_advance",
+        customerId: "cus_1",
+      },
+    })
+
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_settle_fail", type: "invoice.paid" }),
+      headers: { "stripe-signature": "sig" },
+    })
+
+    expect(result.err).toBeDefined()
+    // Invoice update must NOT have run — the provider re-delivery starts
+    // again from the `unpaid → paid` transition and replays settle.
+    expect(mocks.update).not.toHaveBeenCalled()
     expect(subscriptions.reconcilePaymentOutcome).not.toHaveBeenCalled()
   })
 

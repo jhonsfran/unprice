@@ -67,6 +67,23 @@ export const invoiceMetadataSchema = z.object({
     .int()
     .optional()
     .describe("Epoch ms timestamp of the last finalize attempt"),
+  // Idempotency markers for the webhook → subscription reconcile step. Set
+  // by `applyWebhookEvent` after `reconcilePaymentOutcome` succeeds so that
+  // a webhook retry which arrives after the invoice has already transitioned
+  // to its terminal status can skip the subscription state-machine call
+  // instead of replaying it (replay would re-fire side effects like
+  // `renewing` at end-of-cycle). Outcome is recorded so a later
+  // payment.reversed / payment.dispute_reversed flips the marker and the
+  // machine sees the new transition.
+  subscriptionReconciledAt: z
+    .number()
+    .int()
+    .optional()
+    .describe("Epoch ms timestamp of the last successful reconcile against the subscription"),
+  subscriptionReconciledOutcome: z
+    .enum(["success", "failure"])
+    .optional()
+    .describe("Outcome of the last successful reconcile against the subscription"),
 })
 
 export const subscriptionMetadataSchema = z.object({

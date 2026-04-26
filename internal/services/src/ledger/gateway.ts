@@ -572,7 +572,7 @@ export class LedgerGateway {
       const result = await exec.execute<{
         id: string
         amount: string
-        created_at: Date
+        created_at: Date | string
         metadata: Record<string, unknown> | null
         currency: string
       }>(
@@ -863,7 +863,7 @@ export class LedgerGateway {
     row: {
       id: string
       amount: string
-      created_at: Date
+      created_at: Date | string
       metadata: Record<string, unknown> | null
       currency: string
     },
@@ -879,7 +879,7 @@ export class LedgerGateway {
       quantity: this.parseQuantity(metadata.quantity),
       amount: fromLedgerAmount(row.amount, currency),
       currency,
-      createdAt: row.created_at,
+      createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
       metadata: row.metadata,
     }
   }
