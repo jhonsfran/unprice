@@ -70,20 +70,27 @@ type GrantWindowRow = {
 
 type GrantRow = {
   grantId: string
-  amount: number | null
-  anchor: number
-  currencyCode: string
+  allowanceUnits: number | null
+  effectiveAt: number
+  expiresAt: number | null
+  priority: number
+  addedAt: number
+}
+
+type EntitlementConfigRow = {
+  customerEntitlementId: string
+  projectId: string
+  customerId: string
   effectiveAt: number
   expiresAt: number | null
   featureConfig: unknown
   featurePlanVersionId: string
   featureSlug: string
   meterConfig: unknown
-  meterHash: string
   overageStrategy: string
-  priority: number
   resetConfig: unknown
   addedAt: number
+  updatedAt: number
 }
 
 const METER_WINDOW_KEYS = new Set<string>([
@@ -124,23 +131,31 @@ const GRANT_WINDOW_KEYS = new Set<string>([
 
 const GRANT_KEYS = new Set<string>([
   "grantId",
-  "amount",
-  "anchor",
-  "currencyCode",
+  "allowanceUnits",
+  "effectiveAt",
+  "expiresAt",
+  "priority",
+  "addedAt",
+])
+
+const ENTITLEMENT_CONFIG_KEYS = new Set<string>([
+  "customerEntitlementId",
+  "projectId",
+  "customerId",
   "effectiveAt",
   "expiresAt",
   "featureConfig",
   "featurePlanVersionId",
   "featureSlug",
   "meterConfig",
-  "meterHash",
   "overageStrategy",
-  "priority",
   "resetConfig",
   "addedAt",
+  "updatedAt",
 ])
 
 type FakeDbState = {
+  entitlementConfigRows: Map<string, EntitlementConfigRow>
   idempotencyRows: Map<string, IdempotencyRow>
   outboxRows: { id: number; payload: string; currency: string }[]
   meterWindowRows: Map<string, MeterWindowRow>
@@ -377,15 +392,15 @@ describe("EntitlementWindowDO", () => {
   it("rejects invalid apply payloads", async () => {
     const cases: Array<[string, Record<string, unknown>]> = [
       ["empty idempotency key", { idempotencyKey: "" }],
-      ["missing meter", { grants: [createGrantSnapshot({ meterConfig: null })] }],
+      ["missing meter", { entitlement: { meterConfig: null } }],
       ["non-finite limit", { grants: [createGrantSnapshot({ amount: Number.POSITIVE_INFINITY })] }],
       [
         "unsupported overage strategy",
-        { grants: [createGrantSnapshot({ overageStrategy: "sometimes" })] },
+        { entitlement: { overageStrategy: "sometimes" }, overageStrategy: "sometimes" },
       ],
       ["nan period end", { grants: [createGrantSnapshot({ expiresAt: Number.NaN })] }],
-      ["missing price config", { grants: [createGrantSnapshot({ featureConfig: null })] }],
-      ["missing plan version id", { grants: [createGrantSnapshot({ featurePlanVersionId: "" })] }],
+      ["missing price config", { entitlement: { featureConfig: null } }],
+      ["missing plan version id", { entitlement: { featurePlanVersionId: "" } }],
     ]
 
     for (const [, overrides] of cases) {
@@ -438,10 +453,9 @@ describe("EntitlementWindowDO", () => {
       expect.objectContaining({
         delta: 2,
         event_id: input.event.id,
-        feature_slug: input.grants[0]!.featureSlug,
+        feature_slug: input.entitlement.featureSlug,
         feature_plan_version_id: "fpv_123",
         idempotency_key: input.idempotencyKey,
-        meter_hash: input.grants[0]!.meterHash,
         value_after: 2,
         amount: 200_000_000,
         amount_scale: 8,
@@ -524,7 +538,7 @@ describe("EntitlementWindowDO", () => {
     expect(ratingRateIncrementalSpy).not.toHaveBeenCalled()
   })
 
-  it("rates same-stream applies with each grant's own feature config snapshot", async () => {
+  it("rates same-stream applies from the entitlement config snapshot", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -539,13 +553,13 @@ describe("EntitlementWindowDO", () => {
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
 
-    // First apply hydrates the raw meter-state row. Pricing still comes from
-    // each persisted grant snapshot, not the meter row.
+    // First apply hydrates the raw meter-state row. Pricing comes from the
+    // entitlement snapshot, not the meter row or allowance grants.
     await durableObject.apply(
       createApplyInput({
         idempotencyKey: "idem_a",
         featurePlanVersionId: "fpv_a",
-        grants: [createGrantSnapshot({ featurePlanVersionId: "fpv_a", grantId: "grant_a" })],
+        grants: [createGrantSnapshot({ grantId: "grant_a" })],
       })
     )
     expect(db.meterWindowRows.size).toBe(1)
@@ -554,18 +568,18 @@ describe("EntitlementWindowDO", () => {
     expect(pricingRow?.priceConfig).toBeUndefined()
 
     // Second apply brings a higher-priority addon grant on the same stream.
-    // The meter row stays singleton, but rating/audit follows the grant snapshot.
+    // The meter row stays singleton, but rating/audit still follows the
+    // entitlement snapshot.
     await durableObject.apply(
       createApplyInput({
         idempotencyKey: "idem_b",
-        featurePlanVersionId: "fpv_b",
+        featurePlanVersionId: "fpv_a",
         grants: [
           createGrantSnapshot({
-            featurePlanVersionId: "fpv_b",
             grantId: "grant_b",
             priority: 20,
           }),
-          createGrantSnapshot({ featurePlanVersionId: "fpv_a", grantId: "grant_a" }),
+          createGrantSnapshot({ grantId: "grant_a" }),
         ],
       })
     )
@@ -573,10 +587,20 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.size).toBe(1)
     expect(db.outboxRows).toHaveLength(2)
     const fpvs = db.outboxRows.map((row) => JSON.parse(row.payload).feature_plan_version_id)
-    expect(fpvs).toEqual(["fpv_a", "fpv_b"])
+    expect(fpvs).toEqual(["fpv_a", "fpv_a"])
+
+    await expect(
+      durableObject.apply(
+        createApplyInput({
+          idempotencyKey: "idem_mutated_config",
+          featurePlanVersionId: "fpv_b",
+          grants: [createGrantSnapshot({ grantId: "grant_c" })],
+        })
+      )
+    ).rejects.toThrow("Immutable entitlement config changed")
   })
 
-  it("splits one usage fact across canonical grants with each grant's own price", async () => {
+  it("splits one usage fact across canonical grants using the entitlement price", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -600,18 +624,18 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(
       createApplyInput({
+        featurePlanVersionId: "fpv_entitlement",
+        priceConfig: { ...DEFAULT_PRICE_CONFIG, unitAmount: 100 },
         grants: [
           createGrantSnapshot({
             grantId: "grant_a",
             amount: 3,
-            featurePlanVersionId: "fpv_a",
             featureConfig: { ...DEFAULT_PRICE_CONFIG, unitAmount: 100 },
             priority: 20,
           }),
           createGrantSnapshot({
             grantId: "grant_b",
             amount: 10,
-            featurePlanVersionId: "fpv_b",
             featureConfig: { ...DEFAULT_PRICE_CONFIG, unitAmount: 200 },
             priority: 10,
           }),
@@ -624,9 +648,12 @@ describe("EntitlementWindowDO", () => {
 
     const payloads = db.outboxRows.map((row) => JSON.parse(row.payload))
     expect(payloads.map((payload) => payload.grant_id)).toEqual(["grant_a", "grant_b"])
-    expect(payloads.map((payload) => payload.feature_plan_version_id)).toEqual(["fpv_a", "fpv_b"])
+    expect(payloads.map((payload) => payload.feature_plan_version_id)).toEqual([
+      "fpv_entitlement",
+      "fpv_entitlement",
+    ])
     expect(payloads.map((payload) => payload.delta)).toEqual([3, 2])
-    expect(payloads.map((payload) => payload.amount)).toEqual([300_000_000, 400_000_000])
+    expect(payloads.map((payload) => payload.amount)).toEqual([300_000_000, 200_000_000])
 
     expect(db.grantWindowRows.get(`grant_a:onetime:${BASE_NOW - 60_000}`)).toMatchObject({
       consumedInCurrentWindow: 3,
@@ -653,11 +680,11 @@ describe("EntitlementWindowDO", () => {
     await durableObject.apply(
       createApplyInput({
         idempotencyKey: "idem_original",
+        featurePlanVersionId: "fpv_original",
         grants: [
           createGrantSnapshot({
             grantId: "grant_stable",
-            featurePlanVersionId: "fpv_original",
-            featureSlug: "api_calls",
+            amount: 50,
             expiresAt: BASE_NOW + 60_000,
           }),
         ],
@@ -667,12 +694,11 @@ describe("EntitlementWindowDO", () => {
     await durableObject.apply(
       createApplyInput({
         idempotencyKey: "idem_mutated",
+        featurePlanVersionId: "fpv_original",
         grants: [
           createGrantSnapshot({
             grantId: "grant_stable",
             amount: 999,
-            featurePlanVersionId: "fpv_mutated",
-            featureSlug: "mutated_feature",
             expiresAt: BASE_NOW + 10_000,
             priority: 999,
           }),
@@ -681,10 +707,8 @@ describe("EntitlementWindowDO", () => {
     )
 
     expect(db.grantRows.get("grant_stable")).toMatchObject({
-      amount: null,
+      allowanceUnits: 50,
       expiresAt: BASE_NOW + 10_000,
-      featurePlanVersionId: "fpv_original",
-      featureSlug: "api_calls",
       priority: 10,
     })
 
@@ -897,7 +921,7 @@ describe("EntitlementWindowDO", () => {
         projectId: "proj_123",
         customerId: "cus_123",
         currency: "USD",
-        entitlementId: "fpv_123",
+        entitlementId: "ce_123",
       })
     )
     // The reservation is persisted onto the window so subsequent events use
@@ -2085,6 +2109,7 @@ async function loadEntitlementWindowDO() {
     },
     calculatePricePerFeature: testState.pricePerFeature,
     configFeatureSchema: z.record(z.string(), z.unknown()),
+    meterConfigSchema: z.record(z.string(), z.unknown()),
   }))
 
   vi.doMock("@unprice/services/entitlements", () => {
@@ -2199,9 +2224,12 @@ async function loadEntitlementWindowDO() {
       return "none"
     }
 
+    const getGrantAllowance = (grant: { allowanceUnits?: number | null; amount?: number | null }) =>
+      grant.allowanceUnits ?? grant.amount ?? null
+
     const resolveAvailableGrantUnits = (params: {
       grants: Array<{
-        amount: number | null
+        allowanceUnits: number | null
         effectiveAt: number
         expiresAt: number | null
         grantId: string
@@ -2213,11 +2241,12 @@ async function loadEntitlementWindowDO() {
       let available = 0
 
       for (const grant of params.grants) {
-        if (grant.amount === null) return Number.POSITIVE_INFINITY
+        const allowanceUnits = getGrantAllowance(grant)
+        if (allowanceUnits === null) return Number.POSITIVE_INFINITY
 
         const bucket = computeGrantPeriodBucket(grant)
         const consumed = statesByBucketKey.get(bucket.bucketKey)?.consumedInCurrentWindow ?? 0
-        available += Math.max(0, grant.amount - consumed)
+        available += Math.max(0, allowanceUnits - consumed)
       }
 
       return available
@@ -2265,7 +2294,7 @@ async function loadEntitlementWindowDO() {
       }) => [m.eventId, m.eventSlug, m.aggregationMethod, m.aggregationField ?? ""].join(":"),
       consumeGrantsByPriority: (params: {
         grants: Array<{
-          amount: number | null
+          allowanceUnits: number | null
           effectiveAt: number
           expiresAt: number | null
           grantId: string
@@ -2293,10 +2322,11 @@ async function loadEntitlementWindowDO() {
             consumedInCurrentWindow: 0,
             exhaustedAt: null,
           }
+          const allowanceUnits = getGrantAllowance(grant)
           const available =
-            grant.amount === null
+            allowanceUnits === null
               ? Number.POSITIVE_INFINITY
-              : grant.amount - state.consumedInCurrentWindow
+              : allowanceUnits - state.consumedInCurrentWindow
           if (available <= 0) continue
           const units = Math.min(remaining, available)
           const usageBefore = state.consumedInCurrentWindow
@@ -2310,7 +2340,7 @@ async function loadEntitlementWindowDO() {
               ...state,
               consumedInCurrentWindow: usageAfter,
               exhaustedAt:
-                grant.amount !== null && usageAfter >= grant.amount
+                allowanceUnits !== null && usageAfter >= allowanceUnits
                   ? params.timestamp
                   : state.exhaustedAt,
             },
@@ -2333,7 +2363,8 @@ async function loadEntitlementWindowDO() {
               ...previous.nextState,
               consumedInCurrentWindow: usageAfter,
               exhaustedAt:
-                previous.grant.amount !== null && usageAfter >= previous.grant.amount
+                getGrantAllowance(previous.grant) !== null &&
+                usageAfter >= (getGrantAllowance(previous.grant) ?? Number.POSITIVE_INFINITY)
                   ? params.timestamp
                   : previous.nextState.exhaustedAt,
             },
@@ -2403,6 +2434,7 @@ function createDurableObjectState(): FakeDurableObjectState {
 
 function createFakeDbState(): FakeDbState {
   return {
+    entitlementConfigRows: new Map(),
     idempotencyRows: new Map(),
     outboxRows: [],
     meterWindowRows: new Map(),
@@ -2435,6 +2467,7 @@ function buildFakeDrizzle(state: FakeDbState) {
   const db = {
     transaction<T>(callback: (tx: typeof db) => T): T {
       const idempotencySnapshot = new Map(state.idempotencyRows)
+      const entitlementConfigSnapshot = new Map(state.entitlementConfigRows)
       const outboxSnapshot = [...state.outboxRows]
       const meterPricingSnapshot = new Map(state.meterWindowRows)
       const grantSnapshot = new Map(state.grantRows)
@@ -2446,6 +2479,9 @@ function buildFakeDrizzle(state: FakeDbState) {
         state.idempotencyRows.clear()
         for (const [k, v] of Array.from(idempotencySnapshot.entries()))
           state.idempotencyRows.set(k, v)
+        state.entitlementConfigRows.clear()
+        for (const [k, v] of Array.from(entitlementConfigSnapshot.entries()))
+          state.entitlementConfigRows.set(k, v)
         state.outboxRows.splice(0, state.outboxRows.length, ...outboxSnapshot)
         state.meterWindowRows.clear()
         for (const [k, v] of Array.from(meterPricingSnapshot.entries()))
@@ -2489,6 +2525,16 @@ function buildFakeDrizzle(state: FakeDbState) {
             }
           }
           if (keys.includes("count")) return { count: state.outboxRows.length }
+          if (keys.every((k) => ENTITLEMENT_CONFIG_KEYS.has(k))) {
+            const source =
+              cond?.value !== undefined
+                ? state.entitlementConfigRows.get(String(cond.value))
+                : state.entitlementConfigRows.values().next().value
+            if (!source) return undefined
+            const row: Record<string, unknown> = {}
+            for (const key of keys) row[key] = (source as Record<string, unknown>)[key]
+            return row
+          }
           if (keys.every((k) => METER_WINDOW_KEYS.has(k))) {
             // Single-meter DO → at most one meter_window row
             const first = state.meterWindowRows.values().next().value
@@ -2569,6 +2615,26 @@ function buildFakeDrizzle(state: FakeDbState) {
               return builder
             },
             run() {
+              if ("customerEntitlementId" in value && "featureConfig" in value) {
+                const key = String(value.customerEntitlementId)
+                if (state.entitlementConfigRows.has(key)) return
+                state.entitlementConfigRows.set(key, {
+                  customerEntitlementId: key,
+                  projectId: String(value.projectId),
+                  customerId: String(value.customerId),
+                  effectiveAt: Number(value.effectiveAt),
+                  expiresAt: value.expiresAt != null ? Number(value.expiresAt) : null,
+                  featureConfig: value.featureConfig,
+                  featurePlanVersionId: String(value.featurePlanVersionId),
+                  featureSlug: String(value.featureSlug),
+                  meterConfig: value.meterConfig,
+                  overageStrategy: String(value.overageStrategy),
+                  resetConfig: value.resetConfig ?? null,
+                  addedAt: Number(value.addedAt),
+                  updatedAt: Number(value.updatedAt),
+                })
+                return
+              }
               if ("bucketKey" in value && "consumedInCurrentWindow" in value) {
                 const key = String(value.bucketKey)
                 if (state.grantWindowRows.has(key)) return
@@ -2583,24 +2649,16 @@ function buildFakeDrizzle(state: FakeDbState) {
                 })
                 return
               }
-              if ("grantId" in value && "featureConfig" in value) {
+              if ("grantId" in value && "allowanceUnits" in value) {
                 const key = String(value.grantId)
                 if (state.grantRows.has(key)) return
                 state.grantRows.set(key, {
                   grantId: key,
-                  amount: value.amount != null ? Number(value.amount) : null,
-                  anchor: Number(value.anchor),
-                  currencyCode: String(value.currencyCode),
+                  allowanceUnits:
+                    value.allowanceUnits != null ? Number(value.allowanceUnits) : null,
                   effectiveAt: Number(value.effectiveAt),
                   expiresAt: value.expiresAt != null ? Number(value.expiresAt) : null,
-                  featureConfig: value.featureConfig,
-                  featurePlanVersionId: String(value.featurePlanVersionId),
-                  featureSlug: String(value.featureSlug),
-                  meterConfig: value.meterConfig,
-                  meterHash: String(value.meterHash),
-                  overageStrategy: String(value.overageStrategy),
                   priority: Number(value.priority),
-                  resetConfig: value.resetConfig ?? null,
                   addedAt: Number(value.addedAt),
                 })
                 return
@@ -2701,10 +2759,15 @@ function buildFakeDrizzle(state: FakeDbState) {
                 return
               }
               if ("expiresAt" in patch) {
-                const grantId = String(cond?.value ?? "")
-                const row = state.grantRows.get(grantId)
-                if (!row) return
-                Object.assign(row, patch)
+                const id = String(cond?.value ?? "")
+                const entitlement = state.entitlementConfigRows.get(id)
+                if (entitlement) {
+                  Object.assign(entitlement, patch)
+                  return
+                }
+                const grant = state.grantRows.get(id)
+                if (!grant) return
+                Object.assign(grant, patch)
                 return
               }
               const first = state.meterWindowRows.values().next().value
@@ -2752,31 +2815,34 @@ function createEnv() {
 }
 
 function createGrantSnapshot(overrides: Record<string, unknown> = {}) {
+  const amount =
+    typeof overrides.allowanceUnits === "number"
+      ? overrides.allowanceUnits
+      : typeof overrides.amount === "number"
+        ? overrides.amount
+        : null
+
   return {
-    amount: null,
-    anchor: 0,
-    currencyCode: "USD",
+    allowanceUnits: amount,
+    amount,
     effectiveAt: BASE_NOW - 60_000,
     expiresAt: null,
-    featureConfig: DEFAULT_PRICE_CONFIG,
-    featurePlanVersionId: "fpv_123",
-    featureSlug: "api_calls",
     grantId: "grant_123",
-    meterConfig: DEFAULT_METER_CONFIG,
-    meterHash: "meter_hash_123",
-    overageStrategy: "none",
     priority: 10,
-    resetConfig: null,
     ...overrides,
   }
 }
 
 function createApplyInput(overrides: Record<string, unknown> = {}) {
-  const currency = typeof overrides.currency === "string" ? overrides.currency : "USD"
+  const projectId = (overrides.projectId as string | undefined) ?? "proj_123"
+  const customerId = (overrides.customerId as string | undefined) ?? "cus_123"
+  const customerEntitlementId = (overrides.customerEntitlementId as string | undefined) ?? "ce_123"
   const featurePlanVersionId =
     typeof overrides.featurePlanVersionId === "string" ? overrides.featurePlanVersionId : "fpv_123"
   const priceConfig =
     (overrides.priceConfig as typeof DEFAULT_PRICE_CONFIG | undefined) ?? DEFAULT_PRICE_CONFIG
+  const meterConfig =
+    (overrides.meterConfig as typeof DEFAULT_METER_CONFIG | undefined) ?? DEFAULT_METER_CONFIG
   const periodStartAt =
     typeof overrides.periodStartAt === "number" ? overrides.periodStartAt : BASE_NOW - 60_000
   const periodEndAt =
@@ -2784,20 +2850,39 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
   const amount = typeof overrides.limit === "number" ? overrides.limit : null
   const overageStrategy =
     typeof overrides.overageStrategy === "string" ? overrides.overageStrategy : "none"
-  const grants = (overrides.grants as ReturnType<typeof createGrantSnapshot>[] | undefined) ?? [
+  const grantSnapshots = (overrides.grants as
+    | ReturnType<typeof createGrantSnapshot>[]
+    | undefined) ?? [
     createGrantSnapshot({
       amount,
-      currencyCode: currency,
       effectiveAt: periodStartAt,
       expiresAt: periodEndAt,
-      featureConfig: priceConfig,
-      featurePlanVersionId,
-      overageStrategy,
     }),
   ]
+  const entitlementExpiresAt =
+    "entitlementExpiresAt" in overrides
+      ? (overrides.entitlementExpiresAt as number | null)
+      : periodEndAt
+  const entitlement = {
+    allowanceUnits: amount,
+    customerEntitlementId,
+    customerId,
+    effectiveAt: periodStartAt,
+    expiresAt: entitlementExpiresAt,
+    featureConfig: priceConfig,
+    featurePlanVersionId,
+    featureSlug: (overrides.featureSlug as string | undefined) ?? "api_calls",
+    featureType: (overrides.featureType as string | undefined) ?? "usage",
+    meterConfig,
+    overageStrategy,
+    projectId,
+    resetConfig: (overrides.resetConfig as Record<string, unknown> | null | undefined) ?? null,
+    ...((overrides.entitlement as Record<string, unknown> | undefined) ?? {}),
+  }
 
   return {
-    customerId: (overrides.customerId as string | undefined) ?? "cus_123",
+    customerId,
+    entitlement,
     enforceLimit: (overrides.enforceLimit as boolean | undefined) ?? false,
     event: {
       id: "evt_123",
@@ -2808,7 +2893,18 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
     },
     idempotencyKey: (overrides.idempotencyKey as string | undefined) ?? "idem_123",
     now: (overrides.now as number | undefined) ?? BASE_NOW,
-    projectId: (overrides.projectId as string | undefined) ?? "proj_123",
-    grants,
+    projectId,
+    grants: grantSnapshots.map((grant) => ({
+      allowanceUnits:
+        typeof grant.allowanceUnits === "number"
+          ? grant.allowanceUnits
+          : typeof grant.amount === "number"
+            ? grant.amount
+            : null,
+      effectiveAt: Number(grant.effectiveAt),
+      expiresAt: grant.expiresAt != null ? Number(grant.expiresAt) : null,
+      grantId: String(grant.grantId),
+      priority: Number(grant.priority),
+    })),
   }
 }

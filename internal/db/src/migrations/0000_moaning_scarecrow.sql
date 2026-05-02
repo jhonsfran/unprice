@@ -7,7 +7,6 @@ CREATE TYPE "public"."currency" AS ENUM('USD', 'EUR');--> statement-breakpoint
 CREATE TYPE "public"."due_behaviour" AS ENUM('cancel', 'downgrade');--> statement-breakpoint
 CREATE TYPE "public"."merging_policy" AS ENUM('sum', 'max', 'min', 'replace');--> statement-breakpoint
 CREATE TYPE "public"."grant_type" AS ENUM('subscription', 'manual', 'promotion', 'trial', 'addon');--> statement-breakpoint
-CREATE TYPE "public"."invoice_item_kind" AS ENUM('period', 'tax', 'discount', 'refund', 'adjustment', 'trial');--> statement-breakpoint
 CREATE TYPE "public"."invoice_status" AS ENUM('unpaid', 'paid', 'waiting', 'void', 'draft', 'failed');--> statement-breakpoint
 CREATE TYPE "public"."overage_strategy" AS ENUM('none', 'last-call', 'always');--> statement-breakpoint
 CREATE TYPE "public"."payment_providers" AS ENUM('stripe', 'square', 'sandbox');--> statement-breakpoint
@@ -15,12 +14,14 @@ CREATE TYPE "public"."plan_type" AS ENUM('recurring', 'onetime');--> statement-b
 CREATE TYPE "public"."app_stages" AS ENUM('prod', 'test', 'dev');--> statement-breakpoint
 CREATE TYPE "public"."plan_version_status" AS ENUM('draft', 'published');--> statement-breakpoint
 CREATE TYPE "public"."subject_type" AS ENUM('project', 'plan', 'plan_version', 'customer');--> statement-breakpoint
-CREATE TYPE "public"."subscription_status_v3" AS ENUM('active', 'trialing', 'canceled', 'expired', 'past_due');--> statement-breakpoint
+CREATE TYPE "public"."subscription_status_v3" AS ENUM('active', 'trialing', 'pending_payment', 'pending_activation', 'canceled', 'expired', 'past_due');--> statement-breakpoint
 CREATE TYPE "public"."team_roles" AS ENUM('OWNER', 'ADMIN', 'MEMBER');--> statement-breakpoint
 CREATE TYPE "public"."tier_mode" AS ENUM('volume', 'graduated');--> statement-breakpoint
 CREATE TYPE "public"."feature_config_types" AS ENUM('feature', 'addon');--> statement-breakpoint
 CREATE TYPE "public"."feature_types" AS ENUM('flat', 'tier', 'package', 'usage');--> statement-breakpoint
 CREATE TYPE "public"."usage_mode" AS ENUM('tier', 'package', 'unit');--> statement-breakpoint
+CREATE TYPE "public"."wallet_grant_source" AS ENUM('promo', 'plan_included', 'trial', 'manual', 'credit_line');--> statement-breakpoint
+CREATE TYPE "public"."wallet_topup_status" AS ENUM('pending', 'completed', 'failed', 'expired');--> statement-breakpoint
 CREATE TYPE "public"."when_to_bill" AS ENUM('pay_in_advance', 'pay_in_arrear');--> statement-breakpoint
 CREATE TABLE "unprice_apikeys" (
 	"id" varchar(36) COLLATE "C" NOT NULL,
@@ -176,57 +177,6 @@ CREATE TABLE "unprice_billing_periods" (
 	CONSTRAINT "billing_periods_pkey" PRIMARY KEY("id","project_id")
 );
 --> statement-breakpoint
-CREATE TABLE "unprice_credit_grants" (
-	"id" varchar(36) COLLATE "C" NOT NULL,
-	"project_id" varchar(36) COLLATE "C" NOT NULL,
-	"created_at_m" bigint DEFAULT 0 NOT NULL,
-	"updated_at_m" bigint DEFAULT 0 NOT NULL,
-	"customer_id" varchar(36) COLLATE "C" NOT NULL,
-	"currency" "currency" NOT NULL,
-	"payment_providers" "payment_providers" NOT NULL,
-	"total_amount" integer NOT NULL,
-	"amount_used" integer DEFAULT 0 NOT NULL,
-	"expires_at_m" bigint,
-	"reason" varchar(64),
-	"metadata" json,
-	"active" boolean DEFAULT true NOT NULL,
-	CONSTRAINT "credit_grants_pkey" PRIMARY KEY("id","project_id")
-);
---> statement-breakpoint
-CREATE TABLE "unprice_invoice_credit_applications" (
-	"id" varchar(36) COLLATE "C" NOT NULL,
-	"project_id" varchar(36) COLLATE "C" NOT NULL,
-	"created_at_m" bigint DEFAULT 0 NOT NULL,
-	"updated_at_m" bigint DEFAULT 0 NOT NULL,
-	"invoice_id" varchar(36) COLLATE "C" NOT NULL,
-	"credit_grant_id" varchar(36) COLLATE "C" NOT NULL,
-	"amount_applied" integer NOT NULL,
-	CONSTRAINT "invoice_credit_applications_pkey" PRIMARY KEY("id","project_id")
-);
---> statement-breakpoint
-CREATE TABLE "unprice_invoice_items" (
-	"id" varchar(36) COLLATE "C" NOT NULL,
-	"project_id" varchar(36) COLLATE "C" NOT NULL,
-	"created_at_m" bigint DEFAULT 0 NOT NULL,
-	"updated_at_m" bigint DEFAULT 0 NOT NULL,
-	"invoice_id" varchar(36) COLLATE "C" NOT NULL,
-	"billing_period_id" varchar(36) COLLATE "C",
-	"subscription_item_id" varchar(36) COLLATE "C",
-	"feature_plan_version_id" varchar(36) COLLATE "C",
-	"kind" "invoice_item_kind" DEFAULT 'period' NOT NULL,
-	"unit_amount_cents" integer,
-	"quantity" integer DEFAULT 1 NOT NULL,
-	"amount_subtotal" integer DEFAULT 0 NOT NULL,
-	"amount_total" integer DEFAULT 0 NOT NULL,
-	"cycle_start_at_m" bigint NOT NULL,
-	"cycle_end_at_m" bigint NOT NULL,
-	"proration_factor" double precision DEFAULT 1 NOT NULL,
-	"description" varchar(200),
-	"item_provider_id" text,
-	"ledger_transfer_id" text,
-	CONSTRAINT "invoice_items_pkey" PRIMARY KEY("id","project_id")
-);
---> statement-breakpoint
 CREATE TABLE "unprice_invoices" (
 	"id" varchar(36) COLLATE "C" NOT NULL,
 	"project_id" varchar(36) COLLATE "C" NOT NULL,
@@ -247,12 +197,9 @@ CREATE TABLE "unprice_invoices" (
 	"payment_providers" "payment_providers" NOT NULL,
 	"currency" "currency" NOT NULL,
 	"sent_at_m" bigint,
-	"payment_attempts" json,
 	"due_at_m" bigint NOT NULL,
 	"paid_at_m" bigint,
-	"amount_credit_used" integer DEFAULT 0,
-	"subtotal_cents" integer DEFAULT 0 NOT NULL,
-	"total_cents" integer DEFAULT 0 NOT NULL,
+	"total_amount" bigint DEFAULT 0 NOT NULL,
 	"invoice_payment_provider_id" text,
 	"invoice_payment_provider_url" text,
 	"past_due_at_m" bigint NOT NULL,
@@ -372,6 +319,7 @@ CREATE TABLE "unprice_plan_versions" (
 	"collection_method" "collection_method" DEFAULT 'charge_automatically' NOT NULL,
 	"trial_units" integer DEFAULT 0 NOT NULL,
 	"auto_renew" boolean DEFAULT true NOT NULL,
+	"credit_line_amount" bigint DEFAULT 0 NOT NULL,
 	"metadata" json,
 	"payment_method_required" boolean DEFAULT false NOT NULL,
 	"version" integer DEFAULT 1 NOT NULL,
@@ -523,29 +471,87 @@ CREATE TABLE "unprice_workspaces" (
 	CONSTRAINT "unprice_customer_id" UNIQUE("unprice_customer_id")
 );
 --> statement-breakpoint
+CREATE TABLE "unprice_customer_entitlements" (
+	"id" varchar(36) COLLATE "C" NOT NULL,
+	"project_id" varchar(36) COLLATE "C" NOT NULL,
+	"created_at_m" bigint DEFAULT 0 NOT NULL,
+	"updated_at_m" bigint DEFAULT 0 NOT NULL,
+	"customer_id" varchar(36) COLLATE "C" NOT NULL,
+	"feature_plan_version_id" varchar(36) COLLATE "C" NOT NULL,
+	"subscription_id" varchar(36) COLLATE "C",
+	"subscription_phase_id" varchar(36) COLLATE "C",
+	"subscription_item_id" varchar(36) COLLATE "C",
+	"effective_at" bigint NOT NULL,
+	"expires_at" bigint,
+	"allowance_units" integer,
+	"overage_strategy" "overage_strategy" DEFAULT 'none' NOT NULL,
+	"metadata" json,
+	CONSTRAINT "customer_entitlements_pkey" PRIMARY KEY("id","project_id"),
+	CONSTRAINT "unique_customer_entitlement_source_window" UNIQUE NULLS NOT DISTINCT("project_id","customer_id","feature_plan_version_id","subscription_id","subscription_phase_id","subscription_item_id","effective_at","expires_at")
+);
+--> statement-breakpoint
 CREATE TABLE "unprice_grants" (
 	"id" varchar(36) COLLATE "C" NOT NULL,
 	"project_id" varchar(36) COLLATE "C" NOT NULL,
 	"created_at_m" bigint DEFAULT 0 NOT NULL,
 	"updated_at_m" bigint DEFAULT 0 NOT NULL,
-	"name" varchar(64) NOT NULL,
-	"feature_plan_version_id" varchar(36) COLLATE "C" NOT NULL,
+	"customer_entitlement_id" varchar(36) COLLATE "C" NOT NULL,
 	"type" "grant_type" NOT NULL,
-	"subject_type" "subject_type" NOT NULL,
-	"subject_id" varchar(36) COLLATE "C" NOT NULL,
 	"priority" integer DEFAULT 0 NOT NULL,
+	"allowance_units" integer,
 	"effective_at" bigint NOT NULL,
 	"expires_at" bigint,
-	"auto_renew" boolean DEFAULT true NOT NULL,
-	"deleted" boolean DEFAULT false NOT NULL,
-	"deleted_at" bigint,
-	"limit" integer,
-	"overage_strategy" "overage_strategy" DEFAULT 'none' NOT NULL,
-	"units" integer,
-	"anchor" integer DEFAULT 0 NOT NULL,
 	"metadata" json,
 	CONSTRAINT "pk_grant" PRIMARY KEY("id","project_id"),
-	CONSTRAINT "unique_grant" UNIQUE NULLS NOT DISTINCT("project_id","subject_id","subject_type","feature_plan_version_id","type","effective_at","expires_at")
+	CONSTRAINT "unique_grant" UNIQUE NULLS NOT DISTINCT("project_id","customer_entitlement_id","type","effective_at","expires_at")
+);
+--> statement-breakpoint
+CREATE TABLE "unprice_entitlement_reservations" (
+	"id" varchar(36) COLLATE "C" NOT NULL,
+	"project_id" varchar(36) COLLATE "C" NOT NULL,
+	"customer_id" varchar(36) COLLATE "C" NOT NULL,
+	"entitlement_id" varchar(36) COLLATE "C" NOT NULL,
+	"allocation_amount" bigint NOT NULL,
+	"consumed_amount" bigint DEFAULT 0 NOT NULL,
+	"refill_threshold_bps" integer DEFAULT 2000 NOT NULL,
+	"refill_chunk_amount" bigint NOT NULL,
+	"period_start_at" timestamp with time zone NOT NULL,
+	"period_end_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"reconciled_at" timestamp with time zone,
+	CONSTRAINT "entitlement_reservations_pkey" PRIMARY KEY("id","project_id")
+);
+--> statement-breakpoint
+CREATE TABLE "unprice_wallet_topups" (
+	"id" varchar(36) COLLATE "C" NOT NULL,
+	"project_id" varchar(36) COLLATE "C" NOT NULL,
+	"customer_id" varchar(36) COLLATE "C" NOT NULL,
+	"provider" text NOT NULL,
+	"provider_session_id" text NOT NULL,
+	"requested_amount" bigint NOT NULL,
+	"currency" "currency" NOT NULL,
+	"status" "wallet_topup_status" NOT NULL,
+	"settled_amount" bigint,
+	"ledger_transfer_id" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"completed_at" timestamp with time zone,
+	CONSTRAINT "wallet_topups_pkey" PRIMARY KEY("id","project_id")
+);
+--> statement-breakpoint
+CREATE TABLE "unprice_wallet_grants" (
+	"id" varchar(36) COLLATE "C" NOT NULL,
+	"project_id" varchar(36) COLLATE "C" NOT NULL,
+	"customer_id" varchar(36) COLLATE "C" NOT NULL,
+	"source" "wallet_grant_source" NOT NULL,
+	"issued_amount" bigint NOT NULL,
+	"remaining_amount" bigint NOT NULL,
+	"expires_at" timestamp with time zone,
+	"expired_at" timestamp with time zone,
+	"voided_at" timestamp with time zone,
+	"ledger_transfer_id" text NOT NULL,
+	"metadata" json,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "wallet_grants_pkey" PRIMARY KEY("id","project_id")
 );
 --> statement-breakpoint
 ALTER TABLE "unprice_apikeys" ADD CONSTRAINT "unprice_apikeys_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -565,18 +571,6 @@ ALTER TABLE "unprice_billing_periods" ADD CONSTRAINT "billing_periods_customer_i
 ALTER TABLE "unprice_billing_periods" ADD CONSTRAINT "billing_periods_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_billing_periods" ADD CONSTRAINT "billing_periods_subscription_item_id_fkey" FOREIGN KEY ("subscription_item_id","project_id") REFERENCES "public"."unprice_subscription_items"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_billing_periods" ADD CONSTRAINT "billing_periods_invoice_id_fkey" FOREIGN KEY ("invoice_id","project_id") REFERENCES "public"."unprice_invoices"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_credit_grants" ADD CONSTRAINT "unprice_credit_grants_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_credit_grants" ADD CONSTRAINT "credit_grants_customer_id_fkey" FOREIGN KEY ("customer_id","project_id") REFERENCES "public"."unprice_customers"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_credit_grants" ADD CONSTRAINT "credit_grants_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_credit_applications" ADD CONSTRAINT "unprice_invoice_credit_applications_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_credit_applications" ADD CONSTRAINT "invoice_credit_applications_invoice_id_fkey" FOREIGN KEY ("invoice_id","project_id") REFERENCES "public"."unprice_invoices"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_credit_applications" ADD CONSTRAINT "invoice_credit_applications_credit_grant_id_fkey" FOREIGN KEY ("credit_grant_id","project_id") REFERENCES "public"."unprice_credit_grants"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_items" ADD CONSTRAINT "unprice_invoice_items_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_items" ADD CONSTRAINT "invoice_items_invoice_id_fkey" FOREIGN KEY ("invoice_id","project_id") REFERENCES "public"."unprice_invoices"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_items" ADD CONSTRAINT "invoice_items_billing_period_id_fkey" FOREIGN KEY ("billing_period_id","project_id") REFERENCES "public"."unprice_billing_periods"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_items" ADD CONSTRAINT "invoice_items_subscription_item_id_fkey" FOREIGN KEY ("subscription_item_id","project_id") REFERENCES "public"."unprice_subscription_items"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_items" ADD CONSTRAINT "invoice_items_feature_plan_version_id_fkey" FOREIGN KEY ("feature_plan_version_id","project_id") REFERENCES "public"."unprice_plan_versions_features"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_invoice_items" ADD CONSTRAINT "invoice_items_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_invoices" ADD CONSTRAINT "unprice_invoices_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_invoices" ADD CONSTRAINT "invoices_subscription_id_fkey" FOREIGN KEY ("subscription_id","project_id") REFERENCES "public"."unprice_subscriptions"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_invoices" ADD CONSTRAINT "invoices_customer_id_fkey" FOREIGN KEY ("customer_id","project_id") REFERENCES "public"."unprice_customers"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -613,9 +607,24 @@ ALTER TABLE "unprice_invites" ADD CONSTRAINT "invites_invited_by_fkey" FOREIGN K
 ALTER TABLE "unprice_members" ADD CONSTRAINT "members_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."unprice_user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_members" ADD CONSTRAINT "members_workspace_id_fkey" FOREIGN KEY ("workspace_id") REFERENCES "public"."unprice_workspaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_workspaces" ADD CONSTRAINT "unprice_workspaces_created_by_unprice_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."unprice_user"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_customer_entitlements" ADD CONSTRAINT "unprice_customer_entitlements_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_customer_entitlements" ADD CONSTRAINT "customer_entitlements_customer_id_fkey" FOREIGN KEY ("customer_id","project_id") REFERENCES "public"."unprice_customers"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_customer_entitlements" ADD CONSTRAINT "customer_entitlements_feature_plan_version_id_fkey" FOREIGN KEY ("feature_plan_version_id","project_id") REFERENCES "public"."unprice_plan_versions_features"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_customer_entitlements" ADD CONSTRAINT "customer_entitlements_subscription_id_fkey" FOREIGN KEY ("subscription_id","project_id") REFERENCES "public"."unprice_subscriptions"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_customer_entitlements" ADD CONSTRAINT "customer_entitlements_subscription_phase_id_fkey" FOREIGN KEY ("subscription_phase_id","project_id") REFERENCES "public"."unprice_subscription_phases"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_customer_entitlements" ADD CONSTRAINT "customer_entitlements_subscription_item_id_fkey" FOREIGN KEY ("subscription_item_id","project_id") REFERENCES "public"."unprice_subscription_items"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_grants" ADD CONSTRAINT "unprice_grants_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "unprice_grants" ADD CONSTRAINT "feature_plan_version_id_fkey" FOREIGN KEY ("feature_plan_version_id","project_id") REFERENCES "public"."unprice_plan_versions_features"("id","project_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_grants" ADD CONSTRAINT "grants_customer_entitlement_id_fkey" FOREIGN KEY ("customer_entitlement_id","project_id") REFERENCES "public"."unprice_customer_entitlements"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_grants" ADD CONSTRAINT "project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_entitlement_reservations" ADD CONSTRAINT "unprice_entitlement_reservations_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_entitlement_reservations" ADD CONSTRAINT "entitlement_reservations_customer_id_fkey" FOREIGN KEY ("customer_id","project_id") REFERENCES "public"."unprice_customers"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_entitlement_reservations" ADD CONSTRAINT "entitlement_reservations_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_wallet_topups" ADD CONSTRAINT "unprice_wallet_topups_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_wallet_topups" ADD CONSTRAINT "wallet_topups_customer_id_fkey" FOREIGN KEY ("customer_id","project_id") REFERENCES "public"."unprice_customers"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_wallet_topups" ADD CONSTRAINT "wallet_topups_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_wallet_grants" ADD CONSTRAINT "unprice_wallet_grants_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_wallet_grants" ADD CONSTRAINT "wallet_grants_customer_id_fkey" FOREIGN KEY ("customer_id","project_id") REFERENCES "public"."unprice_customers"("id","project_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "unprice_wallet_grants" ADD CONSTRAINT "wallet_grants_project_id_fkey" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "apikeys_project_default_customer_idx" ON "unprice_apikeys" USING btree ("project_id","default_customer_id") WHERE "unprice_apikeys"."default_customer_id" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "hash" ON "unprice_apikeys" USING btree ("hash");--> statement-breakpoint
 CREATE INDEX "email" ON "unprice_customers" USING btree ("email");--> statement-breakpoint
@@ -627,11 +636,6 @@ CREATE UNIQUE INDEX "slug_feature" ON "unprice_features" USING btree ("slug","pr
 CREATE UNIQUE INDEX "billing_periods_period_unique" ON "unprice_billing_periods" USING btree ("project_id","subscription_id","subscription_phase_id","subscription_item_id","cycle_start_at_m","cycle_end_at_m");--> statement-breakpoint
 CREATE INDEX "billing_periods_bill_at_idx" ON "unprice_billing_periods" USING btree ("project_id","status","invoice_at_m");--> statement-breakpoint
 CREATE INDEX "billing_periods_statement_idx" ON "unprice_billing_periods" USING btree ("project_id","subscription_id","statement_key");--> statement-breakpoint
-CREATE UNIQUE INDEX "invoice_items_cycle_unique" ON "unprice_invoice_items" USING btree ("project_id","invoice_id","billing_period_id") WHERE "unprice_invoice_items"."billing_period_id" IS NOT NULL;--> statement-breakpoint
-CREATE UNIQUE INDEX "invoice_items_item_provider_id_unique" ON "unprice_invoice_items" USING btree ("project_id","invoice_id","item_provider_id") WHERE "unprice_invoice_items"."item_provider_id" IS NOT NULL;--> statement-breakpoint
-CREATE INDEX "invoice_items_invoice_idx" ON "unprice_invoice_items" USING btree ("project_id","invoice_id");--> statement-breakpoint
-CREATE INDEX "invoice_items_cycle_idx" ON "unprice_invoice_items" USING btree ("project_id","billing_period_id");--> statement-breakpoint
-CREATE INDEX "invoice_items_sub_item_idx" ON "unprice_invoice_items" USING btree ("project_id","subscription_item_id");--> statement-breakpoint
 CREATE INDEX "invoices_period_idx" ON "unprice_invoices" USING btree ("project_id","subscription_id","customer_id","statement_start_at_m","statement_end_at_m");--> statement-breakpoint
 CREATE UNIQUE INDEX "invoices_statement_key_idx" ON "unprice_invoices" USING btree ("project_id","subscription_id","customer_id","statement_key");--> statement-breakpoint
 CREATE INDEX "ledger_idempotency_statement_key_idx" ON "unprice_ledger_idempotency" USING btree ("project_id","statement_key");--> statement-breakpoint
@@ -652,5 +656,15 @@ CREATE UNIQUE INDEX "phase_sub_window_uq" ON "unprice_subscription_phases" USING
 CREATE INDEX "subscriptions_sub_renew_uq" ON "unprice_subscriptions" USING btree ("project_id","renew_at_m");--> statement-breakpoint
 CREATE UNIQUE INDEX "subscription_locks_idx" ON "unprice_subscription_locks" USING btree ("project_id","subscription_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "main_workspace" ON "unprice_workspaces" USING btree ("is_main") WHERE "unprice_workspaces"."is_main" = true;--> statement-breakpoint
-CREATE INDEX "idx_grants_subject_feature_effective" ON "unprice_grants" USING btree ("project_id","subject_id","subject_type","feature_plan_version_id","effective_at","expires_at") WHERE not "unprice_grants"."deleted";--> statement-breakpoint
-CREATE INDEX "idx_grants_feature_version_effective" ON "unprice_grants" USING btree ("project_id","feature_plan_version_id","effective_at","expires_at");
+CREATE INDEX "idx_customer_entitlements_customer_window" ON "unprice_customer_entitlements" USING btree ("project_id","customer_id","effective_at","expires_at");--> statement-breakpoint
+CREATE INDEX "idx_customer_entitlements_phase_source" ON "unprice_customer_entitlements" USING btree ("project_id","customer_id","subscription_phase_id","feature_plan_version_id","effective_at","expires_at");--> statement-breakpoint
+CREATE INDEX "idx_grants_customer_entitlement_effective" ON "unprice_grants" USING btree ("project_id","customer_entitlement_id","effective_at","expires_at","priority");--> statement-breakpoint
+CREATE UNIQUE INDEX "entitlement_reservations_entitlement_period_idx" ON "unprice_entitlement_reservations" USING btree ("project_id","entitlement_id","period_start_at") WHERE "unprice_entitlement_reservations"."reconciled_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "entitlement_reservations_customer_idx" ON "unprice_entitlement_reservations" USING btree ("project_id","customer_id");--> statement-breakpoint
+CREATE INDEX "entitlement_reservations_active_period_end_idx" ON "unprice_entitlement_reservations" USING btree ("period_end_at") WHERE "unprice_entitlement_reservations"."reconciled_at" IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "wallet_topups_provider_session_idx" ON "unprice_wallet_topups" USING btree ("provider","provider_session_id");--> statement-breakpoint
+CREATE INDEX "wallet_topups_customer_created_idx" ON "unprice_wallet_topups" USING btree ("project_id","customer_id","created_at");--> statement-breakpoint
+CREATE INDEX "wallet_topups_pending_sweep_idx" ON "unprice_wallet_topups" USING btree ("created_at") WHERE "unprice_wallet_topups"."status" = 'pending';--> statement-breakpoint
+CREATE UNIQUE INDEX "wallet_grants_ledger_transfer_idx" ON "unprice_wallet_grants" USING btree ("customer_id","ledger_transfer_id");--> statement-breakpoint
+CREATE INDEX "wallet_grants_active_customer_expiry_idx" ON "unprice_wallet_grants" USING btree ("customer_id","expires_at") WHERE "unprice_wallet_grants"."expired_at" IS NULL AND "unprice_wallet_grants"."voided_at" IS NULL;--> statement-breakpoint
+CREATE INDEX "wallet_grants_expiration_sweep_idx" ON "unprice_wallet_grants" USING btree ("expires_at") WHERE "unprice_wallet_grants"."expired_at" IS NULL AND "unprice_wallet_grants"."voided_at" IS NULL AND "unprice_wallet_grants"."remaining_amount" > 0;

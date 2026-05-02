@@ -33,8 +33,8 @@ export const entitlementReservations = pgTableProject(
   {
     ...projectID,
     customerId: cuid("customer_id").notNull(),
-    // Computed entitlement identifier (stable across the billing period).
-    // Entitlements are derived from grants; this column is not an FK.
+    // Legacy column name: stores customerEntitlementId.
+    // Customer entitlements own the window; grants are allowance chunks under it.
     entitlementId: cuid("entitlement_id").notNull(),
     // Total amount ever moved into reserved for this period.
     allocationAmount: bigint("allocation_amount", { mode: "number" }).notNull(),

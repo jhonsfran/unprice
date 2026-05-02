@@ -6,6 +6,7 @@ import {
 } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
 import {
+  type ConfigFeatureVersionType,
   type Currency,
   type OverageStrategy,
   type ResetConfig,
@@ -1311,7 +1312,19 @@ export class EntitlementWindowDO extends DurableObject {
     }
   ): void {
     const existing = tx
-      .select({ customerEntitlementId: entitlementConfigTable.customerEntitlementId })
+      .select({
+        customerEntitlementId: entitlementConfigTable.customerEntitlementId,
+        projectId: entitlementConfigTable.projectId,
+        customerId: entitlementConfigTable.customerId,
+        effectiveAt: entitlementConfigTable.effectiveAt,
+        expiresAt: entitlementConfigTable.expiresAt,
+        featureConfig: entitlementConfigTable.featureConfig,
+        featurePlanVersionId: entitlementConfigTable.featurePlanVersionId,
+        featureSlug: entitlementConfigTable.featureSlug,
+        meterConfig: entitlementConfigTable.meterConfig,
+        overageStrategy: entitlementConfigTable.overageStrategy,
+        resetConfig: entitlementConfigTable.resetConfig,
+      })
       .from(entitlementConfigTable)
       .where(
         eq(entitlementConfigTable.customerEntitlementId, params.entitlement.customerEntitlementId)
@@ -1334,12 +1347,23 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     if (existing) {
-      tx.update(entitlementConfigTable)
-        .set(values)
-        .where(
-          eq(entitlementConfigTable.customerEntitlementId, params.entitlement.customerEntitlementId)
-        )
-        .run()
+      this.assertImmutableEntitlementConfig(existing, params.entitlement)
+
+      const nextExpiresAt = minNullableExpiry(existing.expiresAt ?? null, values.expiresAt)
+      if (nextExpiresAt !== (existing.expiresAt ?? null)) {
+        tx.update(entitlementConfigTable)
+          .set({
+            expiresAt: nextExpiresAt,
+            updatedAt: params.createdAt,
+          })
+          .where(
+            eq(
+              entitlementConfigTable.customerEntitlementId,
+              params.entitlement.customerEntitlementId
+            )
+          )
+          .run()
+      }
       return
     }
 
@@ -1349,6 +1373,51 @@ export class EntitlementWindowDO extends DurableObject {
         addedAt: params.createdAt,
       })
       .run()
+  }
+
+  private assertImmutableEntitlementConfig(
+    existing: {
+      customerEntitlementId: string
+      projectId: string
+      customerId: string
+      effectiveAt: number
+      featureConfig: ConfigFeatureVersionType
+      featurePlanVersionId: string
+      featureSlug: string
+      meterConfig: MeterConfig
+      overageStrategy: OverageStrategy
+      resetConfig: ResetConfig | null
+    },
+    incoming: EntitlementConfigInput
+  ): void {
+    const mismatches: string[] = []
+
+    if (existing.customerEntitlementId !== incoming.customerEntitlementId) {
+      mismatches.push("customerEntitlementId")
+    }
+    if (existing.projectId !== incoming.projectId) mismatches.push("projectId")
+    if (existing.customerId !== incoming.customerId) mismatches.push("customerId")
+    if (existing.effectiveAt !== incoming.effectiveAt) mismatches.push("effectiveAt")
+    if (existing.featurePlanVersionId !== incoming.featurePlanVersionId) {
+      mismatches.push("featurePlanVersionId")
+    }
+    if (existing.featureSlug !== incoming.featureSlug) mismatches.push("featureSlug")
+    if (existing.overageStrategy !== incoming.overageStrategy) mismatches.push("overageStrategy")
+    if (!jsonEquals(existing.featureConfig, incoming.featureConfig)) {
+      mismatches.push("featureConfig")
+    }
+    if (!jsonEquals(existing.meterConfig, incoming.meterConfig)) {
+      mismatches.push("meterConfig")
+    }
+    if (!jsonEquals(existing.resetConfig ?? null, incoming.resetConfig ?? null)) {
+      mismatches.push("resetConfig")
+    }
+
+    if (mismatches.length > 0) {
+      throw new Error(
+        `Immutable entitlement config changed for ${incoming.customerEntitlementId}: ${mismatches.join(", ")}`
+      )
+    }
   }
 
   private readEntitlementConfig(
@@ -2092,4 +2161,24 @@ export class EntitlementWindowDO extends DurableObject {
     if (existing !== null && existing <= target) return
     await this.ctx.storage.setAlarm(target)
   }
+}
+
+function jsonEquals(left: unknown, right: unknown): boolean {
+  return JSON.stringify(stableJson(left ?? null)) === JSON.stringify(stableJson(right ?? null))
+}
+
+function stableJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stableJson)
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+        .map(([key, nestedValue]) => [key, stableJson(nestedValue)])
+    )
+  }
+
+  return value
 }

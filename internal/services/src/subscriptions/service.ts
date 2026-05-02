@@ -1402,6 +1402,167 @@ export class SubscriptionService {
     return result
   }
 
+  public async cancelSubscription({
+    subscriptionId,
+    projectId,
+    endAt,
+    now,
+  }: {
+    subscriptionId: string
+    projectId: string
+    endAt?: number
+    now: number
+  }): Promise<Result<Subscription, UnPriceSubscriptionError>> {
+    const cancelAt = Math.max(endAt ?? now, now)
+    const subscriptionWithPhases = await this.repo.findSubscriptionWithPhases({
+      subscriptionId,
+      projectId,
+    })
+
+    if (!subscriptionWithPhases) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Subscription not found",
+        })
+      )
+    }
+
+    if (!subscriptionWithPhases.active || subscriptionWithPhases.status === "canceled") {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Subscription is not active",
+        })
+      )
+    }
+
+    const phasesToClose = subscriptionWithPhases.phases.filter(
+      (phase) => phase.startAt <= cancelAt && (phase.endAt ?? Number.POSITIVE_INFINITY) > cancelAt
+    )
+
+    const result = await this.repo.withTransaction(async (txRepo) => {
+      for (const phase of phasesToClose) {
+        const updatedPhase = await txRepo.updatePhase({
+          phaseId: phase.id,
+          data: { endAt: cancelAt },
+        })
+
+        if (!updatedPhase) {
+          return Err(
+            new UnPriceSubscriptionError({
+              message: "Error while updating subscription phase",
+            })
+          )
+        }
+
+        const items = this.normalizePhaseGrantItems(phase.items ?? [])
+        const phaseForSync = {
+          id: phase.id,
+          projectId,
+          startAt: phase.startAt,
+          endAt: cancelAt,
+        }
+
+        const syncEntitlementsResult = await this.syncPhaseEntitlements({
+          customerId: subscriptionWithPhases.customerId,
+          subscriptionId,
+          phase: phaseForSync,
+          items,
+          db: this.db,
+          now: cancelAt,
+        })
+
+        if (syncEntitlementsResult.err) {
+          return syncEntitlementsResult
+        }
+
+        const entitlementsResult = await this.entitlementService.getPhaseOwnedEntitlements({
+          projectId,
+          customerId: subscriptionWithPhases.customerId,
+          subscriptionPhaseId: phase.id,
+          featurePlanVersionIds: [...new Set(items.map((item) => item.featurePlanVersionId))],
+          phaseStartAt: phase.startAt,
+          phaseEndAt: cancelAt,
+          db: this.db,
+        })
+
+        if (entitlementsResult.err) {
+          return Err(
+            new UnPriceSubscriptionError({
+              message: entitlementsResult.err.message,
+            })
+          )
+        }
+
+        const expireGrantsResult = await this.createGrantManager(
+          this.db
+        ).expireGrantsForEntitlements({
+          projectId,
+          customerEntitlementIds: entitlementsResult.val.map((entitlement) => entitlement.id),
+          expiresAt: cancelAt,
+          db: this.db,
+        })
+
+        if (expireGrantsResult.err) {
+          return Err(
+            new UnPriceSubscriptionError({
+              message: expireGrantsResult.err.message,
+            })
+          )
+        }
+      }
+
+      const metadata = subscriptionWithPhases.metadata ?? {}
+      const metadataRecord =
+        typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}
+      const existingDates =
+        "dates" in metadataRecord &&
+        metadataRecord.dates &&
+        typeof metadataRecord.dates === "object" &&
+        !Array.isArray(metadataRecord.dates)
+          ? metadataRecord.dates
+          : {}
+
+      const subscription = await txRepo.updateSubscription({
+        subscriptionId,
+        projectId,
+        data: {
+          active: false,
+          status: "canceled",
+          metadata: {
+            ...metadataRecord,
+            reason: "cancelled",
+            dates: {
+              ...existingDates,
+              cancelAt,
+            },
+          },
+        },
+      })
+
+      if (!subscription) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "Error while canceling subscription",
+          })
+        )
+      }
+
+      return Ok(subscription)
+    })
+
+    if (!result.err) {
+      this.waitUntil(
+        this.customerService.updateAccessControlList({
+          customerId: subscriptionWithPhases.customerId,
+          projectId,
+          updates: { subscriptionStatus: "canceled" },
+        })
+      )
+    }
+
+    return result
+  }
+
   public async createSubscription({
     input,
     projectId,

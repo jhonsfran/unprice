@@ -12,8 +12,10 @@
 These resolve audit findings without code changes. Treat as load-bearing invariants and do not violate them when implementing tickets below.
 
 1. **Sandbox is the platform's test payment provider.** It is a first-class provider, not a stub. Webhooks against it must still be authenticated; sandbox-mode is no excuse for accepting forged events. Treat the sandbox the same as Stripe for security-relevant code (signature verification, idempotency, webhook state-machine).
-2. **A customer cannot have two meters on the same feature slug — meters are collapsed by `featureSlug`.** This invalidates the audit's "double-count via stacked grants on one feature" finding. Fungibility is enforced at grant-resolution time. Tickets in this doc that reference per-stream double counting are dropped; do not reintroduce a code path that would allow two streams to consume from the same `(customerId, featureSlug)`.
+2. **A customer cannot have two active customer entitlements for the same feature slug.** The access boundary is the customer entitlement, not a computed grant group or meter stream. Ingestion resolves active customer entitlements by event slug, then routes to the Durable Object by `env:projectId:customerId:customerEntitlementId`. Grants are allowance chunks under that entitlement; they do not own meter identity, price, cadence, or routing. Tickets in this doc that reference per-stream double counting are dropped; do not reintroduce a code path that would allow two active usage streams for the same `(customerId, featureSlug)`.
 3. **Plans are append-only after publish.** A published `planVersion` is immutable. New pricing = new `planVersion`. This invalidates the audit's "rating drift on retry" finding — re-running `bill-period` on the same `(subscription, period)` always rates against the same `planVersionId` it was provisioned with. Do not add a "version pin" column; the existing `planVersionId` reference on the period is the pin. Any ticket that smells like "snapshot the plan into the period" is wrong — instead, assert that all rating reads go through `planVersionId` and never through "current plan version of subscription."
+4. **The EntitlementWindowDO owns runtime allowance math.** Ingestion should not compute period keys, summed grant allowance, active grant availability, or pricing. It passes `{ entitlement, grants, event }`; the DO stores entitlement config, filters active grants by range/priority, computes period buckets from the entitlement effective time, prices usage from the plan feature config, and emits facts with `customer_entitlement_id`.
+5. **Reservation rows still use the legacy column name `entitlement_id`, but the value is now `customerEntitlementId`.** Do not add a parallel computed entitlement identifier or `meter_hash`. A later migration may rename the column to `customer_entitlement_id`, but until then this doc treats `entitlement_reservations.entitlement_id` as the customer entitlement id.
 
 ---
 
@@ -186,7 +188,7 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 ### [ ] HARD-008 — Tinybird flush has no retry, no DLQ, and 30-day SQLite TTL drops data (P1, analytics correctness)
 
-**Files:** `apps/.../EntitlementWindowDO.ts` (`flushToTinybird` ~L1565-1600, alarm logic ~L743-967, outbox table ~L545-550)
+**Files:** `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` (`alarmInner`, `flushToTinybird`, self-destruct logic), `apps/api/src/ingestion/entitlements/db/schema.ts` (`meterFactsOutboxTable`, new flush-state table/row), `apps/api/src/ingestion/entitlements/drizzle/*` (DO SQLite migration)
 
 **Problem:** When `analytics.ingestEntitlementMeterFacts` fails, the function returns `false`, the alarm logs and exits, and the outbox rows stay in SQLite. There is no exponential backoff, no escalation, no metric. After 30 days post-period the DO can `deleteAll()` itself with rows still unflushed. Tinybird outage > 30 days → permanent data loss for analytics (note: not money — the ledger is independent).
 
@@ -195,9 +197,9 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 1. **Add structured retry state to the DO.** New SQLite columns/keys on a `flush_state` row: `consecutiveFailures INT`, `lastErrorAt TIMESTAMP`, `nextRetryAt TIMESTAMP`, `lastErrorMessage TEXT`.
 2. **Exponential backoff with jitter.** Compute next alarm: `min(30m, 30s * 2^min(failures, 6)) + random(0, 30s)`. On success, reset `consecutiveFailures=0`. The normal alarm cadence (30s/5m) only applies when there is no active backoff.
 3. **Self-protect against the 30-day deletion.** In the deletion path (~L917-923), refuse to delete if `outbox` is non-empty *or* `consecutiveFailures > 0`. Instead, schedule an alarm 1h out and surface a metric.
-4. **Surface health.** Emit a wide-event log line on every flush: `{customerId, projectId, streamId, periodKey, batchSize, durationMs, success, consecutiveFailures, errorMessage?}`. Wire a Tinybird/Grafana alert on `consecutiveFailures > 5`.
-5. **Operator escape hatch.** Add an admin RPC `forceFlushDO(streamKey)` that takes a single DO and flushes its outbox synchronously, returning the result. Useful for incident recovery.
-6. **Long-tail backstop.** Add a worker that scans `entitlement_reservations WHERE period_end_at < now - 7d AND reconciled_at IS NULL` and pings the corresponding DO to flush. This catches DOs that went quiet after a flush failure and aren't being driven by ingestion.
+4. **Surface health.** Emit a wide-event log line on every flush: `{customerId, projectId, customerEntitlementId, batchSize, durationMs, success, consecutiveFailures, errorMessage?}`. `period_key` can stay inside individual Tinybird fact payloads; it is not part of DO identity or operator routing. Wire a Tinybird/Grafana alert on `consecutiveFailures > 5`.
+5. **Operator escape hatch.** Add an admin RPC `forceFlushEntitlementWindow({ projectId, customerId, customerEntitlementId })` that targets the current DO route and flushes its outbox synchronously, returning the result. Useful for incident recovery.
+6. **Long-tail backstop.** Add a worker that scans `entitlement_reservations WHERE period_end_at < now - 7d AND reconciled_at IS NULL` and pings the corresponding entitlement-window DO by `(projectId, customerId, entitlement_id AS customerEntitlementId)`. The DO owns its local period/reservation state; the scanner should not derive a period-scoped DO id.
 7. **Decision needed (escalate, do not silently choose):** if Tinybird is down for the entire backoff window (e.g., 24h), do we (a) accept the analytics gap and continue, or (b) fail closed and stop accepting events? Default: (a). Document the decision in this ticket before flipping the box.
 
 **Acceptance:**
@@ -209,13 +211,13 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 ---
 
-### [ ] HARD-009 — Mid-cycle subscription cancellation strategy: ping all DOs (P0, money correctness)
+### [ ] HARD-009 — Mid-cycle subscription cancellation strategy: close entitlement-window DOs (P0, money correctness)
 
-**Files:** `internal/services/src/use-cases/subscription/cancel.ts` (create if missing), `internal/services/src/wallet/service.ts` (`flushReservation` final path), DO `EntitlementWindowDO.ts` (`finiteFlush`/`closeReservation`), `internal/db/src/schema/entitlementReservations.ts`
+**Files:** `internal/services/src/use-cases/subscription/cancel.ts` (create if missing), `internal/services/src/wallet/service.ts` (`flushReservation` final path), `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` (`finalFlush`/new `closeReservation` RPC), `internal/db/src/schema/entitlementReservations.ts`
 
 **Problem:** Today, when a subscription is cancelled mid-cycle, reserved funds sit in the `reserved` ledger account until the DO's 24h-inactivity alarm fires its final flush. This is up to 24h of cash in customer-visible limbo, with the subscription appearing "cancelled" in the UI but the wallet still showing the hold. There is no explicit "cancellation → flush now" hook.
 
-**Strategy.** The reservations table is already the index of truth for which DOs are open per customer. Use it.
+**Strategy.** The reservations table is the index of truth for which customer-entitlement windows have open wallet holds. Use it, but route DO calls by `customerEntitlementId` only. `period_start_at` identifies the wallet reservation, not the DO id.
 
 **Plan:**
 
@@ -225,47 +227,50 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 2. **Find the open reservations.**
    ```sql
-   SELECT id, project_id, entitlement_id, period_start_at
+   SELECT id, project_id, customer_id, entitlement_id AS customer_entitlement_id,
+          period_start_at, period_end_at
    FROM entitlement_reservations
    WHERE customer_id = $1
      AND project_id = $2
      AND reconciled_at IS NULL
    ```
-   This is the existing `entitlement_reservations_customer_idx` plus the active partial index. No new index needed.
+   This is the existing `entitlement_reservations_customer_idx` plus the active partial index. No new index needed for v1. Add a migration in this ticket to rename `entitlement_id` → `customer_entitlement_id` if you want to pay down the legacy column name; do not add a second identifier.
 
-3. **Derive DO IDs and dispatch close.** The DO routing key is `(projectId, customerId, entitlementId, periodStartAt)` — same fields the reservation row holds. For each row, derive the DO stub and call a new RPC `closeReservation(reason: 'subscription_cancelled')` on the DO.
+3. **Derive DO IDs and dispatch close.** The DO routing key is `buildIngestionWindowName({ appEnv, projectId, customerId, customerEntitlementId })`. For each open reservation row, derive the DO stub from `(projectId, customerId, customerEntitlementId)` and call a new RPC `closeReservation({ reservationId, reason: 'subscription_cancelled' })` on the DO.
    - The DO must:
-     a. Set internal state to `closing` so concurrent `apply()` calls fast-reject with `SUBSCRIPTION_CANCELLING`.
-     b. Call `finiteFlush(final=true)` — flush all outstanding consumption to ledger, refund remainder via `wallet.flushReservation(final=true)`, mark `reservation.reconciledAt = now`.
-     c. Return `{ ok: true, refunded, finalConsumed }`.
+     a. Persist a local `closing`/`deletionRequested` state before any await so concurrent `apply()` calls fast-reject with `SUBSCRIPTION_CANCELLING`.
+     b. Verify the local wallet reservation matches `reservationId` when one is supplied. If already closed, return `{ ok: true, alreadyClosed: true }`.
+     c. Wait for any in-flight flush/refill promise, then call `finalFlush` — flush all outstanding consumption to ledger, refund remainder via `wallet.flushReservation(final=true)`, and mark `reservation.reconciledAt = now`.
+     d. Return `{ ok: true, refunded, finalConsumed }`.
 
 4. **Use-case orchestration.** New use case `internal/services/src/use-cases/subscription/cancel.ts`:
    ```
    cancelSubscription(deps, { subscriptionId, projectId, reason })
      1. Tx: subscription.status = 'cancelling'
-     2. Read open reservations (above query)
+     2. Read open reservations for the customer/subscription-owned entitlements
      3. For each: dispatch closeReservation RPC. Collect results.
-     4. If all ok → subscription.status = 'cancelled', cancelledAt = now
-     5. If any fail → subscription stays 'cancelling', failures emit a row in
-        `cancellation_retries(subscriptionId, reservationId, lastError, attempts)`
+     4. Re-read open reservations from Postgres.
+     5. If none remain → subscription.status = 'cancelled', cancelledAt = now
+     6. If any remain → subscription stays 'cancelling', failures emit a row in
+        `cancellation_retries(subscriptionId, reservationId, customerEntitlementId, lastError, attempts)`
    ```
-   Concurrency: run RPCs in parallel with bounded fan-out (e.g., `pLimit(10)`). Cancellation latency for a customer with 10s of streams should be sub-second.
+   Concurrency: group duplicate reservation rows by `customerEntitlementId` before dispatch, then run RPCs in parallel with bounded fan-out (e.g., `pLimit(10)`). Cancellation latency for a customer with 10s of active entitlements should be sub-second.
 
 5. **Failure recovery — the sweeper.** New cron job `internal/jobs/src/trigger/schedules/cancellation-sweeper.ts`, runs every 5 minutes:
    ```
    For each subscription in 'cancelling' for > 5 minutes:
      For each reservation still open:
-       Re-dispatch closeReservation
+       Re-dispatch closeReservation({ reservationId, customerEntitlementId })
      If success on all → flip to 'cancelled'
    ```
    Bounded retry attempts (e.g., 20 attempts over ~24h); after exhaustion, page on-call. Reservations with persistent close failures need human inspection (likely a stuck DO).
 
 6. **Race with in-flight events.** When `closeReservation` RPC arrives at the DO mid-`apply()`:
-   - The DO is single-threaded per instance — the RPC queues behind the apply. Good.
-   - If the apply triggered a refill that's now mid-flight (`waitUntil`), `closeReservation` must wait for it. Add an `await` on the in-flight refill promise before final flush.
+   - The DO is single-threaded per customer entitlement — the RPC queues behind the current `apply()`. Good.
+   - If the apply triggered a refill that's now mid-flight (`waitUntil`), `closeReservation` must wait for it. Track the in-flight promise on the DO and `await` it before final flush.
 
 7. **Tests.**
-   - Cancel mid-period with 3 open streams → all 3 reconciled, wallet refund posted, subscription `cancelled` within seconds.
+   - Cancel mid-period with 3 open customer entitlements → all 3 reconciled, wallet refund posted, subscription `cancelled` within seconds.
    - Cancel while one DO is unreachable → subscription stuck in `cancelling`, sweeper retries, succeeds when DO recovers.
    - Cancel while events are arriving → events post-cancel are rejected with the typed error.
    - Cancel during in-flight refill → final flush waits, no double-spend.
@@ -282,7 +287,7 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 ### [ ] HARD-010 — Reservation sizing strategy for large single-event costs (P1, customer impact)
 
-**Files:** `internal/services/src/wallet/reservation-sizing.ts`, `apps/.../EntitlementWindowDO.ts` (`bootstrapReservation`, `computeMarginalPriceMinor` ~L1328-1454), `internal/services/src/wallet/local-reservation.ts`
+**Files:** `internal/services/src/wallet/reservation-sizing.ts`, `internal/services/src/wallet/local-reservation.ts`, `internal/services/src/entitlements/grant-consumption.ts` (`computeMaxMarginalPriceMinor`), `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` (`bootstrapReservation`, reservation check/refill path)
 
 **Problem:** A single event whose marginal cost exceeds `refillChunkAmount` is denied with `WALLET_EMPTY` even though the wallet has plenty of balance. Common trigger: tier boundaries with flat fees (e.g., $1 onboarding fee on first unit), price spikes, multi-unit events. Today's sizing assumes uniform pricing.
 
@@ -295,7 +300,7 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 **(b) Adaptive bump on denial.** Closes the gap when the event cost exceeds even the probed worst case (e.g., volume discounts that flip sign, batch events).
 1. In `LocalReservation.applyUsage`, if `cost > remaining + refillChunkAmount` (i.e., one refill won't cover it), don't deny outright. Instead emit a `BUMP_REQUIRED` decision with `requestedChunk = ceil(cost * 1.5 / chunkUnit) * chunkUnit`.
-2. The DO triggers an immediate refill with the bumped chunk size, persists `refillChunkAmount = bumped` to the reservation row (monotonic increase only — never shrink mid-period), then re-applies the event in the same `apply()` call.
+2. The DO triggers an immediate refill with the bumped chunk size, persists `refillChunkAmount = bumped` to the local reservation row and Postgres reservation row (monotonic increase only — never shrink mid-period), then re-applies the event in the same `apply()` call. Pricing still comes from the owning customer entitlement's plan feature config; grant allocation only determines allowance consumption.
 3. Bound the bump: cap at e.g., `min(walletBalance, 100 * baseChunk)`. If still insufficient, fall through to denial.
 4. Idempotency: the re-apply uses the same `idempotencyKey`. The first call's `BUMP_REQUIRED` outcome is *not* persisted to the idempotency table — only the final `accepted`/`denied` is.
 
@@ -319,7 +324,7 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 ### [ ] HARD-011 — 30-day idempotency window vs. DLQ retention: tighten ingestion-side cap (P1, money correctness)
 
-**Files:** `apps/.../EntitlementWindowDO.ts` (`MAX_EVENT_AGE_MS` ~L788-808), `internal/services/src/ingestion/service.ts` (event acceptance), `internal/services/src/ingestion/message.ts`
+**Files:** `internal/services/src/entitlements/domain.ts` (`MAX_EVENT_AGE_MS` / timestamp validation), `apps/api/src/routes/events/ingestEventsV1.ts`, `apps/api/src/routes/events/ingestEventsSyncV1.ts`, `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` (SQLite idempotency cleanup), `apps/api/src/ingestion/audit/IngestionAuditDO.ts` (audit retention)
 
 **Detailed explanation of the issue (per request):**
 
@@ -328,13 +333,13 @@ Each event carries an `idempotencyKey` (typically `eventId` or a hash). Two laye
 1. **Batch-level dedup** in `ingestion/message.ts` — short-lived, per-batch only.
 2. **Audit DO and EntitlementWindowDO SQLite** — persist `(idempotencyKey → outcome)` rows so that retries replay deterministically.
 
-The DO sweeps SQLite idempotency rows when their event timestamp is older than `MAX_EVENT_AGE_MS = 30 days`. The reasoning is straightforward: SQLite would grow unbounded, and "events" are bounded by billing periods so 30 days is a generous safety margin past any realistic in-flight window.
+The API rejects events older than `MAX_EVENT_AGE_MS = 30 days`, and the DO sweeps SQLite idempotency rows by local `createdAt` once they are older than that same constant. The current shared constant makes the system mostly safe, but the invariant is implicit and fragile: a future change could widen ingestion acceptance without widening DO/audit retention.
 
 **The hole:**
 
 - Cloudflare Queues retain failed messages for up to 14 days (current limits; check at fix time).
 - A trigger.dev DLQ can retain longer (configurable; could be 30+ days).
-- Operators replaying a DLQ after a long incident, or backfill jobs sending events with old timestamps, can submit an event whose `idempotencyKey` was already processed but has been swept from the DO.
+- Operators replaying a DLQ after a long incident, or backfill jobs sending events with old timestamps, can submit an event whose `idempotencyKey` was already processed but has been swept from the DO if the replay path bypasses the public timestamp validation or if acceptance and retention constants drift apart.
 - The DO sees a "fresh" event, processes it, prices it, posts to ledger → **double-charge for the same event**.
 
 **Realism:** Medium. Triggered by:
@@ -342,21 +347,22 @@ The DO sweeps SQLite idempotency rows when their event timestamp is older than `
 - A backfill tool submitting historical events for a new customer migration.
 - A bug in the producer that defers events (e.g., batch upload of months-old IoT data).
 
-**Strategy.** The cleanest fix is to make the *acceptance* contract narrower than the *idempotency* window, so the dedup table is always wide enough to catch any event we'd accept.
+**Strategy.** Make the acceptance/retention invariant explicit instead of relying on shared constant coincidence. The dedup table must be at least as wide as the oldest event the platform will accept, with a small safety margin for cleanup timing.
 
 **Plan:**
 
-1. **Hard-cap event acceptance at ingestion.** In `ingestion/service.ts`, reject any event whose `timestamp < now - 25 days` (ingestion-cap, a margin under the DO's 30-day idempotency window). Return a typed `EVENT_TOO_OLD` error that is **non-retryable** so it doesn't bounce in queues. Make the cap a config knob `INGESTION_MAX_EVENT_AGE_MS` defaulting to 25 days.
-2. **Asymmetry by design.** Document the invariant: `INGESTION_MAX_EVENT_AGE_MS < DO_IDEMPOTENCY_TTL_MS`. Add an assertion at service init that fails fast if these are misconfigured.
+1. **Split the constants and assert the invariant.** In `entitlements/domain.ts`, define `INGESTION_MAX_EVENT_AGE_MS` for public acceptance and `DO_IDEMPOTENCY_TTL_MS` for DO cleanup. Default: keep ingestion at 30 days and set DO TTL to `INGESTION_MAX_EVENT_AGE_MS + 7 days` (matching the audit DO's existing margin). Add a module-level assertion that `DO_IDEMPOTENCY_TTL_MS > INGESTION_MAX_EVENT_AGE_MS`.
+2. **Use the right constant at each boundary.** Public routes and the entitlement engine validate against `INGESTION_MAX_EVENT_AGE_MS`. EntitlementWindowDO idempotency cleanup uses `DO_IDEMPOTENCY_TTL_MS`. Audit DO retention remains at least as long as DO idempotency retention.
 3. **Backfill escape hatch.** Add an admin-only ingestion endpoint `ingestHistorical` that accepts old events but routes them to a separate processing path (no DO, direct insert to Tinybird, no billing impact). Customers explicitly opt in for migrations; events ingested through this path are flagged `historical=true` and never billed.
 4. **Operator runbook.** Document the policy: DLQ replays older than the cap must be either (a) discarded with explicit operator sign-off, or (b) routed through the historical endpoint after billing-impact review.
 5. **Telemetry.** Log every `EVENT_TOO_OLD` rejection with rich context (`projectId`, `customerId`, `eventTimestamp`, `now`). Operators need to see when this triggers — it's a strong signal of a DLQ drain or producer bug.
 6. **Tests.**
    - Event with timestamp in window → accepted.
-   - Event with timestamp 26d old → rejected with `EVENT_TOO_OLD`, no DO touched.
+   - Event older than `INGESTION_MAX_EVENT_AGE_MS` → rejected with `EVENT_TOO_OLD`, no DO touched.
+   - Idempotency row at `INGESTION_MAX_EVENT_AGE_MS + 1d` age is still retained; row older than `DO_IDEMPOTENCY_TTL_MS` is cleaned.
    - Replay of already-processed event within window → idempotency hit, no double-process.
 
-**Acceptance:** No event accepted by ingestion can ever fall outside the DO's idempotency window. The asymmetry is asserted at startup.
+**Acceptance:** No event accepted by ingestion can ever fall outside the DO's idempotency window. The invariant is asserted in code and covered by tests.
 
 **Resolution:** _(fill in when fixed)_
 
@@ -481,19 +487,21 @@ The DO sweeps SQLite idempotency rows when their event timestamp is older than `
 
 ---
 
-### [ ] HARD-014 — Audit DO commit is fire-and-forget after message ack (P2, audit correctness)
+### [ ] HARD-014 — Audit DO commit failures are swallowed or async after billing (P2, audit correctness)
 
-**Files:** `internal/services/src/ingestion/service.ts` (`commitToAuditAsync` ~L715-719, `commitOutcomesToAudit` ~L609-617)
+**Files:** `internal/services/src/ingestion/service.ts` (`commitToAuditAsync`, `commitOutcomesToAudit`, `flushAuditEntries`, sync ingestion path)
 
-**Problem:** Ingestion processes a message, decides outcomes, then queues the audit DO write via `waitUntil`. The queue message is ack'd before the audit DO row exists. If the audit write fails after ack, the audit shard never reflects the event but billing already ran. Audit DO is supposed to be the cross-period correctness boundary; it shouldn't be racy with ack.
+**Problem:** The queue batch path now awaits `commitOutcomesToAudit` before returning ack dispositions, which is good. But `flushAuditEntries` catches and logs audit DO failures instead of throwing, so the caller still treats the commit as successful. The sync ingestion path still calls `commitToAuditAsync` via `waitUntil` after billing has already run. Audit DO is supposed to be the cross-period correctness boundary; failures should not be invisible.
 
 **Plan:**
-1. Make `commitOutcomesToAudit` synchronous: await it before acking the queue message. Move it inside the message handler's main path.
-2. If the audit DO write fails, throw — let the queue retry the whole message. Outcomes computed in the previous attempt will be re-computed (idempotency at the DO and ledger layers makes this safe).
-3. Test: inject audit DO failure → message is retried; on second attempt audit row is created, no double-billing observed.
-4. Measure: this adds one DO round-trip to the hot path. Confirm latency budget. If too slow, fall back to a "two-phase commit" pattern: write a pending-commit row to Postgres synchronously, then async-confirm to audit DO. But default to the simpler synchronous approach first.
+1. Change `flushAuditEntries` so audit DO failures reject the promise after logging. Do not swallow `.commit()` errors.
+2. Keep the queue path synchronous: if audit commit fails, return retry dispositions / throw so the queue retries the whole message. Outcomes computed in the previous attempt will be re-computed; DO idempotency and ledger idempotency make this safe.
+3. Decide the sync API behavior explicitly. Recommendation: await audit commit in `ingestFeatureSync` before returning success. If that latency is unacceptable, write a synchronous Postgres `pending_audit_commits` row before returning, then have a sweeper confirm to Audit DO. Do not leave it as naked `waitUntil`.
+4. Test: inject audit DO failure in queue ingestion → message is retried; on second attempt audit row is created, no double-billing observed.
+5. Test: inject audit DO failure in sync ingestion → response is either a retryable failure or a pending-audit row exists; never silent success with no audit trace.
+6. Measure: this adds one DO round-trip to the hot path. Confirm latency budget before choosing the pending-commit fallback.
 
-**Acceptance:** No queue ack occurs without a confirmed audit row.
+**Acceptance:** No queue ack or sync success occurs without either a confirmed audit row or a durable pending-audit row.
 
 **Resolution:** _(fill in when fixed)_
 
@@ -501,19 +509,20 @@ The DO sweeps SQLite idempotency rows when their event timestamp is older than `
 
 ### [ ] HARD-015 — Late-arriving events for closed periods are silently dropped (P1, money correctness)
 
-**Files:** `internal/jobs/src/trigger/schedules/invoicing.ts` (~L36), `internal/services/src/use-cases/billing/bill-period.ts`, ingestion path
+**Files:** `internal/jobs/src/trigger/schedules/invoicing.ts`, `internal/services/src/use-cases/billing/bill-period.ts`, `internal/services/src/ingestion/service.ts`, `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts`
 
-**Problem:** Period closes on `cycleEndAt <= now` and is rated immediately. An event with timestamp inside the closed period that arrives after close (network delay, retry, queue lag) is not aggregated — the DO has flushed and reconciled, ingestion still routes the event to a DO for the now-closed period, and either it errors out or it lands in a freshly bootstrapped reservation for the wrong period.
+**Problem:** Period closes on `cycleEndAt <= now` and is rated immediately. An event with timestamp inside the closed period that arrives after close (network delay, retry, queue lag) can still route to the same customer-entitlement DO. Because the DO computes grant period buckets from the event timestamp and can bootstrap reservations by period, a late event can either be denied after final flush or reopen a reservation for a period that billing already closed.
 
 **Plan:**
 
 1. **Grace window.** Delay period close by a configurable `LATE_EVENT_GRACE_MS` (default: 1h). Change the invoicing cron query to `cycleEndAt <= now - LATE_EVENT_GRACE_MS`. This catches the long tail of slow producers.
-2. **Late-event policy.** Document and enforce: events arriving after close + grace are routed to the *next* open period for the same `(customer, feature)`. Never mutate a closed period. Implementation: ingestion adapter compares `event.timestamp` to the subscription's `currentCycleStartAt/EndAt`; if the event is for a closed window, it's logged with `late_event=true` and routed to the current period (or rejected via HARD-011's policy if too old).
-3. **Telemetry.** Log every late-event routing: `{eventId, originalPeriod, routedToPeriod, lagMs}`. Operators need to see whether late events are a one-off or systemic.
-4. **Edge case:** customer cancels mid-period, event arrives after cancellation. With HARD-009 in place, the subscription is `cancelled`; route the event to a `cancelled_subscription_late_events` table (or just reject) — discuss with product.
-5. Tests:
+2. **Late-event policy.** Document and enforce: events arriving after close + grace are routed to the *current open entitlement period* for the same customer entitlement, or rejected if product decides closed-period mutation is forbidden. Default recommendation: route to current period and mark `late_event=true`; never reopen or mutate a closed wallet reservation.
+3. **Implementation boundary.** Ingestion should not compute period keys. It should ask the entitlement/billing read model whether the event timestamp is inside a still-open billing window or should be treated as late. The DO receives an explicit late-event flag/current-period timestamp override if rerouting is allowed; otherwise ingestion rejects before touching the DO.
+4. **Telemetry.** Log every late-event routing: `{eventId, customerEntitlementId, originalEventTimestamp, routedTimestamp, lagMs}`. Operators need to see whether late events are a one-off or systemic.
+5. **Edge case:** customer cancels mid-period, event arrives after cancellation. With HARD-009 in place, the subscription is `cancelled`; route the event to a `cancelled_subscription_late_events` table (or just reject) — discuss with product.
+6. Tests:
    - Event arriving 30min after close, grace = 1h → captured in the closing period.
-   - Event arriving 2h after close, grace = 1h → routed to next period.
+   - Event arriving 2h after close, grace = 1h → routed to current open period or rejected per documented policy; it must not reopen the closed reservation.
    - Event arriving for cancelled subscription → rejected/quarantined per policy.
 
 **Acceptance:** Producers up to `LATE_EVENT_GRACE_MS` lagged are billed correctly without operator intervention.
@@ -549,18 +558,18 @@ The DO sweeps SQLite idempotency rows when their event timestamp is older than `
 
 ---
 
-### [ ] HARD-017 — Multi-phase grant derivation reads first phase without ordering (P2, correctness)
+### [ ] HARD-017 — Multi-phase activation input derivation reads first phase without ordering (P2, correctness)
 
 **Files:** `internal/services/src/use-cases/billing/derive-provision-inputs.ts` (~L89)
 
-**Problem:** Grant derivation queries phases with `limit:1` and no `orderBy`. Newly-created subscriptions today only have one phase, but multi-phase subs (plan changes, scheduled upgrades) will be a real case.
+**Problem:** `deriveActivationInputsFromPlan` still queries phases with `limit:1` and no `orderBy`. This code derives wallet activation inputs such as credit line amount and starting wallet grants; it is not the runtime customer-entitlement grant allocator. Newly-created subscriptions today only have one phase, but multi-phase subscriptions (plan changes, scheduled upgrades) will be a real case.
 
 **Plan:**
-1. Change the phase fetch to: filter by phase active at `now` (`startAt <= now AND (endAt IS NULL OR endAt > now)`), order by `startAt DESC`, limit 1.
-2. Add a code comment near the query stating the active-phase contract.
-3. Add a test with a subscription that has a past phase and an active phase; assert the active one is used.
+1. Pass `now` into `deriveActivationInputsFromPlan` (or pass the active subscription phase from the state machine) and change the phase fetch to: `startAt <= now AND (endAt IS NULL OR endAt > now)`, order by `startAt DESC`, limit 1.
+2. Add a code comment near the query stating the active-phase contract and clarifying that this path does not allocate runtime customer-entitlement grants.
+3. Add a test with a subscription that has a past phase, active phase, and future phase; assert the active phase's wallet activation inputs are used.
 
-**Acceptance:** Derivation never reads a non-active phase.
+**Acceptance:** Activation derivation never reads a non-active phase and never affects customer-entitlement grant provisioning.
 
 **Resolution:** _(fill in when fixed)_
 
@@ -605,7 +614,7 @@ The DO sweeps SQLite idempotency rows when their event timestamp is older than `
 
 These were in the audit but are not real issues given the project's invariants:
 
-- **Double-counting via stacked grants on same feature** — resolved by clarification #2 (one meter per feature slug).
+- **Double-counting via stacked allowance grants on the same feature** — resolved by clarification #2. One active customer entitlement owns a feature for a customer; multiple allowance grants can exist under that entitlement, but they are not independent metering streams.
 - **Pricing drift on `bill-period` retry / no version pin to period** — resolved by clarification #3 (plans append-only). Verify via HARD-004's test that re-runs of `billPeriod` rate against the same `planVersionId`.
 
 ---

@@ -110,6 +110,96 @@ export class EntitlementService {
     })
   }
 
+  private async assertNoOverlappingActiveFeatureEntitlement({
+    db,
+    entitlement,
+  }: {
+    db: Database
+    entitlement: InsertCustomerEntitlement
+  }): Promise<Result<void, FetchError | UnPriceEntitlementError>> {
+    try {
+      const targetFeaturePlanVersion = await db.query.planVersionFeatures.findFirst({
+        where: (table, { and: andOp, eq: eqOp }) =>
+          andOp(
+            eqOp(table.projectId, entitlement.projectId),
+            eqOp(table.id, entitlement.featurePlanVersionId)
+          ),
+      })
+
+      if (!targetFeaturePlanVersion) {
+        return Err(
+          new UnPriceEntitlementError({
+            message: "Feature plan version not found for entitlement",
+            context: {
+              projectId: entitlement.projectId,
+              featurePlanVersionId: entitlement.featurePlanVersionId,
+            },
+          })
+        )
+      }
+
+      const overlappingEntitlements = await db.query.customerEntitlements.findMany({
+        with: {
+          featurePlanVersion: true,
+        },
+        where: (table, { and: andOp, eq: eqOp, gt, isNull, lt, or }) => {
+          const conditions = [
+            eqOp(table.projectId, entitlement.projectId),
+            eqOp(table.customerId, entitlement.customerId),
+            or(isNull(table.expiresAt), gt(table.expiresAt, entitlement.effectiveAt)),
+          ]
+
+          if (entitlement.expiresAt !== null && entitlement.expiresAt !== undefined) {
+            conditions.push(lt(table.effectiveAt, entitlement.expiresAt))
+          }
+
+          return andOp(...conditions)
+        },
+      })
+
+      const conflictingEntitlement = overlappingEntitlements.find(
+        (existing) =>
+          existing.featurePlanVersion?.featureId === targetFeaturePlanVersion.featureId &&
+          existing.id !== entitlement.id
+      )
+
+      if (conflictingEntitlement) {
+        return Err(
+          new UnPriceEntitlementError({
+            message: "Customer already has an active entitlement for this feature",
+            context: {
+              projectId: entitlement.projectId,
+              customerId: entitlement.customerId,
+              featureId: targetFeaturePlanVersion.featureId,
+              existingCustomerEntitlementId: conflictingEntitlement.id,
+              requestedFeaturePlanVersionId: entitlement.featurePlanVersionId,
+              requestedEffectiveAt: entitlement.effectiveAt,
+              requestedExpiresAt: entitlement.expiresAt ?? null,
+            },
+          })
+        )
+      }
+
+      return Ok(undefined)
+    } catch (error) {
+      this.logger.error(error, {
+        context: "Error checking active customer entitlement uniqueness",
+        customerId: entitlement.customerId,
+        projectId: entitlement.projectId,
+        featurePlanVersionId: entitlement.featurePlanVersionId,
+      })
+
+      return Err(
+        new FetchError({
+          message: `Failed to check active customer entitlement uniqueness: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          retry: true,
+        })
+      )
+    }
+  }
+
   public async createCustomerEntitlement(params: {
     entitlement: InsertCustomerEntitlement
     db?: Database
@@ -121,6 +211,24 @@ export class EntitlementService {
     }
 
     try {
+      const existing = await this.findCustomerEntitlementBySourceWindow({
+        db: trx,
+        entitlement,
+      })
+
+      if (existing) {
+        return Ok(existing)
+      }
+
+      const uniquenessResult = await this.assertNoOverlappingActiveFeatureEntitlement({
+        db: trx,
+        entitlement,
+      })
+
+      if (uniquenessResult.err) {
+        return Err(uniquenessResult.err)
+      }
+
       const inserted = await trx
         .insert(customerEntitlements)
         .values(entitlement)
@@ -143,12 +251,12 @@ export class EntitlementService {
         return Ok(inserted)
       }
 
-      const existing = await this.findCustomerEntitlementBySourceWindow({
+      const existingAfterConflict = await this.findCustomerEntitlementBySourceWindow({
         db: trx,
         entitlement,
       })
 
-      if (!existing) {
+      if (!existingAfterConflict) {
         return Err(
           new UnPriceEntitlementError({
             message: "Customer entitlement conflict could not be resolved",
@@ -161,7 +269,7 @@ export class EntitlementService {
         )
       }
 
-      return Ok(existing)
+      return Ok(existingAfterConflict)
     } catch (error) {
       this.logger.error(error, {
         context: "Error creating customer entitlement",

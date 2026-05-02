@@ -13,6 +13,7 @@
     "clean": "git clean -xdf .next .turbo node_modules && rm -rf .turbo && rm -rf node_modules && rm -rf .next",
     "dev:turbo": "openlogs --name nextjs --text-only --out-dir '../../.openlogs' next dev --turbo",
     "dev": "openlogs --name nextjs --text-only --out-dir '../../.openlogs' next dev",
+    "dev:local": "next dev --turbo --port 3001",
     "fmt": "pnpm biome format . --write && pnpm biome check . --write",
     "start": "next start",
     "typecheck": "tsc --noEmit"

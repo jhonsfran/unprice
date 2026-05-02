@@ -101,3 +101,4 @@ internal/lakehouse/lakenv/*
 .sisyphus
 
 .openlogs
+.claude/worktrees

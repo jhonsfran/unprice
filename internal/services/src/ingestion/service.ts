@@ -278,11 +278,31 @@ export class IngestionService {
       }
     }
 
-    const entitlement = preparedContext.candidateEntitlements.find(
+    const matchingEntitlements = preparedContext.candidateEntitlements.filter(
       (candidate) =>
         candidate.featureSlug === featureSlug &&
         isIngestionEntitlementActiveAt(candidate, timestamp)
     )
+
+    if (matchingEntitlements.length > 1) {
+      this.logger.error("multiple active entitlements matched feature verification", {
+        projectId,
+        customerId,
+        featureSlug,
+        customerEntitlementIds: matchingEntitlements.map(
+          (entitlement) => entitlement.customerEntitlementId
+        ),
+      })
+
+      return {
+        allowed: false,
+        featureSlug,
+        status: "invalid_entitlement_configuration",
+        timestamp,
+      }
+    }
+
+    const entitlement = matchingEntitlements[0]
 
     if (!entitlement) {
       return {
@@ -893,6 +913,20 @@ export class IngestionService {
 
     if (matchingEntitlements.length === 0) {
       return { err: "UNROUTABLE_EVENT" }
+    }
+
+    if (matchingEntitlements.length > 1) {
+      this.logger.error("multiple active entitlements matched ingestion event", {
+        projectId: params.message.projectId,
+        customerId: params.message.customerId,
+        eventId: params.message.id,
+        eventSlug: params.message.slug,
+        customerEntitlementIds: matchingEntitlements.map(
+          (entitlement) => entitlement.customerEntitlementId
+        ),
+      })
+
+      return { err: "INVALID_ENTITLEMENT_CONFIGURATION" }
     }
 
     const processableEntitlements = filterIngestionEntitlementsWithValidAggregationPayload({
