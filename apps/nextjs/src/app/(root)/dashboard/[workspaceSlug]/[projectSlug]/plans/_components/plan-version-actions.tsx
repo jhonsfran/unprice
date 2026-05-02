@@ -9,8 +9,9 @@ import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { toast } from "@unprice/ui/sonner"
 
 import { useMutation } from "@tanstack/react-query"
+import { useStore } from "jotai"
 import { ConfirmAction } from "~/components/confirm-action"
-import { usePlanFeaturesList } from "~/hooks/use-features"
+import { configPlanFeaturesListAtom } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
@@ -25,11 +26,11 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
   (props, ref) => {
     const { planVersionId, onConfirmAction, classNames, variant = "primary" } = props
     const router = useRouter()
-    const [planFeatures] = usePlanFeaturesList()
+    // Read the atom lazily via the store rather than subscribing — subscribing here causes
+    // a "Cannot update a component while rendering a different component" warning when the
+    // atom is hydrated by PlanFeatureList further down the tree.
+    const store = useStore()
     const trpc = useTRPC()
-
-    // is valid when all features have config
-    const isValidConfig = Object.values(planFeatures).every((f) => f.id !== undefined)
 
     const publishVersion = useMutation(
       trpc.planVersions.publish.mutationOptions({
@@ -41,6 +42,8 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
 
     function onPublishVersion() {
       startTransition(() => {
+        const planFeatures = store.get(configPlanFeaturesListAtom)
+        const isValidConfig = Object.values(planFeatures).every((f) => f.id !== undefined)
         if (!isValidConfig) {
           toastAction("error", "There are some features without configuration. try again")
           return

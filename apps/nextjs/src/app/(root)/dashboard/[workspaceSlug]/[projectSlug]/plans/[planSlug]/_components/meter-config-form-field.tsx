@@ -50,7 +50,6 @@ import { SubmitButton } from "~/components/submit-button"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
-import { SectionLabel } from "./section-label"
 
 const AGGREGATION_METHODS_WITHOUT_FIELD = new Set<AggregationMethod>(["count"])
 const EVENT_PICKER_SEARCH_THRESHOLD = 6
@@ -475,10 +474,6 @@ export function MeterConfigFormField({
   return (
     <>
       <div className="space-y-3">
-        <SectionLabel tooltip="Pick a reusable event and define how this feature measures usage from that event.">
-          Meter
-        </SectionLabel>
-
         <FormField
           control={form.control}
           name="meterConfig.eventId"

@@ -19,6 +19,7 @@ import { createPortal } from "react-dom"
 
 import { useMutation } from "@tanstack/react-query"
 import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
+import { GripVertical } from "lucide-react"
 import { useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
@@ -210,7 +211,16 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
         createPortal(
           <DragOverlay adjustScale={false} dropAnimation={dropAnimation}>
             {draggingFeature && (
-              <FeaturePlan mode={"FeaturePlan"} planFeatureVersion={draggingFeature} isDragging />
+              <FeaturePlan
+                mode={"FeaturePlan"}
+                planFeatureVersion={draggingFeature}
+                isDragging
+                renderDragHandle={() => (
+                  <span className="flex size-4 items-center justify-center text-foreground">
+                    <GripVertical className="size-3.5" />
+                  </span>
+                )}
+              />
             )}
           </DragOverlay>,
           document.body

@@ -20,6 +20,9 @@ export function SortableFeature(props: FeaturePlanProps) {
       roleDescription: props.mode,
     },
     disabled: props.disabled,
+    // Only animate during active sort / right after a drop. New items added via "+ Add" should
+    // appear in place without sliding in.
+    animateLayoutChanges: ({ isSorting, wasDragging }) => isSorting || wasDragging,
   })
 
   const style = {
@@ -48,7 +51,7 @@ export function SortableFeature(props: FeaturePlanProps) {
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => e.stopPropagation()}
                 className={cn(
-                  "flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground/60 transition-colors hover:text-foreground active:cursor-grabbing",
+                  "flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground transition-colors hover:text-foreground active:cursor-grabbing",
                   isDragging && "cursor-grabbing text-foreground"
                 )}
                 aria-label="Drag to reorder feature"

@@ -16,7 +16,6 @@ import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from "@unprice/
 import { cn } from "@unprice/ui/utils"
 
 import { InputWithAddons } from "~/components/input-addons"
-import { SectionLabel } from "./section-label"
 
 export function QuantityFormField({
   form,
@@ -116,10 +115,12 @@ export function PriceFormField({
   form,
   currency,
   isDisabled,
+  label = "Price",
 }: {
   form: UseFormReturn<PlanVersionFeatureInsert>
   currency: Currency
   isDisabled?: boolean
+  label?: string
 }) {
   return (
     <div className="w-full">
@@ -129,7 +130,7 @@ export function PriceFormField({
         render={({ field }) => (
           <FormItem className="">
             <div className="flex items-center gap-1">
-              <FormLabel>Price</FormLabel>
+              <FormLabel>{label}</FormLabel>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <HelpCircle className="size-3.5 text-muted-foreground" />
@@ -174,11 +175,23 @@ export function UnitsFormField({
         name="config.units"
         render={({ field }) => (
           <FormItem className="">
+            <div className="flex items-center gap-1">
+              <FormLabel>Bundle size</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[250px]">
+                  How many units the customer gets in each bundle. The price above is charged once
+                  per bundle.
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
             <div className="flex flex-col items-center space-y-1">
               <FormControl className="w-full">
                 <InputWithAddons
                   {...field}
-                  leading={"per"}
                   trailing={"units"}
                   value={field.value ?? ""}
                   disabled={isDisabled}
@@ -410,18 +423,6 @@ export function TierFormField({
 
   return (
     <div className="flex w-full flex-col">
-      <div className="mb-3">
-        <SectionLabel
-          tooltip={
-            form.getValues("featureType") === "usage"
-              ? "Set up pricing tiers based on usage volume. Customers pay different rates as their usage increases."
-              : "Set up pricing tiers based on quantity selected. Different quantities unlock different price points."
-          }
-        >
-          Tier configuration
-        </SectionLabel>
-      </div>
-
       {fields.length > 0 ? (
         <div className="px-2 py-2">
           {fields.map((field, index) => (

@@ -5,10 +5,8 @@ import { Pencil } from "lucide-react"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
-import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 
-import { CopyButton } from "~/components/copy-button"
 import { PricingCard } from "~/components/forms/pricing-card"
 import { PlanVersionDialog } from "../../_components/plan-version-dialog"
 
@@ -66,13 +64,6 @@ export function PlanWorkspaceRail({
             Edit plan settings
           </Button>
         </PlanVersionDialog>
-
-        <div className="flex items-center justify-between gap-2 pt-1">
-          <Typography variant="p" affects="small" className="truncate text-muted-foreground">
-            {planVersion.id}
-          </Typography>
-          <CopyButton value={planVersion.id} className="size-3.5 shrink-0" />
-        </div>
       </section>
     </div>
   )

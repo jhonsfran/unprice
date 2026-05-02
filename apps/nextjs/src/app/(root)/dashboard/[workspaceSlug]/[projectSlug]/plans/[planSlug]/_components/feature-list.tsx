@@ -115,9 +115,8 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
       billingConfig: planVersion.billingConfig,
     } as PlanVersionFeatureDragDrop
 
-    // optimistic local insert + auto-expand
+    // optimistic local insert (no auto-expand — let the user open it manually)
     setPlanFeaturesList((prev) => [...prev, optimistic])
-    setActiveFeature(optimistic)
 
     const payload: PlanVersionFeatureInsert = {
       planVersionId: optimistic.planVersionId,
