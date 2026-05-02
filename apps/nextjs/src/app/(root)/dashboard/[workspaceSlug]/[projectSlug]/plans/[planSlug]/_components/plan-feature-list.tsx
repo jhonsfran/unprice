@@ -8,10 +8,8 @@ import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Input } from "@unprice/ui/input"
 import { Separator } from "@unprice/ui/separator"
 
-import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Typography } from "@unprice/ui/typography"
 import { useHydrateAtoms } from "jotai/utils"
-import { useRouter } from "next/navigation"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import {
   configActivePlanAtom,
@@ -30,35 +28,33 @@ interface PlanFeatureListProps {
 
 export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
   const [filter, setFilter] = useState("")
-  const router = useRouter()
 
   if (!planVersion) return null
 
   const { planFeatures, plan, ...activePlanVersion } = planVersion
 
-  // hydrate atoms with initial data from the server to avoid hydration errors
+  // Hydrate atoms with initial server data — required for SSR consistency.
   useHydrateAtoms([[configPlanFeaturesListAtom, planFeatures]])
   useHydrateAtoms([[configActivePlanVersionAtom, activePlanVersion]])
   useHydrateAtoms([[configActivePlanAtom, plan]])
 
   const [featuresList, setPlanFeaturesList] = usePlanFeaturesList()
-  const [_, setActivePlanVersion] = useActivePlanVersion()
-  const [__, setActivePlan] = useActivePlan()
+  const [, setActivePlanVersion] = useActivePlanVersion()
+  const [, setActivePlan] = useActivePlan()
+
+  // Re-sync atoms when the plan version id changes (route navigation between versions).
+  useEffect(() => {
+    setPlanFeaturesList(planFeatures)
+    setActivePlanVersion(activePlanVersion)
+    setActivePlan(plan)
+    // intentionally narrow deps — only react to id changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planVersion.id])
 
   const filteredFeatures =
     featuresList.filter((feature) =>
       feature.feature.title.toLowerCase().includes(filter.toLowerCase())
     ) ?? featuresList
-
-  useEffect(() => {
-    // rehydrate atoms when the planVersion id changes
-    setPlanFeaturesList(planFeatures)
-    setActivePlanVersion(activePlanVersion)
-    setActivePlan(plan)
-
-    // refresh the page when the planVersion id changes
-    router.refresh()
-  }, [planVersion.id])
 
   return (
     <div className="flex h-full flex-col">
@@ -77,37 +73,34 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
           />
         </div>
       </div>
-      <div className="flex h-min-[750px] flex-col gap-2 p-4 pt-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 p-4 pt-1">
         <DroppableContainer id={"planVersionFeaturesList"}>
           <SortableContext
             items={featuresList.map((feature) => feature.featureId)}
             strategy={verticalListSortingStrategy}
           >
             {filteredFeatures.length === 0 ? (
-              <EmptyPlaceholder className="h-[725px]">
+              <EmptyPlaceholder className="flex h-full min-h-[480px] flex-1">
                 <EmptyPlaceholder.Icon>
                   <FileStack className="h-8 w-8" />
                 </EmptyPlaceholder.Icon>
-                <EmptyPlaceholder.Title>No features</EmptyPlaceholder.Title>
+                <EmptyPlaceholder.Title>No features yet</EmptyPlaceholder.Title>
                 <EmptyPlaceholder.Description>
-                  Once you create a feature, you can add it to the plan version.
-                  <br />
-                  Drag and drop it here.
+                  Pick a feature from the library on the left and click <strong>Add</strong> to
+                  attach it to this plan version.
                 </EmptyPlaceholder.Description>
               </EmptyPlaceholder>
             ) : (
-              <ScrollArea className="h-[700px] w-full" hideScrollBar={true}>
-                <div className="space-y-2">
-                  {filteredFeatures.map((feature) => (
-                    <SortableFeature
-                      disabled={activePlanVersion?.status === "published"}
-                      key={feature.featureId}
-                      mode="FeaturePlan"
-                      planFeatureVersion={feature}
-                    />
-                  ))}
-                </div>
-              </ScrollArea>
+              <div className="space-y-2">
+                {filteredFeatures.map((feature) => (
+                  <SortableFeature
+                    disabled={activePlanVersion?.status === "published"}
+                    key={feature.featureId}
+                    mode="FeaturePlan"
+                    planFeatureVersion={feature}
+                  />
+                ))}
+              </div>
             )}
           </SortableContext>
         </DroppableContainer>

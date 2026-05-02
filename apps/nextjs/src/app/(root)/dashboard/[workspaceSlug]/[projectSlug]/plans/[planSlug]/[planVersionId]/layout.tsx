@@ -7,9 +7,7 @@ import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
-import Stepper from "./_components/stepper"
-import StepperButton from "./_components/stepper-button"
-import VersionOverview from "./_components/version-overview"
+import { PlanVersionPublish } from "../../_components/plan-version-actions"
 
 export default async function PlanVersionLayout(props: {
   children: React.ReactNode
@@ -42,22 +40,14 @@ export default async function PlanVersionLayout(props: {
                   API
                 </Button>
               </CodeApiSheet>
-              <StepperButton
-                isPublished={planVersion.status === "published"}
-                planVersionId={props.params.planVersionId}
-                baseUrl={`/${props.params.workspaceSlug}/${props.params.projectSlug}/plans/${props.params.planSlug}/${props.params.planVersionId}`}
-              />
+              {planVersion.status !== "published" && (
+                <PlanVersionPublish planVersionId={props.params.planVersionId} />
+              )}
             </div>
           }
         />
       }
-      aside={<VersionOverview planVersion={planVersion} />}
     >
-      <Stepper
-        planVersionId={props.params.planVersionId}
-        className="flex flex-col py-4"
-        baseUrl={`/${props.params.workspaceSlug}/${props.params.projectSlug}/plans/${props.params.planSlug}/${props.params.planVersionId}`}
-      />
       <div className="flex w-full flex-col justify-center">{props.children}</div>
     </DashboardShell>
   )

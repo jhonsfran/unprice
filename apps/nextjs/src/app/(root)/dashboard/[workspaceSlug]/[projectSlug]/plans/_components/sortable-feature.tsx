@@ -2,6 +2,7 @@
 
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
+import { GripVertical } from "lucide-react"
 
 import { cn } from "@unprice/ui/utils"
 
@@ -19,6 +20,9 @@ export function SortableFeature(props: FeaturePlanProps) {
       roleDescription: props.mode,
     },
     disabled: props.disabled,
+    // Only animate during active sort / right after a drop. New items added via "+ Add" should
+    // appear in place without sliding in.
+    animateLayoutChanges: ({ isSorting, wasDragging }) => isSorting || wasDragging,
   })
 
   const style = {
@@ -26,19 +30,36 @@ export function SortableFeature(props: FeaturePlanProps) {
     transform: CSS.Translate.toString(transform),
   }
 
-  const isFeature = props.mode === "Feature"
+  // Library mode keeps the original structure (no drag in Phase 2 onwards anyway)
+  if (props.mode === "Feature") {
+    return <FeaturePlan {...props} />
+  }
 
   return (
     <FeaturePlan
       ref={props.disabled ? undefined : setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
-      className={cn(props.className, {
-        "cursor-pointer": !isFeature,
-        "cursor-grab": isFeature,
-        "cursor-pointer border-dashed opacity-80": isDragging && !isFeature,
-      })}
+      isDragging={isDragging}
+      renderDragHandle={
+        props.disabled
+          ? undefined
+          : () => (
+              <button
+                type="button"
+                {...listeners}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+                className={cn(
+                  "flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground transition-colors hover:text-foreground active:cursor-grabbing",
+                  isDragging && "cursor-grabbing text-foreground"
+                )}
+                aria-label="Drag to reorder feature"
+              >
+                <GripVertical className="size-3.5" />
+              </button>
+            )
+      }
       {...props}
     />
   )

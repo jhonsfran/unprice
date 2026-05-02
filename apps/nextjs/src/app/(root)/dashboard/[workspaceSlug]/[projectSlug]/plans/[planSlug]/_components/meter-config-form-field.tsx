@@ -473,24 +473,7 @@ export function MeterConfigFormField({
 
   return (
     <>
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <div className="flex items-center gap-1">
-            <p className="font-semibold text-sm">Meter</p>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <HelpCircle className="size-3.5 text-muted-foreground" />
-              </TooltipTrigger>
-              <TooltipContent side="right" className="max-w-[280px]">
-                Pick a reusable event and define how this feature measures usage from that event.
-              </TooltipContent>
-            </Tooltip>
-          </div>
-          <p className="text-muted-foreground text-sm">
-            Choose the event and measurement rule for this usage feature.
-          </p>
-        </div>
-
+      <div className="space-y-3">
         <FormField
           control={form.control}
           name="meterConfig.eventId"

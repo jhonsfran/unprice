@@ -14,24 +14,27 @@ export const TIER_MODES_MAP = {
 export const FEATURE_TYPES_MAPS = {
   flat: {
     code: "flat",
-    label: "Flat",
-    description: "One fixed price — quantity is set when the customer subscribes",
+    label: "Pay monthly",
+    shortLabel: "Monthly",
+    description: "Customer pays the same fixed price every billing period.",
   },
   tier: {
     code: "tier",
-    label: "Tier",
-    description: "Price varies by quantity — quantity is set when the customer subscribes",
+    label: "Pay by volume",
+    shortLabel: "Tiered",
+    description: "Price changes as the customer chooses more units up front.",
   },
   package: {
     code: "package",
-    label: "Package",
-    description: "Price per bundle of units — quantity is set when the customer subscribes",
+    label: "Pay by bundle",
+    shortLabel: "Bundle",
+    description: "Customer buys fixed-size bundles, e.g., 1,000 calls for $10.",
   },
   usage: {
     code: "usage",
-    label: "Usage",
-    description:
-      "Price based on actual consumption — tracked automatically during the billing period",
+    label: "Pay per use",
+    shortLabel: "Metered",
+    description: "Customer is charged for what they actually use during the period.",
   },
 } as const
 
