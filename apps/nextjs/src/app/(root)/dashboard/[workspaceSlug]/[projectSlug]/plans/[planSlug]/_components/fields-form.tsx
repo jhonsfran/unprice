@@ -429,95 +429,70 @@ export function TierFormField({
       {fields.length > 0 ? (
         <div className="px-2 py-2">
           {fields.map((field, index) => (
-            <div key={field.id} className="flex items-end justify-between gap-2 space-y-2">
-              <div className="flex items-center justify-start">
-                <span className="h-8 font-light text-sm leading-8">{index + 1}</span>
-              </div>
-              <div className="w-full">
-                <FormField
-                  control={form.control}
-                  key={field.id}
-                  name={`config.tiers.${index}.firstUnit`}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className={cn(index !== 0 && "sr-only")}>
-                        <Tooltip>
-                          <div className="flex items-center justify-center gap-2 font-normal text-xs">
-                            First Unit
-                            <span>
-                              <TooltipTrigger asChild>
-                                <HelpCircle className="h-4 w-4 font-light" />
-                              </TooltipTrigger>
-                            </span>
-                          </div>
-
-                          <TooltipContent
-                            className="w-40 bg-background-bg font-normal text-xs"
-                            align="center"
-                          >
-                            Starting unit for this tier. The first tier always starts at 1.
-                            <TooltipArrow className="fill-background-bg" />
-                          </TooltipContent>
-                        </Tooltip>
-                      </FormLabel>
-
-                      <FormMessage className="font-light text-xs" />
-                      <FormControl>
-                        <Input {...field} className="h-8" disabled={index === 0 || isDisabled} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="w-full">
+            <div
+              key={field.id}
+              className="grid grid-cols-[1fr_1fr_1fr_28px] items-end gap-2 space-y-2"
+            >
+              <div>
                 <FormField
                   control={form.control}
                   key={field.id}
                   name={`config.tiers.${index}.lastUnit`}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className={cn(index !== 0 && "sr-only")}>
-                        <Tooltip>
-                          <div className="flex items-center justify-center gap-2 font-normal text-xs">
-                            Last Unit
-                            <span>
-                              <TooltipTrigger asChild>
-                                <HelpCircle className="h-4 w-4 font-light" />
-                              </TooltipTrigger>
-                            </span>
-                          </div>
+                  render={({ field }) => {
+                    const isLastRow = index === fields.length - 1
+                    return (
+                      <FormItem>
+                        <FormLabel className={cn(index !== 0 && "sr-only")}>
+                          <Tooltip>
+                            <div className="flex items-center gap-2 font-normal text-xs">
+                              Up to
+                              <span>
+                                <TooltipTrigger asChild>
+                                  <HelpCircle className="h-4 w-4 font-light" />
+                                </TooltipTrigger>
+                              </span>
+                            </div>
+                            <TooltipContent
+                              className="w-56 bg-background-bg font-normal text-xs"
+                              align="center"
+                            >
+                              Maximum unit covered by this tier. Use ∞ for the final tier — every
+                              following tier starts one unit above the previous "up to".
+                              <TooltipArrow className="fill-background-bg" />
+                            </TooltipContent>
+                          </Tooltip>
+                        </FormLabel>
 
-                          <TooltipContent
-                            className="w-48 bg-background-bg font-normal text-xs"
-                            align="center"
-                          >
-                            Ending unit for this tier. Use ∞ (infinity) for the final tier to cover
-                            all remaining usage.
-                            <TooltipArrow className="fill-background-bg" />
-                          </TooltipContent>
-                        </Tooltip>
-                      </FormLabel>
+                        <FormMessage className="font-light text-xs" />
 
-                      <FormMessage className="font-light text-xs" />
+                        <FormControl>
+                          <Input
+                            {...field}
+                            className="h-8"
+                            value={field.value ?? "∞"}
+                            disabled={
+                              (index !== 0 && isLastRow) || fields.length === 1 || isDisabled
+                            }
+                            onChange={(e) => {
+                              const next = e.target.value
+                              field.onChange(next)
 
-                      <FormControl>
-                        <Input
-                          {...field}
-                          className="h-8"
-                          value={field.value ?? "∞"}
-                          disabled={
-                            (index !== 0 && index === fields.length - 1) ||
-                            fields.length === 1 ||
-                            isDisabled
-                          }
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
+                              // keep the next tier's firstUnit in sync (= this lastUnit + 1)
+                              if (!isLastRow && next !== "" && next !== "∞") {
+                                const parsed = Number(next)
+                                if (!Number.isNaN(parsed)) {
+                                  form.setValue(`config.tiers.${index + 1}.firstUnit`, parsed + 1)
+                                }
+                              }
+                            }}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )
+                  }}
                 />
               </div>
-              <div className="w-full">
+              <div>
                 <FormField
                   control={form.control}
                   key={field.id}
@@ -573,7 +548,7 @@ export function TierFormField({
                   )}
                 />
               </div>
-              <div className="w-full">
+              <div>
                 <FormField
                   control={form.control}
                   key={field.id}

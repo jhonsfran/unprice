@@ -151,21 +151,6 @@ if [ "$MODE_ID" = "dev" ]; then
   UPSTASH_REDIS_REST_URL="http://localhost:8079"
   UPSTASH_REDIS_REST_TOKEN="unprice"
 
-  # loging to tb
-  cd internal/analytics
-
-  # check if tinybird is running
-  if [ "$RESTART_TINYBIRD" = "true" ]; then
-    TB_RESTARTED=true
-    # restart tinybird local runtime
-    tb local restart
-  fi
-
-  # check if tinybird http://localhost:7181 is running
-  echo "Waiting for Tinybird to be ready..."
-  max_attempts=12  # 2 minutes total
-  attempt=1
-
   while ! curl -s http://localhost:7181 > /dev/null 2>&1; do
     if [ $attempt = 1 -a $TB_RESTARTED = "false" ]; then
       echo "Starting Tinybird"
@@ -191,12 +176,6 @@ if [ "$MODE_ID" = "dev" ]; then
   # auth tb with the admin token
   echo "Authenticating Tinybird"
   # tb auth --token $TB_TOKEN --host $TB_HOST
-
-  echo "Building and deploying Tinybird to local runtime"
-  tb --local build
-  tb --local deploy
-
-  cd ../../
 
   echo "Applying migrations"
   infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST REDIS_URL=$REDIS_URL REDIS_TOKEN=$REDIS_TOKEN AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db migrate:custom

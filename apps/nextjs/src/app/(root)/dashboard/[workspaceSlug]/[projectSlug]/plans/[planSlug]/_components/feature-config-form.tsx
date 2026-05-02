@@ -26,6 +26,7 @@ import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Separator } from "@unprice/ui/separator"
 import { Switch } from "@unprice/ui/switch"
+import { Tabs, TabsList, TabsTrigger } from "@unprice/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 import { SubmitButton } from "~/components/submit-button"
@@ -287,15 +288,17 @@ export function FeatureConfigForm({
                   </TooltipContent>
                 </Tooltip>
               </div>
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-2">
                 <FormField
                   control={form.control}
                   name="featureType"
                   render={({ field }) => (
-                    <FormItem className="space-y-1">
-                      <FormMessage className="self-start" />
-                      <Select
+                    <FormItem className="space-y-1.5">
+                      <Tabs
+                        value={field.value ?? ""}
                         onValueChange={(value) => {
+                          if (isPublished) return
+
                           field.onChange(value)
 
                           if (value === "usage") {
@@ -309,31 +312,21 @@ export function FeatureConfigForm({
                             form.setValue("meterConfig", null)
                           }
                         }}
-                        value={field.value ?? ""}
                       >
-                        <FormControl className="truncate">
-                          <SelectTrigger
-                            className="items-start [&_[data-description]]:hidden"
-                            disabled={isPublished}
-                          >
-                            <SelectValue placeholder="Select type" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
+                        <TabsList variant="solid" className="grid w-full grid-cols-4 capitalize">
                           {FEATURE_TYPES.map((type) => (
-                            <SelectItem value={type} key={type}>
-                              <div className="flex items-start gap-3">
-                                <div className="grid gap-0.5">
-                                  <p>{FEATURE_TYPES_MAPS[type].label}</p>
-                                  <p className="text-xs" data-description>
-                                    {FEATURE_TYPES_MAPS[type].description}
-                                  </p>
-                                </div>
-                              </div>
-                            </SelectItem>
+                            <TabsTrigger key={type} value={type} disabled={isPublished}>
+                              {FEATURE_TYPES_MAPS[type].label}
+                            </TabsTrigger>
                           ))}
-                        </SelectContent>
-                      </Select>
+                        </TabsList>
+                      </Tabs>
+                      {field.value && (
+                        <p className="px-1 text-muted-foreground text-xs">
+                          {FEATURE_TYPES_MAPS[field.value].description}
+                        </p>
+                      )}
+                      <FormMessage className="self-start" />
                     </FormItem>
                   )}
                 />

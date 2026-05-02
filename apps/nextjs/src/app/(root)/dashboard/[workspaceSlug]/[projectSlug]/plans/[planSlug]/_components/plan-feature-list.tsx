@@ -77,26 +77,25 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
           />
         </div>
       </div>
-      <div className="flex h-min-[750px] flex-col gap-2 p-4 pt-1">
+      <div className="flex flex-col gap-2 p-4 pt-1 lg:min-h-[750px]">
         <DroppableContainer id={"planVersionFeaturesList"}>
           <SortableContext
             items={featuresList.map((feature) => feature.featureId)}
             strategy={verticalListSortingStrategy}
           >
             {filteredFeatures.length === 0 ? (
-              <EmptyPlaceholder className="h-[725px]">
+              <EmptyPlaceholder className="lg:h-[725px]">
                 <EmptyPlaceholder.Icon>
                   <FileStack className="h-8 w-8" />
                 </EmptyPlaceholder.Icon>
-                <EmptyPlaceholder.Title>No features</EmptyPlaceholder.Title>
+                <EmptyPlaceholder.Title>No features yet</EmptyPlaceholder.Title>
                 <EmptyPlaceholder.Description>
-                  Once you create a feature, you can add it to the plan version.
-                  <br />
-                  Drag and drop it here.
+                  Pick a feature from the library on the left and click <strong>Add</strong> to
+                  attach it to this plan version.
                 </EmptyPlaceholder.Description>
               </EmptyPlaceholder>
             ) : (
-              <ScrollArea className="h-[700px] w-full" hideScrollBar={true}>
+              <ScrollArea className="w-full lg:h-[700px]" hideScrollBar={true}>
                 <div className="space-y-2">
                   {filteredFeatures.map((feature) => (
                     <SortableFeature
