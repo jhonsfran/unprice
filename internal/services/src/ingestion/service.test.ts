@@ -32,6 +32,21 @@ describe("IngestionService entitlement routing", () => {
               metadata: null,
               createdAtM: 0,
               updatedAtM: 0,
+              grants: [
+                {
+                  id: "grant_123",
+                  projectId: entitlement.projectId,
+                  customerEntitlementId: entitlement.customerEntitlementId,
+                  type: "subscription",
+                  priority: 10,
+                  allowanceUnits: 100,
+                  effectiveAt: entitlement.effectiveAt,
+                  expiresAt: entitlement.expiresAt,
+                  metadata: null,
+                  createdAtM: 0,
+                  updatedAtM: 0,
+                },
+              ],
               featurePlanVersion: {
                 id: entitlement.featurePlanVersionId,
                 projectId: entitlement.projectId,
@@ -71,25 +86,6 @@ describe("IngestionService entitlement routing", () => {
               subscriptionItem: undefined,
             },
           ] as never)
-        ),
-      } as never,
-      grantsManager: {
-        listGrantsForEntitlements: vi.fn().mockResolvedValue(
-          Ok([
-            {
-              id: "grant_123",
-              projectId: entitlement.projectId,
-              customerEntitlementId: entitlement.customerEntitlementId,
-              type: "subscription",
-              priority: 10,
-              allowanceUnits: 100,
-              effectiveAt: entitlement.effectiveAt,
-              expiresAt: entitlement.expiresAt,
-              metadata: null,
-              createdAtM: 0,
-              updatedAtM: 0,
-            },
-          ])
         ),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },

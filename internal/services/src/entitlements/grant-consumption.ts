@@ -11,7 +11,6 @@ const GRANT_PRICING_FEATURE_TYPE = "usage" as const
 
 export type GrantConsumptionGrant = {
   allowanceUnits: number | null
-  anchor: number
   cadenceEffectiveAt?: number
   cadenceExpiresAt?: number | null
   effectiveAt: number
@@ -121,7 +120,6 @@ export function consumeGrantsByPriority<TGrant extends GrantConsumptionGrant>(pa
 export function computeGrantPeriodBucket(
   grant: Pick<
     GrantConsumptionGrant,
-    | "anchor"
     | "cadenceEffectiveAt"
     | "cadenceExpiresAt"
     | "effectiveAt"
@@ -136,7 +134,7 @@ export function computeGrantPeriodBucket(
         name: grant.resetConfig.name,
         interval: grant.resetConfig.resetInterval,
         intervalCount: grant.resetConfig.resetIntervalCount,
-        anchor: grant.anchor,
+        anchor: "dayOfCreation" as const,
         planType: grant.resetConfig.planType,
       }
     : {

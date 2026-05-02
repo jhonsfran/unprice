@@ -60,13 +60,6 @@ export const customerEntitlementInsertSchema = createInsertSchema(schema.custome
   })
   .strict()
 
-export const customerEntitlementSchemaExtended = customerEntitlementSelectSchema.extend({
-  featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
-    feature: featureSelectBaseSchema,
-  }),
-  subscriptionItem: subscriptionItemsSelectSchema.optional(),
-})
-
 export const grantSchema = createSelectSchema(schema.grants, {
   metadata: grantsMetadataSchema.nullable(),
   allowanceUnits: z.number().int().nonnegative().nullable(),
@@ -86,6 +79,14 @@ export const grantInsertSchema = createInsertSchema(schema.grants, {
     metadata: true,
   })
   .strict()
+
+export const customerEntitlementSchemaExtended = customerEntitlementSelectSchema.extend({
+  featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
+    feature: featureSelectBaseSchema,
+  }),
+  grants: grantSchema.array().optional(),
+  subscriptionItem: subscriptionItemsSelectSchema.optional(),
+})
 
 export const grantSchemaExtended = grantSchema.extend({
   customerEntitlement: customerEntitlementSelectSchema.extend({

@@ -1,4 +1,5 @@
 import type {
+  BillingConfig,
   ConfigFeatureVersionType,
   CustomerEntitlementExtended,
   FeatureType,
@@ -9,7 +10,7 @@ import type {
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
-import { type GrantsManager, MAX_EVENT_AGE_MS } from "../entitlements"
+import { MAX_EVENT_AGE_MS } from "../entitlements"
 import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import {
@@ -29,8 +30,8 @@ import {
 } from "./interface"
 import {
   type IngestionQueueMessage,
-  computeIngestionEntitlementPeriodKey,
   filterIngestionEntitlementsWithValidAggregationPayload,
+  isIngestionEntitlementActiveAt,
 } from "./message"
 
 export type IngestionGrant = {
@@ -89,6 +90,12 @@ type EntitlementWindowApplyResult = {
   message?: string
 }
 
+export type EntitlementWindowStateInput = {
+  entitlement: IngestionEntitlement & { meterConfig: MeterConfig }
+  grants: IngestionGrant[]
+  now: number
+}
+
 export type EntitlementWindowApplyInput = {
   customerId: string
   enforceLimit: boolean
@@ -107,7 +114,7 @@ export type EntitlementWindowApplyInput = {
 
 export type EntitlementWindowController = {
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
-  getEnforcementState: () => Promise<{
+  getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<{
     isLimitReached: boolean
     limit: number | null
     usage: number
@@ -138,7 +145,6 @@ const GRANT_CONTEXT_CACHE_BUCKET_MS = 300_000
 
 export class IngestionService {
   private readonly entitlementService: EntitlementService
-  private readonly grantsManager: GrantsManager
   private readonly entitlementWindowClient: EntitlementWindowClient
   private readonly auditClient: IngestionAuditClient
   private readonly cache: Pick<Cache, "ingestionPreparedGrantContext">
@@ -150,7 +156,6 @@ export class IngestionService {
     cache: Pick<Cache, "ingestionPreparedGrantContext">
     entitlementService: EntitlementService
     entitlementWindowClient: EntitlementWindowClient
-    grantsManager: GrantsManager
     auditClient: IngestionAuditClient
     logger: Logger
     now?: () => number
@@ -161,7 +166,6 @@ export class IngestionService {
     this.auditClient = opts.auditClient
     this.cache = opts.cache
     this.logger = opts.logger
-    this.grantsManager = opts.grantsManager
     this.now = opts.now ?? (() => Date.now())
     this.waitUntil = opts.waitUntil
   }
@@ -277,8 +281,7 @@ export class IngestionService {
     const entitlement = preparedContext.candidateEntitlements.find(
       (candidate) =>
         candidate.featureSlug === featureSlug &&
-        candidate.effectiveAt <= timestamp &&
-        (candidate.expiresAt === null || timestamp < candidate.expiresAt)
+        isIngestionEntitlementActiveAt(candidate, timestamp)
     )
 
     if (!entitlement) {
@@ -311,43 +314,30 @@ export class IngestionService {
       }
     }
 
-    const periodKey = computeIngestionEntitlementPeriodKey(entitlement, timestamp)
-
-    if (!periodKey) {
-      return {
-        allowed: false,
-        featureSlug,
-        featureType: "usage",
-        message: "Unable to resolve the current meter window for this feature",
-        status: "invalid_entitlement_configuration",
-        timestamp,
-      }
+    const applyEntitlement = {
+      ...entitlement,
+      meterConfig: entitlement.meterConfig,
     }
-
     const enforcementState = await this.entitlementWindowClient
       .getEntitlementWindowStub({
         customerEntitlementId: entitlement.customerEntitlementId,
         customerId,
         projectId,
       })
-      .getEnforcementState()
-
-    const limit = resolveTotalGrantAllowance(entitlement.grants, timestamp)
-    const isLimitReached =
-      entitlement.overageStrategy !== "always" &&
-      typeof limit === "number" &&
-      Number.isFinite(limit) &&
-      enforcementState.usage >= limit
+      .getEnforcementState({
+        entitlement: applyEntitlement,
+        grants: entitlement.grants,
+        now: timestamp,
+      })
 
     return {
-      allowed: !isLimitReached,
+      allowed: !enforcementState.isLimitReached,
       featureSlug,
       featureType: "usage",
-      isLimitReached,
-      limit,
+      isLimitReached: enforcementState.isLimitReached,
+      limit: enforcementState.limit,
       meterConfig: entitlement.meterConfig,
       overageStrategy: entitlement.overageStrategy,
-      periodKey,
       status: "usage",
       effectiveAt: entitlement.effectiveAt,
       expiresAt: entitlement.expiresAt,
@@ -801,40 +791,8 @@ export class IngestionService {
       throw entitlementsResult.err
     }
 
-    const grantResult = await this.grantsManager.listGrantsForEntitlements({
-      projectId,
-      customerEntitlementIds: entitlementsResult.val.map((entitlement) => entitlement.id),
-      startAt,
-      endAt,
-    })
-
-    if (grantResult.err) {
-      throw grantResult.err
-    }
-
-    const grantsByEntitlementId = new Map<string, IngestionGrant[]>()
-
-    for (const grant of grantResult.val) {
-      const mappedGrant = {
-        allowanceUnits: grant.allowanceUnits,
-        effectiveAt: grant.effectiveAt,
-        expiresAt: grant.expiresAt,
-        grantId: grant.id,
-        priority: grant.priority,
-      }
-      const existing = grantsByEntitlementId.get(grant.customerEntitlementId)
-      if (existing) {
-        existing.push(mappedGrant)
-      } else {
-        grantsByEntitlementId.set(grant.customerEntitlementId, [mappedGrant])
-      }
-    }
-
     const candidateEntitlements = entitlementsResult.val.map((entitlement) =>
-      this.toIngestionEntitlement({
-        entitlement,
-        grants: grantsByEntitlementId.get(entitlement.id) ?? [],
-      })
+      this.toIngestionEntitlement(entitlement)
     )
 
     return {
@@ -845,12 +803,7 @@ export class IngestionService {
     }
   }
 
-  private toIngestionEntitlement(params: {
-    entitlement: CustomerEntitlementExtended
-    grants: IngestionGrant[]
-  }): IngestionEntitlement {
-    const { entitlement, grants } = params
-
+  private toIngestionEntitlement(entitlement: CustomerEntitlementExtended): IngestionEntitlement {
     return {
       allowanceUnits: entitlement.allowanceUnits,
       customerEntitlementId: entitlement.id,
@@ -861,38 +814,19 @@ export class IngestionService {
       featurePlanVersionId: entitlement.featurePlanVersionId,
       featureSlug: entitlement.featurePlanVersion.feature.slug,
       featureType: entitlement.featurePlanVersion.featureType,
-      grants,
+      grants: (entitlement.grants ?? []).map((grant) => ({
+        allowanceUnits: grant.allowanceUnits,
+        effectiveAt: grant.effectiveAt,
+        expiresAt: grant.expiresAt,
+        grantId: grant.id,
+        priority: grant.priority,
+      })),
       meterConfig: entitlement.featurePlanVersion.meterConfig ?? null,
       overageStrategy: entitlement.overageStrategy,
       projectId: entitlement.projectId,
-      resetConfig: this.resolveEntitlementResetConfig(entitlement),
-    }
-  }
-
-  private resolveEntitlementResetConfig(
-    entitlement: CustomerEntitlementExtended
-  ): ResetConfig | null {
-    const resetConfig = entitlement.featurePlanVersion.resetConfig
-
-    if (resetConfig) {
-      return {
-        ...resetConfig,
-        resetAnchor: "dayOfCreation",
-      }
-    }
-
-    const billingConfig = entitlement.featurePlanVersion.billingConfig
-
-    if (!billingConfig) {
-      return null
-    }
-
-    return {
-      name: billingConfig.name,
-      resetInterval: billingConfig.billingInterval,
-      resetIntervalCount: billingConfig.billingIntervalCount,
-      planType: billingConfig.planType,
-      resetAnchor: "dayOfCreation",
+      resetConfig:
+        entitlement.featurePlanVersion.resetConfig ??
+        toResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig),
     }
   }
 
@@ -954,7 +888,7 @@ export class IngestionService {
       (entitlement) =>
         entitlement.featureType === "usage" &&
         entitlement.meterConfig?.eventSlug === params.message.slug &&
-        computeIngestionEntitlementPeriodKey(entitlement, params.message.timestamp) !== null
+        isIngestionEntitlementActiveAt(entitlement, params.message.timestamp)
     )
 
     if (matchingEntitlements.length === 0) {
@@ -1111,15 +1045,12 @@ function isUsageEntitlement(entitlement: IngestionEntitlement): boolean {
   return entitlement.featureType === "usage" && Boolean(entitlement.meterConfig)
 }
 
-function resolveTotalGrantAllowance(grants: IngestionGrant[], timestamp: number): number | null {
-  const activeGrants = grants.filter(
-    (grant) =>
-      grant.effectiveAt <= timestamp && (grant.expiresAt === null || timestamp < grant.expiresAt)
-  )
-
-  if (activeGrants.some((grant) => grant.allowanceUnits === null)) {
-    return null
+function toResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
+  return {
+    name: billingConfig.name,
+    resetInterval: billingConfig.billingInterval,
+    resetIntervalCount: billingConfig.billingIntervalCount,
+    planType: billingConfig.planType,
+    resetAnchor: "dayOfCreation",
   }
-
-  return activeGrants.reduce((total, grant) => total + (grant.allowanceUnits ?? 0), 0)
 }

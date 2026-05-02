@@ -64,6 +64,8 @@ describe("verifyV1 route", () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       allowed: true,
+      effectiveAt: requestStartedAt,
+      expiresAt: null,
       featureSlug: "api_calls",
       featureType: "usage",
       isLimitReached: false,
@@ -74,13 +76,8 @@ describe("verifyV1 route", () => {
         eventId: "meter_123",
         eventSlug: "tokens_used",
       },
-      method: "sum",
       overageStrategy: "none",
-      periodKey: `onetime:${requestStartedAt}`,
       status: "usage",
-      streamEndAt: null,
-      streamId: "stream_123",
-      streamStartAt: requestStartedAt,
       timestamp: requestStartedAt,
       usage: 42,
     })
@@ -129,6 +126,8 @@ function createTestApp(
     options.verifyFeatureStatus ??
     vi.fn().mockResolvedValue({
       allowed: true,
+      effectiveAt: Date.UTC(2026, 2, 21, 12, 0, 0),
+      expiresAt: null,
       featureSlug: "api_calls",
       featureType: "usage",
       isLimitReached: false,
@@ -139,13 +138,8 @@ function createTestApp(
         eventId: "meter_123",
         eventSlug: "tokens_used",
       },
-      method: "sum",
       overageStrategy: "none",
-      periodKey: `onetime:${Date.UTC(2026, 2, 21, 12, 0, 0)}`,
       status: "usage",
-      streamEndAt: null,
-      streamId: "stream_123",
-      streamStartAt: Date.UTC(2026, 2, 21, 12, 0, 0),
       timestamp: Date.UTC(2026, 2, 21, 12, 0, 0),
       usage: 42,
     })

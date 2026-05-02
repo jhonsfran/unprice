@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   buildIngestionWindowName,
-  computeIngestionEntitlementPeriodKey,
   filterIngestionEntitlementsWithValidAggregationPayload,
+  isIngestionEntitlementActiveAt,
 } from "./message"
 import type { IngestionEntitlement } from "./service"
 
@@ -59,9 +59,9 @@ describe("ingestion entitlement message helpers", () => {
       expiresAt: timestamp + 100,
     })
 
-    expect(computeIngestionEntitlementPeriodKey(state, timestamp - 101)).toBeNull()
-    expect(computeIngestionEntitlementPeriodKey(state, timestamp + 100)).toBeNull()
-    expect(computeIngestionEntitlementPeriodKey(state, timestamp)).not.toBeNull()
+    expect(isIngestionEntitlementActiveAt(state, timestamp - 101)).toBe(false)
+    expect(isIngestionEntitlementActiveAt(state, timestamp + 100)).toBe(false)
+    expect(isIngestionEntitlementActiveAt(state, timestamp)).toBe(true)
   })
 
   it("keeps only entitlements with valid aggregation payloads", () => {
@@ -79,9 +79,6 @@ describe("ingestion entitlement message helpers", () => {
     expect(
       filterIngestionEntitlementsWithValidAggregationPayload({
         event: {
-          id: "evt_1",
-          slug: "usage.recorded",
-          timestamp,
           properties: { amount: "12" },
         },
         entitlements: [count, validSum, invalidSum],
@@ -91,9 +88,6 @@ describe("ingestion entitlement message helpers", () => {
     expect(
       filterIngestionEntitlementsWithValidAggregationPayload({
         event: {
-          id: "evt_2",
-          slug: "usage.recorded",
-          timestamp,
           properties: { amount: "not-a-number" },
         },
         entitlements: [count, validSum],

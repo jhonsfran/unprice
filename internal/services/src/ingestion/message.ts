@@ -1,6 +1,4 @@
-import { type Entitlement, calculateCycleWindow } from "@unprice/db/validators"
 import { z } from "zod"
-import { type RawEvent, computePeriodKey } from "../entitlements"
 import type { IngestionEntitlement } from "./service"
 
 export const ingestionQueueMessageSchema = z.object({
@@ -58,22 +56,6 @@ export function partitionDuplicateQueuedMessages(messages: IngestionQueueConsume
   }
 }
 
-export function buildEntitlementWindowName(params: {
-  appEnv: string
-  customerId: string
-  entitlementId: string
-  periodKey: string
-  projectId: string
-}): string {
-  return [
-    params.appEnv,
-    params.projectId,
-    params.customerId,
-    params.entitlementId,
-    params.periodKey,
-  ].join(":")
-}
-
 export function buildIngestionWindowName(params: {
   appEnv: string
   customerId: string
@@ -85,207 +67,23 @@ export function buildIngestionWindowName(params: {
   )
 }
 
-export function computeEntitlementPeriodKey(
-  entitlement: Entitlement,
+export function isIngestionEntitlementActiveAt(
+  entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt">,
   timestamp: number
-): string | null {
+): boolean {
   if (timestamp < entitlement.effectiveAt) {
-    return null
+    return false
   }
 
   if (typeof entitlement.expiresAt === "number" && timestamp >= entitlement.expiresAt) {
-    return null
+    return false
   }
 
-  if (!entitlement.resetConfig) {
-    return computePeriodKey({
-      now: timestamp,
-      effectiveStartDate: entitlement.effectiveAt,
-      effectiveEndDate: entitlement.expiresAt,
-      trialEndsAt: null,
-      config: {
-        name: "ingestion",
-        interval: "onetime",
-        intervalCount: 1,
-        anchor: "dayOfCreation",
-        planType: "onetime",
-      },
-    })
-  }
-
-  return computePeriodKey({
-    now: timestamp,
-    effectiveStartDate: entitlement.effectiveAt,
-    effectiveEndDate: entitlement.expiresAt,
-    trialEndsAt: null,
-    config: {
-      name: entitlement.resetConfig.name,
-      interval: entitlement.resetConfig.resetInterval,
-      intervalCount: entitlement.resetConfig.resetIntervalCount,
-      anchor: entitlement.resetConfig.resetAnchor,
-      planType: entitlement.resetConfig.planType,
-    },
-  })
-}
-
-export function computeIngestionEntitlementPeriodKey(
-  entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt" | "resetConfig">,
-  timestamp: number
-): string | null {
-  if (timestamp < entitlement.effectiveAt) {
-    return null
-  }
-
-  if (typeof entitlement.expiresAt === "number" && timestamp >= entitlement.expiresAt) {
-    return null
-  }
-
-  if (!entitlement.resetConfig) {
-    return computePeriodKey({
-      now: timestamp,
-      effectiveStartDate: entitlement.effectiveAt,
-      effectiveEndDate: entitlement.expiresAt,
-      trialEndsAt: null,
-      config: {
-        name: "ingestion",
-        interval: "onetime",
-        intervalCount: 1,
-        anchor: "dayOfCreation",
-        planType: "onetime",
-      },
-    })
-  }
-
-  return computePeriodKey({
-    now: timestamp,
-    effectiveStartDate: entitlement.effectiveAt,
-    effectiveEndDate: entitlement.expiresAt,
-    trialEndsAt: null,
-    config: {
-      name: entitlement.resetConfig.name,
-      interval: entitlement.resetConfig.resetInterval,
-      intervalCount: entitlement.resetConfig.resetIntervalCount,
-      anchor: entitlement.resetConfig.resetAnchor,
-      planType: entitlement.resetConfig.planType,
-    },
-  })
-}
-
-export function computeIngestionEntitlementPeriodWindow(
-  entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt" | "resetConfig">,
-  timestamp: number
-): { start: number; end: number } | null {
-  if (timestamp < entitlement.effectiveAt) {
-    return null
-  }
-
-  if (typeof entitlement.expiresAt === "number" && timestamp >= entitlement.expiresAt) {
-    return null
-  }
-
-  if (!entitlement.resetConfig) {
-    const cycle = calculateCycleWindow({
-      now: timestamp,
-      effectiveStartDate: entitlement.effectiveAt,
-      effectiveEndDate: entitlement.expiresAt,
-      trialEndsAt: null,
-      config: {
-        name: "ingestion",
-        interval: "onetime",
-        intervalCount: 1,
-        anchor: "dayOfCreation",
-        planType: "onetime",
-      },
-    })
-
-    return cycle ? { start: cycle.start, end: cycle.end } : null
-  }
-
-  const cycle = calculateCycleWindow({
-    now: timestamp,
-    effectiveStartDate: entitlement.effectiveAt,
-    effectiveEndDate: entitlement.expiresAt,
-    trialEndsAt: null,
-    config: {
-      name: entitlement.resetConfig.name,
-      interval: entitlement.resetConfig.resetInterval,
-      intervalCount: entitlement.resetConfig.resetIntervalCount,
-      anchor: entitlement.resetConfig.resetAnchor,
-      planType: entitlement.resetConfig.planType,
-    },
-  })
-
-  return cycle ? { start: cycle.start, end: cycle.end } : null
-}
-
-export function computeIngestionEntitlementPeriodEndAt(
-  entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt" | "resetConfig">,
-  timestamp: number
-): number | null {
-  return computeIngestionEntitlementPeriodWindow(entitlement, timestamp)?.end ?? null
-}
-
-export function filterMatchingEntitlements(params: {
-  entitlements: Entitlement[]
-  event: RawEvent
-}): Entitlement[] {
-  return params.entitlements.filter((entitlement) => {
-    // only entitlements with meters
-    if (entitlement.featureType !== "usage" || !entitlement.meterConfig) {
-      return false
-    }
-
-    // only entitlements listening for this event
-    if (entitlement.meterConfig.eventSlug !== params.event.slug) {
-      return false
-    }
-
-    // only events that have a valid periodkey
-    return computeEntitlementPeriodKey(entitlement, params.event.timestamp) !== null
-  })
-}
-
-export function filterEntitlementsWithValidAggregationPayload(params: {
-  entitlements: Entitlement[]
-  event: RawEvent
-}): Entitlement[] {
-  return params.entitlements.filter((entitlement) => {
-    const meterConfig = entitlement.meterConfig
-
-    if (!meterConfig) {
-      return false
-    }
-
-    if (meterConfig.aggregationMethod === "count") {
-      return true
-    }
-
-    const aggregationField = meterConfig.aggregationField
-
-    if (!aggregationField) {
-      return false
-    }
-
-    const value = params.event.properties[aggregationField]
-
-    return parseFiniteAggregationValue(value) !== null
-  })
-}
-
-export function filterMatchingIngestionEntitlements(params: {
-  event: RawEvent
-  entitlements: IngestionEntitlement[]
-}): IngestionEntitlement[] {
-  return params.entitlements.filter((entitlement) => {
-    return (
-      entitlement.meterConfig?.eventSlug === params.event.slug &&
-      computeIngestionEntitlementPeriodKey(entitlement, params.event.timestamp) !== null
-    )
-  })
+  return true
 }
 
 export function filterIngestionEntitlementsWithValidAggregationPayload(params: {
-  event: RawEvent
+  event: Pick<IngestionQueueMessage, "properties">
   entitlements: IngestionEntitlement[]
 }): IngestionEntitlement[] {
   return params.entitlements.filter((entitlement) => {

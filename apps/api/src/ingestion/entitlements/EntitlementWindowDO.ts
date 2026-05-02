@@ -190,10 +190,16 @@ const applyInputSchema = z.object({
   now: z.number(),
 })
 
+const enforcementStateInputSchema = z.object({
+  entitlement: entitlementConfigSchema,
+  grants: z.array(activeGrantSchema),
+  now: z.number().finite(),
+})
+
 type ApplyInput = z.infer<typeof applyInputSchema>
 type ApplyGrantInput = z.infer<typeof activeGrantSchema>
+type EnforcementStateInput = z.infer<typeof enforcementStateInputSchema>
 type ActiveGrantInput = ApplyGrantInput & {
-  anchor: number
   cadenceEffectiveAt: number
   cadenceExpiresAt: number | null
   currencyCode: string
@@ -713,16 +719,32 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  public async getEnforcementState(): Promise<{
+  public async getEnforcementState(rawInput?: EnforcementStateInput): Promise<{
     isLimitReached: boolean
     limit: number | null
     usage: number
   }> {
     await this.ready
 
-    const timestamp = Date.now()
+    const input = rawInput ? enforcementStateInputSchema.parse(rawInput) : null
+    const timestamp = input?.now ?? Date.now()
+    const syncedAt = Date.now()
+    const activeGrants = this.db.transaction((tx) => {
+      if (input) {
+        this.syncEntitlementConfig(tx, {
+          entitlement: input.entitlement,
+          createdAt: syncedAt,
+        })
+        this.syncGrants(tx, {
+          customerEntitlementId: input.entitlement.customerEntitlementId,
+          grants: input.grants,
+          createdAt: syncedAt,
+        })
+      }
+
+      return resolveActiveGrants(this.readGrants(tx), timestamp)
+    })
     const entitlement = this.readEntitlementConfig(this.db)
-    const activeGrants = resolveActiveGrants(this.readGrants(this.db), timestamp)
 
     if (!entitlement || activeGrants.length === 0) {
       return { usage: 0, limit: null, isLimitReached: false }
@@ -1430,7 +1452,6 @@ export class EntitlementWindowDO extends DurableObject {
       .all()
       .map((row) => ({
         allowanceUnits: row.allowanceUnits ?? null,
-        anchor: 0,
         cadenceEffectiveAt: entitlement.effectiveAt,
         cadenceExpiresAt: entitlement.expiresAt,
         currencyCode: this.extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig) ?? "USD",

@@ -14,8 +14,7 @@ import {
 describe("consumeGrantsByPriority", () => {
   const now = Date.UTC(2026, 2, 19, 12, 0, 0)
   const grantStart = now - 1000
-  const marchStart = Date.UTC(2026, 2, 1, 0, 0, 0)
-  const aprilStart = Date.UTC(2026, 3, 1, 0, 0, 0)
+  const entitlementMonthEnd = Date.UTC(2026, 3, 19, 0, 0, 0)
 
   const monthlyReset: ResetConfig = {
     name: "monthly",
@@ -28,7 +27,6 @@ describe("consumeGrantsByPriority", () => {
   const grant = (overrides: Partial<GrantConsumptionGrant> = {}): GrantConsumptionGrant => ({
     grantId: "grant_a",
     allowanceUnits: 100,
-    anchor: 1,
     effectiveAt: grantStart,
     expiresAt: null,
     priority: 10,
@@ -280,7 +278,7 @@ describe("consumeGrantsByPriority", () => {
           bucketKey: `grant_a:month:${grantStart}`,
           periodKey: `month:${grantStart}`,
           periodStartAt: grantStart,
-          periodEndAt: aprilStart,
+          periodEndAt: entitlementMonthEnd,
         }),
       ],
     })
@@ -306,22 +304,22 @@ describe("consumeGrantsByPriority", () => {
         consumedInCurrentWindow: 3,
         periodKey: `month:${grantStart}`,
         periodStartAt: grantStart,
-        periodEndAt: aprilStart,
+        periodEndAt: entitlementMonthEnd,
       })
     )
   })
 
   it("creates a new reset bucket at the window boundary", () => {
     const result = consumeGrantsByPriority({
-      timestamp: aprilStart,
+      timestamp: entitlementMonthEnd,
       units: 4,
       grants: [grant({ resetConfig: monthlyReset })],
       states: [
         state({
-          bucketKey: `grant_a:month:${marchStart}`,
-          periodKey: `month:${marchStart}`,
-          periodStartAt: marchStart,
-          periodEndAt: aprilStart,
+          bucketKey: `grant_a:month:${grantStart}`,
+          periodKey: `month:${grantStart}`,
+          periodStartAt: grantStart,
+          periodEndAt: entitlementMonthEnd,
           consumedInCurrentWindow: 99,
         }),
       ],
@@ -330,9 +328,9 @@ describe("consumeGrantsByPriority", () => {
     expect(result.allocations[0]?.nextState).toEqual(
       expect.objectContaining({
         consumedInCurrentWindow: 4,
-        periodKey: `month:${aprilStart}`,
-        periodStartAt: aprilStart,
-        periodEndAt: Date.UTC(2026, 4, 1, 0, 0, 0),
+        periodKey: `month:${entitlementMonthEnd}`,
+        periodStartAt: entitlementMonthEnd,
+        periodEndAt: Date.UTC(2026, 4, 19, 0, 0, 0),
       })
     )
   })
@@ -347,7 +345,7 @@ describe("consumeGrantsByPriority", () => {
           bucketKey: `grant_a:month:${grantStart}`,
           periodKey: `month:${grantStart}`,
           periodStartAt: grantStart,
-          periodEndAt: aprilStart,
+          periodEndAt: entitlementMonthEnd,
           consumedInCurrentWindow: 6,
         }),
       ],
@@ -359,7 +357,7 @@ describe("consumeGrantsByPriority", () => {
         consumedInCurrentWindow: 10,
         periodKey: `month:${grantStart}`,
         periodStartAt: grantStart,
-        periodEndAt: aprilStart,
+        periodEndAt: entitlementMonthEnd,
       })
     )
   })
@@ -378,11 +376,11 @@ describe("consumeGrantsByPriority", () => {
       bucketKey: `grant_a:month:${grantStart}`,
       periodKey: `month:${grantStart}`,
       start: grantStart,
-      end: aprilStart,
+      end: entitlementMonthEnd,
     })
   })
 
-  it("uses the grant anchor when calculating reset buckets", () => {
+  it("uses the entitlement cadence start when calculating reset buckets", () => {
     const effectiveAt = Date.UTC(2026, 2, 1, 0, 0, 0)
     const anchoredStart = Date.UTC(2026, 2, 15, 0, 0, 0)
     const anchoredEnd = Date.UTC(2026, 3, 15, 0, 0, 0)
@@ -390,7 +388,7 @@ describe("consumeGrantsByPriority", () => {
     expect(
       computeGrantPeriodBucket(
         grant({
-          anchor: 15,
+          cadenceEffectiveAt: anchoredStart,
           effectiveAt,
           resetConfig: monthlyReset,
         }),

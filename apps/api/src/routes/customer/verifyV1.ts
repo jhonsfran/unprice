@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { meterConfigSchema, overageStrategySchema } from "@unprice/db/validators"
+import { meterConfigSchema, overageStrategySchema, typeFeatureSchema } from "@unprice/db/validators"
 import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
@@ -31,6 +31,10 @@ const verifyFeatureStatusSchema = z.object({
     description: "The feature slug that was verified",
     example: "tokens",
   }),
+  featureType: typeFeatureSchema.optional().openapi({
+    description: "The resolved feature type",
+    example: "usage",
+  }),
   meterConfig: meterConfigSchema.optional().openapi({
     description: "The resolved meter configuration for usage-based features",
   }),
@@ -49,6 +53,17 @@ const verifyFeatureStatusSchema = z.object({
   overageStrategy: overageStrategySchema.optional().openapi({
     description: "How the feature behaves once the limit is reached",
     example: "none",
+  }),
+  effectiveAt: z
+    .number()
+    .optional()
+    .openapi({
+      description: "The customer entitlement effective start timestamp",
+      example: Date.UTC(2026, 2, 21, 12, 0, 0),
+    }),
+  expiresAt: z.number().nullable().optional().openapi({
+    description: "The customer entitlement exclusive end timestamp",
+    example: null,
   }),
   message: z.string().optional().openapi({
     description: "Optional detail about the verification result",

@@ -211,6 +211,18 @@ export class EntitlementService {
               feature: true,
             },
           },
+          grants: {
+            where: (grant, { and: andOp, gt, isNull, lte, or }) =>
+              andOp(
+                lte(grant.effectiveAt, maxEffectiveAt),
+                or(isNull(grant.expiresAt), gt(grant.expiresAt, minExpiresAt))
+              ),
+            orderBy: (grant, { asc, desc }) => [
+              desc(grant.priority),
+              asc(grant.expiresAt),
+              asc(grant.id),
+            ],
+          },
           subscriptionItem: true,
         },
         where: (entitlement, { and: andOp, eq: eqOp, gt, isNull, lte, or }) =>

@@ -70,7 +70,6 @@ export type FeatureVerificationResult = {
   meterConfig?: MeterConfig
   method?: AggregationMethod
   overageStrategy?: OverageStrategy
-  periodKey?: string
   status: FeatureVerificationStatus
   effectiveAt?: number
   expiresAt?: number | null

@@ -12,7 +12,7 @@ export function createQueueServices(params: {
   env: Env
   executionCtx: ExecutionContext
   logger: AppLogger
-}): Pick<ServiceContext, "entitlements" | "grantsManager"> & {
+}): Pick<ServiceContext, "entitlements"> & {
   cache: Pick<Cache, "ingestionPreparedGrantContext">
 } {
   const db = createConnection({
@@ -68,6 +68,5 @@ export function createQueueServices(params: {
   return {
     cache,
     entitlements: svcCtx.entitlements,
-    grantsManager: svcCtx.grantsManager,
   }
 }
