@@ -11,7 +11,7 @@ SCHEMA >
     `idempotency_key` String `json:$.idempotency_key`,
     `project_id` String `json:$.project_id`,
     `customer_id` String `json:$.customer_id`,
-    `meter_hash` String `json:$.meter_hash`,
+    `customer_entitlement_id` String `json:$.customer_entitlement_id`,
     `grant_id` Nullable(String) `json:$.grant_id`,
     `feature_plan_version_id` Nullable(String) `json:$.feature_plan_version_id`,
     `feature_slug` LowCardinality(String) `json:$.feature_slug`,

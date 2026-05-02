@@ -282,6 +282,47 @@ export class RatingService {
     }
   }
 
+  private entitlementFromGrant(
+    grant: z.infer<typeof grantSchemaExtended>
+  ): Omit<Entitlement, "id"> {
+    const customerEntitlement = grant.customerEntitlement
+    const featurePlanVersion = customerEntitlement.featurePlanVersion
+    const resetConfig = featurePlanVersion.resetConfig
+
+    return {
+      limit: customerEntitlement.allowanceUnits,
+      mergingPolicy: "replace",
+      effectiveAt: customerEntitlement.effectiveAt,
+      expiresAt: customerEntitlement.expiresAt,
+      resetConfig: resetConfig
+        ? {
+            ...resetConfig,
+            resetAnchor: typeof resetConfig.resetAnchor === "number" ? resetConfig.resetAnchor : 0,
+          }
+        : null,
+      meterConfig:
+        featurePlanVersion.featureType === "usage"
+          ? (featurePlanVersion.meterConfig ?? null)
+          : null,
+      featureType: featurePlanVersion.featureType,
+      unitOfMeasure: featurePlanVersion.unitOfMeasure,
+      grants: [],
+      featureSlug: featurePlanVersion.feature.slug,
+      customerId: customerEntitlement.customerId,
+      projectId: customerEntitlement.projectId,
+      isCurrent: true,
+      createdAtM: customerEntitlement.createdAtM,
+      updatedAtM: customerEntitlement.updatedAtM,
+      metadata: {
+        realtime: featurePlanVersion.metadata?.realtime ?? false,
+        notifyUsageThreshold: featurePlanVersion.metadata?.notifyUsageThreshold ?? 90,
+        overageStrategy: customerEntitlement.overageStrategy,
+        blockCustomer: featurePlanVersion.metadata?.blockCustomer ?? false,
+        hidden: featurePlanVersion.metadata?.hidden ?? false,
+      },
+    }
+  }
+
   private resolveCurrency(
     explicitCurrency: Currency | undefined,
     charges: RatedCharge[],
@@ -300,7 +341,7 @@ export class RatingService {
     }
 
     for (const grant of grants) {
-      const cfg = grant.featurePlanVersion?.config
+      const cfg = grant.customerEntitlement.featurePlanVersion.config
       // Try tiers first (tier pricing stores currency per tier)
       const tierCurrency = cfg?.tiers?.[0]?.unitPrice?.dinero?.currency?.code
       if (tierCurrency && tierCurrency in currencies) {
@@ -386,59 +427,13 @@ export class RatingService {
       )
     }
 
-    // Fetch grants if not provided
-    let grants: z.infer<typeof grantSchemaExtended>[]
-    if (providedGrants) {
-      grants = providedGrants
-    } else {
-      // Fetch all grants for customer and filter by feature slug
-      const { val: grantsResult, err: grantsErr } = await this.grantsManager.getGrantsForCustomer(
-        now !== undefined
-          ? { customerId, projectId, now }
-          : { customerId, projectId, startAt: startAt!, endAt: endAt! }
-      )
-
-      if (grantsErr) {
-        this.logger.error(grantsErr, {
-          customerId,
-          projectId,
-          featureSlug,
-          context: "Failed to get grants for customer",
-        })
-        return Err(new UnPriceRatingError({ message: grantsErr.message }))
-      }
-
-      // Filter grants by feature slug
-      grants = grantsResult.grants.filter((g) => g.featurePlanVersion.feature.slug === featureSlug)
-    }
+    const grants = providedGrants ?? []
 
     if (grants.length === 0) {
       return Ok([])
     }
 
-    // Use provided entitlement or compute it
-    let entitlement: Omit<Entitlement, "id">
-    if (providedEntitlement) {
-      entitlement = providedEntitlement
-    } else {
-      const computedStateResult = await this.grantsManager.computeEntitlementState({
-        grants,
-        customerId,
-        projectId,
-      })
-
-      if (computedStateResult.err) {
-        this.logger.error(computedStateResult.err, {
-          featureSlug,
-          customerId,
-          projectId,
-          context: "Failed to compute entitlement state",
-        })
-        return Err(new UnPriceRatingError({ message: computedStateResult.err.message }))
-      }
-
-      entitlement = computedStateResult.val
-    }
+    const entitlement = providedEntitlement ?? this.entitlementFromGrant(grants[0]!)
 
     // Calculate billing window
     const billingWindowInput: ResolveBillingWindowInput =
@@ -501,7 +496,7 @@ export class RatingService {
         continue
       }
 
-      const grantLimit = grant.limit ?? Number.POSITIVE_INFINITY
+      const grantLimit = grant.allowanceUnits ?? Number.POSITIVE_INFINITY
 
       // Calculate proration
       const proration = this.calculateGrantProration({
@@ -513,8 +508,8 @@ export class RatingService {
 
       // Calculate free units
       const freeUnitsResult = calculateFreeUnits({
-        config: grant.featurePlanVersion.config,
-        featureType: grant.featurePlanVersion.featureType,
+        config: grant.customerEntitlement.featurePlanVersion.config,
+        featureType: grant.customerEntitlement.featurePlanVersion.featureType,
       })
 
       if (freeUnitsResult.err) {
@@ -529,9 +524,9 @@ export class RatingService {
 
       pricingGrants.push({
         id: grant.id,
-        limit: grant.limit,
+        limit: grant.allowanceUnits,
         priority: grant.priority,
-        config: grant.featurePlanVersion.config,
+        config: grant.customerEntitlement.featurePlanVersion.config,
         prorate: proration.prorationFactor,
       })
 
@@ -620,67 +615,23 @@ export class RatingService {
       )
     }
 
-    // Pre-fetch grants once (shared between before and after)
-    let grants = params.grants
+    const grants = params.grants ?? []
 
-    if (!grants) {
-      const grantsLookupInput =
-        params.now !== undefined
-          ? { customerId, projectId, now: params.now }
-          : { customerId, projectId, startAt: params.startAt, endAt: params.endAt }
-
-      const { val: grantsResult, err: grantsErr } =
-        await this.grantsManager.getGrantsForCustomer(grantsLookupInput)
-
-      if (grantsErr) {
-        this.logger.error(grantsErr, {
-          customerId,
-          projectId,
-          featureSlug,
-          context: "Failed to get grants for customer",
-        })
-        return Err(new UnPriceRatingError({ message: grantsErr.message }))
-      }
-
-      grants = grantsResult.grants.filter((g) => g.featurePlanVersion.feature.slug === featureSlug)
-    }
-
-    // Pre-compute entitlement once (shared between before and after)
-    let entitlement = params.entitlement
-    if (!entitlement) {
-      if (grants.length === 0) {
-        // No grants means no charges — return zero delta
-        const currency = this.resolveCurrency(params.currency, [], grants)
-        const zero = dinero({ amount: 0, currency })
-        const zeroPrice = this.asCalculatedPrice(zero, zero, zero)
-        return Ok({
-          usageBefore,
-          usageAfter,
-          usageDelta: usageAfter - usageBefore,
-          before: [],
-          after: [],
-          deltaPrice: zeroPrice,
-        })
-      }
-
-      const computedStateResult = await this.grantsManager.computeEntitlementState({
-        grants,
-        customerId,
-        projectId,
+    if (!params.entitlement && grants.length === 0) {
+      const currency = this.resolveCurrency(params.currency, [], grants)
+      const zero = dinero({ amount: 0, currency })
+      const zeroPrice = this.asCalculatedPrice(zero, zero, zero)
+      return Ok({
+        usageBefore,
+        usageAfter,
+        usageDelta: usageAfter - usageBefore,
+        before: [],
+        after: [],
+        deltaPrice: zeroPrice,
       })
-
-      if (computedStateResult.err) {
-        this.logger.error(computedStateResult.err, {
-          featureSlug,
-          customerId,
-          projectId,
-          context: "Failed to compute entitlement state for incremental rating",
-        })
-        return Err(new UnPriceRatingError({ message: computedStateResult.err.message }))
-      }
-
-      entitlement = computedStateResult.val
     }
+
+    const entitlement = params.entitlement ?? this.entitlementFromGrant(grants[0]!)
 
     const buildRatingInput = (usageData: UsageFeatureData[]): RatingInput => {
       if (params.now !== undefined) {

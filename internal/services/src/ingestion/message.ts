@@ -1,6 +1,7 @@
 import { type Entitlement, calculateCycleWindow } from "@unprice/db/validators"
 import { z } from "zod"
-import { type IngestionResolvedState, type RawEvent, computePeriodKey } from "../entitlements"
+import { type RawEvent, computePeriodKey } from "../entitlements"
+import type { IngestionEntitlement } from "./service"
 
 export const ingestionQueueMessageSchema = z.object({
   version: z.literal(1),
@@ -76,10 +77,12 @@ export function buildEntitlementWindowName(params: {
 export function buildIngestionWindowName(params: {
   appEnv: string
   customerId: string
-  meterHash: string
+  customerEntitlementId: string
   projectId: string
 }): string {
-  return [params.appEnv, params.projectId, params.customerId, params.meterHash].join(":")
+  return [params.appEnv, params.projectId, params.customerId, params.customerEntitlementId].join(
+    ":"
+  )
 }
 
 export function computeEntitlementPeriodKey(
@@ -125,23 +128,23 @@ export function computeEntitlementPeriodKey(
   })
 }
 
-export function computeResolvedStatePeriodKey(
-  state: Pick<IngestionResolvedState, "effectiveAt" | "expiresAt" | "resetConfig">,
+export function computeIngestionEntitlementPeriodKey(
+  entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt" | "resetConfig">,
   timestamp: number
 ): string | null {
-  if (timestamp < state.effectiveAt) {
+  if (timestamp < entitlement.effectiveAt) {
     return null
   }
 
-  if (typeof state.expiresAt === "number" && timestamp >= state.expiresAt) {
+  if (typeof entitlement.expiresAt === "number" && timestamp >= entitlement.expiresAt) {
     return null
   }
 
-  if (!state.resetConfig) {
+  if (!entitlement.resetConfig) {
     return computePeriodKey({
       now: timestamp,
-      effectiveStartDate: state.effectiveAt,
-      effectiveEndDate: state.expiresAt,
+      effectiveStartDate: entitlement.effectiveAt,
+      effectiveEndDate: entitlement.expiresAt,
       trialEndsAt: null,
       config: {
         name: "ingestion",
@@ -155,36 +158,36 @@ export function computeResolvedStatePeriodKey(
 
   return computePeriodKey({
     now: timestamp,
-    effectiveStartDate: state.effectiveAt,
-    effectiveEndDate: state.expiresAt,
+    effectiveStartDate: entitlement.effectiveAt,
+    effectiveEndDate: entitlement.expiresAt,
     trialEndsAt: null,
     config: {
-      name: state.resetConfig.name,
-      interval: state.resetConfig.resetInterval,
-      intervalCount: state.resetConfig.resetIntervalCount,
-      anchor: state.resetConfig.resetAnchor,
-      planType: state.resetConfig.planType,
+      name: entitlement.resetConfig.name,
+      interval: entitlement.resetConfig.resetInterval,
+      intervalCount: entitlement.resetConfig.resetIntervalCount,
+      anchor: entitlement.resetConfig.resetAnchor,
+      planType: entitlement.resetConfig.planType,
     },
   })
 }
 
-export function computeResolvedStatePeriodWindow(
-  state: Pick<IngestionResolvedState, "effectiveAt" | "expiresAt" | "resetConfig">,
+export function computeIngestionEntitlementPeriodWindow(
+  entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt" | "resetConfig">,
   timestamp: number
 ): { start: number; end: number } | null {
-  if (timestamp < state.effectiveAt) {
+  if (timestamp < entitlement.effectiveAt) {
     return null
   }
 
-  if (typeof state.expiresAt === "number" && timestamp >= state.expiresAt) {
+  if (typeof entitlement.expiresAt === "number" && timestamp >= entitlement.expiresAt) {
     return null
   }
 
-  if (!state.resetConfig) {
+  if (!entitlement.resetConfig) {
     const cycle = calculateCycleWindow({
       now: timestamp,
-      effectiveStartDate: state.effectiveAt,
-      effectiveEndDate: state.expiresAt,
+      effectiveStartDate: entitlement.effectiveAt,
+      effectiveEndDate: entitlement.expiresAt,
       trialEndsAt: null,
       config: {
         name: "ingestion",
@@ -200,26 +203,26 @@ export function computeResolvedStatePeriodWindow(
 
   const cycle = calculateCycleWindow({
     now: timestamp,
-    effectiveStartDate: state.effectiveAt,
-    effectiveEndDate: state.expiresAt,
+    effectiveStartDate: entitlement.effectiveAt,
+    effectiveEndDate: entitlement.expiresAt,
     trialEndsAt: null,
     config: {
-      name: state.resetConfig.name,
-      interval: state.resetConfig.resetInterval,
-      intervalCount: state.resetConfig.resetIntervalCount,
-      anchor: state.resetConfig.resetAnchor,
-      planType: state.resetConfig.planType,
+      name: entitlement.resetConfig.name,
+      interval: entitlement.resetConfig.resetInterval,
+      intervalCount: entitlement.resetConfig.resetIntervalCount,
+      anchor: entitlement.resetConfig.resetAnchor,
+      planType: entitlement.resetConfig.planType,
     },
   })
 
   return cycle ? { start: cycle.start, end: cycle.end } : null
 }
 
-export function computeResolvedStatePeriodEndAt(
-  state: Pick<IngestionResolvedState, "effectiveAt" | "expiresAt" | "resetConfig">,
+export function computeIngestionEntitlementPeriodEndAt(
+  entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt" | "resetConfig">,
   timestamp: number
 ): number | null {
-  return computeResolvedStatePeriodWindow(state, timestamp)?.end ?? null
+  return computeIngestionEntitlementPeriodWindow(entitlement, timestamp)?.end ?? null
 }
 
 export function filterMatchingEntitlements(params: {
@@ -269,24 +272,28 @@ export function filterEntitlementsWithValidAggregationPayload(params: {
   })
 }
 
-export function filterMatchingResolvedStates(params: {
+export function filterMatchingIngestionEntitlements(params: {
   event: RawEvent
-  states: IngestionResolvedState[]
-}): IngestionResolvedState[] {
-  return params.states.filter((state) => {
+  entitlements: IngestionEntitlement[]
+}): IngestionEntitlement[] {
+  return params.entitlements.filter((entitlement) => {
     return (
-      state.meterConfig.eventSlug === params.event.slug &&
-      computeResolvedStatePeriodKey(state, params.event.timestamp) !== null
+      entitlement.meterConfig?.eventSlug === params.event.slug &&
+      computeIngestionEntitlementPeriodKey(entitlement, params.event.timestamp) !== null
     )
   })
 }
 
-export function filterResolvedStatesWithValidAggregationPayload(params: {
+export function filterIngestionEntitlementsWithValidAggregationPayload(params: {
   event: RawEvent
-  states: IngestionResolvedState[]
-}): IngestionResolvedState[] {
-  return params.states.filter((state) => {
-    const meterConfig = state.meterConfig
+  entitlements: IngestionEntitlement[]
+}): IngestionEntitlement[] {
+  return params.entitlements.filter((entitlement) => {
+    const meterConfig = entitlement.meterConfig
+
+    if (!meterConfig) {
+      return false
+    }
 
     if (meterConfig.aggregationMethod === "count") {
       return true

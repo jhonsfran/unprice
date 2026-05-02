@@ -10,6 +10,7 @@ import {
   type OverageStrategy,
   type ResetConfig,
   configFeatureSchema,
+  meterConfigSchema,
 } from "@unprice/db/validators"
 import { LEDGER_SCALE } from "@unprice/money"
 import type { AppLogger } from "@unprice/observability"
@@ -26,12 +27,9 @@ import {
   computeUsagePriceDeltaMinor,
   consumeGrantsByPriority,
   deriveMeterKey,
-  mergeGrantExpiry,
   resolveActiveGrants,
   resolveAvailableGrantUnits,
   resolveConsumedGrantUnits,
-  resolveGrantOverageStrategy,
-  validateGrantBatch,
 } from "@unprice/services/entitlements"
 import { LedgerGateway } from "@unprice/services/ledger"
 import { WalletService } from "@unprice/services/wallet"
@@ -46,6 +44,7 @@ import { z } from "zod"
 import type { Env } from "~/env"
 import { createDoLogger, runDoOperation } from "~/observability"
 import {
+  entitlementConfigTable,
   grantWindowsTable,
   grantsTable,
   idempotencyKeysTable,
@@ -113,7 +112,7 @@ const outboxFactSchema = z.object({
   project_id: z.string(),
   customer_id: z.string(),
   currency: z.string().length(3),
-  meter_hash: z.string(),
+  customer_entitlement_id: z.string(),
   grant_id: z.string().optional(),
   feature_plan_version_id: z.string().nullable().optional(),
   feature_slug: z.string(),
@@ -157,19 +156,26 @@ const resetConfigSnapshotSchema = z.custom<ResetConfig>(
 )
 
 const activeGrantSchema = z.object({
-  amount: z.number().finite().nullable(),
-  anchor: z.number().int(),
-  currencyCode: z.string().length(3),
+  allowanceUnits: z.number().finite().nullable(),
+  effectiveAt: z.number().finite(),
+  expiresAt: z.number().finite().nullable(),
+  grantId: z.string().min(1),
+  priority: z.number().int(),
+})
+
+const entitlementConfigSchema = z.object({
+  allowanceUnits: z.number().finite().nullable(),
+  customerEntitlementId: z.string().min(1),
+  customerId: z.string().min(1),
   effectiveAt: z.number().finite(),
   expiresAt: z.number().finite().nullable(),
   featureConfig: configFeatureSchema,
   featurePlanVersionId: z.string().min(1),
   featureSlug: z.string().min(1),
-  grantId: z.string().min(1),
-  meterConfig: z.custom<MeterConfig>((val) => val != null && typeof val === "object"),
-  meterHash: z.string().min(1),
+  featureType: z.string().min(1),
+  meterConfig: meterConfigSchema,
   overageStrategy: overageStrategySchema,
-  priority: z.number().int(),
+  projectId: z.string().min(1),
   resetConfig: resetConfigSnapshotSchema.nullable().optional(),
 })
 
@@ -178,17 +184,26 @@ const applyInputSchema = z.object({
   idempotencyKey: z.string().min(1),
   projectId: z.string().min(1),
   customerId: z.string().min(1),
+  entitlement: entitlementConfigSchema,
   grants: z.array(activeGrantSchema).min(1),
   enforceLimit: z.boolean(),
   now: z.number(),
 })
 
 type ApplyInput = z.infer<typeof applyInputSchema>
-type ActiveGrantInput = z.infer<typeof activeGrantSchema>
+type ApplyGrantInput = z.infer<typeof activeGrantSchema>
+type ActiveGrantInput = ApplyGrantInput & {
+  anchor: number
+  cadenceEffectiveAt: number
+  cadenceExpiresAt: number | null
+  currencyCode: string
+  resetConfig: ResetConfig | null
+}
+type EntitlementConfigInput = z.infer<typeof entitlementConfigSchema>
 
 type MeterIdentity = {
+  customerEntitlementId: string
   currency: string
-  hash: string
   key: string
   config: MeterConfig
 }
@@ -228,6 +243,12 @@ const INACTIVITY_THRESHOLD_MS = 24 * 60 * 60 * 1000
 // per-flush Postgres roundtrip cost on cold meters.
 function maxFlushIntervalMs(env: Env): number {
   return env.NODE_ENV === "development" ? 30_000 : 5 * 60_000
+}
+
+function minNullableExpiry(left: number | null, right: number | null): number | null {
+  if (left === null) return right
+  if (right === null) return left
+  return Math.min(left, right)
 }
 
 export class EntitlementWindowDO extends DurableObject {
@@ -317,10 +338,16 @@ export class EntitlementWindowDO extends DurableObject {
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
 
-    validateGrantBatch(input.grants)
-
     const activeGrants = this.db.transaction((tx) => {
-      this.syncGrants(tx, { grants: input.grants, createdAt })
+      this.syncEntitlementConfig(tx, {
+        entitlement: input.entitlement,
+        createdAt,
+      })
+      this.syncGrants(tx, {
+        customerEntitlementId: input.entitlement.customerEntitlementId,
+        grants: input.grants,
+        createdAt,
+      })
       return resolveActiveGrants(this.readGrants(tx), input.event.timestamp)
     })
 
@@ -331,9 +358,13 @@ export class EntitlementWindowDO extends DurableObject {
       throw new Error("No active grants found for event timestamp")
     }
 
-    // meter is the same for all grants in the DO
-    const meter = this.resolveMeterIdentity(activeGrants)
-    const overageStrategy = resolveGrantOverageStrategy(activeGrants)
+    const entitlement = this.readEntitlementConfig(this.db)
+    if (!entitlement) {
+      throw new Error("No entitlement config found after sync")
+    }
+
+    const meter = this.resolveMeterIdentity(entitlement)
+    const overageStrategy = entitlement.overageStrategy
 
     // One canonical log line per apply() — populated as we go, emitted in
     // the finally block so every code path (success, denial, throw) lands
@@ -346,7 +377,7 @@ export class EntitlementWindowDO extends DurableObject {
       idempotency_key: idempotencyKey,
       project_id: input.projectId,
       customer_id: input.customerId,
-      meter_hash: meter.hash,
+      customer_entitlement_id: entitlement.customerEntitlementId,
       grant_count: activeGrants.length,
       synced_grant_count: input.grants.length,
       meter_key: meter.key,
@@ -458,6 +489,7 @@ export class EntitlementWindowDO extends DurableObject {
                 facts: pendingFacts,
                 overageStrategy,
                 states: this.readGrantStates(tx),
+                entitlement,
                 timestamp: input.event.timestamp,
               })
 
@@ -479,6 +511,7 @@ export class EntitlementWindowDO extends DurableObject {
 
           const pricedFacts = this.priceFactsFromGrantWindows(tx, {
             activeGrants,
+            entitlement,
             eventTimestamp: input.event.timestamp,
             facts,
           })
@@ -688,9 +721,10 @@ export class EntitlementWindowDO extends DurableObject {
     await this.ready
 
     const timestamp = Date.now()
+    const entitlement = this.readEntitlementConfig(this.db)
     const activeGrants = resolveActiveGrants(this.readGrants(this.db), timestamp)
 
-    if (activeGrants.length === 0) {
+    if (!entitlement || activeGrants.length === 0) {
       return { usage: 0, limit: null, isLimitReached: false }
     }
 
@@ -701,7 +735,7 @@ export class EntitlementWindowDO extends DurableObject {
       timestamp,
     })
     const limit = this.resolveTotalGrantUnits(activeGrants)
-    const overageStrategy = resolveGrantOverageStrategy(activeGrants)
+    const overageStrategy = entitlement.overageStrategy
     const available = resolveAvailableGrantUnits({
       grants: activeGrants,
       states,
@@ -1139,28 +1173,74 @@ export class EntitlementWindowDO extends DurableObject {
       .run()
   }
 
-  private resolveMeterIdentity(grants: ActiveGrantInput[]): MeterIdentity {
-    validateGrantBatch(grants)
-
-    const grant = this.firstGrantByDrainOrder(grants)
+  private resolveMeterIdentity(entitlement: EntitlementConfigInput): MeterIdentity {
     return {
-      currency: grant.currencyCode,
-      hash: grant.meterHash,
-      key: deriveMeterKey(grant.meterConfig),
-      config: grant.meterConfig,
+      customerEntitlementId: entitlement.customerEntitlementId,
+      currency: this.extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig) ?? "USD",
+      key: deriveMeterKey(entitlement.meterConfig),
+      config: entitlement.meterConfig,
     }
   }
 
-  private resolveTotalGrantUnits(grants: ActiveGrantInput[]): number | null {
-    if (grants.some((grant) => grant.amount === null)) {
+  private extractCurrencyCodeFromFeatureConfig(config: unknown): string | null {
+    const currencyFromPrice = this.extractCurrencyCode(config, "price")
+    if (currencyFromPrice) {
+      return currencyFromPrice
+    }
+
+    if (!this.isRecord(config) || !Array.isArray(config.tiers)) {
       return null
     }
 
-    return grants.reduce((total, grant) => total + (grant.amount ?? 0), 0)
+    for (const tier of config.tiers) {
+      const currencyFromTier = this.extractCurrencyCode(tier, "unitPrice")
+      if (currencyFromTier) {
+        return currencyFromTier
+      }
+    }
+
+    return null
+  }
+
+  private extractCurrencyCode(input: unknown, priceKey: string): string | null {
+    if (!this.isRecord(input)) {
+      return null
+    }
+
+    const price = input[priceKey]
+    if (!this.isRecord(price)) {
+      return null
+    }
+
+    const dinero = price.dinero
+    if (!this.isRecord(dinero)) {
+      return null
+    }
+
+    const currency = dinero.currency
+    if (!this.isRecord(currency)) {
+      return null
+    }
+
+    const code = currency.code
+    return typeof code === "string" && code.length > 0 ? code : null
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null
+  }
+
+  private resolveTotalGrantUnits(grants: ActiveGrantInput[]): number | null {
+    if (grants.some((grant) => grant.allowanceUnits === null)) {
+      return null
+    }
+
+    return grants.reduce((total, grant) => total + (grant.allowanceUnits ?? 0), 0)
   }
 
   private findGrantLimitExceededFact(params: {
     activeGrants: ActiveGrantInput[]
+    entitlement: EntitlementConfigInput
     facts: Fact[]
     overageStrategy: OverageStrategy
     states: GrantConsumptionState[]
@@ -1201,11 +1281,101 @@ export class EntitlementWindowDO extends DurableObject {
     return null
   }
 
-  private syncGrants(
+  private syncEntitlementConfig(
     tx: DrizzleSqliteDODatabase<typeof schema>,
     params: {
       createdAt: number
-      grants: ActiveGrantInput[]
+      entitlement: EntitlementConfigInput
+    }
+  ): void {
+    const existing = tx
+      .select({ customerEntitlementId: entitlementConfigTable.customerEntitlementId })
+      .from(entitlementConfigTable)
+      .where(
+        eq(entitlementConfigTable.customerEntitlementId, params.entitlement.customerEntitlementId)
+      )
+      .get()
+
+    const values = {
+      customerEntitlementId: params.entitlement.customerEntitlementId,
+      projectId: params.entitlement.projectId,
+      customerId: params.entitlement.customerId,
+      effectiveAt: params.entitlement.effectiveAt,
+      expiresAt: params.entitlement.expiresAt,
+      featureConfig: params.entitlement.featureConfig,
+      featurePlanVersionId: params.entitlement.featurePlanVersionId,
+      featureSlug: params.entitlement.featureSlug,
+      meterConfig: params.entitlement.meterConfig,
+      overageStrategy: params.entitlement.overageStrategy,
+      resetConfig: params.entitlement.resetConfig ?? null,
+      updatedAt: params.createdAt,
+    }
+
+    if (existing) {
+      tx.update(entitlementConfigTable)
+        .set(values)
+        .where(
+          eq(entitlementConfigTable.customerEntitlementId, params.entitlement.customerEntitlementId)
+        )
+        .run()
+      return
+    }
+
+    tx.insert(entitlementConfigTable)
+      .values({
+        ...values,
+        addedAt: params.createdAt,
+      })
+      .run()
+  }
+
+  private readEntitlementConfig(
+    tx: DrizzleSqliteDODatabase<typeof schema>
+  ): EntitlementConfigInput | null {
+    const row = tx
+      .select({
+        customerEntitlementId: entitlementConfigTable.customerEntitlementId,
+        projectId: entitlementConfigTable.projectId,
+        customerId: entitlementConfigTable.customerId,
+        effectiveAt: entitlementConfigTable.effectiveAt,
+        expiresAt: entitlementConfigTable.expiresAt,
+        featureConfig: entitlementConfigTable.featureConfig,
+        featurePlanVersionId: entitlementConfigTable.featurePlanVersionId,
+        featureSlug: entitlementConfigTable.featureSlug,
+        meterConfig: entitlementConfigTable.meterConfig,
+        overageStrategy: entitlementConfigTable.overageStrategy,
+        resetConfig: entitlementConfigTable.resetConfig,
+      })
+      .from(entitlementConfigTable)
+      .get()
+
+    if (!row) {
+      return null
+    }
+
+    return {
+      allowanceUnits: null,
+      customerEntitlementId: row.customerEntitlementId,
+      projectId: row.projectId,
+      customerId: row.customerId,
+      effectiveAt: row.effectiveAt,
+      expiresAt: row.expiresAt ?? null,
+      featureConfig: row.featureConfig,
+      featurePlanVersionId: row.featurePlanVersionId,
+      featureSlug: row.featureSlug,
+      featureType: "usage",
+      meterConfig: row.meterConfig,
+      overageStrategy: row.overageStrategy,
+      resetConfig: row.resetConfig ?? null,
+    }
+  }
+
+  private syncGrants(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    params: {
+      customerEntitlementId: string
+      createdAt: number
+      grants: ApplyGrantInput[]
     }
   ): void {
     for (const grant of params.grants) {
@@ -1219,7 +1389,7 @@ export class EntitlementWindowDO extends DurableObject {
         .get()
 
       if (existing) {
-        const nextExpiresAt = mergeGrantExpiry(existing.expiresAt ?? null, grant.expiresAt)
+        const nextExpiresAt = minNullableExpiry(existing.expiresAt ?? null, grant.expiresAt)
         if (nextExpiresAt !== (existing.expiresAt ?? null)) {
           tx.update(grantsTable)
             .set({ expiresAt: nextExpiresAt })
@@ -1230,19 +1400,11 @@ export class EntitlementWindowDO extends DurableObject {
         tx.insert(grantsTable)
           .values({
             grantId: grant.grantId,
-            amount: grant.amount,
-            anchor: grant.anchor,
-            currencyCode: grant.currencyCode,
+            customerEntitlementId: params.customerEntitlementId,
+            allowanceUnits: grant.allowanceUnits,
             effectiveAt: grant.effectiveAt,
             expiresAt: grant.expiresAt,
-            featureConfig: grant.featureConfig,
-            featurePlanVersionId: grant.featurePlanVersionId,
-            featureSlug: grant.featureSlug,
-            meterConfig: grant.meterConfig,
-            meterHash: grant.meterHash,
-            overageStrategy: grant.overageStrategy,
             priority: grant.priority,
-            resetConfig: grant.resetConfig ?? null,
             addedAt: params.createdAt,
           })
           .run()
@@ -1251,40 +1413,32 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private readGrants(tx: DrizzleSqliteDODatabase<typeof schema>): ActiveGrantInput[] {
+    const entitlement = this.readEntitlementConfig(tx)
+    if (!entitlement) {
+      return []
+    }
+
     return tx
       .select({
         grantId: grantsTable.grantId,
-        amount: grantsTable.amount,
-        anchor: grantsTable.anchor,
-        currencyCode: grantsTable.currencyCode,
+        allowanceUnits: grantsTable.allowanceUnits,
         effectiveAt: grantsTable.effectiveAt,
         expiresAt: grantsTable.expiresAt,
-        featureConfig: grantsTable.featureConfig,
-        featurePlanVersionId: grantsTable.featurePlanVersionId,
-        featureSlug: grantsTable.featureSlug,
-        meterConfig: grantsTable.meterConfig,
-        meterHash: grantsTable.meterHash,
-        overageStrategy: grantsTable.overageStrategy,
         priority: grantsTable.priority,
-        resetConfig: grantsTable.resetConfig,
       })
       .from(grantsTable)
       .all()
       .map((row) => ({
-        amount: row.amount ?? null,
-        anchor: row.anchor,
-        currencyCode: row.currencyCode,
+        allowanceUnits: row.allowanceUnits ?? null,
+        anchor: 0,
+        cadenceEffectiveAt: entitlement.effectiveAt,
+        cadenceExpiresAt: entitlement.expiresAt,
+        currencyCode: this.extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig) ?? "USD",
         effectiveAt: row.effectiveAt,
         expiresAt: row.expiresAt ?? null,
-        featureConfig: row.featureConfig,
-        featurePlanVersionId: row.featurePlanVersionId,
-        featureSlug: row.featureSlug,
         grantId: row.grantId,
-        meterConfig: row.meterConfig,
-        meterHash: row.meterHash,
-        overageStrategy: row.overageStrategy,
         priority: row.priority,
-        resetConfig: row.resetConfig ?? null,
+        resetConfig: entitlement.resetConfig ?? null,
       }))
   }
 
@@ -1314,7 +1468,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     return {
       id: [
-        meter.hash,
+        meter.customerEntitlementId,
         pricedFact.periodKey,
         input.event.id,
         fact.meterKey,
@@ -1325,7 +1479,7 @@ export class EntitlementWindowDO extends DurableObject {
       project_id: input.projectId,
       customer_id: input.customerId,
       currency: pricedFact.currency,
-      meter_hash: meter.hash,
+      customer_entitlement_id: meter.customerEntitlementId,
       grant_id: pricedFact.grantId,
       feature_plan_version_id: pricedFact.featurePlanVersionId,
       feature_slug: pricedFact.featureSlug,
@@ -1346,6 +1500,7 @@ export class EntitlementWindowDO extends DurableObject {
     tx: DrizzleSqliteDODatabase<typeof schema>,
     params: {
       activeGrants: ActiveGrantInput[]
+      entitlement: EntitlementConfigInput
       eventTimestamp: number
       facts: Fact[]
     }
@@ -1355,7 +1510,14 @@ export class EntitlementWindowDO extends DurableObject {
 
     for (const fact of params.facts) {
       if (fact.delta <= 0) {
-        pricedFacts.push(this.priceFactWithGrant(fact, priceGrant, params.eventTimestamp))
+        pricedFacts.push(
+          this.priceFactWithEntitlement({
+            entitlement: params.entitlement,
+            fact,
+            grant: priceGrant,
+            timestamp: params.eventTimestamp,
+          })
+        )
         continue
       }
 
@@ -1369,14 +1531,14 @@ export class EntitlementWindowDO extends DurableObject {
       for (const allocation of consumed.allocations) {
         pricedFacts.push({
           amountMinor: computeUsagePriceDeltaMinor({
-            priceConfig: allocation.grant.featureConfig,
+            priceConfig: params.entitlement.featureConfig,
             usageAfter: allocation.usageAfter,
             usageBefore: allocation.usageBefore,
           }),
           currency: allocation.grant.currencyCode,
           fact,
-          featurePlanVersionId: allocation.grant.featurePlanVersionId,
-          featureSlug: allocation.grant.featureSlug,
+          featurePlanVersionId: params.entitlement.featurePlanVersionId,
+          featureSlug: params.entitlement.featureSlug,
           grantId: allocation.grant.grantId,
           periodKey: allocation.periodKey,
           usageAfter: allocation.usageAfter,
@@ -1388,14 +1550,27 @@ export class EntitlementWindowDO extends DurableObject {
       }
 
       if (consumed.remaining > 0) {
-        pricedFacts.push(this.priceFactWithGrant(fact, priceGrant, params.eventTimestamp))
+        pricedFacts.push(
+          this.priceFactWithEntitlement({
+            entitlement: params.entitlement,
+            fact,
+            grant: priceGrant,
+            timestamp: params.eventTimestamp,
+          })
+        )
       }
     }
 
     return pricedFacts
   }
 
-  private priceFactWithGrant(fact: Fact, grant: ActiveGrantInput, timestamp: number): PricedFact {
+  private priceFactWithEntitlement(params: {
+    entitlement: EntitlementConfigInput
+    fact: Fact
+    grant: ActiveGrantInput
+    timestamp: number
+  }): PricedFact {
+    const { entitlement, fact, grant, timestamp } = params
     const bucket = computeGrantPeriodBucket(grant, timestamp)
     if (!bucket) {
       throw new Error("Unable to resolve grant bucket for fact pricing")
@@ -1406,14 +1581,14 @@ export class EntitlementWindowDO extends DurableObject {
 
     return {
       amountMinor: computeUsagePriceDeltaMinor({
-        priceConfig: grant.featureConfig,
+        priceConfig: entitlement.featureConfig,
         usageAfter,
         usageBefore,
       }),
       currency: grant.currencyCode,
       fact,
-      featurePlanVersionId: grant.featurePlanVersionId,
-      featureSlug: grant.featureSlug,
+      featurePlanVersionId: entitlement.featurePlanVersionId,
+      featureSlug: entitlement.featureSlug,
       grantId: grant.grantId,
       periodKey: bucket.periodKey,
       usageAfter,
@@ -1721,9 +1896,7 @@ export class EntitlementWindowDO extends DurableObject {
     activeGrants: ActiveGrantInput[],
     meter: MeterIdentity
   ): Promise<ApplyResult | null> {
-    const pricePerEvent = Math.max(
-      ...activeGrants.map((grant) => computeMaxMarginalPriceMinor(grant.featureConfig))
-    )
+    const pricePerEvent = computeMaxMarginalPriceMinor(input.entitlement.featureConfig)
 
     // The next event lands in a free portion of the curve — flat-free plan,
     // included-quantity tier still has runway, etc. No wallet engagement
@@ -1744,7 +1917,7 @@ export class EntitlementWindowDO extends DurableObject {
       projectId: input.projectId,
       customerId: input.customerId,
       currency: meter.currency as Currency,
-      entitlementId: reservationGrant.featurePlanVersionId,
+      entitlementId: input.entitlement.customerEntitlementId,
       requestedAmount: sizing.requestedAmount,
       refillThresholdBps: sizing.refillThresholdBps,
       refillChunkAmount: sizing.refillChunkAmount,
@@ -1752,7 +1925,7 @@ export class EntitlementWindowDO extends DurableObject {
       periodEndAt: new Date(reservationBucket.end),
       // The (project, entitlement, period_start) unique index is the real
       // dedupe — this key just tags ledger entries for traceability.
-      idempotencyKey: `do_lazy:${meter.hash}:${reservationBucket.periodKey}`,
+      idempotencyKey: `do_lazy:${meter.customerEntitlementId}:${reservationBucket.periodKey}`,
     })
 
     if (result.err) {
@@ -1760,8 +1933,7 @@ export class EntitlementWindowDO extends DurableObject {
         context: "lazy reservation bootstrap failed",
         customerId: input.customerId,
         projectId: input.projectId,
-        meterHash: meter.hash,
-        entitlementId: reservationGrant.featurePlanVersionId,
+        customerEntitlementId: input.entitlement.customerEntitlementId,
       })
       return {
         allowed: false,

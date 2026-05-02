@@ -13,11 +13,7 @@ import {
   resetConfigSchema,
   typeFeatureSchema,
 } from "./shared"
-import {
-  subscriptionItemsSelectSchema,
-  subscriptionPhaseSelectSchema,
-  subscriptionSelectSchema,
-} from "./subscriptions"
+import { subscriptionItemsSelectSchema } from "./subscriptions"
 
 extendZodWithOpenApi(z)
 
@@ -72,26 +68,31 @@ export const customerEntitlementSchemaExtended = customerEntitlementSelectSchema
 })
 
 export const grantSchema = createSelectSchema(schema.grants, {
-  metadata: grantsMetadataSchema,
-  meterHash: z.string().nullable(),
+  metadata: grantsMetadataSchema.nullable(),
+  allowanceUnits: z.number().int().nonnegative().nullable(),
 })
 
 export const grantInsertSchema = createInsertSchema(schema.grants, {
-  metadata: grantsMetadataSchema.nullable(),
-  meterHash: z.string().nullable().optional(),
+  metadata: grantsMetadataSchema.nullable().optional(),
+  allowanceUnits: z.number().int().nonnegative().nullable().optional(),
 })
+  .partial({
+    id: true,
+    createdAtM: true,
+    updatedAtM: true,
+    priority: true,
+    expiresAt: true,
+    allowanceUnits: true,
+    metadata: true,
+  })
+  .strict()
 
 export const grantSchemaExtended = grantSchema.extend({
-  featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
-    feature: featureSelectBaseSchema,
+  customerEntitlement: customerEntitlementSelectSchema.extend({
+    featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
+      feature: featureSelectBaseSchema,
+    }),
   }),
-  subscriptionItem: subscriptionItemsSelectSchema
-    .extend({
-      subscription: subscriptionSelectSchema.extend({
-        phase: subscriptionPhaseSelectSchema,
-      }),
-    })
-    .optional(),
 })
 
 const metadataValueSchema = z.union([z.string(), z.number(), z.boolean()])
@@ -339,6 +340,7 @@ export type CustomerEntitlement = z.infer<typeof customerEntitlementSelectSchema
 export type CustomerEntitlementExtended = z.infer<typeof customerEntitlementSchemaExtended>
 export type InsertCustomerEntitlement = z.infer<typeof customerEntitlementInsertSchema>
 export type Grant = z.infer<typeof grantSchema>
+export type InsertGrant = z.infer<typeof grantInsertSchema>
 
 // Runtime entitlement state used by the existing ingestion/current-usage pipeline.
 // The persistent source of access is customerEntitlementSelectSchema.

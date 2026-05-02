@@ -161,7 +161,7 @@ export const entitlementMeterFactSchemaV1 = z.object({
   idempotency_key: z.string(),
   project_id: z.string(),
   customer_id: z.string(),
-  meter_hash: z.string(),
+  customer_entitlement_id: z.string(),
   feature_slug: z.string(),
   period_key: z.string(),
   event_slug: z.string(),

@@ -1,5 +1,9 @@
-import type { ConfigFeatureVersionType, OverageStrategy, ResetConfig } from "@unprice/db/validators"
-import type { MeterConfig } from "@unprice/services/entitlements"
+import type {
+  ConfigFeatureVersionType,
+  MeterConfig,
+  OverageStrategy,
+  ResetConfig,
+} from "@unprice/db/validators"
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
 export const meterFactsOutboxTable = sqliteTable("meter_facts_outbox", {
@@ -16,11 +20,10 @@ export const idempotencyKeysTable = sqliteTable("idempotency_keys", {
   denyMessage: text("deny_message"),
 })
 
-export const grantsTable = sqliteTable("grants", {
-  grantId: text("grant_id").primaryKey(),
-  amount: real("amount"),
-  anchor: integer("anchor").notNull(),
-  currencyCode: text("currency_code").notNull(),
+export const entitlementConfigTable = sqliteTable("entitlement_config", {
+  customerEntitlementId: text("customer_entitlement_id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  customerId: text("customer_id").notNull(),
   effectiveAt: integer("effective_at").notNull(),
   expiresAt: integer("expires_at"),
   featureConfig: text("feature_config", { mode: "json" })
@@ -29,10 +32,19 @@ export const grantsTable = sqliteTable("grants", {
   featurePlanVersionId: text("feature_plan_version_id").notNull(),
   featureSlug: text("feature_slug").notNull(),
   meterConfig: text("meter_config", { mode: "json" }).$type<MeterConfig>().notNull(),
-  meterHash: text("meter_hash").notNull(),
   overageStrategy: text("overage_strategy").$type<OverageStrategy>().notNull(),
-  priority: integer("priority").notNull(),
   resetConfig: text("reset_config", { mode: "json" }).$type<ResetConfig | null>(),
+  addedAt: integer("added_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+})
+
+export const grantsTable = sqliteTable("grants", {
+  grantId: text("grant_id").primaryKey(),
+  customerEntitlementId: text("customer_entitlement_id").notNull(),
+  allowanceUnits: real("allowance_units"),
+  effectiveAt: integer("effective_at").notNull(),
+  expiresAt: integer("expires_at"),
+  priority: integer("priority").notNull(),
   addedAt: integer("added_at").notNull(),
 })
 
@@ -86,6 +98,7 @@ export const walletReservationTable = sqliteTable("wallet_reservation", {
 export const schema = {
   meterFactsOutboxTable,
   idempotencyKeysTable,
+  entitlementConfigTable,
   grantsTable,
   grantWindowsTable,
   meterStateTable,

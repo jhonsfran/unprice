@@ -27,7 +27,7 @@ describe("consumeGrantsByPriority", () => {
 
   const grant = (overrides: Partial<GrantConsumptionGrant> = {}): GrantConsumptionGrant => ({
     grantId: "grant_a",
-    amount: 100,
+    allowanceUnits: 100,
     anchor: 1,
     effectiveAt: grantStart,
     expiresAt: null,
@@ -104,8 +104,8 @@ describe("consumeGrantsByPriority", () => {
       timestamp: now,
       units: 12,
       grants: [
-        grant({ grantId: "low", amount: 100, priority: 10 }),
-        grant({ grantId: "high", amount: 5, priority: 20 }),
+        grant({ grantId: "low", allowanceUnits: 100, priority: 10 }),
+        grant({ grantId: "high", allowanceUnits: 5, priority: 20 }),
       ],
       states: [
         state({ bucketKey: `low:onetime:${grantStart}`, grantId: "low" }),
@@ -126,10 +126,10 @@ describe("consumeGrantsByPriority", () => {
       timestamp: now,
       units: 3,
       grants: [
-        grant({ grantId: "z_unbounded", amount: 1, expiresAt: null, priority: 10 }),
-        grant({ grantId: "b_same_expiry", amount: 1, expiresAt: now + 5000, priority: 10 }),
-        grant({ grantId: "a_earliest", amount: 1, expiresAt: now + 1000, priority: 10 }),
-        grant({ grantId: "a_same_expiry", amount: 1, expiresAt: now + 5000, priority: 10 }),
+        grant({ grantId: "z_unbounded", allowanceUnits: 1, expiresAt: null, priority: 10 }),
+        grant({ grantId: "b_same_expiry", allowanceUnits: 1, expiresAt: now + 5000, priority: 10 }),
+        grant({ grantId: "a_earliest", allowanceUnits: 1, expiresAt: now + 1000, priority: 10 }),
+        grant({ grantId: "a_same_expiry", allowanceUnits: 1, expiresAt: now + 5000, priority: 10 }),
       ],
       states: [],
     })
@@ -166,7 +166,7 @@ describe("consumeGrantsByPriority", () => {
     const result = consumeGrantsByPriority({
       timestamp: now,
       units: 4,
-      grants: [grant({ amount: 5 })],
+      grants: [grant({ allowanceUnits: 5 })],
       states: [
         state({
           consumedInCurrentWindow: 5,
@@ -191,8 +191,8 @@ describe("consumeGrantsByPriority", () => {
       timestamp: now,
       units: 10,
       grants: [
-        grant({ grantId: "nearly_empty", amount: 8, priority: 20 }),
-        grant({ grantId: "fallback", amount: 100, priority: 10 }),
+        grant({ grantId: "nearly_empty", allowanceUnits: 8, priority: 20 }),
+        grant({ grantId: "fallback", allowanceUnits: 100, priority: 10 }),
       ],
       states: [
         state({
@@ -213,7 +213,7 @@ describe("consumeGrantsByPriority", () => {
     const result = consumeGrantsByPriority({
       timestamp: now,
       units: 8,
-      grants: [grant({ grantId: "primary", amount: 5, priority: 20 })],
+      grants: [grant({ grantId: "primary", allowanceUnits: 5, priority: 20 })],
       states: [state({ bucketKey: `primary:onetime:${grantStart}`, grantId: "primary" })],
     })
 
@@ -244,7 +244,7 @@ describe("consumeGrantsByPriority", () => {
     const result = consumeGrantsByPriority({
       timestamp: now,
       units: 250,
-      grants: [grant({ amount: null })],
+      grants: [grant({ allowanceUnits: null })],
       states: [state()],
     })
 
@@ -254,11 +254,11 @@ describe("consumeGrantsByPriority", () => {
     expect(result.allocations[0]?.nextState.exhaustedAt).toBeNull()
   })
 
-  it("marks non-reset grants exhausted when they reach their amount", () => {
+  it("marks non-reset grants exhausted when they reach their allowanceUnits", () => {
     const result = consumeGrantsByPriority({
       timestamp: now,
       units: 2,
-      grants: [grant({ amount: 5, resetConfig: undefined })],
+      grants: [grant({ allowanceUnits: 5, resetConfig: undefined })],
       states: [state({ consumedInCurrentWindow: 3 })],
     })
 
@@ -274,7 +274,7 @@ describe("consumeGrantsByPriority", () => {
     const result = consumeGrantsByPriority({
       timestamp: now,
       units: 5,
-      grants: [grant({ amount: 5, resetConfig: monthlyReset })],
+      grants: [grant({ allowanceUnits: 5, resetConfig: monthlyReset })],
       states: [
         state({
           bucketKey: `grant_a:month:${grantStart}`,

@@ -1,6 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, eq, inArray } from "@unprice/db"
-import { grants } from "@unprice/db/schema"
+import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import {
   type CustomerEntitlement,
@@ -48,19 +47,11 @@ interface PhaseGrantItemInput {
 }
 
 interface PhaseGrantTarget {
-  key: string
   type: PhaseGrantType
-  subscriptionItemId: string
-  featurePlanVersionId: string
+  customerEntitlementId: string
   effectiveAt: number
   expiresAt: number | null
-  limit: number | null
-  units: number | null
-  overageStrategy: OverageStrategy
-  anchor: number
 }
-
-type PhaseOwnedGrant = typeof grants.$inferSelect
 
 interface PhaseEntitlementTarget {
   key: string
@@ -156,19 +147,6 @@ export class SubscriptionService {
   }
 
   /**
-   * Builds a stable reconciliation key for a phase-owned grant.
-   *
-   * We key by `featurePlanVersionId + grant type` because a phase currently
-   * materializes at most one subscription item per feature plan version.
-   */
-  private getPhaseGrantKey(input: {
-    featurePlanVersionId: string
-    type: PhaseGrantType
-  }) {
-    return `${input.featurePlanVersionId}:${input.type}`
-  }
-
-  /**
    * Normalizes phase items into the minimal grant-sync shape used by the
    * reconciliation helpers below.
    */
@@ -212,16 +190,15 @@ export class SubscriptionService {
    */
   private buildPhaseGrantTargets({
     phase,
-    items,
+    entitlements,
   }: {
     phase: {
       id: string
-      billingAnchor: number
       startAt: number
       endAt: number | null
       trialEndsAt: number | null
     }
-    items: PhaseGrantItemInput[]
+    entitlements: CustomerEntitlement[]
   }): PhaseGrantTarget[] {
     const targets: PhaseGrantTarget[] = []
 
@@ -253,22 +230,20 @@ export class SubscriptionService {
       })
     }
 
-    for (const item of items) {
+    for (const entitlement of entitlements) {
       for (const grantWindow of grantWindows) {
+        const effectiveAt = Math.max(entitlement.effectiveAt, grantWindow.effectiveAt)
+        const expiresAt = minNullableExpiry(entitlement.expiresAt, grantWindow.expiresAt)
+
+        if (expiresAt !== null && effectiveAt >= expiresAt) {
+          continue
+        }
+
         targets.push({
-          key: this.getPhaseGrantKey({
-            featurePlanVersionId: item.featurePlanVersionId,
-            type: grantWindow.type,
-          }),
           type: grantWindow.type,
-          subscriptionItemId: item.id,
-          featurePlanVersionId: item.featurePlanVersionId,
-          effectiveAt: grantWindow.effectiveAt,
-          expiresAt: grantWindow.expiresAt,
-          limit: item.units ?? item.featureLimit ?? null,
-          units: item.units,
-          overageStrategy: item.overageStrategy,
-          anchor: phase.billingAnchor,
+          customerEntitlementId: entitlement.id,
+          effectiveAt,
+          expiresAt,
         })
       }
     }
@@ -557,40 +532,8 @@ export class SubscriptionService {
   }
 
   /**
-   * Compares the mutable billing attributes of a grant with the desired phase
-   * target. Metadata is intentionally excluded so it stays informational only.
-   */
-  private hasSameGrantConfiguration(existingGrant: PhaseOwnedGrant, target: PhaseGrantTarget) {
-    return (
-      existingGrant.featurePlanVersionId === target.featurePlanVersionId &&
-      existingGrant.type === target.type &&
-      existingGrant.limit === target.limit &&
-      existingGrant.units === target.units &&
-      existingGrant.overageStrategy === target.overageStrategy &&
-      existingGrant.anchor === target.anchor
-    )
-  }
-
-  /**
-   * Same configuration plus identical time bounds, used for future-dated grants
-   * that can be kept as-is during phase edits.
-   */
-  private hasExactFutureGrant(existingGrant: PhaseOwnedGrant, target: PhaseGrantTarget) {
-    return (
-      this.hasSameGrantConfiguration(existingGrant, target) &&
-      existingGrant.effectiveAt === target.effectiveAt &&
-      existingGrant.expiresAt === target.expiresAt
-    )
-  }
-
-  /**
-   * Reconciles the grants that should exist for a subscription phase.
-   *
-   * Rules:
-   * - active phase changes end the old grants at `now` and create replacements
-   * - future phase changes replace only future-dated grants
-   * - metadata is written for observability, but ownership matching is derived
-   *   from the phase's feature plan versions and time window
+   * Ensures each phase entitlement has its default allowance grants.
+   * Grant creation is idempotent by entitlement, grant type, and time window.
    */
   private async syncPhaseGrants({
     customerId,
@@ -605,7 +548,6 @@ export class SubscriptionService {
     phase: {
       id: string
       projectId: string
-      billingAnchor: number
       startAt: number
       endAt: number | null
       trialEndsAt: number | null
@@ -616,195 +558,78 @@ export class SubscriptionService {
   }): Promise<Result<void, UnPriceSubscriptionError>> {
     const grantsManager = this.createGrantManager(db)
     const featurePlanVersionIds = [...new Set(items.map((item) => item.featurePlanVersionId))]
-    const { err: existingErr, val: phaseOwnedGrants } = await grantsManager.getPhaseOwnedGrants({
+    const phaseOwnedEntitlementsResult = await this.entitlementService.getPhaseOwnedEntitlements({
       projectId: phase.projectId,
       customerId,
       subscriptionPhaseId: phase.id,
       featurePlanVersionIds,
       phaseStartAt: phase.startAt,
       phaseEndAt: phase.endAt,
+      db,
     })
 
-    if (existingErr) {
+    if (phaseOwnedEntitlementsResult.err) {
       return Err(
         new UnPriceSubscriptionError({
-          message: existingErr.message,
+          message: phaseOwnedEntitlementsResult.err.message,
         })
       )
     }
 
     const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
 
-    if (!isActivePhase && phaseOwnedGrants.length === 0) {
+    if (!isActivePhase && phaseOwnedEntitlementsResult.val.length === 0) {
       return Ok(undefined)
     }
 
-    const desiredTargets = this.buildPhaseGrantTargets({
-      phase,
-      items,
-    })
+    const expiredEntitlementIds = phaseOwnedEntitlementsResult.val
+      .filter((entitlement) => entitlement.expiresAt !== null && entitlement.expiresAt <= now)
+      .map((entitlement) => entitlement.id)
 
-    const currentGrantsByKey = new Map<string, PhaseOwnedGrant[]>()
-    const futureGrantsByKey = new Map<string, PhaseOwnedGrant[]>()
-
-    for (const grant of phaseOwnedGrants) {
-      const key = this.getPhaseGrantKey({
-        featurePlanVersionId: grant.featurePlanVersionId,
-        type: grant.type as PhaseGrantType,
-      })
-
-      if (grant.effectiveAt > now) {
-        futureGrantsByKey.set(key, [...(futureGrantsByKey.get(key) ?? []), grant])
-        continue
-      }
-
-      if (grant.expiresAt === null || grant.expiresAt > now) {
-        currentGrantsByKey.set(key, [...(currentGrantsByKey.get(key) ?? []), grant])
-      }
-    }
-
-    const keepGrantIds = new Set<string>()
-    const grantIdsToExpire = new Set<string>()
-    const grantIdsToDelete = new Set<string>()
-    const grantExpiryUpdates = new Map<string, number | null>()
-    const targetsToCreate: PhaseGrantTarget[] = []
-
-    for (const target of desiredTargets) {
-      const currentCandidates = currentGrantsByKey.get(target.key) ?? []
-      const futureCandidates = futureGrantsByKey.get(target.key) ?? []
-      const targetIsCurrent =
-        target.effectiveAt <= now && (target.expiresAt === null || target.expiresAt >= now)
-
-      if (targetIsCurrent) {
-        const currentMatch = currentCandidates.find((grant) =>
-          this.hasSameGrantConfiguration(grant, target)
-        )
-
-        if (currentMatch) {
-          keepGrantIds.add(currentMatch.id)
-
-          if (currentMatch.expiresAt !== target.expiresAt) {
-            grantExpiryUpdates.set(currentMatch.id, target.expiresAt)
-          }
-        } else {
-          for (const grant of currentCandidates) {
-            grantIdsToExpire.add(grant.id)
-          }
-
-          targetsToCreate.push({
-            ...target,
-            effectiveAt: now,
-          })
-        }
-
-        for (const grant of futureCandidates) {
-          grantIdsToDelete.add(grant.id)
-        }
-        continue
-      }
-
-      const futureMatch = futureCandidates.find((grant) => this.hasExactFutureGrant(grant, target))
-
-      if (futureMatch) {
-        keepGrantIds.add(futureMatch.id)
-      } else {
-        for (const grant of futureCandidates) {
-          grantIdsToDelete.add(grant.id)
-        }
-
-        targetsToCreate.push(target)
-      }
-
-      for (const grant of currentCandidates) {
-        grantIdsToExpire.add(grant.id)
-      }
-    }
-
-    for (const grantsByKey of currentGrantsByKey.values()) {
-      for (const grant of grantsByKey) {
-        if (!keepGrantIds.has(grant.id)) {
-          grantIdsToExpire.add(grant.id)
-        }
-      }
-    }
-
-    for (const grantsByKey of futureGrantsByKey.values()) {
-      for (const grant of grantsByKey) {
-        if (!keepGrantIds.has(grant.id)) {
-          grantIdsToDelete.add(grant.id)
-        }
-      }
-    }
-
-    for (const grantId of grantIdsToDelete) {
-      grantIdsToExpire.delete(grantId)
-      grantExpiryUpdates.delete(grantId)
-    }
-
-    if (grantIdsToExpire.size > 0) {
-      await db
-        .update(grants)
-        .set({
-          expiresAt: now,
-          updatedAtM: now,
-        })
-        .where(
-          and(inArray(grants.id, [...grantIdsToExpire]), eq(grants.projectId, phase.projectId))
-        )
-    }
-
-    for (const [grantId, expiresAt] of grantExpiryUpdates.entries()) {
-      if (grantIdsToExpire.has(grantId) || grantIdsToDelete.has(grantId)) continue
-
-      await db
-        .update(grants)
-        .set({
-          expiresAt,
-          updatedAtM: now,
-        })
-        .where(and(eq(grants.id, grantId), eq(grants.projectId, phase.projectId)))
-    }
-
-    if (grantIdsToDelete.size > 0) {
-      const deletePhaseOwnedGrantsResult = await grantsManager.deletePhaseOwnedGrants({
+    if (expiredEntitlementIds.length > 0) {
+      const expireGrantsResult = await grantsManager.expireGrantsForEntitlements({
         projectId: phase.projectId,
-        customerId,
-        subscriptionPhaseId: phase.id,
-        featurePlanVersionIds,
-        phaseStartAt: phase.startAt,
-        phaseEndAt: phase.endAt,
-        grantIds: [...grantIdsToDelete],
+        customerEntitlementIds: expiredEntitlementIds,
+        expiresAt: now,
+        db,
       })
 
-      if (deletePhaseOwnedGrantsResult.err) {
+      if (expireGrantsResult.err) {
         return Err(
           new UnPriceSubscriptionError({
-            message: deletePhaseOwnedGrantsResult.err.message,
+            message: expireGrantsResult.err.message,
           })
         )
       }
     }
 
-    for (const target of targetsToCreate) {
+    const grantableEntitlements = phaseOwnedEntitlementsResult.val.filter(
+      (entitlement) => entitlement.expiresAt === null || entitlement.expiresAt > now
+    )
+
+    const desiredTargets = this.buildPhaseGrantTargets({
+      phase,
+      entitlements: grantableEntitlements,
+    })
+
+    for (const target of desiredTargets) {
       const createGrantResult = await grantsManager.createGrant({
+        db,
         grant: {
           id: newId("grant"),
-          name: "Base Plan",
           projectId: phase.projectId,
+          customerEntitlementId: target.customerEntitlementId,
           effectiveAt: target.effectiveAt,
           expiresAt: target.expiresAt,
           type: target.type,
-          subjectType: "customer",
-          subjectId: customerId,
-          featurePlanVersionId: target.featurePlanVersionId,
-          limit: target.limit,
-          overageStrategy: target.overageStrategy,
-          units: target.units,
-          anchor: target.anchor,
+          allowanceUnits:
+            grantableEntitlements.find(
+              (entitlement) => entitlement.id === target.customerEntitlementId
+            )?.allowanceUnits ?? null,
           metadata: {
             subscriptionId,
             subscriptionPhaseId: phase.id,
-            subscriptionItemId: target.subscriptionItemId,
+            customerEntitlementId: target.customerEntitlementId,
           },
         },
       })
@@ -818,7 +643,6 @@ export class SubscriptionService {
       }
     }
 
-    // Invalidate entitlement cache so the next read recomputes from grants
     this.waitUntil(
       Promise.all([
         this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:0`),
@@ -1384,32 +1208,12 @@ export class SubscriptionService {
     }
 
     const result = await this.repo.withTransaction(async (txRepo) => {
-      const grantService = this.createGrantManager(this.db)
-
       const subscriptionPhase = await txRepo.deletePhase({ phaseId, projectId })
 
       if (!subscriptionPhase) {
         return Err(
           new UnPriceSubscriptionError({
             message: "Error while removing subscription phase",
-          })
-        )
-      }
-
-      // remove the grants for the customer - soft delete
-      const deletePhaseOwnedGrantsResult = await grantService.deletePhaseOwnedGrants({
-        projectId,
-        customerId: phase.subscription.customerId,
-        subscriptionPhaseId: phase.id,
-        featurePlanVersionIds: [...new Set(phase.items.map((item) => item.featurePlanVersionId))],
-        phaseStartAt: phase.startAt,
-        phaseEndAt: phase.endAt,
-      })
-
-      if (deletePhaseOwnedGrantsResult.err) {
-        return Err(
-          new UnPriceSubscriptionError({
-            message: deletePhaseOwnedGrantsResult.err.message,
           })
         )
       }
@@ -1567,7 +1371,6 @@ export class SubscriptionService {
         phase: {
           id: subscriptionPhase.id,
           projectId,
-          billingAnchor: subscriptionPhase.billingAnchor,
           startAt: subscriptionPhase.startAt,
           endAt: subscriptionPhase.endAt,
           trialEndsAt: subscriptionPhase.trialEndsAt,
@@ -1970,4 +1773,10 @@ export class SubscriptionService {
       )
     }
   }
+}
+
+function minNullableExpiry(left: number | null, right: number | null): number | null {
+  if (left === null) return right
+  if (right === null) return left
+  return Math.min(left, right)
 }

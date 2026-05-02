@@ -13,15 +13,15 @@ export class CloudflareEntitlementWindowClient implements EntitlementWindowClien
   }
 
   public getEntitlementWindowStub(params: {
+    customerEntitlementId: string
     customerId: string
-    meterHash: string
     projectId: string
   }): EntitlementWindowStub {
     return this.entitlementwindow.getByName(
       buildIngestionWindowName({
         appEnv: this.appEnv,
+        customerEntitlementId: params.customerEntitlementId,
         customerId: params.customerId,
-        meterHash: params.meterHash,
         projectId: params.projectId,
       })
     )

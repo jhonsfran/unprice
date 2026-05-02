@@ -10,8 +10,10 @@ import { diffLedgerMinor } from "@unprice/money"
 const GRANT_PRICING_FEATURE_TYPE = "usage" as const
 
 export type GrantConsumptionGrant = {
-  amount: number | null
+  allowanceUnits: number | null
   anchor: number
+  cadenceEffectiveAt?: number
+  cadenceExpiresAt?: number | null
   effectiveAt: number
   expiresAt: number | null
   grantId: string
@@ -45,7 +47,6 @@ export type GrantConsumptionResult<TGrant extends GrantConsumptionGrant> = {
 
 export type GrantPolicyGrant = GrantConsumptionGrant & {
   currencyCode: string
-  meterHash: string
   overageStrategy: OverageStrategy
 }
 
@@ -86,9 +87,9 @@ export function consumeGrantsByPriority<TGrant extends GrantConsumptionGrant>(pa
     }
 
     const available =
-      grant.amount === null
+      grant.allowanceUnits === null
         ? Number.POSITIVE_INFINITY
-        : grant.amount - state.consumedInCurrentWindow
+        : grant.allowanceUnits - state.consumedInCurrentWindow
 
     if (available <= 0) {
       continue
@@ -120,7 +121,13 @@ export function consumeGrantsByPriority<TGrant extends GrantConsumptionGrant>(pa
 export function computeGrantPeriodBucket(
   grant: Pick<
     GrantConsumptionGrant,
-    "anchor" | "effectiveAt" | "expiresAt" | "grantId" | "resetConfig"
+    | "anchor"
+    | "cadenceEffectiveAt"
+    | "cadenceExpiresAt"
+    | "effectiveAt"
+    | "expiresAt"
+    | "grantId"
+    | "resetConfig"
   >,
   timestamp: number
 ): { bucketKey: string; end: number; periodKey: string; start: number } | null {
@@ -142,8 +149,8 @@ export function computeGrantPeriodBucket(
 
   const cycle = calculateCycleWindow({
     now: timestamp,
-    effectiveStartDate: grant.effectiveAt,
-    effectiveEndDate: grant.expiresAt,
+    effectiveStartDate: grant.cadenceEffectiveAt ?? grant.effectiveAt,
+    effectiveEndDate: grant.cadenceExpiresAt ?? grant.expiresAt,
     trialEndsAt: null,
     config,
   })
@@ -185,17 +192,12 @@ export function resolveGrantOverageStrategy<TGrant extends { overageStrategy: Ov
   return "none"
 }
 
-export function validateGrantBatch<
-  TGrant extends Pick<GrantPolicyGrant, "currencyCode" | "meterHash">,
->(grants: TGrant[]): void {
+export function validateGrantBatch<TGrant extends Pick<GrantPolicyGrant, "currencyCode">>(
+  grants: TGrant[]
+): void {
   const currencies = new Set(grants.map((grant) => grant.currencyCode))
   if (currencies.size > 1) {
     throw new Error("Mixed-currency grants are not supported for one entitlement window")
-  }
-
-  const meterHashes = new Set(grants.map((grant) => grant.meterHash))
-  if (meterHashes.size > 1) {
-    throw new Error("Mixed meter hashes are not supported for one entitlement window")
   }
 }
 
@@ -214,7 +216,7 @@ export function resolveAvailableGrantUnits<TGrant extends GrantConsumptionGrant>
   let available = 0
 
   for (const grant of params.grants) {
-    if (grant.amount === null) {
+    if (grant.allowanceUnits === null) {
       return Number.POSITIVE_INFINITY
     }
 
@@ -224,7 +226,7 @@ export function resolveAvailableGrantUnits<TGrant extends GrantConsumptionGrant>
     }
 
     const consumed = statesByBucketKey.get(bucket.bucketKey)?.consumedInCurrentWindow ?? 0
-    available += Math.max(0, grant.amount - consumed)
+    available += Math.max(0, grant.allowanceUnits - consumed)
   }
 
   return available
@@ -340,7 +342,7 @@ function allocateUnits<TGrant extends GrantConsumptionGrant>(params: {
       ...params.state,
       consumedInCurrentWindow: usageAfter,
       exhaustedAt:
-        params.grant.amount !== null && usageAfter >= params.grant.amount
+        params.grant.allowanceUnits !== null && usageAfter >= params.grant.allowanceUnits
           ? params.timestamp
           : params.state.exhaustedAt,
     },

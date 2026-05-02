@@ -68,7 +68,6 @@ export type FeatureVerificationResult = {
   limit?: number | null
   message?: string
   meterConfig?: MeterConfig
-  meterHash?: string
   method?: AggregationMethod
   overageStrategy?: OverageStrategy
   periodKey?: string

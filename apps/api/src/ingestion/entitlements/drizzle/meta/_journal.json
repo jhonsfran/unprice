@@ -71,6 +71,13 @@
       "when": 1777546051022,
       "tag": "0010_nifty_starjammers",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1777740443053,
+      "tag": "0011_redundant_leo",
+      "breakpoints": true
     }
   ]
 }

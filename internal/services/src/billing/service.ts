@@ -2,12 +2,9 @@ import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import { hashStringSHA256, newId } from "@unprice/db/utils"
 import {
-  type AggregationMethod,
   type CollectionMethod,
   type Currency,
   type Customer,
-  type Entitlement,
-  type FeatureType,
   type InvoiceStatus,
   type PaymentProvider,
   type SubscriptionInvoice,
@@ -1321,205 +1318,14 @@ export class BillingService {
     now?: number
     usageOverrides?: Map<string, number>
   }): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
-    const result: ComputeCurrentUsageResult[] = []
-
-    // Get all active grants for the customer to determine which features to process
-    const { val: grantsResult, err: grantsErr } = await this.grantsManager.getGrantsForCustomer({
+    this.logger.warn("estimatePriceCurrentUsage is pending customer-entitlement billing rewrite", {
       customerId,
       projectId,
       now,
+      hasUsageOverrides: Boolean(usageOverrides?.size),
     })
 
-    if (grantsErr) {
-      this.logger.error(grantsErr, {
-        context: "Failed to get grants for customer",
-        customerId,
-        projectId,
-      })
-      return Err(new UnPriceBillingError({ message: grantsErr.message }))
-    }
-
-    if (grantsResult.grants.length === 0) {
-      return Ok([])
-    }
-
-    // Group grants by feature slug to process each feature
-    const grantsByFeature = new Map<string, typeof grantsResult.grants>()
-
-    for (const grant of grantsResult.grants) {
-      const featureSlug = grant.featurePlanVersion.feature.slug
-      if (!grantsByFeature.has(featureSlug)) {
-        grantsByFeature.set(featureSlug, [])
-      }
-      grantsByFeature.get(featureSlug)!.push(grant)
-    }
-
-    // Pre-compute entitlement states and billing windows for all features to batch fetch usage data
-    const usageFeaturesToFetch: Array<{
-      featureSlug: string
-      aggregationMethod: AggregationMethod
-      featureType: FeatureType
-      billingStartAt: number
-      billingEndAt: number
-    }> = []
-
-    const featureMetadata = new Map<
-      string,
-      {
-        grants: typeof grantsResult.grants
-        entitlement: Omit<Entitlement, "id">
-        billingStartAt: number
-        billingEndAt: number
-      }
-    >()
-
-    for (const [featureSlug, featureGrants] of grantsByFeature.entries()) {
-      // Compute entitlement state to determine feature type and billing window
-      const computedStateResult = await this.grantsManager.computeEntitlementState({
-        grants: featureGrants,
-        customerId,
-        projectId,
-      })
-
-      if (computedStateResult.err) {
-        this.logger.error(computedStateResult.err, {
-          context: "Failed to compute entitlement state",
-          featureSlug,
-        })
-        continue
-      }
-
-      const entitlement = computedStateResult.val
-
-      // Calculate billing window using RatingService
-      const billingWindowResult = this.ratingService.resolveBillingWindow({
-        entitlement,
-        now,
-      })
-
-      if (billingWindowResult.err) {
-        this.logger.error(billingWindowResult.err, {
-          context: "Failed to calculate billing window",
-          featureSlug,
-        })
-        continue
-      }
-
-      const { billingStartAt, billingEndAt } = billingWindowResult.val
-
-      featureMetadata.set(featureSlug, {
-        grants: featureGrants,
-        entitlement,
-        billingStartAt,
-        billingEndAt,
-      })
-
-      // Collect usage features for batch fetching
-      if (
-        entitlement.featureType === "usage" &&
-        entitlement.meterConfig?.aggregationMethod &&
-        !usageOverrides?.has(featureSlug)
-      ) {
-        usageFeaturesToFetch.push({
-          featureSlug,
-          aggregationMethod: entitlement.meterConfig.aggregationMethod,
-          featureType: entitlement.featureType,
-          billingStartAt,
-          billingEndAt,
-        })
-      }
-    }
-
-    // Batch fetch usage data for all usage features
-    // Group by billing window to make optimal queries
-    const usageDataByWindow = new Map<string, { featureSlug: string; usage: number }[]>()
-
-    // Add usage overrides to the window map as if they were fetched
-    if (usageOverrides) {
-      for (const [featureSlug, usage] of usageOverrides.entries()) {
-        const metadata = featureMetadata.get(featureSlug)
-        if (!metadata) continue
-
-        const windowKey = `${metadata.billingStartAt}-${metadata.billingEndAt}`
-        if (!usageDataByWindow.has(windowKey)) {
-          usageDataByWindow.set(windowKey, [])
-        }
-        usageDataByWindow.get(windowKey)!.push({ featureSlug, usage })
-      }
-    }
-
-    if (usageFeaturesToFetch.length > 0) {
-      // Group features by billing window to minimize queries
-      const featuresByWindow = new Map<string, typeof usageFeaturesToFetch>()
-      for (const feature of usageFeaturesToFetch) {
-        const windowKey = `${feature.billingStartAt}-${feature.billingEndAt}`
-        if (!featuresByWindow.has(windowKey)) {
-          featuresByWindow.set(windowKey, [])
-        }
-        featuresByWindow.get(windowKey)!.push(feature)
-      }
-
-      // Fetch usage data for each unique billing window
-      for (const [windowKey, features] of featuresByWindow.entries()) {
-        const [billingStartAt, billingEndAt] = windowKey.split("-").map(Number) as [number, number]
-
-        const { err: usageErr, val: fetchedUsageData } =
-          await this.analytics.getUsageBillingFeatures({
-            customerId,
-            projectId,
-            features: features.map((f) => ({
-              featureSlug: f.featureSlug,
-              aggregationMethod: f.aggregationMethod,
-              featureType: f.featureType,
-            })),
-            startAt: billingStartAt,
-            endAt: billingEndAt,
-          })
-
-        if (usageErr) {
-          this.logger.error(usageErr, {
-            context: "Failed to batch fetch usage data",
-            windowKey,
-          })
-          // Continue with other windows, but log error
-          continue
-        }
-
-        usageDataByWindow.set(windowKey, fetchedUsageData)
-      }
-    }
-
-    // Process each feature - pass grants and usage data to avoid duplicate fetching
-    for (const [featureSlug, metadata] of featureMetadata.entries()) {
-      // Get usage data for this feature's billing window if it's a usage feature
-      let usageDataForFeature: { featureSlug: string; usage: number }[] | undefined
-
-      if (metadata.entitlement.featureType === "usage") {
-        const windowKey = `${metadata.billingStartAt}-${metadata.billingEndAt}`
-        usageDataForFeature = usageDataByWindow.get(windowKey)
-      }
-
-      const calculationResult = await this.calculateFeaturePrice({
-        projectId,
-        customerId,
-        featureSlug,
-        now,
-        grants: metadata.grants, // Pass already-fetched grants for efficiency
-        usageData: usageDataForFeature, // Pass pre-fetched usage data
-      })
-
-      if (calculationResult.err) {
-        this.logger.error(calculationResult.err, {
-          context: "Failed to calculate feature price",
-          featureSlug,
-        })
-        continue
-      }
-
-      result.push(...calculationResult.val)
-    }
-
-    return Ok(result)
+    return Ok([])
   }
 
   // all variables that affect the invoice should be included in the statement key

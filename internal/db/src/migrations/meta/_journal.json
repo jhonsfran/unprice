@@ -50,6 +50,13 @@
       "when": 1777737060739,
       "tag": "0006_brief_magma",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1777740415831,
+      "tag": "0007_great_boomer",
+      "breakpoints": true
     }
   ]
 }
