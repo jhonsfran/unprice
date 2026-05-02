@@ -10,6 +10,7 @@ import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import { EntitlementService } from "../entitlements/service"
 import { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
@@ -366,6 +367,45 @@ describe("SubscriptionService - grant lifecycle", () => {
       Ok({ paymentMethodId: null, requiredPaymentMethod: false })
     )
     vi.spyOn(CustomerService.prototype, "updateAccessControlList").mockResolvedValue(undefined)
+    vi.spyOn(EntitlementService.prototype, "getPhaseOwnedEntitlements").mockResolvedValue(Ok([]))
+    vi.spyOn(EntitlementService.prototype, "createCustomerEntitlement").mockImplementation(
+      async ({ entitlement }) =>
+        Ok({
+          id: entitlement.id ?? "customer_entitlement_test",
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          featurePlanVersionId: entitlement.featurePlanVersionId,
+          subscriptionId: entitlement.subscriptionId ?? null,
+          subscriptionPhaseId: entitlement.subscriptionPhaseId ?? null,
+          subscriptionItemId: entitlement.subscriptionItemId ?? null,
+          effectiveAt: entitlement.effectiveAt,
+          expiresAt: entitlement.expiresAt ?? null,
+          allowanceUnits: entitlement.allowanceUnits ?? null,
+          overageStrategy: entitlement.overageStrategy ?? "none",
+          metadata: entitlement.metadata ?? null,
+          createdAtM: initialNow,
+          updatedAtM: initialNow,
+        })
+    )
+    vi.spyOn(EntitlementService.prototype, "expireCustomerEntitlement").mockImplementation(
+      async ({ id, projectId, expiresAt }) =>
+        Ok({
+          id,
+          projectId,
+          customerId,
+          featurePlanVersionId: "pf_basic",
+          subscriptionId: "subscription_existing",
+          subscriptionPhaseId: "phase_old",
+          subscriptionItemId: "subscription_item_old",
+          effectiveAt: initialNow,
+          expiresAt,
+          allowanceUnits: 3,
+          overageStrategy: "none",
+          metadata: null,
+          createdAtM: initialNow,
+          updatedAtM: initialNow,
+        })
+    )
     const serviceDeps = {
       db: mockDb,
       logger: mockLogger,
@@ -397,10 +437,17 @@ describe("SubscriptionService - grant lifecycle", () => {
         ledgerGateway,
       }),
     })
+    const entitlementService = new EntitlementService({
+      ...serviceDeps,
+      customerService,
+      grantsManager,
+      billingService,
+    })
     subscriptionService = new SubscriptionService({
       ...serviceDeps,
       repo: new DrizzleSubscriptionRepository(mockDb),
       customerService,
+      entitlementService,
       billingService,
       ratingService,
       ledgerService: new LedgerGateway({
@@ -414,6 +461,10 @@ describe("SubscriptionService - grant lifecycle", () => {
     const getPhaseOwnedGrantsSpy = vi
       .spyOn(GrantsManager.prototype, "getPhaseOwnedGrants")
       .mockResolvedValue(Ok([]))
+    const createCustomerEntitlementSpy = vi.spyOn(
+      EntitlementService.prototype,
+      "createCustomerEntitlement"
+    )
     const createGrantSpy = vi
       .spyOn(GrantsManager.prototype, "createGrant")
       .mockImplementation(async ({ grant }) => Ok(grant as never))
@@ -448,6 +499,22 @@ describe("SubscriptionService - grant lifecycle", () => {
     })
 
     expect(createPhaseResult.err).toBeUndefined()
+    expect(createCustomerEntitlementSpy).toHaveBeenCalledTimes(1)
+    expect(createCustomerEntitlementSpy).toHaveBeenCalledWith({
+      entitlement: expect.objectContaining({
+        projectId,
+        customerId,
+        featurePlanVersionId: "pf_basic",
+        subscriptionId: createSubscriptionResult.val!.id,
+        subscriptionPhaseId: createPhaseResult.val!.id,
+        subscriptionItemId: expect.any(String),
+        effectiveAt: initialNow,
+        expiresAt: null,
+        allowanceUnits: 3,
+        overageStrategy: "none",
+      }),
+      db: mockDb,
+    })
     expect(getPhaseOwnedGrantsSpy).toHaveBeenCalledWith({
       projectId,
       customerId,
@@ -468,7 +535,6 @@ describe("SubscriptionService - grant lifecycle", () => {
         expiresAt: undefined,
         limit: 3,
         units: 3,
-        autoRenew: false,
         metadata: expect.objectContaining({
           subscriptionId: createSubscriptionResult.val!.id,
           subscriptionPhaseId: createPhaseResult.val!.id,
@@ -476,6 +542,73 @@ describe("SubscriptionService - grant lifecycle", () => {
         }),
       }),
     })
+  })
+
+  it("does not create a duplicate customer entitlement for an existing source window", async () => {
+    vi.spyOn(GrantsManager.prototype, "getPhaseOwnedGrants").mockResolvedValue(Ok([]))
+    vi.spyOn(GrantsManager.prototype, "createGrant").mockImplementation(async ({ grant }) =>
+      Ok(grant as never)
+    )
+
+    const createSubscriptionResult = await subscriptionService.createSubscription({
+      input: { customerId, timezone: "UTC" },
+      projectId,
+    })
+
+    expect(createSubscriptionResult.err).toBeUndefined()
+
+    vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(basicPlanVersion)
+    vi.spyOn(EntitlementService.prototype, "getPhaseOwnedEntitlements").mockResolvedValue(
+      Ok([
+        {
+          id: "customer_entitlement_existing",
+          projectId,
+          customerId,
+          featurePlanVersionId: "pf_basic",
+          subscriptionId: createSubscriptionResult.val!.id,
+          subscriptionPhaseId: "subscription_phase_3",
+          subscriptionItemId: "subscription_item_4",
+          effectiveAt: initialNow,
+          expiresAt: null,
+          allowanceUnits: 3,
+          overageStrategy: "none",
+          metadata: null,
+          createdAtM: initialNow,
+          updatedAtM: initialNow,
+        },
+      ])
+    )
+    const createCustomerEntitlementSpy = vi.spyOn(
+      EntitlementService.prototype,
+      "createCustomerEntitlement"
+    )
+    const expireCustomerEntitlementSpy = vi.spyOn(
+      EntitlementService.prototype,
+      "expireCustomerEntitlement"
+    )
+
+    const createPhaseResult = await subscriptionService.createPhase({
+      input: {
+        subscriptionId: createSubscriptionResult.val!.id,
+        planVersionId: basicPlanVersion.id,
+        startAt: initialNow,
+        config: [
+          {
+            featurePlanId: "pf_basic",
+            units: 3,
+            featureSlug: "seats-basic",
+          },
+        ],
+        customerId,
+        paymentMethodRequired: false,
+      },
+      projectId,
+      now: initialNow,
+    })
+
+    expect(createPhaseResult.err).toBeUndefined()
+    expect(createCustomerEntitlementSpy).not.toHaveBeenCalled()
+    expect(expireCustomerEntitlementSpy).not.toHaveBeenCalled()
   })
 
   it("expires grants for the ended phase and creates grants for the replacement phase", async () => {
@@ -706,6 +839,34 @@ describe("SubscriptionService - grant lifecycle", () => {
     const getPhaseOwnedGrantsSpy = vi
       .spyOn(GrantsManager.prototype, "getPhaseOwnedGrants")
       .mockResolvedValue(Ok([existingGrant as never]))
+    vi.spyOn(EntitlementService.prototype, "getPhaseOwnedEntitlements").mockResolvedValue(
+      Ok([
+        {
+          id: "customer_entitlement_old",
+          projectId,
+          customerId,
+          featurePlanVersionId: "pf_basic",
+          subscriptionId: "subscription_existing",
+          subscriptionPhaseId: "phase_old",
+          subscriptionItemId: "subscription_item_old",
+          effectiveAt: initialNow,
+          expiresAt: null,
+          allowanceUnits: 3,
+          overageStrategy: "none",
+          metadata: null,
+          createdAtM: initialNow,
+          updatedAtM: initialNow,
+        },
+      ])
+    )
+    const createCustomerEntitlementSpy = vi.spyOn(
+      EntitlementService.prototype,
+      "createCustomerEntitlement"
+    )
+    const expireCustomerEntitlementSpy = vi.spyOn(
+      EntitlementService.prototype,
+      "expireCustomerEntitlement"
+    )
     const createGrantSpy = vi
       .spyOn(GrantsManager.prototype, "createGrant")
       .mockImplementation(async ({ grant }) => Ok(grant as never))
@@ -734,6 +895,13 @@ describe("SubscriptionService - grant lifecycle", () => {
       featurePlanVersionIds: ["pf_basic"],
       phaseStartAt: initialNow,
       phaseEndAt: transitionAt,
+    })
+    expect(createCustomerEntitlementSpy).not.toHaveBeenCalled()
+    expect(expireCustomerEntitlementSpy).toHaveBeenCalledWith({
+      id: "customer_entitlement_old",
+      projectId,
+      expiresAt: transitionAt,
+      db: mockDb,
     })
     expect(createGrantSpy).not.toHaveBeenCalled()
     expect(state.grantUpdateSets).toContainEqual(

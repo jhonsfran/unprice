@@ -43,6 +43,13 @@
       "when": 1777546051128,
       "tag": "0005_brown_steel_serpent",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1777737060739,
+      "tag": "0006_brief_magma",
+      "breakpoints": true
     }
   ]
 }

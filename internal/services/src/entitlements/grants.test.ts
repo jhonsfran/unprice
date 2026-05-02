@@ -108,7 +108,7 @@ describe("GrantsManager", () => {
 
   // Helper to mock DB responses for tests that need getGrantsForCustomer
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-  const setupMocks = (grantsList: any[]) => {
+  const _setupMocks = (grantsList: any[]) => {
     vi.spyOn(mockDb.query.customers, "findFirst").mockResolvedValue({
       subscriptions: [{ phases: [{ planVersion: { plan: { id: "plan_1" }, id: "pv_1" } }] }],
       // biome-ignore lint/suspicious/noExplicitAny: <explanation>

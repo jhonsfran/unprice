@@ -15,10 +15,117 @@ import type { z } from "zod"
 import { pgTableProject } from "../utils/_table"
 import { cuid, timestamps } from "../utils/fields"
 import { projectID } from "../utils/sql"
-import type { grantsMetadataSchema } from "../validators/entitlements"
+import type {
+  customerEntitlementMetadataSchema,
+  grantsMetadataSchema,
+} from "../validators/entitlements"
+import { customers } from "./customers"
 import { grantTypeEnum, overageStrategyEnum, subjectTypeEnum } from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
+import { subscriptionItems, subscriptionPhases, subscriptions } from "./subscriptions"
+
+export const customerEntitlements = pgTableProject(
+  "customer_entitlements",
+  {
+    ...projectID,
+    ...timestamps,
+    customerId: cuid("customer_id").notNull(),
+    featurePlanVersionId: cuid("feature_plan_version_id").notNull(),
+    subscriptionId: cuid("subscription_id"),
+    subscriptionPhaseId: cuid("subscription_phase_id"),
+    subscriptionItemId: cuid("subscription_item_id"),
+    effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }),
+    allowanceUnits: integer("allowance_units"),
+    overageStrategy: overageStrategyEnum("overage_strategy").notNull().default("none"),
+    metadata: json("metadata").$type<z.infer<typeof customerEntitlementMetadataSchema>>(),
+  },
+  (table) => ({
+    primary: primaryKey({
+      columns: [table.id, table.projectId],
+      name: "customer_entitlements_pkey",
+    }),
+    idxCustomerWindow: index("idx_customer_entitlements_customer_window").on(
+      table.projectId,
+      table.customerId,
+      table.effectiveAt,
+      table.expiresAt
+    ),
+    idxPhaseSource: index("idx_customer_entitlements_phase_source").on(
+      table.projectId,
+      table.customerId,
+      table.subscriptionPhaseId,
+      table.featurePlanVersionId,
+      table.effectiveAt,
+      table.expiresAt
+    ),
+    uniqueSourceWindow: unique("unique_customer_entitlement_source_window")
+      .on(
+        table.projectId,
+        table.customerId,
+        table.featurePlanVersionId,
+        table.subscriptionId,
+        table.subscriptionPhaseId,
+        table.subscriptionItemId,
+        table.effectiveAt,
+        table.expiresAt
+      )
+      .nullsNotDistinct(),
+    customerfk: foreignKey({
+      columns: [table.customerId, table.projectId],
+      foreignColumns: [customers.id, customers.projectId],
+      name: "customer_entitlements_customer_id_fkey",
+    }).onDelete("cascade"),
+    featurePlanVersionfk: foreignKey({
+      columns: [table.featurePlanVersionId, table.projectId],
+      foreignColumns: [planVersionFeatures.id, planVersionFeatures.projectId],
+      name: "customer_entitlements_feature_plan_version_id_fkey",
+    }).onDelete("no action"),
+    subscriptionfk: foreignKey({
+      columns: [table.subscriptionId, table.projectId],
+      foreignColumns: [subscriptions.id, subscriptions.projectId],
+      name: "customer_entitlements_subscription_id_fkey",
+    }).onDelete("cascade"),
+    subscriptionPhasefk: foreignKey({
+      columns: [table.subscriptionPhaseId, table.projectId],
+      foreignColumns: [subscriptionPhases.id, subscriptionPhases.projectId],
+      name: "customer_entitlements_subscription_phase_id_fkey",
+    }).onDelete("cascade"),
+    subscriptionItemfk: foreignKey({
+      columns: [table.subscriptionItemId, table.projectId],
+      foreignColumns: [subscriptionItems.id, subscriptionItems.projectId],
+      name: "customer_entitlements_subscription_item_id_fkey",
+    }).onDelete("cascade"),
+  })
+)
+
+export const customerEntitlementsRelations = relations(customerEntitlements, ({ one }) => ({
+  project: one(projects, {
+    fields: [customerEntitlements.projectId],
+    references: [projects.id],
+  }),
+  customer: one(customers, {
+    fields: [customerEntitlements.customerId, customerEntitlements.projectId],
+    references: [customers.id, customers.projectId],
+  }),
+  featurePlanVersion: one(planVersionFeatures, {
+    fields: [customerEntitlements.featurePlanVersionId, customerEntitlements.projectId],
+    references: [planVersionFeatures.id, planVersionFeatures.projectId],
+  }),
+  subscription: one(subscriptions, {
+    fields: [customerEntitlements.subscriptionId, customerEntitlements.projectId],
+    references: [subscriptions.id, subscriptions.projectId],
+  }),
+  subscriptionPhase: one(subscriptionPhases, {
+    fields: [customerEntitlements.subscriptionPhaseId, customerEntitlements.projectId],
+    references: [subscriptionPhases.id, subscriptionPhases.projectId],
+  }),
+  subscriptionItem: one(subscriptionItems, {
+    fields: [customerEntitlements.subscriptionItemId, customerEntitlements.projectId],
+    references: [subscriptionItems.id, subscriptionItems.projectId],
+  }),
+}))
 
 // Grants are the limits and overrides that are applied to a feature plan version
 // for a given subject (workspace, project, plan, plan_version, customer)

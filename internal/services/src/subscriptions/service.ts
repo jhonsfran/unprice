@@ -3,6 +3,7 @@ import { type Database, and, eq, inArray } from "@unprice/db"
 import { grants } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import {
+  type CustomerEntitlement,
   type GrantType,
   type InsertSubscription,
   type InsertSubscriptionPhase,
@@ -23,6 +24,7 @@ import { billingStrategyFor } from "../billing/strategy"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import type { EntitlementService } from "../entitlements/service"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { getPaymentProviderCapabilities } from "../payment-provider/service"
@@ -60,6 +62,16 @@ interface PhaseGrantTarget {
 
 type PhaseOwnedGrant = typeof grants.$inferSelect
 
+interface PhaseEntitlementTarget {
+  key: string
+  subscriptionItemId: string
+  featurePlanVersionId: string
+  effectiveAt: number
+  expiresAt: number | null
+  allowanceUnits: number | null
+  overageStrategy: OverageStrategy
+}
+
 export class SubscriptionService {
   private readonly db: Database
   private readonly repo: SubscriptionRepository
@@ -70,6 +82,7 @@ export class SubscriptionService {
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly customerService: CustomerService
+  private readonly entitlementService: EntitlementService
   private readonly billingService: BillingService
   private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
@@ -84,6 +97,7 @@ export class SubscriptionService {
     cache,
     metrics,
     customerService,
+    entitlementService,
     billingService,
     ratingService,
     ledgerService,
@@ -98,6 +112,7 @@ export class SubscriptionService {
     cache: Cache
     metrics: Metrics
     customerService: CustomerService
+    entitlementService: EntitlementService
     billingService: BillingService
     ratingService: RatingService
     ledgerService: LedgerGateway
@@ -111,6 +126,7 @@ export class SubscriptionService {
     this.metrics = metrics
     this.waitUntil = waitUntil
     this.customerService = customerService
+    this.entitlementService = entitlementService
     this.billingService = billingService
     this.ratingService = ratingService
     this.ledgerService = ledgerService
@@ -258,6 +274,286 @@ export class SubscriptionService {
     }
 
     return targets
+  }
+
+  private getPhaseEntitlementKey(input: { subscriptionItemId: string }) {
+    return input.subscriptionItemId
+  }
+
+  private buildPhaseEntitlementTargets({
+    phase,
+    items,
+  }: {
+    phase: {
+      startAt: number
+      endAt: number | null
+    }
+    items: PhaseGrantItemInput[]
+  }): PhaseEntitlementTarget[] {
+    return items.map((item) => ({
+      key: this.getPhaseEntitlementKey({ subscriptionItemId: item.id }),
+      subscriptionItemId: item.id,
+      featurePlanVersionId: item.featurePlanVersionId,
+      effectiveAt: phase.startAt,
+      expiresAt: phase.endAt ?? null,
+      allowanceUnits: item.units ?? item.featureLimit ?? null,
+      overageStrategy: item.overageStrategy,
+    }))
+  }
+
+  private hasSameEntitlementConfiguration(
+    existingEntitlement: CustomerEntitlement,
+    target: PhaseEntitlementTarget
+  ) {
+    return (
+      existingEntitlement.subscriptionItemId === target.subscriptionItemId &&
+      existingEntitlement.featurePlanVersionId === target.featurePlanVersionId &&
+      existingEntitlement.allowanceUnits === target.allowanceUnits &&
+      existingEntitlement.overageStrategy === target.overageStrategy
+    )
+  }
+
+  private hasExactEntitlement(
+    existingEntitlement: CustomerEntitlement,
+    target: PhaseEntitlementTarget
+  ) {
+    return (
+      this.hasSameEntitlementConfiguration(existingEntitlement, target) &&
+      existingEntitlement.effectiveAt === target.effectiveAt &&
+      existingEntitlement.expiresAt === target.expiresAt
+    )
+  }
+
+  private async expirePhaseEntitlements({
+    entitlements,
+    projectId,
+    db,
+    now,
+  }: {
+    entitlements: CustomerEntitlement[]
+    projectId: string
+    db: Database
+    now: number
+  }): Promise<Result<void, UnPriceSubscriptionError>> {
+    for (const entitlement of entitlements) {
+      if (entitlement.expiresAt !== null && entitlement.expiresAt <= now) {
+        continue
+      }
+
+      const expireResult = await this.entitlementService.expireCustomerEntitlement({
+        id: entitlement.id,
+        projectId,
+        expiresAt: now,
+        db,
+      })
+
+      if (expireResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: expireResult.err.message,
+          })
+        )
+      }
+    }
+
+    return Ok(undefined)
+  }
+
+  private async syncPhaseEntitlements({
+    customerId,
+    subscriptionId,
+    phase,
+    items,
+    db,
+    now,
+  }: {
+    customerId: string
+    subscriptionId: string
+    phase: {
+      id: string
+      projectId: string
+      startAt: number
+      endAt: number | null
+    }
+    items: PhaseGrantItemInput[]
+    db: Database
+    now: number
+  }): Promise<Result<void, UnPriceSubscriptionError>> {
+    const featurePlanVersionIds = [...new Set(items.map((item) => item.featurePlanVersionId))]
+    const phaseOwnedEntitlementsResult = await this.entitlementService.getPhaseOwnedEntitlements({
+      projectId: phase.projectId,
+      customerId,
+      subscriptionPhaseId: phase.id,
+      featurePlanVersionIds,
+      phaseStartAt: phase.startAt,
+      phaseEndAt: phase.endAt ?? null,
+      db,
+    })
+
+    if (phaseOwnedEntitlementsResult.err) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: phaseOwnedEntitlementsResult.err.message,
+        })
+      )
+    }
+
+    const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
+
+    if (!isActivePhase && phaseOwnedEntitlementsResult.val.length === 0) {
+      return Ok(undefined)
+    }
+
+    const desiredTargets = this.buildPhaseEntitlementTargets({
+      phase,
+      items,
+    })
+    const existingByKey = new Map<string, CustomerEntitlement[]>()
+
+    for (const entitlement of phaseOwnedEntitlementsResult.val) {
+      if (!entitlement.subscriptionItemId) {
+        continue
+      }
+
+      const key = this.getPhaseEntitlementKey({
+        subscriptionItemId: entitlement.subscriptionItemId,
+      })
+      existingByKey.set(key, [...(existingByKey.get(key) ?? []), entitlement])
+    }
+
+    const keepEntitlementIds = new Set<string>()
+    const entitlementsToExpire = new Map<string, CustomerEntitlement>()
+    const entitlementExpiryUpdates = new Map<
+      string,
+      {
+        entitlement: CustomerEntitlement
+        expiresAt: number | null
+      }
+    >()
+    const targetsToCreate: PhaseEntitlementTarget[] = []
+
+    for (const target of desiredTargets) {
+      const currentCandidates = existingByKey.get(target.key) ?? []
+      const exactMatch = currentCandidates.find((entitlement) =>
+        this.hasExactEntitlement(entitlement, target)
+      )
+
+      if (exactMatch) {
+        keepEntitlementIds.add(exactMatch.id)
+        continue
+      }
+
+      const configurationMatch = currentCandidates.find(
+        (entitlement) =>
+          this.hasSameEntitlementConfiguration(entitlement, target) &&
+          entitlement.effectiveAt === target.effectiveAt
+      )
+
+      if (configurationMatch) {
+        keepEntitlementIds.add(configurationMatch.id)
+
+        if (configurationMatch.expiresAt !== target.expiresAt) {
+          entitlementExpiryUpdates.set(configurationMatch.id, {
+            entitlement: configurationMatch,
+            expiresAt: target.expiresAt,
+          })
+        }
+
+        continue
+      }
+
+      for (const entitlement of currentCandidates) {
+        entitlementsToExpire.set(entitlement.id, entitlement)
+      }
+
+      const targetIsCurrent =
+        target.effectiveAt <= now && (target.expiresAt === null || target.expiresAt >= now)
+      const replacingExisting = currentCandidates.length > 0
+
+      targetsToCreate.push({
+        ...target,
+        effectiveAt: targetIsCurrent && replacingExisting ? now : target.effectiveAt,
+      })
+    }
+
+    for (const entitlement of phaseOwnedEntitlementsResult.val) {
+      if (!keepEntitlementIds.has(entitlement.id)) {
+        entitlementsToExpire.set(entitlement.id, entitlement)
+      }
+    }
+
+    const expireResult = await this.expirePhaseEntitlements({
+      entitlements: [...entitlementsToExpire.values()],
+      projectId: phase.projectId,
+      db,
+      now,
+    })
+
+    if (expireResult.err) {
+      return expireResult
+    }
+
+    for (const { entitlement, expiresAt } of entitlementExpiryUpdates.values()) {
+      if (entitlementsToExpire.has(entitlement.id)) {
+        continue
+      }
+
+      const expireEntitlementResult = await this.entitlementService.expireCustomerEntitlement({
+        id: entitlement.id,
+        projectId: phase.projectId,
+        expiresAt,
+        db,
+      })
+
+      if (expireEntitlementResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: expireEntitlementResult.err.message,
+          })
+        )
+      }
+    }
+
+    for (const target of targetsToCreate) {
+      const createEntitlementResult = await this.entitlementService.createCustomerEntitlement({
+        entitlement: {
+          id: newId("customer_entitlement"),
+          projectId: phase.projectId,
+          customerId,
+          featurePlanVersionId: target.featurePlanVersionId,
+          subscriptionId,
+          subscriptionPhaseId: phase.id,
+          subscriptionItemId: target.subscriptionItemId,
+          effectiveAt: target.effectiveAt,
+          expiresAt: target.expiresAt,
+          allowanceUnits: target.allowanceUnits,
+          overageStrategy: target.overageStrategy,
+          metadata: {
+            subscriptionId,
+            subscriptionPhaseId: phase.id,
+            subscriptionItemId: target.subscriptionItemId,
+          },
+        },
+        db,
+      })
+
+      if (createEntitlementResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: createEntitlementResult.err.message,
+          })
+        )
+      }
+    }
+
+    this.waitUntil(
+      Promise.all([
+        this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:0`),
+        this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:30`),
+      ])
+    )
+
+    return Ok(undefined)
   }
 
   /**
@@ -1000,6 +1296,19 @@ export class SubscriptionService {
           })
         )
 
+        const syncPhaseEntitlementsResult = await this.syncPhaseEntitlements({
+          customerId: subscriptionWithPhases.customerId,
+          subscriptionId,
+          phase,
+          items: normalizedPhaseItems,
+          db: db ?? this.db,
+          now,
+        })
+
+        if (syncPhaseEntitlementsResult.err) {
+          return syncPhaseEntitlementsResult
+        }
+
         const syncPhaseGrantsResult = await this.syncPhaseGrants({
           customerId: subscriptionWithPhases.customerId,
           subscriptionId,
@@ -1233,6 +1542,24 @@ export class SubscriptionService {
           units: changedItem?.units ?? item.units,
         }
       })
+
+      const syncPhaseEntitlementsResult = await this.syncPhaseEntitlements({
+        customerId: subscriptionWithPhases.customerId,
+        subscriptionId,
+        phase: {
+          id: subscriptionPhase.id,
+          projectId,
+          startAt: subscriptionPhase.startAt,
+          endAt: subscriptionPhase.endAt,
+        },
+        items: this.normalizePhaseGrantItems(updatedPhaseItems),
+        db: db ?? this.db,
+        now,
+      })
+
+      if (syncPhaseEntitlementsResult.err) {
+        return syncPhaseEntitlementsResult
+      }
 
       const syncPhaseGrantsResult = await this.syncPhaseGrants({
         customerId: subscriptionWithPhases.customerId,

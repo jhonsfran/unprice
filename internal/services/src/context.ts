@@ -166,21 +166,6 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     walletService: wallet,
   })
 
-  const subscriptions = new SubscriptionService({
-    db: deps.db,
-    repo: new DrizzleSubscriptionRepository(deps.db),
-    logger: deps.logger,
-    analytics: deps.analytics,
-    waitUntil: deps.waitUntil,
-    cache: deps.cache,
-    metrics: deps.metrics,
-    customerService: customers,
-    billingService: billing,
-    ratingService: rating,
-    ledgerService: ledger,
-    walletService: wallet,
-  })
-
   const entitlements = new EntitlementService({
     db: deps.db,
     logger: deps.logger,
@@ -191,6 +176,22 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     customerService: customers,
     grantsManager,
     billingService: billing,
+  })
+
+  const subscriptions = new SubscriptionService({
+    db: deps.db,
+    repo: new DrizzleSubscriptionRepository(deps.db),
+    logger: deps.logger,
+    analytics: deps.analytics,
+    waitUntil: deps.waitUntil,
+    cache: deps.cache,
+    metrics: deps.metrics,
+    customerService: customers,
+    entitlementService: entitlements,
+    billingService: billing,
+    ratingService: rating,
+    ledgerService: ledger,
+    walletService: wallet,
   })
 
   return {

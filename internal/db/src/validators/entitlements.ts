@@ -39,6 +39,38 @@ export const grantsMetadataSchema = z.record(
   z.union([z.string(), z.number(), z.boolean(), z.null()])
 )
 
+export const customerEntitlementSelectSchema = createSelectSchema(schema.customerEntitlements, {
+  metadata: customerEntitlementMetadataSchema.nullable(),
+  allowanceUnits: z.number().int().nonnegative().nullable(),
+  overageStrategy: overageStrategySchema,
+})
+
+export const customerEntitlementInsertSchema = createInsertSchema(schema.customerEntitlements, {
+  metadata: customerEntitlementMetadataSchema.nullable().optional(),
+  allowanceUnits: z.number().int().nonnegative().nullable().optional(),
+  overageStrategy: overageStrategySchema.optional(),
+})
+  .partial({
+    id: true,
+    createdAtM: true,
+    updatedAtM: true,
+    subscriptionId: true,
+    subscriptionPhaseId: true,
+    subscriptionItemId: true,
+    expiresAt: true,
+    allowanceUnits: true,
+    overageStrategy: true,
+    metadata: true,
+  })
+  .strict()
+
+export const customerEntitlementSchemaExtended = customerEntitlementSelectSchema.extend({
+  featurePlanVersion: planVersionFeatureSelectBaseSchema.extend({
+    feature: featureSelectBaseSchema,
+  }),
+  subscriptionItem: subscriptionItemsSelectSchema.optional(),
+})
+
 export const grantSchema = createSelectSchema(schema.grants, {
   metadata: grantsMetadataSchema,
   meterHash: z.string().nullable(),
@@ -303,10 +335,13 @@ export const currentUsageSchema = z.object({
 
 export type CurrentUsage = z.infer<typeof currentUsageSchema>
 export type MeterState = z.infer<typeof meterStateSchema>
+export type CustomerEntitlement = z.infer<typeof customerEntitlementSelectSchema>
+export type CustomerEntitlementExtended = z.infer<typeof customerEntitlementSchemaExtended>
+export type InsertCustomerEntitlement = z.infer<typeof customerEntitlementInsertSchema>
 export type Grant = z.infer<typeof grantSchema>
 
-// Entitlement is now a computed type derived from grants, not a database table.
-// It represents the effective entitlement state for a customer+feature pair.
+// Runtime entitlement state used by the existing ingestion/current-usage pipeline.
+// The persistent source of access is customerEntitlementSelectSchema.
 export const entitlementSchema = z.object({
   id: z.string(),
   limit: z.number().nullable(),

@@ -1,12 +1,14 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
 import type { PlanVersion } from "@unprice/db/validators"
+import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { BillingService } from "../billing/service"
 import type { Cache } from "../cache/service"
 import { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import { EntitlementService } from "../entitlements/service"
 import { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import { PaymentProviderResolver } from "../payment-provider/resolver"
@@ -312,10 +314,56 @@ describe("Workflow - Billing and Subscriptions", () => {
       ledgerService,
       walletService,
     })
+    vi.spyOn(EntitlementService.prototype, "getPhaseOwnedEntitlements").mockResolvedValue(Ok([]))
+    vi.spyOn(EntitlementService.prototype, "createCustomerEntitlement").mockImplementation(
+      async ({ entitlement }) =>
+        Ok({
+          id: entitlement.id ?? "customer_entitlement_test",
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          featurePlanVersionId: entitlement.featurePlanVersionId,
+          subscriptionId: entitlement.subscriptionId ?? null,
+          subscriptionPhaseId: entitlement.subscriptionPhaseId ?? null,
+          subscriptionItemId: entitlement.subscriptionItemId ?? null,
+          effectiveAt: entitlement.effectiveAt,
+          expiresAt: entitlement.expiresAt ?? null,
+          allowanceUnits: entitlement.allowanceUnits ?? null,
+          overageStrategy: entitlement.overageStrategy ?? "none",
+          metadata: entitlement.metadata ?? null,
+          createdAtM: initialNow,
+          updatedAtM: initialNow,
+        })
+    )
+    vi.spyOn(EntitlementService.prototype, "expireCustomerEntitlement").mockImplementation(
+      async ({ id, projectId, expiresAt }) =>
+        Ok({
+          id,
+          projectId,
+          customerId,
+          featurePlanVersionId: "pf_123",
+          subscriptionId: "sub_123",
+          subscriptionPhaseId: "phase_123",
+          subscriptionItemId: "item_123",
+          effectiveAt: initialNow,
+          expiresAt,
+          allowanceUnits: null,
+          overageStrategy: "none",
+          metadata: null,
+          createdAtM: initialNow,
+          updatedAtM: initialNow,
+        })
+    )
+    const entitlementService = new EntitlementService({
+      ...serviceDeps,
+      customerService,
+      grantsManager,
+      billingService: _billingService,
+    })
     subscriptionService = new SubscriptionService({
       ...serviceDeps,
       repo: new DrizzleSubscriptionRepository(mockDb),
       customerService,
+      entitlementService,
       billingService: _billingService,
       ratingService,
       ledgerService,
@@ -638,7 +686,6 @@ describe("Workflow - Billing and Subscriptions", () => {
       subjectId: customerId,
       featurePlanVersionId: "pf_1",
       type: "subscription",
-      autoRenew: false,
       metadata: {
         subscriptionId: "sub_123",
         subscriptionPhaseId: expect.any(String),
