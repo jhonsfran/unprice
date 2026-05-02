@@ -1,6 +1,6 @@
 {
-  "id": "afc4ac09-a073-4654-b764-5f34ece3f0e6",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "a1408245-9e12-4f51-b709-20ad13f90144",
+  "prevId": "afc4ac09-a073-4654-b764-5f34ece3f0e6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -4869,11 +4869,6 @@
       "name": "due_behaviour",
       "schema": "public",
       "values": ["cancel", "downgrade"]
-    },
-    "public.merging_policy": {
-      "name": "merging_policy",
-      "schema": "public",
-      "values": ["sum", "max", "min", "replace"]
     },
     "public.grant_type": {
       "name": "grant_type",

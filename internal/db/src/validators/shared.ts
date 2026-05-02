@@ -10,7 +10,6 @@ import {
   COLLECTION_METHODS,
   CURRENCIES,
   DUE_BEHAVIOUR,
-  ENTITLEMENT_MERGING_POLICY,
   FEATURE_CONFIG_TYPES,
   FEATURE_TYPES,
   GRANT_TYPES,
@@ -191,7 +190,6 @@ export const resetConfigSchema = z.object({
   planType: planTypeSchema,
 })
 
-export const entitlementMergingPolicySchema = z.enum(ENTITLEMENT_MERGING_POLICY)
 export const overageStrategySchema = z.enum(OVERAGE_STRATEGIES)
 
 export type Currency = z.infer<typeof currencySchema>
@@ -211,6 +209,5 @@ export type PlanType = z.infer<typeof planTypeSchema>
 export type BillingConfig = z.infer<typeof billingConfigSchema>
 export type ResetConfig = z.infer<typeof resetConfigSchema>
 export type MeterConfig = z.infer<typeof meterConfigSchema>
-export type EntitlementMergingPolicy = z.infer<typeof entitlementMergingPolicySchema>
 export type OverageStrategy = z.infer<typeof overageStrategySchema>
 export type GrantType = z.infer<typeof grantTypeSchema>

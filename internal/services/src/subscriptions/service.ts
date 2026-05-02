@@ -3,6 +3,7 @@ import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
 import {
   type CustomerEntitlement,
+  type Grant,
   type GrantType,
   type InsertSubscription,
   type InsertSubscriptionPhase,
@@ -49,6 +50,7 @@ interface PhaseGrantItemInput {
 interface PhaseGrantTarget {
   type: PhaseGrantType
   customerEntitlementId: string
+  allowanceUnits: number | null
   effectiveAt: number
   expiresAt: number | null
 }
@@ -63,12 +65,15 @@ interface PhaseEntitlementTarget {
   overageStrategy: OverageStrategy
 }
 
+type PhaseOwnedEntitlement = CustomerEntitlement & {
+  grants?: Grant[]
+}
+
 export class SubscriptionService {
   private readonly db: Database
   private readonly repo: SubscriptionRepository
   private readonly logger: Logger
   private readonly analytics: Analytics
-  private readonly cache: Cache
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
@@ -85,7 +90,7 @@ export class SubscriptionService {
     logger,
     analytics,
     waitUntil,
-    cache,
+    cache: _cache,
     metrics,
     customerService,
     entitlementService,
@@ -113,7 +118,6 @@ export class SubscriptionService {
     this.repo = repo
     this.logger = logger
     this.analytics = analytics
-    this.cache = cache
     this.metrics = metrics
     this.waitUntil = waitUntil
     this.customerService = customerService
@@ -144,6 +148,10 @@ export class SubscriptionService {
       db,
       logger: this.logger,
     })
+  }
+
+  private repoForDatabase(db?: Database) {
+    return db && this.repo.forDatabase ? this.repo.forDatabase(db) : this.repo
   }
 
   /**
@@ -191,6 +199,7 @@ export class SubscriptionService {
   private buildPhaseGrantTargets({
     phase,
     entitlements,
+    items,
   }: {
     phase: {
       id: string
@@ -198,9 +207,13 @@ export class SubscriptionService {
       endAt: number | null
       trialEndsAt: number | null
     }
-    entitlements: CustomerEntitlement[]
+    entitlements: PhaseOwnedEntitlement[]
+    items: PhaseGrantItemInput[]
   }): PhaseGrantTarget[] {
     const targets: PhaseGrantTarget[] = []
+    const allowanceBySubscriptionItemId = new Map(
+      items.map((item) => [item.id, this.getPhaseGrantAllowance(item)])
+    )
 
     const grantWindows: Array<{
       type: PhaseGrantType
@@ -242,6 +255,9 @@ export class SubscriptionService {
         targets.push({
           type: grantWindow.type,
           customerEntitlementId: entitlement.id,
+          allowanceUnits: entitlement.subscriptionItemId
+            ? (allowanceBySubscriptionItemId.get(entitlement.subscriptionItemId) ?? null)
+            : null,
           effectiveAt,
           expiresAt,
         })
@@ -253,6 +269,10 @@ export class SubscriptionService {
 
   private getPhaseEntitlementKey(input: { subscriptionItemId: string }) {
     return input.subscriptionItemId
+  }
+
+  private getPhaseGrantAllowance(item: PhaseGrantItemInput): number | null {
+    return item.units ?? item.featureLimit ?? null
   }
 
   private buildPhaseEntitlementTargets({
@@ -271,19 +291,23 @@ export class SubscriptionService {
       featurePlanVersionId: item.featurePlanVersionId,
       effectiveAt: phase.startAt,
       expiresAt: phase.endAt ?? null,
-      allowanceUnits: item.units ?? item.featureLimit ?? null,
+      allowanceUnits: this.getPhaseGrantAllowance(item),
       overageStrategy: item.overageStrategy,
     }))
   }
 
   private hasSameEntitlementConfiguration(
-    existingEntitlement: CustomerEntitlement,
+    existingEntitlement: PhaseOwnedEntitlement,
     target: PhaseEntitlementTarget
   ) {
+    const grants = existingEntitlement.grants ?? []
+    const hasSameAllowance =
+      grants.length === 0 || grants.every((grant) => grant.allowanceUnits === target.allowanceUnits)
+
     return (
       existingEntitlement.subscriptionItemId === target.subscriptionItemId &&
       existingEntitlement.featurePlanVersionId === target.featurePlanVersionId &&
-      existingEntitlement.allowanceUnits === target.allowanceUnits &&
+      hasSameAllowance &&
       existingEntitlement.overageStrategy === target.overageStrategy
     )
   }
@@ -305,7 +329,7 @@ export class SubscriptionService {
     db,
     now,
   }: {
-    entitlements: CustomerEntitlement[]
+    entitlements: PhaseOwnedEntitlement[]
     projectId: string
     db: Database
     now: number
@@ -501,7 +525,6 @@ export class SubscriptionService {
           subscriptionItemId: target.subscriptionItemId,
           effectiveAt: target.effectiveAt,
           expiresAt: target.expiresAt,
-          allowanceUnits: target.allowanceUnits,
           overageStrategy: target.overageStrategy,
           metadata: {
             subscriptionId,
@@ -520,13 +543,6 @@ export class SubscriptionService {
         )
       }
     }
-
-    this.waitUntil(
-      Promise.all([
-        this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:0`),
-        this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:30`),
-      ])
-    )
 
     return Ok(undefined)
   }
@@ -610,6 +626,7 @@ export class SubscriptionService {
     const desiredTargets = this.buildPhaseGrantTargets({
       phase,
       entitlements: grantableEntitlements,
+      items,
     })
 
     for (const target of desiredTargets) {
@@ -622,10 +639,7 @@ export class SubscriptionService {
           effectiveAt: target.effectiveAt,
           expiresAt: target.expiresAt,
           type: target.type,
-          allowanceUnits:
-            grantableEntitlements.find(
-              (entitlement) => entitlement.id === target.customerEntitlementId
-            )?.allowanceUnits ?? null,
+          allowanceUnits: target.allowanceUnits,
           metadata: {
             subscriptionId,
             subscriptionPhaseId: phase.id,
@@ -642,13 +656,6 @@ export class SubscriptionService {
         )
       }
     }
-
-    this.waitUntil(
-      Promise.all([
-        this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:0`),
-        this.cache.customerRelevantEntitlements.remove(`${phase.projectId}:${customerId}:30`),
-      ])
-    )
 
     return Ok(undefined)
   }
@@ -804,6 +811,7 @@ export class SubscriptionService {
       endAt,
       subscriptionId,
     } = input
+    const repo = this.repoForDatabase(db)
 
     const startAtToUse = startAt ?? now
     const endAtToUse = endAt ?? undefined
@@ -818,7 +826,7 @@ export class SubscriptionService {
     }
 
     // get subscription with phases from start date
-    const subscriptionWithPhases = await this.repo.findSubscriptionWithPhases({
+    const subscriptionWithPhases = await repo.findSubscriptionWithPhases({
       subscriptionId,
     })
 
@@ -1014,7 +1022,8 @@ export class SubscriptionService {
       )
     }
 
-    const result = await this.repo.withTransaction(async (txRepo) => {
+    const result = await repo.withTransaction(async (txRepo, txDb) => {
+      const writeDb = txDb ?? db ?? this.db
       const phase = await txRepo.insertPhase({
         id: newId("subscription_phase"),
         projectId,
@@ -1125,7 +1134,7 @@ export class SubscriptionService {
           subscriptionId,
           phase,
           items: normalizedPhaseItems,
-          db: db ?? this.db,
+          db: writeDb,
           now,
         })
 
@@ -1138,7 +1147,7 @@ export class SubscriptionService {
           subscriptionId,
           phase,
           items: normalizedPhaseItems,
-          db: db ?? this.db,
+          db: writeDb,
           now,
         })
 
@@ -1238,6 +1247,7 @@ export class SubscriptionService {
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
     const { startAt, endAt, items, id: phaseId } = input
+    const repo = this.repoForDatabase(db)
 
     let endAtToUse = endAt ?? undefined
 
@@ -1247,7 +1257,7 @@ export class SubscriptionService {
     }
 
     // get subscription with phases from start date
-    const subscriptionWithPhases = await this.repo.findSubscriptionWithPhases({
+    const subscriptionWithPhases = await repo.findSubscriptionWithPhases({
       subscriptionId,
       projectId,
       phasesFromStartAt: startAt,
@@ -1302,7 +1312,8 @@ export class SubscriptionService {
 
     // we allow to set the end date before the current billing cycle end date to allow mid-cycle cancellations
     // if the end date is less than the current date, it will be set to the current date by endAtToUse logic above
-    const result = await this.repo.withTransaction(async (txRepo) => {
+    const result = await repo.withTransaction(async (txRepo, txDb) => {
+      const writeDb = txDb ?? db ?? this.db
       const subscriptionPhase = await txRepo.updatePhase({
         phaseId: input.id,
         data: {
@@ -1357,7 +1368,7 @@ export class SubscriptionService {
           endAt: subscriptionPhase.endAt,
         },
         items: this.normalizePhaseGrantItems(updatedPhaseItems),
-        db: db ?? this.db,
+        db: writeDb,
         now,
       })
 
@@ -1376,7 +1387,7 @@ export class SubscriptionService {
           trialEndsAt: subscriptionPhase.trialEndsAt,
         },
         items: this.normalizePhaseGrantItems(updatedPhaseItems),
-        db: db ?? this.db,
+        db: writeDb,
         now,
       })
 
@@ -1439,7 +1450,8 @@ export class SubscriptionService {
       (phase) => phase.startAt <= cancelAt && (phase.endAt ?? Number.POSITIVE_INFINITY) > cancelAt
     )
 
-    const result = await this.repo.withTransaction(async (txRepo) => {
+    const result = await this.repo.withTransaction(async (txRepo, txDb) => {
+      const writeDb = txDb ?? this.db
       for (const phase of phasesToClose) {
         const updatedPhase = await txRepo.updatePhase({
           phaseId: phase.id,
@@ -1467,7 +1479,7 @@ export class SubscriptionService {
           subscriptionId,
           phase: phaseForSync,
           items,
-          db: this.db,
+          db: writeDb,
           now: cancelAt,
         })
 
@@ -1482,7 +1494,7 @@ export class SubscriptionService {
           featurePlanVersionIds: [...new Set(items.map((item) => item.featurePlanVersionId))],
           phaseStartAt: phase.startAt,
           phaseEndAt: cancelAt,
-          db: this.db,
+          db: writeDb,
         })
 
         if (entitlementsResult.err) {
@@ -1494,12 +1506,12 @@ export class SubscriptionService {
         }
 
         const expireGrantsResult = await this.createGrantManager(
-          this.db
+          writeDb
         ).expireGrantsForEntitlements({
           projectId,
           customerEntitlementIds: entitlementsResult.val.map((entitlement) => entitlement.id),
           expiresAt: cancelAt,
-          db: this.db,
+          db: writeDb,
         })
 
         if (expireGrantsResult.err) {
@@ -1575,6 +1587,7 @@ export class SubscriptionService {
     const { customerId, metadata, timezone } = input
 
     const trx = db ?? this.db
+    const repo = this.repoForDatabase(db)
 
     const customerData = await trx.query.customers.findFirst({
       with: {
@@ -1618,7 +1631,7 @@ export class SubscriptionService {
 
     const subscriptionId = newId("subscription")
 
-    const newSubscription = await this.repo.insertSubscription({
+    const newSubscription = await repo.insertSubscription({
       id: subscriptionId,
       projectId,
       customerId: customerData.id,

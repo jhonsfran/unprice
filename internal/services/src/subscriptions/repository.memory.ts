@@ -1,3 +1,4 @@
+import type { Database } from "@unprice/db"
 import type {
   Customer,
   Subscription,
@@ -39,7 +40,13 @@ export class InMemorySubscriptionRepository implements SubscriptionRepository {
   readonly planVersionsByPhaseId: Map<string, Record<string, unknown>> = new Map()
   readonly featurePlanVersionsByItemId: Map<string, Record<string, unknown>> = new Map()
 
-  async withTransaction<T>(fn: (txRepo: SubscriptionRepository) => Promise<T>): Promise<T> {
+  forDatabase(_db: Database): SubscriptionRepository {
+    return this
+  }
+
+  async withTransaction<T>(
+    fn: (txRepo: SubscriptionRepository, txDb?: Database) => Promise<T>
+  ): Promise<T> {
     return fn(this)
   }
 

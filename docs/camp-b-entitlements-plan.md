@@ -151,7 +151,6 @@ customer_entitlements
   subscription_item_id
   effective_at
   expires_at
-  allowance_units             -- keep only if this has a defined role
   overage_strategy
   metadata
 
@@ -185,8 +184,8 @@ add `feature_slug` to grants for this.
 
 For Camp B, the only expected mutation to an existing entitlement is narrowing
 `expiresAt` for cancellation or phase end. Everything else remains append-only.
-Other cleanup choices, such as removing `customer_entitlements.allowance_units`
-or adding grant-level cadence, are explicitly deferred.
+Grant-level cadence remains explicitly deferred. `customer_entitlements` no
+longer carries `allowance_units`; grants are the only allowance source.
 
 ---
 

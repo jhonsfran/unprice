@@ -13,13 +13,13 @@ const baseCustomerEntitlement = {
 }
 
 describe("customerEntitlementInsertSchema", () => {
-  it.each([null, 0, 10])("accepts allowanceUnits=%s", (allowanceUnits) => {
+  it("rejects allowanceUnits because allowances belong to grants", () => {
     const result = customerEntitlementInsertSchema.safeParse({
       ...baseCustomerEntitlement,
-      allowanceUnits,
+      allowanceUnits: 10,
     })
 
-    expect(result.success).toBe(true)
+    expect(result.success).toBe(false)
   })
 
   it("rejects stale entitlement override fields", () => {

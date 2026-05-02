@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { entitlementSchema } from "@unprice/db/validators"
+import { customerEntitlementSchemaExtended } from "@unprice/db/validators"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
@@ -15,8 +15,8 @@ const tags = ["customer"]
 export const route = createRoute({
   path: "/v1/customer/getEntitlements",
   operationId: "customers.getEntitlements",
-  summary: "get minimal entitlements",
-  description: "Get minimal entitlements for a customer",
+  summary: "get customer entitlements",
+  description: "Get active customer entitlements with their grants",
   method: "post",
   tags,
   request: {
@@ -39,8 +39,8 @@ export const route = createRoute({
   },
   responses: {
     [HttpStatusCodes.OK]: jsonContent(
-      z.array(entitlementSchema),
-      "The result of the get minimal entitlements"
+      z.array(customerEntitlementSchemaExtended),
+      "The result of the get customer entitlements"
     ),
     ...openApiErrorResponses,
   },
@@ -70,8 +70,8 @@ export const registerGetEntitlementsV1 = (app: App) =>
       requestedProjectId: projectId ?? key.project.id,
     })
 
-    // validate usage from db
-    const { err, val: result } = await entitlement.getRelevantEntitlementsForIngestion({
+    // load entitlements and their active grants from Postgres
+    const { err, val: result } = await entitlement.loadCustomerEntitlementsForCache({
       customerId,
       projectId: finalProjectId,
       historicalDays: 0,

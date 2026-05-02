@@ -165,7 +165,6 @@ const activeGrantSchema = z.object({
 })
 
 const entitlementConfigSchema = z.object({
-  allowanceUnits: z.number().finite().nullable(),
   customerEntitlementId: z.string().min(1),
   customerId: z.string().min(1),
   effectiveAt: z.number().finite(),
@@ -1445,7 +1444,6 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     return {
-      allowanceUnits: null,
       customerEntitlementId: row.customerEntitlementId,
       projectId: row.projectId,
       customerId: row.customerId,

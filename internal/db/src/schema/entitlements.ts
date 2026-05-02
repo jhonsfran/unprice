@@ -27,7 +27,6 @@ export const customerEntitlements = pgTableProject(
     subscriptionItemId: cuid("subscription_item_id"),
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
     expiresAt: bigint("expires_at", { mode: "number" }),
-    allowanceUnits: integer("allowance_units"),
     overageStrategy: overageStrategyEnum("overage_strategy").notNull().default("none"),
     metadata: json("metadata").$type<z.infer<typeof customerEntitlementMetadataSchema>>(),
   },

@@ -7,7 +7,7 @@ import type {
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
-import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
+import { UnPriceSubscriptionError } from "../../subscriptions/errors"
 
 type CreateSubscriptionDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions">
@@ -35,37 +35,51 @@ export async function createSubscription(
     },
   })
 
-  const result = await deps.db.transaction(async (tx) => {
-    const { err, val: subscription } = await deps.services.subscriptions.createSubscription({
-      input: subscriptionInput,
-      projectId,
-      db: tx,
-    })
+  let transactionError: UnPriceSubscriptionError | SchemaError | undefined
 
-    if (err) {
-      return Err(err)
-    }
-
-    const now = Date.now()
-
-    for (const phase of phases) {
-      const { err: phaseErr } = await deps.services.subscriptions.createPhase({
-        input: {
-          ...phase,
-          subscriptionId: subscription.id,
-        } as InsertSubscriptionPhase,
+  const result = await deps.db
+    .transaction(async (tx) => {
+      const { err, val: subscription } = await deps.services.subscriptions.createSubscription({
+        input: subscriptionInput,
         projectId,
         db: tx,
-        now,
       })
 
-      if (phaseErr) {
-        return Err(phaseErr)
+      if (err) {
+        transactionError = err
+        throw err
       }
-    }
 
-    return Ok(subscription)
-  })
+      const now = Date.now()
+
+      for (const phase of phases) {
+        const { err: phaseErr } = await deps.services.subscriptions.createPhase({
+          input: {
+            ...phase,
+            subscriptionId: subscription.id,
+          } as InsertSubscriptionPhase,
+          projectId,
+          db: tx,
+          now,
+        })
+
+        if (phaseErr) {
+          transactionError = phaseErr
+          throw phaseErr
+        }
+      }
+
+      return subscription
+    })
+    .then((subscription) => Ok(subscription))
+    .catch((error) =>
+      Err(
+        transactionError ??
+          new UnPriceSubscriptionError({
+            message: error instanceof Error ? error.message : String(error),
+          })
+      )
+    )
 
   if (result.err) {
     return result

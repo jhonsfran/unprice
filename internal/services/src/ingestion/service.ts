@@ -43,7 +43,6 @@ export type IngestionGrant = {
 }
 
 export type IngestionEntitlement = {
-  allowanceUnits: number | null
   customerEntitlementId: string
   customerId: string
   effectiveAt: number
@@ -825,7 +824,6 @@ export class IngestionService {
 
   private toIngestionEntitlement(entitlement: CustomerEntitlementExtended): IngestionEntitlement {
     return {
-      allowanceUnits: entitlement.allowanceUnits,
       customerEntitlementId: entitlement.id,
       customerId: entitlement.customerId,
       effectiveAt: entitlement.effectiveAt,

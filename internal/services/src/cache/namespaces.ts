@@ -10,11 +10,9 @@ import type {
   CurrentUsage,
   Customer,
   CustomerPaymentMethod,
-  Entitlement,
   Feature,
   PlanVersionApi,
   Project,
-  ReportUsageResult,
   SubscriptionCache,
   SubscriptionStatus,
   User,
@@ -49,7 +47,6 @@ export type CacheNamespaces = {
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null
   customerByExternalId: CustomerCache | null
-  customerRelevantEntitlements: Entitlement[]
   accessControlList: {
     customerUsageLimitReached: boolean | null
     customerDisabled: boolean | null
@@ -58,7 +55,6 @@ export type CacheNamespaces = {
   customerPaymentMethods: CustomerPaymentMethod[] | null
   projectFeatures: ProjectFeatureCache | null
   workspaceGuard: WorkspaceGuardCache | null
-  idempotentRequestUsageByHash: ReportUsageResult | null
   planVersionList: PlanVersionApi[] | null
   planVersion: PlanVersionApi | null
   pageCountryVisits: PageCountryVisits | null

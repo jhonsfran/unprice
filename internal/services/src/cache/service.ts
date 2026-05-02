@@ -83,10 +83,6 @@ export class CacheService {
         this.context,
         defaultOpts
       ),
-      customerRelevantEntitlements: new Namespace<CacheNamespaces["customerRelevantEntitlements"]>(
-        this.context,
-        defaultOpts
-      ),
       accessControlList: new Namespace<CacheNamespaces["accessControlList"]>(this.context, {
         ...defaultOpts,
         fresh: 1000 * 60 * 1, // Consider them "fresh" for 1 minute
@@ -114,14 +110,6 @@ export class CacheService {
         fresh: 1000 * 60, // 1 minute
         stale: 1000 * 60 * 5, // 5 minutes
       }),
-      idempotentRequestUsageByHash: new Namespace<CacheNamespaces["idempotentRequestUsageByHash"]>(
-        this.context,
-        {
-          ...defaultOpts,
-          fresh: 1000 * 30, // 30 seconds
-          stale: 1000 * 60, // delete after 1 minute
-        }
-      ),
       pageCountryVisits: new Namespace<CacheNamespaces["pageCountryVisits"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds

@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import type { PlanVersion } from "@unprice/db/validators"
+import type { CustomerEntitlement, PlanVersion } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -127,14 +127,6 @@ describe("Workflow - Billing and Subscriptions", () => {
         swr: vi
           .fn()
           .mockImplementation(async (_key, fetcher) => ({ val: await fetcher(), fresh: true })),
-      },
-      customerRelevantEntitlements: {
-        remove: vi.fn(),
-        swr: vi
-          .fn()
-          .mockImplementation(async (_key, fetcher) => ({ val: await fetcher(), fresh: true })),
-        set: vi.fn(),
-        get: vi.fn(),
       },
       getCurrentUsage: {
         remove: vi.fn(),
@@ -314,10 +306,24 @@ describe("Workflow - Billing and Subscriptions", () => {
       ledgerService,
       walletService,
     })
-    vi.spyOn(EntitlementService.prototype, "getPhaseOwnedEntitlements").mockResolvedValue(Ok([]))
+    const phaseEntitlements: CustomerEntitlement[] = []
+    vi.spyOn(EntitlementService.prototype, "getPhaseOwnedEntitlements").mockImplementation(
+      async ({ projectId, customerId, subscriptionPhaseId, featurePlanVersionIds }) =>
+        Ok(
+          phaseEntitlements
+            .filter(
+              (entitlement) =>
+                entitlement.projectId === projectId &&
+                entitlement.customerId === customerId &&
+                entitlement.subscriptionPhaseId === subscriptionPhaseId &&
+                featurePlanVersionIds.includes(entitlement.featurePlanVersionId)
+            )
+            .map((entitlement) => ({ ...entitlement, grants: [] }))
+        )
+    )
     vi.spyOn(EntitlementService.prototype, "createCustomerEntitlement").mockImplementation(
-      async ({ entitlement }) =>
-        Ok({
+      async ({ entitlement }) => {
+        const createdEntitlement = {
           id: entitlement.id ?? "customer_entitlement_test",
           projectId: entitlement.projectId,
           customerId: entitlement.customerId,
@@ -327,31 +333,44 @@ describe("Workflow - Billing and Subscriptions", () => {
           subscriptionItemId: entitlement.subscriptionItemId ?? null,
           effectiveAt: entitlement.effectiveAt,
           expiresAt: entitlement.expiresAt ?? null,
-          allowanceUnits: entitlement.allowanceUnits ?? null,
           overageStrategy: entitlement.overageStrategy ?? "none",
           metadata: entitlement.metadata ?? null,
           createdAtM: initialNow,
           updatedAtM: initialNow,
-        })
+        }
+
+        phaseEntitlements.push(createdEntitlement)
+
+        return Ok(createdEntitlement)
+      }
     )
     vi.spyOn(EntitlementService.prototype, "expireCustomerEntitlement").mockImplementation(
-      async ({ id, projectId, expiresAt }) =>
-        Ok({
+      async ({ id, projectId, expiresAt }) => {
+        const existingEntitlement = phaseEntitlements.find(
+          (entitlement) => entitlement.id === id && entitlement.projectId === projectId
+        )
+
+        if (existingEntitlement) {
+          existingEntitlement.expiresAt = expiresAt
+          existingEntitlement.updatedAtM = initialNow
+        }
+
+        return Ok({
           id,
           projectId,
-          customerId,
+          customerId: existingEntitlement?.customerId ?? customerId,
           featurePlanVersionId: "pf_123",
           subscriptionId: "sub_123",
           subscriptionPhaseId: "phase_123",
           subscriptionItemId: "item_123",
           effectiveAt: initialNow,
           expiresAt,
-          allowanceUnits: null,
           overageStrategy: "none",
           metadata: null,
           createdAtM: initialNow,
           updatedAtM: initialNow,
         })
+      }
     )
     const entitlementService = new EntitlementService({
       ...serviceDeps,
@@ -622,7 +641,7 @@ describe("Workflow - Billing and Subscriptions", () => {
     })
   })
 
-  it("creates phase-owned grants with subscription metadata for active phases", async () => {
+  it("creates grants attached to phase-owned entitlements with subscription metadata", async () => {
     vi.spyOn(mockDb.query.versions, "findFirst").mockResolvedValue(
       mockPlanVersion as unknown as PlanVersion
     )
@@ -675,23 +694,28 @@ describe("Workflow - Billing and Subscriptions", () => {
         (value): value is Record<string, unknown> =>
           typeof value === "object" &&
           value !== null &&
-          (value as { subjectType?: unknown }).subjectType === "customer" &&
-          (value as { featurePlanVersionId?: unknown }).featurePlanVersionId === "pf_1"
+          typeof (value as { customerEntitlementId?: unknown }).customerEntitlementId ===
+            "string" &&
+          (value as { type?: unknown }).type === "subscription"
       )
 
     expect(grantInsert).toBeDefined()
     expect(grantInsert).toMatchObject({
       projectId,
-      subjectType: "customer",
-      subjectId: customerId,
-      featurePlanVersionId: "pf_1",
       type: "subscription",
+      customerEntitlementId: expect.any(String),
+      allowanceUnits: 1000,
       metadata: {
         subscriptionId: "sub_123",
         subscriptionPhaseId: expect.any(String),
-        subscriptionItemId: expect.any(String),
+        customerEntitlementId: expect.any(String),
       },
     })
+    expect(grantInsert?.metadata).toMatchObject({
+      customerEntitlementId: grantInsert?.customerEntitlementId,
+    })
+    expect(grantInsert).not.toHaveProperty("subjectType")
+    expect(grantInsert).not.toHaveProperty("featurePlanVersionId")
   })
 
   // Phase 7: the refund is live via `WalletService.adjust({source:

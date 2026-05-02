@@ -3,8 +3,6 @@ import { add, currencies, dinero, toDecimal } from "@unprice/db/utils"
 import {
   type CalculatedPrice,
   type Currency,
-  type Entitlement,
-  type EntitlementState,
   calculateCycleWindow,
   calculateFreeUnits,
   calculateProration,
@@ -25,6 +23,7 @@ import type {
   IncrementalRatingInput,
   IncrementalRatingResult,
   RatedCharge,
+  RatingEntitlementContext,
   RatingInput,
   ResolveBillingWindowInput,
   UsageFeatureData,
@@ -139,7 +138,7 @@ export class RatingService {
     projectId: string
     customerId: string
     featureSlug: string
-    entitlement: Omit<Entitlement, "id">
+    entitlement: RatingEntitlementContext
     billingStartAt: number
     billingEndAt: number
     usageData?: UsageFeatureData[]
@@ -243,7 +242,7 @@ export class RatingService {
     grant: z.infer<typeof grantSchemaExtended>
     billingStartAt: number
     billingEndAt: number
-    resetConfig: Omit<EntitlementState, "id">["resetConfig"]
+    resetConfig: RatingEntitlementContext["resetConfig"]
   }): { prorationFactor: number; referenceCycleStart: number; referenceCycleEnd: number } {
     // Calculate proration based on the billing period
     // The service window is the intersection of the grant active period and the billing cycle
@@ -284,14 +283,12 @@ export class RatingService {
 
   private entitlementFromGrant(
     grant: z.infer<typeof grantSchemaExtended>
-  ): Omit<Entitlement, "id"> {
+  ): RatingEntitlementContext {
     const customerEntitlement = grant.customerEntitlement
     const featurePlanVersion = customerEntitlement.featurePlanVersion
     const resetConfig = featurePlanVersion.resetConfig
 
     return {
-      limit: customerEntitlement.allowanceUnits,
-      mergingPolicy: "replace",
       effectiveAt: customerEntitlement.effectiveAt,
       expiresAt: customerEntitlement.expiresAt,
       resetConfig: resetConfig
@@ -305,21 +302,6 @@ export class RatingService {
           ? (featurePlanVersion.meterConfig ?? null)
           : null,
       featureType: featurePlanVersion.featureType,
-      unitOfMeasure: featurePlanVersion.unitOfMeasure,
-      grants: [],
-      featureSlug: featurePlanVersion.feature.slug,
-      customerId: customerEntitlement.customerId,
-      projectId: customerEntitlement.projectId,
-      isCurrent: true,
-      createdAtM: customerEntitlement.createdAtM,
-      updatedAtM: customerEntitlement.updatedAtM,
-      metadata: {
-        realtime: featurePlanVersion.metadata?.realtime ?? false,
-        notifyUsageThreshold: featurePlanVersion.metadata?.notifyUsageThreshold ?? 90,
-        overageStrategy: customerEntitlement.overageStrategy,
-        blockCustomer: featurePlanVersion.metadata?.blockCustomer ?? false,
-        hidden: featurePlanVersion.metadata?.hidden ?? false,
-      },
     }
   }
 

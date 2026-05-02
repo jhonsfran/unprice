@@ -1,3 +1,4 @@
+import type { Database } from "@unprice/db"
 import type {
   Customer,
   PlanVersion,
@@ -190,7 +191,11 @@ export interface FindPhaseForBillingInput {
 // ─── Repository interface ──────────────────────────────────────────────────
 
 export interface SubscriptionRepository {
-  withTransaction<T>(fn: (txRepo: SubscriptionRepository) => Promise<T>): Promise<T>
+  forDatabase?(db: Database): SubscriptionRepository
+
+  withTransaction<T>(
+    fn: (txRepo: SubscriptionRepository, txDb?: Database) => Promise<T>
+  ): Promise<T>
 
   // ── Subscriptions ──────────────────────────────────────────────────────
 

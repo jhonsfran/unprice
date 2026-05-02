@@ -39,7 +39,6 @@ describe("EntitlementService customer entitlement invariants", () => {
         subscriptionItemId: "item_123",
         effectiveAt: 1000,
         expiresAt: null,
-        allowanceUnits: 100,
         overageStrategy: "none",
         metadata: null,
       },
@@ -90,7 +89,6 @@ describe("EntitlementService customer entitlement invariants", () => {
         subscriptionItemId: "item_123",
         effectiveAt: 2000,
         expiresAt: 3000,
-        allowanceUnits: 100,
         overageStrategy: "none",
         metadata: null,
       },
@@ -115,7 +113,6 @@ function createEntitlementService(db: unknown): EntitlementService {
     analytics: {} as never,
     waitUntil: vi.fn(),
     cache: {
-      customerRelevantEntitlements: {},
       accessControlList: {},
       getCurrentUsage: {},
     } as never,

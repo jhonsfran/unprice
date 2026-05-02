@@ -2864,7 +2864,6 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
       ? (overrides.entitlementExpiresAt as number | null)
       : periodEndAt
   const entitlement = {
-    allowanceUnits: amount,
     customerEntitlementId,
     customerId,
     effectiveAt: periodStartAt,

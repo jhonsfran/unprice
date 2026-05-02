@@ -1,8 +1,10 @@
 import type {
   CalculatedPrice,
   Currency,
-  Entitlement,
   grantSchemaExtended,
+  meterConfigSchema,
+  resetConfigSchema,
+  typeFeatureSchema,
 } from "@unprice/db/validators"
 import type { z } from "zod"
 
@@ -14,6 +16,14 @@ export interface BillingWindow {
 export interface UsageFeatureData {
   featureSlug: string
   usage: number
+}
+
+export interface RatingEntitlementContext {
+  effectiveAt: number
+  expiresAt: number | null
+  resetConfig: z.infer<typeof resetConfigSchema> | null
+  meterConfig: z.infer<typeof meterConfigSchema> | null
+  featureType: z.infer<typeof typeFeatureSchema>
 }
 
 export interface RatedCharge {
@@ -35,7 +45,7 @@ export type RatingInput =
       featureSlug: string
       now: number
       grants?: z.infer<typeof grantSchemaExtended>[]
-      entitlement?: Omit<Entitlement, "id">
+      entitlement?: RatingEntitlementContext
       startAt?: never
       endAt?: never
       usageData?: UsageFeatureData[]
@@ -47,20 +57,20 @@ export type RatingInput =
       startAt: number
       endAt: number
       grants?: z.infer<typeof grantSchemaExtended>[]
-      entitlement?: Omit<Entitlement, "id">
+      entitlement?: RatingEntitlementContext
       now?: never
       usageData?: UsageFeatureData[]
     }
 
 export type ResolveBillingWindowInput =
   | {
-      entitlement: Omit<Entitlement, "id">
+      entitlement: RatingEntitlementContext
       now: number
       startAt?: never
       endAt?: never
     }
   | {
-      entitlement: Omit<Entitlement, "id">
+      entitlement: RatingEntitlementContext
       startAt: number
       endAt: number
       now?: never
@@ -85,7 +95,7 @@ export type IncrementalRatingInput = RatingTimeWindowInput & {
   usageBefore: number
   usageAfter: number
   grants?: z.infer<typeof grantSchemaExtended>[]
-  entitlement?: Omit<Entitlement, "id">
+  entitlement?: RatingEntitlementContext
   currency?: Currency
   usageDataBefore?: UsageFeatureData[]
   usageDataAfter?: UsageFeatureData[]

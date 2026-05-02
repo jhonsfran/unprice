@@ -483,7 +483,6 @@ CREATE TABLE "unprice_customer_entitlements" (
 	"subscription_item_id" varchar(36) COLLATE "C",
 	"effective_at" bigint NOT NULL,
 	"expires_at" bigint,
-	"allowance_units" integer,
 	"overage_strategy" "overage_strategy" DEFAULT 'none' NOT NULL,
 	"metadata" json,
 	CONSTRAINT "customer_entitlements_pkey" PRIMARY KEY("id","project_id"),

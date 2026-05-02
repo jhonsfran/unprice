@@ -53,7 +53,6 @@ Add `customer_entitlements` with only the fields needed for this version:
 - `subscriptionItemId` -> nullable
 - `effectiveAt`
 - `expiresAt`
-- `allowanceUnits`
 - `overageStrategy`
 - `metadata`
 - timestamps
@@ -66,12 +65,13 @@ Do not include:
 - duplicated feature config
 - duplicated meter config
 - duplicated cadence config
+- `allowanceUnits`; allowances are grant-owned
 
-`allowanceUnits` semantics:
+Grant `allowanceUnits` semantics:
 
 - `null` means unlimited/no hard cap.
-- `0` means no included allowance; overage behavior depends on `overageStrategy`.
-- Positive number means included allowance for the entitlement cadence.
+- `0` means no included allowance; overage behavior depends on the owning entitlement.
+- Positive number means included allowance for the owning entitlement cadence.
 
 ### Agent Tasks
 
@@ -257,4 +257,3 @@ Keep the diff reviewable and delete stale old-model code instead of adding compa
 When implementation is complete, run pnpm validate. It must pass.
 Then stop and ask for human review with a concise diff summary and any open questions.
 ```
-

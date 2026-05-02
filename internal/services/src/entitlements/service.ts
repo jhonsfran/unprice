@@ -5,10 +5,9 @@ import type {
   CurrentUsage,
   CustomerEntitlement,
   CustomerEntitlementExtended,
+  Grant,
   InsertCustomerEntitlement,
-  ResetConfig,
 } from "@unprice/db/validators"
-import { getAnchor } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger, WideEventInput } from "@unprice/logs"
 import { formatMoney } from "@unprice/money"
@@ -65,10 +64,6 @@ export class EntitlementService {
     this.metrics = opts.metrics
     this.customerService = opts.customerService
     this.billingService = opts.billingService
-  }
-
-  private addBusinessContext(context: WideEventInput["business"]) {
-    this.logger.set({ business: context })
   }
 
   /**
@@ -331,7 +326,6 @@ export class EntitlementService {
               asc(grant.id),
             ],
           },
-          subscriptionItem: true,
         },
         where: (entitlement, { and: andOp, eq: eqOp, gt, isNull, lte, or }) =>
           andOp(
@@ -422,7 +416,7 @@ export class EntitlementService {
     phaseStartAt: number
     phaseEndAt: number | null
     db?: Database
-  }): Promise<Result<CustomerEntitlement[], FetchError>> {
+  }): Promise<Result<Array<CustomerEntitlement & { grants?: Grant[] }>, FetchError>> {
     const trx = params.db ?? this.db
 
     if (params.featurePlanVersionIds.length === 0) {
@@ -431,6 +425,15 @@ export class EntitlementService {
 
     try {
       const rows = await trx.query.customerEntitlements.findMany({
+        with: {
+          grants: {
+            where: (grant, { and: andOp, gt, isNull, lte, or }) =>
+              andOp(
+                params.phaseEndAt ? lte(grant.effectiveAt, params.phaseEndAt) : undefined,
+                or(isNull(grant.expiresAt), gt(grant.expiresAt, params.phaseStartAt))
+              ),
+          },
+        },
         where: (entitlement, { and: andOp, eq: eqOp, gt, inArray: inArrayOp, isNull, lte, or }) =>
           andOp(
             eqOp(entitlement.projectId, params.projectId),
@@ -443,7 +446,7 @@ export class EntitlementService {
         orderBy: (entitlement, { desc }) => desc(entitlement.effectiveAt),
       })
 
-      return Ok(rows)
+      return Ok(rows as Array<CustomerEntitlement & { grants?: Grant[] }>)
     } catch (error) {
       this.logger.error(error, {
         context: "Error getting phase-owned customer entitlements",
@@ -463,40 +466,7 @@ export class EntitlementService {
     }
   }
 
-  private buildCustomerEntitlementResetConfig(
-    entitlement: CustomerEntitlementExtended
-  ): (ResetConfig & { resetAnchor: number }) | null {
-    const resetConfig = entitlement.featurePlanVersion.resetConfig
-
-    if (resetConfig) {
-      return {
-        ...resetConfig,
-        resetAnchor:
-          resetConfig.resetAnchor === "dayOfCreation"
-            ? getAnchor(entitlement.effectiveAt, resetConfig.resetInterval, "dayOfCreation")
-            : resetConfig.resetAnchor,
-      }
-    }
-
-    const billingConfig = entitlement.featurePlanVersion.billingConfig
-
-    if (!billingConfig) {
-      return null
-    }
-
-    return {
-      name: billingConfig.name,
-      resetInterval: billingConfig.billingInterval,
-      resetIntervalCount: billingConfig.billingIntervalCount,
-      planType: billingConfig.planType,
-      resetAnchor:
-        billingConfig.billingAnchor === "dayOfCreation"
-          ? getAnchor(entitlement.effectiveAt, billingConfig.billingInterval, "dayOfCreation")
-          : billingConfig.billingAnchor,
-    }
-  }
-
-  private async loadCustomerEntitlementsForCache({
+  public async loadCustomerEntitlementsForCache({
     projectId,
     customerId,
     historicalDays = 30,
@@ -504,110 +474,21 @@ export class EntitlementService {
     projectId: string
     customerId: string
     historicalDays?: number
-  }): Promise<CacheNamespaces["customerRelevantEntitlements"]> {
+  }): Promise<Result<CustomerEntitlementExtended[], FetchError>> {
     const now = Date.now()
 
-    const entitlementsResult =
-      historicalDays > 0
-        ? await this.getCustomerEntitlementsForCustomer({
-            customerId,
-            projectId,
-            startAt: now - historicalDays * 24 * 60 * 60 * 1000,
-            endAt: now,
-          })
-        : await this.getCustomerEntitlementsForCustomer({
-            customerId,
-            projectId,
-            now,
-          })
-
-    if (entitlementsResult.err) {
-      throw entitlementsResult.err
-    }
-
-    return entitlementsResult.val.map((entitlement) => ({
-      id: entitlement.id,
-      limit: entitlement.allowanceUnits,
-      mergingPolicy: "replace",
-      effectiveAt: entitlement.effectiveAt,
-      expiresAt: entitlement.expiresAt,
-      resetConfig:
-        entitlement.featurePlanVersion.featureType === "usage"
-          ? this.buildCustomerEntitlementResetConfig(entitlement)
-          : null,
-      meterConfig:
-        entitlement.featurePlanVersion.featureType === "usage"
-          ? (entitlement.featurePlanVersion.meterConfig ?? null)
-          : null,
-      featureType: entitlement.featurePlanVersion.featureType,
-      unitOfMeasure: entitlement.featurePlanVersion.unitOfMeasure,
-      grants: [],
-      featureSlug: entitlement.featurePlanVersion.feature.slug,
-      customerId: entitlement.customerId,
-      projectId: entitlement.projectId,
-      isCurrent: true,
-      createdAtM: entitlement.createdAtM,
-      updatedAtM: entitlement.updatedAtM,
-      metadata: {
-        realtime: entitlement.featurePlanVersion.metadata?.realtime ?? false,
-        notifyUsageThreshold: entitlement.featurePlanVersion.metadata?.notifyUsageThreshold ?? 90,
-        overageStrategy: entitlement.overageStrategy,
-        blockCustomer: entitlement.featurePlanVersion.metadata?.blockCustomer ?? false,
-        hidden: entitlement.featurePlanVersion.metadata?.hidden ?? false,
-      },
-    }))
-  }
-
-  public async getRelevantEntitlementsForIngestion({
-    projectId,
-    customerId,
-    historicalDays = 30,
-    opts,
-  }: {
-    projectId: string
-    customerId: string
-    historicalDays?: number
-    opts?: {
-      skipCache?: boolean
-    }
-  }): Promise<Result<CacheNamespaces["customerRelevantEntitlements"], FetchError>> {
-    const cacheKey = `${projectId}:${customerId}:${historicalDays}`
-
-    const { val, err } = await cachedQuery({
-      skipCache: opts?.skipCache,
-      cache: this.cache.customerRelevantEntitlements,
-      cacheKey,
-      load: () =>
-        this.loadCustomerEntitlementsForCache({
-          projectId,
+    return historicalDays > 0
+      ? this.getCustomerEntitlementsForCustomer({
           customerId,
-          historicalDays,
-        }),
-      wrapLoadError: (error) =>
-        new FetchError({
-          message: `unable to load customer entitlements - ${error.message}`,
-          retry: false,
-          context: {
-            error: error.message,
-            url: "",
-            customerId,
-            projectId,
-            method: "loadCustomerEntitlementsForCache",
-          },
-        }),
-    })
-
-    if (err) {
-      return Err(
-        new FetchError({
-          message: err.message,
-          retry: true,
-          cause: err,
+          projectId,
+          startAt: now - historicalDays * 24 * 60 * 60 * 1000,
+          endAt: now,
         })
-      )
-    }
-
-    return Ok(val ?? [])
+      : this.getCustomerEntitlementsForCustomer({
+          customerId,
+          projectId,
+          now,
+        })
   }
 
   public async getAccessControlList(params: {

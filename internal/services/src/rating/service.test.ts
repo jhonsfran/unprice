@@ -11,22 +11,11 @@ describe("RatingService", () => {
 
     const result = service.resolveBillingWindow({
       entitlement: {
-        limit: 100,
-        mergingPolicy: "replace",
         effectiveAt: 1,
         expiresAt: null,
         resetConfig: null,
         meterConfig: null,
         featureType: "usage",
-        unitOfMeasure: "units",
-        grants: [],
-        featureSlug: "api_calls",
-        customerId: "cus_123",
-        projectId: "proj_123",
-        isCurrent: true,
-        createdAtM: 0,
-        updatedAtM: 0,
-        metadata: null,
       },
       startAt: 10,
       endAt: 20,

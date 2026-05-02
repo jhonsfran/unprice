@@ -27,7 +27,6 @@ describe("IngestionService entitlement routing", () => {
               subscriptionItemId: null,
               effectiveAt: entitlement.effectiveAt,
               expiresAt: entitlement.expiresAt,
-              allowanceUnits: entitlement.allowanceUnits,
               overageStrategy: entitlement.overageStrategy,
               metadata: null,
               createdAtM: 0,
@@ -83,7 +82,6 @@ describe("IngestionService entitlement routing", () => {
                   updatedAtM: 0,
                 },
               },
-              subscriptionItem: undefined,
             },
           ] as never)
         ),
@@ -204,7 +202,6 @@ describe("IngestionService entitlement routing", () => {
 
 function createEntitlement(): IngestionEntitlement {
   return {
-    allowanceUnits: 100,
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
     effectiveAt: Date.UTC(2026, 2, 1),
@@ -247,7 +244,6 @@ function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
     subscriptionItemId: null,
     effectiveAt: entitlement.effectiveAt,
     expiresAt: entitlement.expiresAt,
-    allowanceUnits: entitlement.allowanceUnits,
     overageStrategy: entitlement.overageStrategy,
     metadata: null,
     createdAtM: 0,
@@ -303,7 +299,6 @@ function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
         updatedAtM: 0,
       },
     },
-    subscriptionItem: undefined,
   }
 }
 

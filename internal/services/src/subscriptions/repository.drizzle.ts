@@ -30,13 +30,58 @@ import type {
 
 type DbExecutor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0]
 
+class ResultRollback extends Error {
+  readonly name = "ResultRollback"
+
+  constructor(readonly result: unknown) {
+    super("Transaction returned a Result error")
+  }
+}
+
+function isResultError(result: unknown): result is { err: Error } {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "err" in result &&
+    (result as { err?: unknown }).err instanceof Error
+  )
+}
+
 export class DrizzleSubscriptionRepository implements SubscriptionRepository {
   constructor(private readonly db: DbExecutor) {}
 
-  async withTransaction<T>(fn: (txRepo: SubscriptionRepository) => Promise<T>): Promise<T> {
-    return (this.db as Database).transaction(async (tx) => {
-      return fn(new DrizzleSubscriptionRepository(tx))
-    })
+  forDatabase(db: Database): SubscriptionRepository {
+    return new DrizzleSubscriptionRepository(db)
+  }
+
+  async withTransaction<T>(
+    fn: (txRepo: SubscriptionRepository, txDb?: Database) => Promise<T>
+  ): Promise<T> {
+    const executor = this.db as DbExecutor & {
+      transaction?: <TResult>(fn: (tx: DbExecutor) => Promise<TResult>) => Promise<TResult>
+    }
+
+    if (typeof executor.transaction !== "function") {
+      return fn(new DrizzleSubscriptionRepository(this.db), this.db as Database)
+    }
+
+    try {
+      return await executor.transaction(async (tx) => {
+        const result = await fn(new DrizzleSubscriptionRepository(tx), tx as Database)
+
+        if (isResultError(result)) {
+          throw new ResultRollback(result)
+        }
+
+        return result
+      })
+    } catch (error) {
+      if (error instanceof ResultRollback) {
+        return error.result as T
+      }
+
+      throw error
+    }
   }
 
   // ── Subscriptions ────────────────────────────────────────────────────────
