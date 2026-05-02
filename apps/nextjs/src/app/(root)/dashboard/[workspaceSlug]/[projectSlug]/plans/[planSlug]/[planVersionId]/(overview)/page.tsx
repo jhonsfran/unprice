@@ -11,7 +11,7 @@ import DragDrop from "../../../_components/drag-drop"
 import { FeatureDialog } from "../../../_components/feature-dialog"
 import { FeatureList } from "../../_components/feature-list"
 import { PlanFeatureList } from "../../_components/plan-feature-list"
-import { BannerInactiveVersion, BannerPublishedVersion } from "../_components/banner"
+import { BannerInactiveVersion } from "../_components/banner"
 import { PlanWorkspaceRail } from "../_components/plan-workspace-rail"
 
 export default async function OverviewVersionPage({
@@ -64,10 +64,9 @@ export default async function OverviewVersionPage({
 
         {/* ── Middle: features attached to this version ───────── */}
         <main className="flex min-h-0 flex-col">
-          {(planVersion.status === "published" || !planVersion.active) && (
-            <div className="flex flex-col gap-2 px-4 pt-4">
-              {planVersion.status === "published" && <BannerPublishedVersion />}
-              {!planVersion.active && <BannerInactiveVersion />}
+          {!planVersion.active && (
+            <div className="px-4 pt-4">
+              <BannerInactiveVersion />
             </div>
           )}
           <PlanFeatureList planVersion={planVersion} />
@@ -75,7 +74,9 @@ export default async function OverviewVersionPage({
 
         {/* ── Right: customer preview + plan settings ─────────── */}
         <aside className="min-h-0">
-          <PlanWorkspaceRail planVersion={planVersion} />
+          <div className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+            <PlanWorkspaceRail planVersion={planVersion} />
+          </div>
         </aside>
       </div>
     </DragDrop>

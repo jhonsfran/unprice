@@ -15,8 +15,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
 
-import { Typography } from "@unprice/ui/typography"
 import { InputWithAddons } from "~/components/input-addons"
+import { SectionLabel } from "./section-label"
 
 export function QuantityFormField({
   form,
@@ -410,20 +410,16 @@ export function TierFormField({
 
   return (
     <div className="flex w-full flex-col">
-      <div className="mb-4 flex items-center gap-2">
-        <Typography variant="h4" className="my-auto block">
-          Tier Configuration
-        </Typography>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <HelpCircle className="size-3.5 text-muted-foreground" />
-          </TooltipTrigger>
-          <TooltipContent side="right" className="max-w-[280px]">
-            {form.getValues("featureType") === "usage"
+      <div className="mb-3">
+        <SectionLabel
+          tooltip={
+            form.getValues("featureType") === "usage"
               ? "Set up pricing tiers based on usage volume. Customers pay different rates as their usage increases."
-              : "Set up pricing tiers based on quantity selected. Different quantities unlock different price points."}
-          </TooltipContent>
-        </Tooltip>
+              : "Set up pricing tiers based on quantity selected. Different quantities unlock different price points."
+          }
+        >
+          Tier configuration
+        </SectionLabel>
       </div>
 
       {fields.length > 0 ? (

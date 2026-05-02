@@ -8,7 +8,6 @@ import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Input } from "@unprice/ui/input"
 import { Separator } from "@unprice/ui/separator"
 
-import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Typography } from "@unprice/ui/typography"
 import { useHydrateAtoms } from "jotai/utils"
 import { useRouter } from "next/navigation"
@@ -77,14 +76,14 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
           />
         </div>
       </div>
-      <div className="flex flex-col gap-2 p-4 pt-1 lg:min-h-[750px]">
+      <div className="flex flex-col gap-2 p-4 pt-1">
         <DroppableContainer id={"planVersionFeaturesList"}>
           <SortableContext
             items={featuresList.map((feature) => feature.featureId)}
             strategy={verticalListSortingStrategy}
           >
             {filteredFeatures.length === 0 ? (
-              <EmptyPlaceholder className="lg:h-[725px]">
+              <EmptyPlaceholder className="min-h-[400px]">
                 <EmptyPlaceholder.Icon>
                   <FileStack className="h-8 w-8" />
                 </EmptyPlaceholder.Icon>
@@ -95,18 +94,16 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
                 </EmptyPlaceholder.Description>
               </EmptyPlaceholder>
             ) : (
-              <ScrollArea className="w-full lg:h-[700px]" hideScrollBar={true}>
-                <div className="space-y-2">
-                  {filteredFeatures.map((feature) => (
-                    <SortableFeature
-                      disabled={activePlanVersion?.status === "published"}
-                      key={feature.featureId}
-                      mode="FeaturePlan"
-                      planFeatureVersion={feature}
-                    />
-                  ))}
-                </div>
-              </ScrollArea>
+              <div className="space-y-2">
+                {filteredFeatures.map((feature) => (
+                  <SortableFeature
+                    disabled={activePlanVersion?.status === "published"}
+                    key={feature.featureId}
+                    mode="FeaturePlan"
+                    planFeatureVersion={feature}
+                  />
+                ))}
+              </div>
             )}
           </SortableContext>
         </DroppableContainer>

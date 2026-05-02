@@ -29,12 +29,10 @@ export function PlanWorkspaceRail({
   ]
 
   return (
-    <div className="flex h-full flex-col gap-6 overflow-y-auto p-4">
+    <div className="flex flex-col gap-6 p-4">
       <section className="flex flex-col gap-3">
         <SectionTitle>Customer preview</SectionTitle>
-        <div className="flex justify-center">
-          <PricingCard planVersion={planVersion} />
-        </div>
+        <PricingCard planVersion={planVersion} className="w-full" showPublish={false} />
       </section>
 
       <Separator />

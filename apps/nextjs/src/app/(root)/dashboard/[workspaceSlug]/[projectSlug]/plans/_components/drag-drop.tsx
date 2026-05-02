@@ -19,7 +19,7 @@ import { createPortal } from "react-dom"
 
 import { useMutation } from "@tanstack/react-query"
 import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
-import { useActiveFeature, useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
+import { useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { FeaturePlan } from "./feature-plan"
@@ -36,8 +36,10 @@ const dropAnimation: DropAnimation = {
 
 export default function DragDrop({ children }: { children: React.ReactNode }) {
   const [clonedFeatures, setClonedFeatures] = useState<PlanVersionFeatureDragDrop[] | null>(null)
+  // Local state for the DragOverlay clone — keeps drag UI independent of `activeFeature`
+  // so dragging a closed card doesn't accidentally expand it.
+  const [draggingFeature, setDraggingFeature] = useState<PlanVersionFeatureDragDrop | null>(null)
   const router = useRouter()
-  const [activeFeature, setActiveFeature] = useActiveFeature()
   const [planFeaturesList, setPlanFeaturesList] = usePlanFeaturesList()
   const [activePlanVersion] = useActivePlanVersion()
   const isPublished = activePlanVersion?.status === "published"
@@ -112,6 +114,8 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
     const { active } = event
     const activeData = active.data.current
 
+    setDraggingFeature(null)
+
     if (isPublished) {
       return
     }
@@ -126,6 +130,8 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
   }
 
   const onDragCancel = () => {
+    setDraggingFeature(null)
+
     if (clonedFeatures) {
       setPlanFeaturesList(clonedFeatures)
     }
@@ -146,7 +152,9 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
     setClonedFeatures(planFeaturesList)
 
     if (event.active.data.current?.mode === "FeaturePlan") {
-      setActiveFeature(event.active.data.current?.planFeatureVersion as PlanVersionFeatureDragDrop)
+      setDraggingFeature(
+        event.active.data.current?.planFeatureVersion as PlanVersionFeatureDragDrop
+      )
     }
   }
 
@@ -201,8 +209,8 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
         "document" in window &&
         createPortal(
           <DragOverlay adjustScale={false} dropAnimation={dropAnimation}>
-            {activeFeature && (
-              <FeaturePlan mode={"FeaturePlan"} planFeatureVersion={activeFeature} />
+            {draggingFeature && (
+              <FeaturePlan mode={"FeaturePlan"} planFeatureVersion={draggingFeature} isDragging />
             )}
           </DragOverlay>,
           document.body

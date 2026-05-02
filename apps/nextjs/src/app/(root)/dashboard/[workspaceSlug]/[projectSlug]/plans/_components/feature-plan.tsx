@@ -19,9 +19,9 @@ import type React from "react"
 import type { ElementRef } from "react"
 import { forwardRef, useState } from "react"
 
+import { FEATURE_TYPES_MAPS } from "@unprice/db/utils"
 import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
 import { currencySymbol } from "@unprice/money"
-import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn, focusRing } from "@unprice/ui/utils"
@@ -38,7 +38,7 @@ const featureVariants = cva(
     variants: {
       variant: {
         feature: "flex h-10 flex-row items-center gap-2 px-2 disabled:opacity-50",
-        default: "flex flex-col",
+        default: "flex flex-col overflow-hidden",
       },
     },
     defaultVariants: {
@@ -54,10 +54,24 @@ export interface FeaturePlanProps
   mode: "Feature" | "FeaturePlan"
   disabled?: boolean
   onAdd?: () => void
+  /** Render slot for the drag handle (provided by SortableFeature). */
+  renderDragHandle?: () => React.ReactNode
+  /** Active drag state — used to collapse the expanded editor while reordering. */
+  isDragging?: boolean
 }
 
 const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref) => {
-  const { mode, variant, className, planFeatureVersion, onAdd, disabled, ...rest } = props
+  const {
+    mode,
+    variant,
+    className,
+    planFeatureVersion,
+    onAdd,
+    disabled,
+    renderDragHandle,
+    isDragging,
+    ...rest
+  } = props
   const feature = planFeatureVersion.feature
 
   const [active, setActiveFeature] = useActiveFeature()
@@ -71,8 +85,28 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
   const isExpanded = mode === "FeaturePlan" && active?.featureId === planFeatureVersion.featureId
   const isPublished = activePlanVersion?.status === "published"
 
+  const priceSummary = (() => {
+    const cfg = planFeatureVersion.config
+    if (cfg?.price) {
+      if (cfg.price.dinero.amount === 0) return "Free"
+      const formatted = toDecimal(
+        dinero(cfg.price.dinero),
+        ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
+      )
+      if (cfg.units) {
+        return `${formatted} / ${cfg.units} ${planFeatureVersion?.unitOfMeasure ?? "units"}`
+      }
+      return formatted
+    }
+    if (cfg?.tiers?.length) {
+      return `${cfg.tiers.length} tiers`
+    }
+    return "—"
+  })()
+
   const handleToggle = () => {
     if (mode !== "FeaturePlan") return
+    if (isDragging) return
     setActiveFeature(isExpanded ? null : planFeatureVersion)
   }
 
@@ -87,8 +121,12 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
         })}
       >
         <FeatureDialog defaultValues={feature}>
-          <Button variant="link" size="icon" className="shrink-0">
-            <Settings className="h-4 w-4" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <Settings className="h-3.5 w-3.5" />
           </Button>
         </FeatureDialog>
 
@@ -97,9 +135,9 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
         {!disabled && onAdd && (
           <Button
             type="button"
-            size="xs"
-            variant="ghost"
-            className="shrink-0 gap-1 text-xs"
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 gap-1 px-2 font-medium text-xs"
             onClick={(e) => {
               e.stopPropagation()
               e.preventDefault()
@@ -122,7 +160,7 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
       className={cn(
         featureVariants({ variant: "default" }),
         {
-          "border-background-borderHover bg-background-bgHover shadow-sm": isExpanded,
+          "border-primary shadow-md ring-1 ring-primary/40": isExpanded,
         },
         focusRing,
         className
@@ -140,204 +178,162 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
             handleToggle()
           }
         }}
-        className="flex w-full cursor-pointer flex-col gap-2 p-3"
+        className="flex w-full cursor-pointer items-start justify-between gap-2 p-3"
       >
-        <div className="flex w-full items-center justify-between">
-          <div className="flex flex-row items-center gap-2">
-            <ChevronRight
-              className={cn(
-                "size-4 shrink-0 text-muted-foreground transition-transform",
-                isExpanded && "rotate-90"
-              )}
-            />
-            <div className="line-clamp-1 text-left font-bold">{feature.slug}</div>
+        {/* Drag handle (only present in attached mode via SortableFeature) */}
+        {renderDragHandle && <div className="mt-0.5">{renderDragHandle()}</div>}
 
-            {!planFeatureVersion?.id && (
-              <div className="relative">
-                <div className="absolute top-1">
-                  <Ping variant="destructive" />
-                </div>
-              </div>
+        {/* Left: chevron + title + indicators + description */}
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <ChevronRight
+            className={cn(
+              "mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform",
+              isExpanded && "rotate-90"
             )}
+          />
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="line-clamp-1 font-semibold text-sm">{feature.title}</span>
 
-            {planFeatureVersion.metadata?.hidden && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <EyeOff className="h-4 w-4 text-muted-foreground" />
-                </TooltipTrigger>
-                <TooltipContent className="bg-background-bg font-normal text-xs" align="center">
-                  This feature is hidden in the pricing card.
-                  <TooltipArrow className="fill-background-bg" />
-                </TooltipContent>
-              </Tooltip>
-            )}
+              {!planFeatureVersion?.id && <Ping variant="destructive" />}
 
-            {planFeatureVersion.featureType === "usage" &&
-              activePlanVersion?.billingConfig.name !== planFeatureVersion.billingConfig.name && (
+              {planFeatureVersion.metadata?.hidden && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="flex items-center justify-center rounded-md bg-secondary p-1 text-secondary-foreground">
-                      <CalendarClock className="h-3 w-3" />
-                    </div>
+                    <EyeOff className="size-3.5 text-muted-foreground" />
                   </TooltipTrigger>
                   <TooltipContent className="bg-background-bg font-normal text-xs" align="center">
-                    Billing: {planFeatureVersion.billingConfig.name}
+                    Hidden from the customer pricing card.
                     <TooltipArrow className="fill-background-bg" />
                   </TooltipContent>
                 </Tooltip>
               )}
 
-            {planFeatureVersion.featureType === "usage" &&
-              planFeatureVersion.resetConfig?.name &&
-              planFeatureVersion.resetConfig.name !== activePlanVersion?.billingConfig?.name && (
+              {planFeatureVersion.featureType === "usage" &&
+                activePlanVersion?.billingConfig.name !== planFeatureVersion.billingConfig.name && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <CalendarClock className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-background-bg font-normal text-xs" align="center">
+                      Billing: {planFeatureVersion.billingConfig.name}
+                      <TooltipArrow className="fill-background-bg" />
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+
+              {planFeatureVersion.featureType === "usage" &&
+                planFeatureVersion.resetConfig?.name &&
+                planFeatureVersion.resetConfig.name !== activePlanVersion?.billingConfig?.name && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <RotateCw className="size-3.5 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent className="bg-background-bg font-normal text-xs" align="center">
+                      Resets: {planFeatureVersion.resetConfig.name}
+                      <TooltipArrow className="fill-background-bg" />
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+
+              {planFeatureVersion.metadata?.realtime && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="flex items-center justify-center rounded-md bg-secondary p-1 text-secondary-foreground">
-                      <RotateCw className="h-3 w-3" />
-                    </div>
+                    <Zap className="size-3.5 text-warning" />
                   </TooltipTrigger>
                   <TooltipContent className="bg-background-bg font-normal text-xs" align="center">
-                    Resets: {planFeatureVersion.resetConfig.name}
+                    Reports usage in realtime.
                     <TooltipArrow className="fill-background-bg" />
                   </TooltipContent>
                 </Tooltip>
               )}
-
-            {planFeatureVersion.metadata?.realtime && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Zap className="h-4 w-4 text-warning" />
-                </TooltipTrigger>
-                <TooltipContent className="bg-background-bg font-normal text-xs" align="center">
-                  This feature is reporting usage in realtime.
-                  <TooltipArrow className="fill-background-bg" />
-                </TooltipContent>
-              </Tooltip>
+            </div>
+            {feature.description && (
+              <p className="line-clamp-1 text-muted-foreground text-xs">{feature.description}</p>
             )}
           </div>
+        </div>
 
-          {!isPublished && (
-            <div className="flex items-center gap-1 text-xs">
-              {isDelete ? (
-                <div className="flex flex-row items-center">
-                  <Button
-                    className="px-1 font-light text-xs"
-                    variant="link"
-                    size="icon"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      e.preventDefault()
-                      setConfirmDelete(false)
-                    }}
-                  >
-                    cancel
-                    <span className="sr-only">cancel delete from plan</span>
-                  </Button>
-                  <Button
-                    className="px-1"
-                    variant="link"
-                    size="icon"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      e.preventDefault()
+        {/* Right: price summary + type + delete */}
+        <div className="flex shrink-0 items-start gap-2">
+          <div className="text-right">
+            <div className="font-medium font-mono text-sm tabular-nums">{priceSummary}</div>
+            <div className="text-muted-foreground text-xs">
+              {FEATURE_TYPES_MAPS[planFeatureVersion.featureType]?.shortLabel ??
+                planFeatureVersion.featureType}
+            </div>
+          </div>
 
-                      if (active?.id === feature.id) {
-                        setActiveFeature(null)
-                      }
-
-                      if (planFeatureVersion.id) {
-                        void removePlanVersionFeature.mutateAsync({
-                          id: planFeatureVersion.id,
-                        })
-                      }
-
-                      setPlanFeaturesList((features) =>
-                        features.filter((f) => f.featureId !== feature.id)
-                      )
-
-                      setConfirmDelete(false)
-                    }}
-                  >
-                    <X className="h-4 w-4" />
-                    <span className="sr-only">Confirm delete from plan</span>
-                  </Button>
-                </div>
-              ) : (
+          {!isPublished &&
+            (isDelete ? (
+              <div className="flex items-center">
                 <Button
-                  className="px-1"
+                  className="h-7 px-1 font-light text-xs"
                   variant="link"
                   size="icon"
                   onClick={(e) => {
                     e.stopPropagation()
                     e.preventDefault()
-                    setConfirmDelete(true)
+                    setConfirmDelete(false)
                   }}
                 >
-                  <Trash2 className="h-4 w-4" />
-                  <span className="sr-only">Delete from plan</span>
+                  cancel
+                  <span className="sr-only">cancel delete from plan</span>
                 </Button>
-              )}
-            </div>
-          )}
-        </div>
+                <Button
+                  className="h-7 px-1"
+                  variant="link"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    e.preventDefault()
 
-        <div className="line-clamp-1 pl-6 font-normal text-muted-foreground text-xs">
-          {feature.description ?? "No description"}
-        </div>
+                    if (active?.id === feature.id) {
+                      setActiveFeature(null)
+                    }
 
-        <div className="hidden w-full flex-row items-center justify-between gap-2 pl-6 md:flex">
-          <div className="flex flex-row gap-1">
-            <Badge>{planFeatureVersion.featureType}</Badge>
-            {planFeatureVersion.config?.usageMode && (
-              <Badge>{planFeatureVersion.config.usageMode}</Badge>
-            )}
-          </div>
-          <div className="line-clamp-1 pr-3 font-light text-xs">
-            {planFeatureVersion?.config?.price
-              ? `${
-                  planFeatureVersion?.config?.price.dinero.amount === 0
-                    ? "Free"
-                    : planFeatureVersion?.config?.units
-                      ? `${toDecimal(
-                          dinero(planFeatureVersion?.config?.price.dinero),
-                          ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-                        )} per ${planFeatureVersion?.config?.units} ${planFeatureVersion?.unitOfMeasure ?? "units"}`
-                      : toDecimal(
-                          dinero(planFeatureVersion?.config?.price.dinero),
-                          ({ value, currency }) => `${currencySymbol(currency.code)}${value}`
-                        )
-                }`
-              : planFeatureVersion.config?.tiers?.length
-                ? `${planFeatureVersion.config.tiers.length} tiers`
-                : null}
-          </div>
+                    if (planFeatureVersion.id) {
+                      void removePlanVersionFeature.mutateAsync({
+                        id: planFeatureVersion.id,
+                      })
+                    }
+
+                    setPlanFeaturesList((features) =>
+                      features.filter((f) => f.featureId !== feature.id)
+                    )
+
+                    setConfirmDelete(false)
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                  <span className="sr-only">Confirm delete from plan</span>
+                </Button>
+              </div>
+            ) : (
+              <Button
+                className="h-7 px-1 text-muted-foreground hover:text-destructive"
+                variant="link"
+                size="icon"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  setConfirmDelete(true)
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+                <span className="sr-only">Delete from plan</span>
+              </Button>
+            ))}
         </div>
       </div>
 
-      {/* expanded inline editor */}
-      {isExpanded && activePlanVersion && (
+      {/* expanded inline editor — hidden while dragging so the card stays compact during reorder */}
+      {isExpanded && !isDragging && activePlanVersion && (
         <div
           className="border-t bg-background p-4"
-          // stop click bubbling so editing inside doesn't collapse the card
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <div className="mb-4 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-base">{feature.title}</span>
-              <FeatureDialog defaultValues={feature}>
-                <Button variant="link" size="xs" className="h-auto p-0 text-muted-foreground">
-                  <Settings className="h-3.5 w-3.5" />
-                </Button>
-              </FeatureDialog>
-            </div>
-            {feature.description && (
-              <span className="line-clamp-1 text-muted-foreground text-xs">
-                {feature.description}
-              </span>
-            )}
-          </div>
-
           <FeatureConfigForm
             defaultValues={planFeatureVersion}
             planVersion={activePlanVersion}

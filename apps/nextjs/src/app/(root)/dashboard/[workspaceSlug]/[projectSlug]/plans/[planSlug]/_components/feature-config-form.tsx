@@ -1,7 +1,7 @@
 "use client"
 
 import { useRouter } from "next/navigation"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { DOCS_DOMAIN } from "@unprice/config"
@@ -24,20 +24,21 @@ import { Button } from "@unprice/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
-import { Separator } from "@unprice/ui/separator"
 import { Switch } from "@unprice/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@unprice/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { cn } from "@unprice/ui/utils"
+import { Lock, Settings } from "lucide-react"
 import { SubmitButton } from "~/components/submit-button"
 import { SuperLink } from "~/components/super-link"
 import { useActiveFeature, useIsOnboarding, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
-import { BannerPublishedVersion } from "../[planVersionId]/_components/banner"
+import { FeatureDialog } from "../../_components/feature-dialog"
 import { FlatFormFields } from "./flat-form-fields"
 import { PackageFormFields } from "./package-form-fields"
+import { CollapsibleSection, SectionLabel } from "./section-label"
 import { TierFormFields } from "./tier-form-fields"
 import { UsageFormFields } from "./usage-form-fields"
 
@@ -61,8 +62,9 @@ export function FeatureConfigForm({
 
   const editMode = !!defaultValues.id
   const isPublished = planVersion?.status === "published"
-  const featureMeterTemplate =
-    "feature" in defaultValues ? defaultValues.feature?.meterConfig : undefined
+  const [isDisplayOpen, setIsDisplayOpen] = useState(false)
+  const feature = "feature" in defaultValues ? defaultValues.feature : undefined
+  const featureMeterTemplate = feature?.meterConfig
   // const isProEnabled = useFlags(FEATURE_SLUGS.ACCESS_PRO.SLUG)
 
   // we set all possible values for the form so react-hook-form don't complain
@@ -191,43 +193,6 @@ export function FeatureConfigForm({
         className={cn("space-y-4", className)}
         onSubmit={form.handleSubmit(onSubmitForm)}
       >
-        {planVersion.status === "published" && <BannerPublishedVersion />}
-
-        <FormField
-          control={form.control}
-          name="metadata.hidden"
-          render={({ field }) => (
-            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-              <div className="flex items-center gap-2">
-                <FormLabel className="font-semibold text-sm">Hide from Pricing Page</FormLabel>
-                <SuperLink
-                  href={`${DOCS_DOMAIN}/features/plans`}
-                  target="_blank"
-                  className="text-muted-foreground text-xs underline-offset-4 hover:underline"
-                >
-                  Learn more
-                </SuperLink>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="size-3.5 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="max-w-[250px]">
-                    When enabled, customers won't see this feature on public pricing pages. Useful
-                    for internal or backend features.
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <FormControl>
-                <Switch
-                  checked={field.value ?? false}
-                  onCheckedChange={field.onChange}
-                  disabled={isPublished}
-                />
-              </FormControl>
-            </FormItem>
-          )}
-        />
-
         {/* <FormField
           control={form.control}
           name="metadata.realtime"
@@ -271,143 +236,152 @@ export function FeatureConfigForm({
           )}
         /> */}
 
-        <Separator />
-
-        <div className="flex flex-col gap-2">
-          <div className="items-center rounded-md border-1">
-            <div className="space-y-2">
-              <div className="flex items-center justify-center gap-2 rounded-md bg-background-bg p-2 font-semibold shadow-sm">
-                Pricing Model
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="size-3.5 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="max-w-[280px]">
-                    Choose how this feature is priced: flat fee, usage-based, tiered pricing, or
-                    package bundles.
-                  </TooltipContent>
-                </Tooltip>
+        <div className="space-y-3">
+          <SectionLabel
+            tooltip="Choose what the customer experiences: a fixed monthly fee, volume-based pricing, pre-paid bundles, or pay-per-use."
+            action={
+              <div className="flex items-center gap-2">
+                {isPublished && (
+                  <span className="inline-flex items-center gap-1 text-muted-foreground text-xs">
+                    <Lock className="size-3" />
+                    Published
+                  </span>
+                )}
+                {feature && (
+                  <FeatureDialog defaultValues={feature}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 gap-1 px-2 text-muted-foreground text-xs hover:text-foreground"
+                    >
+                      <Settings className="size-3" />
+                      Edit feature
+                    </Button>
+                  </FeatureDialog>
+                )}
               </div>
-              <div className="flex flex-col gap-2">
-                <FormField
-                  control={form.control}
-                  name="featureType"
-                  render={({ field }) => (
-                    <FormItem className="space-y-1.5">
-                      <Tabs
-                        value={field.value ?? ""}
-                        onValueChange={(value) => {
-                          if (isPublished) return
+            }
+          >
+            How customers pay
+          </SectionLabel>
 
-                          field.onChange(value)
+          <div className="flex flex-col gap-2">
+            <FormField
+              control={form.control}
+              name="featureType"
+              render={({ field }) => (
+                <FormItem className="space-y-1.5">
+                  <Tabs
+                    value={field.value ?? ""}
+                    onValueChange={(value) => {
+                      if (isPublished) return
 
-                          if (value === "usage") {
-                            const currentMeterConfig = form.getValues("meterConfig")
+                      field.onChange(value)
 
-                            form.setValue(
-                              "meterConfig",
-                              currentMeterConfig ?? featureMeterTemplate ?? undefined
-                            )
-                          } else {
-                            form.setValue("meterConfig", null)
-                          }
-                        }}
-                      >
-                        <TabsList variant="solid" className="grid w-full grid-cols-4 capitalize">
-                          {FEATURE_TYPES.map((type) => (
-                            <TabsTrigger key={type} value={type} disabled={isPublished}>
-                              {FEATURE_TYPES_MAPS[type].label}
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
-                      </Tabs>
-                      {field.value && (
-                        <p className="px-1 text-muted-foreground text-xs">
-                          {FEATURE_TYPES_MAPS[field.value].description}
-                        </p>
-                      )}
-                      <FormMessage className="self-start" />
-                    </FormItem>
+                      if (value === "usage") {
+                        const currentMeterConfig = form.getValues("meterConfig")
+
+                        form.setValue(
+                          "meterConfig",
+                          currentMeterConfig ?? featureMeterTemplate ?? undefined
+                        )
+                      } else {
+                        form.setValue("meterConfig", null)
+                      }
+                    }}
+                  >
+                    <TabsList variant="solid" className="grid w-full grid-cols-4">
+                      {FEATURE_TYPES.map((type) => (
+                        <TabsTrigger key={type} value={type} disabled={isPublished}>
+                          {FEATURE_TYPES_MAPS[type].label}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                  </Tabs>
+                  {field.value && (
+                    <p className="px-1 text-muted-foreground text-xs">
+                      {FEATURE_TYPES_MAPS[field.value].description}
+                    </p>
                   )}
-                />
+                  <FormMessage className="self-start" />
+                </FormItem>
+              )}
+            />
 
-                {featureType === "usage" && (
-                  <FormField
-                    control={form.control}
-                    name="config.usageMode"
-                    render={({ field }) => (
-                      <FormItem className="space-y-1">
-                        <FormMessage className="self-start px-2" />
-                        <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                          <FormControl className="truncate">
-                            <SelectTrigger
-                              className="items-start [&_[data-description]]:hidden"
-                              disabled={isPublished}
-                            >
-                              <SelectValue placeholder="Select type" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {USAGE_MODES.map((mode) => (
-                              <SelectItem value={mode} key={mode}>
-                                <div className="flex items-start gap-3">
-                                  <div className="grid gap-0.5">
-                                    <p>{USAGE_MODES_MAP[mode].label}</p>
-                                    <p className="text-xs" data-description>
-                                      {USAGE_MODES_MAP[mode].description}
-                                    </p>
-                                  </div>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormItem>
-                    )}
-                  />
+            {featureType === "usage" && (
+              <FormField
+                control={form.control}
+                name="config.usageMode"
+                render={({ field }) => (
+                  <FormItem className="space-y-1">
+                    <FormMessage className="self-start px-2" />
+                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                      <FormControl className="truncate">
+                        <SelectTrigger
+                          className="items-start [&_[data-description]]:hidden"
+                          disabled={isPublished}
+                        >
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {USAGE_MODES.map((mode) => (
+                          <SelectItem value={mode} key={mode}>
+                            <div className="flex items-start gap-3">
+                              <div className="grid gap-0.5">
+                                <p>{USAGE_MODES_MAP[mode].label}</p>
+                                <p className="text-xs" data-description>
+                                  {USAGE_MODES_MAP[mode].description}
+                                </p>
+                              </div>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
                 )}
+              />
+            )}
 
-                {(featureType === "tier" || (featureType === "usage" && usageMode === "tier")) && (
-                  <FormField
-                    control={form.control}
-                    name="config.tierMode"
-                    render={({ field }) => (
-                      <FormItem className="space-y-1">
-                        <FormMessage className="self-start px-2" />
-                        <Select onValueChange={field.onChange} value={field.value ?? ""}>
-                          <FormControl className="truncate">
-                            <SelectTrigger
-                              className="items-start [&_[data-description]]:hidden"
-                              disabled={isPublished}
-                            >
-                              <SelectValue placeholder="Select type" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {TIER_MODES.map((mode) => (
-                              <SelectItem value={mode} key={mode}>
-                                <div className="flex items-start gap-3">
-                                  <div className="grid gap-0.5">
-                                    <p>{TIER_MODES_MAP[mode].label}</p>
-                                    <p className="text-xs" data-description>
-                                      {TIER_MODES_MAP[mode].description}
-                                    </p>
-                                  </div>
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FormItem>
-                    )}
-                  />
+            {(featureType === "tier" || (featureType === "usage" && usageMode === "tier")) && (
+              <FormField
+                control={form.control}
+                name="config.tierMode"
+                render={({ field }) => (
+                  <FormItem className="space-y-1">
+                    <FormMessage className="self-start px-2" />
+                    <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                      <FormControl className="truncate">
+                        <SelectTrigger
+                          className="items-start [&_[data-description]]:hidden"
+                          disabled={isPublished}
+                        >
+                          <SelectValue placeholder="Select type" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {TIER_MODES.map((mode) => (
+                          <SelectItem value={mode} key={mode}>
+                            <div className="flex items-start gap-3">
+                              <div className="grid gap-0.5">
+                                <p>{TIER_MODES_MAP[mode].label}</p>
+                                <p className="text-xs" data-description>
+                                  {TIER_MODES_MAP[mode].description}
+                                </p>
+                              </div>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormItem>
                 )}
-              </div>
-            </div>
+              />
+            )}
           </div>
         </div>
-
-        <Separator />
 
         {featureType === "flat" && (
           <FlatFormFields form={form} currency={planVersion.currency} isDisabled={isPublished} />
@@ -435,26 +409,64 @@ export function FeatureConfigForm({
           />
         )}
 
+        <CollapsibleSection
+          label="Display options"
+          open={isDisplayOpen}
+          onOpenChange={setIsDisplayOpen}
+        >
+          <FormField
+            control={form.control}
+            name="metadata.hidden"
+            render={({ field }) => (
+              <FormItem className="mt-2 flex flex-row items-center justify-between gap-3 py-1.5">
+                <div className="flex items-center gap-1.5">
+                  <FormLabel className="font-normal text-sm">Hide from pricing page</FormLabel>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="size-3 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-[260px]">
+                      When enabled, customers won't see this feature on public pricing pages. Useful
+                      for internal or backend features.{" "}
+                      <SuperLink
+                        href={`${DOCS_DOMAIN}/features/plans`}
+                        target="_blank"
+                        className="underline-offset-4 hover:underline"
+                      >
+                        Learn more
+                      </SuperLink>
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <FormControl>
+                  <Switch
+                    checked={field.value ?? false}
+                    onCheckedChange={field.onChange}
+                    disabled={isPublished}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+        </CollapsibleSection>
+
         {planVersion.status !== "published" && (
-          <div className="flex justify-end space-x-4">
-            <div className="mt-8 flex flex-col">
-              <div className="flex justify-end gap-4">
-                <Button
-                  variant={"link"}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    setDialogOpen?.(false)
-                  }}
-                >
-                  Cancel
-                </Button>
-                <SubmitButton
-                  isSubmitting={form.formState.isSubmitting}
-                  isDisabled={form.formState.isSubmitting}
-                  label={editMode ? "Update" : "Create"}
-                />
-              </div>
-            </div>
+          <div className="mt-6 flex items-center justify-end gap-4 border-t pt-4">
+            <Button
+              type="button"
+              variant={"link"}
+              onClick={(e) => {
+                e.preventDefault()
+                setDialogOpen?.(false)
+              }}
+            >
+              Cancel
+            </Button>
+            <SubmitButton
+              isSubmitting={form.formState.isSubmitting}
+              isDisabled={form.formState.isSubmitting}
+              label={editMode ? "Update" : "Create"}
+            />
           </div>
         )}
       </form>

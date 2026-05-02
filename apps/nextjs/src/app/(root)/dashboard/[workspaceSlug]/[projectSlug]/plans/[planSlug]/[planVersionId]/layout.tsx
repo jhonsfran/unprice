@@ -7,6 +7,7 @@ import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
+import { PlanVersionPublish } from "../../_components/plan-version-actions"
 
 export default async function PlanVersionLayout(props: {
   children: React.ReactNode
@@ -32,12 +33,17 @@ export default async function PlanVersionLayout(props: {
           title="Plan Version Settings"
           description="Configure features and pricing for this plan version."
           action={
-            <CodeApiSheet defaultMethod="listPlanVersions">
-              <Button variant={"ghost"}>
-                <Code className="mr-2 h-4 w-4" />
-                API
-              </Button>
-            </CodeApiSheet>
+            <div className="flex items-center gap-2">
+              <CodeApiSheet defaultMethod="listPlanVersions">
+                <Button variant={"ghost"}>
+                  <Code className="mr-2 h-4 w-4" />
+                  API
+                </Button>
+              </CodeApiSheet>
+              {planVersion.status !== "published" && (
+                <PlanVersionPublish planVersionId={props.params.planVersionId} />
+              )}
+            </div>
           }
         />
       }

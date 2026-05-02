@@ -1,14 +1,9 @@
 "use client"
 
-import { ChevronDown } from "lucide-react"
 import { useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 
 import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
-import { Button } from "@unprice/ui/button"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@unprice/ui/collapsible"
-import { Separator } from "@unprice/ui/separator"
-import { cn } from "@unprice/ui/utils"
 
 import {
   BillingConfigFeatureFormField,
@@ -20,6 +15,7 @@ import {
   UnitsFormField,
 } from "./fields-form"
 import { MeterConfigFormField } from "./meter-config-form-field"
+import { CollapsibleSection } from "./section-label"
 
 export function UsageFormFields({
   form,
@@ -33,67 +29,43 @@ export function UsageFormFields({
   units: string
 }) {
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
+  const usageMode = form.getValues("config.usageMode")
 
   return (
-    <div className="flex flex-col space-y-6">
-      {/* Core settings - always visible */}
+    <div className="flex flex-col gap-6">
+      {/* Meter — section heading provided by MeterConfigFormField */}
       <MeterConfigFormField form={form} isDisabled={isDisabled} />
 
-      <div className="flex w-full justify-between">
-        <LimitFormField form={form} isDisabled={isDisabled} units={units} />
-      </div>
+      {/* Usage limit (no section heading; single field) */}
+      <LimitFormField form={form} isDisabled={isDisabled} units={units} />
 
-      <Separator />
+      {/* Pricing — Tier section provides its own heading; unit/package keep the field-level label */}
+      {usageMode === "unit" && (
+        <PriceFormField form={form} currency={currency} isDisabled={isDisabled} />
+      )}
 
-      {/* Pricing section based on usage mode */}
-      {form.getValues("config.usageMode") === "unit" && (
-        <div className="flex w-full justify-between">
+      {usageMode === "tier" && (
+        <TierFormField form={form} currency={currency} isDisabled={isDisabled} />
+      )}
+
+      {usageMode === "package" && (
+        <div className="flex w-full flex-col gap-1">
           <PriceFormField form={form} currency={currency} isDisabled={isDisabled} />
+          <UnitsFormField form={form} isDisabled={isDisabled} />
         </div>
       )}
 
-      {form.getValues("config.usageMode") === "tier" && (
-        <div className="flex w-full justify-between">
-          <TierFormField form={form} currency={currency} isDisabled={isDisabled} />
+      <CollapsibleSection
+        label="Advanced settings"
+        open={isAdvancedOpen}
+        onOpenChange={setIsAdvancedOpen}
+      >
+        <div className="flex flex-col gap-6 pt-3">
+          <BillingConfigFeatureFormField form={form} isDisabled={isDisabled} />
+          <ResetConfigFeatureFormField form={form} isDisabled={isDisabled} />
+          <OverageStrategyFormField form={form} isDisabled={isDisabled} />
         </div>
-      )}
-
-      {form.getValues("config.usageMode") === "package" && (
-        <div className="flex w-full justify-between">
-          <div className="flex w-full flex-col gap-1">
-            <PriceFormField form={form} currency={currency} isDisabled={isDisabled} />
-            <UnitsFormField form={form} isDisabled={isDisabled} />
-          </div>
-        </div>
-      )}
-
-      <Separator />
-
-      {/* Advanced settings - collapsible */}
-      <Collapsible open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
-        <CollapsibleTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            className="flex w-full items-center justify-between bg-background-bgSubtle font-medium text-sm hover:bg-background-bgHover"
-          >
-            <span>Advanced Settings</span>
-            <ChevronDown
-              className={cn(
-                "size-4 text-muted-foreground transition-transform duration-200",
-                isAdvancedOpen && "rotate-180"
-              )}
-            />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="flex flex-col gap-6 px-4 py-4">
-            <BillingConfigFeatureFormField form={form} isDisabled={isDisabled} />
-            <ResetConfigFeatureFormField form={form} isDisabled={isDisabled} />
-            <OverageStrategyFormField form={form} isDisabled={isDisabled} />
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
+      </CollapsibleSection>
     </div>
   )
 }

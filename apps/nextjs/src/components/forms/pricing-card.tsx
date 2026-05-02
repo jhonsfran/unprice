@@ -2,18 +2,23 @@ import { calculateFlatPricePlan } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"
-import { Separator } from "@unprice/ui/separator"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Typography } from "@unprice/ui/typography"
+import { cn } from "@unprice/ui/utils"
 import { PlanVersionPublish } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/_components/plan-version-actions"
 import { PricingItem } from "~/components/forms/pricing-item"
 
 export function PricingCard({
   planVersion,
   onPublish,
+  className,
+  showPublish = true,
 }: {
   planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
   onPublish?: () => void
+  className?: string
+  /** Render the Publish CTA when the version is a draft. Set false when Publish lives elsewhere (e.g., the page header). */
+  showPublish?: boolean
 }) {
   if (!planVersion) return null
 
@@ -27,54 +32,56 @@ export function PricingCard({
   }
 
   const isPublished = planVersion.status === "published"
+  const trialDays = planVersion.trialUnits ?? 0
+  const billingLabel = planVersion.billingConfig.name
 
   return (
-    <Card className="flex w-[300px] flex-col">
-      <CardHeader className="space-y-6">
-        <Typography variant="h2">{planVersion.plan.title}</Typography>
-
-        {/* // only show the price if it's not an enterprise plan */}
-        {!planVersion.plan.enterprisePlan && (
-          <div className="mt-8 flex items-baseline space-x-2">
-            <span className="font-extrabold text-4xl">{val.displayAmount}</span>
-            <span className="text-sm">{planVersion.billingConfig.name}</span>
-          </div>
+    <Card className={cn("flex w-[300px] flex-col", className)}>
+      <CardHeader className="space-y-2 pb-4">
+        <Typography variant="h2" className="leading-tight">
+          {planVersion.plan.title}
+        </Typography>
+        {planVersion.description && (
+          <CardDescription className="line-clamp-2">{planVersion.description}</CardDescription>
         )}
       </CardHeader>
 
-      <CardContent className="flex flex-col gap-4">
-        <CardDescription className="line-clamp-2">{planVersion.description}*</CardDescription>
-        {!isPublished && (
-          <PlanVersionPublish planVersionId={planVersion.id} onConfirmAction={onPublish} />
+      <CardContent className="flex flex-col gap-3 pb-6">
+        {!planVersion.plan.enterprisePlan && (
+          <div className="space-y-1">
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-extrabold text-4xl tracking-tight">{val.displayAmount}</span>
+              <span className="text-muted-foreground text-sm">/ {billingLabel}</span>
+            </div>
+            {trialDays > 0 && (
+              <p className="text-muted-foreground text-xs">{trialDays}-day free trial</p>
+            )}
+          </div>
         )}
-        {isPublished && <Button className="w-full">Get Started</Button>}
+
+        {showPublish && !isPublished ? (
+          <PlanVersionPublish planVersionId={planVersion.id} onConfirmAction={onPublish} />
+        ) : (
+          <Button className="w-full">Get Started</Button>
+        )}
       </CardContent>
 
       <CardFooter className="flex w-full flex-col border-t px-6 py-6">
-        <div className="w-full space-y-6">
-          <div className="w-full space-y-2">
-            <Typography variant="h4">Features Included</Typography>
-            <ul className="flex w-full flex-col space-y-4 py-4">
-              {planVersion.planFeatures
-                .filter((f) => !f.metadata?.hidden)
-                .map((feature) => {
-                  return (
-                    <li key={feature.id} className="flex w-full flex-col justify-start">
-                      <PricingItem feature={feature} withCalculator withQuantity />
-                    </li>
-                  )
-                })}
-            </ul>
-          </div>
-          <Separator />
-          <Typography
-            variant="p"
-            affects="removePaddingMargin"
-            className="text-start text-xs italic"
-          >
-            {"* plus usage if applicable"} <br />
-            {"* plus payment processing fees"}
-          </Typography>
+        <div className="w-full space-y-4">
+          <p className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
+            What's included
+          </p>
+          <ul className="flex w-full flex-col space-y-3">
+            {planVersion.planFeatures
+              .filter((f) => !f.metadata?.hidden)
+              .map((feature) => {
+                return (
+                  <li key={feature.id} className="flex w-full flex-col justify-start">
+                    <PricingItem feature={feature} withCalculator withQuantity />
+                  </li>
+                )
+              })}
+          </ul>
         </div>
       </CardFooter>
     </Card>
