@@ -1,9 +1,9 @@
-import type { ConfigFeatureVersionType } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
 import {
   type GrantsManager,
+  type IngestionGrant,
   type IngestionResolvedState,
   MAX_EVENT_AGE_MS,
   UnPriceGrantError,
@@ -24,11 +24,7 @@ import {
   type IngestionRejectionReason,
   type IngestionSyncResult,
 } from "./interface"
-import {
-  type IngestionQueueMessage,
-  computeResolvedStatePeriodKey,
-  computeResolvedStatePeriodWindow,
-} from "./message"
+import { type IngestionQueueMessage, computeResolvedStatePeriodKey } from "./message"
 export type IngestionCandidateGrants = Parameters<
   GrantsManager["resolveIngestionStatesFromGrants"]
 >[0]["grants"]
@@ -58,7 +54,6 @@ type HandleMessageParams = {
 }
 
 type ApplyResolvedStatesParams = {
-  candidateGrants: IngestionCandidateGrants
   customerId: string
   message: IngestionQueueMessage
   processableStates: IngestionResolvedState[]
@@ -66,7 +61,6 @@ type ApplyResolvedStatesParams = {
 }
 
 type ApplyResolvedStateParams = {
-  candidateGrants: IngestionCandidateGrants
   customerId: string
   enforceLimit: boolean
   message: IngestionQueueMessage
@@ -76,7 +70,6 @@ type ApplyResolvedStateParams = {
 
 export type EntitlementWindowApplyInput = {
   customerId: string
-  currency: string
   enforceLimit: boolean
   event: {
     id: string
@@ -84,19 +77,10 @@ export type EntitlementWindowApplyInput = {
     slug: string
     timestamp: number
   }
-  featureSlug: string
+  grants: IngestionGrant[]
   idempotencyKey: string
-  limit: IngestionResolvedState["limit"]
-  meter: IngestionResolvedState["meterConfig"]
-  priceConfig: ConfigFeatureVersionType
   now: number
-  overageStrategy: IngestionResolvedState["overageStrategy"]
-  periodStartAt: number
-  periodEndAt: number
-  periodKey: string
   projectId: string
-  streamId: string
-  featurePlanVersionId: string
 }
 
 export type EntitlementWindowController = {
@@ -111,9 +95,8 @@ export type EntitlementWindowController = {
 export interface EntitlementWindowClient {
   getEntitlementWindowStub(params: {
     customerId: string
-    periodKey: string
+    meterHash: string
     projectId: string
-    streamId: string
   }): EntitlementWindowController
 }
 
@@ -248,22 +231,12 @@ export class IngestionService {
     }
 
     const applyResult = await this.applyResolvedState({
-      candidateGrants: preparedContext.candidateGrants,
       customerId,
       enforceLimit: true,
       message,
       projectId,
       state: resolvedState,
     })
-
-    if (!applyResult) {
-      return this.rejectSyncMessage({
-        customerId,
-        message,
-        projectId,
-        rejectionReason: "UNROUTABLE_EVENT",
-      })
-    }
 
     if (!applyResult.allowed) {
       return this.rejectSyncMessage({
@@ -376,9 +349,9 @@ export class IngestionService {
         projectId,
         activeGrantIds: state.activeGrantIds,
         resetConfig: state.resetConfig,
-        streamEndAt: state.streamEndAt,
-        streamId: state.streamId,
-        streamStartAt: state.streamStartAt,
+        effectiveAt: state.effectiveAt,
+        expiresAt: state.expiresAt,
+        meterHash: state.meterHash,
         timestamp,
       }
 
@@ -405,8 +378,8 @@ export class IngestionService {
       this.logger.warn("unable to resolve feature verification period key", {
         customerId,
         featureSlug,
+        meterHash: state.meterHash,
         projectId,
-        streamId: state.streamId,
         timestamp,
       })
 
@@ -423,9 +396,8 @@ export class IngestionService {
     const enforcementState = await this.entitlementWindowClient
       .getEntitlementWindowStub({
         customerId,
-        periodKey,
+        meterHash: state.meterHash,
         projectId,
-        streamId: state.streamId,
       })
       .getEnforcementState()
 
@@ -447,12 +419,12 @@ export class IngestionService {
       isLimitReached,
       limit: state.limit,
       meterConfig: state.meterConfig,
+      meterHash: state.meterHash,
       overageStrategy: state.overageStrategy,
       periodKey,
       status: "usage",
-      streamEndAt: state.streamEndAt,
-      streamId: state.streamId,
-      streamStartAt: state.streamStartAt,
+      effectiveAt: state.effectiveAt,
+      expiresAt: state.expiresAt,
       timestamp,
       usage: enforcementState.usage,
     }
@@ -534,7 +506,6 @@ export class IngestionService {
     }
 
     await this.applyResolvedStates({
-      candidateGrants: context.candidateGrants,
       customerId,
       message,
       processableStates: processableStatesResult.val,
@@ -960,11 +931,10 @@ export class IngestionService {
   }
 
   private async applyResolvedStates(params: ApplyResolvedStatesParams): Promise<void> {
-    const { candidateGrants, customerId, message, processableStates, projectId } = params
+    const { customerId, message, processableStates, projectId } = params
 
     for (const state of processableStates) {
       await this.applyResolvedState({
-        candidateGrants,
         customerId,
         enforceLimit: false,
         message,
@@ -976,55 +946,12 @@ export class IngestionService {
 
   private async applyResolvedState(
     params: ApplyResolvedStateParams
-  ): Promise<EntitlementWindowApplyResult | null> {
-    const { candidateGrants, customerId, enforceLimit, message, projectId, state } = params
-    const activeGrant = resolveActiveGrantForResolvedState(candidateGrants, state)
-
-    if (!activeGrant) {
-      this.logger.debug("no active grant for resolved state", {
-        projectId,
-        customerId,
-        streamId: state.streamId,
-      })
-      return null
-    }
-
-    const priceConfig = activeGrant.featurePlanVersion?.config as
-      | ConfigFeatureVersionType
-      | undefined
-    const featurePlanVersionId = activeGrant.featurePlanVersionId
-
-    if (!priceConfig || !featurePlanVersionId) {
-      this.logger.warn("active grant missing price config or plan version id", {
-        projectId,
-        customerId,
-        grantId: activeGrant.id,
-        streamId: state.streamId,
-      })
-      return null
-    }
-
-    const currency = resolveCurrencyForResolvedState(candidateGrants, state)
-
-    const periodKey = computeResolvedStatePeriodKey(state, message.timestamp)
-
-    if (!periodKey) {
-      this.logger.debug("period key doesn't exist")
-      return null
-    }
-
-    const periodWindow = computeResolvedStatePeriodWindow(state, message.timestamp)
-
-    if (!periodWindow) {
-      this.logger.debug("period window doesn't exist")
-      return null
-    }
-
+  ): Promise<EntitlementWindowApplyResult> {
+    const { customerId, enforceLimit, message, projectId, state } = params
     const stub = this.entitlementWindowClient.getEntitlementWindowStub({
       customerId,
-      periodKey,
+      meterHash: state.meterHash,
       projectId,
-      streamId: state.streamId,
     })
 
     return stub.apply({
@@ -1037,19 +964,9 @@ export class IngestionService {
       idempotencyKey: message.idempotencyKey,
       projectId,
       customerId,
-      currency,
-      streamId: state.streamId,
-      featurePlanVersionId,
-      featureSlug: state.featureSlug,
-      periodKey,
-      meter: state.meterConfig,
-      priceConfig,
-      limit: state.limit,
-      overageStrategy: state.overageStrategy,
+      grants: state.grants,
       enforceLimit,
       now: message.receivedAt,
-      periodStartAt: periodWindow.start,
-      periodEndAt: periodWindow.end,
     })
   }
 
@@ -1107,94 +1024,6 @@ export class IngestionService {
       state: outcome.state,
     }
   }
-}
-
-// state.activeGrantIds is priority-ordered (desc) by assertFungibleGrantSet
-// in grants.ts. Iterating it directly — and looking up in candidateGrants —
-// gives a deterministic, priority-respecting selection rather than relying on
-// candidateGrants' arbitrary iteration order.
-function iterateActiveGrantsByPriority(
-  candidateGrants: IngestionCandidateGrants,
-  state: IngestionResolvedState
-): IngestionCandidateGrants[number][] {
-  const byId = new Map(candidateGrants.map((grant) => [grant.id, grant]))
-  const ordered: IngestionCandidateGrants[number][] = []
-  for (const id of state.activeGrantIds) {
-    const grant = byId.get(id)
-    if (grant) ordered.push(grant)
-  }
-  return ordered
-}
-
-function resolveCurrencyForResolvedState(
-  candidateGrants: IngestionCandidateGrants,
-  state: IngestionResolvedState
-): string {
-  for (const grant of iterateActiveGrantsByPriority(candidateGrants, state)) {
-    const config = grant.featurePlanVersion?.config
-    const currencyFromPrice = extractCurrencyCode(config, "price")
-    if (currencyFromPrice) {
-      return currencyFromPrice
-    }
-
-    const tiers = extractTiers(config)
-    for (const tier of tiers) {
-      const currencyFromTier = extractCurrencyCode(tier, "unitPrice")
-      if (currencyFromTier) {
-        return currencyFromTier
-      }
-    }
-  }
-
-  return "USD"
-}
-
-function resolveActiveGrantForResolvedState(
-  candidateGrants: IngestionCandidateGrants,
-  state: IngestionResolvedState
-): IngestionCandidateGrants[number] | undefined {
-  return iterateActiveGrantsByPriority(candidateGrants, state)[0]
-}
-
-function extractCurrencyCode(input: unknown, priceKey: string): string | null {
-  if (!isRecord(input)) {
-    return null
-  }
-
-  const price = input[priceKey]
-  if (!isRecord(price)) {
-    return null
-  }
-
-  const dinero = price.dinero
-  if (!isRecord(dinero)) {
-    return null
-  }
-
-  const currency = dinero.currency
-  if (!isRecord(currency)) {
-    return null
-  }
-
-  const code = currency.code
-  return typeof code === "string" && code.length > 0 ? code : null
-}
-
-function extractTiers(input: unknown): Record<string, unknown>[] {
-  if (!isRecord(input)) {
-    return []
-  }
-
-  const tiers = input.tiers
-  if (!Array.isArray(tiers)) {
-    return []
-  }
-
-  return tiers.filter((tier): tier is Record<string, unknown> => isRecord(tier))
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }
 
 function buildAuditPayload(

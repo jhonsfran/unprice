@@ -2,9 +2,9 @@ import { type Database, and, eq, inArray } from "@unprice/db"
 import { grants } from "@unprice/db/schema"
 import { type UsageMode, hashStringSHA256 } from "@unprice/db/utils"
 import {
+  type ConfigFeatureVersionType,
   type FeatureType,
   type OverageStrategy,
-  calculateCycleWindow,
   type entitlementGrantsSnapshotSchema,
   getAnchor,
 } from "@unprice/db/validators"
@@ -21,6 +21,7 @@ import type {
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type z from "zod"
+import { deriveMeterKey } from "./domain"
 import { UnPriceGrantError } from "./errors"
 
 interface SubjectGrantQuery {
@@ -31,15 +32,33 @@ interface SubjectGrantQuery {
 export type IngestionResolvedState = {
   activeGrantIds: string[]
   customerId: string
+  effectiveAt: number
+  expiresAt: number | null
   featureSlug: string
+  grants: IngestionGrant[]
   limit: number | null
+  meterHash: string
   meterConfig: NonNullable<Entitlement["meterConfig"]>
   overageStrategy: OverageStrategy
   projectId: string
   resetConfig: Entitlement["resetConfig"]
-  streamEndAt: number | null
-  streamId: string
-  streamStartAt: number
+}
+
+export type IngestionGrant = {
+  amount: number | null
+  anchor: number
+  currencyCode: string
+  effectiveAt: number
+  expiresAt: number | null
+  featureConfig: ConfigFeatureVersionType
+  featurePlanVersionId: string
+  featureSlug: string
+  grantId: string
+  meterConfig: NonNullable<Entitlement["meterConfig"]>
+  meterHash: string
+  overageStrategy: OverageStrategy
+  priority: number
+  resetConfig: Entitlement["resetConfig"]
 }
 
 export type ResolvedFeatureStateAtTimestamp =
@@ -98,9 +117,7 @@ export class GrantsManager {
   }
 
   /**
-   * craete a stable signarute to find if stacked grants are fungible
-   * @param grant
-   * @returns
+   * Create the reset contract a grant carries into ingestion.
    */
   private getGrantResetSignature(grant: z.infer<typeof grantSchemaExtended>) {
     if (grant.featurePlanVersion.resetConfig) {
@@ -129,58 +146,31 @@ export class GrantsManager {
     return null
   }
 
-  /**
-   * Every grant id tight to a feature plan version. The signature is calculated with the config
-   * normalizing all its fields to a stable contract, this only applies for usage based features
-   *
-   * @param grant
-   * @returns
-   */
-  private getGrantFungibilitySignature(grant: z.infer<typeof grantSchemaExtended>) {
-    const { featurePlanVersion } = grant
-    const config = featurePlanVersion.config
+  private getGrantMeterConfig(grant: z.infer<typeof grantSchemaExtended>) {
+    return grant.featurePlanVersion.meterConfig ?? null
+  }
 
-    const usageMode =
-      featurePlanVersion.featureType === "usage" &&
-      config &&
-      typeof config === "object" &&
-      "usageMode" in config
-        ? ((config.usageMode as UsageMode | null | undefined) ?? null)
-        : null
+  private getGrantUnitOfMeasure(grant: z.infer<typeof grantSchemaExtended>): string {
+    return this.normalizeUnitOfMeasure(grant.featurePlanVersion.unitOfMeasure)
+  }
 
-    // stable signature to avoid recomputations
-    const meterConfig =
-      featurePlanVersion.featureType === "usage" && featurePlanVersion.meterConfig
-        ? {
-            eventId: featurePlanVersion.meterConfig.eventId,
-            eventSlug: featurePlanVersion.meterConfig.eventSlug,
-            aggregationMethod: featurePlanVersion.meterConfig.aggregationMethod,
-            aggregationField: featurePlanVersion.meterConfig.aggregationField?.trim() ?? null,
-            filters: featurePlanVersion.meterConfig.filters
-              ? Object.fromEntries(
-                  Object.entries(featurePlanVersion.meterConfig.filters).sort(([left], [right]) =>
-                    left.localeCompare(right)
-                  )
-                )
-              : null,
-            groupBy: featurePlanVersion.meterConfig.groupBy
-              ? [...featurePlanVersion.meterConfig.groupBy].sort()
-              : null,
-            windowSize: featurePlanVersion.meterConfig.windowSize ?? null,
-          }
-        : null
+  private getSemanticMeterKeyFromConfig(params: {
+    meterConfig: NonNullable<Entitlement["meterConfig"]>
+    unitOfMeasure: string | null | undefined
+  }): string {
+    return `${deriveMeterKey(params.meterConfig)}|unit=${encodeURIComponent(
+      this.normalizeUnitOfMeasure(params.unitOfMeasure)
+    )}`
+  }
 
-    return {
-      featureType: featurePlanVersion.featureType,
-      unitOfMeasure: this.normalizeUnitOfMeasure(featurePlanVersion.unitOfMeasure),
-      usageMode,
-      meterConfig,
-      resetConfig: this.getGrantResetSignature(grant),
-    }
+  private orderGrantsByPriority<T extends { priority: number | null | undefined }>(
+    grants: T[]
+  ): T[] {
+    return [...grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
   }
 
   private buildMaterializedMeterConfig(grant: z.infer<typeof grantSchemaExtended>) {
-    const meterConfig = grant.featurePlanVersion.meterConfig
+    const meterConfig = this.getGrantMeterConfig(grant)
 
     if (!meterConfig) {
       return null
@@ -207,109 +197,135 @@ export class GrantsManager {
     }
   }
 
-  private serializeGrantFungibilitySignature(value: unknown): string {
-    return JSON.stringify(value)
+  private resolveGrantFeatureConfig(
+    grant: z.infer<typeof grantSchemaExtended>
+  ): ConfigFeatureVersionType | null {
+    return (grant.featurePlanVersion.config ?? null) as ConfigFeatureVersionType | null
   }
 
-  /**
-   * Compare 2 signatures and defines its differences
-   * @param expected
-   * @param actual
-   * @returns
-   */
-  private getGrantFungibilityDifferences(
-    expected: ReturnType<GrantsManager["getGrantFungibilitySignature"]>,
-    actual: ReturnType<GrantsManager["getGrantFungibilitySignature"]>
-  ): string[] {
-    const differences: string[] = []
-
-    if (expected.featureType !== actual.featureType) {
-      differences.push("featureType")
-    }
-
-    if (expected.unitOfMeasure !== actual.unitOfMeasure) {
-      differences.push("unitOfMeasure")
-    }
-
-    if (expected.usageMode !== actual.usageMode) {
-      differences.push("usageMode")
-    }
-
-    if (
-      this.serializeGrantFungibilitySignature(expected.meterConfig) !==
-      this.serializeGrantFungibilitySignature(actual.meterConfig)
-    ) {
-      differences.push("meterConfig")
-    }
-
-    if (
-      this.serializeGrantFungibilitySignature(expected.resetConfig) !==
-      this.serializeGrantFungibilitySignature(actual.resetConfig)
-    ) {
-      differences.push("resetConfig")
-    }
-
-    return differences
+  private resolveGrantCurrencyCode(grant: z.infer<typeof grantSchemaExtended>): string {
+    const featureConfig = this.resolveGrantFeatureConfig(grant)
+    return this.extractCurrencyCodeFromFeatureConfig(featureConfig) ?? "USD"
   }
 
-  /**
-   * In order to process stacked grants, we need to validate if their configurations are mergeable.
-   * Basically they are mergable if the
-   * @param params
-   * @returns
-   */
-  private assertFungibleGrantSet(params: {
-    grants: z.infer<typeof grantSchemaExtended>[]
-    featureSlug: string
-    customerId: string
-  }): Result<
-    {
-      orderedGrants: z.infer<typeof grantSchemaExtended>[]
-      signature: ReturnType<GrantsManager["getGrantFungibilitySignature"]>
-    },
-    UnPriceGrantError
-  > {
-    const orderedGrants = [...params.grants].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-    const baselineGrant = orderedGrants[0]
+  private resolveGrantAmount(grant: z.infer<typeof grantSchemaExtended>): number | null {
+    return grant.limit ?? grant.units ?? grant.featurePlanVersion.limit ?? null
+  }
 
-    if (!baselineGrant) {
-      return Err(new UnPriceGrantError({ message: "No grants provided" }))
+  private materializeIngestionGrant(
+    grant: z.infer<typeof grantSchemaExtended>
+  ): IngestionGrant | null {
+    const featureConfig = this.resolveGrantFeatureConfig(grant)
+    const meterConfig = this.getGrantMeterConfig(grant)
+    const resetConfig = this.getGrantResetSignature(grant)
+
+    if (!featureConfig || !meterConfig || !grant.meterHash) {
+      return null
     }
 
-    // compare the bast priotiry grant with the rest by its signatures.
-    const baselineSignature = this.getGrantFungibilitySignature(baselineGrant)
-    const nonFungibleGrants = orderedGrants
-      .slice(1)
-      .map((grant) => ({
-        grant,
-        differences: this.getGrantFungibilityDifferences(
-          baselineSignature,
-          this.getGrantFungibilitySignature(grant)
-        ),
-      }))
-      .filter(({ differences }) => differences.length > 0)
+    return {
+      amount: this.resolveGrantAmount(grant),
+      anchor: resetConfig?.resetAnchor ?? grant.anchor,
+      currencyCode: this.resolveGrantCurrencyCode(grant),
+      effectiveAt: grant.effectiveAt,
+      expiresAt: grant.expiresAt,
+      featureConfig,
+      featurePlanVersionId: grant.featurePlanVersionId,
+      featureSlug: grant.featurePlanVersion.feature.slug,
+      grantId: grant.id,
+      meterConfig,
+      meterHash: grant.meterHash,
+      overageStrategy: grant.featurePlanVersion.metadata?.overageStrategy ?? "none",
+      priority: grant.priority,
+      resetConfig,
+    }
+  }
 
-    // Do not accept grants that are not fungible.
-    if (nonFungibleGrants.length > 0) {
-      const nonFungibleGrantSummary = nonFungibleGrants
-        .map(({ grant, differences }) => `${grant.id} (${differences.join(", ")})`)
-        .join(", ")
+  private extractCurrencyCodeFromFeatureConfig(config: unknown): string | null {
+    const currencyFromPrice = this.extractCurrencyCode(config, "price")
+    if (currencyFromPrice) {
+      return currencyFromPrice
+    }
 
-      return Err(
-        new UnPriceGrantError({
-          message: `Cannot materialize feature "${params.featureSlug}" into a
-          single entitlement because the current schema only allows one active entitlement
-          per feature slug. Stacked grants must be fungible and share featureType, unitOfMeasure,
-          usageMode, meterConfig, and resetConfig. Non-fungible grants: ${nonFungibleGrantSummary}`,
-          subjectId: params.customerId,
+    if (!this.isRecord(config) || !Array.isArray(config.tiers)) {
+      return null
+    }
+
+    for (const tier of config.tiers) {
+      const currencyFromTier = this.extractCurrencyCode(tier, "unitPrice")
+      if (currencyFromTier) {
+        return currencyFromTier
+      }
+    }
+
+    return null
+  }
+
+  private extractCurrencyCode(input: unknown, priceKey: string): string | null {
+    if (!this.isRecord(input)) {
+      return null
+    }
+
+    const price = input[priceKey]
+    if (!this.isRecord(price)) {
+      return null
+    }
+
+    const dinero = price.dinero
+    if (!this.isRecord(dinero)) {
+      return null
+    }
+
+    const currency = dinero.currency
+    if (!this.isRecord(currency)) {
+      return null
+    }
+
+    const code = currency.code
+    return typeof code === "string" && code.length > 0 ? code : null
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null
+  }
+
+  private async buildGrantInsertMeterHash(
+    grant: z.infer<typeof grantInsertSchema>
+  ): Promise<Partial<z.infer<typeof grantInsertSchema>>> {
+    const embeddedPlanFeature = (grant as unknown as { featurePlanVersion?: unknown })
+      .featurePlanVersion
+    const featurePlanVersion = this.isRecord(embeddedPlanFeature)
+      ? embeddedPlanFeature
+      : await this.db.query.planVersionFeatures?.findFirst({
+          where: (planFeature, { and, eq }) =>
+            and(
+              eq(planFeature.id, grant.featurePlanVersionId),
+              eq(planFeature.projectId, grant.projectId)
+            ),
         })
-      )
+
+    if (!this.isRecord(featurePlanVersion)) {
+      return {}
     }
 
-    return Ok({
-      orderedGrants,
-      signature: baselineSignature,
-    })
+    const meterConfig = this.isRecord(featurePlanVersion.meterConfig)
+      ? featurePlanVersion.meterConfig
+      : undefined
+    const unitOfMeasure =
+      typeof featurePlanVersion.unitOfMeasure === "string" ? featurePlanVersion.unitOfMeasure : null
+
+    if (!meterConfig) {
+      return {}
+    }
+
+    return {
+      meterHash: await hashStringSHA256(
+        this.getSemanticMeterKeyFromConfig({
+          meterConfig: meterConfig as NonNullable<Entitlement["meterConfig"]>,
+          unitOfMeasure,
+        })
+      ),
+    }
   }
 
   public async deleteGrants(params: {
@@ -602,35 +618,9 @@ export class GrantsManager {
   }
 
   /**
-   * Resolve the event-time metering state directly from grants.
-   *
-   * Resolves event-time metering state directly from grants.
-   * The important distinction is:
-   *
-   * - Grants answer "what is true at this event timestamp?"
-   * - The stream answers "which counter should accumulate this event?"
-   *
-   * For each feature with active usage grants at `timestamp` we:
-   *
-   * 1. Keep only grants active at the event time.
-   * 2. Enforce fungibility so stacked grants agree on meter/reset shape.
-   * 3. Reuse `computeEntitlementState()` to derive the effective limit/config
-   *    for that moment in time.
-   * 4. Build a stable `streamId` from customer + project + feature + the
-   *    fungibility signature.
-   * 5. Expand from the active grants to the full continuous coverage interval
-   *    of that same stream so the reset anchor stays stable across mid-cycle
-   *    grant changes.
-   *
-   * Example:
-   *
-   * - grant A: [Mar 1, Mar 10) limit 100
-   * - grant B: [Mar 10, Mar 20) limit 150
-   *
-   * On Mar 15 the active limit is 150, but the stream still started on Mar 1.
-   * That lets ingestion keep using the same monthly counter instead of
-   * accidentally creating a new counter on Mar 10. This mean we can add new grants mid cycle if needed without
-   * affecting the current counters
+   * Resolve the event-time metering state directly from the active grants.
+   * Grant creation already stores the meter hash, so ingestion only groups
+   * active usage grants by their stored semantic meter hash.
    */
   public async resolveIngestionStatesFromGrants(params: {
     customerId: string
@@ -643,38 +633,49 @@ export class GrantsManager {
       (grant) =>
         this.isGrantActiveAt(grant, timestamp) &&
         grant.featurePlanVersion.featureType === "usage" &&
-        Boolean(grant.featurePlanVersion.meterConfig)
+        Boolean(this.getGrantMeterConfig(grant)) &&
+        Boolean(grant.meterHash)
     )
 
     if (activeUsageGrants.length === 0) {
       return Ok([])
     }
 
-    const grantsByFeature = new Map<string, z.infer<typeof grantSchemaExtended>[]>()
+    const grantsByMeterHash = new Map<
+      string,
+      {
+        featureSlug: string
+        grants: z.infer<typeof grantSchemaExtended>[]
+        meterHash: string
+      }
+    >()
 
     for (const grant of activeUsageGrants) {
       const featureSlug = grant.featurePlanVersion.feature.slug
-      const existing = grantsByFeature.get(featureSlug) ?? []
-      grantsByFeature.set(featureSlug, [...existing, grant])
+      const meterHash = grant.meterHash
+
+      if (!meterHash) {
+        continue
+      }
+
+      const groupKey = JSON.stringify({ featureSlug, meterHash })
+      const group = grantsByMeterHash.get(groupKey) ?? {
+        featureSlug,
+        grants: [],
+        meterHash,
+      }
+
+      group.grants.push(grant)
+      grantsByMeterHash.set(groupKey, group)
     }
 
     const resolvedStates: IngestionResolvedState[] = []
 
-    for (const [featureSlug, featureGrants] of grantsByFeature.entries()) {
-      const { err: fungibilityErr, val: fungibleGrantSet } = this.assertFungibleGrantSet({
-        grants: featureGrants,
-        featureSlug,
-        customerId,
-      })
-
-      if (fungibilityErr) {
-        return Err(fungibilityErr)
-      }
-
+    for (const { featureSlug, grants: groupGrants, meterHash } of grantsByMeterHash.values()) {
       const computedStateResult = await this.computeEntitlementState({
         customerId,
         projectId,
-        grants: featureGrants,
+        grants: groupGrants,
       })
 
       if (computedStateResult.err) {
@@ -687,54 +688,33 @@ export class GrantsManager {
         continue
       }
 
-      const serializedSignature = this.serializeGrantFungibilitySignature(
-        fungibleGrantSet.signature
-      )
-      const sameStreamGrants = grants.filter((grant) => {
-        if (grant.featurePlanVersion.feature.slug !== featureSlug) {
-          return false
-        }
+      const orderedGrants = this.orderGrantsByPriority(groupGrants)
+      const ingestionGrants = orderedGrants
+        .map((grant) => this.materializeIngestionGrant(grant))
+        .filter((grant): grant is IngestionGrant => grant !== null)
 
-        return (
-          this.serializeGrantFungibilitySignature(this.getGrantFungibilitySignature(grant)) ===
-          serializedSignature
+      if (ingestionGrants.length === 0) {
+        return Err(
+          new UnPriceGrantError({
+            message: `Usage feature "${featureSlug}" has no active grant pricing configs`,
+            subjectId: customerId,
+          })
         )
-      })
-      // We intentionally derive stream coverage from all grants with the same
-      // stream signature, not only the grants active at `timestamp`.
-      // This keeps the stream anchor stable across temporary stacked grants or
-      // back-to-back renewals that should continue accumulating in one period.
-      const coverage = this.findContinuousCoverageBounds({
-        grants: sameStreamGrants,
-        timestamp,
-      }) ?? {
-        end: computedState.expiresAt,
-        start: computedState.effectiveAt,
       }
 
-      // This is very important as is the key that allow us to rotate the DO
-      const streamId = `stream_${await hashStringSHA256(
-        JSON.stringify({
-          customerId,
-          featureSlug,
-          projectId,
-          signature: fungibleGrantSet.signature,
-        })
-      )}`
-
-      // stream is the list of grants that are fungible. They are fungible because they share meter config, reset config and feature.
       resolvedStates.push({
-        activeGrantIds: fungibleGrantSet.orderedGrants.map((grant) => grant.id),
+        activeGrantIds: orderedGrants.map((grant) => grant.id),
         customerId,
+        effectiveAt: computedState.effectiveAt,
+        expiresAt: computedState.expiresAt,
         featureSlug,
+        grants: ingestionGrants,
         limit: computedState.limit,
+        meterHash,
         meterConfig: computedState.meterConfig,
         overageStrategy: computedState.metadata?.overageStrategy ?? "none",
         projectId,
         resetConfig: computedState.resetConfig,
-        streamEndAt: coverage.end,
-        streamId,
-        streamStartAt: coverage.start,
       })
     }
 
@@ -844,10 +824,20 @@ export class GrantsManager {
     // We don't care which grant is inserted, we just want to make sure it's unique
     // the merging logic will handle the rest
     try {
+      const grantConfig = await this.buildGrantInsertMeterHash(newGrant)
+      const {
+        featurePlanVersion: _featurePlanVersion,
+        subscriptionItem: _subscriptionItem,
+        ...grantInsert
+      } = newGrant as z.infer<typeof grantInsertSchema> & {
+        featurePlanVersion?: unknown
+        subscriptionItem?: unknown
+      }
       const insertedGrants = await this.db
         .insert(grants)
         .values({
-          ...newGrant,
+          ...grantInsert,
+          ...grantConfig,
           priority: priorityMap[newGrant.type],
         })
         .onConflictDoNothing({
@@ -897,79 +887,6 @@ export class GrantsManager {
     }
   }
 
-  public async renewGrantsForCustomer(params: {
-    customerId: string
-    projectId: string
-    now: number
-  }): Promise<Result<(typeof grants.$inferSelect)[], FetchError | UnPriceGrantError>> {
-    const { customerId, projectId, now } = params
-
-    const { val: result, err: getGrantsErr } = await this.getGrantsForCustomer({
-      customerId,
-      projectId,
-      now,
-    })
-
-    if (getGrantsErr) {
-      return Err(getGrantsErr)
-    }
-
-    const { grants: allGrants } = result
-
-    // only renew grants with auto renew true and not trial and subscription
-    const autoRenewGrants = allGrants.filter(
-      (grant) => grant.autoRenew && grant.type !== "trial" && grant.type !== "subscription"
-    )
-
-    const renewedGrants = []
-    for (const grant of autoRenewGrants) {
-      const cycle = calculateCycleWindow({
-        now: now,
-        effectiveStartDate: grant.effectiveAt,
-        effectiveEndDate: grant.expiresAt ?? null,
-        config: {
-          name: grant.featurePlanVersion.billingConfig.name,
-          interval: grant.featurePlanVersion.billingConfig.billingInterval,
-          intervalCount: grant.featurePlanVersion.billingConfig.billingIntervalCount,
-          anchor: grant.anchor,
-          planType: grant.featurePlanVersion.billingConfig.planType,
-        },
-        trialEndsAt: null,
-      })
-
-      if (!cycle) {
-        return Err(
-          new UnPriceGrantError({
-            message: "Failed to calculate cycle window",
-            subjectId: grant.subjectId,
-          })
-        )
-      }
-
-      // create the grant
-      const createGrantResult = await this.createGrant({
-        grant: {
-          ...grant,
-          effectiveAt: cycle.start,
-          expiresAt: cycle.end,
-        },
-      })
-
-      if (createGrantResult.err) {
-        this.logger.error(createGrantResult.err, {
-          context: "Failed to renew grant",
-          grantId: grant.id,
-          subjectId: grant.subjectId,
-        })
-        continue
-      }
-
-      renewedGrants.push(createGrantResult.val)
-    }
-
-    return Ok(renewedGrants)
-  }
-
   /**
    * Computes the entitlement state from a list of grants without saving to the database.
    * This logic is shared between the entitlement computation and the billing estimation.
@@ -995,21 +912,11 @@ export class GrantsManager {
       return Err(new UnPriceGrantError({ message: "All grants must have the same feature slug" }))
     }
 
-    const { err: fungibilityErr, val: fungibleGrantSet } = this.assertFungibleGrantSet({
-      grants,
-      featureSlug,
-      customerId,
-    })
-
-    if (fungibilityErr) {
-      return Err(fungibilityErr)
-    }
-
     // Sort by priority (higher first) to preserve consumption order and get the best priority grant.
     // This determines the canonical configuration for the computed entitlement.
-    const ordered = fungibleGrantSet.orderedGrants
+    const ordered = this.orderGrantsByPriority(grants)
     const bestPriorityGrant = ordered[0]!
-    const winningUnitOfMeasure = fungibleGrantSet.signature.unitOfMeasure
+    const winningUnitOfMeasure = this.getGrantUnitOfMeasure(bestPriorityGrant)
 
     const grantsSnapshot = ordered.map((g) => ({
       id: g.id,
@@ -1132,80 +1039,6 @@ export class GrantsManager {
     return (
       grant.effectiveAt <= timestamp && (grant.expiresAt === null || timestamp < grant.expiresAt)
     )
-  }
-
-  /**
-   * Find the continuous interval of a logical stream that contains `timestamp`.
-   *
-   * "Continuous" here means overlapping or touching grant intervals after we
-   * have already limited the input to grants with the same feature + same
-   * fungibility signature.
-   *
-   * This is used for reset-period anchoring, not for deciding which grants are
-   * active. Active grants are filtered separately by `isGrantActiveAt()`.
-   *
-   * Example:
-   *
-   * - g1: [Mar 1, Mar 15)
-   * - g2: [Mar 15, Mar 31)
-   *
-   * These should behave like one continuous stream for period-key
-   * computation, so this helper returns [Mar 1, Mar 31) for any timestamp in
-   * that merged interval.
-   */
-  private findContinuousCoverageBounds(params: {
-    grants: z.infer<typeof grantSchemaExtended>[]
-    timestamp: number
-  }): {
-    end: number | null
-    start: number
-  } | null {
-    if (params.grants.length === 0) {
-      return null
-    }
-
-    const intervals = params.grants
-      .map((grant) => ({
-        end: grant.expiresAt,
-        start: grant.effectiveAt,
-      }))
-      .sort(
-        (left, right) =>
-          left.start - right.start ||
-          this.normalizeCoverageEnd(left.end) - this.normalizeCoverageEnd(right.end)
-      )
-    const merged: Array<{ end: number | null; start: number }> = []
-
-    for (const interval of intervals) {
-      const previous = merged.at(-1)
-
-      if (!previous) {
-        merged.push({ ...interval })
-        continue
-      }
-
-      if (interval.start <= this.normalizeCoverageEnd(previous.end)) {
-        previous.end =
-          previous.end === null || interval.end === null
-            ? null
-            : Math.max(previous.end, interval.end)
-        continue
-      }
-
-      merged.push({ ...interval })
-    }
-
-    return (
-      merged.find(
-        (interval) =>
-          interval.start <= params.timestamp &&
-          (interval.end === null || params.timestamp < interval.end)
-      ) ?? null
-    )
-  }
-
-  private normalizeCoverageEnd(end: number | null): number {
-    return end ?? Number.POSITIVE_INFINITY
   }
 
   /**

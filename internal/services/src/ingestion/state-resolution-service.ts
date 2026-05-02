@@ -113,12 +113,12 @@ export class IngestionStateResolutionService {
     const invalidStates: Array<{
       activeGrantIds: string[]
       errorMessage: string
+      effectiveAt: number
+      expiresAt: number | null
       featureSlug: string
       meterConfig: IngestionResolvedState["meterConfig"]
+      meterHash: string
       resetConfig: IngestionResolvedState["resetConfig"]
-      streamEndAt: number | null
-      streamId: string
-      streamStartAt: number
     }> = []
 
     for (const state of states) {
@@ -135,13 +135,13 @@ export class IngestionStateResolutionService {
       } catch (error) {
         invalidStates.push({
           activeGrantIds: state.activeGrantIds,
+          effectiveAt: state.effectiveAt,
           errorMessage: error instanceof Error ? error.message : String(error),
+          expiresAt: state.expiresAt,
           featureSlug: state.featureSlug,
           meterConfig: state.meterConfig,
+          meterHash: state.meterHash,
           resetConfig: state.resetConfig,
-          streamEndAt: state.streamEndAt,
-          streamId: state.streamId,
-          streamStartAt: state.streamStartAt,
         })
       }
     }

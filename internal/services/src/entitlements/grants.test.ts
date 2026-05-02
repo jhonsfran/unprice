@@ -23,6 +23,7 @@ describe("GrantsManager", () => {
     name: "grant_base",
     subjectType: "customer" as const,
     subjectId: customerId,
+    meterHash: "meter_hash_value",
     type: "subscription" as const,
     featurePlanVersionId: "fpv_1",
     effectiveAt: now - 10000,
@@ -33,7 +34,6 @@ describe("GrantsManager", () => {
     metadata: null,
     deleted: false,
     deletedAt: null,
-    autoRenew: true,
     priority: 10,
     featurePlanVersion: {
       id: "fpv_1",
@@ -319,12 +319,13 @@ describe("GrantsManager", () => {
       expect(entitlement.metadata?.overageStrategy).toBe("always")
     })
 
-    it("should reject non-fungible grants with different meter configs", async () => {
+    it("splits grants with different meter configs into separate ingestion streams", async () => {
       const grants = [
         {
           ...baseGrant,
           id: "g_input_tokens",
           limit: 100,
+          meterHash: "meter_hash_input_tokens",
           featurePlanVersion: {
             ...baseGrant.featurePlanVersion,
             meterConfig: {
@@ -337,6 +338,7 @@ describe("GrantsManager", () => {
           ...baseGrant,
           id: "g_output_tokens",
           limit: 50,
+          meterHash: "meter_hash_output_tokens",
           priority: 20,
           featurePlanVersion: {
             ...baseGrant.featurePlanVersion,
@@ -348,20 +350,37 @@ describe("GrantsManager", () => {
         },
       ]
 
-      const result = await grantsManager.computeEntitlementState({
+      const result = await grantsManager.resolveIngestionStatesFromGrants({
         customerId,
         projectId,
+        timestamp: now,
         grants,
       })
 
-      expect(result.val).toBeUndefined()
-      expect(result.err).toBeDefined()
-      expect(result.err?.message).toContain('feature "merge-test-feature"')
-      expect(result.err?.message).toContain("fungible")
-      expect(result.err?.message).toContain("meterConfig")
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(2)
+
+      const statesByField = new Map(
+        result.val?.map((state) => [state.meterConfig.aggregationField, state])
+      )
+      expect(statesByField.get("input_tokens")).toEqual(
+        expect.objectContaining({
+          activeGrantIds: ["g_input_tokens"],
+          limit: 100,
+        })
+      )
+      expect(statesByField.get("output_tokens")).toEqual(
+        expect.objectContaining({
+          activeGrantIds: ["g_output_tokens"],
+          limit: 50,
+        })
+      )
+      expect(statesByField.get("input_tokens")?.meterHash).not.toBe(
+        statesByField.get("output_tokens")?.meterHash
+      )
     })
 
-    it("should reject non-fungible grants with different reset periods", async () => {
+    it("allows stacked usage grants with different reset periods", async () => {
       const grants = [
         {
           ...baseGrant,
@@ -391,10 +410,9 @@ describe("GrantsManager", () => {
         grants,
       })
 
-      expect(result.val).toBeUndefined()
-      expect(result.err).toBeDefined()
-      expect(result.err?.message).toContain("Non-fungible grants")
-      expect(result.err?.message).toContain("resetConfig")
+      expect(result.err).toBeUndefined()
+      expect(result.val?.limit).toBe(150)
+      expect(result.val?.grants.map((grant) => grant.id)).toEqual(["g_yearly", "g_monthly"])
     })
 
     it("should allow overage if ANY grant allows it (max policy)", async () => {
@@ -1012,7 +1030,7 @@ describe("GrantsManager", () => {
         grants: [baseGrant],
       })
 
-      expect(result1.val?.[0]?.streamId).toBe(result2.val?.[0]?.streamId)
+      expect(result1.val?.[0]?.meterHash).toBe(result2.val?.[0]?.meterHash)
     })
 
     it("non-continuous grants produce separate stream windows", async () => {
@@ -1035,65 +1053,12 @@ describe("GrantsManager", () => {
       expect(result.err).toBeUndefined()
       expect(result.val).toHaveLength(1)
       // Second grant's window should NOT extend back to march1 (there's a gap)
-      expect(result.val?.[0]?.streamStartAt).toBe(march20)
-    })
-  })
-
-  describe("renewGrantsForCustomer", () => {
-    it("should renew auto-renewing grants that are not trial or subscription", async () => {
-      const grantToRenew = {
-        ...baseGrant,
-        id: "g_addon",
-        type: "addon" as const,
-        autoRenew: true,
-        effectiveAt: now - 30 * 24 * 60 * 60 * 1000, // 30 days ago
-        expiresAt: now + 1000, // Grant is still active
-      }
-
-      setupMocks([grantToRenew])
-
-      // Mock createGrant (insert)
-      vi.spyOn(mockDb, "insert").mockReturnValue({
-        values: vi.fn().mockReturnValue({
-          onConflictDoNothing: vi.fn().mockReturnValue({
-            returning: vi.fn().mockResolvedValue([{ ...grantToRenew, id: "g_addon_renewed" }]),
-          }),
-        }),
-        // biome-ignore lint/suspicious/noExplicitAny: <explanation>
-      } as any)
-
-      const result = await grantsManager.renewGrantsForCustomer({
-        customerId,
-        projectId,
-        now,
-      })
-
-      expect(result.err).toBeUndefined()
-      expect(result.val).toHaveLength(1)
-      expect(result.val?.[0]?.id).toBe("g_addon_renewed")
-    })
-
-    it("should not renew trial or subscription grants", async () => {
-      const grants = [
-        { ...baseGrant, id: "g_sub", type: "subscription" as const, autoRenew: true },
-        { ...baseGrant, id: "g_trial", type: "trial" as const, autoRenew: true },
-      ]
-
-      setupMocks(grants)
-
-      const result = await grantsManager.renewGrantsForCustomer({
-        customerId,
-        projectId,
-        now,
-      })
-
-      expect(result.err).toBeUndefined()
-      expect(result.val).toHaveLength(0)
+      expect(result.val?.[0]?.effectiveAt).toBe(march20)
     })
   })
 
   describe("resolveIngestionStatesFromGrants", () => {
-    it("keeps the stream coverage anchored across a continuous same-signature grant chain", async () => {
+    it("uses the active grant window for the resolved meter hash", async () => {
       const march1 = Date.UTC(2026, 2, 1)
       const march15 = Date.UTC(2026, 2, 15)
       const march31 = Date.UTC(2026, 2, 31)
@@ -1128,14 +1093,14 @@ describe("GrantsManager", () => {
           activeGrantIds: ["g_chain_2"],
           featureSlug,
           limit: 50,
-          streamStartAt: march1,
-          streamEndAt: march31,
+          effectiveAt: march15,
+          expiresAt: march31,
         })
       )
-      expect(result.val?.[0]?.streamId).toContain("stream_")
+      expect(result.val?.[0]?.meterHash).toContain("meter_hash_")
     })
 
-    it("rejects active stacked grants that disagree on meter configuration", async () => {
+    it("splits active stacked grants that disagree on meter configuration", async () => {
       const timestamp = Date.UTC(2026, 2, 20)
 
       const result = await grantsManager.resolveIngestionStatesFromGrants({
@@ -1152,6 +1117,7 @@ describe("GrantsManager", () => {
           {
             ...baseGrant,
             id: "g_meter_b",
+            meterHash: "meter_hash_other_value",
             effectiveAt: timestamp - 5_000,
             expiresAt: timestamp + 5_000,
             featurePlanVersion: {
@@ -1165,8 +1131,13 @@ describe("GrantsManager", () => {
         ],
       })
 
-      expect(result.err).toBeDefined()
-      expect(result.err?.message).toContain("Non-fungible grants")
+      expect(result.err).toBeUndefined()
+      expect(result.val).toHaveLength(2)
+      expect(result.val?.map((state) => state.activeGrantIds)).toEqual([
+        ["g_meter_a"],
+        ["g_meter_b"],
+      ])
+      expect(new Set(result.val?.map((state) => state.meterHash)).size).toBe(2)
     })
 
     it("derives dayOfCreation reset anchors from grant effectiveAt for daily reset configs", async () => {

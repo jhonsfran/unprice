@@ -5,6 +5,7 @@ import { vi } from "vitest"
 import type { Cache } from "../../cache/service"
 import {
   type GrantsManager,
+  type IngestionGrant,
   type IngestionResolvedState,
   type ResolvedFeatureStateAtTimestamp,
   UnPriceGrantError,
@@ -27,7 +28,6 @@ type LoggerStub = {
 
 type ApplyInput = {
   customerId: string
-  currency: string
   enforceLimit: boolean
   event: {
     id: string
@@ -35,18 +35,10 @@ type ApplyInput = {
     slug: string
     timestamp: number
   }
-  featureSlug: string
+  grants: IngestionGrant[]
   idempotencyKey: string
-  limit?: number | null
-  meter: MeterConfig
-  priceConfig: ConfigFeatureVersionType
   now: number
-  overageStrategy?: OverageStrategy
-  periodEndAt: number
-  periodKey: string
   projectId: string
-  streamId: string
-  featurePlanVersionId: string
 }
 
 type ApplyResult = {
@@ -59,6 +51,22 @@ type EnforcementResult = {
   isLimitReached: boolean
   limit: number | null
   usage: number
+}
+
+const DEFAULT_PRICE_CONFIG: ConfigFeatureVersionType = {
+  usageMode: "unit",
+  price: {
+    dinero: {
+      amount: 0,
+      currency: {
+        code: "USD",
+        base: 10,
+        exponent: 2,
+      },
+      scale: 2,
+    },
+    displayAmount: "0.00",
+  },
 }
 
 type HarnessOptions = {
@@ -287,7 +295,7 @@ function applyToWindow(params: {
     updatedAt: number
   }> = []
 
-  const meter = input.meter
+  const meter = input.grants[0]!.meterConfig
   const meterKey = deriveMeterKey(meter)
   const previous = window.get(meterKey) ?? {
     updatedAt: Number.NEGATIVE_INFINITY,
@@ -312,8 +320,8 @@ function applyToWindow(params: {
     updatedAt,
   })
 
-  const limit = normalizeLimit(input.limit)
-  const overageStrategy = input.overageStrategy ?? "none"
+  const limit = normalizeLimit(resolveGrantLimit(input.grants))
+  const overageStrategy = resolveOverageStrategy(input.grants)
 
   if (input.enforceLimit && limit !== null && overageStrategy !== "always") {
     for (const update of pendingUpdates) {
@@ -414,11 +422,10 @@ function readAggregationNumericValue(
 
 function buildMeterWindowKey(params: {
   customerId: string
-  periodKey: string
+  meterHash: string
   projectId: string
-  streamId: string
 }): string {
-  return `${params.projectId}:${params.customerId}:${params.streamId}:${params.periodKey}`
+  return `${params.projectId}:${params.customerId}:${params.meterHash}`
 }
 
 function getOrCreateMeterWindow(windows: Map<string, MeterWindow>, key: string): MeterWindow {
@@ -438,6 +445,31 @@ function normalizeLimit(limit?: number | null): number | null {
   }
 
   return limit
+}
+
+function resolveGrantLimit(grants: IngestionGrant[]): number | null {
+  if (grants.some((grant) => grant.amount === null)) {
+    return null
+  }
+
+  const amounts = grants.map((grant) => grant.amount ?? 0)
+  const usageMode = grants[0]?.featureConfig.usageMode
+
+  return usageMode === "tier"
+    ? Math.max(...amounts)
+    : amounts.reduce((total, amount) => total + amount, 0)
+}
+
+function resolveOverageStrategy(grants: IngestionGrant[]): OverageStrategy {
+  if (grants.some((grant) => grant.overageStrategy === "always")) {
+    return "always"
+  }
+
+  if (grants.some((grant) => grant.overageStrategy === "last-call")) {
+    return "last-call"
+  }
+
+  return "none"
 }
 
 export function createUsageGrant(
@@ -505,7 +537,31 @@ export function createResolvedState(
     activeGrantIds: ["grant_123"],
     customerId: "cus_123",
     featureSlug: "api_calls",
+    grants: [
+      {
+        amount: 100,
+        anchor: 0,
+        currencyCode: "USD",
+        effectiveAt: timestamp,
+        expiresAt: null,
+        featureConfig: DEFAULT_PRICE_CONFIG,
+        featurePlanVersionId: "fpv_123",
+        featureSlug: "api_calls",
+        grantId: "grant_123",
+        meterConfig: {
+          eventId: "meter_123",
+          eventSlug: "tokens_used",
+          aggregationMethod: "sum",
+          aggregationField: "amount",
+        },
+        meterHash: "meter_hash_123",
+        overageStrategy: "none",
+        priority: 10,
+        resetConfig: null,
+      },
+    ],
     limit: 100,
+    meterHash: "meter_hash_123",
     meterConfig: {
       eventId: "meter_123",
       eventSlug: "tokens_used",
@@ -515,16 +571,32 @@ export function createResolvedState(
     overageStrategy: "none",
     projectId: "proj_123",
     resetConfig: null,
-    streamEndAt: null,
-    streamId: "stream_123",
-    streamStartAt: timestamp,
+    effectiveAt: timestamp,
+    expiresAt: null,
   }
 
-  return {
+  const state = {
     ...defaults,
     ...overrides,
     meterConfig: overrides.meterConfig ?? defaults.meterConfig,
     resetConfig: overrides.resetConfig ?? defaults.resetConfig,
+  }
+
+  return {
+    ...state,
+    grants:
+      overrides.grants ??
+      defaults.grants.map((grant) => ({
+        ...grant,
+        amount: state.limit,
+        effectiveAt: state.effectiveAt,
+        expiresAt: state.expiresAt,
+        featureSlug: state.featureSlug,
+        meterConfig: state.meterConfig,
+        meterHash: state.meterHash,
+        overageStrategy: state.overageStrategy,
+        resetConfig: state.resetConfig,
+      })),
   }
 }
 

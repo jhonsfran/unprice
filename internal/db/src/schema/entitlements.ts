@@ -38,6 +38,8 @@ export const grants = pgTableProject(
     // when project is the subject, the subjectId is the projectId
     // all customers with that subjectId will have the grant applied
     subjectId: cuid("subject_id").notNull(),
+    // Semantic meter hash derived from the plan version feature meter config.
+    meterHash: varchar("meter_hash", { length: 128 }),
     // priority defines the merge order higher priority will be consumed first, comes from the type of the grant
     // subscription priority 10
     // trial priority 80
@@ -46,9 +48,6 @@ export const grants = pgTableProject(
     priority: integer("priority").notNull().default(0),
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
     expiresAt: bigint("expires_at", { mode: "number" }),
-    // whether the grant is auto renewed or not
-    // grants with auto renew true must have a subscription item id
-    autoRenew: boolean("auto_renew").notNull().default(true),
     // deleted flag is used to delete a grant
     // when deleting a grant, we set the deleted flag to true and create a new one
     // this is useful to keep append only history of the grants and reproduce any entitlement state at any time
@@ -104,6 +103,13 @@ export const grants = pgTableProject(
       table.featurePlanVersionId,
       table.effectiveAt,
       table.expiresAt
+    ),
+    idxRoute: index("idx_grants_route").on(
+      table.projectId,
+      table.subjectId,
+      table.subjectType,
+      table.meterHash,
+      table.effectiveAt
     ),
     featurePlanVersionfk: foreignKey({
       columns: [table.featurePlanVersionId, table.projectId],

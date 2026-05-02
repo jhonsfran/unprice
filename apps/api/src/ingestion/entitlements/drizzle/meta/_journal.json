@@ -64,6 +64,13 @@
       "when": 1777128879724,
       "tag": "0009_slimy_talon",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1777546051022,
+      "tag": "0010_nifty_starjammers",
+      "breakpoints": true
     }
   ]
 }

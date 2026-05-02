@@ -141,14 +141,18 @@ describe("IngestionService", () => {
     expect(mocks.getEntitlementWindowStub).toHaveBeenCalledTimes(1)
     expect(mocks.getEntitlementWindowStub.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
-        streamId: "stream_123",
+        meterHash: "meter_hash_123",
       })
     )
     expect(mocks.apply).toHaveBeenCalledWith(
       expect.objectContaining({
-        streamId: "stream_123",
-        featureSlug: "api_calls",
-        limit: 100,
+        grants: [
+          expect.objectContaining({
+            amount: 100,
+            featureSlug: "api_calls",
+            meterHash: "meter_hash_123",
+          }),
+        ],
       })
     )
     expect(mocks.commit).toHaveBeenCalledWith([
@@ -168,7 +172,47 @@ describe("IngestionService", () => {
           featurePlanVersionId: "fpv_billing_123",
         }),
       ],
-      resolvedStates: [createResolvedState(timestamp)],
+      resolvedStates: [
+        createResolvedState(timestamp, {
+          grants: [
+            {
+              amount: 100,
+              anchor: 0,
+              currencyCode: "EUR",
+              effectiveAt: timestamp,
+              expiresAt: null,
+              featureConfig: {
+                usageMode: "unit",
+                price: {
+                  dinero: {
+                    amount: 0,
+                    currency: {
+                      code: "EUR",
+                      base: 10,
+                      exponent: 2,
+                    },
+                    scale: 2,
+                  },
+                  displayAmount: "0.00",
+                },
+              },
+              featurePlanVersionId: "fpv_billing_123",
+              featureSlug: "api_calls",
+              grantId: "grant_billing_123",
+              meterConfig: {
+                eventId: "meter_123",
+                eventSlug: "tokens_used",
+                aggregationMethod: "sum",
+                aggregationField: "amount",
+              },
+              meterHash: "meter_hash_123",
+              overageStrategy: "none",
+              priority: 10,
+              resetConfig: null,
+            },
+          ],
+        }),
+      ],
     })
     const message = createBatchMessage({
       id: "evt_currency",
@@ -185,8 +229,12 @@ describe("IngestionService", () => {
 
     expect(mocks.apply).toHaveBeenCalledWith(
       expect.objectContaining({
-        currency: "EUR",
-        featurePlanVersionId: "fpv_billing_123",
+        grants: [
+          expect.objectContaining({
+            currencyCode: "EUR",
+            featurePlanVersionId: "fpv_billing_123",
+          }),
+        ],
       })
     )
   })
@@ -343,7 +391,7 @@ describe("IngestionService", () => {
         invalidStates: expect.arrayContaining([
           expect.objectContaining({
             featureSlug: "api_calls",
-            streamId: "stream_123",
+            meterHash: "meter_hash_123",
             errorMessage: expect.stringContaining("daily intervals"),
           }),
         ]),
@@ -389,7 +437,7 @@ describe("IngestionService", () => {
     expect(mocks.apply).toHaveBeenCalledWith(
       expect.objectContaining({
         enforceLimit: true,
-        featureSlug: "api_calls",
+        grants: [expect.objectContaining({ featureSlug: "api_calls" })],
       })
     )
     expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
@@ -647,7 +695,7 @@ describe("IngestionService", () => {
     const states = [
       createResolvedState(timestamp, {
         featureSlug: "feature_sum",
-        streamId: "stream_sum",
+        meterHash: "meter_hash_sum",
         meterConfig: {
           eventId: "meter_sum",
           eventSlug: "tokens_used",
@@ -657,7 +705,7 @@ describe("IngestionService", () => {
       }),
       createResolvedState(timestamp, {
         featureSlug: "feature_count",
-        streamId: "stream_count",
+        meterHash: "meter_hash_count",
         limit: 3,
         meterConfig: {
           eventId: "meter_count",
@@ -667,7 +715,7 @@ describe("IngestionService", () => {
       }),
       createResolvedState(timestamp, {
         featureSlug: "feature_max",
-        streamId: "stream_max",
+        meterHash: "meter_hash_max",
         meterConfig: {
           eventId: "meter_max",
           eventSlug: "tokens_used",
@@ -677,7 +725,7 @@ describe("IngestionService", () => {
       }),
       createResolvedState(timestamp, {
         featureSlug: "feature_latest",
-        streamId: "stream_latest",
+        meterHash: "meter_hash_latest",
         meterConfig: {
           eventId: "meter_latest",
           eventSlug: "tokens_used",
@@ -687,7 +735,7 @@ describe("IngestionService", () => {
       }),
       createResolvedState(timestamp, {
         featureSlug: "feature_sum_text",
-        streamId: "stream_sum_text",
+        meterHash: "meter_hash_sum_text",
         meterConfig: {
           eventId: "meter_sum_text",
           eventSlug: "tokens_used",
@@ -892,7 +940,7 @@ describe("IngestionService", () => {
       const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
       const state = createResolvedState(timestamp, {
         featureSlug: "feature_matrix",
-        streamId: `stream_${scenario.aggregationMethod}`,
+        meterHash: `meter_hash_${scenario.aggregationMethod}`,
         meterConfig: {
           eventId: `meter_${scenario.aggregationMethod}`,
           eventSlug: "tokens_used",
@@ -960,7 +1008,7 @@ describe("IngestionService", () => {
       const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
       const state = createResolvedState(timestamp, {
         featureSlug: "feature_invalid_payload",
-        streamId: `stream_invalid_${scenario.aggregationMethod}`,
+        meterHash: `meter_hash_invalid_${scenario.aggregationMethod}`,
         meterConfig: {
           eventId: `meter_invalid_${scenario.aggregationMethod}`,
           eventSlug: "tokens_used",
@@ -1047,7 +1095,7 @@ describe("IngestionService", () => {
       const baseTimestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
       const state = createResolvedState(baseTimestamp, {
         featureSlug: `feature_consistency_${scenario.aggregationMethod}`,
-        streamId: `stream_consistency_${scenario.aggregationMethod}`,
+        meterHash: `meter_hash_consistency_${scenario.aggregationMethod}`,
         meterConfig: {
           eventId: `meter_consistency_${scenario.aggregationMethod}`,
           eventSlug: "tokens_used",

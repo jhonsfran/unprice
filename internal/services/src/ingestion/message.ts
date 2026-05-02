@@ -76,17 +76,10 @@ export function buildEntitlementWindowName(params: {
 export function buildIngestionWindowName(params: {
   appEnv: string
   customerId: string
-  periodKey: string
+  meterHash: string
   projectId: string
-  streamId: string
 }): string {
-  return [
-    params.appEnv,
-    params.projectId,
-    params.customerId,
-    params.streamId,
-    params.periodKey,
-  ].join(":")
+  return [params.appEnv, params.projectId, params.customerId, params.meterHash].join(":")
 }
 
 export function computeEntitlementPeriodKey(
@@ -133,22 +126,22 @@ export function computeEntitlementPeriodKey(
 }
 
 export function computeResolvedStatePeriodKey(
-  state: Pick<IngestionResolvedState, "resetConfig" | "streamEndAt" | "streamStartAt">,
+  state: Pick<IngestionResolvedState, "effectiveAt" | "expiresAt" | "resetConfig">,
   timestamp: number
 ): string | null {
-  if (timestamp < state.streamStartAt) {
+  if (timestamp < state.effectiveAt) {
     return null
   }
 
-  if (typeof state.streamEndAt === "number" && timestamp >= state.streamEndAt) {
+  if (typeof state.expiresAt === "number" && timestamp >= state.expiresAt) {
     return null
   }
 
   if (!state.resetConfig) {
     return computePeriodKey({
       now: timestamp,
-      effectiveStartDate: state.streamStartAt,
-      effectiveEndDate: state.streamEndAt,
+      effectiveStartDate: state.effectiveAt,
+      effectiveEndDate: state.expiresAt,
       trialEndsAt: null,
       config: {
         name: "ingestion",
@@ -162,8 +155,8 @@ export function computeResolvedStatePeriodKey(
 
   return computePeriodKey({
     now: timestamp,
-    effectiveStartDate: state.streamStartAt,
-    effectiveEndDate: state.streamEndAt,
+    effectiveStartDate: state.effectiveAt,
+    effectiveEndDate: state.expiresAt,
     trialEndsAt: null,
     config: {
       name: state.resetConfig.name,
@@ -176,22 +169,22 @@ export function computeResolvedStatePeriodKey(
 }
 
 export function computeResolvedStatePeriodWindow(
-  state: Pick<IngestionResolvedState, "resetConfig" | "streamEndAt" | "streamStartAt">,
+  state: Pick<IngestionResolvedState, "effectiveAt" | "expiresAt" | "resetConfig">,
   timestamp: number
 ): { start: number; end: number } | null {
-  if (timestamp < state.streamStartAt) {
+  if (timestamp < state.effectiveAt) {
     return null
   }
 
-  if (typeof state.streamEndAt === "number" && timestamp >= state.streamEndAt) {
+  if (typeof state.expiresAt === "number" && timestamp >= state.expiresAt) {
     return null
   }
 
   if (!state.resetConfig) {
     const cycle = calculateCycleWindow({
       now: timestamp,
-      effectiveStartDate: state.streamStartAt,
-      effectiveEndDate: state.streamEndAt,
+      effectiveStartDate: state.effectiveAt,
+      effectiveEndDate: state.expiresAt,
       trialEndsAt: null,
       config: {
         name: "ingestion",
@@ -207,8 +200,8 @@ export function computeResolvedStatePeriodWindow(
 
   const cycle = calculateCycleWindow({
     now: timestamp,
-    effectiveStartDate: state.streamStartAt,
-    effectiveEndDate: state.streamEndAt,
+    effectiveStartDate: state.effectiveAt,
+    effectiveEndDate: state.expiresAt,
     trialEndsAt: null,
     config: {
       name: state.resetConfig.name,
@@ -223,7 +216,7 @@ export function computeResolvedStatePeriodWindow(
 }
 
 export function computeResolvedStatePeriodEndAt(
-  state: Pick<IngestionResolvedState, "resetConfig" | "streamEndAt" | "streamStartAt">,
+  state: Pick<IngestionResolvedState, "effectiveAt" | "expiresAt" | "resetConfig">,
   timestamp: number
 ): number | null {
   return computeResolvedStatePeriodWindow(state, timestamp)?.end ?? null

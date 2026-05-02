@@ -41,10 +41,12 @@ export const grantsMetadataSchema = z.record(
 
 export const grantSchema = createSelectSchema(schema.grants, {
   metadata: grantsMetadataSchema,
+  meterHash: z.string().nullable(),
 })
 
 export const grantInsertSchema = createInsertSchema(schema.grants, {
   metadata: grantsMetadataSchema.nullable(),
+  meterHash: z.string().nullable().optional(),
 })
 
 export const grantSchemaExtended = grantSchema.extend({
@@ -157,6 +159,7 @@ export const entitlementGrantsSnapshotSchema = z.object({
   priority: z.number(),
   effectiveAt: z.number(),
   expiresAt: z.number().nullable(),
+  amount: z.number().nullable().optional(),
   limit: z.number().nullable(),
   unitOfMeasure: z.string().optional(),
   featurePlanVersionId: z.string().optional(),

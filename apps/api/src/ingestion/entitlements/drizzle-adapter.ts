@@ -1,12 +1,12 @@
 import type { StorageAdapter } from "@unprice/services/entitlements"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
-import { meterWindowTable, type schema } from "./db/schema"
+import { meterStateTable, type schema } from "./db/schema"
 
 // DO-local adapter: one row per DO (the single meter). The engine uses
 // opaque keyed storage via these methods, but the keys it writes always
 // have one of two prefixes — "meter-state:" (current value) or
 // "meter-state-updated-at:" (timestamp) — so we route them onto the
-// dedicated columns of the singleton meter_window row.
+// dedicated columns of the meter_state row.
 const USAGE_PREFIX = "meter-state:"
 const UPDATED_AT_PREFIX = "meter-state-updated-at:"
 
@@ -28,8 +28,8 @@ export class DrizzleStorageAdapter implements StorageAdapter {
   getSync<T>(key: string): T | null {
     const column = columnFor(key)
     const row = this.db
-      .select({ usage: meterWindowTable.usage, updatedAt: meterWindowTable.updatedAt })
-      .from(meterWindowTable)
+      .select({ usage: meterStateTable.usage, updatedAt: meterStateTable.updatedAt })
+      .from(meterStateTable)
       .get()
     if (!row) return null
     const value = row[column]
@@ -43,10 +43,10 @@ export class DrizzleStorageAdapter implements StorageAdapter {
   putSync<T>(key: string, value: T): void {
     const column = columnFor(key)
     const numeric = Number(value)
-    // ensureMeterWindow inserts the singleton row before the engine runs,
+    // ensureMeterState inserts the singleton row before the engine runs,
     // so this UPDATE always hits exactly one row.
     this.db
-      .update(meterWindowTable)
+      .update(meterStateTable)
       .set({ [column]: numeric })
       .run()
   }

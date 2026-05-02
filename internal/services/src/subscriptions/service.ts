@@ -501,7 +501,6 @@ export class SubscriptionService {
           subjectType: "customer",
           subjectId: customerId,
           featurePlanVersionId: target.featurePlanVersionId,
-          autoRenew: false,
           limit: target.limit,
           overageStrategy: target.overageStrategy,
           units: target.units,

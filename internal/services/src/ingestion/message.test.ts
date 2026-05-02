@@ -59,8 +59,8 @@ describe("ingestion message helpers", () => {
 
   it("returns null resolved-state period keys outside the stream window", () => {
     const state = createResolvedState({
-      streamStartAt: Date.UTC(2026, 2, 10),
-      streamEndAt: Date.UTC(2026, 2, 20),
+      effectiveAt: Date.UTC(2026, 2, 10),
+      expiresAt: Date.UTC(2026, 2, 20),
     })
 
     expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 2, 9))).toBeNull()
@@ -68,22 +68,22 @@ describe("ingestion message helpers", () => {
   })
 
   it("uses one-time period keys when resolved state has no reset config", () => {
-    const streamStartAt = Date.UTC(2026, 2, 10, 8, 0, 0)
+    const effectiveAt = Date.UTC(2026, 2, 10, 8, 0, 0)
     const state = createResolvedState({
-      streamStartAt,
-      streamEndAt: Date.UTC(2026, 2, 20, 8, 0, 0),
+      effectiveAt,
+      expiresAt: Date.UTC(2026, 2, 20, 8, 0, 0),
       resetConfig: null,
     })
 
     expect(computeResolvedStatePeriodKey(state, Date.UTC(2026, 2, 15, 12, 0, 0))).toBe(
-      `onetime:${streamStartAt}`
+      `onetime:${effectiveAt}`
     )
   })
 
   it("computes monthly resolved-state keys and rotates exactly at the monthly anchor", () => {
     const state = createResolvedState({
-      streamStartAt: Date.UTC(2026, 2, 15, 0, 0, 0),
-      streamEndAt: Date.UTC(2026, 4, 15, 0, 0, 0),
+      effectiveAt: Date.UTC(2026, 2, 15, 0, 0, 0),
+      expiresAt: Date.UTC(2026, 4, 15, 0, 0, 0),
       resetConfig: {
         name: "billing",
         resetInterval: "month",
@@ -103,7 +103,7 @@ describe("ingestion message helpers", () => {
 
   it("computes daily resolved-state keys using the configured reset hour", () => {
     const state = createResolvedState({
-      streamStartAt: Date.UTC(2026, 2, 1, 0, 0, 0),
+      effectiveAt: Date.UTC(2026, 2, 1, 0, 0, 0),
       resetConfig: {
         name: "daily",
         resetInterval: "day",
@@ -123,7 +123,7 @@ describe("ingestion message helpers", () => {
 
   it("supports custom reset intervals from grant state (every two months)", () => {
     const state = createResolvedState({
-      streamStartAt: Date.UTC(2026, 0, 1, 0, 0, 0),
+      effectiveAt: Date.UTC(2026, 0, 1, 0, 0, 0),
       resetConfig: {
         name: "billing",
         resetInterval: "month",
@@ -143,9 +143,9 @@ describe("ingestion message helpers", () => {
 
   it("matches resolved states against grant-derived stream windows and reset config", () => {
     const historical = createResolvedState({
-      streamId: "stream_historical",
-      streamStartAt: Date.UTC(2026, 1, 15),
-      streamEndAt: Date.UTC(2026, 2, 15),
+      meterHash: "meter_hash_historical",
+      effectiveAt: Date.UTC(2026, 1, 15),
+      expiresAt: Date.UTC(2026, 2, 15),
       resetConfig: {
         name: "billing",
         resetInterval: "month",
@@ -155,9 +155,9 @@ describe("ingestion message helpers", () => {
       },
     })
     const current = createResolvedState({
-      streamId: "stream_current",
-      streamStartAt: Date.UTC(2026, 2, 15),
-      streamEndAt: Date.UTC(2026, 3, 15),
+      meterHash: "meter_hash_current",
+      effectiveAt: Date.UTC(2026, 2, 15),
+      expiresAt: Date.UTC(2026, 3, 15),
       resetConfig: {
         name: "billing",
         resetInterval: "month",
@@ -167,7 +167,7 @@ describe("ingestion message helpers", () => {
       },
     })
     const wrongSlug = createResolvedState({
-      streamId: "stream_wrong_slug",
+      meterHash: "meter_hash_wrong_slug",
       meterConfig: {
         eventId: "meter_wrong_slug",
         eventSlug: "other_event",
@@ -183,8 +183,8 @@ describe("ingestion message helpers", () => {
           slug: "tokens_used",
           timestamp: Date.UTC(2026, 2, 10),
         }),
-      }).map((state) => state.streamId)
-    ).toEqual(["stream_historical"])
+      }).map((state) => state.meterHash)
+    ).toEqual(["meter_hash_historical"])
   })
 
   it("filters matching entitlements by feature type, slug, and active period", () => {
@@ -343,7 +343,7 @@ describe("ingestion message helpers", () => {
 
   it("accepts parseable numeric strings for resolved states and rejects non-numeric payloads", () => {
     const countState = createResolvedState({
-      streamId: "stream_count",
+      meterHash: "meter_hash_count",
       meterConfig: {
         eventId: "meter_count",
         eventSlug: "tokens_used",
@@ -351,7 +351,7 @@ describe("ingestion message helpers", () => {
       },
     })
     const validStringState = createResolvedState({
-      streamId: "stream_string_valid",
+      meterHash: "meter_hash_string_valid",
       meterConfig: {
         eventId: "meter_string_valid",
         eventSlug: "tokens_used",
@@ -360,7 +360,7 @@ describe("ingestion message helpers", () => {
       },
     })
     const validNumberState = createResolvedState({
-      streamId: "stream_number_valid",
+      meterHash: "meter_hash_number_valid",
       meterConfig: {
         eventId: "meter_number_valid",
         eventSlug: "tokens_used",
@@ -369,7 +369,7 @@ describe("ingestion message helpers", () => {
       },
     })
     const invalidStringState = createResolvedState({
-      streamId: "stream_string_invalid",
+      meterHash: "meter_hash_string_invalid",
       meterConfig: {
         eventId: "meter_string_invalid",
         eventSlug: "tokens_used",
@@ -388,8 +388,8 @@ describe("ingestion message helpers", () => {
             label: "three",
           },
         }),
-      }).map((state) => state.streamId)
-    ).toEqual(["stream_count", "stream_string_valid", "stream_number_valid"])
+      }).map((state) => state.meterHash)
+    ).toEqual(["meter_hash_count", "meter_hash_string_valid", "meter_hash_number_valid"])
   })
 
   it("sorts queued messages by timestamp and then idempotency key", () => {
@@ -571,7 +571,45 @@ function createResolvedState(
     activeGrantIds: ["grant_123"],
     customerId: "cus_123",
     featureSlug: "api_calls",
+    grants: [
+      {
+        amount: 100,
+        currencyCode: "USD",
+        effectiveAt: Date.UTC(2026, 2, 18, 0, 0, 0),
+        expiresAt: null,
+        featureConfig: {
+          usageMode: "unit",
+          price: {
+            dinero: {
+              amount: 0,
+              currency: {
+                code: "USD",
+                base: 10,
+                exponent: 2,
+              },
+              scale: 2,
+            },
+            displayAmount: "0.00",
+          },
+        },
+        anchor: 0,
+        featurePlanVersionId: "fpv_123",
+        featureSlug: "api_calls",
+        grantId: "grant_123",
+        meterConfig: {
+          eventId: "meter_123",
+          eventSlug: "tokens_used",
+          aggregationMethod: "sum",
+          aggregationField: "amount",
+        },
+        meterHash: "meter_hash_123",
+        overageStrategy: "none",
+        priority: 10,
+        resetConfig: null,
+      },
+    ],
     limit: 100,
+    meterHash: "meter_hash_123",
     meterConfig: {
       eventId: "meter_123",
       eventSlug: "tokens_used",
@@ -581,15 +619,31 @@ function createResolvedState(
     overageStrategy: "none",
     projectId: "proj_123",
     resetConfig: null,
-    streamEndAt: null,
-    streamId: "stream_123",
-    streamStartAt: Date.UTC(2026, 2, 18, 0, 0, 0),
+    expiresAt: null,
+    effectiveAt: Date.UTC(2026, 2, 18, 0, 0, 0),
   }
 
-  return {
+  const state = {
     ...defaults,
     ...overrides,
     meterConfig: overrides.meterConfig ?? defaults.meterConfig,
     resetConfig: overrides.resetConfig ?? defaults.resetConfig,
+  }
+
+  return {
+    ...state,
+    grants:
+      overrides.grants ??
+      defaults.grants.map((grant) => ({
+        ...grant,
+        amount: state.limit,
+        effectiveAt: state.effectiveAt,
+        expiresAt: state.expiresAt,
+        featureSlug: state.featureSlug,
+        meterConfig: state.meterConfig,
+        meterHash: state.meterHash,
+        overageStrategy: state.overageStrategy,
+        resetConfig: state.resetConfig,
+      })),
   }
 }
