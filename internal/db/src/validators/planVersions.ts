@@ -115,7 +115,7 @@ export const versionInsertBaseSchema = createInsertSchema(versions, {
     .min(0)
     .default(0)
     .describe(
-      "Number of trial period units (based on billing interval). Example: 14 for a 14-day trial when interval is 'day'. Default: 0 (no trial)"
+      "Number of trial duration units. Minute-billed plans use minutes; all other billing intervals use days. Example: 15 for a 15-day trial on a monthly plan. Default: 0 (no trial)"
     ),
   creditLineAmount: z.coerce
     .number()

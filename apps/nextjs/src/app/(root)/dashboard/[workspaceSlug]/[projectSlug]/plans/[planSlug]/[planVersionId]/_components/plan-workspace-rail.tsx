@@ -2,6 +2,7 @@ import type React from "react"
 
 import { Pencil } from "lucide-react"
 
+import { getTrialUnitLabel } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
@@ -18,11 +19,12 @@ export function PlanWorkspaceRail({
   if (!planVersion) return null
 
   const status = planVersion.status ?? "draft"
-  const trialUnit = planVersion.billingConfig.billingInterval
+  const trialUnit = getTrialUnitLabel({
+    billingInterval: planVersion.billingConfig.billingInterval,
+    units: planVersion.trialUnits,
+  })
   const trialLabel =
-    planVersion.trialUnits === 0
-      ? "no trial"
-      : `${planVersion.trialUnits} ${trialUnit}${planVersion.trialUnits === 1 ? "" : "s"}`
+    planVersion.trialUnits === 0 ? "no trial" : `${planVersion.trialUnits} ${trialUnit}`
 
   const items: Array<[string, React.ReactNode]> = [
     ["Status", <StatusDot key="status" status={status} />],

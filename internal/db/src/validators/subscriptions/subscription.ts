@@ -195,7 +195,7 @@ export const subscriptionInsertSchema = createInsertSchema(subscriptions, {
             if (phase.trialUnits < 0) {
               return ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: "Trial days must be greater than 0",
+                message: "Trial duration cannot be negative",
                 path: [index, "trialUnits"],
               })
             }

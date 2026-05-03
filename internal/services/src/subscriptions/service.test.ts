@@ -9,6 +9,110 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     expect(DEFAULT_GRANT_PRIORITY.subscription).toBe(10)
   })
 
+  it("applies plan trial units even when no payment method id is present", async () => {
+    const now = Date.parse("2026-05-02T12:00:00.000Z")
+    const startAt = Date.parse("2026-05-03T12:00:00.000Z")
+    const projectId = "proj_123"
+    const subscriptionId = "sub_123"
+    const featurePlanVersionId = "fpv_123"
+    const insertPhase = vi.fn(async (phase) => phase)
+    const insertItems = vi.fn().mockResolvedValue(undefined)
+    const db = {
+      query: {
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "version_123",
+            status: "published",
+            active: true,
+            paymentMethodRequired: true,
+            paymentProvider: "sandbox",
+            trialUnits: 15,
+            billingConfig: {
+              name: "monthly",
+              billingInterval: "month",
+              billingIntervalCount: 1,
+              planType: "recurring",
+              billingAnchor: "dayOfCreation",
+            },
+            plan: { slug: "pro" },
+            planFeatures: [
+              {
+                id: featurePlanVersionId,
+                feature: { id: "feature_123" },
+                limit: 3,
+                metadata: { overageStrategy: "none" },
+              },
+            ],
+          }),
+        },
+      },
+    } as unknown as Database
+    const repo = {
+      findSubscriptionWithPhases: vi.fn().mockResolvedValue({
+        id: subscriptionId,
+        projectId,
+        customerId: "cus_123",
+        active: true,
+        status: "active",
+        phases: [],
+      }),
+      withTransaction: vi.fn(async (callback) =>
+        callback({
+          insertPhase,
+          insertItems,
+        })
+      ),
+    }
+    const logger = {
+      set: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    }
+    const service = new SubscriptionService({
+      db,
+      repo: repo as never,
+      logger: logger as never,
+      analytics: {} as never,
+      waitUntil: vi.fn(),
+      cache: {} as never,
+      metrics: {} as never,
+      customerService: {} as never,
+      entitlementService: {} as never,
+      billingService: {} as never,
+      ratingService: {} as never,
+      ledgerService: {} as never,
+    })
+
+    const result = await service.createPhase({
+      input: {
+        subscriptionId,
+        planVersionId: "version_123",
+        startAt,
+        config: [
+          {
+            featurePlanId: featurePlanVersionId,
+            units: 3,
+            featureSlug: "api-requests",
+          },
+        ],
+      } as never,
+      projectId,
+      db,
+      now,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(insertPhase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentMethodId: null,
+        trialUnits: 15,
+        trialEndsAt: Date.parse("2026-05-18T12:00:00.000Z"),
+      })
+    )
+  })
+
   it("syncs new phase entitlements on the same transaction as the phase write", async () => {
     const now = Date.parse("2026-05-02T12:00:00.000Z")
     const projectId = "proj_123"

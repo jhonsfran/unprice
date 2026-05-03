@@ -1,4 +1,4 @@
-import { calculateFlatPricePlan } from "@unprice/db/validators"
+import { calculateFlatPricePlan, getTrialUnitLabel } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"
@@ -33,7 +33,10 @@ export function PricingCard({
 
   const isPublished = planVersion.status === "published"
   const trialUnits = planVersion.trialUnits ?? 0
-  const trialUnitLabel = planVersion.billingConfig.billingInterval
+  const trialUnitLabel = getTrialUnitLabel({
+    billingInterval: planVersion.billingConfig.billingInterval,
+    units: trialUnits,
+  })
   const billingLabel = planVersion.billingConfig.name
 
   return (
@@ -56,7 +59,7 @@ export function PricingCard({
             </div>
             {trialUnits > 0 && (
               <p className="text-muted-foreground text-xs">
-                {trialUnits}-{trialUnitLabel} free trial
+                {trialUnits} {trialUnitLabel} free trial
               </p>
             )}
           </div>

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { calculateDateAt, calculateProration, getAnchor, getBillingCycleMessage } from "./utils"
+import {
+  calculateDateAt,
+  calculateProration,
+  getAnchor,
+  getBillingCycleMessage,
+  getTrialIntervalForBillingInterval,
+  getTrialUnitLabel,
+} from "./utils"
 import type { Config } from "./utils"
 
 const utcDate = (date: string, time = "00:00:00.000") => new Date(`${date}T${time}Z`).getTime()
@@ -57,6 +64,22 @@ describe("calculateDateAt", () => {
     })
 
     expect(end).toBe(utcDate("2026-01-01", "12:00:00.000"))
+  })
+})
+
+describe("getTrialIntervalForBillingInterval", () => {
+  it("uses minutes for minute-billed plans", () => {
+    expect(getTrialIntervalForBillingInterval("minute")).toBe("minute")
+    expect(getTrialUnitLabel({ billingInterval: "minute", units: 5 })).toBe("minutes")
+  })
+
+  it("uses days for non-minute billing periods", () => {
+    expect(getTrialIntervalForBillingInterval("day")).toBe("day")
+    expect(getTrialIntervalForBillingInterval("week")).toBe("day")
+    expect(getTrialIntervalForBillingInterval("month")).toBe("day")
+    expect(getTrialIntervalForBillingInterval("year")).toBe("day")
+    expect(getTrialIntervalForBillingInterval("onetime")).toBe("day")
+    expect(getTrialUnitLabel({ billingInterval: "month", units: 1 })).toBe("day")
   })
 })
 

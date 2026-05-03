@@ -15,6 +15,7 @@ import {
   calculateDateAt,
   createDefaultSubscriptionConfig,
   getAnchor,
+  getTrialIntervalForBillingInterval,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -927,12 +928,8 @@ export class SubscriptionService {
       )
     }
 
-    // check if payment method is required for the plan version
     const paymentMethodRequired = versionData.paymentMethodRequired
-    const trialUnitsToUse =
-      paymentMethodRequired && paymentMethodId && paymentMethodId !== ""
-        ? (trialUnits ?? versionData.trialUnits ?? 0)
-        : 0
+    const trialUnitsToUse = trialUnits ?? versionData.trialUnits ?? 0
     const billingAnchorToUse = getAnchor(
       startAtToUse,
       versionData.billingConfig.billingInterval,
@@ -987,13 +984,13 @@ export class SubscriptionService {
       configItemsSubscription = config
     }
 
-    // calculate trials only if payment method is set and required for the plan version
+    // Minute-billed plans support minute trials for local/test loops. All other plans use trial days.
     let trialsEndAt = null
     if (trialUnitsToUse > 0) {
       trialsEndAt = calculateDateAt({
         startDate: startAtToUse,
         config: {
-          interval: versionData.billingConfig.billingInterval,
+          interval: getTrialIntervalForBillingInterval(versionData.billingConfig.billingInterval),
           units: trialUnitsToUse,
         },
       })
@@ -1086,8 +1083,7 @@ export class SubscriptionService {
 
       if (isActivePhase) {
         // Status decision tree, in priority order:
-        //   trialing       — plan grants trial units (and a payment method
-        //                    is on file if the plan requires one).
+        //   trialing       — plan grants trial units.
         //   pending_payment — invoice-driven mode that bills upfront and
         //                    requires a payment method but no funds have
         //                    settled yet. The bootstrap topup/invoice will

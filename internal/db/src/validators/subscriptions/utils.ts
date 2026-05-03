@@ -14,6 +14,24 @@ export const configSchema = z.object({
 })
 export type Config = z.infer<typeof configSchema>
 
+export function getTrialIntervalForBillingInterval(
+  billingInterval: BillingInterval
+): Extract<BillingInterval, "day" | "minute"> {
+  return billingInterval === "minute" ? "minute" : "day"
+}
+
+export function getTrialUnitLabel({
+  billingInterval,
+  units,
+}: {
+  billingInterval: BillingInterval
+  units?: number | null
+}): string {
+  const trialInterval = getTrialIntervalForBillingInterval(billingInterval)
+
+  return units === 1 ? trialInterval : `${trialInterval}s`
+}
+
 // =================================================================================
 // 2. STANDALONE UTILITY FUNCTION: calculateTrialEndsAt
 // This function can be exported and used anywhere in the system to determine

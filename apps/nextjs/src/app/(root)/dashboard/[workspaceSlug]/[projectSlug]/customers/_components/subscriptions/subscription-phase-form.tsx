@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   type InsertSubscriptionPhase,
   type SubscriptionPhase,
+  getTrialUnitLabel,
   subscriptionPhaseInsertSchema,
   subscriptionPhaseSelectSchema,
 } from "@unprice/db/validators"
@@ -115,6 +116,12 @@ export function SubscriptionPhaseForm({
   const selectedPlanVersion = planVersions?.planVersions.find(
     (version) => version.id === selectedPlanVersionId
   )
+  const trialUnitLabel = selectedPlanVersion
+    ? getTrialUnitLabel({
+        billingInterval: selectedPlanVersion.billingConfig.billingInterval,
+        units: form.watch("trialUnits"),
+      })
+    : "days"
 
   // when plan is selected set payment method required to true
   useEffect(() => {
@@ -150,8 +157,9 @@ export function SubscriptionPhaseForm({
 
           <TrialUnitsFormField
             form={form}
-            isDisabled={editMode || !selectedPlanVersion?.paymentMethodRequired}
+            isDisabled={editMode || !selectedPlanVersion}
             className="w-full"
+            unitLabel={trialUnitLabel}
           />
         </div>
 

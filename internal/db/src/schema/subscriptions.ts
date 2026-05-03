@@ -95,7 +95,7 @@ export const subscriptionPhases = pgTableProject(
     // payment method id of the customer - if not set, the first payment method will be used
     paymentMethodId: text("payment_method_id"),
     paymentProvider: paymentProviderEnum("payment_provider").notNull().default("sandbox"),
-    // trial units of the phase
+    // trial duration units of the phase
     trialUnits: integer("trial_units").notNull().default(0),
     // billing anchor of the phase
     billingAnchor: integer("billing_anchor").notNull().default(0),
