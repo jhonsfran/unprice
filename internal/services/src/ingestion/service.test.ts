@@ -1,6 +1,9 @@
 import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
+import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import { type IngestionEntitlement, IngestionService } from "./service"
+
+const SERVICE_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 
 describe("IngestionService entitlement routing", () => {
   it("loads customer entitlements and routes by customerEntitlementId", async () => {
@@ -94,6 +97,7 @@ describe("IngestionService entitlement routing", () => {
         }),
       },
       logger: createLogger() as never,
+      now: () => SERVICE_NOW,
       waitUntil: vi.fn(),
     })
 
@@ -165,6 +169,7 @@ describe("IngestionService entitlement routing", () => {
         }),
       },
       logger: logger as never,
+      now: () => SERVICE_NOW,
       waitUntil: vi.fn(),
     })
 
@@ -227,6 +232,7 @@ describe("IngestionService entitlement routing", () => {
         }),
       },
       logger: createLogger() as never,
+      now: () => SERVICE_NOW,
       waitUntil: vi.fn(),
     })
 
@@ -262,6 +268,72 @@ describe("IngestionService entitlement routing", () => {
     expect(JSON.parse(entries[0].resultJson)).toEqual({
       state: "rejected",
       rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
+  })
+
+  it("rejects queue messages older than the ingestion cap before entitlement processing", async () => {
+    const entitlement = createEntitlement()
+    const getCustomerEntitlementsForCustomer = vi.fn()
+    const getEntitlementWindowStub = vi.fn()
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const logger = createLogger()
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer,
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW - INGESTION_MAX_EVENT_AGE_MS - 10_000,
+          idempotencyKey: "idem_too_old",
+          id: "evt_too_old",
+          slug: "usage.recorded",
+          timestamp: SERVICE_NOW - INGESTION_MAX_EVENT_AGE_MS - 1,
+          properties: { amount: 1 },
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.disposition.action).toBe("ack")
+    expect(getCustomerEntitlementsForCustomer).not.toHaveBeenCalled()
+    expect(getEntitlementWindowStub).not.toHaveBeenCalled()
+    expect(logger.warn).toHaveBeenCalledWith(
+      "raw ingestion event rejected as too old",
+      expect.objectContaining({
+        projectId: entitlement.projectId,
+        customerId: entitlement.customerId,
+        idempotencyKey: "idem_too_old",
+        rejectionReason: "EVENT_TOO_OLD",
+      })
+    )
+    expect(commit).toHaveBeenCalledTimes(1)
+
+    const [entries] = commit.mock.calls[0]!
+    expect(entries[0]).toMatchObject({
+      idempotencyKey: "idem_too_old",
+      status: "rejected",
+      rejectionReason: "EVENT_TOO_OLD",
     })
   })
 })

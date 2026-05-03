@@ -3,8 +3,14 @@ import type { MeterConfig as DbMeterConfig } from "@unprice/db/validators"
 import { BaseError } from "@unprice/error"
 
 export const MAX_FUTURE_EVENT_SKEW_MS = 5_000 // 5 secs is more than enough to avoid clock skews
-export const MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1_000 // 30 days to allow late events
+export const INGESTION_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1_000 // 30 days to allow late events
+export const DO_IDEMPOTENCY_TTL_MS = INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1_000
+export const MAX_EVENT_AGE_MS = INGESTION_MAX_EVENT_AGE_MS
 export const LATE_EVENT_GRACE_MS = 60 * 60 * 1_000 // 1h producer / queue lag grace before period close
+
+if (DO_IDEMPOTENCY_TTL_MS <= INGESTION_MAX_EVENT_AGE_MS) {
+  throw new Error("DO idempotency retention must exceed ingestion event acceptance")
+}
 
 export interface RawEvent {
   id: string
@@ -68,7 +74,7 @@ export class EventTimestampTooOldError extends BaseError<{
       context: {
         eventTimeMs,
         serverTimeMs,
-        maxEventAgeMs: MAX_EVENT_AGE_MS,
+        maxEventAgeMs: INGESTION_MAX_EVENT_AGE_MS,
       },
     })
   }
@@ -106,7 +112,7 @@ export function validateEventTimestamp(eventTimeMs: number, serverTimeMs: number
     throw new EventTimestampTooFarInFutureError(eventTimeMs, serverTimeMs)
   }
 
-  if (serverTimeMs - eventTimeMs > MAX_EVENT_AGE_MS) {
+  if (serverTimeMs - eventTimeMs > INGESTION_MAX_EVENT_AGE_MS) {
     throw new EventTimestampTooOldError(eventTimeMs, serverTimeMs)
   }
 }

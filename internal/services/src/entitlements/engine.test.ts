@@ -3,6 +3,8 @@ import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
   type Fact,
+  DO_IDEMPOTENCY_TTL_MS,
+  INGESTION_MAX_EVENT_AGE_MS,
   type MeterConfig,
   PeriodKeyComputationError,
   type RawEvent,
@@ -55,7 +57,7 @@ describe("validateEventTimestamp", () => {
 
   it("throws an old-event error when the event is older than thirty days", () => {
     const serverTimeMs = Date.UTC(2026, 2, 8, 10, 0, 0)
-    const tooOldEventTimeMs = serverTimeMs - 30 * 24 * 60 * 60 * 1_000 - 1
+    const tooOldEventTimeMs = serverTimeMs - INGESTION_MAX_EVENT_AGE_MS - 1
 
     expect(() => validateEventTimestamp(tooOldEventTimeMs, serverTimeMs)).toThrow(
       EventTimestampTooOldError
@@ -67,8 +69,12 @@ describe("validateEventTimestamp", () => {
 
     expect(() => validateEventTimestamp(serverTimeMs + 4_999, serverTimeMs)).not.toThrow()
     expect(() =>
-      validateEventTimestamp(serverTimeMs - 30 * 24 * 60 * 60 * 1_000, serverTimeMs)
+      validateEventTimestamp(serverTimeMs - INGESTION_MAX_EVENT_AGE_MS, serverTimeMs)
     ).not.toThrow()
+  })
+
+  it("keeps DO idempotency retention wider than public ingestion acceptance", () => {
+    expect(DO_IDEMPOTENCY_TTL_MS).toBeGreaterThan(INGESTION_MAX_EVENT_AGE_MS)
   })
 })
 

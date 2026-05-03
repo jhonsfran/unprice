@@ -1,5 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
-import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
+import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
 import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -206,12 +206,12 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, logger } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
         ...requestBody,
-        timestamp: requestBody.timestamp - MAX_EVENT_AGE_MS - 1,
+        timestamp: requestBody.timestamp - INGESTION_MAX_EVENT_AGE_MS - 1,
       }),
       env,
       executionCtx
@@ -221,6 +221,15 @@ describe("ingestEventsV1 route", () => {
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         code: "BAD_REQUEST",
+      })
+    )
+    expect(logger.warn).toHaveBeenCalledWith(
+      "raw ingestion event rejected as too old",
+      expect.objectContaining({
+        projectId: "proj_123",
+        customerId: requestBody.customerId,
+        idempotencyKey: requestBody.idempotencyKey,
+        rejectionReason: "EVENT_TOO_OLD",
       })
     )
   })
@@ -366,6 +375,7 @@ describe("ingestEventsV1 route", () => {
 function createTestApp() {
   const app = new OpenAPIHono<HonoEnv>()
   const waitUntilPromises: Promise<unknown>[] = []
+  const logger = createRouteLogger()
 
   app.use(timing())
 
@@ -381,8 +391,9 @@ function createTestApp() {
   app.use("*", async (c, next) => {
     c.set("requestId", "req_123")
     c.set("requestStartedAt", Date.now())
+    c.set("logger", logger as AppLogger)
     c.set("services", {
-      logger: createRouteLogger(),
+      logger,
     })
 
     await next()
@@ -408,7 +419,7 @@ function createTestApp() {
     },
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, waitUntilPromises }
+  return { app, env, executionCtx, logger, waitUntilPromises }
 }
 
 function buildRequest(body: Record<string, unknown> = requestBody) {

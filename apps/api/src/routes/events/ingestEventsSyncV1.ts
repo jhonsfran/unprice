@@ -14,6 +14,7 @@ import type { App } from "~/hono/app"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import {
   buildIngestionQueueMessage,
+  logEventTooOldRejection,
   rawEventSchema,
   resolveRequestCustomerId,
 } from "./ingestEventsV1"
@@ -73,6 +74,7 @@ export const registerIngestEventsSyncV1 = (app: App) =>
     const requestId = c.get("requestId")
     const receivedAt = c.get("requestStartedAt")
     const timestamp = body.timestamp ?? receivedAt
+    const logger = c.get("logger")
 
     const key = await keyAuth(c)
     const customerId = resolveRequestCustomerId({
@@ -92,6 +94,20 @@ export const registerIngestEventsSyncV1 = (app: App) =>
     try {
       validateEventTimestamp(timestamp, receivedAt)
     } catch (error) {
+      if (error instanceof EventTimestampTooOldError) {
+        logEventTooOldRejection({
+          customerId,
+          eventId: body.id,
+          eventSlug: body.eventSlug,
+          eventTimestamp: timestamp,
+          idempotencyKey: body.idempotencyKey,
+          logger,
+          now: receivedAt,
+          projectId,
+          maxEventAgeMs: error.context?.maxEventAgeMs,
+        })
+      }
+
       if (
         error instanceof EventTimestampTooFarInFutureError ||
         error instanceof EventTimestampTooOldError

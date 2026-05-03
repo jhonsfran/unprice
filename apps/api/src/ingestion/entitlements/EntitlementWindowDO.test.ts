@@ -11,7 +11,8 @@ function fakeDinero(amount: number, scale: number): Dinero<number> {
 }
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
-const TEST_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const TEST_INGESTION_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const TEST_DO_IDEMPOTENCY_TTL_MS = TEST_INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000
 const TEST_LATE_EVENT_GRACE_MS = 60 * 60 * 1000
 
 type Fact = { delta: number; meterKey: string; valueAfter: number }
@@ -531,6 +532,33 @@ describe("EntitlementWindowDO", () => {
     // at the time-based flush deadline (5 min in non-dev) rather than the
     // distant self-destruct. The flush deadline wins because it's sooner.
     expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
+  })
+
+  it("retains idempotency rows past the ingestion age cap and cleans them at the DO TTL", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    db.idempotencyRows.set("inside_retention_margin", {
+      createdAt: BASE_NOW - TEST_INGESTION_MAX_EVENT_AGE_MS - 24 * 60 * 60 * 1000,
+      allowed: true,
+      deniedReason: null,
+      denyMessage: null,
+    })
+    db.idempotencyRows.set("beyond_do_ttl", {
+      createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
+      allowed: true,
+      deniedReason: null,
+      denyMessage: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await durableObject.alarm()
+
+    expect(db.idempotencyRows.has("inside_retention_margin")).toBe(true)
+    expect(db.idempotencyRows.has("beyond_do_ttl")).toBe(false)
   })
 
   it("keeps rows in the outbox for retry when Tinybird flush fails", async () => {
@@ -2559,8 +2587,10 @@ async function loadEntitlementWindowDO() {
       },
       EventTimestampTooFarInFutureError,
       EventTimestampTooOldError,
+      DO_IDEMPOTENCY_TTL_MS: TEST_DO_IDEMPOTENCY_TTL_MS,
+      INGESTION_MAX_EVENT_AGE_MS: TEST_INGESTION_MAX_EVENT_AGE_MS,
       LATE_EVENT_GRACE_MS: TEST_LATE_EVENT_GRACE_MS,
-      MAX_EVENT_AGE_MS: TEST_MAX_EVENT_AGE_MS,
+      MAX_EVENT_AGE_MS: TEST_INGESTION_MAX_EVENT_AGE_MS,
       computeGrantPeriodBucket,
       computeMaxMarginalPriceMinor,
       computeUsagePriceDeltaMinor,

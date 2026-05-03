@@ -13,6 +13,7 @@ export type IngestionPipelineEvent = LakehouseEventForSource<"events">
 
 export const INGESTION_REJECTION_REASONS = [
   "CUSTOMER_NOT_FOUND",
+  "EVENT_TOO_OLD",
   "INVALID_ENTITLEMENT_CONFIGURATION",
   "INVALID_AGGREGATION_PROPERTIES",
   "LIMIT_EXCEEDED",

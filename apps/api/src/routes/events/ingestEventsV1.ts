@@ -122,6 +122,20 @@ export const registerIngestEventsV1 = (app: App) =>
       // 3. events that are too old doesn't get pass, also events that are too far from the future.
       validateEventTimestamp(timestamp, receivedAt)
     } catch (error) {
+      if (error instanceof EventTimestampTooOldError) {
+        logEventTooOldRejection({
+          customerId,
+          eventId: body.id,
+          eventSlug: body.eventSlug,
+          eventTimestamp: timestamp,
+          idempotencyKey: body.idempotencyKey,
+          logger,
+          now: receivedAt,
+          projectId,
+          maxEventAgeMs: error.context?.maxEventAgeMs,
+        })
+      }
+
       if (
         error instanceof EventTimestampTooFarInFutureError ||
         error instanceof EventTimestampTooOldError
@@ -262,6 +276,31 @@ export function resolveRequestCustomerId(params: {
   defaultCustomerId?: string | null
 }): string | null {
   return params.explicitCustomerId ?? params.defaultCustomerId ?? null
+}
+
+export function logEventTooOldRejection(params: {
+  customerId: string
+  eventId?: string | undefined
+  eventSlug: string
+  eventTimestamp: number
+  idempotencyKey: string
+  logger: Pick<AppLogger, "warn">
+  maxEventAgeMs?: number | undefined
+  now: number
+  projectId: string
+}): void {
+  params.logger.warn("raw ingestion event rejected as too old", {
+    projectId: params.projectId,
+    customerId: params.customerId,
+    eventId: params.eventId,
+    eventSlug: params.eventSlug,
+    idempotencyKey: params.idempotencyKey,
+    eventTimestamp: params.eventTimestamp,
+    now: params.now,
+    eventAgeMs: params.now - params.eventTimestamp,
+    maxEventAgeMs: params.maxEventAgeMs,
+    rejectionReason: "EVENT_TOO_OLD",
+  })
 }
 
 export type IngestEventsRequest = z.infer<typeof rawEventSchema>

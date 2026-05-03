@@ -10,7 +10,7 @@ import type {
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
-import { MAX_EVENT_AGE_MS } from "../entitlements"
+import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import {
@@ -175,10 +175,28 @@ export class IngestionService {
   }): Promise<IngestionSyncResult> {
     const { featureSlug, message } = params
     const { customerId, projectId } = message
+
+    const tooOldOutcome = this.resolveTooOldOutcome({
+      customerId,
+      message,
+      now: this.now(),
+      projectId,
+    })
+
+    if (tooOldOutcome) {
+      return this.rejectSyncMessage({
+        customerId,
+        message,
+        messageText: "Event timestamp is older than the maximum accepted age",
+        projectId,
+        rejectionReason: "EVENT_TOO_OLD",
+      })
+    }
+
     const preparedContext = await this.prepareCustomerGrantContext({
       customerId,
       projectId,
-      startAt: Math.max(0, message.timestamp - MAX_EVENT_AGE_MS),
+      startAt: Math.max(0, message.timestamp - INGESTION_MAX_EVENT_AGE_MS),
       endAt: message.timestamp,
     })
 
@@ -261,7 +279,7 @@ export class IngestionService {
     const preparedContext = await this.prepareCustomerGrantContext({
       customerId,
       projectId,
-      startAt: Math.max(0, timestamp - MAX_EVENT_AGE_MS),
+      startAt: Math.max(0, timestamp - INGESTION_MAX_EVENT_AGE_MS),
       endAt: timestamp,
     })
 
@@ -374,9 +392,23 @@ export class IngestionService {
     const messages = [...params.messages].sort(sortIngestionMessages)
 
     try {
-      const preparedGroup = await this.prepareCustomerMessageGroup({
+      const { freshMessages, tooOldOutcomes } = this.partitionTooOldMessages({
         customerId,
         messages,
+        projectId,
+      })
+
+      if (tooOldOutcomes.length > 0) {
+        await this.commitOutcomesToAudit(projectId, customerId, tooOldOutcomes)
+      }
+
+      if (freshMessages.length === 0) {
+        return this.mapOutcomesToAckResults(tooOldOutcomes)
+      }
+
+      const preparedGroup = await this.prepareCustomerMessageGroup({
+        customerId,
+        messages: freshMessages,
         projectId,
       })
 
@@ -387,7 +419,10 @@ export class IngestionService {
           rejectionReason: preparedGroup.rejectionReason,
         })
         await this.commitOutcomesToAudit(projectId, customerId, outcomes)
-        return this.mapOutcomesToAckResults(outcomes)
+        return [
+          ...this.mapOutcomesToAckResults(outcomes),
+          ...this.mapOutcomesToAckResults(tooOldOutcomes),
+        ]
       }
 
       const { fresh, duplicateOutcomes } = await this.filterCrossPeriodDuplicates(
@@ -411,6 +446,7 @@ export class IngestionService {
       return [
         ...this.mapOutcomesToAckResults(freshOutcomes),
         ...duplicateOutcomes.map(({ message }) => this.ackMessage(message)),
+        ...this.mapOutcomesToAckResults(tooOldOutcomes),
       ]
     } catch (error) {
       this.logger.error("raw ingestion queue processing failed", {
@@ -421,6 +457,71 @@ export class IngestionService {
 
       return messages.map((message) => this.retryMessage(message))
     }
+  }
+
+  private partitionTooOldMessages(params: {
+    customerId: string
+    messages: IngestionQueueMessage[]
+    projectId: string
+  }): {
+    freshMessages: IngestionQueueMessage[]
+    tooOldOutcomes: MessageOutcome[]
+  } {
+    const now = this.now()
+    const freshMessages: IngestionQueueMessage[] = []
+    const tooOldOutcomes: MessageOutcome[] = []
+
+    for (const message of params.messages) {
+      const outcome = this.resolveTooOldOutcome({
+        customerId: params.customerId,
+        message,
+        now,
+        projectId: params.projectId,
+      })
+
+      if (!outcome) {
+        freshMessages.push(message)
+        continue
+      }
+
+      this.logRejectedMessage({
+        customerId: params.customerId,
+        message,
+        projectId: params.projectId,
+        rejectionReason: outcome.rejectionReason,
+      })
+      tooOldOutcomes.push({ message, outcome })
+    }
+
+    return { freshMessages, tooOldOutcomes }
+  }
+
+  private resolveTooOldOutcome(params: {
+    customerId: string
+    message: IngestionQueueMessage
+    now: number
+    projectId: string
+  }): IngestionOutcome | null {
+    const eventAgeMs = params.now - params.message.timestamp
+    if (eventAgeMs <= INGESTION_MAX_EVENT_AGE_MS) {
+      return null
+    }
+
+    this.logger.warn("raw ingestion event rejected as too old", {
+      projectId: params.projectId,
+      customerId: params.customerId,
+      eventId: params.message.id,
+      eventSlug: params.message.slug,
+      idempotencyKey: params.message.idempotencyKey,
+      eventTimestamp: params.message.timestamp,
+      receivedAt: params.message.receivedAt,
+      now: params.now,
+      eventAgeMs,
+      maxEventAgeMs: INGESTION_MAX_EVENT_AGE_MS,
+      rejectionReason: "EVENT_TOO_OLD",
+    })
+
+    return { state: "rejected", rejectionReason: "EVENT_TOO_OLD" }
   }
 
   private async handleMessage(params: HandleMessageParams): Promise<IngestionOutcome> {
@@ -744,7 +845,7 @@ export class IngestionService {
     const preparedContext = await this.prepareCustomerGrantContext({
       customerId,
       projectId,
-      startAt: Math.max(0, earliestMessage.timestamp - MAX_EVENT_AGE_MS),
+      startAt: Math.max(0, earliestMessage.timestamp - INGESTION_MAX_EVENT_AGE_MS),
       endAt: latestMessage.timestamp,
     })
 

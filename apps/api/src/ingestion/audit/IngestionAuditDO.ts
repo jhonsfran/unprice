@@ -2,7 +2,7 @@ import type { Pipeline } from "cloudflare:pipelines"
 import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import type { AppLogger } from "@unprice/observability"
-import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
+import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
 import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -12,7 +12,7 @@ import migrations from "./drizzle/migrations"
 
 const TABLE_NAME = "ingestion_audit"
 
-const AUDIT_RETENTION_MS = MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000 // 7 days after the event
+const AUDIT_RETENTION_MS = DO_IDEMPOTENCY_TTL_MS
 const OUTBOX_BATCH_SIZE = 500 // 500 rows
 const RETENTION_CLEANUP_BATCH_SIZE = 5000 // 5000 rows
 const ALARM_RETRY_DELAY_MS = 30_000 // 30 seconds

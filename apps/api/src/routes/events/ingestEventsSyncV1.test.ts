@@ -1,4 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
+import type { AppLogger } from "@unprice/observability"
+import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -188,6 +190,34 @@ describe("ingestEventsSyncV1 route", () => {
       })
     )
   })
+
+  it("returns 400 and logs when the raw event timestamp is older than the max accepted age", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync, logger } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        timestamp: requestBody.timestamp - INGESTION_MAX_EVENT_AGE_MS - 1,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    expect(ingestFeatureSync).not.toHaveBeenCalled()
+    expect(logger.warn).toHaveBeenCalledWith(
+      "raw ingestion event rejected as too old",
+      expect.objectContaining({
+        projectId: "proj_123",
+        customerId: requestBody.customerId,
+        idempotencyKey: requestBody.idempotencyKey,
+        rejectionReason: "EVENT_TOO_OLD",
+      })
+    )
+  })
 })
 
 function createTestApp() {
@@ -196,6 +226,7 @@ function createTestApp() {
     allowed: true,
     state: "processed",
   })
+  const logger = createRouteLogger()
 
   app.use(timing())
 
@@ -211,6 +242,7 @@ function createTestApp() {
   app.use("*", async (c, next) => {
     c.set("requestId", "req_123")
     c.set("requestStartedAt", Date.now())
+    c.set("logger", logger as AppLogger)
     c.set("services", {
       ingestion: {
         ingestFeatureSync,
@@ -232,7 +264,7 @@ function createTestApp() {
     waitUntil: vi.fn(),
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, ingestFeatureSync }
+  return { app, env, executionCtx, ingestFeatureSync, logger }
 }
 
 function buildRequest(body: Record<string, unknown> = requestBody) {
@@ -244,4 +276,12 @@ function buildRequest(body: Record<string, unknown> = requestBody) {
     },
     body: JSON.stringify(body),
   })
+}
+
+function createRouteLogger(): Pick<AppLogger, "error" | "warn" | "set"> {
+  return {
+    error: vi.fn(),
+    warn: vi.fn(),
+    set: vi.fn(),
+  }
 }

@@ -17,12 +17,12 @@ import { LEDGER_SCALE } from "@unprice/money"
 import type { AppLogger } from "@unprice/observability"
 import {
   AsyncMeterAggregationEngine,
+  DO_IDEMPOTENCY_TTL_MS,
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
   type Fact,
   type GrantConsumptionState,
   LATE_EVENT_GRACE_MS,
-  MAX_EVENT_AGE_MS,
   type MeterConfig,
   computeGrantPeriodBucket,
   computeMaxMarginalPriceMinor,
@@ -883,12 +883,13 @@ export class EntitlementWindowDO extends DurableObject {
       const tinybirdFlushFailed = batch.length > 0 && !outboxFlushed
       wideEvent.tinybird_flush_failed = tinybirdFlushFailed
 
-      // Keep idempotency keys for MAX_EVENT_AGE_MS (30 days). Cleanup is chunked
+      // Keep idempotency keys beyond the public ingestion cap so delayed
+      // cleanup cannot erase the replay seal for an event we would accept.
       // to avoid long synchronous SQLite write locks during large backlogs.
       const staleIdempotencyRows = this.db
         .select({ eventId: idempotencyKeysTable.eventId })
         .from(idempotencyKeysTable)
-        .where(lt(idempotencyKeysTable.createdAt, Date.now() - MAX_EVENT_AGE_MS))
+        .where(lt(idempotencyKeysTable.createdAt, Date.now() - DO_IDEMPOTENCY_TTL_MS))
         .orderBy(asc(idempotencyKeysTable.createdAt))
         .limit(IDEMPOTENCY_CLEANUP_BATCH_SIZE)
         .all()
@@ -1070,8 +1071,9 @@ export class EntitlementWindowDO extends DurableObject {
         return
       }
 
-      // After the latest known grant/reservation window we give 30 days to self destruct.
-      const selfDestructAt = lifecycleEndAt + MAX_EVENT_AGE_MS
+      // After the latest known grant/reservation window we keep the DO alive
+      // for the full idempotency TTL before self-destructing.
+      const selfDestructAt = lifecycleEndAt + DO_IDEMPOTENCY_TTL_MS
 
       if (now > selfDestructAt) {
         const latestWindow = this.readWalletReservation(this.db)

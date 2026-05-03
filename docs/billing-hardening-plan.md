@@ -324,7 +324,7 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 ---
 
-### [ ] HARD-011 — 30-day idempotency window vs. DLQ retention: tighten ingestion-side cap (P1, money correctness)
+### [x] HARD-011 — 30-day idempotency window vs. DLQ retention: tighten ingestion-side cap (P1, money correctness)
 
 **Files:** `internal/services/src/entitlements/domain.ts` (`MAX_EVENT_AGE_MS` / timestamp validation), `apps/api/src/routes/events/ingestEventsV1.ts`, `apps/api/src/routes/events/ingestEventsSyncV1.ts`, `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` (SQLite idempotency cleanup), `apps/api/src/ingestion/audit/IngestionAuditDO.ts` (audit retention)
 
@@ -366,7 +366,7 @@ The API rejects events older than `MAX_EVENT_AGE_MS = 30 days`, and the DO sweep
 
 **Acceptance:** No event accepted by ingestion can ever fall outside the DO's idempotency window. The invariant is asserted in code and covered by tests.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Split public event acceptance from durable replay retention: `INGESTION_MAX_EVENT_AGE_MS` remains 30 days while `DO_IDEMPOTENCY_TTL_MS` keeps EntitlementWindowDO idempotency rows, DO self-destruct, and audit retention alive for an additional 7-day safety margin, with a module-level invariant asserting the TTL stays wider than the accepted event age. Public async/sync ingest routes now log rich `EVENT_TOO_OLD` telemetry before returning 400, and queue-side ingestion rejects/audits messages older than the ingestion cap before entitlement or wallet processing so DLQ/manual replays cannot bill after the accepted window. Tests cover route rejection logging, service-side old-message rejection, DO idempotency cleanup retaining rows inside the margin, audit retention, and the acceptance/retention invariant.
 
 ---
 
