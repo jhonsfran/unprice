@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import type { ElementRef } from "react"
 import { forwardRef, startTransition } from "react"
 
@@ -201,4 +201,59 @@ const PlanVersionDeactivate = forwardRef<ElementRef<"button">, PlanVersionDuplic
 
 PlanVersionDeactivate.displayName = "PlanVersionDeactivate"
 
-export { PlanVersionDeactivate, PlanVersionDuplicate, PlanVersionPublish }
+const PlanVersionDelete = forwardRef<ElementRef<"button">, PlanVersionDuplicateProps>(
+  (props, ref) => {
+    const { planVersionId, classNames, onConfirmAction } = props
+    const router = useRouter()
+    const pathname = usePathname()
+    const trpc = useTRPC()
+
+    const deleteVersion = useMutation(
+      trpc.planVersions.remove.mutationOptions({
+        onSuccess: ({ planVersion }) => {
+          // Navigate up to the plan overview if we were on this version's page,
+          // then refresh to invalidate the RSC cache so the deleted version is
+          // no longer shown in the parent versions table.
+          if (pathname.includes(planVersion.id)) {
+            router.push(pathname.replace(`/${planVersion.id}`, ""))
+          }
+          router.refresh()
+        },
+      })
+    )
+
+    function onDeleteVersion() {
+      startTransition(() => {
+        toast.promise(deleteVersion.mutateAsync({ id: planVersionId }), {
+          loading: "Deleting...",
+          success: "Version deleted",
+        })
+      })
+    }
+
+    return (
+      <ConfirmAction
+        title="Delete this version?"
+        message="This will permanently delete the draft. Customers on other versions are unaffected. This action cannot be undone."
+        confirmAction={() => {
+          onConfirmAction?.()
+          onDeleteVersion()
+        }}
+      >
+        <Button
+          ref={ref}
+          className={classNames}
+          variant={"custom"}
+          disabled={deleteVersion.isPending}
+        >
+          Delete version
+          {deleteVersion.isPending && <LoadingAnimation className={"ml-2"} />}
+        </Button>
+      </ConfirmAction>
+    )
+  }
+)
+
+PlanVersionDelete.displayName = "PlanVersionDelete"
+
+export { PlanVersionDeactivate, PlanVersionDelete, PlanVersionDuplicate, PlanVersionPublish }

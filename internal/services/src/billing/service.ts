@@ -21,9 +21,9 @@ import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import {
+  type InvoiceSubscriptionOutcome,
   providerStatusToInvoiceEvent,
   transitionInvoiceStatus,
-  type InvoiceSubscriptionOutcome,
 } from "../payment-provider/invoice-state-machine"
 import type { RatingService } from "../rating/service"
 import type { RatedCharge, RatingInput } from "../rating/types"

@@ -32,7 +32,8 @@ export function PricingCard({
   }
 
   const isPublished = planVersion.status === "published"
-  const trialDays = planVersion.trialUnits ?? 0
+  const trialUnits = planVersion.trialUnits ?? 0
+  const trialUnitLabel = planVersion.billingConfig.billingInterval
   const billingLabel = planVersion.billingConfig.name
 
   return (
@@ -53,8 +54,10 @@ export function PricingCard({
               <span className="font-extrabold text-4xl tracking-tight">{val.displayAmount}</span>
               <span className="text-muted-foreground text-sm">/ {billingLabel}</span>
             </div>
-            {trialDays > 0 && (
-              <p className="text-muted-foreground text-xs">{trialDays}-day free trial</p>
+            {trialUnits > 0 && (
+              <p className="text-muted-foreground text-xs">
+                {trialUnits}-{trialUnitLabel} free trial
+              </p>
             )}
           </div>
         )}
@@ -72,7 +75,8 @@ export function PricingCard({
             What's included
           </p>
           <ul className="flex w-full flex-col space-y-3">
-            {planVersion.planFeatures
+            {[...planVersion.planFeatures]
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
               .filter((f) => !f.metadata?.hidden)
               .map((feature) => {
                 return (

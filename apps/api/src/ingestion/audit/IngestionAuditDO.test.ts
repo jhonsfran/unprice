@@ -2,8 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 const TEST_INGESTION_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
-const TEST_DO_IDEMPOTENCY_TTL_MS =
-  TEST_INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000
+const TEST_DO_IDEMPOTENCY_TTL_MS = TEST_INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000
 const TEST_AUDIT_RETENTION_MS = TEST_DO_IDEMPOTENCY_TTL_MS
 
 type DrizzleCondition = {

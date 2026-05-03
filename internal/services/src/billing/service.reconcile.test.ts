@@ -105,7 +105,10 @@ describe("BillingService.reconcileInvoiceFromProvider", () => {
     const updatedInvoice = {
       ...invoice,
       status: "paid" as const,
-      metadata: { reason: "payment_received", note: "Invoice reconciled from provider status paid" },
+      metadata: {
+        reason: "payment_received",
+        note: "Invoice reconciled from provider status paid",
+      },
     }
     repoMocks.findInvoiceById.mockResolvedValue(invoice)
     repoMocks.updateInvoiceIfStatus.mockResolvedValue(updatedInvoice)

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import {
+  DO_IDEMPOTENCY_TTL_MS,
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
   type Fact,
-  DO_IDEMPOTENCY_TTL_MS,
   INGESTION_MAX_EVENT_AGE_MS,
   type MeterConfig,
   PeriodKeyComputationError,

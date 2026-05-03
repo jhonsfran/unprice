@@ -16,8 +16,8 @@ import {
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import type React from "react"
-import type { ElementRef } from "react"
-import { forwardRef, useState } from "react"
+import type { ElementRef, MutableRefObject } from "react"
+import { forwardRef, useEffect, useRef, useState } from "react"
 
 import { FEATURE_TYPES_MAPS } from "@unprice/db/utils"
 import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
@@ -104,6 +104,22 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
   const isExpanded = mode === "FeaturePlan" && active?.featureId === planFeatureVersion.featureId
   const isPublished = activePlanVersion?.status === "published"
 
+  // Compose internal ref with the forwarded ref (dnd-kit's setNodeRef) so we can scroll the
+  // card into view when it expands as a freshly-added optimistic feature (no id yet).
+  const innerRef = useRef<HTMLDivElement | null>(null)
+  const composedRef = (node: HTMLDivElement | null) => {
+    innerRef.current = node
+    if (typeof ref === "function") ref(node)
+    else if (ref) (ref as MutableRefObject<HTMLDivElement | null>).current = node
+  }
+
+  useEffect(() => {
+    if (mode !== "FeaturePlan") return
+    if (!isExpanded) return
+    if (planFeatureVersion.id) return
+    innerRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
+  }, [isExpanded, mode, planFeatureVersion.id])
+
   const priceSummary = (() => {
     const cfg = planFeatureVersion.config
     if (cfg?.price) {
@@ -179,7 +195,7 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
   // ── Plan mode: full card with inline expansion ────────────────
   return (
     <div
-      ref={ref}
+      ref={composedRef}
       {...rest}
       className={cn(
         featureVariants({ variant: "default" }),

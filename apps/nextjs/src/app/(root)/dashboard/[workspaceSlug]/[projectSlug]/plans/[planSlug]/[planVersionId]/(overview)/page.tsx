@@ -11,7 +11,6 @@ import DragDrop from "../../../_components/drag-drop"
 import { FeatureDialog } from "../../../_components/feature-dialog"
 import { FeatureList } from "../../_components/feature-list"
 import { PlanFeatureList } from "../../_components/plan-feature-list"
-import { BannerInactiveVersion } from "../_components/banner"
 import { PlanWorkspaceRail } from "../_components/plan-workspace-rail"
 
 export default async function OverviewVersionPage({
@@ -34,7 +33,7 @@ export default async function OverviewVersionPage({
 
   return (
     <DragDrop>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_380px] lg:gap-0 lg:divide-x lg:rounded-lg lg:border">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_300px] lg:gap-0 lg:divide-x lg:rounded-lg lg:border">
         {/* ── Left: feature library ───────────────────────────── */}
         <aside className="flex min-h-0 flex-col">
           <div className="flex h-[70px] items-center justify-between px-4">
@@ -64,11 +63,6 @@ export default async function OverviewVersionPage({
 
         {/* ── Middle: features attached to this version ───────── */}
         <main className="flex min-h-0 flex-col">
-          {!planVersion.active && (
-            <div className="px-4 pt-4">
-              <BannerInactiveVersion />
-            </div>
-          )}
           <PlanFeatureList planVersion={planVersion} />
         </main>
 

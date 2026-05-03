@@ -115,8 +115,11 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
       billingConfig: planVersion.billingConfig,
     } as PlanVersionFeatureDragDrop
 
-    // optimistic local insert (no auto-expand — let the user open it manually)
+    // Optimistic local insert AND auto-expand: the user just declared intent to configure
+    // this feature, so we open the inline editor immediately. FeaturePlan scrolls itself into
+    // view when it becomes active without an id yet (see useEffect there).
     setPlanFeaturesList((prev) => [...prev, optimistic])
+    setActiveFeature(optimistic)
 
     const payload: PlanVersionFeatureInsert = {
       planVersionId: optimistic.planVersionId,

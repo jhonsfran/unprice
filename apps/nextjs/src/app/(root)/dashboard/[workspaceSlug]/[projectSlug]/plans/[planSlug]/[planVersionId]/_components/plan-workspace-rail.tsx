@@ -18,11 +18,17 @@ export function PlanWorkspaceRail({
   if (!planVersion) return null
 
   const status = planVersion.status ?? "draft"
+  const trialUnit = planVersion.billingConfig.billingInterval
+  const trialLabel =
+    planVersion.trialUnits === 0
+      ? "no trial"
+      : `${planVersion.trialUnits} ${trialUnit}${planVersion.trialUnits === 1 ? "" : "s"}`
+
   const items: Array<[string, React.ReactNode]> = [
     ["Status", <StatusDot key="status" status={status} />],
     ["Currency", planVersion.currency],
     ["Billing", planVersion.billingConfig.name],
-    ["Trial", `${planVersion.trialUnits} days`],
+    ["Trial", trialLabel],
     ["Provider", planVersion.paymentProvider],
     ["Plan type", planVersion.billingConfig.planType],
   ]
