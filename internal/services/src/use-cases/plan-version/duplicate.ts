@@ -21,7 +21,7 @@ export async function duplicatePlanVersion(
 ): Promise<
   Result<
     | {
-        state: "not_found" | "default_plan_payment_method_conflict" | "duplicate_error"
+        state: "not_found" | "duplicate_error"
       }
     | { state: "ok"; planVersion: PlanVersion },
     FetchError
@@ -49,11 +49,10 @@ export async function duplicatePlanVersion(
       return Ok({ state: "not_found" })
     }
 
-    if (planVersionData.plan.defaultPlan && planVersionData.paymentMethodRequired) {
-      return Ok({ state: "default_plan_payment_method_conflict" })
-    }
-
     const planVersionId = newId("plan_version")
+    const paymentMethodRequired = planVersionData.plan.defaultPlan
+      ? false
+      : planVersionData.paymentMethodRequired
 
     const duplicated = await deps.db.transaction(async (tx) => {
       const countVersionsPlan = await tx
@@ -75,7 +74,7 @@ export async function duplicatePlanVersion(
           trialUnits: planVersionData.trialUnits,
           billingConfig: planVersionData.billingConfig,
           autoRenew: planVersionData.autoRenew,
-          paymentMethodRequired: planVersionData.paymentMethodRequired,
+          paymentMethodRequired,
           metadata: {},
           latest: false,
           active: true,

@@ -48,13 +48,6 @@ export const duplicate = protectedProjectProcedure
       })
     }
 
-    if (val.state === "default_plan_payment_method_conflict") {
-      throw new TRPCError({
-        code: "BAD_REQUEST",
-        message: "default plan can't have a required payment method",
-      })
-    }
-
     if (val.state === "duplicate_error") {
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",

@@ -186,7 +186,7 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 ---
 
-### [ ] HARD-008 — Tinybird flush has no retry, no DLQ, and 30-day SQLite TTL drops data (P1, analytics correctness)
+### [x] HARD-008 — Tinybird flush has no retry, no DLQ, and 30-day SQLite TTL drops data (P1, analytics correctness)
 
 **Files:** `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` (`alarmInner`, `flushToTinybird`, self-destruct logic), `apps/api/src/ingestion/entitlements/db/schema.ts` (`meterFactsOutboxTable`, new flush-state table/row), `apps/api/src/ingestion/entitlements/drizzle/*` (DO SQLite migration)
 
@@ -207,7 +207,7 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 - Outage of 30d+ → no data loss; outbox preserved; alert fires.
 - Test exists for the backoff schedule and the deletion-refusal logic.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Implemented the 80/20 fix after validating the plan against the code. The DO already had a durable SQLite outbox and fixed-cadence retry, so no DLQ, admin RPC, scanner, or SQLite schema migration was added. Instead, `EntitlementWindowDO` now stores a tiny Tinybird flush state in DO storage (`consecutiveFailures`, `lastErrorAt`, `lastErrorMessage`, `nextRetryAt`), backs off failed flushes with a capped exponential schedule starting at 30s and maxing at 30m, skips retry attempts before `nextRetryAt`, and resets the state after a successful flush. The existing `entitlement alarm` wide event now includes the Tinybird failure/backoff fields, and deletion is refused when the Tinybird outbox still has rows or flush failures are still recorded. Both explicit `requestDeletion` and 30-day TTL self-destruct now log `tinybird_flush_blocking_delete` and re-arm the alarm instead of calling `deleteAll()` while analytics facts are pending. Tests cover backoff retry, skip-before-backoff-expiry, state reset on success, requested-deletion refusal, and TTL-deletion refusal. Focused DO tests pass and API type-check passes.
 
 ---
 
@@ -623,11 +623,10 @@ These were in the audit but are not real issues given the project's invariants:
 
 Before any AI agent picks these up, surface to the team:
 
-1. **HARD-008 escalation policy** — Tinybird outage > backoff window: accept gap or fail-closed? Default proposed: accept gap.
-2. **HARD-009 cancellation refund timing** — real-time vs next-cycle close? Default: real-time.
-3. **HARD-013 reconciler cadence** — 10 min default; faster for higher-volume customers?
-4. **HARD-016 dunning policy** — retry schedule and grace expiry behavior.
-5. **HARD-015 cancelled-subscription late event** — reject or quarantine?
+1. **HARD-009 cancellation refund timing** — real-time vs next-cycle close? Default: real-time.
+2. **HARD-013 reconciler cadence** — 10 min default; faster for higher-volume customers?
+3. **HARD-016 dunning policy** — retry schedule and grace expiry behavior.
+4. **HARD-015 cancelled-subscription late event** — reject or quarantine?
 
 ---
 
