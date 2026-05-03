@@ -1,7 +1,7 @@
 import { type Database, and, asc, eq, gt, isNull, or, sql } from "@unprice/db"
-import { entitlementReservations, walletGrants, walletTopups } from "@unprice/db/schema"
+import { entitlementReservations, walletCredits, walletTopups } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import type { Currency, WalletGrant, WalletGrantSource } from "@unprice/db/validators"
+import type { Currency, WalletCredit, WalletCreditSource } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromLedgerMinor, toLedgerMinor } from "@unprice/money"
@@ -28,7 +28,7 @@ export interface DrainLeg {
   source: "granted" | "purchased"
   amount: number
   grantId?: string
-  grantSource?: WalletGrantSource
+  grantSource?: WalletCreditSource
 }
 
 export interface WalletDeps {
@@ -153,7 +153,7 @@ export interface ExpireGrantInput {
   currency: Currency
   grantId: string
   amount: number
-  source: WalletGrantSource
+  source: WalletCreditSource
   idempotencyKey: string
 }
 
@@ -171,10 +171,10 @@ export interface WalletBalances {
 
 export interface WalletStateOutput {
   balances: WalletBalances
-  grants: WalletGrant[]
+  grants: WalletCredit[]
 }
 
-const GRANT_SOURCE_TO_PLATFORM: Record<WalletGrantSource, PlatformFundingKind> = {
+const GRANT_SOURCE_TO_PLATFORM: Record<WalletCreditSource, PlatformFundingKind> = {
   promo: "promo",
   plan_included: "plan_credit",
   trial: "promo",
@@ -823,17 +823,17 @@ export class WalletService {
         this.readBalance(this.db, keys.granted),
         this.readBalance(this.db, keys.reserved),
         this.readBalance(this.db, keys.consumed),
-        this.db.query.walletGrants.findMany({
+        this.db.query.walletCredits.findMany({
           where: and(
-            eq(walletGrants.customerId, input.customerId),
-            eq(walletGrants.projectId, input.projectId),
-            isNull(walletGrants.expiredAt),
-            isNull(walletGrants.voidedAt),
-            gt(walletGrants.remainingAmount, 0)
+            eq(walletCredits.customerId, input.customerId),
+            eq(walletCredits.projectId, input.projectId),
+            isNull(walletCredits.expiredAt),
+            isNull(walletCredits.voidedAt),
+            gt(walletCredits.remainingAmount, 0)
           ),
           orderBy: [
-            sql`COALESCE(${walletGrants.expiresAt}, 'infinity'::timestamptz) ASC`,
-            asc(walletGrants.createdAt),
+            sql`COALESCE(${walletCredits.expiresAt}, 'infinity'::timestamptz) ASC`,
+            asc(walletCredits.createdAt),
           ],
         }),
       ])
@@ -886,9 +886,9 @@ export class WalletService {
       return Ok({ clampedAmount: amount, unclampedRemainder: 0 })
     }
 
-    const platformKind = GRANT_SOURCE_TO_PLATFORM[input.source as WalletGrantSource]
+    const platformKind = GRANT_SOURCE_TO_PLATFORM[input.source as WalletCreditSource]
     const fromAccount = platformAccountKey(platformKind, input.projectId)
-    const grantId = newId("wallet_grant")
+    const grantId = newId("wallet_credit")
 
     const transferResult = await this.ledger.createTransfer(
       {
@@ -907,18 +907,18 @@ export class WalletService {
     )
     if (transferResult.err) return Err(this.wrapLedgerError(transferResult.err))
 
-    // Idempotent insert: the unique index `wallet_grants_ledger_transfer_idx`
+    // Idempotent insert: the unique index `wallet_credits_ledger_transfer_idx`
     // on (customer_id, ledger_transfer_id) means a replay (same idempotency
     // key → same ledger transfer) must reuse the prior grant row instead of
     // inserting a fresh one. ON CONFLICT DO NOTHING + fallback lookup keeps
     // both the first call and any retry returning the same grantId.
     const inserted = await tx
-      .insert(walletGrants)
+      .insert(walletCredits)
       .values({
         id: grantId,
         projectId: input.projectId,
         customerId: input.customerId,
-        source: input.source as WalletGrantSource,
+        source: input.source as WalletCreditSource,
         issuedAmount: amount,
         remainingAmount: amount,
         expiresAt: input.expiresAt ?? null,
@@ -930,20 +930,20 @@ export class WalletService {
         }),
       })
       .onConflictDoNothing({
-        target: [walletGrants.customerId, walletGrants.ledgerTransferId],
+        target: [walletCredits.customerId, walletCredits.ledgerTransferId],
       })
-      .returning({ id: walletGrants.id })
+      .returning({ id: walletCredits.id })
 
     if (inserted.length > 0) {
       return Ok({ clampedAmount: amount, unclampedRemainder: 0, grantId: inserted[0]!.id })
     }
 
-    const existing = await tx.query.walletGrants.findFirst({
+    const existing = await tx.query.walletCredits.findFirst({
       columns: { id: true },
       where: and(
-        eq(walletGrants.customerId, input.customerId),
-        eq(walletGrants.projectId, input.projectId),
-        eq(walletGrants.ledgerTransferId, transferResult.val.id)
+        eq(walletCredits.customerId, input.customerId),
+        eq(walletCredits.projectId, input.projectId),
+        eq(walletCredits.ledgerTransferId, transferResult.val.id)
       ),
     })
 
@@ -1013,7 +1013,7 @@ export class WalletService {
 
     if (drained > 0) {
       const toAccount = platformAccountKey(
-        GRANT_SOURCE_TO_PLATFORM[input.source as WalletGrantSource],
+        GRANT_SOURCE_TO_PLATFORM[input.source as WalletCreditSource],
         input.projectId
       )
       const transferResult = await this.ledger.createTransfer(
@@ -1038,7 +1038,7 @@ export class WalletService {
 
   /**
    * Drain from `available.granted` FIFO by grant expiry. Updates
-   * `wallet_grants.remaining_amount` in the same tx as the ledger transfer,
+   * `wallet_credits.remaining_amount` in the same tx as the ledger transfer,
    * preserving the invariant:
    *
    *   SUM(remaining_amount WHERE active) == available.granted balance
@@ -1054,21 +1054,21 @@ export class WalletService {
     requestedAmount: number
   ): Promise<{ drained: number; legs: DrainLeg[] }> {
     const now = new Date()
-    const activeGrants = await tx.query.walletGrants.findMany({
+    const activeGrants = await tx.query.walletCredits.findMany({
       where: and(
-        eq(walletGrants.customerId, customerId),
-        eq(walletGrants.projectId, projectId),
-        isNull(walletGrants.expiredAt),
-        isNull(walletGrants.voidedAt),
-        gt(walletGrants.remainingAmount, 0),
+        eq(walletCredits.customerId, customerId),
+        eq(walletCredits.projectId, projectId),
+        isNull(walletCredits.expiredAt),
+        isNull(walletCredits.voidedAt),
+        gt(walletCredits.remainingAmount, 0),
         // Belt-and-suspenders: skip grants whose expiry has passed even if
         // the nightly cron hasn't marked them yet
-        or(isNull(walletGrants.expiresAt), gt(walletGrants.expiresAt, now))
+        or(isNull(walletCredits.expiresAt), gt(walletCredits.expiresAt, now))
       ),
       orderBy: [
         // soonest-expiring first; never-expiring last
-        sql`COALESCE(${walletGrants.expiresAt}, 'infinity'::timestamptz) ASC`,
-        asc(walletGrants.createdAt),
+        sql`COALESCE(${walletCredits.expiresAt}, 'infinity'::timestamptz) ASC`,
+        asc(walletCredits.createdAt),
       ],
     })
 
@@ -1080,9 +1080,9 @@ export class WalletService {
       const drain = Math.min(remaining, grant.remainingAmount)
 
       await tx
-        .update(walletGrants)
+        .update(walletCredits)
         .set({ remainingAmount: grant.remainingAmount - drain })
-        .where(and(eq(walletGrants.id, grant.id), eq(walletGrants.projectId, grant.projectId)))
+        .where(and(eq(walletCredits.id, grant.id), eq(walletCredits.projectId, grant.projectId)))
 
       legs.push({
         source: "granted",

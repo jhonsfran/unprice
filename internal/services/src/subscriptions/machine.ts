@@ -675,7 +675,7 @@ export class SubscriptionMachine {
             // Sweeper / manual retry path. Re-enters `activating` which
             // re-runs grant issuance under the same advisory lock; grant
             // idempotency keys keep retries convergent on the same
-            // wallet_grants rows.
+            // wallet_credits rows.
             ACTIVATE: {
               target: "activating",
               actions: "logStateTransition",

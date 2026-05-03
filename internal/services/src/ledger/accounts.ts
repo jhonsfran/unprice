@@ -2,10 +2,11 @@
  * Canonical account-key builders. Every account name pgledger stores is built
  * here so the format stays uniform — callers never concatenate strings manually.
  *
- * Phase 7 introduces four customer sub-accounts (purchased / granted / reserved
- * / consumed) and four typed platform funding sources (topup / promo /
- * plan_credit / manual). The full Chart of Accounts lands in Phase 8; widen the
- * union then.
+ * Five customer sub-accounts (purchased / granted / reserved / consumed /
+ * receivable) and five typed platform funding sources (topup / promo /
+ * plan_credit / manual / credit_line). `receivable` and `credit_line` are
+ * wired in Phase 7 for Phase 8 forward-compatibility (invoicing + postpaid)
+ * but not drained by the Phase 7 hot path.
  */
 
 export type PlatformFundingKind = "topup" | "promo" | "plan_credit" | "manual" | "credit_line"

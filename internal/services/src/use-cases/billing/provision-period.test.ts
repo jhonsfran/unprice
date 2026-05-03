@@ -10,7 +10,7 @@ import { activateSubscription } from "./provision-period"
 
 // ---------------------------------------------------------------------------
 // Phase 7 activation is grants-only:
-//   - Issues additive `wallet_grants` rows (plan_included / trial / credit_line / promo / manual)
+//   - Issues additive `wallet_credits` rows (plan_included / trial / credit_line / promo / manual)
 //   - Flips the subscription to `active`
 //
 // Reservations are owned by the EntitlementWindowDO (lazy on first priced
@@ -67,7 +67,7 @@ function buildDeps(state: FakeState, customerExists = true, stubs: WalletStubs =
       })
       if (stubs.adjustImpl) return stubs.adjustImpl(input)
       return Ok({
-        grantId: `wgr_${state.walletCalls.adjust.length}`,
+        grantId: `wcr_${state.walletCalls.adjust.length}`,
         clampedAmount: input.signedAmount,
         unclampedRemainder: 0,
       })

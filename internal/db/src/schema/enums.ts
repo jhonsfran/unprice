@@ -22,7 +22,7 @@ import {
   SUBSCRIPTION_STATUS,
   TIER_MODES,
   USAGE_MODES,
-  WALLET_GRANT_SOURCES,
+  WALLET_CREDIT_SOURCES,
   WALLET_TOPUP_STATUSES,
   WHEN_TO_BILLING,
 } from "../utils"
@@ -50,4 +50,4 @@ export const whenToBillEnum = pgEnum("when_to_bill", WHEN_TO_BILLING)
 export const collectionMethodEnum = pgEnum("collection_method", COLLECTION_METHODS)
 export const overageStrategyEnum = pgEnum("overage_strategy", OVERAGE_STRATEGIES)
 export const walletTopupStatusEnum = pgEnum("wallet_topup_status", WALLET_TOPUP_STATUSES)
-export const walletGrantSourceEnum = pgEnum("wallet_grant_source", WALLET_GRANT_SOURCES)
+export const walletCreditSourceEnum = pgEnum("wallet_credit_source", WALLET_CREDIT_SOURCES)

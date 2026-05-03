@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import { walletGrantSourceSchema } from "@unprice/db/validators"
+import { walletCreditSourceSchema } from "@unprice/db/validators"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
@@ -12,7 +12,7 @@ const tags = ["wallet"]
 
 const walletGrantResponseSchema = z.object({
   id: z.string(),
-  source: walletGrantSourceSchema,
+  source: walletCreditSourceSchema,
   issued_amount: z.number().int().nonnegative(),
   remaining_amount: z.number().int().nonnegative(),
   expires_at: z.string().datetime().nullable(),

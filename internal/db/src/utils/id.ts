@@ -44,7 +44,7 @@ export const prefixes = {
   ledger_settlement_line: "lsl",
   entitlement_reservation: "eres",
   wallet_topup: "wtup",
-  wallet_grant: "wgr",
+  wallet_credit: "wcr",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

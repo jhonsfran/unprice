@@ -11,7 +11,7 @@ import { db } from "../db"
  * race, or legitimate state requiring a backfill.
  *
  * 1. Grant tracking invariant:
- *    `SUM(wallet_grants.remaining_amount)` == `available.granted` balance
+ *    `SUM(wallet_credits.remaining_amount)` == `available.granted` balance
  * 2. Wallet identity:
  *    `purchased + granted + reserved + consumed` == Σ inflows − Σ outflows
  * 3. Stranded reservations (unreconciled past period end)
@@ -36,7 +36,7 @@ export const walletReconciliationSchedule = schedules.task({
     }
 
     // 1. Grant tracking invariant.
-    // For each customer: SUM(wallet_grants.remaining_amount) must equal
+    // For each customer: SUM(wallet_credits.remaining_amount) must equal
     // the customer's `available.granted` ledger balance. Any row returned
     // from this query is drift — the invariant is broken.
     try {
@@ -51,7 +51,7 @@ export const walletReconciliationSchedule = schedules.task({
           SUM(wg.remaining_amount)::text AS grant_sum,
           COALESCE(a.balance::text, '0') AS ledger_balance,
           (SUM(wg.remaining_amount) - COALESCE(a.balance, 0))::text AS drift
-        FROM unprice_wallet_grants wg
+        FROM unprice_wallet_credits wg
         LEFT JOIN pgledger_accounts_view a
           ON a.name = 'customer.' || wg.customer_id || '.available.granted'
         WHERE wg.expired_at IS NULL

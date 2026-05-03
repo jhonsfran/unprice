@@ -3,7 +3,6 @@ import {
   bigint,
   foreignKey,
   index,
-  integer,
   primaryKey,
   uniqueIndex,
   varchar,
@@ -33,7 +32,7 @@ export const billingPeriods = pgTableProject(
     type: billingPeriodTypeEnum("type").notNull().default("normal"),
     cycleStartAt: bigint("cycle_start_at_m", { mode: "number" }).notNull(),
     cycleEndAt: bigint("cycle_end_at_m", { mode: "number" }).notNull(),
-    amountEstimate: integer("amount_estimate_cents"),
+    amountEstimate: bigint("amount_estimate", { mode: "number" }),
     reason: varchar("reason", { length: 64 }).$type<"normal" | "mid_cycle_change" | "trial">(), // annual_renewal|monthly_usage|mid_cycle_change|trial
     // invoice id is the invoice that is associated with the billing period can be null if the billing period is not invoiced yet
     invoiceId: cuid("invoice_id"),

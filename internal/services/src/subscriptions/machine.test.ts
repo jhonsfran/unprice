@@ -923,7 +923,7 @@ describe("SubscriptionMachine - comprehensive", () => {
           return Err(new UnPriceWalletError({ message: "WALLET_LEDGER_FAILED" }))
         }
         return Ok({
-          grantId: `wgr_${adjustCalls}`,
+          grantId: `wcr_${adjustCalls}`,
           clampedAmount: input.signedAmount,
           unclampedRemainder: 0,
         })
@@ -960,7 +960,7 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     // Sweeper-style retry: switch wallet to a non-failing impl and re-fire
     // ACTIVATE. Real path uses per-grant idempotency keys to converge on
-    // the same wallet_grants rows; the mock just confirms the transition.
+    // the same wallet_credits rows; the mock just confirms the transition.
     await m.shutdown()
 
     let retryCalls = 0
@@ -968,7 +968,7 @@ describe("SubscriptionMachine - comprehensive", () => {
       adjust: vi.fn(async (input: { signedAmount: number }) => {
         retryCalls++
         return Ok({
-          grantId: `wgr_retry_${retryCalls}`,
+          grantId: `wcr_retry_${retryCalls}`,
           clampedAmount: input.signedAmount,
           unclampedRemainder: 0,
         })

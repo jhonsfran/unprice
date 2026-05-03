@@ -237,7 +237,7 @@ export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
 export const OVERAGE_STRATEGIES = ["none", "last-call", "always"] as const
 export const WALLET_TOPUP_STATUSES = ["pending", "completed", "failed", "expired"] as const
-export const WALLET_GRANT_SOURCES = [
+export const WALLET_CREDIT_SOURCES = [
   "promo",
   "plan_included",
   "trial",

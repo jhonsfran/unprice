@@ -16,7 +16,7 @@ export type ActivateSubscriptionDeps = {
 
 /**
  * One additive grant to issue at activation. Each entry creates one
- * `wallet_grants` row (`adjust(signedAmount > 0, expiresAt = periodEndAt)`).
+ * `wallet_credits` row (`adjust(signedAmount > 0, expiresAt = periodEndAt)`).
  *
  * Sources:
  * - `plan_included` — flat plan-included credit baked into the plan version
@@ -44,7 +44,7 @@ export interface ActivateSubscriptionInput {
   idempotencyKey: string
   /**
    * Additive wallet grants to issue at activation. Each entry creates one
-   * `wallet_grants` row that expires at `periodEndAt`. This is the only
+   * `wallet_credits` row that expires at `periodEndAt`. This is the only
    * money movement activation owns — base fees and usage are settled by
    * the invoicing flow at period boundaries; usage reservations are
    * created lazily by the EntitlementWindowDO on first priced event.
@@ -73,7 +73,7 @@ export interface ActivateSubscriptionOutput {
  *
  * Single transaction, single advisory lock per customer. Any grant
  * failing aborts the tx (no partial activation). Idempotency suffix
- * `:grant:{i}` keeps retries convergent on the same `wallet_grants` row.
+ * `:grant:{i}` keeps retries convergent on the same `wallet_credits` row.
  */
 export async function activateSubscription(
   deps: ActivateSubscriptionDeps,

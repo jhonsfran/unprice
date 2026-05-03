@@ -1271,7 +1271,7 @@ export class BillingService {
   }
 
   /**
-   * Phase 7: customer credits live in `wallet_grants` and drain through
+   * Phase 7: customer credits live in `wallet_credits` and drain through
    * the reservation/flush pipeline. The legacy `credit_grants` +
    * `invoice_credit_applications` path is deleted. Any credit application
    * at invoice time should instead route through `WalletService.adjust`

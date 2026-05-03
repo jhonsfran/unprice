@@ -1,13 +1,13 @@
 import type { Database } from "@unprice/db"
 import {
   entitlementReservations as entitlementReservationsTable,
-  walletGrants as walletGrantsTable,
+  walletCredits as walletCreditsTable,
   walletTopups as walletTopupsTable,
 } from "@unprice/db/schema"
 import type {
   EntitlementReservation,
-  WalletGrant,
-  WalletGrantSource,
+  WalletCredit,
+  WalletCreditSource,
   WalletTopup,
 } from "@unprice/db/validators"
 import { Ok } from "@unprice/error"
@@ -23,7 +23,7 @@ import { WalletService } from "./service"
 // Fakes — minimal in-memory stand-ins for Drizzle + LedgerGateway.
 //
 // Fidelity tradeoff: we do not emulate Drizzle's opaque `where`/`orderBy`
-// expressions, so mutation of wallet_grants via `update(...).set(...).where(...)`
+// expressions, so mutation of wallet_credits via `update(...).set(...).where(...)`
 // is recorded but not applied back to `state.grants`. Tests assert on:
 //   - the ordered sequence of ledger transfers (`state.transfers`)
 //   - inserted rows (`state.inserts`)
@@ -31,7 +31,7 @@ import { WalletService } from "./service"
 // That is enough for every scenario in slice 7.10's WalletService bullet list.
 // ---------------------------------------------------------------------------
 
-type FakeGrant = WalletGrant
+type FakeGrant = WalletCredit
 type FakeTopup = WalletTopup
 type FakeReservation = EntitlementReservation
 
@@ -60,7 +60,7 @@ function createState(): FakeState {
 }
 
 function tableName(table: unknown): string {
-  if (table === walletGrantsTable) return "walletGrants"
+  if (table === walletCreditsTable) return "walletCredits"
   if (table === walletTopupsTable) return "walletTopups"
   if (table === entitlementReservationsTable) return "entitlementReservations"
   return "unknown"
@@ -69,7 +69,7 @@ function tableName(table: unknown): string {
 function createDb(state: FakeState): Database {
   const tx = {
     query: {
-      walletGrants: {
+      walletCredits: {
         findFirst: vi.fn(async () => state.grants[state.grants.length - 1] ?? null),
         findMany: vi.fn(async () => {
           // emulate FIFO drain lookup: expired_at IS NULL, voided_at IS NULL,
@@ -100,7 +100,7 @@ function createDb(state: FakeState): Database {
         values: vi.fn((values: Record<string, unknown>) => {
           const record = () => {
             state.inserts.push({ table: name, values })
-            if (name === "walletGrants") {
+            if (name === "walletCredits") {
               const grant = { ...(values as unknown as FakeGrant) }
               const dup = state.grants.find(
                 (g) =>
@@ -326,7 +326,7 @@ describe("WalletService.createReservation", () => {
     const { state, wallet } = buildService()
     state.balances[keys.purchased] = 5 * DOLLAR
     seedGrant(state, {
-      id: "wgr_old",
+      id: "wcr_old",
       customerId,
       projectId,
       source: "promo",
@@ -336,7 +336,7 @@ describe("WalletService.createReservation", () => {
       createdAt: new Date("2026-01-01"),
     })
     seedGrant(state, {
-      id: "wgr_new",
+      id: "wcr_new",
       customerId,
       projectId,
       source: "promo",
@@ -379,8 +379,8 @@ describe("WalletService.createReservation", () => {
 
     // drainLegs attribution: granted before purchased, preserving grant ids.
     expect(val?.drainLegs).toEqual([
-      { source: "granted", amount: 3 * DOLLAR, grantId: "wgr_old", grantSource: "promo" },
-      { source: "granted", amount: 2 * DOLLAR, grantId: "wgr_new", grantSource: "promo" },
+      { source: "granted", amount: 3 * DOLLAR, grantId: "wcr_old", grantSource: "promo" },
+      { source: "granted", amount: 2 * DOLLAR, grantId: "wcr_new", grantSource: "promo" },
       { source: "purchased", amount: 2 * DOLLAR },
     ])
   })
@@ -389,7 +389,7 @@ describe("WalletService.createReservation", () => {
     const { state, wallet } = buildService()
     // Seed in "wrong" order; findMany sorts by expiresAt ascending.
     seedGrant(state, {
-      id: "wgr_far",
+      id: "wcr_far",
       customerId,
       projectId,
       issuedAmount: 1 * DOLLAR,
@@ -398,7 +398,7 @@ describe("WalletService.createReservation", () => {
       createdAt: new Date("2026-01-01"),
     })
     seedGrant(state, {
-      id: "wgr_soon",
+      id: "wcr_soon",
       customerId,
       projectId,
       issuedAmount: 1 * DOLLAR,
@@ -420,14 +420,14 @@ describe("WalletService.createReservation", () => {
       idempotencyKey: "reserve:fifo",
     })
 
-    expect(val?.drainLegs.map((l) => l.grantId)).toEqual(["wgr_soon", "wgr_far"])
+    expect(val?.drainLegs.map((l) => l.grantId)).toEqual(["wcr_soon", "wcr_far"])
   })
 
   it("skips grants with remaining_amount = 0 and returns partial fulfillment", async () => {
     const { state, wallet } = buildService()
     // Partially-consumed grant still active, but only 1 DOLLAR remains.
     seedGrant(state, {
-      id: "wgr_partial",
+      id: "wcr_partial",
       customerId,
       projectId,
       issuedAmount: 5 * DOLLAR,
@@ -437,7 +437,7 @@ describe("WalletService.createReservation", () => {
     })
     // Drained grant — findMany must skip it.
     seedGrant(state, {
-      id: "wgr_empty",
+      id: "wcr_empty",
       customerId,
       projectId,
       issuedAmount: 5 * DOLLAR,
@@ -469,10 +469,10 @@ describe("WalletService.createReservation", () => {
     // zero drained from purchased → no purchased transfer leg emitted.
   })
 
-  it("decrements wallet_grants.remaining_amount for each drained grant", async () => {
+  it("decrements wallet_credits.remaining_amount for each drained grant", async () => {
     const { state, wallet } = buildService()
     seedGrant(state, {
-      id: "wgr_a",
+      id: "wcr_a",
       customerId,
       projectId,
       issuedAmount: 3 * DOLLAR,
@@ -481,7 +481,7 @@ describe("WalletService.createReservation", () => {
       createdAt: new Date("2026-01-01"),
     })
     seedGrant(state, {
-      id: "wgr_b",
+      id: "wcr_b",
       customerId,
       projectId,
       issuedAmount: 3 * DOLLAR,
@@ -503,7 +503,7 @@ describe("WalletService.createReservation", () => {
       idempotencyKey: "reserve:decrement",
     })
 
-    const grantUpdates = state.updates.filter((u) => u.table === "walletGrants")
+    const grantUpdates = state.updates.filter((u) => u.table === "walletCredits")
     // First grant fully drained (3 -> 0); second partially drained (3 -> 2).
     expect(grantUpdates).toHaveLength(2)
     expect(grantUpdates[0]!.set).toEqual({ remainingAmount: 0 })
@@ -529,7 +529,7 @@ describe("WalletService.flushReservation", () => {
     state.balances[keys.reserved] = 5 * DOLLAR // pre-existing allocation
     state.balances[keys.purchased] = 10 * DOLLAR
     seedGrant(state, {
-      id: "wgr_1",
+      id: "wcr_1",
       customerId,
       projectId,
       issuedAmount: 1 * DOLLAR,
@@ -667,7 +667,7 @@ describe("WalletService.adjust", () => {
   const projectId = "prj_abc"
   const keys = customerAccountKeys(customerId)
 
-  it("positive with expiresAt: credits available.granted and creates wallet_grants row", async () => {
+  it("positive with expiresAt: credits available.granted and creates wallet_credits row", async () => {
     const { state, wallet } = buildService()
 
     const { val, err } = await wallet.adjust({
@@ -691,7 +691,7 @@ describe("WalletService.adjust", () => {
     })
     expect(toLedgerMinor(state.transfers[0]!.amount)).toBe(5 * DOLLAR)
 
-    const grantInsert = state.inserts.find((i) => i.table === "walletGrants")
+    const grantInsert = state.inserts.find((i) => i.table === "walletCredits")
     expect(grantInsert?.values).toMatchObject({
       source: "promo",
       issuedAmount: 5 * DOLLAR,
@@ -699,7 +699,7 @@ describe("WalletService.adjust", () => {
     })
   })
 
-  it("positive with source='purchased': credits available.purchased and creates NO wallet_grants row", async () => {
+  it("positive with source='purchased': credits available.purchased and creates NO wallet_credits row", async () => {
     const { state, wallet } = buildService()
 
     const { val, err } = await wallet.adjust({
@@ -719,10 +719,10 @@ describe("WalletService.adjust", () => {
       fromAccount: platformAccountKey("manual", projectId),
       toAccount: keys.purchased,
     })
-    expect(state.inserts.find((i) => i.table === "walletGrants")).toBeUndefined()
+    expect(state.inserts.find((i) => i.table === "walletCredits")).toBeUndefined()
   })
 
-  it("replay with same idempotencyKey reuses the existing wallet_grants row", async () => {
+  it("replay with same idempotencyKey reuses the existing wallet_credits row", async () => {
     const { state, wallet } = buildService()
 
     const first = await wallet.adjust({
@@ -753,7 +753,7 @@ describe("WalletService.adjust", () => {
 
     expect(second.err).toBeUndefined()
     expect(second.val?.grantId).toBe(first.val?.grantId)
-    // exactly one ledger transfer + one wallet_grants row across both calls
+    // exactly one ledger transfer + one wallet_credits row across both calls
     expect(state.transfers).toHaveLength(1)
     expect(state.grants).toHaveLength(1)
   })
@@ -777,7 +777,7 @@ describe("WalletService.adjust", () => {
       fromAccount: platformAccountKey("plan_credit", projectId),
       toAccount: keys.granted,
     })
-    const grantInsert = state.inserts.find((i) => i.table === "walletGrants")
+    const grantInsert = state.inserts.find((i) => i.table === "walletCredits")
     expect(grantInsert?.values).toMatchObject({ source: "plan_included" })
   })
 })
@@ -888,10 +888,10 @@ describe("WalletService.expireGrant", () => {
       projectId,
       customerId,
       currency: "USD",
-      grantId: "wgr_expire",
+      grantId: "wcr_expire",
       amount: 3 * DOLLAR,
-      source: "promo" as WalletGrantSource,
-      idempotencyKey: "expire:wgr_expire",
+      source: "promo" as WalletCreditSource,
+      idempotencyKey: "expire:wcr_expire",
     })
 
     expect(err).toBeUndefined()
@@ -903,7 +903,7 @@ describe("WalletService.expireGrant", () => {
     expect(toLedgerMinor(state.transfers[0]!.amount)).toBe(3 * DOLLAR)
     expect(state.transfers[0]!.metadata).toMatchObject({
       flow: "expire",
-      grant_id: "wgr_expire",
+      grant_id: "wcr_expire",
       source: "promo",
     })
   })
@@ -916,10 +916,10 @@ describe("WalletService.expireGrant", () => {
       projectId,
       customerId,
       currency: "USD",
-      grantId: "wgr_plan",
+      grantId: "wcr_plan",
       amount: 1 * DOLLAR,
-      source: "plan_included" as WalletGrantSource,
-      idempotencyKey: "expire:wgr_plan",
+      source: "plan_included" as WalletCreditSource,
+      idempotencyKey: "expire:wcr_plan",
     })
 
     expect(state.transfers[0]).toMatchObject({
@@ -941,7 +941,7 @@ describe("WalletService.getWalletState", () => {
     state.balances[keys.consumed] = 25 * DOLLAR
 
     seedGrant(state, {
-      id: "wgr_far",
+      id: "wcr_far",
       customerId,
       projectId,
       issuedAmount: 3 * DOLLAR,
@@ -949,7 +949,7 @@ describe("WalletService.getWalletState", () => {
       expiresAt: new Date("2026-12-01"),
     })
     seedGrant(state, {
-      id: "wgr_soon",
+      id: "wcr_soon",
       customerId,
       projectId,
       issuedAmount: 2 * DOLLAR,
@@ -958,7 +958,7 @@ describe("WalletService.getWalletState", () => {
     })
     // Inactive — must NOT appear in the result.
     seedGrant(state, {
-      id: "wgr_expired",
+      id: "wcr_expired",
       customerId,
       projectId,
       issuedAmount: 1 * DOLLAR,
@@ -975,7 +975,7 @@ describe("WalletService.getWalletState", () => {
       reserved: 1 * DOLLAR,
       consumed: 25 * DOLLAR,
     })
-    expect(val?.grants.map((g) => g.id)).toEqual(["wgr_soon", "wgr_far"])
+    expect(val?.grants.map((g) => g.id)).toEqual(["wcr_soon", "wcr_far"])
   })
 
   it("returns zeros and empty grants for an untouched customer", async () => {

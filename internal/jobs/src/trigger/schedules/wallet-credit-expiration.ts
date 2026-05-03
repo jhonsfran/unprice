@@ -1,7 +1,7 @@
 import { logger, schedules } from "@trigger.dev/sdk/v3"
 import { Analytics } from "@unprice/analytics"
 import { and, eq, gt, isNull, lte, sql } from "@unprice/db"
-import { customers, walletGrants } from "@unprice/db/schema"
+import { customers, walletCredits } from "@unprice/db/schema"
 import { createStandaloneRequestLogger } from "@unprice/observability"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
@@ -10,7 +10,7 @@ import { env } from "../../env"
 import { db } from "../db"
 
 /**
- * Sweeps `wallet_grants` whose `expires_at` has passed and claws the
+ * Sweeps `wallet_credits` whose `expires_at` has passed and claws the
  * remaining balance back to the matching platform funding account.
  *
  * Per plan slice 7.11 §6: every 5 minutes. One transaction per grant so
@@ -22,7 +22,7 @@ import { db } from "../db"
  * replays on the same ledger transfer, and the in-lock re-read ensures
  * an already-expired or fully-drained grant is skipped.
  */
-export const walletGrantExpirationSchedule = schedules.task({
+export const walletCreditExpirationSchedule = schedules.task({
   id: "wallet.expire-grants",
   cron: {
     timezone: "UTC",
@@ -59,12 +59,12 @@ export const walletGrantExpirationSchedule = schedules.task({
       metrics: new NoopMetrics(),
     })
 
-    const expiredGrants = await db.query.walletGrants.findMany({
+    const expiredGrants = await db.query.walletCredits.findMany({
       where: and(
-        isNull(walletGrants.expiredAt),
-        isNull(walletGrants.voidedAt),
-        gt(walletGrants.remainingAmount, 0),
-        lte(walletGrants.expiresAt, now)
+        isNull(walletCredits.expiredAt),
+        isNull(walletCredits.voidedAt),
+        gt(walletCredits.remainingAmount, 0),
+        lte(walletCredits.expiresAt, now)
       ),
       limit: 500,
     })
@@ -88,8 +88,8 @@ export const walletGrantExpirationSchedule = schedules.task({
           // Re-read under the lock — another flow may have drained the
           // grant between the outer query and here. If already expired,
           // already voided, or fully consumed, skip.
-          const current = await tx.query.walletGrants.findFirst({
-            where: and(eq(walletGrants.id, grant.id), eq(walletGrants.projectId, grant.projectId)),
+          const current = await tx.query.walletCredits.findFirst({
+            where: and(eq(walletCredits.id, grant.id), eq(walletCredits.projectId, grant.projectId)),
           })
 
           if (!current) {
@@ -101,12 +101,12 @@ export const walletGrantExpirationSchedule = schedules.task({
             // the sweep), mark it expired so the state machine advances.
             if (current.remainingAmount === 0 && !current.expiredAt && !current.voidedAt) {
               await tx
-                .update(walletGrants)
+                .update(walletCredits)
                 .set({ expiredAt: now })
                 .where(
                   and(
-                    eq(walletGrants.id, current.id),
-                    eq(walletGrants.projectId, current.projectId)
+                    eq(walletCredits.id, current.id),
+                    eq(walletCredits.projectId, current.projectId)
                   )
                 )
             }
@@ -117,7 +117,7 @@ export const walletGrantExpirationSchedule = schedules.task({
           // Resolve currency from the customer row. Phase 7 is
           // single-currency per customer (see plan §Non-Goals —
           // "One account per currency"), so `customers.default_currency`
-          // is the authoritative source. `wallet_grants` does not store
+          // is the authoritative source. `wallet_credits` does not store
           // currency; reading it here avoids hardcoding USD and respects
           // EUR customers.
           const customer = await tx.query.customers.findFirst({
@@ -157,13 +157,13 @@ export const walletGrantExpirationSchedule = schedules.task({
           }
 
           await tx
-            .update(walletGrants)
+            .update(walletCredits)
             .set({
               remainingAmount: 0,
               expiredAt: now,
             })
             .where(
-              and(eq(walletGrants.id, current.id), eq(walletGrants.projectId, current.projectId))
+              and(eq(walletCredits.id, current.id), eq(walletCredits.projectId, current.projectId))
             )
 
           expiredCount += 1
