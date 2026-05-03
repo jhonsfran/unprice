@@ -4,6 +4,7 @@ import { BaseError } from "@unprice/error"
 
 export const MAX_FUTURE_EVENT_SKEW_MS = 5_000 // 5 secs is more than enough to avoid clock skews
 export const MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1_000 // 30 days to allow late events
+export const LATE_EVENT_GRACE_MS = 60 * 60 * 1_000 // 1h producer / queue lag grace before period close
 
 export interface RawEvent {
   id: string

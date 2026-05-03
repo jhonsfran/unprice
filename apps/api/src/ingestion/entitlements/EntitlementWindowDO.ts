@@ -21,6 +21,7 @@ import {
   EventTimestampTooOldError,
   type Fact,
   type GrantConsumptionState,
+  LATE_EVENT_GRACE_MS,
   MAX_EVENT_AGE_MS,
   type MeterConfig,
   computeGrantPeriodBucket,
@@ -89,7 +90,7 @@ class EntitlementWindowWalletEmptyError extends Error {
   }
 }
 
-type DeniedReason = "LIMIT_EXCEEDED" | "WALLET_EMPTY"
+type DeniedReason = "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
 
 type ApplyResult = {
   allowed: boolean
@@ -425,6 +426,38 @@ export class EntitlementWindowDO extends DurableObject {
         return cachedResult
       }
       wideEvent.idempotent_replay = false
+
+      const lateClosedPeriod = this.resolveLateClosedPeriod({
+        activeGrants,
+        eventTimestamp: input.event.timestamp,
+        now: input.now,
+      })
+
+      if (lateClosedPeriod) {
+        const deniedResult: ApplyResult = {
+          allowed: false,
+          deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+          message: `Event timestamp is ${lateClosedPeriod.lagMs}ms after the closed period grace window`,
+        }
+
+        this.db
+          .insert(idempotencyKeysTable)
+          .values({
+            eventId: idempotencyKey,
+            createdAt,
+            allowed: false,
+            deniedReason: deniedResult.deniedReason ?? null,
+            denyMessage: deniedResult.message ?? null,
+          })
+          .run()
+
+        wideEvent.late_event_rejected = true
+        wideEvent.late_event_lag_ms = lateClosedPeriod.lagMs
+        wideEvent.late_event_period_end_at = lateClosedPeriod.periodEndAt
+        result = deniedResult
+        return deniedResult
+      }
+      wideEvent.late_event_rejected = false
 
       // Phase 7.13 — lazy reservation bootstrap. If this DO has never opened a
       // reservation for the current period (or the previous one closed at period
@@ -1864,6 +1897,29 @@ export class EntitlementWindowDO extends DurableObject {
       throw new Error("Expected at least one grant")
     }
     return grant
+  }
+
+  private resolveLateClosedPeriod(params: {
+    activeGrants: ActiveGrantInput[]
+    eventTimestamp: number
+    now: number
+  }): { lagMs: number; periodEndAt: number } | null {
+    const grant = this.firstGrantByDrainOrder(params.activeGrants)
+    const bucket = computeGrantPeriodBucket(grant, params.eventTimestamp)
+
+    if (!bucket || bucket.end === Number.MAX_SAFE_INTEGER) {
+      return null
+    }
+
+    const graceEndsAt = bucket.end + LATE_EVENT_GRACE_MS
+    if (params.now <= graceEndsAt) {
+      return null
+    }
+
+    return {
+      lagMs: params.now - graceEndsAt,
+      periodEndAt: bucket.end,
+    }
   }
 
   private compareGrantDrainOrder(

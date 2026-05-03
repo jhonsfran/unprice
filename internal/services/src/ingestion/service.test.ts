@@ -198,6 +198,72 @@ describe("IngestionService entitlement routing", () => {
       })
     )
   })
+
+  it("records late closed-period DO denials as rejected queue outcomes", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({
+      allowed: false,
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+      message: "closed period",
+    })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply,
+      getEnforcementState: vi.fn(),
+    })
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: Date.now(),
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { amount: 1 },
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.disposition.action).toBe("ack")
+    expect(commit).toHaveBeenCalledTimes(1)
+
+    const [entries] = commit.mock.calls[0]!
+    expect(entries[0]).toMatchObject({
+      idempotencyKey: "idem_123",
+      status: "rejected",
+      rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
+    expect(JSON.parse(entries[0].resultJson)).toEqual({
+      state: "rejected",
+      rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
+  })
 })
 
 function createEntitlement(): IngestionEntitlement {

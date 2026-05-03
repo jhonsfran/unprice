@@ -509,7 +509,7 @@ The API rejects events older than `MAX_EVENT_AGE_MS = 30 days`, and the DO sweep
 
 ---
 
-### [ ] HARD-015 — Late-arriving events for closed periods are silently dropped (P1, money correctness)
+### [x] HARD-015 — Late-arriving events for closed periods are silently dropped (P1, money correctness)
 
 **Files:** `internal/jobs/src/trigger/schedules/invoicing.ts`, `internal/services/src/use-cases/billing/bill-period.ts`, `internal/services/src/ingestion/service.ts`, `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts`
 
@@ -529,7 +529,7 @@ The API rejects events older than `MAX_EVENT_AGE_MS = 30 days`, and the DO sweep
 
 **Acceptance:** Producers up to `LATE_EVENT_GRACE_MS` lagged are billed correctly without operator intervention.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Added a shared 1h `LATE_EVENT_GRACE_MS`, delayed arrears statement invoicing until the grace window has elapsed for every arrears period in the statement, and added an EntitlementWindowDO guard that idempotently rejects events whose grant period ended beyond the grace window so closed periods cannot be reopened or mutated. Events inside the grace window continue to apply to their original period; events after the grace are rejected with `LATE_EVENT_CLOSED_PERIOD`.
 
 ---
 
@@ -626,7 +626,6 @@ These were in the audit but are not real issues given the project's invariants:
 Before any AI agent picks these up, surface to the team:
 
 1. **HARD-016 dunning policy** — retry schedule and grace expiry behavior.
-2. **HARD-015 cancelled-subscription late event** — reject or quarantine?
 
 ---
 

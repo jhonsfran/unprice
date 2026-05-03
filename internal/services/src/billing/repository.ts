@@ -26,6 +26,7 @@ export interface InvoiceWithDetails extends SubscriptionInvoice {
 }
 
 export interface ListPendingPeriodGroupsInput {
+  lateEventGraceMs?: number
   projectId: string
   subscriptionId: string
   now: number

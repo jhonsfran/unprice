@@ -8,6 +8,7 @@ import { toZonedTime } from "date-fns-tz"
 import { isNegative } from "dinero.js"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { billingStrategyForInterval } from "../../billing/strategy"
+import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { type InvoiceLine, type LedgerGateway, customerAccountKeys } from "../../ledger"
 import type { RatingService } from "../../rating/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
@@ -53,6 +54,7 @@ export async function billPeriod({
   const billingRepo = new DrizzleBillingRepository(db)
 
   const periodItemsGroups = await billingRepo.listPendingPeriodGroups({
+    lateEventGraceMs: LATE_EVENT_GRACE_MS,
     projectId: subscription.projectId,
     subscriptionId: subscription.id,
     now,

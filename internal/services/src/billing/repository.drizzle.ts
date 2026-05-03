@@ -37,6 +37,8 @@ export class DrizzleBillingRepository implements BillingRepository {
   }
 
   async listPendingPeriodGroups(input: ListPendingPeriodGroupsInput): Promise<PeriodGroupRow[]> {
+    const arrearsReadyAt = input.now - (input.lateEventGraceMs ?? 0)
+
     return this.db
       .select({
         projectId: billingPeriods.projectId,
@@ -60,6 +62,9 @@ export class DrizzleBillingRepository implements BillingRepository {
           eq(billingPeriods.projectId, input.projectId),
           eq(billingPeriods.subscriptionId, input.subscriptionId)
         )
+      )
+      .having(
+        sql`bool_and(${billingPeriods.whenToBill} <> 'pay_in_arrear' OR ${billingPeriods.cycleEndAt} <= ${arrearsReadyAt})`
       )
       .limit(input.limit ?? 500)
   }

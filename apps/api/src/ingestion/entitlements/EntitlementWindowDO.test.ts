@@ -12,6 +12,7 @@ function fakeDinero(amount: number, scale: number): Dinero<number> {
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 const TEST_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const TEST_LATE_EVENT_GRACE_MS = 60 * 60 * 1000
 
 type Fact = { delta: number; meterKey: string; valueAfter: number }
 type PersistOptions = { beforePersist?: (facts: Fact[]) => void }
@@ -308,6 +309,69 @@ describe("EntitlementWindowDO", () => {
     expect(payload.currency).toBe("USD")
     expect(payload.priced_at).toBe(BASE_NOW)
     expect(payload.feature_plan_version_id).toBe("fpv_123")
+  })
+
+  it("rejects events for a closed period after the late-event grace window", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const periodEndAt = BASE_NOW - TEST_LATE_EVENT_GRACE_MS - 1
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        periodStartAt: periodEndAt - 60_000,
+        periodEndAt,
+        event: {
+          timestamp: periodEndAt - 1,
+        },
+      })
+    )
+
+    expect(result.allowed).toBe(false)
+    expect(result.deniedReason).toBe("LATE_EVENT_CLOSED_PERIOD")
+    expect(testState.engineApply).not.toHaveBeenCalled()
+    expect(testState.createReservation).not.toHaveBeenCalled()
+    expect(db.outboxRows).toHaveLength(0)
+    expect(db.idempotencyRows.get("idem_123")).toMatchObject({
+      allowed: false,
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
+  })
+
+  it("accepts late events that are still inside the grace window", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const periodEndAt = BASE_NOW - TEST_LATE_EVENT_GRACE_MS + 1
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        periodStartAt: periodEndAt - 60_000,
+        periodEndAt,
+        event: {
+          timestamp: periodEndAt - 1,
+        },
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(db.outboxRows).toHaveLength(1)
   })
 
   it("preserves sub-cent pricing precisely across many events", async () => {
@@ -2495,6 +2559,7 @@ async function loadEntitlementWindowDO() {
       },
       EventTimestampTooFarInFutureError,
       EventTimestampTooOldError,
+      LATE_EVENT_GRACE_MS: TEST_LATE_EVENT_GRACE_MS,
       MAX_EVENT_AGE_MS: TEST_MAX_EVENT_AGE_MS,
       computeGrantPeriodBucket,
       computeMaxMarginalPriceMinor,

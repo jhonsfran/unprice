@@ -85,7 +85,7 @@ type HandleMessageParams = {
 
 type EntitlementWindowApplyResult = {
   allowed: boolean
-  deniedReason?: "LIMIT_EXCEEDED" | "WALLET_EMPTY"
+  deniedReason?: "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
   message?: string
 }
 
@@ -438,13 +438,17 @@ export class IngestionService {
     }
 
     for (const entitlement of processableEntitlementsResult.val) {
-      await this.applyEntitlement({
+      const applyResult = await this.applyEntitlement({
         customerId,
         enforceLimit: false,
         entitlement,
         message,
         projectId,
       })
+
+      if (!applyResult.allowed && applyResult.deniedReason === "LATE_EVENT_CLOSED_PERIOD") {
+        return { state: "rejected", rejectionReason: applyResult.deniedReason }
+      }
     }
 
     return { state: "processed" }
