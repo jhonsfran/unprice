@@ -74,6 +74,11 @@ if [ "$MODE_ID" = "dev" ]; then
     infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db drop
   fi
 
+  if [ "$COMMAND" = "generate:custom" ]; then
+    echo "Generating custom migrations"
+    infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db generate:custom
+  fi
+
   if [ "$COMMAND" = "migrate:custom" ]; then
     echo "Generating migrations"
     infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db generate

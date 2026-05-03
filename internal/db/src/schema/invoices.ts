@@ -56,7 +56,9 @@ export const invoices = pgTableProject(
     // when the invoice is due and ready to be billed
     dueAt: bigint("due_at_m", { mode: "number" }).notNull(),
     paidAt: bigint("paid_at_m", { mode: "number" }),
-    // total amount of the invoice at pgledger scale 8 (1 USD = 100_000_000)
+    // Total amount of the invoice at pgledger scale 8 (1 USD = 100_000_000).
+    // Payment providers receive a cents/minor-unit conversion at the provider
+    // boundary, not in this persisted invoice header.
     totalAmount: bigint("total_amount", { mode: "number" }).notNull().default(0),
     invoicePaymentProviderId: text("invoice_payment_provider_id"),
     invoicePaymentProviderUrl: text("invoice_payment_provider_url"),

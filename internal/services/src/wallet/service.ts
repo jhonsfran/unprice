@@ -1,5 +1,10 @@
 import { type Database, and, asc, eq, gt, isNull, or, sql } from "@unprice/db"
-import { entitlementReservations, walletCredits, walletTopups } from "@unprice/db/schema"
+import {
+  entitlementReservations,
+  type EntitlementReservationDrainLeg,
+  walletCredits,
+  walletTopups,
+} from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { Currency, WalletCredit, WalletCreditSource } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -93,13 +98,7 @@ export interface FlushReservationOutput {
   drainLegs: DrainLeg[]
 }
 
-export type AdjustSource =
-  | "promo"
-  | "purchased"
-  | "plan_included"
-  | "manual"
-  | "trial"
-  | "credit_line"
+export type AdjustSource = WalletCreditSource | "purchased"
 
 export interface AdjustInput {
   projectId: string
@@ -171,7 +170,7 @@ export interface WalletBalances {
 
 export interface WalletStateOutput {
   balances: WalletBalances
-  grants: WalletCredit[]
+  credits: WalletCredit[]
 }
 
 const GRANT_SOURCE_TO_PLATFORM: Record<WalletCreditSource, PlatformFundingKind> = {
@@ -305,7 +304,7 @@ export class WalletService {
         return Ok({
           reservationId: existing.id,
           allocationAmount: existing.allocationAmount,
-          drainLegs: [],
+          drainLegs: this.normalizeDrainLegs(existing.drainLegs),
           reused: "active",
         })
       }
@@ -323,6 +322,12 @@ export class WalletService {
 
       const allocationAmount = grantedDrained + purchasedDrained
       const reservationId = newId("entitlement_reservation")
+      const drainLegs: DrainLeg[] = [
+        ...grantLegs,
+        ...(purchasedDrained > 0
+          ? [{ source: "purchased" as const, amount: purchasedDrained }]
+          : []),
+      ]
 
       const transfers: LedgerTransferRequest[] = []
 
@@ -379,18 +384,12 @@ export class WalletService {
         entitlementId: input.entitlementId,
         allocationAmount,
         consumedAmount: 0,
+        drainLegs: this.toStoredDrainLegs(drainLegs),
         refillThresholdBps: input.refillThresholdBps,
         refillChunkAmount: input.refillChunkAmount,
         periodStartAt: input.periodStartAt,
         periodEndAt: input.periodEndAt,
       })
-
-      const drainLegs: DrainLeg[] = [
-        ...grantLegs,
-        ...(purchasedDrained > 0
-          ? [{ source: "purchased" as const, amount: purchasedDrained }]
-          : []),
-      ]
 
       return Ok({ reservationId, allocationAmount, drainLegs })
     }
@@ -449,14 +448,11 @@ export class WalletService {
             toAccount: keys.consumed,
             amount: fromLedgerMinor(input.flushAmount, input.currency),
             source: { type: "wallet_flush_consume", id: idemBase },
-            statementKey: input.statementKey,
             metadata: {
               flow: "flush",
               ...(input.sourceId ? { source_id: input.sourceId } : {}),
-              kind: "usage",
               reservation_id: input.reservationId,
               flush_seq: input.flushSeq,
-              statement_key: input.statementKey,
               final: input.final,
             },
           })
@@ -467,33 +463,54 @@ export class WalletService {
         let grantedAmount = 0
         let refundedAmount = 0
 
-        // handling final flush from sources. Happens when the source close the billing cycle.
         if (input.final) {
-          // Read reserved balance before the batch executes. This is safe
-          // because pgledger enforces non-negative on the account — if
-          // flushAmount exceeds the actual reserved balance the transfer
-          // will fail atomically. The refund leg uses the pre-flush
-          // snapshot minus flushAmount, which is correct: any shortfall
-          // means refund = 0 (no money to return).
-          const reservedBalance = await this.readBalance(tx, keys.reserved)
-          // math is precise since scale is 8
-          const refund = Math.max(0, reservedBalance - input.flushAmount)
+          const totalConsumedAfterFlush = reservation.consumedAmount + input.flushAmount
+          const releases = this.computeFinalReleases({
+            allocationAmount: reservation.allocationAmount,
+            consumedAmount: totalConsumedAfterFlush,
+            drainLegs: this.normalizeDrainLegs(reservation.drainLegs),
+          })
 
-          if (refund > 0) {
+          if (releases.purchasedAmount > 0) {
             transfers.push({
               projectId: input.projectId,
               fromAccount: keys.reserved,
               toAccount: keys.purchased,
-              amount: fromLedgerMinor(refund, input.currency),
-              source: { type: "wallet_capture_refund", id: `capture:${input.reservationId}` },
-              statementKey: input.statementKey,
+              amount: fromLedgerMinor(releases.purchasedAmount, input.currency),
+              source: {
+                type: "wallet_capture_refund",
+                id: `capture:${input.reservationId}:${input.flushSeq}:purchased`,
+              },
               metadata: {
-                flow: "refund",
+                flow: "refund_reserved_cash",
+                source: "purchased",
                 reservation_id: input.reservationId,
-                statement_key: input.statementKey,
+                flush_seq: input.flushSeq,
               },
             })
-            refundedAmount = refund
+            refundedAmount = releases.purchasedAmount
+          }
+
+          for (const release of releases.grantedAmounts) {
+            transfers.push({
+              projectId: input.projectId,
+              fromAccount: keys.reserved,
+              toAccount: platformAccountKey(
+                GRANT_SOURCE_TO_PLATFORM[release.source],
+                input.projectId
+              ),
+              amount: fromLedgerMinor(release.amount, input.currency),
+              source: {
+                type: "wallet_release_granted",
+                id: `release:${input.reservationId}:${input.flushSeq}:${release.source}`,
+              },
+              metadata: {
+                flow: "release_reserved_credit",
+                source: release.source,
+                reservation_id: input.reservationId,
+                flush_seq: input.flushSeq,
+              },
+            })
           }
         } else if (input.refillChunkAmount > 0) {
           const { drained: grantedDrained, legs: grantLegs } = await this.drainGrantedFIFO(
@@ -564,6 +581,14 @@ export class WalletService {
           .set({
             consumedAmount: newConsumed,
             allocationAmount: newAllocation,
+            ...(!input.final
+              ? {
+                  drainLegs: this.toStoredDrainLegs([
+                    ...this.normalizeDrainLegs(reservation.drainLegs),
+                    ...drainLegs,
+                  ]),
+                }
+              : {}),
             ...(input.final ? { reconciledAt: new Date() } : {}),
           })
           .where(
@@ -806,7 +831,7 @@ export class WalletService {
 
   /**
    * Read-only snapshot of the customer's wallet: the four sub-account
-   * balances and the list of active grants (not expired, not voided,
+   * balances and the list of active credits (not expired, not voided,
    * `remaining_amount > 0`). Missing ledger accounts report zero — a
    * customer who has never transacted is not an error, just an empty
    * wallet. No advisory lock: balances are eventually consistent with
@@ -818,7 +843,7 @@ export class WalletService {
     const keys = customerAccountKeys(input.customerId)
 
     try {
-      const [purchased, granted, reserved, consumed, grants] = await Promise.all([
+      const [purchased, granted, reserved, consumed, credits] = await Promise.all([
         this.readBalance(this.db, keys.purchased),
         this.readBalance(this.db, keys.granted),
         this.readBalance(this.db, keys.reserved),
@@ -840,7 +865,7 @@ export class WalletService {
 
       return Ok({
         balances: { purchased, granted, reserved, consumed },
-        grants,
+        credits,
       })
     } catch (error) {
       return this.handleUnexpected("wallet.get_state_failed", error, {
@@ -1097,6 +1122,110 @@ export class WalletService {
     return { drained: requestedAmount - remaining, legs }
   }
 
+  private normalizeDrainLegs(value: unknown): DrainLeg[] {
+    if (!Array.isArray(value)) return []
+
+    return value.flatMap((leg): DrainLeg[] => {
+      if (!leg || typeof leg !== "object") return []
+      const record = leg as Record<string, unknown>
+      const amount = typeof record.amount === "number" ? record.amount : 0
+      if (amount <= 0) return []
+
+      if (record.source === "purchased") {
+        return [{ source: "purchased", amount }]
+      }
+
+      if (record.source === "granted") {
+        const grantSource = record.grantSource
+        if (!this.isWalletCreditSource(grantSource)) return []
+
+        return [
+          {
+            source: "granted",
+            amount,
+            grantId: typeof record.grantId === "string" ? record.grantId : undefined,
+            grantSource,
+          },
+        ]
+      }
+
+      return []
+    })
+  }
+
+  private toStoredDrainLegs(legs: DrainLeg[]): EntitlementReservationDrainLeg[] {
+    return legs.map((leg) => ({
+      source: leg.source,
+      amount: leg.amount,
+      ...(leg.grantId ? { grantId: leg.grantId } : {}),
+      ...(leg.grantSource ? { grantSource: leg.grantSource } : {}),
+    }))
+  }
+
+  private computeFinalReleases(input: {
+    allocationAmount: number
+    consumedAmount: number
+    drainLegs: DrainLeg[]
+  }): {
+    purchasedAmount: number
+    grantedAmounts: Array<{ source: WalletCreditSource; amount: number }>
+  } {
+    const attributedTotal = input.drainLegs.reduce((sum, leg) => sum + leg.amount, 0)
+    if (attributedTotal !== input.allocationAmount) {
+      throw new UnPriceWalletError({
+        message: "WALLET_METADATA_REQUIRED",
+        context: {
+          missing: "reservation.drain_legs",
+          allocationAmount: input.allocationAmount,
+          attributedTotal,
+        },
+      })
+    }
+
+    let remainingConsumption = input.consumedAmount
+    let purchasedAmount = 0
+    const grantedBySource = new Map<WalletCreditSource, number>()
+
+    for (const leg of input.drainLegs) {
+      const consumedFromLeg = Math.min(leg.amount, Math.max(0, remainingConsumption))
+      remainingConsumption -= consumedFromLeg
+      const unused = leg.amount - consumedFromLeg
+      if (unused <= 0) continue
+
+      if (leg.source === "purchased") {
+        purchasedAmount += unused
+        continue
+      }
+
+      if (!leg.grantSource) {
+        throw new UnPriceWalletError({
+          message: "WALLET_METADATA_REQUIRED",
+          context: { missing: "drain_legs.grantSource" },
+        })
+      }
+
+      grantedBySource.set(leg.grantSource, (grantedBySource.get(leg.grantSource) ?? 0) + unused)
+    }
+
+    return {
+      purchasedAmount,
+      grantedAmounts: [...grantedBySource.entries()].map(([source, amount]) => ({
+        source,
+        amount,
+      })),
+    }
+  }
+
+  private isWalletCreditSource(value: unknown): value is WalletCreditSource {
+    return (
+      value === "promo" ||
+      value === "plan_included" ||
+      value === "trial" ||
+      value === "manual" ||
+      value === "credit_line"
+    )
+  }
+
   private async readBalance(tx: DbExecutor, accountName: string): Promise<number> {
     const result = await this.ledger.getAccountBalanceIn(accountName, tx)
     if (result.err) return 0
@@ -1167,6 +1296,9 @@ export class WalletService {
     error: unknown,
     context: Record<string, unknown>
   ): Result<never, UnPriceWalletError> {
+    if (error instanceof UnPriceWalletError) {
+      return Err(error)
+    }
     if (error instanceof UnPriceLedgerError) {
       return Err(this.wrapLedgerError(error))
     }
@@ -1188,6 +1320,7 @@ export const WALLET_SOURCE_TYPES = {
   refillGranted: "wallet_refill_granted",
   refillPurchased: "wallet_refill_purchased",
   captureRefund: "wallet_capture_refund",
+  releaseGranted: "wallet_release_granted",
   adjust: "wallet_adjust",
   topup: "wallet_topup",
   expireGrant: "wallet_expire_grant",

@@ -110,7 +110,7 @@ export interface CreatePeriodsBatchInput {
  * Phase 7: invoices are header-only rows. Lines are projected from the
  * ledger on read (slice 7.8) — no `invoice_items` storage. Totals are
  * reconciled from ledger projection when needed; `totalAmount` is a
- * snapshot stamped at materialization time.
+ * ledger-scale snapshot stamped at materialization time.
  */
 export interface CreateInvoiceInput {
   id: string

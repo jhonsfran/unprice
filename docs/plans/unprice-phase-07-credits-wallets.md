@@ -161,9 +161,12 @@ Day 31 (period end):
   └─────────────────────────────────────────────────────────┘
 ```
 
-The ledger cares about `flow + statement_key + kind` metadata, not
-about plan shape. Invoice projection ([§ Invoice Projection](#invoice-projection))
-queries by `(project_id, statement_key)` — same query for both modes.
+Bill-period transfers carry `flow + statement_key + kind` invoice
+metadata, independent of plan shape. Invoice projection
+([§ Invoice Projection](#invoice-projection)) queries by
+`(project_id, statement_key)` — same query for advance and arrears.
+Reservation flushes are accounting moves and are excluded from invoice
+projection.
 
 ---
 
@@ -172,7 +175,11 @@ queries by `(project_id, statement_key)` — same query for both modes.
 All monetary amounts at **pgledger scale 8** (`$1 = 100_000_000`).
 Database columns are `bigint`. TypeScript field names use `*Amount`
 (never `*Cents`). Service boundaries use `Dinero<number>` configured at
-scale 8. Conversions happen only at UI / SDK boundaries.
+scale 8. Invoices also store `totalAmount` at ledger scale.
+Payment-provider adapters convert scale-8 amounts to currency minor
+units when sending provider invoice items or checkout amounts, and
+convert provider webhook amounts back to ledger scale before ledger
+transfers. UI / SDK formatting is the other conversion boundary.
 
 ---
 
@@ -200,25 +207,29 @@ amounts to the ledger.
 
 ┌─ flush + refill (mid-period) ────────────────────────────┐
 │  customer.reserved → customer.consumed : flush_amount    │
-│    metadata: { flow:"flush", kind:"usage", statement_key }│
+│    metadata: { flow:"flush", reservation_id, flush_seq }  │
 │  customer.granted    → customer.reserved : refill_g      │
 │  customer.purchased  → customer.reserved : refill_p      │
-│    metadata: { flow:"refill", flush_seq }                │
+│    metadata: { flow:"refill", flush_seq, drain_legs }    │
 │  shared idempotency: flush:{reservation}:{seq}           │
 └──────────────────────────────────────────────────────────┘
 
 ┌─ final flush (period end / 12h inactivity / deletion) ───┐
 │  customer.reserved → customer.consumed : unflushed       │
-│    metadata: { flow:"flush", final:true, statement_key } │
-│  customer.reserved → customer.purchased : refund         │
-│    metadata: { flow:"refund", statement_key }            │
+│    metadata: { flow:"flush", final:true, reservation_id }│
+│  customer.reserved → customer.purchased : unused_p       │
+│    metadata: { flow:"refund_reserved_cash" }             │
+│  customer.reserved → platform.funding.{source} : unused_g│
+│    metadata: { flow:"release_reserved_credit" }          │
 └──────────────────────────────────────────────────────────┘
 ```
 
-**Refund target.** Once money enters `reserved`, source attribution is
-lost. Final-flush refund returns to `purchased` (real money, always
-safe to hold). Phase 8 may track drain attribution and refund
-proportionally.
+**Refund target.** Source attribution is preserved on the reservation
+as `drain_legs`. Final flush refunds unused purchased money to
+`available.purchased` and releases unused granted money back to the
+mapped platform funding account (`promo`, `plan_credit`, `manual`,
+`credit_line`). Phase 8 may add refund-to-card and per-payment
+proportional attribution.
 
 **Ledger writes per period.** 1 (reserve, multi-leg) + 2N (N mid-period
 flushes) + 1–2 (final). Typically 5–10 transfers per customer per
@@ -321,7 +332,7 @@ per pending period (grouped by statement_key):
       ...rating snapshot
     }
   project invoice lines from ledger (getInvoiceLines)
-  upsert invoice row, totalAmount = sum of lines
+  upsert invoice row, totalAmount = sum of lines at ledger scale
   mark periods invoiced
 ```
 
@@ -343,7 +354,9 @@ on payment-provider webhook (or sync collect):
 
 Same for `pay_in_advance` and `pay_in_arrear`. Idempotency on invoice
 ID (not webhook event ID) so duplicate `payment.succeeded` +
-`invoice.paid` webhooks converge on one ledger row.
+`invoice.paid` webhooks converge on one ledger row. The payment
+provider charge uses currency minor units at the provider boundary;
+the ledger settlement uses `invoice.totalAmount` at scale 8.
 
 ### Why usage runway isn't funded by invoice settlement
 
@@ -358,9 +371,11 @@ explicit customer top-ups (a separate operation).
 
 ```
 INITIATE (tRPC, user-facing):
-  insert wallet_topups row (status='pending')
+  insert wallet_topups row (status='pending', provider_session_id=NULL)
   call provider.createCheckoutSession
+  update wallet_topups.provider_session_id with returned session id
   return checkoutUrl
+  on provider error: mark row failed
   (no ledger write yet)
 
 SETTLE (provider webhook):
@@ -449,10 +464,13 @@ settleReceivable(input)      topup → receivable (clears invoice IOU)
 getWalletState(input)        read sub-account balances + active credits
 ```
 
-`AdjustSource = "promo" | "purchased" | "plan_included" | "manual" | "trial" | "credit_line"`.
+`AdjustSource = WalletCreditSource | "purchased"` — reuse the schema
+derived `WalletCreditSource` type instead of re-declaring the DB enum
+in service code.
 
-`reserved → consumed` transfers MUST carry `metadata.statement_key`
-AND `metadata.kind` for invoice projection.
+`reserved → consumed` reservation flushes intentionally do **not** carry
+`metadata.statement_key` or `metadata.kind`; they are accounting moves,
+not invoice lines. Bill-period transfers carry invoice metadata.
 
 ---
 
@@ -521,47 +539,32 @@ refill_chunk_amount  = initial_allocation_amount / 4
 | `Σ inflows - Σ outflows == sum of balances` | nightly cron (heavy query) |
 | Stranded reservations (period_end past, reconciled_at NULL) | nightly cron |
 | Stranded top-ups (pending > 24h) | nightly cron |
-| Invoice projection orphans (consumed without statement_key + kind) | nightly cron |
+| Invoice projection orphans (bill-period consumed without statement_key + kind; reservation flushes excluded) | nightly cron |
 
-The wallet_credits invariant is the high-value addition for Phase 7.
-A `CONSTRAINT TRIGGER` deferred to commit asserts the sum matches the
-ledger balance for the affected customer; any transaction that breaks
-the invariant aborts at commit, eliminating drift by construction.
+The wallet_credits invariant is enforced by a deferred `CONSTRAINT
+TRIGGER` that asserts the sum matches the ledger balance for the
+affected customer at COMMIT. Any transaction that breaks the invariant aborts —
+drift cannot persist. **The nightly cron does NOT re-check this
+invariant**; the trigger is the single source of enforcement. If the
+trigger ever fires, the failed tx already rolled back and the bad
+state never existed; debug from application logs (the violating
+operation surfaced an error to the caller).
 
 ---
 
 ## DO durability and recovery
 
 The DO holds `consumedAmount - flushedAmount` in SQLite between flushes.
-If the DO is permanently lost (eviction without recovery), that delta
-is unrecoverable today.
+If the DO is permanently lost after local consumption and before a
+flush, that delta is unrecoverable in Phase 7.
 
-**Mitigation: shadow watermark in Postgres.** Every Nth priced event
-(or every M seconds), the DO publishes its current `consumedAmount` to
-`entitlement_reservations.consumed_amount` as a fire-and-forget update.
+Phase 7 does **not** use `entitlement_reservations.consumed_amount` as a
+shadow watermark. That column remains the Postgres-side committed
+consumption total. The nightly reconciliation sweep only finds stranded
+reservations; automated reconstruction from DO-local deltas is deferred.
 
-```
-Steady state:
-  DO event → SQLite consumed += cost
-  every Nth event:
-    ctx.waitUntil(
-      UPDATE entitlement_reservations
-        SET consumed_amount = state.consumedAmount
-      WHERE id = reservationId
-    )
-
-Recovery (DO permanently lost):
-  Reconciliation sweep finds reservation: reconciled_at IS NULL,
-  period_end_at < now() - 1h.
-  Reads watermark.consumed_amount.
-  Final flush: reserved → consumed for that amount.
-  Refund the rest to purchased. Mark reconciled_at.
-
-Loss bound: at most N-1 events of consumption.
-```
-
-The watermark uses an existing column. The cost is one extra UPDATE
-per N events per (customer, meter). Tune N per meter velocity.
+Queue-backed flushes, consumed watermarks, and bounded-loss recovery are
+Phase 8 / follow-up work.
 
 ---
 
@@ -579,7 +582,7 @@ patterns:
 | Pattern | Examples | Right tool |
 |---|---|---|
 | Request-response (RPC) | `createReservation`, mid-period `flushReservation+refill` | **Hyperdrive** (CF edge pool) — drop-in, keeps RPC semantics |
-| Fire-and-forget (durable) | consumed watermark, final flush on eviction, audit | **CF Queue** — DO publishes and exits; consumer drains |
+| Fire-and-forget (durable) | future consumed watermark, final flush on eviction, audit | **CF Queue** — DO publishes and exits; consumer drains |
 
 Phase 7 ships with direct Neon. Hyperdrive and Queue integrations are
 follow-ups; benchmark first to confirm the saturation problem before
@@ -591,13 +594,13 @@ adding plumbing.
 
 Three new tables. All amount columns `bigint` at scale 8.
 
-- [`entitlement_reservations`](../../internal/db/src/schema/entitlementReservations.ts) — reservation state machine
-- [`wallet_topups`](../../internal/db/src/schema/walletTopups.ts) — top-up state machine
+- [`entitlement_reservations`](../../internal/db/src/schema/entitlementReservations.ts) — reservation state machine + `drain_legs`
+- [`wallet_topups`](../../internal/db/src/schema/walletTopups.ts) — top-up state machine (`provider_session_id` nullable until provider session creation succeeds)
 - [`wallet_credits`](../../internal/db/src/schema/walletCredits.ts) — credit attribution + expiration
 
-Schema changes also drop `credit_grants`, `invoice_items`,
-`invoice_credit_applications` (legacy), and rename
-`invoices.totalCents` → `totalAmount` (bigint scale 8).
+Schema changes also omit the legacy `credit_grants`, `invoice_items`,
+and `invoice_credit_applications` tables. Invoices use `totalAmount`
+(bigint scale 8); there is no cents-named invoice column.
 
 ---
 
@@ -619,13 +622,16 @@ WHERE e.project_id   = $1
   AND e.metadata->>'statement_key' = $2
   AND e.account_kind = 'customer_consumed'
   AND e.direction    = 'debit'   -- debit-leg landing on customer.consumed
-  AND e.metadata->>'kind' IS NOT NULL;
+  AND e.metadata->>'kind' IS NOT NULL
+  AND COALESCE(e.metadata->>'flow', '') <> 'flush';
 ```
 
-**Contract.** A transfer is an invoice line iff it lands on
-`customer.{cid}.consumed` AND carries `metadata.statement_key` AND
-`metadata.kind`. Both `bill-period` (subscription kind) and the DO
-(usage kind) emit lines.
+**Contract.** In Phase 7, invoice lines come from bill-period transfers:
+they land on `customer.{cid}.consumed` and carry
+`metadata.statement_key` plus `metadata.kind`. Reservation flushes carry
+`flow:"flush"` and intentionally omit invoice metadata, so they cannot
+double-count usage already represented by bill-period receivable
+transfers.
 
 API: [`GET /v1/invoices/:id`](../../apps/api/src/routes/invoices/getInvoiceV1.ts)
 returns invoice header + projection.
@@ -652,7 +658,7 @@ calls `WalletService.getWalletState`. All amounts at scale 8.
 
 | Risk | Mitigation |
 |---|---|
-| DO permanently lost mid-period | Consumed watermark (above) — bounded loss |
+| DO permanently lost mid-period | Accepted Phase 7 risk; queue/watermark recovery deferred |
 | Connection saturation at scale | Hyperdrive (drop-in) once stress-tested |
 | `wallet_credits` drift vs ledger | Deferred constraint trigger (real-time) |
 | Refill latency under burst | Per-meter `refill_threshold_bps`; hot meters use 50%+ |
@@ -717,18 +723,16 @@ pnpm -F @unprice/db migrate
 
 Single rollout, no feature flag.
 
-1. Migration 0000-0001: legacy teardown + new tables (already applied)
-2. Migration 0002: cents cleanup (`amount_estimate_cents` → `amount_estimate`)
-3. Migration 0003: `wallet_grants` → `wallet_credits` rename
-4. Migration 0004: deferred `wallet_credits` invariant trigger
-5. Deploy `LocalReservation` + `WalletService` (8 methods)
-6. Deploy DO with allocation-aware apply + lazy bootstrap + consumed watermark
-7. Activation hook (grants only)
-8. bill-period + settle-invoice (already wired for both advance and arrears)
-9. Top-up tRPC + webhook → `settleTopUp`
-10. Credit expiration job (5-min cron)
-11. Nightly reconciliation cron (5 checks)
-12. Read API: `GET /v1/wallet`, `GET /v1/invoices/:id`
+1. Schema migrations: tables + amount naming cleanup + `wallet_grants` → `wallet_credits` rename
+2. Custom SQL migration: deferred `wallet_credits` invariant trigger
+3. Deploy `LocalReservation` + `WalletService` (8 methods)
+4. Deploy DO with allocation-aware apply + lazy bootstrap
+5. Activation hook (grants only)
+6. bill-period + settle-invoice (wired for both advance and arrears)
+7. Top-up tRPC + webhook → `settleTopUp`
+8. Credit expiration job (5-min cron)
+9. Nightly reconciliation cron (4 checks — the wallet_credits invariant is enforced by the trigger, not re-checked here)
+10. Read API: `GET /v1/wallet`, `GET /v1/invoices/:id`
 
 No back-fill. No dual-write.
 

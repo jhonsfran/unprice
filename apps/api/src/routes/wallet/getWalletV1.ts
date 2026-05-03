@@ -10,7 +10,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["wallet"]
 
-const walletGrantResponseSchema = z.object({
+const walletCreditResponseSchema = z.object({
   id: z.string(),
   source: walletCreditSourceSchema,
   issued_amount: z.number().int().nonnegative(),
@@ -27,7 +27,7 @@ const walletResponseSchema = z.object({
   }),
   reserved: z.number().int().nonnegative(),
   consumed: z.number().int().nonnegative(),
-  grants: walletGrantResponseSchema.array(),
+  credits: walletCreditResponseSchema.array(),
 })
 
 export const route = createRoute({
@@ -35,7 +35,7 @@ export const route = createRoute({
   operationId: "wallet.getWallet",
   summary: "get wallet state",
   description:
-    "Snapshot of the four customer sub-account balances (purchased, granted, reserved, consumed) plus the list of active wallet grants. Amounts are at pgledger scale 8 ($1 = 100_000_000).",
+    "Snapshot of the four customer sub-account balances (purchased, granted, reserved, consumed) plus active wallet credits. Amounts are at pgledger scale 8 ($1 = 100_000_000).",
   method: "get",
   tags,
   request: {
@@ -86,7 +86,7 @@ export const registerGetWalletV1 = (app: App) =>
       throw toUnpriceApiError(err)
     }
 
-    const { balances, grants } = val
+    const { balances, credits } = val
 
     return c.json(
       {
@@ -97,13 +97,13 @@ export const registerGetWalletV1 = (app: App) =>
         },
         reserved: balances.reserved,
         consumed: balances.consumed,
-        grants: grants.map((g) => ({
-          id: g.id,
-          source: g.source,
-          issued_amount: g.issuedAmount,
-          remaining_amount: g.remainingAmount,
-          expires_at: g.expiresAt ? g.expiresAt.toISOString() : null,
-          created_at: g.createdAt.toISOString(),
+        credits: credits.map((credit) => ({
+          id: credit.id,
+          source: credit.source,
+          issued_amount: credit.issuedAmount,
+          remaining_amount: credit.remainingAmount,
+          expires_at: credit.expiresAt ? credit.expiresAt.toISOString() : null,
+          created_at: credit.createdAt.toISOString(),
         })),
       },
       HttpStatusCodes.OK

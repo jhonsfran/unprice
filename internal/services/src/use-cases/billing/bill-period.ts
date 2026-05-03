@@ -2,7 +2,7 @@ import { type Database, sql } from "@unprice/db"
 import { type Dinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
-import { add, formatAmountForProvider } from "@unprice/money"
+import { add, toLedgerMinor } from "@unprice/money"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { isNegative } from "dinero.js"
@@ -350,16 +350,13 @@ export async function billPeriod({
       // of credit-leg ledger transfers landing on `customer.*.consumed`
       // under this statement_key — same projection the API uses on read
       // (slice 7.8). We sum the line Dineros (which are at `LEDGER_SCALE = 8`)
-      // and quantize once at the boundary via `formatAmountForProvider` so
-      // `invoices.totalAmount` is in currency minor units (cents) — matching
-      // what the payment provider receives in `addInvoiceItem` /
-      // `createInvoice`. Summing `.toJSON().amount` per-line would yield
-      // scale-8 minor units, not cents.
+      // and store the invoice total at ledger scale. Provider calls quantize
+      // to currency minor units separately at the provider boundary.
       const totalDinero = linesToInvoice.reduce<Dinero<number> | null>(
         (sum, line) => (sum === null ? line.amount : add(sum, line.amount)),
         null
       )
-      const totalAmountForInvoice = totalDinero ? formatAmountForProvider(totalDinero).amount : 0
+      const totalAmountForInvoice = totalDinero ? toLedgerMinor(totalDinero) : 0
 
       await txBillingRepo.updateInvoice({
         invoiceId: invoice.id,

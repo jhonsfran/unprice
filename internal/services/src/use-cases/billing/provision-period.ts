@@ -1,12 +1,13 @@
 import { type Database, and, eq, sql } from "@unprice/db"
 import { subscriptions } from "@unprice/db/schema"
+import type { WalletCreditSource } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 
 import type { ServiceContext } from "../../context"
 import { UnPriceSubscriptionError } from "../../subscriptions/errors"
 import { toErrorContext } from "../../utils/log-context"
-import type { AdjustSource, UnPriceWalletError } from "../../wallet"
+import type { UnPriceWalletError } from "../../wallet"
 
 export type ActivateSubscriptionDeps = {
   services: Pick<ServiceContext, "subscriptions" | "wallet" | "ledger">
@@ -32,7 +33,7 @@ export type ActivateSubscriptionDeps = {
 export interface ActivationGrant {
   /** Credit amount in pgledger scale 8. Must be > 0. */
   amount: number
-  source: Extract<AdjustSource, "plan_included" | "trial" | "credit_line" | "promo" | "manual">
+  source: WalletCreditSource
   reason?: string
 }
 

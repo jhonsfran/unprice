@@ -1,0 +1,2 @@
+ALTER TABLE "unprice_wallet_topups" ALTER COLUMN "provider_session_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "unprice_entitlement_reservations" ADD COLUMN "drain_legs" json DEFAULT '[]'::json NOT NULL;

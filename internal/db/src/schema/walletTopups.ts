@@ -38,7 +38,7 @@ export const walletTopups = pgTableProject(
     // Kept as text — this is orthogonal to the configured invoice
     // payment provider and may evolve independently.
     provider: text("provider").notNull(),
-    providerSessionId: text("provider_session_id").notNull(),
+    providerSessionId: text("provider_session_id"),
     // Amount the customer requested at checkout, in scale-8 minor units.
     requestedAmount: bigint("requested_amount", { mode: "number" }).notNull(),
     currency: currencyEnum("currency").notNull(),

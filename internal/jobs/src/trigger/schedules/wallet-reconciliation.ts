@@ -3,21 +3,27 @@ import { sql } from "@unprice/db"
 import { db } from "../db"
 
 /**
- * Nightly reconciliation for the Phase 7 wallet/ledger plane. Five
+ * Nightly reconciliation for the Phase 7 wallet/ledger plane. Four
  * invariant checks — each produces a small, bounded result set (only
  * drift rows, never healthy ones). The job logs violations at WARN so
  * the on-call dashboard surfaces them, but does not auto-repair — human
  * judgement is required to decide whether a drift indicates a bug, a
  * race, or legitimate state requiring a backfill.
  *
- * 1. Grant tracking invariant:
- *    `SUM(wallet_credits.remaining_amount)` == `available.granted` balance
- * 2. Wallet identity:
+ * The wallet_credits invariant
+ *   `SUM(remaining_amount) == available.granted balance`
+ * is NOT checked here — it's enforced in real time by the deferred
+ * constraint trigger `wallet_credits_invariant_check` (migration 0004).
+ * Any tx that violates the invariant aborts at COMMIT, so drift cannot
+ * persist.
+ *
+ * 1. Wallet identity:
  *    `purchased + granted + reserved + consumed` == Σ inflows − Σ outflows
- * 3. Stranded reservations (unreconciled past period end)
- * 4. Stranded top-ups (pending > 24h)
- * 5. Invoice-projection orphans (credits to `*.consumed` missing
- *    `statement_key` or `kind` metadata)
+ * 2. Stranded reservations (unreconciled past period end)
+ * 3. Stranded top-ups (pending > 24h)
+ * 4. Invoice-projection orphans (billable credits to `*.consumed` missing
+ *    `statement_key` or `kind` metadata). Reservation flushes are accounting
+ *    movements, not invoice lines, and are excluded by `flow = 'flush'`.
  */
 export const walletReconciliationSchedule = schedules.task({
   id: "wallet.reconciliation",
@@ -28,52 +34,13 @@ export const walletReconciliationSchedule = schedules.task({
   },
   run: async () => {
     const results = {
-      grantDriftRows: 0,
       walletIdentityDriftCustomers: 0,
       strandedReservations: 0,
       strandedTopups: 0,
       invoiceProjectionOrphans: 0,
     }
 
-    // 1. Grant tracking invariant.
-    // For each customer: SUM(wallet_credits.remaining_amount) must equal
-    // the customer's `available.granted` ledger balance. Any row returned
-    // from this query is drift — the invariant is broken.
-    try {
-      const grantDrift = await db.execute<{
-        customer_id: string
-        grant_sum: string
-        ledger_balance: string
-        drift: string
-      }>(sql`
-        SELECT
-          wg.customer_id,
-          SUM(wg.remaining_amount)::text AS grant_sum,
-          COALESCE(a.balance::text, '0') AS ledger_balance,
-          (SUM(wg.remaining_amount) - COALESCE(a.balance, 0))::text AS drift
-        FROM unprice_wallet_credits wg
-        LEFT JOIN pgledger_accounts_view a
-          ON a.name = 'customer.' || wg.customer_id || '.available.granted'
-        WHERE wg.expired_at IS NULL
-          AND wg.voided_at IS NULL
-        GROUP BY wg.customer_id, a.balance
-        HAVING SUM(wg.remaining_amount) <> COALESCE(a.balance, 0)
-      `)
-
-      results.grantDriftRows = grantDrift.rows.length
-      if (grantDrift.rows.length > 0) {
-        logger.warn("wallet.reconciliation.grant_tracking_drift", {
-          count: grantDrift.rows.length,
-          samples: grantDrift.rows.slice(0, 10),
-        })
-      }
-    } catch (error) {
-      logger.error("wallet.reconciliation.grant_tracking_failed", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-
-    // 2. Wallet identity check.
+    // 1. Wallet identity check.
     // For each customer: the sum of their four sub-account balances must
     // equal the net of all inflows minus outflows (i.e. the sum of all
     // entries into those accounts). pgledger guarantees this by
@@ -108,7 +75,7 @@ export const walletReconciliationSchedule = schedules.task({
       })
     }
 
-    // 3. Stranded reservations — period ended more than an hour ago but
+    // 2. Stranded reservations — period ended more than an hour ago but
     // `reconciled_at` is still null. The DO alarm should have closed
     // these; anything here means the DO missed its final flush.
     try {
@@ -138,7 +105,7 @@ export const walletReconciliationSchedule = schedules.task({
       })
     }
 
-    // 4. Stranded top-ups — pending for more than 24 hours. Provider
+    // 3. Stranded top-ups — pending for more than 24 hours. Provider
     // checkout sessions have expired by now; these can be marked
     // `expired` and their rows closed out.
     try {
@@ -168,11 +135,10 @@ export const walletReconciliationSchedule = schedules.task({
       })
     }
 
-    // 5. Invoice-projection orphans — credits to `customer.*.consumed`
-    // that are missing `statement_key` or `kind` in metadata. These
-    // cannot be projected as invoice lines; they indicate a caller that
-    // bypassed `WalletService` (which requires both fields for transfers
-    // to `consumed`).
+    // 4. Invoice-projection orphans — billable credits to
+    // `customer.*.consumed` that are missing `statement_key` or `kind` in
+    // metadata. Reservation flushes deliberately do not carry invoice-line
+    // metadata; bill-period receivable transfers are the invoice source.
     try {
       const orphans = await db.execute<{ count: string }>(sql`
         SELECT count(*)::text AS count
@@ -180,6 +146,7 @@ export const walletReconciliationSchedule = schedules.task({
         INNER JOIN pgledger_accounts_view a ON a.id = e.account_id
         WHERE a.name LIKE 'customer.%.consumed'
           AND e.amount > 0
+          AND COALESCE(e.metadata->>'flow', '') <> 'flush'
           AND (
             e.metadata->>'statement_key' IS NULL
             OR e.metadata->>'kind' IS NULL

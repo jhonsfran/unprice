@@ -52,7 +52,7 @@ export const route = createRoute({
   operationId: "invoices.getInvoice",
   summary: "get invoice",
   description:
-    "Fetch an invoice header along with its line items projected from the ledger. A line is a transfer that credits the customer's consumed sub-account and carries both `statement_key` and `kind` in metadata. Amounts are at pgledger scale 8 ($1 = 100_000_000).",
+    "Fetch an invoice header along with its line items projected from the ledger. Amounts are at pgledger scale 8 ($1 = 100_000_000). Provider calls convert to currency minor units at the provider boundary.",
   method: "get",
   tags,
   request: {

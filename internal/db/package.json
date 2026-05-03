@@ -22,6 +22,7 @@
     "test:file": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run 'src/**/$@'",
     "clean": "rm -rf .turbo node_modules",
     "generate": "pnpm exec drizzle-kit generate --config=drizzle.config.ts",
+    "generate:custom": "pnpm exec drizzle-kit generate --custom --config=drizzle.config.ts",
     "drop": "pnpm exec drizzle-kit drop --config=drizzle.config.ts",
     "migrate": "pnpm exec drizzle-kit migrate --config=drizzle.config.ts",
     "migrate:custom": "pnpm tsx src/migrate.ts",

@@ -4,6 +4,7 @@ import {
   foreignKey,
   index,
   integer,
+  json,
   primaryKey,
   timestamp,
   uniqueIndex,
@@ -26,8 +27,18 @@ import { projects } from "./projects"
  *   - INSERT on subscription activation (via `walletService.createReservation`).
  *   - `allocation_amount` monotonically grows as the DO refills.
  *   - `consumed_amount` syncs at each flush to mirror DO SQLite.
+ *   - `drain_legs` preserves coarse source attribution for safe final
+ *     release; purchased returns to purchased, granted returns to platform
+ *     funding instead of becoming cash.
  *   - `reconciled_at` set by the final flush; NULL = active.
  */
+export type EntitlementReservationDrainLeg = {
+  source: "granted" | "purchased"
+  amount: number
+  grantId?: string
+  grantSource?: string
+}
+
 export const entitlementReservations = pgTableProject(
   "entitlement_reservations",
   {
@@ -40,6 +51,11 @@ export const entitlementReservations = pgTableProject(
     allocationAmount: bigint("allocation_amount", { mode: "number" }).notNull(),
     // Mirror of DO-side consumed counter, synced on each flush.
     consumedAmount: bigint("consumed_amount", { mode: "number" }).notNull().default(0),
+    // Cumulative source attribution for funds moved into reserved.
+    drainLegs: json("drain_legs")
+      .$type<EntitlementReservationDrainLeg[]>()
+      .notNull()
+      .default([]),
     // Refill trigger threshold in basis points of allocation (2000 = 20%).
     refillThresholdBps: integer("refill_threshold_bps").notNull().default(2000),
     // Size of each refill chunk in scale-8 minor units.

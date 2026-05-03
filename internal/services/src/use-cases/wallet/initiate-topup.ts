@@ -1,4 +1,4 @@
-import type { Database } from "@unprice/db"
+import { and, eq, type Database } from "@unprice/db"
 import { walletTopups } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { Currency, PaymentProvider } from "@unprice/db/validators"
@@ -32,12 +32,10 @@ type InitiateTopupOutput = {
 }
 
 /**
- * Begin a customer-initiated wallet top-up. Creates the provider checkout
- * session and inserts a `pending` `wallet_topups` row — the ledger transfer
- * does not happen until the provider webhook settles the session. Keeping
- * the row insertion after the session create means a successful webhook
- * always has a row to find (the webhook handler is the only writer of
- * `completed`).
+ * Begin a customer-initiated wallet top-up. Inserts a `pending`
+ * `wallet_topups` row before creating the provider checkout session so an
+ * eager webhook can always find the row. The ledger transfer does not happen
+ * until the provider webhook settles the session.
  */
 export async function initiateTopup(
   deps: InitiateTopupDeps,
@@ -99,6 +97,28 @@ export async function initiateTopup(
 
   const topupId = newId("wallet_topup")
 
+  const { err: insertErr } = await wrapResult(
+    deps.db.insert(walletTopups).values({
+      id: topupId,
+      projectId: input.projectId,
+      customerId: input.customerId,
+      provider: input.provider,
+      providerSessionId: null,
+      requestedAmount: input.amount,
+      currency: input.currency,
+      status: "pending",
+    }),
+    (error) =>
+      new FetchError({
+        message: `Failed to persist wallet top-up row: ${error.message}`,
+        retry: false,
+      })
+  )
+
+  if (insertErr) {
+    return Err(insertErr)
+  }
+
   const { err: sessionErr, val: session } = await providerService.createSession({
     kind: "wallet_topup",
     currency: input.currency,
@@ -120,6 +140,11 @@ export async function initiateTopup(
   })
 
   if (sessionErr) {
+    await deps.db
+      .update(walletTopups)
+      .set({ status: "failed" })
+      .where(and(eq(walletTopups.id, topupId), eq(walletTopups.projectId, input.projectId)))
+
     return Err(
       new FetchError({
         message: `Failed to create top-up session: ${sessionErr.message}`,
@@ -129,6 +154,11 @@ export async function initiateTopup(
   }
 
   if (!session.sessionId || !session.url) {
+    await deps.db
+      .update(walletTopups)
+      .set({ status: "failed" })
+      .where(and(eq(walletTopups.id, topupId), eq(walletTopups.projectId, input.projectId)))
+
     return Err(
       new FetchError({
         message: "Provider returned an empty top-up session",
@@ -137,32 +167,26 @@ export async function initiateTopup(
     )
   }
 
-  const { err: insertErr } = await wrapResult(
-    deps.db.insert(walletTopups).values({
-      id: topupId,
-      projectId: input.projectId,
-      customerId: input.customerId,
-      provider: input.provider,
-      providerSessionId: session.sessionId,
-      requestedAmount: input.amount,
-      currency: input.currency,
-      status: "pending",
-    }),
+  const { err: updateErr } = await wrapResult(
+    deps.db
+      .update(walletTopups)
+      .set({ providerSessionId: session.sessionId })
+      .where(and(eq(walletTopups.id, topupId), eq(walletTopups.projectId, input.projectId))),
     (error) =>
       new FetchError({
-        message: `Failed to persist wallet top-up row: ${error.message}`,
+        message: `Failed to persist wallet top-up session: ${error.message}`,
         retry: false,
       })
   )
 
-  if (insertErr) {
-    deps.logger.error(insertErr, {
-      context: "Failed to persist wallet_topups row after creating session",
+  if (updateErr) {
+    deps.logger.error(updateErr, {
+      context: "Failed to persist wallet_topups provider session after creating session",
       topupId,
       providerSessionId: session.sessionId,
       projectId: input.projectId,
     })
-    return Err(insertErr)
+    return Err(updateErr)
   }
 
   return Ok({

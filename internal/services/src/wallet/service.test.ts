@@ -286,6 +286,7 @@ function seedReservation(
   const reservation: FakeReservation = {
     allocationAmount: 0,
     consumedAmount: 0,
+    drainLegs: [],
     refillThresholdBps: 2000,
     refillChunkAmount: 0,
     periodStartAt: new Date("2026-01-01T00:00:00Z"),
@@ -562,8 +563,8 @@ describe("WalletService.flushReservation", () => {
     expect(state.transfers[0]).toMatchObject({
       fromAccount: keys.reserved,
       toAccount: keys.consumed,
-      statementKey: "stmt_1",
     })
+    expect(state.transfers[0]?.statementKey).toBeUndefined()
     expect(state.transfers[1]).toMatchObject({
       fromAccount: keys.granted,
       toAccount: keys.reserved,
@@ -584,7 +585,7 @@ describe("WalletService.flushReservation", () => {
     expect(resUpdate?.set).not.toHaveProperty("reconciledAt")
   })
 
-  it("final flush: flushes consumed and refunds remainder to available.purchased", async () => {
+  it("final flush: flushes consumed, refunds purchased, and releases unused credits", async () => {
     const { state, wallet } = buildService()
     seedReservation(state, {
       id: "res_2",
@@ -592,7 +593,11 @@ describe("WalletService.flushReservation", () => {
       projectId,
       entitlementId: "ent_1",
       allocationAmount: 10 * DOLLAR,
-      consumedAmount: 7 * DOLLAR,
+      consumedAmount: 2 * DOLLAR,
+      drainLegs: [
+        { source: "granted", amount: 4 * DOLLAR, grantSource: "promo", grantId: "wcr_1" },
+        { source: "purchased", amount: 6 * DOLLAR },
+      ],
     })
     state.balances[keys.reserved] = 10 * DOLLAR
 
@@ -602,7 +607,7 @@ describe("WalletService.flushReservation", () => {
       currency: "USD",
       reservationId: "res_2",
       flushSeq: 2,
-      flushAmount: 3 * DOLLAR, // the unflushed delta
+      flushAmount: 1 * DOLLAR, // the unflushed delta
       refillChunkAmount: 0,
       statementKey: "stmt_2",
       final: true,
@@ -610,23 +615,28 @@ describe("WalletService.flushReservation", () => {
 
     expect(err).toBeUndefined()
     expect(val).toMatchObject({
-      flushedAmount: 3 * DOLLAR,
+      flushedAmount: 1 * DOLLAR,
       grantedAmount: 0,
-      refundedAmount: 7 * DOLLAR, // reservedBalance(10) - flushAmount(3)
+      refundedAmount: 6 * DOLLAR,
     })
 
-    // Flush leg + refund leg, one batch.
+    // Flush leg + purchased refund + granted release, one batch.
     expect(state.transferBatches).toBe(1)
-    expect(state.transfers).toHaveLength(2)
+    expect(state.transfers).toHaveLength(3)
     expect(state.transfers[0]).toMatchObject({
       fromAccount: keys.reserved,
       toAccount: keys.consumed,
     })
     expect(state.transfers[1]).toMatchObject({
       fromAccount: keys.reserved,
-      toAccount: keys.purchased, // conservative: always back to real money
+      toAccount: keys.purchased,
     })
-    expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(7 * DOLLAR)
+    expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(6 * DOLLAR)
+    expect(state.transfers[2]).toMatchObject({
+      fromAccount: keys.reserved,
+      toAccount: platformAccountKey("promo", projectId),
+    })
+    expect(toLedgerMinor(state.transfers[2]!.amount)).toBe(1 * DOLLAR)
 
     // reconciledAt is stamped on the final flush.
     const resUpdate = state.updates.find((u) => u.table === "entitlementReservations")
@@ -933,7 +943,7 @@ describe("WalletService.getWalletState", () => {
   const projectId = "prj_abc"
   const keys = customerAccountKeys(customerId)
 
-  it("returns the four sub-account balances and active grants ordered by expiry", async () => {
+  it("returns the four sub-account balances and active credits ordered by expiry", async () => {
     const { state, wallet } = buildService()
     state.balances[keys.purchased] = 10 * DOLLAR
     state.balances[keys.granted] = 4 * DOLLAR
@@ -975,10 +985,10 @@ describe("WalletService.getWalletState", () => {
       reserved: 1 * DOLLAR,
       consumed: 25 * DOLLAR,
     })
-    expect(val?.grants.map((g) => g.id)).toEqual(["wcr_soon", "wcr_far"])
+    expect(val?.credits.map((g) => g.id)).toEqual(["wcr_soon", "wcr_far"])
   })
 
-  it("returns zeros and empty grants for an untouched customer", async () => {
+  it("returns zeros and empty credits for an untouched customer", async () => {
     const { wallet } = buildService()
 
     const { val, err } = await wallet.getWalletState({
@@ -993,6 +1003,6 @@ describe("WalletService.getWalletState", () => {
       reserved: 0,
       consumed: 0,
     })
-    expect(val?.grants).toEqual([])
+    expect(val?.credits).toEqual([])
   })
 })
