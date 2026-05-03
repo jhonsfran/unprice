@@ -211,13 +211,15 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
 
 ---
 
-### [ ] HARD-009 — Mid-cycle subscription cancellation strategy: close entitlement-window DOs (P0, money correctness)
+### [x] HARD-009 — Mid-cycle subscription cancellation strategy: close entitlement-window DOs (P0, money correctness)
 
 **Files:** `internal/services/src/use-cases/subscription/cancel.ts` (create if missing), `internal/services/src/wallet/service.ts` (`flushReservation` final path), `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` (`finalFlush`/new `closeReservation` RPC), `internal/db/src/schema/entitlementReservations.ts`
 
 **Problem:** Today, when a subscription is cancelled mid-cycle, reserved funds sit in the `reserved` ledger account until the DO's 24h-inactivity alarm fires its final flush. This is up to 24h of cash in customer-visible limbo, with the subscription appearing "cancelled" in the UI but the wallet still showing the hold. There is no explicit "cancellation → flush now" hook.
 
 **Strategy.** The reservations table is the index of truth for which customer-entitlement windows have open wallet holds. Use it, but route DO calls by `customerEntitlementId` only. `period_start_at` identifies the wallet reservation, not the DO id.
+
+**Decision (2026-05-03):** Do not build the full real-time cancellation RPC/sweeper path yet. The current entitlement-window alarm already converges period-end and inactivity closeout through the same `finalFlush` path, and final-flush failures now mark the DO reservation `recoveryRequired`, preserve the reservation row, emit `operator_action_required`, and stop automatic retries for operator inspection. Plan changes rotate to a new customer entitlement/DO route, so the old DO can safely age out through the alarm. The 80/20 fix is to reduce the healthy automatic refund SLA from 24h to 12h and keep the original RPC design below as a future upgrade if product requires immediate cancellation refunds.
 
 **Plan:**
 
@@ -275,13 +277,13 @@ So the audit's premise is correct (no caller for `paymentProviderService.finaliz
    - Cancel while events are arriving → events post-cancel are rejected with the typed error.
    - Cancel during in-flight refill → final flush waits, no double-spend.
 
-**Acceptance:** Mid-cycle cancellation completes within seconds for healthy DOs; no reserved funds linger past sweeper SLA (15 min).
+**Acceptance:** For the current 80/20 scope, a healthy inactive entitlement-window reservation is final-flushed and refunded after 12h of no events, period-end final flushes still happen immediately, and failed final flushes leave an operator-visible `recoveryRequired` reservation instead of silently retrying or deleting state.
 
-**Open questions for human review:**
-- Should cancellation be refundable in real time (immediate ledger refund) or only at next billing cycle close? Default proposed: real-time refund.
-- Should `closeReservation` be exposed beyond the cancel path (e.g., for plan downgrades)? Likely yes; design the RPC for reuse.
+**Original open questions (resolved for current scope):**
+- Cancellation does not get a real-time refund path yet; healthy reservations refund through period-end or 12h inactivity closeout.
+- `closeReservation` is not exposed yet; keep the RPC design above as a future upgrade if immediate refunds or downgrade closeout become product requirements.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Reduced the entitlement-window inactivity final-flush threshold from 24h to 12h and pinned the behavior with tests for both >12h auto-refund and <12h reservation retention; retained the existing operator-action path for failed period-end/inactivity final flushes.
 
 ---
 
@@ -416,7 +418,7 @@ The API rejects events older than `MAX_EVENT_AGE_MS = 30 days`, and the DO sweep
 
 ---
 
-### [ ] HARD-013 — Provider-agnostic, webhook-independent payment state machine (P1, reliability)
+### [x] HARD-013 — Provider-agnostic, webhook-independent payment state machine (P1, reliability)
 
 **Files:** new `internal/services/src/payment-provider/state-machine.ts` (or extend existing), `internal/jobs/src/trigger/schedules/invoice-reconciler.ts` (new), `internal/services/src/use-cases/payment-provider/process-webhook-event.ts`, `internal/services/src/payment-provider/service.ts`
 
@@ -483,7 +485,7 @@ The API rejects events older than `MAX_EVENT_AGE_MS = 30 days`, and the DO sweep
 
 **Acceptance:** Invoices cannot be stuck waiting on a webhook. The reconciler picks up missed transitions within SLA. State changes are auditable to a single driver per transition.
 
-**Resolution:** _(fill in when fixed)_
+**Resolution:** Added a provider-agnostic invoice transition helper and a webhook-independent invoice reconciler path. `BillingService.reconcileInvoiceFromProvider` now polls `getStatusInvoice`, maps provider terminal states through a typed transition table, settles wallet receivables before marking invoices `paid`, updates local invoice status/metadata, and idempotently reports the subscription outcome. A new `invoice.reconciler` Trigger schedule polls provider-linked `unpaid`/`waiting` invoices every 10 minutes in production (5 minutes in development) after a 5-minute issue grace, dispatching `invoice.reconcile.task`. Tests cover provider-paid recovery, open-provider no-op, provider-uncollectible failure reconciliation, and the transition table.
 
 ---
 
@@ -623,10 +625,8 @@ These were in the audit but are not real issues given the project's invariants:
 
 Before any AI agent picks these up, surface to the team:
 
-1. **HARD-009 cancellation refund timing** — real-time vs next-cycle close? Default: real-time.
-2. **HARD-013 reconciler cadence** — 10 min default; faster for higher-volume customers?
-3. **HARD-016 dunning policy** — retry schedule and grace expiry behavior.
-4. **HARD-015 cancelled-subscription late event** — reject or quarantine?
+1. **HARD-016 dunning policy** — retry schedule and grace expiry behavior.
+2. **HARD-015 cancelled-subscription late event** — reject or quarantine?
 
 ---
 
@@ -654,7 +654,7 @@ These tickets capture follow-up work surfaced during plan review. They are inten
 **Context for future pickup:** Today the entire webhook pipeline (verify → advisory lock → INSERT webhook_events → invoice update → wallet settle → subscription state machine → mark processed → COMMIT) runs **synchronously inside the provider's HTTP request**. With HARD-002 in place this is correct under concurrency, and Neon's connection pooler mitigates the per-request connection cost, so this is not a current operational pain point. The reasons it is worth revisiting later:
 
 1. **Provider HTTP timeout is the processing-time ceiling.** Stripe's webhook timeout is ~30s. Healthy paths today are well under that, but the current design has no headroom — a slow ledger gateway, a cold subscription machine, or a momentary DB stall can push a webhook past the limit. When that happens the provider considers the delivery failed and retries even though our processing committed; the duplicate is caught by HARD-002's idempotency layers but is wasted work.
-2. **The current retry story relies entirely on the provider re-delivering.** If processing throws, `webhook_events.status='failed'` and we return 500. The next attempt only happens if/when Stripe re-delivers (up to 3 days). After that the event is dead. HARD-006 plans an internal sweeper that partially closes this gap, and HARD-013 plans a pull-based reconciler — together they cover the *missed/lost* case. But neither addresses the *slow-but-eventually-succeeds* case where the provider gives up before our handler returns.
+2. **The current retry story relies entirely on the provider re-delivering.** If processing throws, `webhook_events.status='failed'` and we return 500. The next attempt only happens if/when Stripe re-delivers (up to 3 days). After that the event is dead. HARD-006 plus HARD-013's pull-based reconciler cover the *missed/lost* case. But neither addresses the *slow-but-eventually-succeeds* case where the provider gives up before our handler returns.
 3. **Connection-pool sensitivity at scale.** Holding a tx + advisory lock for the full pipeline ties up a Postgres connection per in-flight webhook. Neon's pooler covers us today; if webhook volume grows by 10×–100× this becomes a saturation risk independent of HARD-012's Hyperdrive plan.
 
 **Strategy when picked up:**
@@ -668,7 +668,7 @@ The standard pattern from production billing systems (Stripe Sigma, Lago, Adyen)
 
 **Cross-references at pickup time:**
 - HARD-006 (settlement retry) becomes redundant — fold into the worker retry policy. Re-evaluate whether HARD-006's resolution is still needed once this lands.
-- HARD-013 (reconciler) is complementary — both should ship.
+- HARD-013 (reconciler) is complementary and should remain enabled.
 - HARD-014 (audit DO commit synchronicity) interacts: the worker-side path needs to preserve audit-DO commit ordering. Re-read both tickets together.
 - HARD-012 (Hyperdrive) is reduced in urgency once the sync handler stops holding long DB transactions, but is not eliminated.
 

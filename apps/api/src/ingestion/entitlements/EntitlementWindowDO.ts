@@ -243,11 +243,11 @@ const FLUSH_INTERVAL_MS = 30_000
 const IDEMPOTENCY_CLEANUP_BATCH_SIZE = 5000
 const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
 const WALLET_RESERVATION_ROW_ID = "singleton"
-// 24h of radio silence closes out a live reservation even if the period
+// 12h of radio silence closes out a live reservation even if the period
 // hasn't ended. The final flush returns remaining reserved funds to
 // `available.purchased`; a future apply() on this DO runs without a
 // reservation until activateEntitlement opens a new one.
-const INACTIVITY_THRESHOLD_MS = 24 * 60 * 60 * 1000
+const INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000
 
 // Maximum time the DO will let consumed-but-unflushed activity sit in
 // `customer.{cid}.reserved` without recognising it in the ledger. Cold
@@ -879,7 +879,7 @@ export class EntitlementWindowDO extends DurableObject {
       wideEvent.outbox_alert = remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD
 
       // Phase 7.7 final-flush detection. Any of three triggers converges on
-      // the same flush path: period end, 24h inactivity, or an explicit
+      // the same flush path: period end, 12h inactivity, or an explicit
       // deletion request. A DO without a reservation (or one marked
       // `recoveryRequired`) skips the flush — there's nothing to close out
       // or the last attempt failed terminally and an operator has to look.

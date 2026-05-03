@@ -1506,7 +1506,7 @@ describe("EntitlementWindowDO", () => {
     expect(state.deletedAll).toBe(false)
   })
 
-  it("alarm runs a final flush when the DO has been inactive for >24h", async () => {
+  it("alarm runs a final flush when the DO has been inactive for >12h", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1523,7 +1523,7 @@ describe("EntitlementWindowDO", () => {
     })
 
     const now = Date.now()
-    // Inactivity > 24h; period hasn't ended yet.
+    // Inactivity > 12h; period hasn't ended yet.
     db.meterWindowRows.set(DEFAULT_METER_KEY, {
       meterKey: DEFAULT_METER_KEY,
       currency: "USD",
@@ -1531,7 +1531,7 @@ describe("EntitlementWindowDO", () => {
       periodEndAt: now + 60 * 60 * 1000,
       usage: 0,
       updatedAt: null,
-      createdAt: now - 48 * 60 * 60 * 1000,
+      createdAt: now - 24 * 60 * 60 * 1000,
       projectId: "proj_123",
       customerId: "cus_123",
       reservationId: "res_abc",
@@ -1543,7 +1543,7 @@ describe("EntitlementWindowDO", () => {
       refillInFlight: false,
       flushSeq: 0,
       pendingFlushSeq: null,
-      lastEventAt: now - 25 * 60 * 60 * 1000,
+      lastEventAt: now - 13 * 60 * 60 * 1000,
       deletionRequested: false,
       recoveryRequired: false,
     })
@@ -1558,6 +1558,47 @@ describe("EntitlementWindowDO", () => {
       expect.objectContaining({ final: true, flushAmount: 0 })
     )
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
+  })
+
+  it("alarm keeps a live reservation open before the 12h inactivity threshold", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+
+    const now = Date.now()
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: now + 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: now - 24 * 60 * 60 * 1000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      lastEventAt: now - 11 * 60 * 60 * 1000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBe("res_abc")
+    expect(state.deletedAlarm).toBe(false)
+    expect(state.deletedAll).toBe(false)
   })
 
   it("alarm captures reservation then deletes storage when deletion cleanup completes", async () => {

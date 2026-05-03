@@ -20,6 +20,11 @@ import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
+import {
+  providerStatusToInvoiceEvent,
+  transitionInvoiceStatus,
+  type InvoiceSubscriptionOutcome,
+} from "../payment-provider/invoice-state-machine"
 import type { RatingService } from "../rating/service"
 import type { RatedCharge, RatingInput } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
@@ -32,6 +37,14 @@ import { DrizzleBillingRepository } from "./repository.drizzle"
 import { billingStrategyFor } from "./strategy"
 
 type ComputeCurrentUsageResult = RatedCharge
+
+function normalizeProviderTimestamp(timestamp: number | undefined, fallback: number): number {
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+    return fallback
+  }
+
+  return timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp
+}
 
 export class BillingService {
   private readonly db: Database
@@ -219,6 +232,289 @@ export class BillingService {
     } catch (e) {
       return Err(e as UnPriceBillingError)
     }
+  }
+
+  public async reconcileInvoiceFromProvider({
+    projectId,
+    subscriptionId,
+    invoiceId,
+    now = Date.now(),
+  }: {
+    projectId: string
+    subscriptionId: string
+    invoiceId: string
+    now?: number
+  }): Promise<
+    Result<
+      {
+        changed: boolean
+        providerStatus: string | null
+        status: InvoiceStatus
+      },
+      UnPriceBillingError
+    >
+  > {
+    try {
+      const res = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        lock: true,
+        run: async (machine) => {
+          const reconciled = await this._reconcileInvoiceFromProvider({
+            invoiceId,
+            projectId,
+            machine,
+            now,
+          })
+
+          if (reconciled.err) {
+            throw reconciled.err
+          }
+
+          return reconciled.val
+        },
+      })
+
+      return Ok(res)
+    } catch (e) {
+      return Err(e as UnPriceBillingError)
+    }
+  }
+
+  private async _reconcileInvoiceFromProvider({
+    invoiceId,
+    projectId,
+    machine,
+    now,
+  }: {
+    invoiceId: string
+    projectId: string
+    machine: SubscriptionMachine
+    now: number
+  }): Promise<
+    Result<
+      {
+        changed: boolean
+        providerStatus: string | null
+        status: InvoiceStatus
+      },
+      UnPriceBillingError
+    >
+  > {
+    const billingRepo = new DrizzleBillingRepository(this.db)
+    const invoice = await billingRepo.findInvoiceById({ invoiceId, projectId })
+
+    if (!invoice) {
+      return Err(new UnPriceBillingError({ message: "Invoice not found" }))
+    }
+
+    if (["paid", "void"].includes(invoice.status)) {
+      return Ok({
+        changed: false,
+        providerStatus: null,
+        status: invoice.status,
+      })
+    }
+
+    if (!invoice.invoicePaymentProviderId) {
+      return Err(
+        new UnPriceBillingError({
+          message: "Invoice has no invoice id from the payment provider",
+        })
+      )
+    }
+
+    const { err: paymentProviderErr, val: paymentProviderService } =
+      await this.customerService.getPaymentProvider({
+        customerId: invoice.customerId,
+        projectId,
+        provider: invoice.paymentProvider,
+      })
+
+    if (paymentProviderErr) {
+      return Err(new UnPriceBillingError({ message: paymentProviderErr.message }))
+    }
+
+    const providerInvoice = await paymentProviderService.getStatusInvoice({
+      invoiceId: invoice.invoicePaymentProviderId,
+    })
+
+    if (providerInvoice.err) {
+      return Err(new UnPriceBillingError({ message: providerInvoice.err.message }))
+    }
+
+    const providerStatus = providerInvoice.val.status
+    const event = providerStatusToInvoiceEvent(providerStatus)
+    const transition = transitionInvoiceStatus({
+      currentStatus: invoice.status,
+      event,
+    })
+
+    if (transition.event === "noop") {
+      this.logger.info("invoice reconciler: provider state has no local transition", {
+        invoiceId: invoice.id,
+        projectId,
+        providerStatus,
+        currentStatus: invoice.status,
+        reason: transition.reason,
+      })
+
+      return Ok({
+        changed: false,
+        providerStatus,
+        status: invoice.status,
+      })
+    }
+
+    if (transition.settleWallet) {
+      const settled = await settlePrepaidInvoiceToWallet({
+        walletService: this.walletService,
+        invoice,
+      })
+
+      if (settled.err) {
+        return Err(
+          new UnPriceBillingError({
+            message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+          })
+        )
+      }
+    }
+
+    const nextMetadata = {
+      ...(invoice.metadata ?? {}),
+      reason:
+        transition.subscriptionOutcome === "success"
+          ? providerStatus === "void"
+            ? "invoice_voided"
+            : "payment_received"
+          : "payment_failed",
+      note: `Invoice reconciled from provider status ${providerStatus}`,
+    } as SubscriptionInvoice["metadata"]
+
+    const updated = await billingRepo.updateInvoiceIfStatus({
+      invoiceId: invoice.id,
+      projectId,
+      allowedFromStatuses: transition.allowedFromStatuses,
+      data: {
+        status: transition.nextStatus,
+        ...(transition.nextStatus === "paid"
+          ? {
+              paidAt: normalizeProviderTimestamp(providerInvoice.val.paidAt, now),
+              invoicePaymentProviderUrl:
+                providerInvoice.val.invoiceUrl ?? invoice.invoicePaymentProviderUrl,
+            }
+          : {}),
+        ...(transition.nextStatus === "void"
+          ? {
+              invoicePaymentProviderUrl:
+                providerInvoice.val.invoiceUrl ?? invoice.invoicePaymentProviderUrl,
+            }
+          : {}),
+        metadata: nextMetadata,
+        updatedAtM: now,
+      },
+    })
+
+    if (!updated) {
+      this.logger.warn("invoice reconciler: invoice transition skipped by state guard", {
+        invoiceId: invoice.id,
+        projectId,
+        providerStatus,
+        currentStatus: invoice.status,
+        targetStatus: transition.nextStatus,
+      })
+
+      return Ok({
+        changed: false,
+        providerStatus,
+        status: invoice.status,
+      })
+    }
+
+    const subscriptionReconciled = await this.reconcileSubscriptionOutcomeOnce({
+      billingRepo,
+      invoice: updated,
+      machine,
+      outcome: transition.subscriptionOutcome,
+      failureMessage: `Provider invoice status: ${providerStatus}`,
+      now,
+    })
+
+    if (subscriptionReconciled.err) {
+      return subscriptionReconciled
+    }
+
+    this.logger.info("invoice reconciled from provider", {
+      invoiceId: invoice.id,
+      projectId,
+      providerStatus,
+      fromStatus: invoice.status,
+      toStatus: updated.status,
+    })
+
+    return Ok({
+      changed: true,
+      providerStatus,
+      status: updated.status,
+    })
+  }
+
+  private async reconcileSubscriptionOutcomeOnce({
+    billingRepo,
+    invoice,
+    machine,
+    outcome,
+    failureMessage,
+    now,
+  }: {
+    billingRepo: DrizzleBillingRepository
+    invoice: SubscriptionInvoice
+    machine: SubscriptionMachine
+    outcome: InvoiceSubscriptionOutcome
+    failureMessage: string
+    now: number
+  }): Promise<Result<void, UnPriceBillingError>> {
+    const metadata = (invoice.metadata ?? {}) as {
+      subscriptionReconciledOutcome?: InvoiceSubscriptionOutcome
+    } & Record<string, unknown>
+
+    if (metadata.subscriptionReconciledOutcome === outcome) {
+      this.logger.info("invoice reconciler: subscription already reconciled with outcome", {
+        invoiceId: invoice.id,
+        subscriptionId: invoice.subscriptionId,
+        outcome,
+      })
+      return Ok(undefined)
+    }
+
+    const machineResult =
+      outcome === "success"
+        ? await machine.reportInvoiceSuccess({ invoiceId: invoice.id })
+        : await machine.reportPaymentFailure({
+            invoiceId: invoice.id,
+            error: failureMessage,
+          })
+
+    if (machineResult.err) {
+      return Err(new UnPriceBillingError({ message: machineResult.err.message }))
+    }
+
+    await billingRepo.updateInvoice({
+      invoiceId: invoice.id,
+      projectId: invoice.projectId,
+      data: {
+        metadata: {
+          ...metadata,
+          subscriptionReconciledAt: now,
+          subscriptionReconciledOutcome: outcome,
+        },
+        updatedAtM: now,
+      },
+    })
+
+    return Ok(undefined)
   }
 
   private async _collectInvoicePayment(payload: {
@@ -804,8 +1100,8 @@ export class BillingService {
    *     succeeds, *before* `addInvoiceItem`/`finalizeInvoice`, so that a
    *     mid-flight crash doesn't orphan a Stripe invoice. A retry sees the
    *     id stamped and skips this method entirely (the public wrapper just
-   *     does the local status flip — the partial Stripe invoice must be
-   *     reconciled out-of-band, e.g. via the future HARD-013 reconciler).
+   *     does the local status flip; the HARD-013 reconciler polls the
+   *     provider afterward if webhook delivery never arrives).
    */
   private async _upsertPaymentProviderInvoice({
     invoice,
