@@ -513,8 +513,8 @@ describe("Workflow - Billing and Subscriptions", () => {
 
     // biome-ignore lint/suspicious/noExplicitAny: test setup
     vi.spyOn(mockDb.query.billingPeriods, "findMany").mockResolvedValue([invoicedPeriod] as any)
-    // Phase 7: invoice_items and credit_grants tables are deleted; the
-    // mid-cycle refund path that previously branched on them is gone.
+    // invoice_items and credit_grants tables are deleted; the mid-cycle refund
+    // path that previously branched on them is gone.
     // These spies are no-ops now — `invoiceItem` and `existingCredit`
     // fixtures are retained for the rewrite that will route through
     // WalletService.adjust.
@@ -718,11 +718,11 @@ describe("Workflow - Billing and Subscriptions", () => {
     expect(grantInsert).not.toHaveProperty("featurePlanVersionId")
   })
 
-  // Phase 7: the refund is live via `WalletService.adjust({source:
-  // "purchased"})` in BillingService._generateBillingPeriods — it
-  // credits `customer.*.available.purchased` from `platform.funding.
-  // manual`. The original assertion looked for a `credit_grants`
-  // insert (deleted table); the new contract writes no DB rows, only
+  // The refund is live via `WalletService.adjust({source: "purchased"})` in
+  // BillingService._generateBillingPeriods — it credits
+  // `customer.*.available.purchased` from `platform.funding.manual`. The
+  // original assertion looked for a `credit_grants` insert (deleted table); the
+  // new contract writes no DB rows, only
   // ledger transfers. A proper integration test needs a live pgledger
   // or a richer ledger/wallet fake than this file currently wires.
   it.skip("creates proration credit for prepaid downgrade when eligible", async () => {

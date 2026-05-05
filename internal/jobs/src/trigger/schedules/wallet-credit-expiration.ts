@@ -13,10 +13,10 @@ import { db } from "../db"
  * Sweeps `wallet_credits` whose `expires_at` has passed and claws the
  * remaining balance back to the matching platform funding account.
  *
- * Per plan slice 7.11 §6: every 5 minutes. One transaction per grant so
- * different customers proceed in parallel; the per-customer advisory
- * lock serializes this sweep against concurrent drains/reservations for
- * the same customer without blocking the platform.
+ * Runs every 5 minutes. One transaction per grant so different customers
+ * proceed in parallel; the per-customer advisory lock serializes this sweep
+ * against concurrent drains/reservations for the same customer without
+ * blocking the platform.
  *
  * Safe to re-run: the idempotency key `expire:<grantId>` converges
  * replays on the same ledger transfer, and the in-lock re-read ensures
@@ -89,7 +89,10 @@ export const walletCreditExpirationSchedule = schedules.task({
           // grant between the outer query and here. If already expired,
           // already voided, or fully consumed, skip.
           const current = await tx.query.walletCredits.findFirst({
-            where: and(eq(walletCredits.id, grant.id), eq(walletCredits.projectId, grant.projectId)),
+            where: and(
+              eq(walletCredits.id, grant.id),
+              eq(walletCredits.projectId, grant.projectId)
+            ),
           })
 
           if (!current) {
@@ -114,12 +117,10 @@ export const walletCreditExpirationSchedule = schedules.task({
             return
           }
 
-          // Resolve currency from the customer row. Phase 7 is
-          // single-currency per customer (see plan §Non-Goals —
-          // "One account per currency"), so `customers.default_currency`
-          // is the authoritative source. `wallet_credits` does not store
-          // currency; reading it here avoids hardcoding USD and respects
-          // EUR customers.
+          // Resolve currency from the customer row. Wallet credits are
+          // single-currency per customer, so `customers.default_currency` is
+          // the authoritative source. `wallet_credits` does not store currency;
+          // reading it here avoids hardcoding USD and respects EUR customers.
           const customer = await tx.query.customers.findFirst({
             columns: { defaultCurrency: true },
             where: and(

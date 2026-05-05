@@ -8,6 +8,7 @@ import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
+import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 type CompleteProviderSignUpDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions">
@@ -325,6 +326,13 @@ export async function completeProviderSignUp(
       })
     )
   }
+
+  await activateWalletIfSubscriptionIsActive(deps, {
+    subscriptionId: subscriptionData.id,
+    projectId,
+    context:
+      "payment provider signup wallet activation failed; subscription parked in pending_activation",
+  })
 
   deps.waitUntil(
     deps.analytics.ingestEvents({

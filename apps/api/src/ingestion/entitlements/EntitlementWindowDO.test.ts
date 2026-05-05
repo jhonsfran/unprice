@@ -41,7 +41,7 @@ type MeterWindowRow = {
   usage: number
   updatedAt: number | null
   createdAt: number
-  // Phase 7 identity + reservation columns; null/zero until activation sets them.
+  // Identity + reservation columns; null/zero until activation sets them.
   projectId?: string | null
   customerId?: string | null
   reservationId?: string | null
@@ -53,7 +53,7 @@ type MeterWindowRow = {
   refillInFlight?: boolean
   flushSeq?: number
   pendingFlushSeq?: number | null
-  // Phase 7.7 alarm trigger columns.
+  // Alarm trigger columns.
   lastEventAt?: number | null
   lastFlushedAt?: number | null
   deletionRequested?: boolean
@@ -163,6 +163,8 @@ type FakeDbState = {
   meterWindowRows: Map<string, MeterWindowRow>
   grantRows: Map<string, GrantRow>
   grantWindowRows: Map<string, GrantWindowRow>
+  deleteInArrayBatchSizes: number[]
+  maxDeleteInArrayValues?: number
 }
 
 type FakeDurableObjectState = {
@@ -171,9 +173,9 @@ type FakeDurableObjectState = {
   deletedAll: boolean
   id: { toString: () => string }
   blockConcurrencyWhile: <T>(cb: () => Promise<T> | T) => Promise<T>
-  // Phase 7: apply() schedules flush+refill via ctx.waitUntil. We record
-  // the scheduled promise so tests can assert the refill was triggered and
-  // await its completion before making assertions on db state.
+  // apply() schedules flush+refill via ctx.waitUntil. We record the scheduled
+  // promise so tests can assert the refill was triggered and await its
+  // completion before making assertions on db state.
   waitUntilPromises: Promise<unknown>[]
   waitUntil: (promise: Promise<unknown>) => void
   storage: {
@@ -190,9 +192,9 @@ const testState = {
   engineApply: vi.fn(),
   pricePerFeature: vi.fn(),
   flushReservation: vi.fn(),
-  // Phase 7.13 — lazy reservation bootstrap. Default returns a healthy
-  // reservation so existing tests that don't care about the wallet path stay
-  // green; tests that exercise WALLET_EMPTY override per-test.
+  // Lazy reservation bootstrap. Default returns a healthy reservation so
+  // existing tests that don't care about the wallet path stay green; tests
+  // that exercise WALLET_EMPTY override per-test.
   createReservation: vi.fn(),
   logger: {
     debug: vi.fn(),
@@ -532,6 +534,113 @@ describe("EntitlementWindowDO", () => {
     // at the time-based flush deadline (5 min in non-dev) rather than the
     // distant self-destruct. The flush deadline wins because it's sooner.
     expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
+  })
+
+  it("cleans alarm outbox and idempotency rows in SQLite bind-safe chunks", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    db.maxDeleteInArrayValues = 90
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({
+      quarantined_rows: 0,
+      successful_rows: 200,
+    })
+
+    for (let index = 1; index <= 200; index++) {
+      db.outboxRows.push({
+        id: index,
+        currency: "USD",
+        payload: JSON.stringify({
+          id: `fact_${index}`,
+          event_id: `evt_${index}`,
+          idempotency_key: `idem_${index}`,
+          project_id: "proj_123",
+          customer_id: "cus_123",
+          currency: "USD",
+          customer_entitlement_id: "ce_123",
+          feature_slug: "api_calls",
+          period_key: "period_123",
+          event_slug: "tokens_used",
+          aggregation_method: "sum",
+          timestamp: BASE_NOW,
+          created_at: BASE_NOW,
+          delta: 1,
+          value_after: index,
+          amount: 100_000_000,
+          amount_scale: 8,
+          priced_at: BASE_NOW,
+        }),
+      })
+      db.idempotencyRows.set(`stale_evt_${index}`, {
+        createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
+        allowed: true,
+        deniedReason: null,
+        denyMessage: null,
+      })
+    }
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await durableObject.alarm()
+
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(db.outboxRows).toHaveLength(0)
+    expect(db.idempotencyRows.size).toBe(0)
+    expect(db.deleteInArrayBatchSizes.length).toBeGreaterThan(2)
+    expect(db.deleteInArrayBatchSizes.every((size) => size <= 90)).toBe(true)
+  })
+
+  it("reschedules a fired alarm when a flush batch leaves facts in the outbox", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockImplementation((facts: unknown[]) =>
+      Promise.resolve({
+        quarantined_rows: 0,
+        successful_rows: facts.length,
+      })
+    )
+
+    // Simulate runtimes/tests that still expose the just-fired alarm timestamp
+    // while alarm() is running. It must be replaced if the outbox still has work.
+    state.alarmAt = BASE_NOW
+
+    for (let index = 1; index <= 1200; index++) {
+      db.outboxRows.push({
+        id: index,
+        currency: "USD",
+        payload: JSON.stringify({
+          id: `fact_${index}`,
+          event_id: `evt_${index}`,
+          idempotency_key: `idem_${index}`,
+          project_id: "proj_123",
+          customer_id: "cus_123",
+          currency: "USD",
+          customer_entitlement_id: "ce_123",
+          feature_slug: "api_calls",
+          period_key: "period_123",
+          event_slug: "tokens_used",
+          aggregation_method: "sum",
+          timestamp: BASE_NOW,
+          created_at: BASE_NOW,
+          delta: 1,
+          value_after: index,
+          amount: 100_000_000,
+          amount_scale: 8,
+          priced_at: BASE_NOW,
+        }),
+      })
+    }
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await durableObject.alarm()
+
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(db.outboxRows).toHaveLength(700)
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
   it("retains idempotency rows past the ingestion age cap and cleans them at the DO TTL", async () => {
@@ -977,13 +1086,13 @@ describe("EntitlementWindowDO", () => {
   })
 
   // ---------------------------------------------------------------------
-  // Phase 7 — wallet hot path. These exercise the reservation-aware
-  // branch of apply(): the window row must be seeded with a reservation
-  // for the branch to engage; otherwise the DO keeps its pre-wallet
-  // behaviour (covered by the earlier tests in this suite).
+  // Wallet hot path. These exercise the reservation-aware branch of apply():
+  // the window row must be seeded with a reservation for the branch to engage;
+  // otherwise the DO keeps its non-reserved behavior (covered by the earlier
+  // tests in this suite).
   // ---------------------------------------------------------------------
 
-  it("opens a reservation lazily on first priced apply (Phase 7.13)", async () => {
+  it("opens a reservation lazily on first priced apply", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1150,9 +1259,9 @@ describe("EntitlementWindowDO", () => {
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
     // 5 events @ $1.00 = $5.00 at LEDGER_SCALE=8.
     expect(row.consumedAmount).toBe(5 * 100_000_000)
-    // Refill was scheduled via ctx.waitUntil; the stub body (slice 7.5 will
-    // replace it) settles synchronously on the microtask queue, so by the
-    // time this assertion runs the single-flight flag has already cleared.
+    // Refill was scheduled via ctx.waitUntil; the stub body settles
+    // synchronously on the microtask queue, so by the time this assertion runs
+    // the single-flight flag has already cleared.
     expect(state.waitUntilPromises).toHaveLength(1)
 
     await Promise.all(state.waitUntilPromises)
@@ -1209,8 +1318,8 @@ describe("EntitlementWindowDO", () => {
   })
 
   // ---------------------------------------------------------------------
-  // Phase 7.5 — in-process flush+refill. These exercise the real
-  // requestFlushAndRefill path: the DO calls WalletService.flushReservation
+  // In-process flush+refill. These exercise the real requestFlushAndRefill
+  // path: the DO calls WalletService.flushReservation
   // (mocked), then folds the returned allocation/flush deltas back into
   // SQLite. We assert both the happy path (grantedAmount extends runway,
   // flushSeq advances, pendingFlushSeq clears) and the failure modes
@@ -1511,7 +1620,7 @@ describe("EntitlementWindowDO", () => {
     expect(row?.customerId).toBe("cus_123")
   })
 
-  // ---- Phase 7.7: alarm-driven final flush ---------------------------------
+  // ---- Alarm-driven final flush --------------------------------------------
 
   it("stamps lastEventAt on every successful apply", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
@@ -2224,7 +2333,7 @@ describe("EntitlementWindowDO", () => {
     expect(payload.delta).toBe(50)
   })
 
-  it("sizes the bootstrap reservation using the tier-boundary marginal (not the local marginal at usage=0)", async () => {
+  it("does not bootstrap a reservation while the current event is still in the free tier", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2257,24 +2366,77 @@ describe("EntitlementWindowDO", () => {
     )
 
     expect(result).toEqual({ allowed: true })
-    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(testState.createReservation).not.toHaveBeenCalled()
 
-    // The bootstrap probes price(31) − price(30) = €1.031 = 103_100_000
-    // as the maximum marginal across the curve, then sizes the reservation
-    // from there. The mocked sizeReservation returns
-    // `requestedAmount = max(price × 1000, $1)`, so the call argument is
-    // 103_100_000 × 1000 = 103_100_000_000. A naive local-marginal sizing
-    // (probing only at currentUsage=0 → 1, both in tier 1 at €0) would
-    // size from 0 and floor to the $1 minimum (100_000_000) — that's the
-    // regression these assertions guard against.
-    const call = testState.createReservation.mock.calls[0]?.[0] as { requestedAmount: number }
-    expect(call.requestedAmount).toBe(103_100_000_000)
-
-    // The boundary event itself was tier-1 (€0), so no debit on the reservation.
     expect(db.outboxRows).toHaveLength(1)
     const payload = JSON.parse(db.outboxRows[0]!.payload)
     expect(payload.amount).toBe(0)
     expect(payload.value_after).toBe(1)
+  })
+
+  it("sizes the bootstrap reservation from the max marginal when the current event crosses into a paid tier", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    mockVolumeFlatTierPricing()
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "EUR",
+      priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 30,
+      updatedAt: BASE_NOW - 1_000,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: null,
+    })
+    db.grantWindowRows.set(`grant_123:onetime:${BASE_NOW - 60_000}`, {
+      bucketKey: `grant_123:onetime:${BASE_NOW - 60_000}`,
+      grantId: "grant_123",
+      periodKey: `onetime:${BASE_NOW - 60_000}`,
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 30,
+      exhaustedAt: null,
+    })
+
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 31 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_lazy",
+        allocationAmount: 5 * 100_000_000,
+        drainLegs: [],
+      },
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        priceConfig: VOLUME_FLAT_TIER_PRICE_CONFIG,
+        currency: "EUR",
+        event: { ...createApplyInput().event, properties: { amount: 1 } },
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+
+    const call = testState.createReservation.mock.calls[0]?.[0] as { requestedAmount: number }
+    expect(call.requestedAmount).toBe(103_100_000_000)
+
+    expect(db.outboxRows).toHaveLength(1)
+    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(payload.amount).toBe(103_100_000)
+    expect(payload.value_after).toBe(31)
   })
 
   it("requestDeletion sets the deletion flag and pulls the alarm in", async () => {
@@ -2348,9 +2510,9 @@ async function loadEntitlementWindowDO() {
     createConnection: createConnectionSpy,
   }))
 
-  // Phase 7.5: the DO lazy-instantiates a WalletService on first refill.
-  // We mock the service and its ledger dep so tests can drive the flush
-  // outcome without a real Postgres connection.
+  // The DO lazy-instantiates a WalletService on first refill. We mock the
+  // service and its ledger dep so tests can drive the flush outcome without a
+  // real Postgres connection.
   vi.doMock("@unprice/services/ledger", () => ({
     LedgerGateway: class {},
   }))
@@ -2748,6 +2910,7 @@ function createFakeDbState(): FakeDbState {
     meterWindowRows: new Map(),
     grantRows: new Map(),
     grantWindowRows: new Map(),
+    deleteInArrayBatchSizes: [],
   }
 }
 
@@ -3093,6 +3256,14 @@ function buildFakeDrizzle(state: FakeDbState) {
           return {
             run() {
               if (cond.kind !== "inArray") throw new Error("Unsupported delete condition")
+              const deleteValueCount = cond.values?.length ?? 0
+              state.deleteInArrayBatchSizes.push(deleteValueCount)
+              if (
+                state.maxDeleteInArrayValues !== undefined &&
+                deleteValueCount > state.maxDeleteInArrayValues
+              ) {
+                throw new Error("too many SQL variables")
+              }
               if ((cond.values ?? []).every((v: unknown) => typeof v === "number")) {
                 const ids = new Set(cond.values as number[])
                 const remaining = state.outboxRows.filter((r) => !ids.has(r.id))

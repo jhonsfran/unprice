@@ -28,7 +28,6 @@ import { Tooltip, TooltipArrow, TooltipContent, TooltipTrigger } from "@unprice/
 import { cn, focusRing } from "@unprice/ui/utils"
 import { PricingModelBadge } from "../[planSlug]/_components/pricing-model"
 
-import { Ping } from "~/components/ping"
 import { useActiveFeature, useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
@@ -241,8 +240,6 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
           <div className="min-w-0 flex-1 space-y-0.5">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="line-clamp-1 font-semibold text-sm">{feature.title}</span>
-
-              {!planFeatureVersion?.id && <Ping variant="destructive" />}
 
               {planFeatureVersion.metadata?.hidden && (
                 <Tooltip>

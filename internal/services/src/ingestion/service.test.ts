@@ -204,6 +204,72 @@ describe("IngestionService entitlement routing", () => {
     )
   })
 
+  it("returns customer_not_found when verifying a missing customer", async () => {
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue(Ok([])),
+        customerExists: vi.fn().mockResolvedValue(Ok(false)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn(),
+          exists: vi.fn(),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.verifyFeatureStatus({
+      customerId: "cus_missing",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp: SERVICE_NOW,
+    })
+
+    expect(result).toMatchObject({
+      allowed: false,
+      featureSlug: "api_calls",
+      status: "customer_not_found",
+    })
+  })
+
+  it("returns feature_missing when the customer exists without a matching entitlement", async () => {
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue(Ok([])),
+        customerExists: vi.fn().mockResolvedValue(Ok(true)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn(),
+          exists: vi.fn(),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.verifyFeatureStatus({
+      customerId: "cus_123",
+      featureSlug: "missing_feature",
+      projectId: "proj_123",
+      timestamp: SERVICE_NOW,
+    })
+
+    expect(result).toMatchObject({
+      allowed: false,
+      featureSlug: "missing_feature",
+      status: "feature_missing",
+    })
+  })
+
   it("records late closed-period DO denials as rejected queue outcomes", async () => {
     const entitlement = createEntitlement()
     const apply = vi.fn().mockResolvedValue({

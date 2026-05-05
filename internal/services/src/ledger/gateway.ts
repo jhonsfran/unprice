@@ -189,13 +189,14 @@ export class LedgerGateway {
    */
   public async seedPlatformAccounts(
     projectId: string,
-    currency: Currency
+    currency: Currency,
+    executor?: DbExecutor
   ): Promise<Result<void, UnPriceLedgerError>> {
     const cacheKey = `${projectId}:${currency}`
     if (this.seededProjects.has(cacheKey)) return Ok(undefined)
 
     try {
-      await this.db.transaction(async (tx) => {
+      const run = async (tx: DbExecutor) => {
         for (const kind of PLATFORM_FUNDING_KINDS) {
           const name = platformAccountKey(kind, projectId)
           await this.ensureAccount(
@@ -203,8 +204,15 @@ export class LedgerGateway {
             tx
           )
         }
-      })
-      this.seededProjects.add(cacheKey)
+      }
+
+      if (executor) {
+        await run(executor)
+      } else {
+        await this.db.transaction(run)
+        this.seededProjects.add(cacheKey)
+      }
+
       return Ok(undefined)
     } catch (error) {
       this.logger.error(error, {
@@ -225,14 +233,15 @@ export class LedgerGateway {
    */
   public async ensureCustomerAccounts(
     customerId: string,
-    currency: Currency
+    currency: Currency,
+    executor?: DbExecutor
   ): Promise<Result<void, UnPriceLedgerError>> {
     const cacheKey = `${customerId}:${currency}`
     if (this.seededCustomers.has(cacheKey)) return Ok(undefined)
 
     const keys = customerAccountKeys(customerId)
     try {
-      await this.db.transaction(async (tx) => {
+      const run = async (tx: DbExecutor) => {
         await this.ensureAccount(
           {
             name: keys.purchased,
@@ -276,8 +285,15 @@ export class LedgerGateway {
           },
           tx
         )
-      })
-      this.seededCustomers.add(cacheKey)
+      }
+
+      if (executor) {
+        await run(executor)
+      } else {
+        await this.db.transaction(run)
+        this.seededCustomers.add(cacheKey)
+      }
+
       return Ok(undefined)
     } catch (error) {
       this.logger.error(error, {

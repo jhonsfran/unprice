@@ -56,9 +56,9 @@ Tests run sequentially. Later tests reuse state discovered in earlier ones (e.g.
 | `limit-enforcement: sync rejects at limit` | Pushes usage over the limit; confirms `LIMIT_EXCEEDED` rejection (skips if no limit or too far from limit) |
 | `analytics: getUsage returns data` | `getUsage` returns records for the last 24h |
 | `verification: non-existent feature` | Fake feature slug returns `feature_missing` or API error |
-| `verification: non-existent customer` | Fake customer ID returns `customer_not_found` or API error |
+| `verification: non-existent customer` | Fake customer ID returns `customer_not_found`, `feature_missing`, or API error |
 
-Ingestion tests (`sync-ingestion`, `async-ingestion`, `idempotency`, `limit-enforcement`) are automatically skipped if the customer has no usage-based features.
+Ingestion tests (`sync-ingestion`, `async-ingestion`, `idempotency`, `limit-enforcement`) are automatically skipped if the customer has no usage-based features or the wallet is not funded for priced usage (`WALLET_EMPTY`).
 
 ## Exit codes
 

@@ -1,5 +1,5 @@
 -- Real-time invariant: SUM(wallet_credits.remaining_amount where active)
--- == balance(customer.{cid}.available.granted)
+-- == balance(customer.{cid}.available.granted) converted to ledger minor units.
 --
 -- Enforced via deferred constraint trigger that fires AFTER COMMIT for each
 -- modified wallet_credits row. Any transaction that violates the invariant
@@ -18,9 +18,10 @@ CREATE OR REPLACE FUNCTION assert_wallet_credits_match_ledger()
 RETURNS TRIGGER AS $$
 DECLARE
   v_customer_id    TEXT;
-  v_credit_sum     NUMERIC;
-  v_ledger_balance NUMERIC;
-  v_account_name   TEXT;
+  v_credit_sum           NUMERIC;
+  v_ledger_balance       NUMERIC;
+  v_ledger_balance_minor NUMERIC;
+  v_account_name         TEXT;
 BEGIN
   -- TG_OP is 'INSERT', 'UPDATE', or 'DELETE'. NEW is null for DELETE.
   v_customer_id := COALESCE(NEW.customer_id, OLD.customer_id);
@@ -46,10 +47,15 @@ BEGIN
     v_ledger_balance := 0;
   END IF;
 
-  IF v_credit_sum <> v_ledger_balance THEN
+  -- wallet_credits stores amounts as ledger-scale minor units. pgledger
+  -- stores account balances as decimal money at scale 8, so normalize before
+  -- comparing or tiny valid grants such as 1 minor unit fail at commit.
+  v_ledger_balance_minor := v_ledger_balance * 100000000;
+
+  IF v_credit_sum <> v_ledger_balance_minor THEN
     RAISE EXCEPTION
-      'wallet_credits invariant violated for customer %: credits_sum=%, granted_balance=% (account=%)',
-      v_customer_id, v_credit_sum, v_ledger_balance, v_account_name
+      'wallet_credits invariant violated for customer %: credits_sum_minor=%, granted_balance_minor=%, granted_balance=% (account=%)',
+      v_customer_id, v_credit_sum, v_ledger_balance_minor, v_ledger_balance, v_account_name
       USING ERRCODE = 'check_violation';
   END IF;
 

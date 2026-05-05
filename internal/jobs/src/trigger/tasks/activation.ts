@@ -8,7 +8,7 @@ import { createContext } from "./context"
  * The grant transaction takes a per-customer advisory lock, so concurrent
  * sweeper runs (or an in-flight foreground retry) serialize on the same
  * key. Per-grant idempotency keys ensure that any partial DB state from a
- * prior failure converges on the same `wallet_credits` rows. See HARD-007.
+ * prior failure converges on the same `wallet_credits` rows.
  */
 export const activationTask = task({
   id: "subscription.activation.task",

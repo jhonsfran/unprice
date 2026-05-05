@@ -30,7 +30,8 @@ export function SortableFeature(props: FeaturePlanProps) {
     transform: CSS.Translate.toString(transform),
   }
 
-  // Library mode keeps the original structure (no drag in Phase 2 onwards anyway)
+  // Library mode keeps the original structure; drag only applies to attached
+  // plan features.
   if (props.mode === "Feature") {
     return <FeaturePlan {...props} />
   }

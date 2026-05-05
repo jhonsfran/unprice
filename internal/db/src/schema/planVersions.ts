@@ -94,14 +94,12 @@ export const versions = pgTableProject(
     trialUnits: integer("trial_units").notNull().default(0),
     // auto renew the subscription every billing period
     autoRenew: boolean("auto_renew").notNull().default(true),
-    // Per-period usage allowance, in pgledger scale-8 minor units. Applies
-    // uniformly to both billing modes — the flat-features sum is the
-    // *subscription fee*, this is the *usage budget*, and they are settled
-    // independently. Issued as a `credit_line` grant at activation and each
-    // renewal, expiring at periodEndAt; the DO drains it on every priced
-    // event, and period-end invoicing rates the consumed amount and charges
-    // the saved payment method (combined with the flat fee for arrears,
-    // standalone for advance). Failed settlement → past_due, no reissue.
+    // Explicit period usage allowance, in pgledger scale-8 minor units. The
+    // column name is historical: semantically this is a plan-level usage
+    // runway/cap, not a customer risk decision. It is issued as a
+    // `credit_line` wallet grant at activation and each renewal, expiring at
+    // periodEndAt; the DO drains it on priced events, and period-end invoicing
+    // rates the consumed amount and charges the saved payment method.
     //
     // 0 disables the allowance — usage events deny with WALLET_EMPTY until
     // the customer tops up `purchased` directly (pure topup-driven model).

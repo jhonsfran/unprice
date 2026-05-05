@@ -356,6 +356,39 @@ export class EntitlementService {
     }
   }
 
+  public async customerExists(params: {
+    customerId: string
+    projectId: string
+    db?: Database
+  }): Promise<Result<boolean, FetchError>> {
+    const trx = params.db ?? this.db
+
+    try {
+      const row = await trx.query.customers.findFirst({
+        columns: { id: true },
+        where: (customer, { and: andOp, eq: eqOp }) =>
+          andOp(eqOp(customer.id, params.customerId), eqOp(customer.projectId, params.projectId)),
+      })
+
+      return Ok(!!row)
+    } catch (error) {
+      this.logger.error(error, {
+        context: "Error checking customer existence",
+        customerId: params.customerId,
+        projectId: params.projectId,
+      })
+
+      return Err(
+        new FetchError({
+          message: `Failed to check customer existence: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          retry: true,
+        })
+      )
+    }
+  }
+
   public async expireCustomerEntitlement(params: {
     id: string
     projectId: string
@@ -649,9 +682,9 @@ export class EntitlementService {
     projectId: string
     now: number
   }): Promise<CurrentUsage | null> {
-    // TODO(entitlements-hardening): rebuild current usage from customer_entitlements
-    // plus the DO/analytics runtime in Phase 3. Phase 1 must not keep deriving
-    // customer access by grouping grants.
+    // TODO: rebuild current usage from customer_entitlements plus the
+    // DO/analytics runtime. Customer access should not be derived by grouping
+    // grants.
     const subscription = await this.db.query.subscriptions.findFirst({
       where: (table, { and: andOp, eq: eqOp }) =>
         andOp(

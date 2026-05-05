@@ -681,9 +681,9 @@ export class BillingService {
         return Ok(updatedInvoice)
       }
 
-      // Past due date reached — fail the invoice. Retry-attempt caps are
-      // no longer tracked on the invoice row (Phase 7: header + collection
-      // state only).
+      // Past due date reached — fail the invoice. Retry-attempt caps are no
+      // longer tracked on the invoice row; the row only carries header and
+      // collection state.
       if (invoice.pastDueAt && invoice.pastDueAt < now) {
         // update the invoice status
         const updatedInvoice = await billingRepo.updateInvoice({
@@ -761,8 +761,8 @@ export class BillingService {
       })
 
       if (providerPaymentInvoice.err) {
-        // mark the invoice as failed — retry-attempt history is not tracked
-        // on the invoice row in Phase 7.
+        // Mark the invoice as failed; retry-attempt history is not tracked on
+        // the invoice row.
         await billingRepo.updateInvoice({
           invoiceId: invoice.id,
           projectId,
@@ -1027,11 +1027,11 @@ export class BillingService {
   }
 
   /**
-   * Phase 7: invoice lines are projected from the ledger (see
-   * `LedgerGateway.getInvoiceLines`), not assembled from an `invoice_items`
-   * table. Finalization here is a header-only transition: move the invoice
-   * from `draft` to `unpaid` (or `void` when `totalAmount === 0`) and
-   * stamp `issueDate`. Provider-side invoice creation runs separately in
+   * Invoice lines are projected from the ledger (see `LedgerGateway.getInvoiceLines`),
+   * not assembled from an `invoice_items` table. Finalization here is a
+   * header-only transition: move the invoice from `draft` to `unpaid` (or
+   * `void` when `totalAmount === 0`) and stamp `issueDate`. Provider-side
+   * invoice creation runs separately in
    * `_upsertPaymentProviderInvoice` (called *before* this method by the
    * public `finalizeInvoice` wrapper) so a provider failure leaves the row
    * in `draft` for the cron to retry.
@@ -1100,8 +1100,8 @@ export class BillingService {
    *     succeeds, *before* `addInvoiceItem`/`finalizeInvoice`, so that a
    *     mid-flight crash doesn't orphan a Stripe invoice. A retry sees the
    *     id stamped and skips this method entirely (the public wrapper just
-   *     does the local status flip; the HARD-013 reconciler polls the
-   *     provider afterward if webhook delivery never arrives).
+   *     does the local status flip; the invoice reconciler polls the provider
+   *     afterward if webhook delivery never arrives).
    */
   private async _upsertPaymentProviderInvoice({
     invoice,
@@ -1271,11 +1271,11 @@ export class BillingService {
   }
 
   /**
-   * Phase 7: customer credits live in `wallet_credits` and drain through
-   * the reservation/flush pipeline. The legacy `credit_grants` +
-   * `invoice_credit_applications` path is deleted. Any credit application
-   * at invoice time should instead route through `WalletService.adjust`
-   * or drain naturally during reservation (slice 7.12).
+   * Customer credits live in `wallet_credits` and drain through the
+   * reservation/flush pipeline. The legacy `credit_grants` +
+   * `invoice_credit_applications` path is deleted. Any credit application at
+   * invoice time should instead route through `WalletService.adjust` or drain
+   * naturally during reservation.
    */
   private async _generateBillingPeriods({
     subscriptionId,
@@ -1349,12 +1349,11 @@ export class BillingService {
 
             // 0.1 Shorten already-invoiced periods that now exceed the
             // new phase end, and issue a prorated refund for the
-            // unearned portion. Phase 7: refunds are wallet-credit only
-            // (plan §Non-Goals) — we credit the customer's `available.
-            // purchased` sub-account via `WalletService.adjust`, sourced
-            // from `platform.funding.manual`. Paid amount is summed
-            // from ledger entries tagged with `billing_period_id` in
-            // metadata (the invoice projection contract from slice 7.8).
+            // unearned portion. Refunds are wallet-credit only: we credit the
+            // customer's `available.purchased` sub-account via
+            // `WalletService.adjust`, sourced from `platform.funding.manual`.
+            // Paid amount is summed from ledger entries tagged with
+            // `billing_period_id` in metadata.
             const invoicedPeriods = await txBillingRepo.listInvoicedPeriodsExceedingPhaseEnd({
               phaseId: phase.id,
               phaseEndAt: phase.endAt!,
@@ -1525,9 +1524,8 @@ export class BillingService {
   /**
    * Compute the unearned portion of a paid billing period that has
    * been shortened to `phaseEndAt`. The paid amount is summed from
-   * ledger entries tagged `billing_period_id = period.id` — the
-   * authoritative record of what the customer actually paid for this
-   * period (invoice_items is deleted in Phase 7).
+   * ledger entries tagged `billing_period_id = period.id` — the authoritative
+   * record of what the customer actually paid for this period.
    *
    * Returns 0 when:
    * - the invoice is not paid (nothing to refund yet)
@@ -1582,9 +1580,8 @@ export class BillingService {
     const newFactor = newProration.prorationFactor
     if (!oldFactor || newFactor >= oldFactor) return 0
 
-    // Sum the ledger entries that credit `customer.*.consumed` for
-    // this billing period. Uses the same projection contract as the
-    // invoice-lines read path (slice 7.8).
+    // Sum the ledger entries that credit `customer.*.consumed` for this billing
+    // period. Uses the same projection contract as the invoice-lines read path.
     const linesResult = await this.ledgerService.getInvoiceLines({
       projectId: period.projectId,
       statementKey: invoice.statementKey,

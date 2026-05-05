@@ -8,6 +8,7 @@ import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { getPaymentProviderCapabilities } from "../../payment-provider/service"
+import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 type SignUpDeps = {
   services: Pick<ServiceContext, "plans" | "customers" | "subscriptions">
@@ -505,12 +506,19 @@ async function handleDirectProvisioningFlow(
         },
       })
 
-      return Ok({ customerId: newCustomer.id })
+      return Ok({ customerId: newCustomer.id, subscriptionId: newSubscription.id })
     })
 
     if (txResult.err) {
       return Err(txResult.err)
     }
+
+    await activateWalletIfSubscriptionIsActive(deps, {
+      subscriptionId: txResult.val.subscriptionId,
+      projectId,
+      context:
+        "customer signup wallet activation failed; subscription parked in pending_activation",
+    })
 
     deps.waitUntil(
       deps.analytics.ingestEvents({

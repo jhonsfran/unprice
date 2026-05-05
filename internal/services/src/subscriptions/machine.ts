@@ -205,8 +205,8 @@ export class SubscriptionMachine {
             }
           }) => {
             // If wallet is not wired in for this machine instance, the
-            // activating state is a no-op pass-through. Callers that
-            // upgrade to Phase 7 activation wire walletService through
+            // activating state is a no-op pass-through. Callers that need
+            // wallet activation wire walletService through
             // SubscriptionMachine.create.
             if (!input.walletService) {
               return {
@@ -227,7 +227,7 @@ export class SubscriptionMachine {
               }
             }
 
-            // Phase 7: activation issues period grants only.
+            // Activation issues period grants only.
             // - Reservations: lazy in EntitlementWindowDO on first priced event.
             // - Base fees / usage: settled by `invoiceSubscription` at period
             //   boundaries.
@@ -633,7 +633,7 @@ export class SubscriptionMachine {
         activating: {
           tags: ["machine", "transition"],
           description:
-            "Issues plan-included credits and opens per-meter reservations for the current billing period. Phase 7 activation hook — runs after invoicing or renewal, before the subscription enters `active`. No-op when walletService isn't wired in.",
+            "Issues plan-included credits for the current billing period. Runs after invoicing or renewal, before the subscription enters `active`. No-op when walletService isn't wired in.",
           invoke: {
             id: "activateSubscription",
             src: "activateSubscription",
@@ -652,8 +652,8 @@ export class SubscriptionMachine {
             // `pending_activation` (a tagged subscription state, so the
             // status persists to the DB) and let the activation sweeper
             // retry. The previous `error` (final) target left the machine
-            // dead while the DB row stayed `active` — paid plans then had
-            // no grants and ingestion saw a green light. See HARD-007.
+            // dead while the DB row stayed `active` — paid plans then had no
+            // grants and ingestion saw a green light.
             onError: {
               target: "pending_activation",
               actions: [
@@ -1134,9 +1134,9 @@ export class SubscriptionMachine {
   }
 
   /**
-   * Triggers Phase 7 wallet activation (plan credits + reservations)
-   * for an already-active subscription. Used when a subscription is
-   * created directly as active (e.g. sandbox provider, no trial).
+   * Triggers wallet activation for an already-active subscription. Used when
+   * a subscription is created directly as active (e.g. sandbox provider, no
+   * trial).
    */
   public async activate(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
     return this.sendAndWait({ type: "ACTIVATE" }, { tag: "subscription", timeout: 15000 })

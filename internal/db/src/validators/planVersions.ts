@@ -123,7 +123,7 @@ export const versionInsertBaseSchema = createInsertSchema(versions, {
     .min(0)
     .default(0)
     .describe(
-      "Per-period usage allowance in pgledger scale-8 minor units (e.g. 100_000_000 = $1.00). Applies uniformly to both billing modes: the flat-features sum is the subscription fee, this is the separate usage budget. Issued as a credit_line wallet grant at activation/renewal, drained on each priced event, and settled at period end against the saved payment method (combined with the flat fee for arrears, standalone for advance). 0 disables the allowance — usage events deny with WALLET_EMPTY until the customer tops up purchased balance directly"
+      "Explicit period usage allowance in pgledger scale-8 minor units (e.g. 100_000_000 = $1.00). The field name is historical: this is usage runway/cap, not customer creditworthiness. Issued as a credit_line wallet grant at activation/renewal and drained on each priced event. For arrears plans, 0 lets activation derive a conservative default from finite priced usage limits; unlimited paid usage still requires an explicit allowance or purchased balance"
     ),
 })
   .required({

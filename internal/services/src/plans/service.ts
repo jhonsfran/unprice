@@ -1138,6 +1138,10 @@ export class PlanService {
     paymentProvider,
     trialUnits,
     autoRenew,
+    collectionMethod,
+    dueBehaviour,
+    paymentMethodRequired,
+    creditLineAmount,
   }: {
     projectId: string
     planId: string
@@ -1155,6 +1159,10 @@ export class PlanService {
     paymentProvider: PlanVersion["paymentProvider"]
     trialUnits?: PlanVersion["trialUnits"]
     autoRenew?: PlanVersion["autoRenew"]
+    collectionMethod?: PlanVersion["collectionMethod"]
+    dueBehaviour?: PlanVersion["dueBehaviour"]
+    paymentMethodRequired?: PlanVersion["paymentMethodRequired"]
+    creditLineAmount?: PlanVersion["creditLineAmount"]
   }): Promise<
     Result<{ state: "plan_not_found" } | { state: "ok"; planVersion: PlanVersion }, FetchError>
   > {
@@ -1196,6 +1204,10 @@ export class PlanService {
             trialUnits: trialUnits ?? 0,
             gracePeriod: gracePeriod ?? 0,
             whenToBill,
+            collectionMethod: collectionMethod ?? "charge_automatically",
+            dueBehaviour: dueBehaviour ?? "cancel",
+            paymentMethodRequired: paymentMethodRequired ?? false,
+            creditLineAmount: creditLineAmount ?? 0,
             metadata,
             version: Number(countVersionsPlan) + 1,
           })
@@ -1248,6 +1260,10 @@ export class PlanService {
     metadata,
     autoRenew,
     trialUnits,
+    collectionMethod,
+    dueBehaviour,
+    paymentMethodRequired,
+    creditLineAmount,
   }: {
     projectId: string
     id: string
@@ -1263,6 +1279,10 @@ export class PlanService {
     metadata?: PlanVersion["metadata"]
     autoRenew?: PlanVersion["autoRenew"]
     trialUnits?: PlanVersion["trialUnits"]
+    collectionMethod?: PlanVersion["collectionMethod"]
+    dueBehaviour?: PlanVersion["dueBehaviour"]
+    paymentMethodRequired?: PlanVersion["paymentMethodRequired"]
+    creditLineAmount?: PlanVersion["creditLineAmount"]
   }): Promise<
     Result<{ state: "not_found" } | { state: "ok"; planVersion: PlanVersion }, FetchError>
   > {
@@ -1492,6 +1512,10 @@ export class PlanService {
             ...(metadata !== undefined && { metadata }),
             ...(paymentProvider !== undefined && { paymentProvider }),
             ...(trialUnits !== undefined && { trialUnits }),
+            ...(collectionMethod !== undefined && { collectionMethod }),
+            ...(dueBehaviour !== undefined && { dueBehaviour }),
+            ...(paymentMethodRequired !== undefined && { paymentMethodRequired }),
+            ...(creditLineAmount !== undefined && { creditLineAmount }),
             updatedAtM: Date.now(),
           })
           .where(and(eq(schema.versions.id, planVersionData.id)))

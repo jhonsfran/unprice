@@ -1832,9 +1832,8 @@ export class SubscriptionService {
 
       // The activating actor parks failed activations in `pending_activation`
       // (a recoverable, sweeper-driven state) instead of throwing. Surface
-      // that as Err here so callers (create.ts, retry sweeper) treat it as
-      // a failure and don't return a "succeeded" Result with an empty wallet.
-      // See HARD-007.
+      // that as Err here so callers (create.ts, retry sweeper) treat it as a
+      // failure and don't return a "succeeded" Result with an empty wallet.
       if (status === "pending_activation") {
         return Err(
           new UnPriceSubscriptionError({

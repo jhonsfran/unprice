@@ -52,10 +52,7 @@ export const entitlementReservations = pgTableProject(
     // Mirror of DO-side consumed counter, synced on each flush.
     consumedAmount: bigint("consumed_amount", { mode: "number" }).notNull().default(0),
     // Cumulative source attribution for funds moved into reserved.
-    drainLegs: json("drain_legs")
-      .$type<EntitlementReservationDrainLeg[]>()
-      .notNull()
-      .default([]),
+    drainLegs: json("drain_legs").$type<EntitlementReservationDrainLeg[]>().notNull().default([]),
     // Refill trigger threshold in basis points of allocation (2000 = 20%).
     refillThresholdBps: integer("refill_threshold_bps").notNull().default(2000),
     // Size of each refill chunk in scale-8 minor units.

@@ -169,6 +169,7 @@ function buildMockSubscription({
         name: "Test Customer",
         email: "test@example.com",
         projectId: "proj_123",
+        defaultCurrency: "USD",
         paymentMethods: [{ id: "pm_123", provider: "stripe", isDefault: true }],
       },
       currentCycleStartAt: now - 24 * 60 * 60 * 1000,
@@ -211,6 +212,7 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     mockCustomerService = {
       syncActiveEntitlementsLastUsage: vi.fn().mockResolvedValue(Ok({})),
+      updateAccessControlList: vi.fn().mockResolvedValue(undefined),
       validatePaymentMethod: vi.fn().mockResolvedValue(Ok({})),
     } as unknown as CustomerService
 
@@ -434,22 +436,24 @@ describe("SubscriptionMachine - comprehensive", () => {
         from: vi.fn((table) => {
           if (table === billingPeriods) {
             return {
-              groupBy: vi.fn(() => ({
-                where: vi.fn(() => ({
-                  limit: vi.fn(() =>
-                    Promise.resolve([
-                      {
-                        projectId: subscription.projectId,
-                        subscriptionId: subscription.id,
-                        subscriptionPhaseId: subscription.phases[0]!.id,
-                        cycleStartAt: subscription.currentCycleStartAt,
-                        cycleEndAt: subscription.currentCycleEndAt,
-                        invoiceAt: subscription.currentCycleStartAt,
-                        statementKey: "test_statement_key",
-                        subscriptionItem: subscription.phases[0]!.items[0]!,
-                      },
-                    ])
-                  ),
+              where: vi.fn(() => ({
+                groupBy: vi.fn(() => ({
+                  having: vi.fn(() => ({
+                    limit: vi.fn(() =>
+                      Promise.resolve([
+                        {
+                          projectId: subscription.projectId,
+                          subscriptionId: subscription.id,
+                          subscriptionPhaseId: subscription.phases[0]!.id,
+                          cycleStartAt: subscription.currentCycleStartAt,
+                          cycleEndAt: subscription.currentCycleEndAt,
+                          invoiceAt: subscription.currentCycleStartAt,
+                          statementKey: "test_statement_key",
+                          subscriptionItem: subscription.phases[0]!.items[0]!,
+                        },
+                      ])
+                    ),
+                  })),
                 })),
               })),
             }
@@ -457,30 +461,34 @@ describe("SubscriptionMachine - comprehensive", () => {
 
           if (table === subscriptions) {
             return {
-              groupBy: vi.fn(() => ({
-                where: vi.fn(() => ({
-                  limit: vi.fn(() =>
-                    Promise.resolve([
-                      {
-                        projectId: subscription.projectId,
-                        subscriptionId: subscription.id,
-                        subscriptionPhaseId: subscription.phases[0]!.id,
-                        cycleStartAt: subscription.currentCycleStartAt,
-                        cycleEndAt: subscription.currentCycleEndAt,
-                        invoiceAt: subscription.currentCycleStartAt,
-                        statementKey: "test_statement_key",
-                      },
-                    ])
-                  ),
+              where: vi.fn(() => ({
+                groupBy: vi.fn(() => ({
+                  having: vi.fn(() => ({
+                    limit: vi.fn(() =>
+                      Promise.resolve([
+                        {
+                          projectId: subscription.projectId,
+                          subscriptionId: subscription.id,
+                          subscriptionPhaseId: subscription.phases[0]!.id,
+                          cycleStartAt: subscription.currentCycleStartAt,
+                          cycleEndAt: subscription.currentCycleEndAt,
+                          invoiceAt: subscription.currentCycleStartAt,
+                          statementKey: "test_statement_key",
+                        },
+                      ])
+                    ),
+                  })),
                 })),
               })),
             }
           }
 
           return {
-            groupBy: vi.fn(() => ({
-              where: vi.fn(() => ({
-                limit: vi.fn(() => Promise.resolve([])),
+            where: vi.fn(() => ({
+              groupBy: vi.fn(() => ({
+                having: vi.fn(() => ({
+                  limit: vi.fn(() => Promise.resolve([])),
+                })),
               })),
             })),
           }
@@ -822,9 +830,11 @@ describe("SubscriptionMachine - comprehensive", () => {
         select: vi.fn(() => ({
           from: vi.fn(() => {
             return {
-              groupBy: vi.fn(() => ({
-                where: vi.fn(() => ({
-                  limit: vi.fn(() => Promise.resolve([])),
+              where: vi.fn(() => ({
+                groupBy: vi.fn(() => ({
+                  having: vi.fn(() => ({
+                    limit: vi.fn(() => Promise.resolve([])),
+                  })),
                 })),
               })),
             }
@@ -917,6 +927,7 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     let adjustCalls = 0
     const failingWallet = {
+      ensureCustomerAccounts: vi.fn(async () => Ok(undefined)),
       adjust: vi.fn(async (input: { signedAmount: number }) => {
         adjustCalls++
         if (adjustCalls === 2) {
@@ -965,6 +976,7 @@ describe("SubscriptionMachine - comprehensive", () => {
 
     let retryCalls = 0
     const goodWallet = {
+      ensureCustomerAccounts: vi.fn(async () => Ok(undefined)),
       adjust: vi.fn(async (input: { signedAmount: number }) => {
         retryCalls++
         return Ok({

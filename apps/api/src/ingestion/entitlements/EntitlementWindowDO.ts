@@ -71,10 +71,10 @@ class EntitlementWindowLimitExceededError extends Error {
   }
 }
 
-// Raised when a priced event's cost exceeds the local reservation's
-// remaining allocation (Phase 7). The DO converts this into a denied
-// ApplyResult, persists the denial to the idempotency table, and returns
-// WALLET_EMPTY so retries are stable.
+// Raised when a priced event's cost exceeds the local reservation's remaining
+// allocation. The DO converts this into a denied ApplyResult, persists the
+// denial to the idempotency table, and returns WALLET_EMPTY so retries are
+// stable.
 class EntitlementWindowWalletEmptyError extends Error {
   constructor(
     public readonly params: {
@@ -239,9 +239,10 @@ type FinalFlushResult =
       outcome: "exception" | "wallet_error"
     }
 
-const FLUSH_BATCH_SIZE = 1000
+const FLUSH_BATCH_SIZE = 500
 const FLUSH_INTERVAL_MS = 30_000
 const IDEMPOTENCY_CLEANUP_BATCH_SIZE = 5000
+const SQLITE_BIND_PARAMETER_CHUNK_SIZE = 90
 const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
 const WALLET_RESERVATION_ROW_ID = "singleton"
 // 12h of radio silence closes out a live reservation even if the period
@@ -261,6 +262,12 @@ const INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000
 // per-flush Postgres roundtrip cost on cold meters.
 function maxFlushIntervalMs(env: Env): number {
   return env.NODE_ENV === "development" ? 30_000 : 5 * 60_000
+}
+
+function forEachSqliteBindChunk<T>(values: readonly T[], callback: (chunk: T[]) => void): void {
+  for (let index = 0; index < values.length; index += SQLITE_BIND_PARAMETER_CHUNK_SIZE) {
+    callback(values.slice(index, index + SQLITE_BIND_PARAMETER_CHUNK_SIZE))
+  }
 }
 
 function minNullableExpiry(left: number | null, right: number | null): number | null {
@@ -313,9 +320,9 @@ export class EntitlementWindowDO extends DurableObject {
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(this.db, migrations)
 
-      // Crash recovery (Phase 7.5). If the DO was evicted mid-flush, the
-      // SQLite row still carries `pending_flush_seq > flush_seq`. Re-issue
-      // the flush with the same seq — WalletService dedupes via the ledger
+      // Crash recovery. If the DO was evicted mid-flush, the SQLite row still
+      // carries `pending_flush_seq > flush_seq`. Re-issue the flush with the
+      // same seq — WalletService dedupes via the ledger
       // idempotency key `flush:{reservationId}:{flushSeq}`, so a duplicate
       // call after a successful commit is a no-op. `flushAmount` is
       // re-derived from `consumed - flushed` because we don't persist the
@@ -459,11 +466,10 @@ export class EntitlementWindowDO extends DurableObject {
       }
       wideEvent.late_event_rejected = false
 
-      // Phase 7.13 — lazy reservation bootstrap. If this DO has never opened a
-      // reservation for the current period (or the previous one closed at period
-      // end / inactivity), open one now against the customer wallet. The
-      // reservation row is the contract the in-tx LocalReservation check needs;
-      // without it the DO falls through to pre-wallet behavior (no enforcement).
+      // Lazy reservation bootstrap. If this DO has never opened a reservation
+      // for the current period, only open one when the current event produces a
+      // positive priced delta. Free-tier events stay off the wallet path; the
+      // first paid boundary-crossing event bootstraps the wallet.
       //
       // Out-of-tx because Postgres ↔ SQLite can't share a single transaction.
       // A small in-memory single-flight prevents duplicate wallet calls while
@@ -572,10 +578,9 @@ export class EntitlementWindowDO extends DurableObject {
             facts,
           })
 
-          // Phase 7 wallet check. Only engages when a reservation has been
-          // opened on this window (activation path, slice 7.12). Without a
-          // reservation the DO operates in the pre-wallet behaviour: no
-          // allocation tracking, no refill trigger.
+          // Wallet check. Only engages when a reservation has been opened on
+          // this window. Without a reservation the DO operates without local
+          // allocation tracking or refill triggers.
           const window = this.readWalletReservation(tx)
           if (window?.reservationId && pricedFacts.length > 0) {
             reservationEngaged = true
@@ -868,15 +873,15 @@ export class EntitlementWindowDO extends DurableObject {
         outboxFlushed = await this.flushToTinybird(batch)
 
         if (outboxFlushed) {
-          this.db
-            .delete(meterFactsOutboxTable)
-            .where(
-              inArray(
-                meterFactsOutboxTable.id,
-                batch.map((row) => row.id)
-              )
-            )
-            .run()
+          forEachSqliteBindChunk(
+            batch.map((row) => row.id),
+            (ids) => {
+              this.db
+                .delete(meterFactsOutboxTable)
+                .where(inArray(meterFactsOutboxTable.id, ids))
+                .run()
+            }
+          )
         }
       }
       wideEvent.outbox_flushed = outboxFlushed
@@ -897,24 +902,24 @@ export class EntitlementWindowDO extends DurableObject {
       wideEvent.idempotency_cleaned = staleIdempotencyRows.length
 
       if (staleIdempotencyRows.length > 0) {
-        this.db
-          .delete(idempotencyKeysTable)
-          .where(
-            inArray(
-              idempotencyKeysTable.eventId,
-              staleIdempotencyRows.map((row) => row.eventId)
-            )
-          )
-          .run()
+        forEachSqliteBindChunk(
+          staleIdempotencyRows.map((row) => row.eventId),
+          (eventIds) => {
+            this.db
+              .delete(idempotencyKeysTable)
+              .where(inArray(idempotencyKeysTable.eventId, eventIds))
+              .run()
+          }
+        )
       }
 
       const remainingOutboxCount = this.getOutboxCount()
       wideEvent.outbox_remaining = remainingOutboxCount
       wideEvent.outbox_alert = remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD
 
-      // Phase 7.7 final-flush detection. Any of three triggers converges on
-      // the same flush path: period end, 12h inactivity, or an explicit
-      // deletion request. A DO without a reservation (or one marked
+      // Final-flush detection. Any of three triggers converges on the same
+      // flush path: period end, 12h inactivity, or an explicit deletion
+      // request. A DO without a reservation (or one marked
       // `recoveryRequired`) skips the flush — there's nothing to close out
       // or the last attempt failed terminally and an operator has to look.
       const window = this.readWalletReservation(this.db)
@@ -1065,8 +1070,16 @@ export class EntitlementWindowDO extends DurableObject {
       wideEvent.lifecycle_end_at = lifecycleEndAt
 
       if (!lifecycleEndAt) {
-        // We don't know when this DO can be safely collected, and outbox is empty.
-        // Go to sleep. Next apply() will wake us up.
+        if (remainingOutboxCount > 0) {
+          const nextAlarmAt = now + FLUSH_INTERVAL_MS
+          wideEvent.next_alarm_at = nextAlarmAt
+          wideEvent.outcome = "scheduled"
+          await this.scheduleAlarm(nextAlarmAt)
+          return
+        }
+
+        // We don't know when this DO can be safely collected, and the outbox is
+        // empty. Go to sleep. Next apply() will wake us up.
         wideEvent.outcome = "idle"
         return
       }
@@ -2216,8 +2229,8 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  // Phase 7.13 — opens the per-(stream, period) reservation lazily on first
-  // priced apply(). Returns a denial result when the wallet has no available
+  // Opens the per-(stream, period) reservation lazily on first priced apply().
+  // Returns a denial result when the wallet has no available
   // balance to back the reservation; returns `null` on success (or when the
   // feature is free, in which case no reservation is needed).
   //
@@ -2234,14 +2247,18 @@ export class EntitlementWindowDO extends DurableObject {
     activeGrants: ActiveGrantInput[],
     meter: MeterIdentity
   ): Promise<ApplyResult | null> {
-    const pricePerEvent = computeMaxMarginalPriceMinor(input.entitlement.featureConfig)
+    const projectedCost = this.computeProjectedCurrentEventCostMinor(input, activeGrants, meter)
 
     // The next event lands in a free portion of the curve — flat-free plan,
     // included-quantity tier still has runway, etc. No wallet engagement
     // needed for this event; a later apply() that crosses into a paid tier
     // will re-probe and bootstrap then.
-    if (pricePerEvent <= 0) return null
+    if (projectedCost <= 0) return null
 
+    const pricePerEvent = Math.max(
+      projectedCost,
+      computeMaxMarginalPriceMinor(input.entitlement.featureConfig)
+    )
     const sizing = sizeReservation(pricePerEvent)
     const walletService = this.getWalletService()
     const reservationGrant = this.firstGrantByDrainOrder(activeGrants)
@@ -2332,6 +2349,175 @@ export class EntitlementWindowDO extends DurableObject {
     return null
   }
 
+  private computeProjectedCurrentEventCostMinor(
+    input: ApplyInput,
+    activeGrants: ActiveGrantInput[],
+    meter: MeterIdentity
+  ): number {
+    const fact = this.projectFactForCurrentEvent(input, meter)
+    if (!fact) return 0
+
+    return this.priceProjectedFact({
+      activeGrants,
+      entitlement: input.entitlement,
+      eventTimestamp: input.event.timestamp,
+      fact,
+    })
+  }
+
+  private projectFactForCurrentEvent(input: ApplyInput, meter: MeterIdentity): Fact | null {
+    if (meter.config.eventSlug !== input.event.slug) {
+      return null
+    }
+
+    const row = this.db
+      .select({ usage: meterStateTable.usage, updatedAt: meterStateTable.updatedAt })
+      .from(meterStateTable)
+      .where(eq(meterStateTable.meterKey, meter.key))
+      .get()
+
+    const previousValue = Number(row?.usage ?? 0)
+    const previousUpdatedAt =
+      row?.updatedAt === null || row?.updatedAt === undefined
+        ? Number.NEGATIVE_INFINITY
+        : Number(row.updatedAt)
+
+    switch (meter.config.aggregationMethod) {
+      case "count": {
+        return {
+          eventId: input.event.id,
+          meterKey: meter.key,
+          delta: 1,
+          valueAfter: previousValue + 1,
+        }
+      }
+      case "sum": {
+        const numericValue = this.readNumericEventField(meter.config, input.event)
+        return {
+          eventId: input.event.id,
+          meterKey: meter.key,
+          delta: numericValue,
+          valueAfter: previousValue + numericValue,
+        }
+      }
+      case "max": {
+        const numericValue = this.readNumericEventField(meter.config, input.event)
+        const nextValue = row ? Math.max(previousValue, numericValue) : numericValue
+        return {
+          eventId: input.event.id,
+          meterKey: meter.key,
+          delta: nextValue - previousValue,
+          valueAfter: nextValue,
+        }
+      }
+      case "latest": {
+        const numericValue = this.readNumericEventField(meter.config, input.event)
+        if (input.event.timestamp < previousUpdatedAt) {
+          return {
+            eventId: input.event.id,
+            meterKey: meter.key,
+            delta: 0,
+            valueAfter: previousValue,
+          }
+        }
+
+        return {
+          eventId: input.event.id,
+          meterKey: meter.key,
+          delta: numericValue - previousValue,
+          valueAfter: numericValue,
+        }
+      }
+      default:
+        return null
+    }
+  }
+
+  private priceProjectedFact(params: {
+    activeGrants: ActiveGrantInput[]
+    entitlement: EntitlementConfigInput
+    eventTimestamp: number
+    fact: Fact
+  }): number {
+    const priceGrant = this.firstGrantByDrainOrder(params.activeGrants)
+    const { fact } = params
+
+    if (fact.delta <= 0) {
+      const usageAfter = Math.max(0, fact.valueAfter)
+      const usageBefore = Math.max(0, fact.valueAfter - fact.delta)
+      return computeUsagePriceDeltaMinor({
+        priceConfig: params.entitlement.featureConfig,
+        usageAfter,
+        usageBefore,
+      })
+    }
+
+    const consumed = consumeGrantsByPriority({
+      grants: params.activeGrants,
+      states: this.readGrantStates(this.db),
+      timestamp: params.eventTimestamp,
+      units: fact.delta,
+    })
+
+    let total = 0
+    for (const allocation of consumed.allocations) {
+      total += computeUsagePriceDeltaMinor({
+        priceConfig: params.entitlement.featureConfig,
+        usageAfter: allocation.usageAfter,
+        usageBefore: allocation.usageBefore,
+      })
+    }
+
+    if (consumed.remaining > 0 && priceGrant) {
+      const usageAfter = Math.max(0, fact.valueAfter)
+      const usageBefore = Math.max(0, fact.valueAfter - fact.delta)
+      total += computeUsagePriceDeltaMinor({
+        priceConfig: params.entitlement.featureConfig,
+        usageAfter,
+        usageBefore,
+      })
+    }
+
+    return total
+  }
+
+  private readNumericEventField(meterConfig: MeterConfig, event: ApplyInput["event"]): number {
+    const field = meterConfig.aggregationField
+
+    if (!field) {
+      throw new Error(`Meter ${meterConfig.eventId} requires an aggregation field`)
+    }
+
+    const rawValue = event.properties[field]
+    const numericValue = this.parseFiniteNumericValue(rawValue)
+
+    if (numericValue === null) {
+      throw new Error(
+        `Meter ${meterConfig.eventId} requires a finite numeric value at properties.${field}`
+      )
+    }
+
+    return numericValue
+  }
+
+  private parseFiniteNumericValue(value: unknown): number | null {
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? value : null
+    }
+
+    if (typeof value !== "string") {
+      return null
+    }
+
+    const trimmedValue = value.trim()
+    if (trimmedValue.length === 0) {
+      return null
+    }
+
+    const parsedValue = Number(trimmedValue)
+    return Number.isFinite(parsedValue) ? parsedValue : null
+  }
+
   // Construct the wallet service on first use. Each DO instance opens at
   // most one connection — pool lifetime is the DO's lifetime.
   private getWalletService(): WalletService {
@@ -2406,7 +2592,7 @@ export class EntitlementWindowDO extends DurableObject {
 
   private async scheduleAlarm(target: number): Promise<void> {
     const existing = await this.ctx.storage.getAlarm()
-    if (existing !== null && existing <= target) return
+    if (existing !== null && existing > Date.now() && existing <= target) return
     await this.ctx.storage.setAlarm(target)
   }
 }

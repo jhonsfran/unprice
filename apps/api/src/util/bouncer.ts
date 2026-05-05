@@ -38,10 +38,10 @@ export const bouncer = async (c: Context<HonoEnv>, customerId: string, projectId
     })
   }
 
-  // HARD-007: subscription is created/renewed but wallet grants haven't
-  // been issued (activation failed). The activation sweeper is retrying;
-  // until grants land we must deny ingestion or the customer would see
-  // WALLET_EMPTY denials per-event without context.
+  // Subscription is created/renewed but wallet grants haven't been issued
+  // because activation failed. The activation sweeper is retrying; until grants
+  // land we must deny ingestion or the customer would see WALLET_EMPTY denials
+  // per-event without context.
   if (acl?.subscriptionStatus === "pending_activation") {
     throw new UnpriceApiError({
       code: "FORBIDDEN",

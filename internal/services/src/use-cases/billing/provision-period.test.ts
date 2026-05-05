@@ -9,7 +9,7 @@ import { UnPriceWalletError, type WalletService } from "../../wallet"
 import { activateSubscription } from "./provision-period"
 
 // ---------------------------------------------------------------------------
-// Phase 7 activation is grants-only:
+// Activation is grants-only:
 //   - Issues additive `wallet_credits` rows (plan_included / trial / credit_line / promo / manual)
 //   - Flips the subscription to `active`
 //
@@ -28,13 +28,14 @@ const periodEndAt = new Date("2026-03-01T00:00:00Z")
 interface FakeState {
   walletCalls: {
     adjust: Array<{ signedAmount: number; source: string; expiresAt?: Date }>
+    ensureCustomerAccounts: Array<{ projectId: string; customerId: string; currency: string }>
   }
   subscriptionUpdates: Array<Record<string, unknown>>
 }
 
 function createState(): FakeState {
   return {
-    walletCalls: { adjust: [] },
+    walletCalls: { adjust: [], ensureCustomerAccounts: [] },
     subscriptionUpdates: [],
   }
 }
@@ -72,6 +73,12 @@ function buildDeps(state: FakeState, customerExists = true, stubs: WalletStubs =
         unclampedRemainder: 0,
       })
     }),
+    ensureCustomerAccounts: vi.fn(
+      async (input: { projectId: string; customerId: string; currency: string }) => {
+        state.walletCalls.ensureCustomerAccounts.push(input)
+        return Ok(undefined)
+      }
+    ),
   } as unknown as WalletService
 
   // ledger.getAccountBalance is no longer called by activation — the
@@ -141,6 +148,9 @@ describe("activateSubscription — happy path", () => {
     expect(val?.subscriptionId).toBe(subscriptionId)
     expect(val?.grantsIssued).toHaveLength(2)
     expect(val?.grantsIssued.map((g) => g.source)).toEqual(["plan_included", "credit_line"])
+    expect(state.walletCalls.ensureCustomerAccounts).toEqual([
+      { projectId, customerId, currency: "USD" },
+    ])
 
     expect(state.walletCalls.adjust[0]).toMatchObject({
       signedAmount: 5 * DOLLAR,
@@ -175,6 +185,9 @@ describe("activateSubscription — happy path", () => {
 
     expect(err).toBeUndefined()
     expect(val?.grantsIssued).toHaveLength(0)
+    expect(state.walletCalls.ensureCustomerAccounts).toEqual([
+      { projectId, customerId, currency: "USD" },
+    ])
     expect(state.walletCalls.adjust).toHaveLength(0)
     // Status flip happens regardless of whether any grants were issued.
     expect(state.subscriptionUpdates[0]).toMatchObject({ active: true, status: "active" })
@@ -217,6 +230,7 @@ describe("activateSubscription — error surfaces", () => {
     })
 
     expect(err?.message).toMatch(/not found/i)
+    expect(state.walletCalls.ensureCustomerAccounts).toHaveLength(0)
     expect(state.walletCalls.adjust).toHaveLength(0)
   })
 

@@ -48,13 +48,6 @@ export class DrizzleBillingRepository implements BillingRepository {
         invoiceAt: billingPeriods.invoiceAt,
       })
       .from(billingPeriods)
-      .groupBy(
-        billingPeriods.projectId,
-        billingPeriods.subscriptionId,
-        billingPeriods.subscriptionPhaseId,
-        billingPeriods.statementKey,
-        billingPeriods.invoiceAt
-      )
       .where(
         and(
           eq(billingPeriods.status, "pending"),
@@ -62,6 +55,13 @@ export class DrizzleBillingRepository implements BillingRepository {
           eq(billingPeriods.projectId, input.projectId),
           eq(billingPeriods.subscriptionId, input.subscriptionId)
         )
+      )
+      .groupBy(
+        billingPeriods.projectId,
+        billingPeriods.subscriptionId,
+        billingPeriods.subscriptionPhaseId,
+        billingPeriods.statementKey,
+        billingPeriods.invoiceAt
       )
       .having(
         sql`bool_and(${billingPeriods.whenToBill} <> 'pay_in_arrear' OR ${billingPeriods.cycleEndAt} <= ${arrearsReadyAt})`

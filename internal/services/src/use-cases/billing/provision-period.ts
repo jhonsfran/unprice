@@ -66,7 +66,7 @@ export interface ActivateSubscriptionOutput {
 
 /**
  * Issues additive wallet grants for a billing period and flips the
- * subscription to `active`. Phase 7 scope: grants-only.
+ * subscription to `active`.
  *
  * Reservations are created lazily by the EntitlementWindowDO on first
  * priced usage event — they're not opened here. Base fees settle through
@@ -107,6 +107,13 @@ export async function activateSubscription(
   const customerId = subscription.customer.id
   const currency = subscription.customer.defaultCurrency
   const grants = (input.grants ?? []).filter((g) => g.amount > 0)
+
+  const seedResult = await deps.services.wallet.ensureCustomerAccounts({
+    projectId: input.projectId,
+    customerId,
+    currency,
+  })
+  if (seedResult.err) return Err(seedResult.err)
 
   try {
     return await deps.db.transaction(async (tx) => {

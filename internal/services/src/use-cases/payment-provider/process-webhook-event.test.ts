@@ -360,14 +360,14 @@ describe("processWebhookEvent", () => {
     expect(wallet.adjust).not.toHaveBeenCalled()
   })
 
-  it("retries idempotent settle + reconcile when invoice is already paid but reconcile marker is missing (HARD-006)", async () => {
+  it("retries idempotent settle + reconcile when invoice is already paid but reconcile marker is missing", async () => {
     // Late delivery / Stripe retry after a previous attempt committed the
     // invoice status flip but failed before the reconcile step. The next
     // delivery must NOT bail out — it must replay both settle (idempotent
     // at the ledger via `invoice_receivable:{id}`) and reconcile, so the
-    // subscription state machine actually advances. Pre-HARD-006 the
-    // handler short-circuited on `!updated` and the receivable + machine
-    // state stayed inconsistent until manual replay.
+    // subscription state machine actually advances. The previous ordering
+    // short-circuited on `!updated` and the receivable + machine state stayed
+    // inconsistent until manual replay.
     ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
       val: {
         eventId: "evt_late",
@@ -434,7 +434,7 @@ describe("processWebhookEvent", () => {
     expect(mocks.update).toHaveBeenCalled()
   })
 
-  it("skips reconcile when invoice already carries a matching reconcile marker (HARD-006 idempotency)", async () => {
+  it("skips reconcile when invoice already carries a matching reconcile marker", async () => {
     // Replay arrives after a prior delivery completed reconcile and stamped
     // metadata.subscriptionReconciledOutcome='success'. settle still runs
     // (idempotent ledger no-op) but reconcile must be a no-op so we don't
@@ -497,12 +497,12 @@ describe("processWebhookEvent", () => {
     expect(subscriptions.reconcilePaymentOutcome).not.toHaveBeenCalled()
   })
 
-  it("settle failure leaves invoice unchanged and surfaces an error so the provider retry can recover (HARD-006)", async () => {
-    // Pre-HARD-006 ordering: invoice flipped to 'paid' before settle, so a
+  it("settle failure leaves invoice unchanged and surfaces an error so the provider retry can recover", async () => {
+    // Previous ordering flipped the invoice to 'paid' before settle, so a
     // settle failure left invoice=paid + receivable still on the wallet's
-    // books AND the next retry took the `!updated` early exit. Post-HARD-006:
-    // settle runs first, an error short-circuits before any invoice mutation,
-    // and the webhook returns failed so the provider re-delivers cleanly.
+    // books and the next retry took the `!updated` early exit. Settle now runs
+    // first, an error short-circuits before any invoice mutation, and the
+    // webhook returns failed so the provider re-delivers cleanly.
     ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
       val: {
         eventId: "evt_settle_fail",

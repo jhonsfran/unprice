@@ -28,7 +28,7 @@ import { WalletService } from "./service"
 //   - the ordered sequence of ledger transfers (`state.transfers`)
 //   - inserted rows (`state.inserts`)
 //   - captured set-specs of updates (`state.updates`)
-// That is enough for every scenario in slice 7.10's WalletService bullet list.
+// That is enough for every scenario covered by WalletService tests.
 // ---------------------------------------------------------------------------
 
 type FakeGrant = WalletCredit
@@ -227,6 +227,7 @@ function createLedger(state: FakeState): LedgerGateway {
       const minor = state.balances[name] ?? 0
       return Ok(fromLedgerMinor(minor, "USD"))
     }),
+    seedPlatformAccounts: vi.fn(async () => Ok(undefined)),
     ensureCustomerAccounts: vi.fn(async () => Ok(undefined)),
   } as unknown as LedgerGateway
 }
@@ -317,6 +318,22 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("WalletService.ensureCustomerAccounts", () => {
+  it("seeds project funding accounts before the customer wallet bundle", async () => {
+    const { ledger, wallet } = buildService()
+
+    const { err } = await wallet.ensureCustomerAccounts({
+      projectId: "prj_abc",
+      customerId: "cus_abc",
+      currency: "USD",
+    })
+
+    expect(err).toBeUndefined()
+    expect(ledger.seedPlatformAccounts).toHaveBeenCalledWith("prj_abc", "USD", undefined)
+    expect(ledger.ensureCustomerAccounts).toHaveBeenCalledWith("cus_abc", "USD", undefined)
+  })
+})
 
 describe("WalletService.createReservation", () => {
   const customerId = "cus_abc"

@@ -919,6 +919,24 @@ export class IngestionService {
       this.toIngestionEntitlement(entitlement)
     )
 
+    if (candidateEntitlements.length === 0) {
+      const customerExists = await this.entitlementService.customerExists({
+        projectId,
+        customerId,
+      })
+
+      if (customerExists.err) {
+        throw customerExists.err
+      }
+
+      if (!customerExists.val) {
+        return {
+          candidateEntitlements,
+          rejectionReason: "CUSTOMER_NOT_FOUND",
+        }
+      }
+    }
+
     return {
       candidateEntitlements,
       rejectionReason: candidateEntitlements.some(isUsageEntitlement)

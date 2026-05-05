@@ -1,4 +1,6 @@
 import type { Database } from "@unprice/db"
+import { type PlanVersionFeature, calculatePricePerFeature } from "@unprice/db/validators"
+import { toLedgerMinor } from "@unprice/money"
 import type { ActivationGrant } from "./provision-period"
 
 // Re-exports for callers that already import sizing constants from this
@@ -20,6 +22,7 @@ type SubscriptionRow = {
     planVersion: {
       whenToBill: string
       creditLineAmount: number
+      planFeatures: Array<Pick<PlanVersionFeature, "featureType" | "config" | "limit">>
     } | null
   }>
 }
@@ -31,11 +34,9 @@ export interface DerivedActivationInputs {
 /**
  * Derives the activation grant for a subscription's billing period.
  *
- * Unified semantic: **`creditLineAmount` is the customer's per-period usage
- * allowance**, applied identically across both billing modes. The wallet /
- * DO / reservation flow is the same regardless of `whenToBill`; only the
- * settlement timing for the flat fee differs (handled by the invoicing
- * layer, not here).
+ * Unified semantic: the persisted `creditLineAmount` field is the explicit
+ * **period usage allowance**. The wallet / DO / reservation flow is the same
+ * regardless of `whenToBill`; only invoice timing differs.
  *
  *  - **`pay_in_advance`**: the flat-features sum is invoiced and paid
  *    upfront — that's the "subscription fee", separate from usage. The
@@ -46,15 +47,18 @@ export interface DerivedActivationInputs {
  *
  *  - **`pay_in_arrear`**: nothing prepaid. The credit_line grant is the
  *    spending cap. Period-end invoicing produces a single invoice for
- *    `flat + consumed`, charged to the saved card.
+ *    `flat + consumed`, charged to the saved card. If no explicit allowance
+ *    is configured, we derive a conservative default from finite, priced usage
+ *    features by rating each feature at its configured `limit`.
  *
  * In both modes the grant `source` is `credit_line` — the platform is
  * extending credit that gets settled (or not) at period end. Failed
  * settlement → `past_due`, no reissue next period.
  *
- * For plans configured with `creditLineAmount = 0`: no usage allowance is
- * granted at activation. Usage events deny with `WALLET_EMPTY` until the
- * customer tops up `purchased` balance directly. (Pure topup-driven model.)
+ * For plans where the explicit allowance is 0 and no finite priced usage limit
+ * exists: no usage allowance is granted at activation. Paid usage events deny
+ * with `WALLET_EMPTY` until the customer tops up `purchased` balance directly
+ * or the plan/customer gets an explicit allowance.
  *
  * Returns `null` when the subscription / phase / plan version is missing.
  */
@@ -71,6 +75,15 @@ export async function deriveActivationInputsFromPlan(
             columns: {
               whenToBill: true,
               creditLineAmount: true,
+            },
+            with: {
+              planFeatures: {
+                columns: {
+                  featureType: true,
+                  config: true,
+                  limit: true,
+                },
+              },
             },
           },
         },
@@ -90,14 +103,40 @@ export async function deriveActivationInputsFromPlan(
   if (!phase || !phase.planVersion) return null
 
   const grants: ActivationGrant[] = []
+  const allowanceAmount = derivePeriodUsageAllowanceAmount(phase.planVersion)
 
-  if (phase.planVersion.creditLineAmount > 0) {
+  if (allowanceAmount > 0) {
     grants.push({
-      amount: phase.planVersion.creditLineAmount,
+      amount: allowanceAmount,
       source: "credit_line",
-      reason: "Usage allowance for billing period",
+      reason: "Period usage allowance",
     })
   }
 
   return { grants }
+}
+
+export function derivePeriodUsageAllowanceAmount(planVersion: {
+  whenToBill: string
+  creditLineAmount: number
+  planFeatures?: Array<Pick<PlanVersionFeature, "featureType" | "config" | "limit">>
+}): number {
+  if (planVersion.creditLineAmount > 0) return planVersion.creditLineAmount
+  if (planVersion.whenToBill !== "pay_in_arrear") return 0
+
+  return (planVersion.planFeatures ?? []).reduce((total, feature) => {
+    if (feature.featureType !== "usage") return total
+    if (!Number.isFinite(feature.limit) || !feature.limit || feature.limit <= 0) return total
+
+    const price = calculatePricePerFeature({
+      config: feature.config,
+      featureType: "usage",
+      quantity: feature.limit,
+    })
+
+    if (price.err) return total
+
+    const amount = toLedgerMinor(price.val.totalPrice.dinero)
+    return amount > 0 ? total + amount : total
+  }, 0)
 }

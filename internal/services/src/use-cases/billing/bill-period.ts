@@ -104,7 +104,7 @@ export async function billPeriod({
       //    query below can enumerate them via the gateway's
       //    metadata-filtered view. Ledger transfers dedupe on
       //    (sourceType, sourceId), so re-runs after a partial failure never
-      //    double-post (HARD-004).
+      //    double-post.
       for (const period of billingPeriodsToInvoice) {
         const feature = period.subscriptionItem.featurePlanVersion.feature
         const nonUsageQuantity = period.subscriptionItem.units ?? 0
@@ -194,7 +194,7 @@ export async function billPeriod({
         // creation from cash-on-hand: invoices can be drafted before any
         // payment, and `purchased` stays a strict cash-only account.
         // The `kind: "subscription"` + `statement_key` metadata pair keeps
-        // the transfer projectable as an invoice line (slice 7.8).
+        // the transfer projectable as an invoice line.
         const postResult = await ledgerService.createTransfer(
           {
             projectId: period.projectId,
@@ -346,12 +346,12 @@ export async function billPeriod({
         )
       }
 
-      // Phase 7: no `invoice_items` table. The invoice total is the sum
-      // of credit-leg ledger transfers landing on `customer.*.consumed`
-      // under this statement_key — same projection the API uses on read
-      // (slice 7.8). We sum the line Dineros (which are at `LEDGER_SCALE = 8`)
-      // and store the invoice total at ledger scale. Provider calls quantize
-      // to currency minor units separately at the provider boundary.
+      // No `invoice_items` table. The invoice total is the sum of credit-leg
+      // ledger transfers landing on `customer.*.consumed` under this
+      // statement_key — same projection the API uses on read. We sum the line
+      // Dineros (which are at `LEDGER_SCALE = 8`) and store the invoice total
+      // at ledger scale. Provider calls quantize to currency minor units
+      // separately at the provider boundary.
       const totalDinero = linesToInvoice.reduce<Dinero<number> | null>(
         (sum, line) => (sum === null ? line.amount : add(sum, line.amount)),
         null

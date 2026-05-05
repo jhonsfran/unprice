@@ -1,7 +1,7 @@
 import { type Database, and, asc, eq, gt, isNull, or, sql } from "@unprice/db"
 import {
-  entitlementReservations,
   type EntitlementReservationDrainLeg,
+  entitlementReservations,
   walletCredits,
   walletTopups,
 } from "@unprice/db/schema"
@@ -231,7 +231,12 @@ export class WalletService {
       }
     }
 
-    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    const seeded = await this.ensureCustomerSeeded(
+      input.projectId,
+      input.customerId,
+      input.currency,
+      executor
+    )
     if (seeded.err) return seeded
 
     const run = async (tx: DbExecutor): Promise<Result<void, UnPriceWalletError>> => {
@@ -277,7 +282,12 @@ export class WalletService {
 
     const keys = customerAccountKeys(input.customerId)
 
-    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    const seeded = await this.ensureCustomerSeeded(
+      input.projectId,
+      input.customerId,
+      input.currency,
+      executor
+    )
     if (seeded.err) return seeded
 
     const run = async (
@@ -413,7 +423,11 @@ export class WalletService {
 
     const keys = customerAccountKeys(input.customerId)
 
-    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    const seeded = await this.ensureCustomerSeeded(
+      input.projectId,
+      input.customerId,
+      input.currency
+    )
     if (seeded.err) return seeded
 
     try {
@@ -625,7 +639,12 @@ export class WalletService {
     const isPositive = input.signedAmount > 0
     const absAmount = Math.abs(input.signedAmount)
 
-    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    const seeded = await this.ensureCustomerSeeded(
+      input.projectId,
+      input.customerId,
+      input.currency,
+      executor
+    )
     if (seeded.err) return seeded
 
     const run = async (tx: DbExecutor): Promise<Result<AdjustOutput, UnPriceWalletError>> => {
@@ -647,6 +666,14 @@ export class WalletService {
     }
   }
 
+  public async ensureCustomerAccounts(input: {
+    projectId: string
+    customerId: string
+    currency: Currency
+  }): Promise<Result<void, UnPriceWalletError>> {
+    return this.ensureCustomerSeeded(input.projectId, input.customerId, input.currency)
+  }
+
   public async settleTopUp(
     input: SettleTopUpInput
   ): Promise<Result<SettleTopUpOutput, UnPriceWalletError>> {
@@ -656,7 +683,11 @@ export class WalletService {
 
     const keys = customerAccountKeys(input.customerId)
 
-    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    const seeded = await this.ensureCustomerSeeded(
+      input.projectId,
+      input.customerId,
+      input.currency
+    )
     if (seeded.err) return seeded
 
     try {
@@ -752,7 +783,11 @@ export class WalletService {
 
     const keys = customerAccountKeys(input.customerId)
 
-    const seeded = await this.ensureCustomerSeeded(input.customerId, input.currency)
+    const seeded = await this.ensureCustomerSeeded(
+      input.projectId,
+      input.customerId,
+      input.currency
+    )
     if (seeded.err) return seeded
 
     try {
@@ -1237,16 +1272,20 @@ export class WalletService {
   }
 
   /**
-   * Idempotently seeds the four `customer.{id}.*` ledger accounts before any
-   * balance-changing operation. Cached in the gateway, so the round-trip
-   * happens once per `(customer, currency)` per worker. Runs outside the
-   * caller's transaction because seeding opens its own.
+   * Idempotently seeds platform funding accounts plus the customer ledger
+   * bundle before any balance-changing operation. When an executor is supplied,
+   * seeding runs in that transaction instead of opening nested transactions.
    */
   private async ensureCustomerSeeded(
+    projectId: string,
     customerId: string,
-    currency: Currency
+    currency: Currency,
+    executor?: DbExecutor
   ): Promise<Result<void, UnPriceWalletError>> {
-    const result = await this.ledger.ensureCustomerAccounts(customerId, currency)
+    const platformResult = await this.ledger.seedPlatformAccounts(projectId, currency, executor)
+    if (platformResult.err) return Err(this.wrapLedgerError(platformResult.err))
+
+    const result = await this.ledger.ensureCustomerAccounts(customerId, currency, executor)
     if (result.err) return Err(this.wrapLedgerError(result.err))
     return Ok(undefined)
   }

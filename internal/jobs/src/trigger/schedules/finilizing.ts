@@ -39,7 +39,7 @@ export const finilizingSchedule = schedules.task({
     // Surface stuck-draft invoices for ops. Threshold: > 5 prior finalize
     // attempts (provider has been failing repeatedly) OR draft for > 1h past
     // dueAt. The warn line is the alarm hook — operators tail logs for
-    // `stale_draft_invoice` and page on it (HARD-005 acceptance criterion).
+    // `stale_draft_invoice` and page on it.
     const oneHourMs = 60 * 60 * 1000
     for (const inv of openInvoices) {
       if (inv.status !== "draft") continue

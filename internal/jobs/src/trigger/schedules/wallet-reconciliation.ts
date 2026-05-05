@@ -3,8 +3,8 @@ import { sql } from "@unprice/db"
 import { db } from "../db"
 
 /**
- * Nightly reconciliation for the Phase 7 wallet/ledger plane. Four
- * invariant checks — each produces a small, bounded result set (only
+ * Nightly reconciliation for the wallet/ledger plane. Four invariant checks —
+ * each produces a small, bounded result set (only
  * drift rows, never healthy ones). The job logs violations at WARN so
  * the on-call dashboard surfaces them, but does not auto-repair — human
  * judgement is required to decide whether a drift indicates a bug, a

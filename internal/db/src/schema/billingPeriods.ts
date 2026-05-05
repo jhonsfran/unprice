@@ -1,12 +1,5 @@
 import { relations } from "drizzle-orm"
-import {
-  bigint,
-  foreignKey,
-  index,
-  primaryKey,
-  uniqueIndex,
-  varchar,
-} from "drizzle-orm/pg-core"
+import { bigint, foreignKey, index, primaryKey, uniqueIndex, varchar } from "drizzle-orm/pg-core"
 
 import { pgTableProject } from "../utils/_table"
 import { cuid, timestamps } from "../utils/fields"

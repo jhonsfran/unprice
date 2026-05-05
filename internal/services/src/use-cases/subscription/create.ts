@@ -8,6 +8,7 @@ import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { UnPriceSubscriptionError } from "../../subscriptions/errors"
+import { activateWalletIfSubscriptionIsActive } from "./activate-wallet-if-active"
 
 type CreateSubscriptionDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions">
@@ -101,34 +102,16 @@ export async function createSubscription(
   // Reservations are never opened here — EntitlementWindowDO opens them
   // lazily on first priced usage event.
   const subscription = result.val
-  const refreshed = await deps.services.subscriptions.getSubscriptionData({
+  // The activating XState actor parks failed activations in
+  // `pending_activation`; the machine subscriber has already persisted that
+  // status to the DB before we return here. The bouncer / ACL layer denies
+  // ingestion while in that state, and the activation sweeper retries grant
+  // issuance until it succeeds.
+  await activateWalletIfSubscriptionIsActive(deps, {
     subscriptionId: subscription.id,
     projectId,
+    context: "wallet activation failed; subscription parked in pending_activation",
   })
-
-  if (refreshed?.status === "active" && deps.services.subscriptions.activateWallet) {
-    const activateResult = await deps.services.subscriptions.activateWallet({
-      subscriptionId: subscription.id,
-      projectId,
-      now: Date.now(),
-    })
-
-    if (activateResult?.err) {
-      // The activating XState actor parks failed activations in
-      // `pending_activation` (HARD-007); the machine subscriber has already
-      // persisted that status to the DB before we return here. The bouncer
-      // / ACL layer denies ingestion while in that state, and the
-      // `subscription.activation` sweeper retries grant issuance until it
-      // succeeds. We keep the subscription record (rollback would discard a
-      // freshly-minted Stripe customer mapping and leave the user without
-      // visibility) but log loudly so ops can correlate retries.
-      deps.logger.error(activateResult.err, {
-        subscriptionId: subscription.id,
-        projectId,
-        context: "wallet activation failed; subscription parked in pending_activation",
-      })
-    }
-  }
 
   return result
 }

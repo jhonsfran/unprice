@@ -4,7 +4,7 @@ import { db } from "../db"
 import { activationTask } from "../tasks/activation"
 
 /**
- * Sweeper for subscriptions parked in `pending_activation` (HARD-007).
+ * Sweeper for subscriptions parked in `pending_activation`.
  *
  * Wallet activation can fail at create or renew time (DB blip, ledger
  * gateway hiccup, etc.). The state machine moves the subscription to
