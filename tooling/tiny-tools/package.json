@@ -15,9 +15,9 @@
     "@unprice/api": "workspace:^"
   },
   "devDependencies": {
-    "@types/node": "20.11.24",
+    "@types/node": "20.19.39",
     "@unprice/tsconfig": "workspace:*",
-    "tsx": "^4.7.2",
-    "typescript": "^5.3.3"
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
   }
 }
