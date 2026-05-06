@@ -28,7 +28,6 @@ export const create = protectedProjectProcedure
       collectionMethod,
       dueBehaviour,
       paymentMethodRequired,
-      creditLineAmount,
     } = opts.input
     const project = opts.ctx.project
     const { plans } = opts.ctx.services
@@ -57,7 +56,6 @@ export const create = protectedProjectProcedure
       collectionMethod: collectionMethod ?? "charge_automatically",
       dueBehaviour: dueBehaviour ?? "cancel",
       paymentMethodRequired,
-      creditLineAmount: creditLineAmount ?? 0,
     })
 
     if (err) {

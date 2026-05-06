@@ -314,6 +314,11 @@ export class EntitlementService {
               feature: true,
             },
           },
+          subscriptionPhase: {
+            columns: {
+              creditLinePolicy: true,
+            },
+          },
           grants: {
             where: (grant, { and: andOp, gt, isNull, lte, or }) =>
               andOp(

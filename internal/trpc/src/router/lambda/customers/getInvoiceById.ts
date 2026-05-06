@@ -5,7 +5,6 @@ import {
   subscriptionInvoiceSelectSchema,
   subscriptionSelectSchema,
 } from "@unprice/db/validators"
-import { toLedgerMinor } from "@unprice/money"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
@@ -45,7 +44,7 @@ export const getInvoiceById = protectedProjectProcedure
   .query(async (opts) => {
     const { invoiceId, customerId } = opts.input
     const { project } = opts.ctx
-    const { customers, ledger } = opts.ctx.services
+    const { billing, customers } = opts.ctx.services
 
     const { err, val: invoice } = await customers.getInvoiceById({
       invoiceId,
@@ -68,9 +67,11 @@ export const getInvoiceById = protectedProjectProcedure
     }
 
     const invoiceRow = invoice as InvoiceWithRelations
-    const linesResult = await ledger.getInvoiceLines({
+    const linesResult = await billing.getInvoiceStatementLines({
       projectId: invoiceRow.projectId,
+      invoiceId,
       statementKey: invoiceRow.statementKey,
+      currency: invoiceRow.currency as z.infer<typeof currencySchema>,
     })
 
     if (linesResult.err) {
@@ -89,7 +90,7 @@ export const getInvoiceById = protectedProjectProcedure
           kind: line.kind,
           description: line.description,
           quantity: line.quantity,
-          amount: toLedgerMinor(line.amount),
+          amount: line.amount,
           currency: line.currency,
           createdAt: line.createdAt.toISOString(),
         })),

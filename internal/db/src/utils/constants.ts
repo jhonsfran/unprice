@@ -227,6 +227,7 @@ export const SUBSCRIPTION_STATUS = [
 export const PLAN_TYPES = ["recurring", "onetime"] as const
 export const ROLES_APP = ["OWNER", "ADMIN", "MEMBER"] as const
 export const WHEN_TO_BILLING = ["pay_in_advance", "pay_in_arrear"] as const
+export const CREDIT_LINE_POLICIES = ["capped", "uncapped"] as const
 export const DUE_BEHAVIOUR = ["cancel", "downgrade"] as const
 export const GRANT_TYPES = ["subscription", "manual", "promotion", "trial", "addon"] as const
 export const SUBJECT_TYPES = ["project", "plan", "plan_version", "customer"] as const

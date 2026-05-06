@@ -781,11 +781,29 @@ describe("Workflow - Billing and Subscriptions", () => {
   })
 
   it.each([
-    { whenToBill: "pay_in_advance", expectedField: "cycleStartAt" as const },
-    { whenToBill: "pay_in_arrear", expectedField: "cycleEndAt" as const },
+    {
+      whenToBill: "pay_in_advance",
+      featureType: "flat" as const,
+      expectedField: "cycleStartAt" as const,
+    },
+    {
+      whenToBill: "pay_in_advance",
+      featureType: "usage" as const,
+      expectedField: "cycleEndAt" as const,
+    },
+    {
+      whenToBill: "pay_in_arrear",
+      featureType: "flat" as const,
+      expectedField: "cycleEndAt" as const,
+    },
+    {
+      whenToBill: "pay_in_arrear",
+      featureType: "usage" as const,
+      expectedField: "cycleEndAt" as const,
+    },
   ])(
-    "maps invoiceAt correctly when whenToBill=$whenToBill",
-    async ({ whenToBill, expectedField }) => {
+    "maps invoiceAt correctly when whenToBill=$whenToBill and featureType=$featureType",
+    async ({ whenToBill, featureType, expectedField }) => {
       const planVersion = {
         ...mockPlanVersion,
         id: `pv_${whenToBill}`,
@@ -817,7 +835,7 @@ describe("Workflow - Billing and Subscriptions", () => {
             {
               id: "item_when_to_bill",
               featurePlanVersion: {
-                featureType: "flat",
+                featureType,
                 unitOfMeasure: "units",
                 billingConfig: {
                   name: "standard",

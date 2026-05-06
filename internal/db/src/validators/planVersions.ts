@@ -117,14 +117,6 @@ export const versionInsertBaseSchema = createInsertSchema(versions, {
     .describe(
       "Number of trial duration units. Minute-billed plans use minutes; all other billing intervals use days. Example: 15 for a 15-day trial on a monthly plan. Default: 0 (no trial)"
     ),
-  creditLineAmount: z.coerce
-    .number()
-    .int()
-    .min(0)
-    .default(0)
-    .describe(
-      "Explicit period usage allowance in pgledger scale-8 minor units (e.g. 100_000_000 = $1.00). The field name is historical: this is usage runway/cap, not customer creditworthiness. Issued as a credit_line wallet grant at activation/renewal and drained on each priced event. For arrears plans, 0 lets activation derive a conservative default from finite priced usage limits; unlimited paid usage still requires an explicit allowance or purchased balance"
-    ),
 })
   .required({
     planId: true,

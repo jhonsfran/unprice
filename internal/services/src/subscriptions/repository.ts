@@ -69,6 +69,8 @@ export interface InsertPhaseInput {
   subscriptionId: string
   paymentMethodId: string | null
   paymentProvider: string
+  creditLinePolicy: SubscriptionPhase["creditLinePolicy"]
+  creditLineAmount: SubscriptionPhase["creditLineAmount"]
   trialEndsAt: number | null
   trialUnits: number
   startAt: number
@@ -79,7 +81,9 @@ export interface InsertPhaseInput {
 
 export interface UpdatePhaseInput {
   phaseId: string
-  data: Partial<Pick<SubscriptionPhase, "startAt" | "endAt">>
+  data: Partial<
+    Pick<SubscriptionPhase, "startAt" | "endAt" | "creditLinePolicy" | "creditLineAmount">
+  >
 }
 
 export interface DeletePhaseInput {

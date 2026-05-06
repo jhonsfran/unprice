@@ -80,6 +80,7 @@ type GrantRow = {
 }
 
 type EntitlementConfigRow = {
+  creditLinePolicy: string
   customerEntitlementId: string
   projectId: string
   customerId: string
@@ -141,6 +142,7 @@ const GRANT_KEYS = new Set<string>([
 ])
 
 const ENTITLEMENT_CONFIG_KEYS = new Set<string>([
+  "creditLinePolicy",
   "customerEntitlementId",
   "projectId",
   "customerId",
@@ -1165,6 +1167,34 @@ describe("EntitlementWindowDO", () => {
       allowed: false,
       deniedReason: "WALLET_EMPTY",
     })
+  })
+
+  it("allows uncapped priced usage without opening a wallet reservation", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_empty",
+        allocationAmount: 0,
+        drainLegs: [],
+      },
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput({ creditLinePolicy: "uncapped" }))
+
+    expect(result).toEqual({ allowed: true })
+    expect(testState.createReservation).not.toHaveBeenCalled()
+    expect(db.outboxRows).toHaveLength(1)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeUndefined()
   })
 
   it("denies with WALLET_EMPTY when the priced cost exceeds remaining allocation", async () => {
@@ -2576,6 +2606,7 @@ async function loadEntitlementWindowDO() {
     },
     calculatePricePerFeature: testState.pricePerFeature,
     configFeatureSchema: z.record(z.string(), z.unknown()),
+    creditLinePolicySchema: z.enum(["capped", "uncapped"]),
     meterConfigSchema: z.record(z.string(), z.unknown()),
   }))
 
@@ -3343,6 +3374,8 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
       ? (overrides.entitlementExpiresAt as number | null)
       : periodEndAt
   const entitlement = {
+    creditLinePolicy:
+      typeof overrides.creditLinePolicy === "string" ? overrides.creditLinePolicy : "capped",
     customerEntitlementId,
     customerId,
     effectiveAt: periodStartAt,

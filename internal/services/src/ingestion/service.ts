@@ -1,6 +1,7 @@
 import type {
   BillingConfig,
   ConfigFeatureVersionType,
+  CreditLinePolicy,
   CustomerEntitlementExtended,
   FeatureType,
   MeterConfig,
@@ -43,6 +44,7 @@ export type IngestionGrant = {
 }
 
 export type IngestionEntitlement = {
+  creditLinePolicy: CreditLinePolicy
   customerEntitlementId: string
   customerId: string
   effectiveAt: number
@@ -947,6 +949,7 @@ export class IngestionService {
 
   private toIngestionEntitlement(entitlement: CustomerEntitlementExtended): IngestionEntitlement {
     return {
+      creditLinePolicy: entitlement.subscriptionPhase?.creditLinePolicy ?? "uncapped",
       customerEntitlementId: entitlement.id,
       customerId: entitlement.customerId,
       effectiveAt: entitlement.effectiveAt,

@@ -1141,7 +1141,6 @@ export class PlanService {
     collectionMethod,
     dueBehaviour,
     paymentMethodRequired,
-    creditLineAmount,
   }: {
     projectId: string
     planId: string
@@ -1162,7 +1161,6 @@ export class PlanService {
     collectionMethod?: PlanVersion["collectionMethod"]
     dueBehaviour?: PlanVersion["dueBehaviour"]
     paymentMethodRequired?: PlanVersion["paymentMethodRequired"]
-    creditLineAmount?: PlanVersion["creditLineAmount"]
   }): Promise<
     Result<{ state: "plan_not_found" } | { state: "ok"; planVersion: PlanVersion }, FetchError>
   > {
@@ -1207,7 +1205,6 @@ export class PlanService {
             collectionMethod: collectionMethod ?? "charge_automatically",
             dueBehaviour: dueBehaviour ?? "cancel",
             paymentMethodRequired: paymentMethodRequired ?? false,
-            creditLineAmount: creditLineAmount ?? 0,
             metadata,
             version: Number(countVersionsPlan) + 1,
           })
@@ -1263,7 +1260,6 @@ export class PlanService {
     collectionMethod,
     dueBehaviour,
     paymentMethodRequired,
-    creditLineAmount,
   }: {
     projectId: string
     id: string
@@ -1282,7 +1278,6 @@ export class PlanService {
     collectionMethod?: PlanVersion["collectionMethod"]
     dueBehaviour?: PlanVersion["dueBehaviour"]
     paymentMethodRequired?: PlanVersion["paymentMethodRequired"]
-    creditLineAmount?: PlanVersion["creditLineAmount"]
   }): Promise<
     Result<{ state: "not_found" } | { state: "ok"; planVersion: PlanVersion }, FetchError>
   > {
@@ -1515,7 +1510,6 @@ export class PlanService {
             ...(collectionMethod !== undefined && { collectionMethod }),
             ...(dueBehaviour !== undefined && { dueBehaviour }),
             ...(paymentMethodRequired !== undefined && { paymentMethodRequired }),
-            ...(creditLineAmount !== undefined && { creditLineAmount }),
             updatedAtM: Date.now(),
           })
           .where(and(eq(schema.versions.id, planVersionData.id)))

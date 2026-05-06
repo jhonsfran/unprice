@@ -8,6 +8,7 @@ import {
   calculateProration,
   calculateWaterfallPrice,
   type configFeatureSchema,
+  getAnchor,
   type grantSchemaExtended,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -294,7 +295,11 @@ export class RatingService {
       resetConfig: resetConfig
         ? {
             ...resetConfig,
-            resetAnchor: typeof resetConfig.resetAnchor === "number" ? resetConfig.resetAnchor : 0,
+            resetAnchor: getAnchor(
+              customerEntitlement.effectiveAt,
+              resetConfig.resetInterval,
+              resetConfig.resetAnchor
+            ),
           }
         : null,
       meterConfig:
@@ -409,7 +414,21 @@ export class RatingService {
       )
     }
 
-    const grants = providedGrants ?? []
+    let grants = providedGrants
+    if (grants === undefined) {
+      const grantsResult = await this.grantsManager.listGrantsForCustomerFeature({
+        projectId,
+        customerId,
+        featureSlug,
+        ...(now !== undefined ? { now } : { startAt: startAt!, endAt: endAt! }),
+      })
+
+      if (grantsResult.err) {
+        return Err(new UnPriceRatingError({ message: grantsResult.err.message }))
+      }
+
+      grants = grantsResult.val
+    }
 
     if (grants.length === 0) {
       return Ok([])

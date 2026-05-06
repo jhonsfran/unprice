@@ -38,6 +38,18 @@ type SignUpContext = {
   cancelUrl: string
 }
 
+function normalizePhaseCreditLine(input: {
+  creditLinePolicy?: CustomerSignUp["creditLinePolicy"]
+  creditLineAmount?: CustomerSignUp["creditLineAmount"]
+}) {
+  const creditLinePolicy = input.creditLinePolicy ?? "uncapped"
+
+  return {
+    creditLinePolicy,
+    creditLineAmount: creditLinePolicy === "uncapped" ? null : (input.creditLineAmount ?? null),
+  }
+}
+
 function isExternalIdConflictError(error: unknown): boolean {
   if (!error || typeof error !== "object") {
     return false
@@ -291,6 +303,7 @@ async function handlePaymentRequiredFlow(
   const paymentProvider = planVersion.paymentProvider
   const paymentRequired = planVersion.paymentMethodRequired
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
+  const phaseCreditLine = normalizePhaseCreditLine(input)
 
   const { err: paymentProviderErr, val: paymentProviderService } =
     await deps.services.customers.getPaymentProvider({
@@ -321,6 +334,8 @@ async function handlePaymentRequiredFlow(
         id: planVersion.id,
         projectId: projectId,
         config: config,
+        creditLinePolicy: phaseCreditLine.creditLinePolicy,
+        creditLineAmount: phaseCreditLine.creditLineAmount,
         paymentMethodRequired: paymentRequired,
       },
       metadata: {
@@ -405,6 +420,7 @@ async function handleDirectProvisioningFlow(
   const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
   const { email, name, config, timezone, metadata, externalId } = input
   const paymentProvider = planVersion.paymentProvider
+  const phaseCreditLine = normalizePhaseCreditLine(input)
 
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
   const customerMetadata = externalId ? { ...metadata, externalId } : metadata
@@ -480,6 +496,8 @@ async function handleDirectProvisioningFlow(
           startAt: phaseTimestamp,
           config: config,
           paymentProvider: paymentProvider,
+          creditLinePolicy: phaseCreditLine.creditLinePolicy,
+          creditLineAmount: phaseCreditLine.creditLineAmount,
           paymentMethodRequired: planVersion.paymentMethodRequired,
           customerId: newCustomer.id,
           subscriptionId: newSubscription.id,

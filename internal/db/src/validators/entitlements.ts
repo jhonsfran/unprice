@@ -4,7 +4,7 @@ import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
 import { featureSelectBaseSchema } from "./features"
 import { planVersionFeatureSelectBaseSchema } from "./planVersionFeatures"
-import { overageStrategySchema } from "./shared"
+import { creditLinePolicySchema, overageStrategySchema } from "./shared"
 
 extendZodWithOpenApi(z)
 
@@ -65,6 +65,12 @@ export const customerEntitlementSchemaExtended = customerEntitlementSelectSchema
     feature: featureSelectBaseSchema,
   }),
   grants: grantSchema.array().optional(),
+  subscriptionPhase: z
+    .object({
+      creditLinePolicy: creditLinePolicySchema,
+    })
+    .nullable()
+    .optional(),
 })
 
 export const grantSchemaExtended = grantSchema.extend({
@@ -196,4 +202,5 @@ export type CustomerEntitlement = z.infer<typeof customerEntitlementSelectSchema
 export type CustomerEntitlementExtended = z.infer<typeof customerEntitlementSchemaExtended>
 export type InsertCustomerEntitlement = z.infer<typeof customerEntitlementInsertSchema>
 export type Grant = z.infer<typeof grantSchema>
+export type GrantExtended = z.infer<typeof grantSchemaExtended>
 export type InsertGrant = z.infer<typeof grantInsertSchema>

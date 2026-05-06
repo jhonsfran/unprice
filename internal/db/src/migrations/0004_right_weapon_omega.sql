@@ -1,0 +1,1 @@
+ALTER TABLE "unprice_subscription_phases" ALTER COLUMN "credit_line_policy" SET DEFAULT 'uncapped';

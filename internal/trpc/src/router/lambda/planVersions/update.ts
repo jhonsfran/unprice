@@ -29,7 +29,6 @@ export const update = protectedProjectProcedure
       collectionMethod,
       dueBehaviour,
       paymentMethodRequired,
-      creditLineAmount,
     } = opts.input
 
     const project = opts.ctx.project
@@ -56,7 +55,6 @@ export const update = protectedProjectProcedure
       collectionMethod,
       dueBehaviour,
       paymentMethodRequired,
-      creditLineAmount,
     })
 
     if (err) {

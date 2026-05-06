@@ -14,7 +14,11 @@ import { planSelectBaseSchema } from "../plans"
 import { projectSelectBaseSchema } from "../project"
 import { UnPriceCalculationError } from "./../errors"
 import { configPackageSchema } from "./../planVersionFeatures"
-import { paymentProviderSchema, subscriptionStatusSchema } from "./../shared"
+import {
+  creditLinePolicySchema,
+  paymentProviderSchema,
+  subscriptionStatusSchema,
+} from "./../shared"
 import {
   type SubscriptionItem,
   type SubscriptionItemConfig,
@@ -113,6 +117,8 @@ export const subscriptionSelectSchema = createSelectSchema(subscriptions, {
 export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
   paymentProvider: paymentProviderSchema,
+  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
+  creditLineAmount: z.coerce.number().int().min(0).nullable(),
   trialUnits: z.coerce.number().int().min(0).default(0),
   metadata: subscriptionPhaseMetadataSchema,
 })
@@ -135,6 +141,8 @@ export const subscriptionPhaseExtendedSchema = subscriptionPhaseSelectSchema.ext
 export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
   paymentProvider: paymentProviderSchema,
+  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
+  creditLineAmount: z.coerce.number().int().min(0).nullable().optional(),
   metadata: subscriptionPhaseMetadataSchema,
   trialUnits: z.coerce.number().int().min(0).default(0),
 })

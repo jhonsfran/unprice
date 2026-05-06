@@ -1,7 +1,13 @@
 import { type Database, and, asc, desc, eq, gt, inArray, isNull, lte, or } from "@unprice/db"
 import { grants } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import type { Grant, GrantType, InsertGrant } from "@unprice/db/validators"
+import type {
+  CustomerEntitlementExtended,
+  Grant,
+  GrantExtended,
+  GrantType,
+  InsertGrant,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { UnPriceGrantError } from "./errors"
@@ -195,6 +201,82 @@ export class GrantsManager {
       this.logger.error(error, {
         context: "Error listing grants for entitlements",
         customerEntitlementIds: params.customerEntitlementIds,
+        projectId: params.projectId,
+      })
+
+      return Err(
+        new FetchError({
+          message: `Failed to list grants: ${error instanceof Error ? error.message : String(error)}`,
+          retry: true,
+        })
+      )
+    }
+  }
+
+  public async listGrantsForCustomerFeature(params: {
+    projectId: string
+    customerId: string
+    featureSlug: string
+    now?: number
+    startAt?: number
+    endAt?: number
+    db?: Database
+  }): Promise<Result<GrantExtended[], FetchError>> {
+    const trx = params.db ?? this.db
+    const maxEffectiveAt = params.startAt !== undefined ? params.endAt : params.now
+    const minExpiresAt = params.startAt !== undefined ? params.startAt : params.now
+
+    try {
+      const rows = (await trx.query.customerEntitlements.findMany({
+        with: {
+          featurePlanVersion: {
+            with: {
+              feature: true,
+            },
+          },
+          grants: {
+            where: (grant, { and: andOp, gt, isNull, lte, or }) =>
+              andOp(
+                maxEffectiveAt === undefined ? undefined : lte(grant.effectiveAt, maxEffectiveAt),
+                minExpiresAt === undefined
+                  ? undefined
+                  : or(isNull(grant.expiresAt), gt(grant.expiresAt, minExpiresAt))
+              ),
+            orderBy: (grant, { asc, desc }) => [
+              desc(grant.priority),
+              asc(grant.expiresAt),
+              asc(grant.id),
+            ],
+          },
+        },
+        where: (entitlement, { and: andOp, eq: eqOp, gt, isNull, lte, or }) =>
+          andOp(
+            eqOp(entitlement.projectId, params.projectId),
+            eqOp(entitlement.customerId, params.customerId),
+            maxEffectiveAt === undefined ? undefined : lte(entitlement.effectiveAt, maxEffectiveAt),
+            minExpiresAt === undefined
+              ? undefined
+              : or(isNull(entitlement.expiresAt), gt(entitlement.expiresAt, minExpiresAt))
+          ),
+      })) as CustomerEntitlementExtended[]
+
+      const featureEntitlements = rows.filter(
+        (entitlement) => entitlement.featurePlanVersion.feature.slug === params.featureSlug
+      )
+
+      return Ok(
+        featureEntitlements.flatMap(({ grants: entitlementGrants, ...customerEntitlement }) =>
+          (entitlementGrants ?? []).map((grant) => ({
+            ...grant,
+            customerEntitlement,
+          }))
+        )
+      )
+    } catch (error) {
+      this.logger.error(error, {
+        context: "Error listing grants for customer feature",
+        customerId: params.customerId,
+        featureSlug: params.featureSlug,
         projectId: params.projectId,
       })
 

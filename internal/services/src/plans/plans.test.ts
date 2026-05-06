@@ -86,8 +86,8 @@ describe("PlanService listPlanVersions enterprise filter", () => {
   })
 })
 
-describe("PlanService plan version usage allowance", () => {
-  it("persists creditLineAmount when creating a plan version", async () => {
+describe("PlanService plan version billing defaults", () => {
+  it("persists billing defaults when creating a plan version", async () => {
     let insertedValues: Record<string, unknown> | null = null
 
     const tx = {
@@ -138,7 +138,6 @@ describe("PlanService plan version usage allowance", () => {
       collectionMethod: "send_invoice",
       dueBehaviour: "downgrade",
       paymentMethodRequired: true,
-      creditLineAmount: 100_000_000,
     })
 
     expect(err).toBeUndefined()
@@ -151,11 +150,10 @@ describe("PlanService plan version usage allowance", () => {
       collectionMethod: "send_invoice",
       dueBehaviour: "downgrade",
       paymentMethodRequired: true,
-      creditLineAmount: 100_000_000,
     })
   })
 
-  it("persists creditLineAmount when updating a draft plan version", async () => {
+  it("persists billing defaults when updating a draft plan version", async () => {
     let updatedValues: Record<string, unknown> | null = null
 
     const tx = {
@@ -190,7 +188,6 @@ describe("PlanService plan version usage allowance", () => {
       projectId: "proj_123",
       id: "pv_123",
       paymentMethodRequired: true,
-      creditLineAmount: 250_000_000,
     })
 
     expect(err).toBeUndefined()
@@ -201,7 +198,6 @@ describe("PlanService plan version usage allowance", () => {
     expect(val.state).toBe("ok")
     expect(updatedValues).toMatchObject({
       paymentMethodRequired: true,
-      creditLineAmount: 250_000_000,
     })
   })
 })

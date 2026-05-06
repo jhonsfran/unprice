@@ -4,6 +4,7 @@ import {
   type InsertSubscriptionPhase,
   getTrialUnitLabel,
 } from "@unprice/db/validators"
+import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { FormDescription, FormLabel, FormMessage } from "@unprice/ui/form"
@@ -57,6 +58,8 @@ export default function SubscriptionPhaseFormField({
     startAt: Date.now(),
     subscriptionId,
     paymentMethodRequired: false,
+    creditLinePolicy: "uncapped",
+    creditLineAmount: null,
     trialUnits: 0,
   } as InsertSubscriptionPhase
 
@@ -216,6 +219,9 @@ export default function SubscriptionPhaseFormField({
                                 <span className="ml-1">{"active phase"}</span>
                               </div>
                             )}
+                            <Badge className="ml-2">
+                              {formatPhaseCreditLinePolicy(phase, selectedPlanVersion.currency)}
+                            </Badge>
                           </Typography>
                           <Typography variant="p" affects="removePaddingMargin">
                             from {formatDate(phase.startAt, timezone, "MMM dd, yyyy")} to{" "}
@@ -240,6 +246,8 @@ export default function SubscriptionPhaseFormField({
                                   selectedPlanVersion.paymentMethodRequired ?? false,
                                 planVersionId: selectedPlanVersion.id,
                                 trialUnits: selectedPlanVersion.trialUnits,
+                                creditLinePolicy: phase.creditLinePolicy ?? "uncapped",
+                                creditLineAmount: phase.creditLineAmount ?? null,
                               })
                               setDialogOpen(true)
                             }}
@@ -439,4 +447,19 @@ export default function SubscriptionPhaseFormField({
       </PropagationStopper>
     </div>
   )
+}
+
+function formatPhaseCreditLinePolicy(
+  phase: Pick<InsertSubscriptionPhase, "creditLinePolicy" | "creditLineAmount">,
+  currency: string
+): string {
+  if ((phase.creditLinePolicy ?? "uncapped") === "uncapped") {
+    return "uncapped usage"
+  }
+
+  if (phase.creditLineAmount === null || phase.creditLineAmount === undefined) {
+    return "derived usage cap"
+  }
+
+  return `${formatMoney(toDecimal(fromLedgerMinor(phase.creditLineAmount, currency)), currency)} cap`
 }

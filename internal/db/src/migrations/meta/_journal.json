@@ -22,6 +22,20 @@
       "when": 1777836939727,
       "tag": "0002_special_mordo",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778097509534,
+      "tag": "0003_glamorous_jazinda",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778098790780,
+      "tag": "0004_right_weapon_omega",
+      "breakpoints": true
     }
   ]
 }

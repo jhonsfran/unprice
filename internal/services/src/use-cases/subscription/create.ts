@@ -87,11 +87,10 @@ export async function createSubscription(
   }
 
   // Sub-create is a pure DB write up to here. Wallet activation only fires
-  // for subscriptions that landed directly in `active` — pay_in_arrear plans
-  // (which need their period credit_line grant) and free / no-payment-method
-  // plans (no-op grants but cheap to call). Grants run through the state
-  // machine's `activating` state so the same code path serves create and
-  // renewal.
+  // for subscriptions that landed directly in `active`. Capped phases may
+  // need a period `credit_line` grant; uncapped phases carry their policy to
+  // the entitlement DO instead. Grants run through the state machine's
+  // `activating` state so the same code path serves create and renewal.
   //
   // - `trialing`        → trial grant is issued at trialing entry; no
   //                        ACTIVATE event needed.

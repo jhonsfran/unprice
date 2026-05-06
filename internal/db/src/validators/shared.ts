@@ -8,6 +8,7 @@ import {
   BILLING_PERIOD_STATUS,
   BILLING_PERIOD_TYPE,
   COLLECTION_METHODS,
+  CREDIT_LINE_POLICIES,
   CURRENCIES,
   DUE_BEHAVIOUR,
   FEATURE_CONFIG_TYPES,
@@ -65,6 +66,7 @@ export const tierModeSchema = z.enum(TIER_MODES)
 export const featureConfigType = z.enum(FEATURE_CONFIG_TYPES)
 export const unitSchema = z.coerce.number().int().min(1)
 export const collectionMethodSchema = z.enum(COLLECTION_METHODS)
+export const creditLinePolicySchema = z.enum(CREDIT_LINE_POLICIES)
 export const monthsSchema = z.coerce.number().int().min(1).max(12)
 export const yearsSchema = z.coerce.number().int().min(2000).max(2100)
 export const whenToBillSchema = z.enum(WHEN_TO_BILLING)
@@ -202,6 +204,7 @@ export type AggregationMethod = z.infer<typeof aggregationMethodSchema>
 export type WhenToBill = z.infer<typeof whenToBillSchema>
 export type BillingAnchor = z.infer<typeof billingAnchorSchema>
 export type CollectionMethod = z.infer<typeof collectionMethodSchema>
+export type CreditLinePolicy = z.infer<typeof creditLinePolicySchema>
 export type SubscriptionStatus = z.infer<typeof subscriptionStatusSchema>
 export type InvoiceStatus = z.infer<typeof invoiceStatusSchema>
 export type BillingInterval = z.infer<typeof billingIntervalSchema>

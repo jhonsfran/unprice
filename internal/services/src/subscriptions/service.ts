@@ -807,6 +807,8 @@ export class SubscriptionService {
       metadata,
       config,
       paymentProvider,
+      creditLinePolicy,
+      creditLineAmount,
       paymentMethodId,
       startAt,
       endAt,
@@ -947,6 +949,9 @@ export class SubscriptionService {
     // }
     const paymentProviderToUse = paymentProvider ?? versionData.paymentProvider
     const providerCaps = getPaymentProviderCapabilities(paymentProviderToUse)
+    const creditLinePolicyToUse = creditLinePolicy ?? "uncapped"
+    const creditLineAmountToUse =
+      creditLinePolicyToUse === "uncapped" ? null : (creditLineAmount ?? null)
 
     // skip payment method validation for providers without async payment confirmation
     if (
@@ -1028,6 +1033,8 @@ export class SubscriptionService {
         subscriptionId,
         paymentMethodId: paymentMethodId ?? null,
         paymentProvider: paymentProviderToUse,
+        creditLinePolicy: creditLinePolicyToUse,
+        creditLineAmount: creditLineAmountToUse,
         trialEndsAt: trialsEndAt,
         trialUnits: trialUnitsToUse,
         startAt: startAtToUse,
@@ -1088,9 +1095,9 @@ export class SubscriptionService {
         //                    requires a payment method but no funds have
         //                    settled yet. The bootstrap topup/invoice will
         //                    fire PAYMENT_SUCCESS to flip us to `active`.
-        //   active         — pay_in_arrear plans (DO drains the credit_line
-        //                    grant), wallet-only plans, and free / no-
-        //                    payment-method plans.
+        //   active         — phases whose first invoice is not blocking
+        //                    activation, including capped/uncapped usage
+        //                    phases and free / no-payment-method plans.
         // versionData.whenToBill is non-null in the schema (default
         // "pay_in_advance"), but some legacy/test fixtures omit it. Treat
         // missing as "not advance billing" — same as the prior `===` check.
@@ -1242,7 +1249,10 @@ export class SubscriptionService {
     db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
-    const { startAt, endAt, items, id: phaseId } = input
+    const { startAt, endAt, items, id: phaseId, creditLinePolicy, creditLineAmount } = input
+    const creditLinePolicyToUse = creditLinePolicy ?? "uncapped"
+    const creditLineAmountToUse =
+      creditLinePolicyToUse === "uncapped" ? null : (creditLineAmount ?? null)
     const repo = this.repoForDatabase(db)
 
     let endAtToUse = endAt ?? undefined
@@ -1315,6 +1325,8 @@ export class SubscriptionService {
         data: {
           startAt: startAt,
           endAt: endAtToUse ?? null,
+          creditLinePolicy: creditLinePolicyToUse,
+          creditLineAmount: creditLineAmountToUse,
         },
       })
 

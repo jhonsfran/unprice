@@ -12,9 +12,9 @@ import type { UnPriceWalletError } from "../../wallet/errors"
 // for `pay_in_advance` and `pay_in_arrear` — both modes draft the invoice the
 // same way, so both settle the same way.
 //
-// Usage runway is NOT funded here. The customer's per-period usage allowance
-// is issued at activation time as a `credit_line → granted` grant (see
-// `derive-activation-inputs.ts`); the DO drains it on each priced event.
+// Usage runway is NOT funded here. Capped phases issue their per-period
+// allowance at activation time as a `credit_line → granted` grant (see
+// `derive-provision-inputs.ts`); the DO drains it on each priced event.
 // Funding `customer.*.available.purchased` from invoice settlement would
 // double-count the flat-fee dollars (paying $50 in subscription fee should
 // not also grant $50 of usage runway). The `purchased` account is reserved

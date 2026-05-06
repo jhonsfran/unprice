@@ -1418,6 +1418,12 @@ export interface operations {
               paymentMethodId: string | null
               /** @enum {string} */
               paymentProvider: "stripe" | "square" | "sandbox"
+              /**
+               * @default uncapped
+               * @enum {string}
+               */
+              creditLinePolicy?: "capped" | "uncapped"
+              creditLineAmount: number | null
               /** @default 0 */
               trialUnits: number | null
               billingAnchor: number
@@ -1808,6 +1814,18 @@ export interface operations {
              */
             limit?: number | null
           }[]
+          /**
+           * @description Usage credit policy for the initial subscription phase. Uncapped allows postpaid usage without wallet reservation; capped uses a finite credit amount or derives one from finite usage limits.
+           * @example uncapped
+           * @default uncapped
+           * @enum {string}
+           */
+          creditLinePolicy?: "capped" | "uncapped"
+          /**
+           * @description Optional capped usage credit amount as a ledger-scale minor-unit integer. Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.
+           * @example 10000000000
+           */
+          creditLineAmount?: number | null
           /**
            * @description The external id you want to associate with the customer. Could be the id of the user in your database
            * @example 1234567890

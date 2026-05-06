@@ -22,11 +22,10 @@ export type ActivateSubscriptionDeps = {
  * Sources:
  * - `plan_included` — flat plan-included credit baked into the plan version
  * - `trial` — trial credits issued when the subscription enters `trialing`
- * - `credit_line` — postpaid spending cap for `pay_in_arrear` plans;
- *    issued at activation and at each renewal, expires at periodEndAt.
- *    The DO drains it like any other granted balance, and period-end
- *    invoicing charges the consumed amount against the customer's saved
- *    payment method (success → reissue, failure → past_due, no reissue).
+ * - `credit_line` — capped phase usage runway; issued at activation and
+ *    renewal, expires at periodEndAt. The DO drains it like any other
+ *    granted balance, and period-end invoicing charges consumed usage against
+ *    the customer's saved payment method.
  * - `promo` / `manual` — admin-driven, included for completeness; not
  *    typically derived from the plan.
  */

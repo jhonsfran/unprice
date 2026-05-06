@@ -22,7 +22,7 @@ import type {
 } from "../validators/subscriptions"
 import { billingPeriods } from "./billingPeriods"
 import { customers } from "./customers"
-import { paymentProviderEnum, subscriptionStatusEnum } from "./enums"
+import { creditLinePolicyEnum, paymentProviderEnum, subscriptionStatusEnum } from "./enums"
 import { invoices } from "./invoices"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { versions } from "./planVersions"
@@ -95,6 +95,8 @@ export const subscriptionPhases = pgTableProject(
     // payment method id of the customer - if not set, the first payment method will be used
     paymentMethodId: text("payment_method_id"),
     paymentProvider: paymentProviderEnum("payment_provider").notNull().default("sandbox"),
+    creditLinePolicy: creditLinePolicyEnum("credit_line_policy").notNull().default("uncapped"),
+    creditLineAmount: bigint("credit_line_amount", { mode: "number" }),
     // trial duration units of the phase
     trialUnits: integer("trial_units").notNull().default(0),
     // billing anchor of the phase

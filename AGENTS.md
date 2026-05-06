@@ -1,11 +1,15 @@
 # Agent Guide
 
 This is the canonical guide for automated agents working in this repository. Read it before
-editing. `CLAUDE.md` and `docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md`
+editing. Read `lessons.md` before non-trivial work and keep it updated when a task reveals
+repo-specific lessons. `CLAUDE.md` and `docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md`
 contain compatible background; keep them aligned when changing architecture rules.
 
 ## Operating Principles
 
+- Treat [`lessons.md`](lessons.md) as durable working memory. Read it before changing code, tests,
+  docs, migrations, payment flows, billing flows, or architecture-sensitive paths. When you learn a
+  repeatable repo-specific lesson, add or update a dated entry before finishing the task.
 - Fix the problem at the owning architectural layer. Do not hide a domain bug in an API route,
   component, or test helper when the invariant belongs in a service, use case, schema, or database
   model.

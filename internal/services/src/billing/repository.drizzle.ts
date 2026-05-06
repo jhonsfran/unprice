@@ -190,7 +190,7 @@ export class DrizzleBillingRepository implements BillingRepository {
     await this.db
       .insert(billingPeriods)
       .values(input.periods)
-      .onConflictDoNothing({
+      .onConflictDoUpdate({
         target: [
           billingPeriods.projectId,
           billingPeriods.subscriptionId,
@@ -199,6 +199,16 @@ export class DrizzleBillingRepository implements BillingRepository {
           billingPeriods.cycleStartAt,
           billingPeriods.cycleEndAt,
         ],
+        // Repair periods voided before zero-total invoices were materialized,
+        // including periods whose corrected invoiceAt changed.
+        set: {
+          status: "pending",
+          invoiceId: null,
+          invoiceAt: sql`excluded.invoice_at_m`,
+          statementKey: sql`excluded.statement_key`,
+          updatedAtM: Date.now(),
+        },
+        where: sql`${billingPeriods.status} = 'voided' AND ${billingPeriods.invoiceId} IS NULL`,
       })
   }
 

@@ -27,6 +27,14 @@ The system answers three questions:
 These compose in the DO hot path:
 `entitlement check → priced fact → reservation check → consume`.
 
+## Implementation Guardrails
+
+Read [ADR-0002: Wallet And Payment Provider Activation Guardrails](../adr/ADR-0002-wallet-payment-provider-activation-guardrails.md)
+before changing activation, reservations, wallet account seeding, or
+payment-provider settlement. The ADR documents the operational lessons from
+local signup and usage E2E debugging, including amount scale, `creditLineAmount`
+semantics, and the distinction between direct provisioning and webhooks.
+
 ---
 
 ## The unified wallet principle

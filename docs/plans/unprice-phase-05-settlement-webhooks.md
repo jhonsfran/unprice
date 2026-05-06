@@ -26,6 +26,13 @@ normalized webhook pipeline.
 - subscription state transitions need a single place to consume payment success
   and failure events
 
+## Implementation Guardrails
+
+Read [ADR-0002: Wallet And Payment Provider Activation Guardrails](../adr/ADR-0002-wallet-payment-provider-activation-guardrails.md)
+before changing provider checkout, webhook, or settlement behavior. Direct free
+and sandbox provisioning must not depend on payment webhooks; webhooks settle
+provider-owned outcomes after durable normalization.
+
 ## Read First
 
 - [../../apps/api/src/index.ts](../../apps/api/src/index.ts)

@@ -47,7 +47,6 @@ function createPlanVersion(overrides?: InsertedValues): InsertedValues {
     collectionMethod: "charge_automatically",
     trialUnits: 0,
     autoRenew: true,
-    creditLineAmount: 0,
     metadata: null,
     paymentMethodRequired: true,
     version: 1,

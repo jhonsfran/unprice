@@ -7,10 +7,12 @@ import {
 import { createConnection } from "@unprice/db"
 import {
   type ConfigFeatureVersionType,
+  type CreditLinePolicy,
   type Currency,
   type OverageStrategy,
   type ResetConfig,
   configFeatureSchema,
+  creditLinePolicySchema,
   meterConfigSchema,
 } from "@unprice/db/validators"
 import { LEDGER_SCALE } from "@unprice/money"
@@ -166,6 +168,7 @@ const activeGrantSchema = z.object({
 })
 
 const entitlementConfigSchema = z.object({
+  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
   customerEntitlementId: z.string().min(1),
   customerId: z.string().min(1),
   effectiveAt: z.number().finite(),
@@ -207,6 +210,7 @@ type ActiveGrantInput = ApplyGrantInput & {
   resetConfig: ResetConfig | null
 }
 type EntitlementConfigInput = z.infer<typeof entitlementConfigSchema>
+type EntitlementCreditLinePolicy = CreditLinePolicy
 
 type MeterIdentity = {
   customerEntitlementId: string
@@ -396,6 +400,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     const meter = this.resolveMeterIdentity(entitlement)
     const overageStrategy = entitlement.overageStrategy
+    const creditLinePolicy: EntitlementCreditLinePolicy = input.entitlement.creditLinePolicy
 
     // One canonical log line per apply() — populated as we go, emitted in
     // the finally block so every code path (success, denial, throw) lands
@@ -414,6 +419,7 @@ export class EntitlementWindowDO extends DurableObject {
       meter_key: meter.key,
       aggregation_method: meter.config.aggregationMethod,
       enforce_limit: input.enforceLimit,
+      credit_line_policy: creditLinePolicy,
     }
 
     let result: ApplyResult | undefined
@@ -475,7 +481,9 @@ export class EntitlementWindowDO extends DurableObject {
       // A small in-memory single-flight prevents duplicate wallet calls while
       // this DO instance is awaiting external I/O.
       const preWindow = this.readWalletReservation(this.db)
-      const needsBootstrap = !preWindow || preWindow.reservationId === null
+      const usesWalletReservation = creditLinePolicy !== "uncapped"
+      const needsBootstrap =
+        usesWalletReservation && (!preWindow || preWindow.reservationId === null)
       wideEvent.bootstrap_attempted = needsBootstrap
 
       if (needsBootstrap) {
@@ -498,6 +506,8 @@ export class EntitlementWindowDO extends DurableObject {
           return denial
         }
         wideEvent.bootstrap_outcome = "success"
+      } else if (!usesWalletReservation) {
+        wideEvent.bootstrap_outcome = "disabled_by_credit_line_policy"
       } else {
         wideEvent.bootstrap_outcome = "reservation_already_open"
       }
@@ -582,7 +592,7 @@ export class EntitlementWindowDO extends DurableObject {
           // this window. Without a reservation the DO operates without local
           // allocation tracking or refill triggers.
           const window = this.readWalletReservation(tx)
-          if (window?.reservationId && pricedFacts.length > 0) {
+          if (usesWalletReservation && window?.reservationId && pricedFacts.length > 0) {
             reservationEngaged = true
             // Pricing has already run through Dinero and was normalized into
             // ledger-scale integers. Mixed currencies are rejected at grant sync.
@@ -1631,6 +1641,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     return {
+      creditLinePolicy: "uncapped",
       customerEntitlementId: row.customerEntitlementId,
       projectId: row.projectId,
       customerId: row.customerId,

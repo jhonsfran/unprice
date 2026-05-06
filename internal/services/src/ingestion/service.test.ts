@@ -406,6 +406,7 @@ describe("IngestionService entitlement routing", () => {
 
 function createEntitlement(): IngestionEntitlement {
   return {
+    creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
     effectiveAt: Date.UTC(2026, 2, 1),
@@ -452,6 +453,9 @@ function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
     metadata: null,
     createdAtM: 0,
     updatedAtM: 0,
+    subscriptionPhase: {
+      creditLinePolicy: entitlement.creditLinePolicy,
+    },
     grants: [
       {
         id: `${entitlement.customerEntitlementId}_grant`,

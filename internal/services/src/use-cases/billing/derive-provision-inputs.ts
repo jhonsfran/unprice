@@ -1,5 +1,9 @@
 import type { Database } from "@unprice/db"
-import { type PlanVersionFeature, calculatePricePerFeature } from "@unprice/db/validators"
+import {
+  type CreditLinePolicy,
+  type PlanVersionFeature,
+  calculatePricePerFeature,
+} from "@unprice/db/validators"
 import { toLedgerMinor } from "@unprice/money"
 import type { ActivationGrant } from "./provision-period"
 
@@ -19,9 +23,9 @@ type SubscriptionRow = {
   projectId: string
   customer: { id: string; defaultCurrency: string } | null
   phases: Array<{
+    creditLinePolicy: CreditLinePolicy
+    creditLineAmount: number | null
     planVersion: {
-      whenToBill: string
-      creditLineAmount: number
       planFeatures: Array<Pick<PlanVersionFeature, "featureType" | "config" | "limit">>
     } | null
   }>
@@ -29,36 +33,28 @@ type SubscriptionRow = {
 
 export interface DerivedActivationInputs {
   grants: ActivationGrant[]
+  creditLinePolicy: CreditLinePolicy
 }
 
 /**
  * Derives the activation grant for a subscription's billing period.
  *
- * Unified semantic: the persisted `creditLineAmount` field is the explicit
- * **period usage allowance**. The wallet / DO / reservation flow is the same
- * regardless of `whenToBill`; only invoice timing differs.
+ * Credit line policy is a subscription-phase decision, not a plan-version
+ * default. A plan describes the public package; the phase describes the
+ * customer-specific contract for this period.
  *
- *  - **`pay_in_advance`**: the flat-features sum is invoiced and paid
- *    upfront — that's the "subscription fee", separate from usage. The
- *    credit_line grant materializes the customer's usage allowance for the
- *    period; the DO drains it on each priced event. Period-end invoicing
- *    rates actual consumed usage and charges the saved card (advance for
- *    flat, arrears for usage — the natural shape).
+ *  - **`capped + creditLineAmount > 0`**: issue exactly that amount as the
+ *    period usage runway.
  *
- *  - **`pay_in_arrear`**: nothing prepaid. The credit_line grant is the
- *    spending cap. Period-end invoicing produces a single invoice for
- *    `flat + consumed`, charged to the saved card. If no explicit allowance
- *    is configured, we derive a conservative default from finite, priced usage
- *    features by rating each feature at its configured `limit`.
+ *  - **`capped + creditLineAmount = null`**: derive a conservative cap from
+ *    finite, priced usage limits by rating each usage feature at its limit.
  *
- * In both modes the grant `source` is `credit_line` — the platform is
- * extending credit that gets settled (or not) at period end. Failed
- * settlement → `past_due`, no reissue next period.
+ *  - **`capped + creditLineAmount = 0`**: issue no runway; paid usage denies
+ *    with `WALLET_EMPTY` unless purchased wallet balance exists.
  *
- * For plans where the explicit allowance is 0 and no finite priced usage limit
- * exists: no usage allowance is granted at activation. Paid usage events deny
- * with `WALLET_EMPTY` until the customer tops up `purchased` balance directly
- * or the plan/customer gets an explicit allowance.
+ *  - **`uncapped`**: issue no `credit_line` wallet grant. The entitlement DO
+ *    receives the phase policy and skips wallet reservation enforcement for
+ *    priced events; invoicing still rates consumed usage at period end.
  *
  * Returns `null` when the subscription / phase / plan version is missing.
  */
@@ -70,12 +66,12 @@ export async function deriveActivationInputsFromPlan(
     with: {
       customer: { columns: { id: true, defaultCurrency: true } },
       phases: {
+        columns: {
+          creditLinePolicy: true,
+          creditLineAmount: true,
+        },
         with: {
           planVersion: {
-            columns: {
-              whenToBill: true,
-              creditLineAmount: true,
-            },
             with: {
               planFeatures: {
                 columns: {
@@ -103,7 +99,7 @@ export async function deriveActivationInputsFromPlan(
   if (!phase || !phase.planVersion) return null
 
   const grants: ActivationGrant[] = []
-  const allowanceAmount = derivePeriodUsageAllowanceAmount(phase.planVersion)
+  const allowanceAmount = derivePeriodUsageAllowanceAmount(phase)
 
   if (allowanceAmount > 0) {
     grants.push({
@@ -113,18 +109,20 @@ export async function deriveActivationInputsFromPlan(
     })
   }
 
-  return { grants }
+  return { grants, creditLinePolicy: phase.creditLinePolicy }
 }
 
-export function derivePeriodUsageAllowanceAmount(planVersion: {
-  whenToBill: string
-  creditLineAmount: number
-  planFeatures?: Array<Pick<PlanVersionFeature, "featureType" | "config" | "limit">>
+export function derivePeriodUsageAllowanceAmount(phase: {
+  creditLinePolicy: CreditLinePolicy
+  creditLineAmount: number | null
+  planVersion?: {
+    planFeatures?: Array<Pick<PlanVersionFeature, "featureType" | "config" | "limit">>
+  } | null
 }): number {
-  if (planVersion.creditLineAmount > 0) return planVersion.creditLineAmount
-  if (planVersion.whenToBill !== "pay_in_arrear") return 0
+  if (phase.creditLinePolicy === "uncapped") return 0
+  if (phase.creditLineAmount !== null) return phase.creditLineAmount
 
-  return (planVersion.planFeatures ?? []).reduce((total, feature) => {
+  return (phase.planVersion?.planFeatures ?? []).reduce((total, feature) => {
     if (feature.featureType !== "usage") return total
     if (!Number.isFinite(feature.limit) || !feature.limit || feature.limit <= 0) return total
 

@@ -387,6 +387,8 @@ export class DrizzleSubscriptionRepository implements SubscriptionRepository {
         subscriptionId: input.subscriptionId,
         paymentMethodId: input.paymentMethodId,
         paymentProvider: input.paymentProvider as "stripe" | "square" | "sandbox",
+        creditLinePolicy: input.creditLinePolicy,
+        creditLineAmount: input.creditLineAmount,
         trialEndsAt: input.trialEndsAt,
         trialUnits: input.trialUnits,
         startAt: input.startAt,

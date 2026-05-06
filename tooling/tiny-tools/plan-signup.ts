@@ -13,12 +13,16 @@ type Currency = NonNullable<ListPlanVersionsRequest["currency"]>
 
 const BILLING_INTERVALS = ["month", "year", "week", "day", "minute", "onetime"] as const
 const CURRENCIES = ["USD", "EUR"] as const
+const CREDIT_LINE_POLICIES = ["capped", "uncapped"] as const
 
 const UNPRICE_TOKEN = process.env.UNPRICE_TOKEN || ""
 const UNPRICE_API_URL = process.env.UNPRICE_API_URL || "http://localhost:8787"
 const PLAN_SLUG = process.env.PLAN_SLUG?.trim() || "free"
 const BILLING_INTERVAL = getOptionalEnvValue("BILLING_INTERVAL", BILLING_INTERVALS)
 const CURRENCY = getOptionalEnvValue("CURRENCY", CURRENCIES)
+const CREDIT_LINE_POLICY = getOptionalEnvValue("CREDIT_LINE_POLICY", CREDIT_LINE_POLICIES)
+const CREDIT_LINE_AMOUNT = getOptionalNonNegativeIntegerEnvValue("CREDIT_LINE_AMOUNT")
+const EXPECTED_CREDIT_LINE_POLICY = CREDIT_LINE_POLICY ?? "uncapped"
 
 const colors = {
   green: (s: string) => `\x1b[32m${s}\x1b[0m`,
@@ -55,6 +59,18 @@ function getOptionalEnvValue<const T extends readonly string[]>(
   }
 
   throw new Error(`${name} must be one of: ${allowedValues.join(", ")}. Received: ${rawValue}`)
+}
+
+function getOptionalNonNegativeIntegerEnvValue(name: string): number | null {
+  const rawValue = process.env[name]?.trim()
+  if (!rawValue) return null
+
+  const value = Number(rawValue)
+  if (Number.isInteger(value) && value >= 0) {
+    return value
+  }
+
+  throw new Error(`${name} must be a non-negative integer. Received: ${rawValue}`)
 }
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -150,6 +166,10 @@ async function planPreflight(): Promise<void> {
 
 async function customerSignup(): Promise<void> {
   assert(selectedPlanVersion, "selected plan version should be loaded before signup")
+  assert(
+    CREDIT_LINE_AMOUNT === null || CREDIT_LINE_POLICY === "capped",
+    "CREDIT_LINE_AMOUNT requires CREDIT_LINE_POLICY=capped"
+  )
 
   const runId = Math.random().toString(8).substring(2, 10)
   externalId = `tiny-tools-signup-${runId}`
@@ -170,6 +190,8 @@ async function customerSignup(): Promise<void> {
     },
     ...(BILLING_INTERVAL ? { billingInterval: BILLING_INTERVAL as BillingInterval } : {}),
     ...(CURRENCY ? { defaultCurrency: CURRENCY as Currency } : {}),
+    ...(CREDIT_LINE_POLICY ? { creditLinePolicy: CREDIT_LINE_POLICY } : {}),
+    ...(CREDIT_LINE_AMOUNT !== null ? { creditLineAmount: CREDIT_LINE_AMOUNT } : {}),
   }
 
   const { result, error } = await unprice.customers.signUp(request)
@@ -188,6 +210,7 @@ async function customerSignup(): Promise<void> {
   console.info(`    externalId: ${externalId}`)
   console.info(`    email: ${email}`)
   console.info(`    planVersionId: ${selectedPlanVersion.id}`)
+  console.info(`    requestedCreditLinePolicy: ${CREDIT_LINE_POLICY ?? "default"}`)
 }
 
 async function subscriptionCheck(): Promise<void> {
@@ -208,8 +231,30 @@ async function subscriptionCheck(): Promise<void> {
     result.planSlug === PLAN_SLUG,
     `subscription planSlug should be ${PLAN_SLUG}, got ${result.planSlug}`
   )
+  assert(isRecord(result.activePhase), "subscription should include an active phase")
+  assert(
+    result.activePhase.creditLinePolicy === EXPECTED_CREDIT_LINE_POLICY,
+    `active phase creditLinePolicy should be ${EXPECTED_CREDIT_LINE_POLICY}, got ${result.activePhase.creditLinePolicy}`
+  )
+
+  if (EXPECTED_CREDIT_LINE_POLICY === "uncapped") {
+    assert(
+      result.activePhase.creditLineAmount === null,
+      `uncapped active phase should not retain creditLineAmount, got ${result.activePhase.creditLineAmount}`
+    )
+  }
+
+  if (CREDIT_LINE_AMOUNT !== null) {
+    assert(
+      result.activePhase.creditLineAmount === CREDIT_LINE_AMOUNT,
+      `active phase creditLineAmount should be ${CREDIT_LINE_AMOUNT}, got ${result.activePhase.creditLineAmount}`
+    )
+  }
 
   console.info(`    subscription: ${result.planSlug} (${result.status})`)
+  console.info(
+    `    creditLine: ${result.activePhase.creditLinePolicy} (${result.activePhase.creditLineAmount ?? "none"})`
+  )
 }
 
 async function entitlementsCheck(): Promise<void> {
@@ -252,6 +297,8 @@ async function main(): Promise<void> {
   console.info(`  target plan: ${PLAN_SLUG}`)
   if (BILLING_INTERVAL) console.info(`  billing interval: ${BILLING_INTERVAL}`)
   if (CURRENCY) console.info(`  currency: ${CURRENCY}`)
+  console.info(`  expected credit line policy: ${EXPECTED_CREDIT_LINE_POLICY}`)
+  if (CREDIT_LINE_AMOUNT !== null) console.info(`  credit line amount: ${CREDIT_LINE_AMOUNT}`)
   console.info("")
 
   await step("plan preflight: expected published plan exists", planPreflight)

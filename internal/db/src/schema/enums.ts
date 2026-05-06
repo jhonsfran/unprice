@@ -6,6 +6,7 @@ import {
   BILLING_PERIOD_STATUS,
   BILLING_PERIOD_TYPE,
   COLLECTION_METHODS,
+  CREDIT_LINE_POLICIES,
   CURRENCIES,
   DUE_BEHAVIOUR,
   FEATURE_CONFIG_TYPES,
@@ -51,3 +52,4 @@ export const collectionMethodEnum = pgEnum("collection_method", COLLECTION_METHO
 export const overageStrategyEnum = pgEnum("overage_strategy", OVERAGE_STRATEGIES)
 export const walletTopupStatusEnum = pgEnum("wallet_topup_status", WALLET_TOPUP_STATUSES)
 export const walletCreditSourceEnum = pgEnum("wallet_credit_source", WALLET_CREDIT_SOURCES)
+export const creditLinePolicyEnum = pgEnum("credit_line_policy", CREDIT_LINE_POLICIES)

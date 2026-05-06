@@ -256,29 +256,24 @@ export async function billPeriod({
           (line.metadata as Record<string, unknown> | null)?.billing_period_id != null
       )
 
-      if (linesToInvoice.length === 0) {
-        await txBillingRepo.voidPendingPeriods({
-          projectId: periodItemGroup.projectId,
-          subscriptionId: periodItemGroup.subscriptionId,
-          subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
-          statementKey: periodItemGroup.statementKey,
-        })
-
-        return
-      }
-
-      const statementStartAt = Math.min(
-        ...linesToInvoice.map((line: InvoiceLine) => {
-          const meta = line.metadata as Record<string, unknown> | null
-          return (meta?.cycle_start_at as number | undefined) ?? periodItemGroup.invoiceAt
-        })
-      )
-      const statementEndAt = Math.max(
-        ...linesToInvoice.map((line: InvoiceLine) => {
-          const meta = line.metadata as Record<string, unknown> | null
-          return (meta?.cycle_end_at as number | undefined) ?? periodItemGroup.invoiceAt
-        })
-      )
+      const statementStartAt =
+        linesToInvoice.length > 0
+          ? Math.min(
+              ...linesToInvoice.map((line: InvoiceLine) => {
+                const meta = line.metadata as Record<string, unknown> | null
+                return (meta?.cycle_start_at as number | undefined) ?? periodItemGroup.invoiceAt
+              })
+            )
+          : Math.min(...billingPeriodsToInvoice.map((period) => period.cycleStartAt))
+      const statementEndAt =
+        linesToInvoice.length > 0
+          ? Math.max(
+              ...linesToInvoice.map((line: InvoiceLine) => {
+                const meta = line.metadata as Record<string, unknown> | null
+                return (meta?.cycle_end_at as number | undefined) ?? periodItemGroup.invoiceAt
+              })
+            )
+          : Math.max(...billingPeriodsToInvoice.map((period) => period.cycleEndAt))
 
       const invoiceAt = periodItemGroup.invoiceAt
       const strategy = billingStrategyForInterval(

@@ -13,10 +13,6 @@ export function InvoiceTable({
   workspaceSlug: string
   projectSlug: string
 }) {
-  if (invoice.lines.length === 0) {
-    return null
-  }
-
   const formatLedger = (amount: number) =>
     formatMoney(toDecimal(fromLedgerMinor(amount, invoice.currency)), invoice.currency)
 
@@ -33,29 +29,53 @@ export function InvoiceTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {invoice.lines.map((line) => (
-              <TableRow key={line.entryId}>
-                <TableCell className="space-y-2">
+            {invoice.lines.length === 0 ? (
+              <TableRow>
+                <TableCell className="space-y-2" colSpan={4}>
                   <Typography variant="h6" affects="removePaddingMargin">
-                    {line.description ?? line.kind}
+                    No billable charges
                   </Typography>
                   <span className="block font-light text-muted-foreground text-xs">
+                    Statement period{" "}
                     {formatDate(
-                      new Date(line.createdAt).getTime(),
+                      invoice.statementStartAt,
+                      invoice.subscription.timezone,
+                      "MMMM d, yyyy hh:mm a"
+                    )}{" "}
+                    -{" "}
+                    {formatDate(
+                      invoice.statementEndAt,
                       invoice.subscription.timezone,
                       "MMMM d, yyyy hh:mm a"
                     )}
                   </span>
                 </TableCell>
-                <TableCell className="text-muted-foreground">{line.kind}</TableCell>
-                <TableCell className="text-right text-muted-foreground">
-                  {line.quantity ?? "-"}
-                </TableCell>
-                <TableCell className="text-right font-medium">
-                  {formatLedger(line.amount)}
-                </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              invoice.lines.map((line) => (
+                <TableRow key={line.entryId}>
+                  <TableCell className="space-y-2">
+                    <Typography variant="h6" affects="removePaddingMargin">
+                      {line.description ?? line.kind}
+                    </Typography>
+                    <span className="block font-light text-muted-foreground text-xs">
+                      {formatDate(
+                        new Date(line.createdAt).getTime(),
+                        invoice.subscription.timezone,
+                        "MMMM d, yyyy hh:mm a"
+                      )}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{line.kind}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">
+                    {line.quantity ?? "-"}
+                  </TableCell>
+                  <TableCell className="text-right font-medium">
+                    {formatLedger(line.amount)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>

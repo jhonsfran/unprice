@@ -16,9 +16,15 @@ import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
 describe("BillingService rating delegation", () => {
-  const buildBillingService = (ratingService: RatingService) =>
+  const buildBillingService = (
+    ratingService: RatingService,
+    overrides: {
+      db?: Database
+      ledgerService?: LedgerGateway
+    } = {}
+  ) =>
     new BillingService({
-      db: {} as Database,
+      db: overrides.db ?? ({} as Database),
       logger: {
         set: vi.fn(),
         error: vi.fn(),
@@ -32,7 +38,7 @@ describe("BillingService rating delegation", () => {
       customerService: {} as CustomerService,
       grantsManager: {} as GrantsManager,
       ratingService,
-      ledgerService: {} as LedgerGateway,
+      ledgerService: overrides.ledgerService ?? ({} as LedgerGateway),
       walletService: {} as WalletService,
     })
 
@@ -105,5 +111,56 @@ describe("BillingService rating delegation", () => {
 
     expect(result.err).toBeDefined()
     expect(result.err?.message).toContain("RATING_FAILED")
+  })
+
+  it("adds zero-amount statement lines for invoiced periods without ledger lines", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      {
+        id: "bp_1",
+        statementKey: "statement_1",
+        type: "normal",
+        invoiceAt: 1_768_000_000_000,
+        cycleStartAt: 1_768_000_000_000,
+        subscriptionItem: {
+          units: 1,
+          featurePlanVersion: {
+            featureType: "flat",
+            feature: {
+              title: "Access Free",
+              slug: "access-free",
+            },
+          },
+        },
+      },
+    ])
+    const db = {
+      query: {
+        billingPeriods: {
+          findMany,
+        },
+      },
+    } as unknown as Database
+    const ledgerService = {
+      getInvoiceLines: vi.fn().mockResolvedValue(Ok([])),
+    } as unknown as LedgerGateway
+    const billingService = buildBillingService({} as RatingService, { db, ledgerService })
+
+    const result = await billingService.getInvoiceStatementLines({
+      projectId: "proj_1",
+      invoiceId: "inv_1",
+      statementKey: "statement_1",
+      currency: "EUR",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toEqual([
+      expect.objectContaining({
+        entryId: "billing-period:bp_1",
+        description: "Access Free",
+        quantity: 1,
+        amount: 0,
+        currency: "EUR",
+      }),
+    ])
   })
 })

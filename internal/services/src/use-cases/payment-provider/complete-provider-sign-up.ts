@@ -302,11 +302,17 @@ export async function completeProviderSignUp(
     )
   }
 
+  const sessionCreditLinePolicy = customerSession.planVersion.creditLinePolicy ?? "uncapped"
   const { err: createPhaseErr } = await deps.services.subscriptions.createPhase({
     input: {
       startAt: Date.now(),
       planVersionId: customerSession.planVersion.id,
       config: customerSession.planVersion.config,
+      creditLinePolicy: sessionCreditLinePolicy,
+      creditLineAmount:
+        sessionCreditLinePolicy === "uncapped"
+          ? null
+          : (customerSession.planVersion.creditLineAmount ?? null),
       paymentProvider: provider,
       paymentMethodId: defaultPaymentMethodId,
       subscriptionId: subscriptionData.id,

@@ -13,12 +13,12 @@ import {
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { formatAmountForProvider } from "@unprice/money"
+import { formatAmountForProvider, toLedgerMinor } from "@unprice/money"
 import { addDays } from "date-fns"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
-import type { LedgerGateway } from "../ledger"
+import type { InvoiceLine, LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import {
   type InvoiceSubscriptionOutcome,
@@ -37,6 +37,35 @@ import { DrizzleBillingRepository } from "./repository.drizzle"
 import { billingStrategyFor } from "./strategy"
 
 type ComputeCurrentUsageResult = RatedCharge
+
+export interface InvoiceStatementLine {
+  entryId: string
+  statementKey: string
+  kind: string
+  description: string | null
+  quantity: number | null
+  amount: number
+  currency: Currency
+  createdAt: Date
+}
+
+type BillingPeriodStatementRow = {
+  id: string
+  statementKey: string
+  type: "normal" | "trial"
+  invoiceAt: number
+  cycleStartAt: number
+  subscriptionItem: {
+    units: number | null
+    featurePlanVersion: {
+      featureType: string
+      feature: {
+        title: string
+        slug: string
+      }
+    }
+  }
+}
 
 function normalizeProviderTimestamp(timestamp: number | undefined, fallback: number): number {
   if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
@@ -887,23 +916,23 @@ export class BillingService {
     >
   > {
     try {
+      const { err: openInvoiceDataErr, val: openInvoiceData } = await this.getOpenInvoiceData({
+        subscriptionId,
+        projectId,
+        now,
+        invoiceId,
+      })
+
+      if (openInvoiceDataErr) {
+        return Err(openInvoiceDataErr)
+      }
+
       const res = await this.withSubscriptionMachine({
         subscriptionId,
         projectId,
         now,
         lock: false, // no need to lock it here
         run: async (machine) => {
-          const { err: openInvoiceDataErr, val: openInvoiceData } = await this.getOpenInvoiceData({
-            subscriptionId,
-            projectId,
-            now,
-            invoiceId,
-          })
-
-          if (openInvoiceDataErr) {
-            throw openInvoiceDataErr
-          }
-
           // Already past draft (and provider id stamped if non-zero) → no-op.
           // The dedup check on `status !== "draft"` is the source of truth;
           // a draft row is the *only* state where finalize work is allowed.
@@ -975,7 +1004,22 @@ export class BillingService {
 
       return Ok(res)
     } catch (e) {
-      return Err(e as UnPriceBillingError)
+      if (e instanceof UnPriceBillingError) {
+        return Err(e)
+      }
+
+      this.logger.error(e as Error, {
+        context: "Failed to finalize invoice",
+        invoiceId,
+        projectId,
+        subscriptionId,
+      })
+
+      return Err(
+        new UnPriceBillingError({
+          message: "Unable to finalize invoice. Please try again or contact support.",
+        })
+      )
     }
   }
 
@@ -993,36 +1037,47 @@ export class BillingService {
     try {
       const invoice = await this.db.query.invoices.findFirst({
         with: { customer: true },
-        where: (inv, { and, eq, inArray, lte, or, isNull }) =>
-          or(
-            and(
-              eq(inv.projectId, projectId),
-              eq(inv.id, invoiceId),
-              eq(inv.subscriptionId, subscriptionId),
-              eq(inv.status, "draft"),
-              lte(inv.dueAt, now)
-            ),
-            and(
-              eq(inv.projectId, projectId),
-              eq(inv.id, invoiceId),
-              eq(inv.subscriptionId, subscriptionId),
-              inArray(inv.status, ["unpaid", "waiting"]),
-              isNull(inv.invoicePaymentProviderId),
-              lte(inv.dueAt, now)
-            )
+        where: (inv, { and, eq }) =>
+          and(
+            eq(inv.projectId, projectId),
+            eq(inv.id, invoiceId),
+            eq(inv.subscriptionId, subscriptionId)
           ),
         orderBy: (inv, { asc }) => asc(inv.dueAt),
       })
 
       if (!invoice) {
+        return Err(new UnPriceBillingError({ message: "Invoice not found" }))
+      }
+
+      if (invoice.status === "draft" && invoice.dueAt > now) {
+        const readyAt = new Date(invoice.dueAt).toLocaleString("en-US", {
+          dateStyle: "medium",
+          timeStyle: "short",
+          timeZone: "UTC",
+        })
+
         return Err(
-          new UnPriceBillingError({ message: "Invoice not found or not due to be processed" })
+          new UnPriceBillingError({
+            message: `Invoice is not ready to finalize yet. It can be finalized after ${readyAt} UTC.`,
+          })
         )
       }
 
       return Ok(invoice)
     } catch (e) {
-      return Err(e as UnPriceBillingError)
+      this.logger.error(e as Error, {
+        context: "Failed to load invoice for finalization",
+        invoiceId,
+        projectId,
+        subscriptionId,
+      })
+
+      return Err(
+        new UnPriceBillingError({
+          message: "Unable to load invoice for finalization. Please try again.",
+        })
+      )
     }
   }
 
@@ -1441,11 +1496,12 @@ export class BillingService {
             const billingPeriodValues = await Promise.all(
               windows.map(async (w) => {
                 const whenToBill = phase.planVersion.whenToBill
-                // BILL phase trigger maps directly to the cycle boundary that
-                // becomes the period's `invoiceAt`. Trial periods always
-                // invoice at cycle end (zero-amount, just for closure).
+                // Fixed subscription charges can bill at period start for
+                // advance plans. Usage is always actuals-based, so it invoices
+                // at period end after events have landed.
                 const billsAtPeriodStart = whenToBill
-                  ? billingStrategyFor(whenToBill).billPhaseTrigger === "period_start"
+                  ? billingStrategyFor(whenToBill).billPhaseTrigger === "period_start" &&
+                    item.featurePlanVersion.featureType !== "usage"
                   : false
                 const invoiceAt = w.isTrial ? w.end : billsAtPeriodStart ? w.start : w.end
                 const statementKey = await this.computeStatementKey({
@@ -1519,6 +1575,85 @@ export class BillingService {
     return result.err
       ? Err(new UnPriceBillingError({ message: result.err.message }))
       : Ok(result.val)
+  }
+
+  public async getInvoiceStatementLines({
+    projectId,
+    invoiceId,
+    statementKey,
+    currency,
+  }: {
+    projectId: string
+    invoiceId: string
+    statementKey: string
+    currency: Currency
+  }): Promise<Result<InvoiceStatementLine[], UnPriceBillingError>> {
+    const linesResult = await this.ledgerService.getInvoiceLines({
+      projectId,
+      statementKey,
+    })
+
+    if (linesResult.err) {
+      return Err(new UnPriceBillingError({ message: linesResult.err.message }))
+    }
+
+    const ledgerLines = linesResult.val
+    const billedPeriodIds = new Set(
+      ledgerLines
+        .map((line: InvoiceLine) => {
+          const metadata = line.metadata as Record<string, unknown> | null
+          const billingPeriodId = metadata?.billing_period_id
+          return typeof billingPeriodId === "string" ? billingPeriodId : null
+        })
+        .filter((billingPeriodId): billingPeriodId is string => billingPeriodId !== null)
+    )
+
+    const periods = (await this.db.query.billingPeriods.findMany({
+      with: {
+        subscriptionItem: {
+          with: {
+            featurePlanVersion: {
+              with: {
+                feature: true,
+              },
+            },
+          },
+        },
+      },
+      where: (period, { and, eq }) =>
+        and(eq(period.projectId, projectId), eq(period.invoiceId, invoiceId)),
+      orderBy: (period, { asc }) => [asc(period.cycleStartAt), asc(period.id)],
+    })) as BillingPeriodStatementRow[]
+
+    const zeroLines = periods
+      .filter((period) => !billedPeriodIds.has(period.id))
+      .map(
+        (period): InvoiceStatementLine => ({
+          entryId: `billing-period:${period.id}`,
+          statementKey: period.statementKey,
+          kind: period.type === "trial" ? "trial" : "period",
+          description: period.subscriptionItem.featurePlanVersion.feature.title,
+          quantity: period.subscriptionItem.units ?? 0,
+          amount: 0,
+          currency,
+          createdAt: new Date(period.invoiceAt),
+        })
+      )
+
+    const projectedLedgerLines = ledgerLines.map(
+      (line): InvoiceStatementLine => ({
+        entryId: line.entryId,
+        statementKey: line.statementKey,
+        kind: line.kind,
+        description: line.description,
+        quantity: line.quantity,
+        amount: toLedgerMinor(line.amount),
+        currency: line.currency,
+        createdAt: line.createdAt,
+      })
+    )
+
+    return Ok([...projectedLedgerLines, ...zeroLines])
   }
 
   /**

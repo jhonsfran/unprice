@@ -14,6 +14,7 @@ import type { Metrics } from "../metrics"
 import type { PaymentProviderService } from "../payment-provider/service"
 import type { RatingService } from "../rating/service"
 import type { SubscriptionMachine } from "../subscriptions/machine"
+import { withLockedMachine } from "../subscriptions/withLockedMachine"
 import type { WalletService } from "../wallet"
 import { BillingService } from "./service"
 
@@ -287,6 +288,23 @@ describe("BillingService.finalizeInvoice", () => {
     expect(repoCalls.updateInvoice[0]?.data).toMatchObject({
       status: "void",
     })
+  })
+
+  it("draft invoice before dueAt returns a user-facing error before loading the machine", async () => {
+    const invoice = makeInvoice({ dueAt: 10_000 })
+    const { billing, provider } = makeBillingService({ invoice, lines: [] })
+
+    const result = await billing.finalizeInvoice({
+      projectId: "proj_1",
+      subscriptionId: "sub_1",
+      invoiceId: "inv_1",
+      now: 5_000,
+    })
+
+    expect(result.err?.message).toContain("Invoice is not ready to finalize yet")
+    expect(withLockedMachine).not.toHaveBeenCalled()
+    expect(provider.createInvoice).not.toHaveBeenCalled()
+    expect(repoCalls.updateInvoice).toHaveLength(0)
   })
 
   it("provider createInvoice failure bumps metadata.finalizeAttempts and leaves status draft", async () => {

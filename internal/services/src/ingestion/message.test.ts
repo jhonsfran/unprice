@@ -10,6 +10,7 @@ describe("ingestion entitlement message helpers", () => {
   const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
 
   const entitlement = (overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement => ({
+    creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
     effectiveAt: Date.UTC(2026, 2, 1),

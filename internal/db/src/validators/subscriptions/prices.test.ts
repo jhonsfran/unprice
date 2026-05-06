@@ -178,7 +178,6 @@ describe("calculateFlatPricePlan", () => {
       autoRenew: true,
       paymentMethodRequired: false,
       billingConfig: billingConfig,
-      creditLineAmount: 0,
       planFeatures: [
         {
           id: "fv_4HsTVDfaaTtnAkq5sKB1Raj4tgaG",

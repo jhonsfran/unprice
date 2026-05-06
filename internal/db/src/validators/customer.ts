@@ -2,7 +2,12 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
-import { billingIntervalSchema, currencySchema, paymentProviderSchema } from "./shared"
+import {
+  billingIntervalSchema,
+  creditLinePolicySchema,
+  currencySchema,
+  paymentProviderSchema,
+} from "./shared"
 import { subscriptionItemsConfigSchema } from "./subscriptions/items"
 
 extendZodWithOpenApi(z)
@@ -87,6 +92,16 @@ export const customerSignUpSchema = z
           units: 100,
         },
       ],
+    }),
+    creditLinePolicy: creditLinePolicySchema.default("uncapped").openapi({
+      description:
+        "Usage credit policy for the initial subscription phase. Uncapped allows postpaid usage without wallet reservation; capped uses a finite credit amount or derives one from finite usage limits.",
+      example: "uncapped",
+    }),
+    creditLineAmount: z.coerce.number().int().min(0).nullable().optional().openapi({
+      description:
+        "Optional capped usage credit amount as a ledger-scale minor-unit integer. Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.",
+      example: 10_000_000_000,
     }),
     externalId: z.string().optional().openapi({
       description:
@@ -197,6 +212,8 @@ export const customerSessionPlanVersionSchema = z.object({
   id: z.string().min(1, "Plan version id is required"),
   projectId: z.string().min(1, "Project id is required"),
   config: subscriptionItemsConfigSchema.optional(),
+  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
+  creditLineAmount: z.number().int().min(0).nullable().optional(),
   paymentMethodRequired: z.boolean(),
 })
 
