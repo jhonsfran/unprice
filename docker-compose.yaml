@@ -5,7 +5,7 @@ name: unprice
 
 services:
   db:
-    image: postgres:15.6
+    image: postgres:15.17
     restart: always
     command: -c 'max_connections=1000'
     environment:
