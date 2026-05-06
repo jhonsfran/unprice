@@ -1,3 +1,4 @@
+import type { Analytics } from "@unprice/analytics"
 import { type Database, and, eq, sql } from "@unprice/db"
 import { webhookEvents } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
@@ -12,11 +13,14 @@ import type {
   PaymentProviderWebhookHeaders,
 } from "../../payment-provider/interface"
 import { settlePrepaidInvoiceToWallet } from "../billing/settle-invoice"
+import { completeProviderSignUp } from "./complete-provider-sign-up"
 
 type ProcessWebhookEventDeps = {
   services: Pick<ServiceContext, "customers" | "subscriptions" | "wallet">
   db: Database
   logger: Logger
+  analytics: Analytics
+  waitUntil: (promise: Promise<unknown>) => void
 }
 
 type ProcessWebhookEventInput = {
@@ -33,6 +37,7 @@ type ProcessWebhookEventOutcome =
   | "payment_reversed"
   | "payment_dispute_reversed"
   | "wallet_topup_settled"
+  | "provider_signup_completed"
   | "ignored"
 
 type ProcessWebhookEventOutput = {
@@ -226,6 +231,39 @@ async function applyWebhookEvent({
   now: number
 }): Promise<Result<ApplyWebhookEventOutput, FetchError>> {
   const outcome = normalizeOutcome(normalizedEvent.eventType)
+  if (isProviderSignUpCompletion(normalizedEvent)) {
+    const completed = await completeProviderSignUp(
+      {
+        services: {
+          customers: deps.services.customers,
+          subscriptions: deps.services.subscriptions,
+        },
+        db: deps.db,
+        logger: deps.logger,
+        analytics: deps.analytics,
+        waitUntil: deps.waitUntil,
+      },
+      {
+        projectId,
+        provider: normalizedEvent.provider,
+        sessionId: normalizedEvent.providerSessionId,
+      }
+    )
+
+    if (completed.err) {
+      return Err(
+        new FetchError({
+          message: `Provider sign-up completion failed from webhook: ${completed.err.message}`,
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({
+      outcome: "provider_signup_completed",
+    })
+  }
+
   if (normalizedEvent.eventType === "noop") {
     return Ok({
       outcome,
@@ -456,6 +494,20 @@ async function applyWebhookEvent({
     invoiceId: invoice.id,
     subscriptionId: invoice.subscriptionId,
   })
+}
+
+function isProviderSignUpCompletion(
+  normalizedEvent: NormalizedProviderWebhook
+): normalizedEvent is NormalizedProviderWebhook & {
+  providerSessionId: string
+  metadata: { customerSessionId: string }
+} {
+  return (
+    normalizedEvent.providerEventType === "checkout.session.completed" &&
+    Boolean(normalizedEvent.providerSessionId) &&
+    typeof normalizedEvent.metadata?.customerSessionId === "string" &&
+    normalizedEvent.metadata.kind !== "wallet_topup"
+  )
 }
 
 // Idempotent wrapper around `subscriptions.reconcilePaymentOutcome`. The

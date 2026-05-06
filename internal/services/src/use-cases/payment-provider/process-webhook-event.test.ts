@@ -6,6 +6,14 @@ import { UnPriceCustomerError } from "../../customers/errors"
 import type { PaymentProviderService } from "../../payment-provider/service"
 import { processWebhookEvent } from "./process-webhook-event"
 
+const completeSignUpMocks = vi.hoisted(() => ({
+  completeProviderSignUp: vi.fn(),
+}))
+
+vi.mock("./complete-provider-sign-up", () => ({
+  completeProviderSignUp: completeSignUpMocks.completeProviderSignUp,
+}))
+
 vi.mock("@unprice/db/utils", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@unprice/db/utils")>()
   return {
@@ -154,6 +162,9 @@ describe("processWebhookEvent", () => {
   beforeEach(() => {
     logger = createLogger()
     paymentProvider = createPaymentProviderService()
+    completeSignUpMocks.completeProviderSignUp.mockResolvedValue({
+      val: { redirectUrl: "https://example.com/success" },
+    })
 
     customers = {
       getPaymentProvider: vi.fn().mockResolvedValue({ val: paymentProvider }),
@@ -185,6 +196,10 @@ describe("processWebhookEvent", () => {
       },
       db,
       logger,
+      analytics: {
+        ingestEvents: vi.fn(),
+      } as never,
+      waitUntil: vi.fn(),
     }
   }
 
@@ -358,6 +373,60 @@ describe("processWebhookEvent", () => {
     // activation (`credit_line → granted`); funding `purchased` here would
     // duplicate the flat-fee dollars.
     expect(wallet.adjust).not.toHaveBeenCalled()
+  })
+
+  it("completes provider signup from a setup checkout.session.completed webhook", async () => {
+    ;(paymentProvider.verifyWebhook as ReturnType<typeof vi.fn>).mockResolvedValue({
+      val: {
+        eventId: "evt_setup_completed",
+        eventType: "checkout.session.completed",
+        occurredAt: Date.now(),
+        payload: {},
+      },
+    })
+    ;(paymentProvider.normalizeWebhook as ReturnType<typeof vi.fn>).mockReturnValue({
+      val: {
+        provider,
+        eventId: "evt_setup_completed",
+        eventType: "noop",
+        providerEventType: "checkout.session.completed",
+        occurredAt: Date.now(),
+        providerSessionId: "cs_setup_123",
+        metadata: {
+          customerSessionId: "customer_session_123",
+          successUrl: "https://example.com/success",
+          cancelUrl: "https://example.com/cancel",
+        },
+        payload: {},
+      },
+    })
+
+    const { db, mocks } = createDbMocks()
+
+    const result = await processWebhookEvent(callServices(db), {
+      projectId: "proj_1",
+      provider,
+      rawBody: JSON.stringify({ id: "evt_setup_completed", type: "checkout.session.completed" }),
+      headers: { "stripe-signature": "sig" },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.status).toBe("processed")
+    expect(result.val?.outcome).toBe("provider_signup_completed")
+    expect(completeSignUpMocks.completeProviderSignUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        services: expect.objectContaining({
+          customers,
+          subscriptions,
+        }),
+      }),
+      {
+        projectId: "proj_1",
+        provider,
+        sessionId: "cs_setup_123",
+      }
+    )
+    expect(mocks.invoicesFindFirst).not.toHaveBeenCalled()
   })
 
   it("retries idempotent settle + reconcile when invoice is already paid but reconcile marker is missing", async () => {

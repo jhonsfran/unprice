@@ -22,6 +22,7 @@ const webhookResponseSchema = z.object({
     "payment_reversed",
     "payment_dispute_reversed",
     "wallet_topup_settled",
+    "provider_signup_completed",
     "ignored",
   ]),
   invoiceId: z.string().optional(),
@@ -89,6 +90,8 @@ export const registerProviderWebhookV1 = (app: App) =>
         },
         db: c.get("db"),
         logger: c.get("logger"),
+        analytics: c.get("analytics"),
+        waitUntil: c.get("waitUntil"),
       },
       {
         projectId,
