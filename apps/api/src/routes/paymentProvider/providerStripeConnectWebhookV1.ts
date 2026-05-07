@@ -38,8 +38,17 @@ const STRIPE_CONNECT_WEBHOOK_EVENT_TYPES = new Set([
   "checkout.session.async_payment_succeeded",
   "checkout.session.completed",
   "invoice.paid",
+  "invoice.payment_succeeded",
   "invoice.payment_failed",
 ])
+
+function isStripeConnectLifecycleEvent(eventType: string): boolean {
+  return (
+    eventType.startsWith("account.") ||
+    eventType.startsWith("capability.") ||
+    eventType.startsWith("person.")
+  )
+}
 
 function collectHeaders(headers: Headers): Record<string, string> {
   const result: Record<string, string> = {}
@@ -115,7 +124,10 @@ export const registerProviderStripeConnectWebhookV1 = (app: App) =>
       })
     }
 
-    if (!STRIPE_CONNECT_WEBHOOK_EVENT_TYPES.has(verified.val.eventType)) {
+    const processableEvent = STRIPE_CONNECT_WEBHOOK_EVENT_TYPES.has(verified.val.eventType)
+    const lifecycleEvent = isStripeConnectLifecycleEvent(verified.val.eventType)
+
+    if (!processableEvent && !lifecycleEvent) {
       c.get("logger").debug("Stripe Connect webhook ignored: unsupported event type", {
         providerEventId: verified.val.eventId,
         providerEventType: verified.val.eventType,
@@ -146,8 +158,7 @@ export const registerProviderStripeConnectWebhookV1 = (app: App) =>
         ops.and(
           ops.eq(table.paymentProvider, "stripe"),
           ops.eq(table.connectionType, "managed_connection"),
-          ops.eq(table.externalAccountId, externalAccountId),
-          ops.eq(table.active, true)
+          ops.eq(table.externalAccountId, externalAccountId)
         ),
     })
 
@@ -156,6 +167,25 @@ export const registerProviderStripeConnectWebhookV1 = (app: App) =>
         code: "BAD_REQUEST",
         message: "Unknown Stripe connected account",
       })
+    }
+
+    if (lifecycleEvent) {
+      c.get("logger").debug("Stripe Connect lifecycle webhook accepted", {
+        providerEventId: verified.val.eventId,
+        providerEventType: verified.val.eventType,
+        externalAccountId,
+        projectId: config.projectId,
+      })
+
+      return c.json(
+        {
+          received: true as const,
+          providerEventId: verified.val.eventId,
+          status: "ignored" as const,
+          outcome: "ignored" as const,
+        },
+        HttpStatusCodes.OK
+      )
     }
 
     const { customer, subscription, wallet } = c.get("services")
@@ -178,6 +208,7 @@ export const registerProviderStripeConnectWebhookV1 = (app: App) =>
         rawBody,
         headers,
         verifiedWebhook: verified.val,
+        includeInactiveProvider: true,
       }
     )
 

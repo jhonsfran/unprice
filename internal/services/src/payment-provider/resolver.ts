@@ -20,10 +20,12 @@ export class PaymentProviderResolver {
     customerId,
     projectId,
     provider,
+    includeInactive = false,
   }: {
     customerId?: string
     projectId: string
     provider: PaymentProvider
+    includeInactive?: boolean
   }): Promise<Result<PaymentProviderService, FetchError | UnPriceCustomerError>> {
     const { err: configErr, val: config } = await wrapResult(
       this.db.query.paymentProviderConfig.findFirst({
@@ -31,7 +33,7 @@ export class PaymentProviderResolver {
           and(
             eq(config.projectId, projectId),
             eq(config.paymentProvider, provider),
-            eq(config.active, true)
+            includeInactive ? undefined : eq(config.active, true)
           ),
       }),
       (error) =>
@@ -67,8 +69,9 @@ export class PaymentProviderResolver {
 
     const connectionType = config.connectionType ?? "bring_your_own_key"
     const isManagedStripe = provider === "stripe" && connectionType === "managed_connection"
+    const isSandbox = provider === "sandbox"
 
-    if (!isManagedStripe && (!config.key || !config.keyIv)) {
+    if (!isManagedStripe && !isSandbox && (!config.key || !config.keyIv)) {
       return Err(
         new FetchError({
           message: "Payment provider key is not configured",
@@ -79,17 +82,19 @@ export class PaymentProviderResolver {
 
     const tokenResult = isManagedStripe
       ? Ok(env.STRIPE_API_KEY ?? "")
-      : await wrapResult(
-          this.decryptSecret({
-            iv: config.keyIv ?? "",
-            ciphertext: config.key ?? "",
-          }),
-          (error) =>
-            new FetchError({
-              message: `error decrypting payment provider token: ${error.message}`,
-              retry: false,
-            })
-        )
+      : isSandbox
+        ? Ok("sandbox")
+        : await wrapResult(
+            this.decryptSecret({
+              iv: config.keyIv ?? "",
+              ciphertext: config.key ?? "",
+            }),
+            (error) =>
+              new FetchError({
+                message: `error decrypting payment provider token: ${error.message}`,
+                retry: false,
+              })
+          )
 
     if (tokenResult.err) {
       this.logger.error(tokenResult.err, {

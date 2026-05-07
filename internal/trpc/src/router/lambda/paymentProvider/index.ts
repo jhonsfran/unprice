@@ -4,6 +4,7 @@ import { getConfig } from "./getConfig"
 import { getConnection } from "./getConnection"
 import { refreshConnection } from "./refreshConnection"
 import { saveConfig } from "./saveConfig"
+import { setEnabled } from "./setEnabled"
 import { startConnection } from "./startConnection"
 
 export const paymentProviderRouter = createTRPCRouter({
@@ -13,4 +14,5 @@ export const paymentProviderRouter = createTRPCRouter({
   refreshConnection,
   getConnection,
   disconnectConnection,
+  setEnabled,
 })

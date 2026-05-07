@@ -2,12 +2,14 @@ import type { Database } from "@unprice/db"
 import type {
   InsertSubscription,
   InsertSubscriptionPhase,
+  PaymentProvider,
   Subscription,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { UnPriceSubscriptionError } from "../../subscriptions/errors"
+import { checkPaymentProviderAvailability } from "../payment-provider/availability"
 import { activateWalletIfSubscriptionIsActive } from "./activate-wallet-if-active"
 
 type CreateSubscriptionDeps = {
@@ -27,6 +29,63 @@ export async function createSubscription(
 ): Promise<Result<Subscription, UnPriceSubscriptionError | SchemaError>> {
   const { input, projectId } = params
   const { phases, ...subscriptionInput } = input
+
+  const paymentProviders = new Set<PaymentProvider>()
+
+  for (const phase of phases) {
+    if (phase.paymentProvider) {
+      paymentProviders.add(phase.paymentProvider)
+      continue
+    }
+
+    const version = await deps.db.query.versions.findFirst({
+      columns: {
+        paymentProvider: true,
+      },
+      where: (fields, operators) =>
+        operators.and(
+          operators.eq(fields.id, phase.planVersionId),
+          operators.eq(fields.projectId, projectId)
+        ),
+    })
+
+    if (!version) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Version not found. Please check the planVersionId",
+        })
+      )
+    }
+
+    paymentProviders.add(version.paymentProvider)
+  }
+
+  for (const paymentProvider of paymentProviders) {
+    const availability = await checkPaymentProviderAvailability(deps, {
+      projectId,
+      paymentProvider,
+    })
+
+    if (availability.err) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: availability.err.message,
+        })
+      )
+    }
+
+    if (!availability.val.available) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: availability.val.message,
+          context: {
+            paymentProvider,
+            reason: availability.val.reason,
+          },
+        })
+      )
+    }
+  }
 
   deps.logger.set({
     business: {

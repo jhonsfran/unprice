@@ -216,6 +216,7 @@ export class GrantsManager {
   public async listGrantsForCustomerFeature(params: {
     projectId: string
     customerId: string
+    customerEntitlementIds?: string[]
     featureSlug: string
     now?: number
     startAt?: number
@@ -225,6 +226,10 @@ export class GrantsManager {
     const trx = params.db ?? this.db
     const maxEffectiveAt = params.startAt !== undefined ? params.endAt : params.now
     const minExpiresAt = params.startAt !== undefined ? params.startAt : params.now
+
+    if (params.customerEntitlementIds !== undefined && params.customerEntitlementIds.length === 0) {
+      return Ok([])
+    }
 
     try {
       const rows = (await trx.query.customerEntitlements.findMany({
@@ -253,6 +258,9 @@ export class GrantsManager {
           andOp(
             eqOp(entitlement.projectId, params.projectId),
             eqOp(entitlement.customerId, params.customerId),
+            params.customerEntitlementIds
+              ? inArray(entitlement.id, params.customerEntitlementIds)
+              : undefined,
             maxEffectiveAt === undefined ? undefined : lte(entitlement.effectiveAt, maxEffectiveAt),
             minExpiresAt === undefined
               ? undefined

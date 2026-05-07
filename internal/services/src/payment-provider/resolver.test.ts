@@ -143,6 +143,37 @@ describe("PaymentProviderResolver", () => {
     expect(resolved.err?.message).toMatch(/Payment provider config not found/)
   })
 
+  it("resolves managed sandbox without project-owned keys", async () => {
+    const resolver = new PaymentProviderResolver({
+      db: createMockDb({
+        customerProviderIds: null,
+        paymentProviderConfig: {
+          id: "ppc_1",
+          projectId: "proj_1",
+          paymentProvider: "sandbox",
+          connectionType: "managed_connection",
+          mode: "test",
+          status: "active",
+          key: null,
+          keyIv: null,
+          webhookSecret: null,
+          webhookSecretIv: null,
+          externalAccountId: null,
+          active: true,
+        },
+      }),
+      logger: createMockLogger(),
+    })
+
+    const resolved = await resolver.resolve({
+      projectId: "proj_1",
+      provider: "sandbox",
+    })
+
+    expect(resolved.err).toBeUndefined()
+    expect(resolved.val?.provider).toBe("sandbox")
+  })
+
   it("resolves managed Stripe with the platform key and connected account config", async () => {
     const resolver = new PaymentProviderResolver({
       db: createMockDb({
@@ -173,6 +204,69 @@ describe("PaymentProviderResolver", () => {
     expect(resolved.err).toBeUndefined()
     expect(resolved.val?.provider).toBe("stripe")
     expect(resolved.val?.capabilities.webhookSetup).toBe("platform_managed")
+  })
+
+  it("can resolve a known inactive provider when explicitly requested for webhook settlement", async () => {
+    const disabledStripeConfig = {
+      id: "ppc_1",
+      projectId: "proj_1",
+      paymentProvider: "stripe",
+      connectionType: "managed_connection",
+      mode: "test",
+      status: "active",
+      key: null,
+      keyIv: null,
+      webhookSecret: null,
+      webhookSecretIv: null,
+      externalAccountId: "acct_123",
+      active: false,
+    }
+
+    const findFirst = vi
+      .fn()
+      .mockImplementation((query: { where?: (table: unknown, ops: unknown) => unknown }) => {
+        const filters: string[] = []
+        query.where?.(
+          {
+            projectId: "projectId",
+            paymentProvider: "paymentProvider",
+            active: "active",
+          },
+          {
+            eq: (field: string, value: unknown) => {
+              filters.push(`${field}:${String(value)}`)
+              return { field, value }
+            },
+            and: (...conditions: unknown[]) => conditions,
+          }
+        )
+
+        return Promise.resolve(filters.includes("active:true") ? null : disabledStripeConfig)
+      })
+
+    const resolver = new PaymentProviderResolver({
+      db: {
+        query: {
+          paymentProviderConfig: { findFirst },
+          customerProviderIds: { findFirst: vi.fn().mockResolvedValue(null) },
+        },
+      } as unknown as Database,
+      logger: createMockLogger(),
+    })
+
+    const defaultResolution = await resolver.resolve({
+      projectId: "proj_1",
+      provider: "stripe",
+    })
+    const webhookResolution = await resolver.resolve({
+      projectId: "proj_1",
+      provider: "stripe",
+      includeInactive: true,
+    })
+
+    expect(defaultResolution.err).toBeDefined()
+    expect(webhookResolution.err).toBeUndefined()
+    expect(webhookResolution.val?.provider).toBe("stripe")
   })
 
   it("rejects webhook verification when sandbox config has no webhook secret", async () => {

@@ -372,6 +372,7 @@ describe("RatingService", () => {
     expect(result.err).toBeUndefined()
     expect(getUsageBillingFeatures).toHaveBeenCalledWith(
       expect.objectContaining({
+        customerEntitlementIds: ["ce_123"],
         periodKeys: [`month:${periodStart}`],
       })
     )

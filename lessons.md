@@ -93,3 +93,10 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
 - Stripe Connect webhook routes should reject unsupported event types immediately after signature
   verification, before connected-account lookup or webhook-event persistence, so an over-broad
   Stripe endpoint does not amplify DB load across many connected accounts.
+
+## 2026-05-07: Stripe Connect Standard Account Email
+
+- For Stripe Connect Standard accounts, pass the owner email when creating the connected account,
+  but do not update `account.email` on reused accounts. Stripe can reject platform updates with
+  "not authorized to edit the parameter 'email'" because the connected account owner controls that
+  field through onboarding.

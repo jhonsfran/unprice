@@ -1,46 +1,53 @@
 "use client"
+
 import { useMutation } from "@tanstack/react-query"
-import type {
-  InsertPaymentProviderConfig,
-  PaymentProvider,
-  PaymentProviderConfig,
-} from "@unprice/db/validators"
-import { insertPaymentProviderConfigSchema } from "@unprice/db/validators"
+import type { PaymentProvider, PaymentProviderConfig } from "@unprice/db/validators"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
-import { Input } from "@unprice/ui/input"
-import { ExternalLink, RefreshCw, Unplug } from "lucide-react"
+import { Switch } from "@unprice/ui/switch"
+import { cn } from "@unprice/ui/utils"
+import { CreditCard, ExternalLink, RefreshCw, TestTube2 } from "lucide-react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { z } from "zod"
-import { revalidateAppPath } from "~/actions/revalidate"
-import { SubmitButton } from "~/components/submit-button"
+import { useEffect, useState } from "react"
 import { toastAction } from "~/lib/toast"
-import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 
-const STATUS_LABELS: Record<PaymentProviderConfig["status"], string> = {
-  not_connected: "Not connected",
-  pending: "Pending",
-  active: "Connected",
-  restricted: "Restricted",
-  disabled: "Disabled",
-}
+type ProviderUiStatus = "ready" | "needs_onboarding" | "restricted" | "sandbox"
 
-const STATUS_VARIANTS: Record<
-  PaymentProviderConfig["status"],
-  "default" | "secondary" | "destructive" | "outline"
+const STATUS_META: Record<
+  ProviderUiStatus,
+  {
+    label: string
+    variant: "default" | "secondary" | "destructive" | "outline" | "info" | "success" | "warning"
+  }
 > = {
-  not_connected: "outline",
-  pending: "secondary",
-  active: "default",
-  restricted: "secondary",
-  disabled: "destructive",
+  ready: { label: "Ready", variant: "success" },
+  needs_onboarding: { label: "Needs onboarding", variant: "warning" },
+  restricted: { label: "Needs action", variant: "warning" },
+  sandbox: { label: "Sandbox", variant: "info" },
 }
 
-const byokPaymentProviderConfigSchema = insertPaymentProviderConfigSchema.extend({
-  key: z.string().min(1),
-})
+function deriveStripeStatus({
+  provider,
+  enabled,
+}: {
+  provider?: PaymentProviderConfig
+  enabled: boolean
+}): ProviderUiStatus | undefined {
+  if (!enabled) {
+    return undefined
+  }
+
+  switch (provider?.status) {
+    case "active":
+      return "ready"
+    case "restricted":
+    case "disabled":
+      return "restricted"
+    default:
+      return "needs_onboarding"
+  }
+}
 
 export function PaymentProviderConfigForm({
   provider,
@@ -63,23 +70,16 @@ export function PaymentProviderConfigForm({
   const searchParams = useSearchParams()
   const router = useRouter()
   const trpc = useTRPC()
-  const workspaceSlug = params.workspaceSlug as string
   let projectSlug = params.projectSlug as string
+  const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null)
 
   if (!projectSlug) {
     projectSlug = searchParams.get("projectSlug") as string
   }
 
-  const saveConfig = useMutation(
-    trpc.paymentProvider.saveConfig.mutationOptions({
-      onSuccess: (data) => {
-        toastAction("saved")
-        setDialogOpen?.(false)
-        onSuccess?.(data.paymentProviderConfig.paymentProvider)
-        revalidateAppPath(`/${workspaceSlug}/${projectSlug}/settings/payment`, "page")
-      },
-    })
-  )
+  useEffect(() => {
+    setEnabledOverride(null)
+  }, [provider?.active, provider?.id, provider?.updatedAtM])
 
   const startConnection = useMutation(
     trpc.paymentProvider.startConnection.mutationOptions({
@@ -106,11 +106,22 @@ export function PaymentProviderConfigForm({
     })
   )
 
-  const disconnectConnection = useMutation(
-    trpc.paymentProvider.disconnectConnection.mutationOptions({
-      onSuccess: () => {
-        toastAction("removed")
+  const setEnabled = useMutation(
+    trpc.paymentProvider.setEnabled.mutationOptions({
+      onMutate: (variables) => {
+        setEnabledOverride(variables.enabled)
+      },
+      onSuccess: (data, variables) => {
+        toastAction("updated")
+        setDialogOpen?.(false)
+        if (variables.enabled) {
+          onSuccess?.(data.paymentProviderConfig?.paymentProvider ?? paymentProvider)
+        }
         router.refresh()
+      },
+      onError: (error) => {
+        setEnabledOverride(null)
+        toastAction("error", error.message)
       },
     })
   )
@@ -134,193 +145,148 @@ export function PaymentProviderConfigForm({
     await refreshConnection.mutateAsync(payload)
   }
 
-  const normalizedProvider = provider
-    ? {
-        ...provider,
-        key: "",
-        keyIv: "",
-        webhookSecret: "",
-        webhookSecretIv: "",
-        ...(projectSlug ? { projectSlug } : {}),
-      }
-    : undefined
+  const toggleProvider = (enabled: boolean) => {
+    if (paymentProvider === "stripe" && enabled && !provider?.externalAccountId) {
+      toastAction("error", "Connect Stripe before enabling this provider.")
+      return
+    }
 
-  const form = useZodForm({
-    schema: byokPaymentProviderConfigSchema,
-    defaultValues: normalizedProvider ?? {
-      paymentProvider: paymentProvider,
-      key: "",
-      keyIv: "",
-      webhookSecret: "",
-      active: true,
-      // from onboarding we can't infer the projectSlug, so we pass it as a search param
-      ...(projectSlug ? { projectSlug } : {}),
-    },
-  })
+    setEnabled.mutate({ paymentProvider, enabled })
+  }
 
-  const connectionStatus = provider?.status ?? "not_connected"
-  const isManagedStripe =
-    paymentProvider === "stripe" && provider?.connectionType === "managed_connection"
+  const isStripe = paymentProvider === "stripe"
+  const isSandbox = paymentProvider === "sandbox"
+  const enabled = enabledOverride ?? Boolean(provider?.active)
+  const hasStripeAccount = Boolean(provider?.externalAccountId)
   const connectSubmitting = startConnection.isPending || refreshConnection.isPending
-  const showAdvancedByok = paymentProvider !== "stripe" || !isManagedStripe
+  const rowStatus: ProviderUiStatus | undefined = isSandbox
+    ? enabled
+      ? "sandbox"
+      : undefined
+    : deriveStripeStatus({ provider, enabled })
+  const status = rowStatus ? STATUS_META[rowStatus] : null
+  const toggleDisabled =
+    setEnabled.isPending ||
+    (isStripe && !enabled && !hasStripeAccount) ||
+    paymentProvider === "square"
+  const switchCopy = enabled ? "Enabled for new subscriptions" : "Paused for new subscriptions"
 
   return (
-    <div className="space-y-4">
-      {paymentProvider === "stripe" && (
-        <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Badge variant={STATUS_VARIANTS[connectionStatus]}>
-                {STATUS_LABELS[connectionStatus]}
-              </Badge>
-              {provider?.externalAccountId && (
-                <span className="font-mono text-muted-foreground text-xs">
-                  {provider.externalAccountId}
-                </span>
+    <div className="rounded-md border bg-background-bgSubtle/30">
+      <div className="grid gap-6 p-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-6">
+        <div className="min-w-0 space-y-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
+              {isSandbox ? (
+                <TestTube2 className="size-3.5 text-muted-foreground" />
+              ) : (
+                <CreditCard className="size-3.5 text-muted-foreground" />
               )}
             </div>
-            <p className="text-muted-foreground text-xs">
-              Stripe Connect keeps products, customers, invoices, payments, disputes, and payouts in
-              the connected Stripe account. Webhooks are handled by Unprice.
+            {status && (
+              <Badge variant={status.variant} className="h-7">
+                {status.label}
+              </Badge>
+            )}
+            {provider?.mode === "test" && isStripe && (
+              <Badge variant="outline" className="h-7 text-muted-foreground">
+                Test
+              </Badge>
+            )}
+            {provider?.externalAccountId && (
+              <span className="truncate font-mono text-muted-foreground text-xs">
+                {provider.externalAccountId}
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="font-medium text-sm">
+              {isSandbox ? "Sandbox test provider" : "Stripe Connect"}
+            </p>
+            <p className="max-w-4xl text-muted-foreground text-xs leading-5">
+              {isSandbox
+                ? "Test subscriptions without external credentials. Sandbox can be enabled or paused at any time."
+                : "Products, customers, invoices, payments, disputes, and payouts stay in the connected Stripe account. Connect webhooks are handled by Unprice."}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => startOrRefreshConnection(isManagedStripe ? "refresh" : "start")}
-              disabled={connectSubmitting}
-            >
-              <ExternalLink className="mr-2 size-3.5" />
-              {isManagedStripe ? "Continue onboarding" : "Connect Stripe"}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => getConnection.mutate({ paymentProvider })}
-              disabled={getConnection.isPending}
-            >
-              <RefreshCw className="mr-2 size-3.5" />
-              Refresh status
-            </Button>
-            {isManagedStripe && (
+
+          {skip && isOnboarding && isSandbox && (
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setEnabled.mutate({ paymentProvider: "sandbox", enabled: true })}
+                disabled={setEnabled.isPending}
+              >
+                Use Sandbox
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => disconnectConnection.mutate({ paymentProvider })}
-                disabled={disconnectConnection.isPending}
+                onClick={() => {
+                  setDialogOpen?.(false)
+                  onSkip?.()
+                }}
               >
-                <Unplug className="mr-2 size-3.5" />
-                Disconnect
+                Skip
               </Button>
-            )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-4 sm:items-end">
+          {isStripe && (
+            <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
+              {!hasStripeAccount && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => startOrRefreshConnection("start")}
+                  disabled={connectSubmitting}
+                >
+                  <ExternalLink className="mr-2 size-3.5" />
+                  Connect Stripe
+                </Button>
+              )}
+              {hasStripeAccount && provider?.status !== "active" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => startOrRefreshConnection("refresh")}
+                  disabled={connectSubmitting}
+                >
+                  <ExternalLink className="mr-2 size-3.5" />
+                  Continue onboarding
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => getConnection.mutate({ paymentProvider })}
+                disabled={getConnection.isPending}
+              >
+                <RefreshCw
+                  className={cn("mr-2 size-3.5", getConnection.isPending && "animate-spin")}
+                />
+                Refresh
+              </Button>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-4 sm:justify-end">
+            <span className="text-muted-foreground text-xs">{switchCopy}</span>
+            <Switch
+              checked={enabled}
+              onCheckedChange={toggleProvider}
+              disabled={toggleDisabled}
+              aria-label={`${isSandbox ? "Sandbox" : "Stripe"} provider enabled`}
+            />
           </div>
         </div>
-      )}
-
-      <details open={showAdvancedByok} className="space-y-2">
-        <summary className="cursor-pointer font-medium text-muted-foreground text-xs">
-          {paymentProvider === "stripe" ? "Advanced: bring your own key" : "Bring your own key"}
-        </summary>
-        <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(async (data: InsertPaymentProviderConfig) => {
-              await saveConfig.mutateAsync(data as InsertPaymentProviderConfig & { key: string })
-            })}
-            className="space-y-2 pt-2"
-          >
-            {/* <div className="flex flex-col items-end">
-          <FormField
-            control={form.control}
-            name="active"
-            render={({ field }) => (
-              <FormItem>
-                <FormControl>
-                  <Switch checked={field.value} onCheckedChange={field.onChange} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div> */}
-            <FormField
-              control={form.control}
-              name="key"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Provider Secret Key</FormLabel>
-                  <FormControl>
-                    <Input
-                      {...field}
-                      value={field.value ?? ""}
-                      placeholder="api key"
-                      type="password"
-                      disabled={!form.getValues("active")}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="webhookSecret"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Webhook Secret (optional)</FormLabel>
-                  <FormControl>
-                    <Input
-                      {...field}
-                      value={field.value ?? ""}
-                      placeholder="provider webhook secret"
-                      type="password"
-                      disabled={!form.getValues("active")}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <div className="flex items-end justify-end gap-2 pt-4">
-              {skip && (
-                <SubmitButton
-                  variant="ghost"
-                  onClick={() => {
-                    setDialogOpen?.(false)
-
-                    if (isOnboarding) {
-                      // create a default config for the onboarding
-                      saveConfig.mutate({
-                        paymentProvider: "sandbox",
-                        key: "onboarding-key",
-                        keyIv: "",
-                        active: true,
-                      })
-                      return
-                    }
-
-                    onSkip?.()
-                  }}
-                  isDisabled={form.formState.isSubmitting}
-                  isSubmitting={form.formState.isSubmitting}
-                  label={isOnboarding ? "Use sandbox" : "Skip"}
-                />
-              )}
-
-              <SubmitButton
-                type="submit"
-                isSubmitting={form.formState.isSubmitting}
-                isDisabled={form.formState.isSubmitting || !form.getValues("active")}
-                label={"Save"}
-              />
-            </div>
-          </form>
-        </Form>
-      </details>
+      </div>
     </div>
   )
 }

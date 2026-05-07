@@ -23,7 +23,9 @@ export {
   refreshProviderConnection,
   getProviderConnection,
   disconnectProviderConnection,
+  setProviderEnabled,
 } from "./payment-provider/connection"
+export { checkPaymentProviderAvailability } from "./payment-provider/availability"
 export { completeProviderSignUp } from "./payment-provider/complete-provider-sign-up"
 export { completeProviderSetup } from "./payment-provider/complete-provider-setup"
 export { processWebhookEvent } from "./payment-provider/process-webhook-event"

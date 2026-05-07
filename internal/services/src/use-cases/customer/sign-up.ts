@@ -8,6 +8,7 @@ import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { getPaymentProviderCapabilities } from "../../payment-provider/service"
+import { checkPaymentProviderAvailability } from "../payment-provider/availability"
 import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 type SignUpDeps = {
@@ -604,6 +605,27 @@ export async function signUp(
   }
 
   const { planVersion, pageId } = planResolution.val
+
+  const providerAvailability = await checkPaymentProviderAvailability(deps, {
+    projectId,
+    paymentProvider: planVersion.paymentProvider,
+  })
+
+  if (providerAvailability.err) {
+    return Err(providerAvailability.err)
+  }
+
+  if (!providerAvailability.val.available) {
+    return Err(
+      new UnPriceCustomerError({
+        code:
+          providerAvailability.val.reason === "not_ready"
+            ? "PAYMENT_PROVIDER_ERROR"
+            : "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
+        message: providerAvailability.val.message,
+      })
+    )
+  }
 
   if (input.externalId) {
     const { err: existingCustomerErr, val: existingCustomer } =

@@ -1,6 +1,6 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { billingPeriods, invoices, subscriptions } from "@unprice/db/schema"
+import { billingPeriods, customerEntitlements, invoices, subscriptions } from "@unprice/db/schema"
 import type {
   Customer,
   Subscription,
@@ -480,6 +480,18 @@ describe("SubscriptionMachine - comprehensive", () => {
                   })),
                 })),
               })),
+            }
+          }
+
+          if (table === customerEntitlements) {
+            return {
+              where: vi.fn(() =>
+                Promise.resolve([
+                  {
+                    id: "ce_123",
+                  },
+                ])
+              ),
             }
           }
 

@@ -18,6 +18,9 @@ SQL >
     WHERE
         project_id = {{ String(project_id) }}
         AND customer_id = {{ String(customer_id) }}
+        {% if defined(customer_entitlement_ids) %}
+            AND customer_entitlement_id IN {{ Array(customer_entitlement_ids, 'String') }}
+        {% end %}
         {% if defined(feature_slugs) %}
             AND feature_slug IN {{ Array(feature_slugs, 'String') }}
         {% end %}

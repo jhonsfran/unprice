@@ -30,6 +30,7 @@ type ProcessWebhookEventInput = {
   rawBody: string
   headers: PaymentProviderWebhookHeaders
   verifiedWebhook?: VerifiedProviderWebhook
+  includeInactiveProvider?: boolean
 }
 
 type ProcessWebhookEventStatus = "processed" | "duplicate"
@@ -624,6 +625,7 @@ export async function processWebhookEvent(
     await deps.services.customers.getPaymentProvider({
       projectId: input.projectId,
       provider: input.provider,
+      includeInactive: input.includeInactiveProvider,
     })
 
   if (paymentProviderErr) {

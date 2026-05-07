@@ -12,6 +12,19 @@ describe("createSubscription use case", () => {
     const tx = {} as Database
     let rolledBack = false
     const db = {
+      query: {
+        paymentProviderConfig: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "ppc_123",
+            projectId: "proj_123",
+            paymentProvider: "sandbox",
+            active: true,
+            connectionType: "managed_connection",
+            mode: "test",
+            status: "active",
+          }),
+        },
+      },
       transaction: vi.fn(async (callback: (tx: Database) => Promise<unknown>) => {
         try {
           return await callback(tx)
@@ -50,6 +63,7 @@ describe("createSubscription use case", () => {
             {
               planVersionId: "version_123",
               startAt: Date.parse("2026-05-02T12:00:00.000Z"),
+              paymentProvider: "sandbox",
             },
           ],
         } as never,
@@ -68,5 +82,59 @@ describe("createSubscription use case", () => {
         db: tx,
       })
     )
+  })
+
+  it("rejects subscription creation when a phase provider is disabled", async () => {
+    const transaction = vi.fn()
+    const db = {
+      query: {
+        paymentProviderConfig: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "ppc_123",
+            projectId: "proj_123",
+            paymentProvider: "stripe",
+            active: false,
+            connectionType: "managed_connection",
+            mode: "test",
+            status: "active",
+            externalAccountId: "acct_123",
+          }),
+        },
+      },
+      transaction,
+    } as unknown as Database
+
+    const result = await createSubscription(
+      {
+        db,
+        logger: {
+          set: vi.fn(),
+          error: vi.fn(),
+        } as never,
+        services: {
+          subscriptions: {
+            createSubscription: vi.fn(),
+            createPhase: vi.fn(),
+          },
+        } as never,
+      },
+      {
+        projectId: "proj_123",
+        input: {
+          customerId: "cus_123",
+          phases: [
+            {
+              planVersionId: "version_123",
+              startAt: Date.parse("2026-05-02T12:00:00.000Z"),
+              paymentProvider: "stripe",
+            },
+          ],
+        } as never,
+      }
+    )
+
+    expect(result.err).toBeInstanceOf(UnPriceSubscriptionError)
+    expect(result.err?.message).toMatch(/Stripe is disabled/)
+    expect(transaction).not.toHaveBeenCalled()
   })
 })

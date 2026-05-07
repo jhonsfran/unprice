@@ -1110,15 +1110,18 @@ export class CustomerService {
     customerId,
     projectId,
     provider,
+    includeInactive,
   }: {
     customerId?: string
     projectId: string
     provider: PaymentProvider
+    includeInactive?: boolean
   }): Promise<Result<PaymentProviderService, FetchError | UnPriceCustomerError>> {
     return this.paymentProviderResolver.resolve({
       customerId,
       projectId,
       provider,
+      includeInactive,
     })
   }
 

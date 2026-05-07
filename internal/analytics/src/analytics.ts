@@ -272,6 +272,7 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_no_duplicates",
       parameters: z.object({
+        customer_entitlement_ids: z.array(z.string()).optional(),
         feature_slugs: z.array(z.string()).optional(),
         period_keys: z.array(z.string()).optional(),
         customer_id: z.string(),
@@ -296,6 +297,7 @@ export class Analytics {
   // TODO: add telemtry for this endpoint to know how many times it's being called and the latency
   public async getUsageBillingFeatures({
     customerId,
+    customerEntitlementIds,
     projectId,
     features,
     startAt,
@@ -303,6 +305,7 @@ export class Analytics {
     periodKeys,
   }: {
     customerId: string
+    customerEntitlementIds?: string[]
     projectId: string
     features: {
       featureSlug: string
@@ -325,6 +328,10 @@ export class Analytics {
 
     const totalPeriodUsages = await this.getBillingUsage({
       customer_id: customerId,
+      customer_entitlement_ids:
+        customerEntitlementIds && customerEntitlementIds.length > 0
+          ? customerEntitlementIds
+          : undefined,
       project_id: projectId,
       feature_slugs: featureSlugsArray,
       period_keys: periodKeys && periodKeys.length > 0 ? periodKeys : undefined,
@@ -335,6 +342,7 @@ export class Analytics {
       .catch((error) => {
         this.logger.error(`Error getBillingUsage:${error.message}`, {
           customerId,
+          customerEntitlementIds,
           projectId,
           feature_slugs: featureSlugsArray,
           periodKeys,

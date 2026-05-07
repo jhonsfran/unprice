@@ -42,6 +42,7 @@ export type RatingInput =
   | {
       projectId: string
       customerId: string
+      customerEntitlementIds?: string[]
       featureSlug: string
       now: number
       grants?: z.infer<typeof grantSchemaExtended>[]
@@ -53,6 +54,7 @@ export type RatingInput =
   | {
       projectId: string
       customerId: string
+      customerEntitlementIds?: string[]
       featureSlug: string
       startAt: number
       endAt: number

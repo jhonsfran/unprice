@@ -131,6 +131,7 @@ export class RatingService {
   private async calculateUsageOfFeatures({
     projectId,
     customerId,
+    customerEntitlementIds,
     featureSlug,
     entitlement,
     billingStartAt,
@@ -140,6 +141,7 @@ export class RatingService {
   }: {
     projectId: string
     customerId: string
+    customerEntitlementIds?: string[]
     featureSlug: string
     entitlement: RatingEntitlementContext
     billingStartAt: number
@@ -196,6 +198,7 @@ export class RatingService {
       const { err: usageErr, val: fetchedUsageData } = await this.analytics.getUsageBillingFeatures(
         {
           customerId,
+          customerEntitlementIds,
           projectId,
           features: [
             {
@@ -272,6 +275,29 @@ export class RatingService {
     }
 
     return [...periodKeys]
+  }
+
+  private resolveUsageCustomerEntitlementIds({
+    billingStartAt,
+    billingEndAt,
+    grants,
+  }: {
+    billingStartAt: number
+    billingEndAt: number
+    grants: z.infer<typeof grantSchemaExtended>[]
+  }): string[] {
+    const customerEntitlementIds = new Set<string>()
+
+    for (const grant of grants) {
+      const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
+      const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
+
+      if (grantServiceStart < grantServiceEnd) {
+        customerEntitlementIds.add(grant.customerEntitlement.id)
+      }
+    }
+
+    return [...customerEntitlementIds]
   }
 
   /**
@@ -439,6 +465,7 @@ export class RatingService {
     const {
       projectId,
       customerId,
+      customerEntitlementIds,
       featureSlug,
       grants: providedGrants,
       entitlement: providedEntitlement,
@@ -462,6 +489,7 @@ export class RatingService {
       const grantsResult = await this.grantsManager.listGrantsForCustomerFeature({
         projectId,
         customerId,
+        ...(customerEntitlementIds !== undefined ? { customerEntitlementIds } : {}),
         featureSlug,
         ...(now !== undefined ? { now } : { startAt: startAt!, endAt: endAt! }),
       })
@@ -471,6 +499,9 @@ export class RatingService {
       }
 
       grants = grantsResult.val
+    } else if (customerEntitlementIds !== undefined) {
+      const entitlementIds = new Set(customerEntitlementIds)
+      grants = grants.filter((grant) => entitlementIds.has(grant.customerEntitlement.id))
     }
 
     if (grants.length === 0) {
@@ -496,11 +527,19 @@ export class RatingService {
       billingEndAt,
       grants,
     })
+    const usageCustomerEntitlementIds =
+      customerEntitlementIds ??
+      this.resolveUsageCustomerEntitlementIds({
+        billingStartAt,
+        billingEndAt,
+        grants,
+      })
 
     // Calculate usage
     const usageResult = await this.calculateUsageOfFeatures({
       projectId,
       customerId,
+      customerEntitlementIds: usageCustomerEntitlementIds,
       featureSlug,
       entitlement,
       billingStartAt,

@@ -17,6 +17,10 @@ type ProviderConnectionInput = {
   paymentProvider: PaymentProvider
 }
 
+type SetProviderEnabledInput = ProviderConnectionInput & {
+  enabled: boolean
+}
+
 type StartProviderConnectionInput = ProviderConnectionInput & {
   returnUrl: string
   refreshUrl: string
@@ -141,7 +145,6 @@ async function updateStripeConnectionStatus(
       .update(paymentProviderConfig)
       .set({
         status: mapStripeAccountStatus(account),
-        active: true,
         connectionData: stripeAccountConnectionData(account),
         updatedAtM: Date.now(),
       })
@@ -214,21 +217,6 @@ export async function startProviderConnection(
     }
 
     externalAccountId = account.id
-  } else if (input.ownerEmail) {
-    const { err } = await wrapResult(
-      stripeResult.val.accounts.update(externalAccountId, {
-        email: input.ownerEmail,
-      }),
-      (error) =>
-        new FetchError({
-          message: `error updating stripe connected account email: ${error.message}`,
-          retry: false,
-        })
-    )
-
-    if (err) {
-      return Err(err)
-    }
   }
 
   const { val: config, err: configErr } = await wrapResult(
@@ -360,6 +348,158 @@ export async function disconnectProviderConnection(
     (error) =>
       new FetchError({
         message: `error disconnecting provider connection: ${error.message}`,
+        retry: false,
+      })
+  )
+
+  if (err) {
+    return Err(err)
+  }
+
+  return Ok({ paymentProviderConfig: val as PaymentProviderConfig | undefined })
+}
+
+export async function setProviderEnabled(
+  deps: ProviderConnectionDeps,
+  input: SetProviderEnabledInput
+): Promise<Result<{ paymentProviderConfig?: PaymentProviderConfig }, FetchError>> {
+  const existingResult = await findProviderConnection(deps, input)
+  if (existingResult.err) {
+    return Err(existingResult.err)
+  }
+
+  const existing = existingResult.val
+
+  if (!input.enabled) {
+    if (!existing) {
+      return Ok({ paymentProviderConfig: undefined })
+    }
+
+    const { val, err } = await wrapResult(
+      deps.db
+        .update(paymentProviderConfig)
+        .set({
+          active: false,
+          updatedAtM: Date.now(),
+        })
+        .where(
+          and(
+            eq(paymentProviderConfig.projectId, input.projectId),
+            eq(paymentProviderConfig.paymentProvider, input.paymentProvider)
+          )
+        )
+        .returning()
+        .then((rows) => rows[0] ?? undefined),
+      (error) =>
+        new FetchError({
+          message: `error disabling provider connection: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      return Err(err)
+    }
+
+    return Ok({ paymentProviderConfig: val as PaymentProviderConfig | undefined })
+  }
+
+  if (input.paymentProvider === "sandbox") {
+    const { val, err } = await wrapResult(
+      deps.db
+        .insert(paymentProviderConfig)
+        .values({
+          id: existing?.id ?? newId("payment_provider_config"),
+          projectId: input.projectId,
+          paymentProvider: "sandbox",
+          active: true,
+          connectionType: "managed_connection",
+          mode: "test",
+          status: "active",
+          key: null,
+          keyIv: null,
+          webhookSecret: null,
+          webhookSecretIv: null,
+          externalAccountId: null,
+          connectionData: null,
+        })
+        .onConflictDoUpdate({
+          target: [paymentProviderConfig.paymentProvider, paymentProviderConfig.projectId],
+          set: {
+            active: true,
+            connectionType: "managed_connection",
+            mode: "test",
+            status: "active",
+            key: null,
+            keyIv: null,
+            webhookSecret: null,
+            webhookSecretIv: null,
+            externalAccountId: null,
+            connectionData: null,
+            updatedAtM: Date.now(),
+          },
+        })
+        .returning()
+        .then((rows) => rows[0] ?? null),
+      (error) =>
+        new FetchError({
+          message: `error enabling sandbox provider: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      return Err(err)
+    }
+
+    if (!val) {
+      return Err(
+        new FetchError({
+          message: "Sandbox provider connection was not saved",
+          retry: false,
+        })
+      )
+    }
+
+    return Ok({ paymentProviderConfig: val as PaymentProviderConfig })
+  }
+
+  if (input.paymentProvider !== "stripe") {
+    return Err(
+      new FetchError({
+        message: "Payment provider enablement is not implemented for this provider",
+        retry: false,
+      })
+    )
+  }
+
+  if (!existing?.externalAccountId) {
+    return Err(
+      new FetchError({
+        message: "Connect Stripe before enabling this payment provider",
+        retry: false,
+      })
+    )
+  }
+
+  const { val, err } = await wrapResult(
+    deps.db
+      .update(paymentProviderConfig)
+      .set({
+        active: true,
+        updatedAtM: Date.now(),
+      })
+      .where(
+        and(
+          eq(paymentProviderConfig.projectId, input.projectId),
+          eq(paymentProviderConfig.paymentProvider, input.paymentProvider)
+        )
+      )
+      .returning()
+      .then((rows) => rows[0] ?? undefined),
+    (error) =>
+      new FetchError({
+        message: `error enabling provider connection: ${error.message}`,
         retry: false,
       })
   )

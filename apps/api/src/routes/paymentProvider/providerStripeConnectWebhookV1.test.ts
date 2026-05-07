@@ -73,6 +73,30 @@ describe("providerStripeConnectWebhookV1 route", () => {
         verifiedWebhook: expect.objectContaining({
           eventId: "evt_1",
         }),
+        includeInactiveProvider: true,
+      })
+    )
+  })
+
+  it("processes settlement events for known disabled connected accounts", async () => {
+    const { app, env, executionCtx } = createTestApp({
+      paymentProviderConfig: {
+        id: "ppc_123",
+        projectId: "proj_123",
+        paymentProvider: "stripe",
+        connectionType: "managed_connection",
+        externalAccountId: "acct_123",
+        active: false,
+      },
+    })
+    const response = await app.fetch(buildRequest(), env, executionCtx)
+
+    expect(response.status).toBe(200)
+    expect(useCaseMocks.processWebhookEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        projectId: "proj_123",
+        includeInactiveProvider: true,
       })
     )
   })
@@ -115,6 +139,43 @@ describe("providerStripeConnectWebhookV1 route", () => {
       outcome: "ignored",
     })
     expect(paymentProviderConfigFindFirst).not.toHaveBeenCalled()
+    expect(useCaseMocks.processWebhookEvent).not.toHaveBeenCalled()
+  })
+
+  it("accepts lifecycle events for known connected accounts without payment processing", async () => {
+    providerMocks.verifyWebhook.mockResolvedValue({
+      val: {
+        eventId: "evt_account_updated",
+        eventType: "account.updated",
+        occurredAt: 123,
+        payload: {
+          id: "evt_account_updated",
+          account: "acct_123",
+          type: "account.updated",
+        },
+      },
+    })
+
+    const { app, env, executionCtx, paymentProviderConfigFindFirst } = createTestApp({
+      paymentProviderConfig: {
+        id: "ppc_123",
+        projectId: "proj_123",
+        paymentProvider: "stripe",
+        connectionType: "managed_connection",
+        externalAccountId: "acct_123",
+        active: false,
+      },
+    })
+    const response = await app.fetch(buildRequest(), env, executionCtx)
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({
+      received: true,
+      providerEventId: "evt_account_updated",
+      status: "ignored",
+      outcome: "ignored",
+    })
+    expect(paymentProviderConfigFindFirst).toHaveBeenCalled()
     expect(useCaseMocks.processWebhookEvent).not.toHaveBeenCalled()
   })
 })

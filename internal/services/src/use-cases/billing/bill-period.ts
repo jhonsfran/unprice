@@ -1,4 +1,5 @@
-import { type Database, sql } from "@unprice/db"
+import { type Database, and, eq, sql } from "@unprice/db"
+import { customerEntitlements } from "@unprice/db/schema"
 import { type Dinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
@@ -112,10 +113,30 @@ export async function billPeriod({
           period.subscriptionItem.featurePlanVersion.featureType === "usage"
             ? undefined
             : [{ featureSlug: feature.slug, usage: nonUsageQuantity }]
+        const entitlementRows = await tx
+          .select({ id: customerEntitlements.id })
+          .from(customerEntitlements)
+          .where(
+            and(
+              eq(customerEntitlements.projectId, period.projectId),
+              eq(customerEntitlements.customerId, period.customerId),
+              eq(customerEntitlements.subscriptionId, period.subscriptionId),
+              eq(customerEntitlements.subscriptionPhaseId, period.subscriptionPhaseId),
+              eq(customerEntitlements.subscriptionItemId, period.subscriptionItemId)
+            )
+          )
+        const customerEntitlementIds = entitlementRows.map((row) => row.id)
+
+        if (customerEntitlementIds.length === 0) {
+          throw new Error(
+            `No customer entitlement found for billing period ${period.id} and subscription item ${period.subscriptionItemId}`
+          )
+        }
 
         const ratingResult = await ratingService.rateBillingPeriod({
           projectId: period.projectId,
           customerId: period.customerId,
+          customerEntitlementIds,
           featureSlug: feature.slug,
           startAt: period.cycleStartAt,
           endAt: period.cycleEndAt,
