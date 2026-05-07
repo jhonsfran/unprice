@@ -149,6 +149,29 @@ describe("calculateCycleWindow", () => {
       // no proration/billableSeconds on cycle window
     })
 
+    it("aligns dayOfCreation cycles to the start of the creation day", () => {
+      const effectiveStart = utcDate("2026-05-07", "12:05:00")
+      const now = utcDate("2026-05-07", "12:05:00")
+
+      const result = calculateCycleWindow({
+        effectiveStartDate: effectiveStart,
+        effectiveEndDate: null,
+        trialEndsAt: null,
+        now,
+        config: {
+          name: "test",
+          interval: "month",
+          intervalCount: 1,
+          planType: "recurring",
+          anchor: "dayOfCreation",
+        },
+      })
+
+      expect(result).not.toBeNull()
+      expect(result!.start).toBe(utcDate("2026-05-07", "00:00:00"))
+      expect(result!.end).toBe(utcDate("2026-06-07", "00:00:00"))
+    })
+
     it("respects effective end date capping the window end", () => {
       const startMs = utcDate("2024-01-01", "00:00:00")
       const endMs = utcDate("2024-01-25", "00:00:00")

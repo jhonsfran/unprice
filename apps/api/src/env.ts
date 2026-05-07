@@ -31,9 +31,14 @@ export const cloudflareR2Bucket = z.custom<R2Bucket>(
     !!bucket && typeof bucket === "object" && "put" in bucket && typeof bucket.put === "function"
 )
 
+function readOptionalStringBinding(workerEnv: Record<string, unknown>, key: string) {
+  const value = workerEnv[key]
+  return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
 // This function should be called at the start of each request.
 export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
-  return createEnv({
+  const parsedEnv = createEnv({
     shared: {
       NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
       APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
@@ -62,6 +67,8 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       LAKEHOUSE: cloudflareR2Bucket,
       LAKEHOUSE_FILE_PLAN_BASE_URL: z.string().url(),
       LAKEHOUSE_API_TOKEN: z.string(),
+      STRIPE_API_KEY: z.string().optional(),
+      STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
     },
     emptyStringAsUndefined: true,
     runtimeEnv: workerEnv as Record<string, string | number | boolean | undefined>,
@@ -74,6 +81,18 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       throw new Error(`Invalid environment variables in API: ${JSON.stringify(issues, null, 2)}`)
     },
   })
+
+  return {
+    ...parsedEnv,
+    // The services env is created from process.env and is also extended into
+    // this Worker env. Prefer Worker bindings here so `.dev.vars` and
+    // Cloudflare secrets are not overwritten by an undefined process env.
+    STRIPE_API_KEY:
+      readOptionalStringBinding(workerEnv, "STRIPE_API_KEY") ?? parsedEnv.STRIPE_API_KEY,
+    STRIPE_CONNECT_WEBHOOK_SECRET:
+      readOptionalStringBinding(workerEnv, "STRIPE_CONNECT_WEBHOOK_SECRET") ??
+      parsedEnv.STRIPE_CONNECT_WEBHOOK_SECRET,
+  }
 }
 
 export type Env = ReturnType<typeof createRuntimeEnv>

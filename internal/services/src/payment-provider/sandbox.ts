@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "node:crypto"
 import { newId } from "@unprice/db/utils"
 import type { Currency } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
@@ -32,11 +31,14 @@ function constantTimeStringEqual(a: string, b: string): boolean {
   const enc = new TextEncoder()
   const aBuf = enc.encode(a)
   const bBuf = enc.encode(b)
-  if (aBuf.byteLength !== bBuf.byteLength) {
-    timingSafeEqual(aBuf, aBuf)
-    return false
+  const maxLength = Math.max(aBuf.byteLength, bBuf.byteLength)
+  let diff = aBuf.byteLength ^ bBuf.byteLength
+
+  for (let i = 0; i < maxLength; i++) {
+    diff |= (aBuf[i] ?? 0) ^ (bBuf[i] ?? 0)
   }
-  return timingSafeEqual(aBuf, bBuf)
+
+  return diff === 0
 }
 
 export class SandboxPaymentProvider implements PaymentProviderInterface {
@@ -46,6 +48,7 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
     savedPaymentMethods: true,
     invoiceItemMutation: true,
     asyncPaymentConfirmation: false,
+    webhookSetup: "manual",
   }
 
   private readonly logger: Logger

@@ -13,7 +13,7 @@ const tags = ["paymentProvider"]
 
 export const route = createRoute({
   path: "/v1/paymentProvider/{provider}/setup/{sessionId}/{projectId}",
-  // this endpoint is not public, so we hide it
+  // this endpoint is not public
   hide: env.NODE_ENV === "production",
   summary: "provider setup",
   description:

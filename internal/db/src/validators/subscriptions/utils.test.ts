@@ -182,6 +182,25 @@ describe("calculateProration", () => {
     expect(prorationFactor).toBeCloseTo(1)
   })
 
+  it("treats sub-day starts as full days for monthly dayOfCreation billing", () => {
+    const effectiveStart = utc("2026-05-07", "12:05:00.000")
+    const serviceStart = utc("2026-05-07", "12:05:00.000")
+    const serviceEnd = utc("2026-06-07", "00:00:00.000")
+    const { prorationFactor } = calculateProration({
+      serviceStart,
+      serviceEnd,
+      effectiveStartDate: effectiveStart,
+      billingConfig: {
+        name: "m",
+        billingInterval: "month",
+        billingIntervalCount: 1,
+        billingAnchor: "dayOfCreation",
+        planType: "recurring",
+      },
+    })
+    expect(prorationFactor).toBeCloseTo(1)
+  })
+
   it("computes stub fraction before first monthly anchor", () => {
     const effectiveStart = utc("2024-01-10")
     const serviceStart = utc("2024-01-10")

@@ -36,27 +36,35 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     savedPaymentMethods: true,
     invoiceItemMutation: true,
     asyncPaymentConfirmation: true,
+    webhookSetup: "platform_managed",
   }
 
   private readonly client: Stripe
   private providerCustomerId?: string | null
   private readonly logger: Logger
   private readonly webhookSecret?: string
+  private readonly connectedAccountId?: string
 
   constructor(opts: {
     token: string
     providerCustomerId?: string | null
     logger: Logger
     webhookSecret?: string
+    connectedAccountId?: string
   }) {
     this.providerCustomerId = opts?.providerCustomerId
     this.logger = opts?.logger
     this.webhookSecret = opts.webhookSecret
+    this.connectedAccountId = opts.connectedAccountId
 
     this.client = new Stripe(opts.token, {
       apiVersion: "2023-10-16",
       typescript: true,
     })
+  }
+
+  private requestOptions(): Stripe.RequestOptions | undefined {
+    return this.connectedAccountId ? { stripeAccount: this.connectedAccountId } : undefined
   }
 
   public getCustomerId(): string | undefined {
@@ -74,10 +82,13 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         /**
          * Customer is already configured, create a billing portal session
          */
-        const session = await this.client.billingPortal.sessions.create({
-          customer: this.providerCustomerId,
-          return_url: opts.cancelUrl,
-        })
+        const session = await this.client.billingPortal.sessions.create(
+          {
+            customer: this.providerCustomerId,
+            return_url: opts.cancelUrl,
+          },
+          this.requestOptions()
+        )
 
         return Ok({ success: true as const, url: session.url, customerId: opts.customer.id })
       }
@@ -87,24 +98,27 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       const apiCallbackUrl = `${getPaymentProviderSignUpCallbackPrefixUrl("stripe")}/{CHECKOUT_SESSION_ID}/${opts.customer.projectId}`
 
       // create a new session for registering a payment method
-      const session = await this.client.checkout.sessions.create({
-        client_reference_id: opts.customer.id,
-        customer_email: opts.customer.email,
-        billing_address_collection: "required",
-        mode: "setup",
-        tax_id_collection: {
-          enabled: true,
+      const session = await this.client.checkout.sessions.create(
+        {
+          client_reference_id: opts.customer.id,
+          customer_email: opts.customer.email,
+          billing_address_collection: "required",
+          mode: "setup",
+          tax_id_collection: {
+            enabled: true,
+          },
+          metadata: {
+            successUrl: opts.successUrl,
+            cancelUrl: opts.cancelUrl,
+            customerSessionId: opts.customerSessionId,
+          },
+          success_url: apiCallbackUrl,
+          cancel_url: opts.cancelUrl,
+          customer_creation: "always",
+          currency: opts.customer.currency,
         },
-        metadata: {
-          successUrl: opts.successUrl,
-          cancelUrl: opts.cancelUrl,
-          customerSessionId: opts.customerSessionId,
-        },
-        success_url: apiCallbackUrl,
-        cancel_url: opts.cancelUrl,
-        customer_creation: "always",
-        currency: opts.customer.currency,
-      })
+        this.requestOptions()
+      )
 
       if (!session.url) return Ok({ success: false as const, url: "", customerId: "" })
 
@@ -139,10 +153,13 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         /**
          * Customer is already configured, create a billing portal session
          */
-        const session = await this.client.billingPortal.sessions.create({
-          customer: this.providerCustomerId,
-          return_url: opts.cancelUrl,
-        })
+        const session = await this.client.billingPortal.sessions.create(
+          {
+            customer: this.providerCustomerId,
+            return_url: opts.cancelUrl,
+          },
+          this.requestOptions()
+        )
 
         return Ok({ success: true as const, url: session.url, customerId: opts.customerId })
       }
@@ -152,25 +169,28 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       const apiCallbackUrl = `${getPaymentProviderSetupCallbackPrefixUrl("stripe")}/{CHECKOUT_SESSION_ID}/${opts.projectId}`
 
       // create a new session for registering a payment method
-      const session = await this.client.checkout.sessions.create({
-        client_reference_id: opts.customerId,
-        customer_email: opts.email,
-        billing_address_collection: "required",
-        mode: "setup",
-        tax_id_collection: {
-          enabled: true,
+      const session = await this.client.checkout.sessions.create(
+        {
+          client_reference_id: opts.customerId,
+          customer_email: opts.email,
+          billing_address_collection: "required",
+          mode: "setup",
+          tax_id_collection: {
+            enabled: true,
+          },
+          metadata: {
+            successUrl: opts.successUrl,
+            cancelUrl: opts.cancelUrl,
+            customerId: opts.customerId,
+            projectId: opts.projectId,
+          },
+          success_url: apiCallbackUrl,
+          cancel_url: opts.cancelUrl,
+          customer_creation: "always",
+          currency: opts.currency,
         },
-        metadata: {
-          successUrl: opts.successUrl,
-          cancelUrl: opts.cancelUrl,
-          customerId: opts.customerId,
-          projectId: opts.projectId,
-        },
-        success_url: apiCallbackUrl,
-        cancel_url: opts.cancelUrl,
-        customer_creation: "always",
-        currency: opts.currency,
-      })
+        this.requestOptions()
+      )
 
       if (!session.url) return Ok({ success: false as const, url: "", customerId: "" })
 
@@ -214,41 +234,44 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     const unitAmount = Math.round(opts.amount / 1_000_000)
 
     try {
-      const session = await this.client.checkout.sessions.create({
-        mode: "payment",
-        client_reference_id: opts.customerId,
-        customer_email: opts.email,
-        success_url: opts.successUrl,
-        cancel_url: opts.cancelUrl,
-        line_items: [
-          {
-            quantity: 1,
-            price_data: {
-              currency: opts.currency.toLowerCase(),
-              unit_amount: unitAmount,
-              product_data: {
-                name: opts.description ?? "Wallet top-up",
+      const session = await this.client.checkout.sessions.create(
+        {
+          mode: "payment",
+          client_reference_id: opts.customerId,
+          customer_email: opts.email,
+          success_url: opts.successUrl,
+          cancel_url: opts.cancelUrl,
+          line_items: [
+            {
+              quantity: 1,
+              price_data: {
+                currency: opts.currency.toLowerCase(),
+                unit_amount: unitAmount,
+                product_data: {
+                  name: opts.description ?? "Wallet top-up",
+                },
               },
             },
-          },
-        ],
-        metadata: {
-          ...(opts.metadata ?? {}),
-          // Defense-in-depth duplicates of what the caller should already
-          // include; harmless if overlapping.
-          kind: "wallet_topup",
-          customerId: opts.customerId,
-          projectId: opts.projectId,
-        },
-        payment_intent_data: {
+          ],
           metadata: {
             ...(opts.metadata ?? {}),
+            // Defense-in-depth duplicates of what the caller should already
+            // include; harmless if overlapping.
             kind: "wallet_topup",
             customerId: opts.customerId,
             projectId: opts.projectId,
           },
+          payment_intent_data: {
+            metadata: {
+              ...(opts.metadata ?? {}),
+              kind: "wallet_topup",
+              customerId: opts.customerId,
+              projectId: opts.projectId,
+            },
+          },
         },
-      })
+        this.requestOptions()
+      )
 
       if (!session.url) return Ok({ success: false as const, url: "", customerId: opts.customerId })
 
@@ -273,7 +296,11 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     opts: GetSessionOpts
   ): Promise<Result<PaymentProviderGetSession, FetchError>> {
     try {
-      const session = await this.client.checkout.sessions.retrieve(opts.sessionId)
+      const session = await this.client.checkout.sessions.retrieve(
+        opts.sessionId,
+        undefined,
+        this.requestOptions()
+      )
 
       return Ok({
         metadata: session.metadata,
@@ -298,10 +325,13 @@ export class StripePaymentProvider implements PaymentProviderInterface {
       )
 
     try {
-      const paymentMethods = await this.client.paymentMethods.list({
-        customer: this.providerCustomerId ?? undefined,
-        limit: opts.limit,
-      })
+      const paymentMethods = await this.client.paymentMethods.list(
+        {
+          customer: this.providerCustomerId ?? undefined,
+          limit: opts.limit,
+        },
+        this.requestOptions()
+      )
 
       return Ok(
         paymentMethods.data.map((pm) => ({
@@ -346,25 +376,28 @@ export class StripePaymentProvider implements PaymentProviderInterface {
 
     // create an invoice
     const result = await this.client.invoices
-      .create({
-        customer: this.providerCustomerId,
-        currency: opts.currency,
-        auto_advance: false,
-        collection_method: opts.collectionMethod,
-        description: opts.description,
-        due_date: dueDate,
-        custom_fields: [
-          {
-            name: "Customer",
-            value: opts.customerName,
-          },
-          {
-            name: "Email",
-            value: opts.email,
-          },
-          ...(opts.customFields ?? []),
-        ],
-      })
+      .create(
+        {
+          customer: this.providerCustomerId,
+          currency: opts.currency,
+          auto_advance: false,
+          collection_method: opts.collectionMethod,
+          description: opts.description,
+          due_date: dueDate,
+          custom_fields: [
+            {
+              name: "Customer",
+              value: opts.customerName,
+            },
+            {
+              name: "Email",
+              value: opts.email,
+            },
+            ...(opts.customFields ?? []),
+          ],
+        },
+        this.requestOptions()
+      )
       .then((invoice) =>
         Ok({
           invoiceId: invoice.id,
@@ -401,13 +434,17 @@ export class StripePaymentProvider implements PaymentProviderInterface {
 
     // create an invoice
     const result = await this.client.invoices
-      .update(opts.invoiceId, {
-        auto_advance: false,
-        collection_method: opts.collectionMethod,
-        description: opts.description,
-        due_date: dueDate,
-        custom_fields: opts.customFields,
-      })
+      .update(
+        opts.invoiceId,
+        {
+          auto_advance: false,
+          collection_method: opts.collectionMethod,
+          description: opts.description,
+          due_date: dueDate,
+          custom_fields: opts.customFields,
+        },
+        this.requestOptions()
+      )
       .then((invoice) =>
         Ok({
           invoiceId: invoice.id,
@@ -493,7 +530,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         }
 
     return await this.client.invoiceItems
-      .create(payload)
+      .create(payload, this.requestOptions())
       .then(() => {
         return Ok(undefined)
       })
@@ -527,13 +564,17 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     const descriptionItem = description ?? (isProrated ? `${name} (prorated)` : name)
 
     return await this.client.invoiceItems
-      .update(invoiceItemId, {
-        amount: totalAmount,
-        quantity,
-        description: descriptionItem,
-        metadata,
-        period,
-      })
+      .update(
+        invoiceItemId,
+        {
+          amount: totalAmount,
+          quantity,
+          description: descriptionItem,
+          metadata,
+          period,
+        },
+        this.requestOptions()
+      )
       .then(() => Ok(undefined))
       .catch((error) => {
         const e = error as Stripe.errors.StripeError
@@ -554,9 +595,13 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     >
   > {
     try {
-      const invoice = await this.client.invoices.pay(opts.invoiceId, {
-        payment_method: opts.paymentMethodId,
-      })
+      const invoice = await this.client.invoices.pay(
+        opts.invoiceId,
+        {
+          payment_method: opts.paymentMethodId,
+        },
+        this.requestOptions()
+      )
 
       return Ok({
         invoiceId: invoice.id,
@@ -576,7 +621,11 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     invoiceId: string
   }): Promise<Result<GetStatusInvoice, FetchError | UnPricePaymentProviderError>> {
     try {
-      const invoice = await this.client.invoices.retrieve(opts.invoiceId)
+      const invoice = await this.client.invoices.retrieve(
+        opts.invoiceId,
+        undefined,
+        this.requestOptions()
+      )
 
       if (!invoice.status) {
         return Err(new UnPricePaymentProviderError({ message: "Invoice status not found" }))
@@ -594,7 +643,9 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         if (invoice.payment_intent) {
           // The payment_intent object contains details about the payment
           const paymentIntent = await this.client.paymentIntents.retrieve(
-            invoice.payment_intent as string
+            invoice.payment_intent as string,
+            undefined,
+            this.requestOptions()
           )
 
           paidAt = paymentIntent.created
@@ -643,7 +694,11 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     invoiceId: string
   }): Promise<Result<PaymentProviderInvoice, FetchError | UnPricePaymentProviderError>> {
     try {
-      const invoice = await this.client.invoices.retrieve(opts.invoiceId)
+      const invoice = await this.client.invoices.retrieve(
+        opts.invoiceId,
+        undefined,
+        this.requestOptions()
+      )
 
       return Ok({
         invoiceUrl: invoice.hosted_invoice_url ?? invoice.invoice_pdf ?? "",
@@ -678,7 +733,7 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     invoiceId: string
   }): Promise<Result<void, FetchError | UnPricePaymentProviderError>> {
     try {
-      await this.client.invoices.sendInvoice(opts.invoiceId)
+      await this.client.invoices.sendInvoice(opts.invoiceId, undefined, this.requestOptions())
 
       return Ok(undefined)
     } catch (error) {
@@ -694,7 +749,11 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     invoiceId: string
   }): Promise<Result<{ invoiceId: string }, FetchError | UnPricePaymentProviderError>> {
     try {
-      const invoice = await this.client.invoices.finalizeInvoice(opts.invoiceId)
+      const invoice = await this.client.invoices.finalizeInvoice(
+        opts.invoiceId,
+        undefined,
+        this.requestOptions()
+      )
 
       return Ok({ invoiceId: invoice.id })
     } catch (error) {
@@ -714,10 +773,13 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         new UnPricePaymentProviderError({ message: "Customer payment provider id not set" })
       )
 
-    const paymentMethods = await this.client.paymentMethods.list({
-      customer: this.providerCustomerId,
-      limit: 1,
-    })
+    const paymentMethods = await this.client.paymentMethods.list(
+      {
+        customer: this.providerCustomerId,
+        limit: 1,
+      },
+      this.requestOptions()
+    )
 
     const paymentMethod = paymentMethods.data.at(0)
 
@@ -744,7 +806,11 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     }
 
     try {
-      const event = this.client.webhooks.constructEvent(opts.rawBody, signatureToUse, secret)
+      const event = await this.client.webhooks.constructEventAsync(
+        opts.rawBody,
+        signatureToUse,
+        secret
+      )
 
       return Ok({
         eventId: event.id,
@@ -833,8 +899,13 @@ export class StripePaymentProvider implements PaymentProviderInterface {
     const normalizedEventType: NormalizedProviderWebhook["eventType"] = (() => {
       switch (event.eventType) {
         case "invoice.paid":
-        case "invoice.payment_succeeded":
           return "payment.succeeded"
+        case "invoice.payment_succeeded":
+          // Stripe emits both `invoice.payment_succeeded` and `invoice.paid`
+          // for successful invoice payments. `invoice.paid` also covers
+          // credit-balance, free, and out-of-band payments, so it is the
+          // canonical invoice success signal for our reconciler.
+          return "noop"
         case "checkout.session.completed":
         case "checkout.session.async_payment_succeeded":
           // Only treat checkout completions as payment events when the

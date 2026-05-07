@@ -66,3 +66,30 @@ debugging shortcut that should influence future work.
   `UNPRICE_TOKEN=unprice_dev_1234567890 pnpm --filter @unprice/tiny-tools e2e:signup:local`.
 
 Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md).
+
+## 2026-05-07: Payment Method Setup UX Cache Refresh
+
+- After returning from a provider payment-method setup flow, the dashboard must bypass the
+  `customerPaymentMethods` service cache and poll briefly before showing a permanent empty state.
+  Otherwise a freshly attached provider method can be hidden behind a cached `[]`.
+- Keep subscription creation drafts open while provider setup runs in a separate tab/window. The
+  original form should enter a confirming state, refetch `customers.listPaymentMethods` with
+  `skipCache`, and auto-select the first returned method.
+
+## 2026-05-07: Day-Based Subscription Billing Starts
+
+- Recurring `day`, `week`, `month`, and `year` billing treats subscription and grant starts as the
+  beginning of their UTC day for cycle and proration math. This avoids charging a prorated first
+  flat fee just because the subscription was created mid-day.
+- Keep `minute` billing timestamp-exact so short-cycle local testing and sub-day billing behavior
+  remain precise.
+
+## 2026-05-07: Stripe Invoice Webhook Success Event
+
+- Stripe can emit both `invoice.payment_succeeded` and `invoice.paid` for the same successful
+  invoice payment. Use `invoice.paid` as the canonical success signal because it also covers free,
+  credit-balance, and out-of-band paid invoices. Treating both as actionable can race subscription
+  reconciliation and surface `SUBSCRIPTION_BUSY` from the subscription machine lock.
+- Stripe Connect webhook routes should reject unsupported event types immediately after signature
+  verification, before connected-account lookup or webhook-event persistence, so an over-broad
+  Stripe endpoint does not amplify DB load across many connected accounts.

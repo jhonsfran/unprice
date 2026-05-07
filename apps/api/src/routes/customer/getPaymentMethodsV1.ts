@@ -29,6 +29,10 @@ export const route = createRoute({
           description: "The payment provider",
           example: "stripe",
         }),
+        skipCache: z.boolean().optional().openapi({
+          description: "Force a fresh provider lookup instead of using the cached payment methods",
+          example: true,
+        }),
       }),
       "Body of the request"
     ),
@@ -52,7 +56,7 @@ export type GetPaymentMethodsResponse = z.infer<
 
 export const registerGetPaymentMethodsV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, provider } = c.req.valid("json")
+    const { customerId, provider, skipCache } = c.req.valid("json")
     const { customer } = c.get("services")
 
     // validate the request
@@ -74,6 +78,9 @@ export const registerGetPaymentMethodsV1 = (app: App) =>
       customerId: customerData.id,
       provider,
       projectId: customerData.projectId,
+      opts: {
+        skipCache,
+      },
     })
 
     if (result.err) {

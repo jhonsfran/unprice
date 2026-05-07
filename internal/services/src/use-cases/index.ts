@@ -18,6 +18,12 @@ export { transferToPersonal } from "./project/transfer-to-personal"
 export { publishPlanVersion } from "./plan-version/publish"
 export { setOnboardingCompleted } from "./user/set-onboarding-completed"
 export { savePaymentProviderConfig } from "./payment-provider/save-config"
+export {
+  startProviderConnection,
+  refreshProviderConnection,
+  getProviderConnection,
+  disconnectProviderConnection,
+} from "./payment-provider/connection"
 export { completeProviderSignUp } from "./payment-provider/complete-provider-sign-up"
 export { completeProviderSetup } from "./payment-provider/complete-provider-setup"
 export { processWebhookEvent } from "./payment-provider/process-webhook-event"

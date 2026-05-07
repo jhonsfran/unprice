@@ -8,8 +8,12 @@ import { z } from "zod"
 
 import { protectedProjectProcedure } from "#trpc"
 
+const saveConfigInputSchema = insertPaymentProviderConfigSchema.extend({
+  key: z.string().min(1),
+})
+
 export const saveConfig = protectedProjectProcedure
-  .input(insertPaymentProviderConfigSchema)
+  .input(saveConfigInputSchema)
   .output(z.object({ paymentProviderConfig: selectPaymentProviderConfigSchema }))
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN"])

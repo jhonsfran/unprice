@@ -78,16 +78,26 @@ export async function savePaymentProviderConfig(
     projectId,
     paymentProvider,
     active: true,
+    connectionType: "bring_your_own_key",
+    mode: "test",
+    status: "active",
     key: encryptedKey.ciphertext,
     keyIv: encryptedKey.iv,
     webhookSecret: encryptedWebhookSecret?.ciphertext ?? null,
     webhookSecretIv: encryptedWebhookSecret?.iv ?? null,
+    externalAccountId: null,
+    connectionData: null,
   }
 
   const onConflictSet: Partial<typeof paymentProviderConfig.$inferInsert> = {
     active: true,
+    connectionType: "bring_your_own_key",
+    mode: "test",
+    status: "active",
     key: encryptedKey.ciphertext,
     keyIv: encryptedKey.iv,
+    externalAccountId: null,
+    connectionData: null,
   }
 
   if (encryptedWebhookSecret) {

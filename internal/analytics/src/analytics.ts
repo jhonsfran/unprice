@@ -273,6 +273,7 @@ export class Analytics {
       pipe: "v1_get_feature_usage_no_duplicates",
       parameters: z.object({
         feature_slugs: z.array(z.string()).optional(),
+        period_keys: z.array(z.string()).optional(),
         customer_id: z.string(),
         project_id: z.string(),
         start: z.number(),
@@ -299,6 +300,7 @@ export class Analytics {
     features,
     startAt,
     endAt,
+    periodKeys,
   }: {
     customerId: string
     projectId: string
@@ -309,6 +311,7 @@ export class Analytics {
     }[]
     startAt: number
     endAt: number
+    periodKeys?: string[]
   }): Promise<
     Result<{ featureSlug: string; usage: number }[], FetchError | UnPriceAnalyticsError>
   > {
@@ -324,6 +327,7 @@ export class Analytics {
       customer_id: customerId,
       project_id: projectId,
       feature_slugs: featureSlugsArray,
+      period_keys: periodKeys && periodKeys.length > 0 ? periodKeys : undefined,
       start: startAt,
       end: endAt,
     })
@@ -333,6 +337,7 @@ export class Analytics {
           customerId,
           projectId,
           feature_slugs: featureSlugsArray,
+          periodKeys,
           startAt,
           endAt,
         })

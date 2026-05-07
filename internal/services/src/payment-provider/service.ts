@@ -31,18 +31,21 @@ const PROVIDER_CAPABILITIES: Record<PaymentProvider, PaymentProviderCapabilities
     savedPaymentMethods: true,
     invoiceItemMutation: true,
     asyncPaymentConfirmation: true,
+    webhookSetup: "platform_managed",
   },
   sandbox: {
     billingPortal: true,
     savedPaymentMethods: true,
     invoiceItemMutation: true,
     asyncPaymentConfirmation: false,
+    webhookSetup: "manual",
   },
   square: {
     billingPortal: false,
     savedPaymentMethods: false,
     invoiceItemMutation: false,
     asyncPaymentConfirmation: false,
+    webhookSetup: "manual",
   },
 }
 
@@ -65,6 +68,7 @@ export class PaymentProviderService implements PaymentProviderInterface {
     logger: Logger
     paymentProvider: PaymentProvider
     webhookSecret?: string
+    connectedAccountId?: string
   }) {
     this.provider = opts.paymentProvider
     this.capabilities = getPaymentProviderCapabilities(opts.paymentProvider)
@@ -76,6 +80,7 @@ export class PaymentProviderService implements PaymentProviderInterface {
       token: opts.token,
       providerCustomerId: this.providerCustomerId,
       webhookSecret: opts.webhookSecret,
+      connectedAccountId: opts.connectedAccountId,
     })
   }
 
@@ -85,6 +90,7 @@ export class PaymentProviderService implements PaymentProviderInterface {
     logger: Logger
     paymentProvider: PaymentProvider
     webhookSecret?: string
+    connectedAccountId?: string
   }): PaymentProviderInterface {
     switch (opts.paymentProvider) {
       case "stripe":
@@ -93,6 +99,7 @@ export class PaymentProviderService implements PaymentProviderInterface {
           providerCustomerId: opts.providerCustomerId,
           logger: opts.logger,
           webhookSecret: opts.webhookSecret,
+          connectedAccountId: opts.connectedAccountId,
         })
       case "sandbox":
         return new SandboxPaymentProvider({

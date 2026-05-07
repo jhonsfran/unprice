@@ -65,26 +65,60 @@ export class PaymentProviderResolver {
       )
     }
 
-    const { err: decryptErr, val: decryptedKey } = await wrapResult(
-      this.decryptSecret({
-        iv: config.keyIv,
-        ciphertext: config.key,
-      }),
-      (error) =>
+    const connectionType = config.connectionType ?? "bring_your_own_key"
+    const isManagedStripe = provider === "stripe" && connectionType === "managed_connection"
+
+    if (!isManagedStripe && (!config.key || !config.keyIv)) {
+      return Err(
         new FetchError({
-          message: `error decrypting payment provider token: ${error.message}`,
+          message: "Payment provider key is not configured",
           retry: false,
         })
-    )
+      )
+    }
 
-    if (decryptErr) {
-      this.logger.error(decryptErr, {
+    const tokenResult = isManagedStripe
+      ? Ok(env.STRIPE_API_KEY ?? "")
+      : await wrapResult(
+          this.decryptSecret({
+            iv: config.keyIv ?? "",
+            ciphertext: config.key ?? "",
+          }),
+          (error) =>
+            new FetchError({
+              message: `error decrypting payment provider token: ${error.message}`,
+              retry: false,
+            })
+        )
+
+    if (tokenResult.err) {
+      this.logger.error(tokenResult.err, {
         context: "error decrypting payment provider token",
         customerId,
         projectId,
         provider,
       })
-      return Err(decryptErr)
+      return Err(tokenResult.err)
+    }
+
+    if (!tokenResult.val) {
+      return Err(
+        new FetchError({
+          message: isManagedStripe
+            ? "Stripe platform key is not configured"
+            : "Payment provider key is not configured",
+          retry: false,
+        })
+      )
+    }
+
+    if (isManagedStripe && !config.externalAccountId) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
+          message: "Stripe connected account is not configured",
+        })
+      )
     }
 
     const { err: webhookSecretErr, val: webhookSecret } = await wrapResult(
@@ -139,8 +173,9 @@ export class PaymentProviderResolver {
         providerCustomerId: providerMapping?.providerCustomerId ?? undefined,
         logger: this.logger,
         paymentProvider: provider,
-        token: decryptedKey,
+        token: tokenResult.val,
         webhookSecret: webhookSecret ?? undefined,
+        connectedAccountId: isManagedStripe ? (config.externalAccountId ?? undefined) : undefined,
       })
     )
   }

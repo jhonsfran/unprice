@@ -11,6 +11,7 @@ import { UnPriceCustomerError } from "../../customers/errors"
 import type {
   NormalizedProviderWebhook,
   PaymentProviderWebhookHeaders,
+  VerifiedProviderWebhook,
 } from "../../payment-provider/interface"
 import { settlePrepaidInvoiceToWallet } from "../billing/settle-invoice"
 import { completeProviderSignUp } from "./complete-provider-sign-up"
@@ -28,6 +29,7 @@ type ProcessWebhookEventInput = {
   provider: PaymentProvider
   rawBody: string
   headers: PaymentProviderWebhookHeaders
+  verifiedWebhook?: VerifiedProviderWebhook
 }
 
 type ProcessWebhookEventStatus = "processed" | "duplicate"
@@ -633,18 +635,24 @@ export async function processWebhookEvent(
     )
   }
 
-  const { err: verifyErr, val: verifiedWebhook } = await paymentProviderService.verifyWebhook({
-    rawBody: input.rawBody,
-    headers: input.headers,
-  })
+  let verifiedWebhook = input.verifiedWebhook
 
-  if (verifyErr) {
-    return Err(
-      new UnPriceCustomerError({
-        code: "PAYMENT_PROVIDER_ERROR",
-        message: verifyErr.message,
-      })
-    )
+  if (!verifiedWebhook) {
+    const { err: verifyErr, val } = await paymentProviderService.verifyWebhook({
+      rawBody: input.rawBody,
+      headers: input.headers,
+    })
+
+    if (verifyErr) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PAYMENT_PROVIDER_ERROR",
+          message: verifyErr.message,
+        })
+      )
+    }
+
+    verifiedWebhook = val
   }
 
   const { err: normalizeErr, val: normalizedWebhook } =

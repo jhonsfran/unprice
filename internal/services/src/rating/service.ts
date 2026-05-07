@@ -17,6 +17,7 @@ import { formatMoney } from "@unprice/money"
 import { subtract, toSnapshot } from "dinero.js"
 import type { z } from "zod"
 import type { GrantsManager } from "../entitlements"
+import { computeGrantPeriodBucket } from "../entitlements/grant-consumption"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceRatingError } from "./errors"
 import type {
@@ -134,6 +135,7 @@ export class RatingService {
     entitlement,
     billingStartAt,
     billingEndAt,
+    periodKeys,
     usageData: providedUsageData,
   }: {
     projectId: string
@@ -142,6 +144,7 @@ export class RatingService {
     entitlement: RatingEntitlementContext
     billingStartAt: number
     billingEndAt: number
+    periodKeys?: string[]
     usageData?: UsageFeatureData[]
   }): Promise<
     Result<
@@ -203,6 +206,7 @@ export class RatingService {
           ],
           startAt: billingStartAt,
           endAt: billingEndAt,
+          periodKeys,
         }
       )
 
@@ -229,6 +233,45 @@ export class RatingService {
       usage: currentCycleUsage,
       isUsageFeature: true,
     })
+  }
+
+  private resolveUsagePeriodKeys({
+    billingStartAt,
+    billingEndAt,
+    grants,
+  }: {
+    billingStartAt: number
+    billingEndAt: number
+    grants: z.infer<typeof grantSchemaExtended>[]
+  }): string[] {
+    const periodKeys = new Set<string>()
+
+    for (const grant of grants) {
+      const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
+      const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
+
+      if (grantServiceStart >= grantServiceEnd) {
+        continue
+      }
+
+      const bucket = computeGrantPeriodBucket(
+        {
+          cadenceEffectiveAt: grant.customerEntitlement.effectiveAt,
+          cadenceExpiresAt: grant.customerEntitlement.expiresAt,
+          effectiveAt: grant.effectiveAt,
+          expiresAt: grant.expiresAt,
+          grantId: grant.id,
+          resetConfig: grant.customerEntitlement.featurePlanVersion.resetConfig,
+        },
+        grantServiceStart
+      )
+
+      if (bucket) {
+        periodKeys.add(bucket.periodKey)
+      }
+    }
+
+    return [...periodKeys]
   }
 
   /**
@@ -448,6 +491,11 @@ export class RatingService {
     }
 
     const { billingStartAt, billingEndAt } = billingWindowResult.val
+    const periodKeys = this.resolveUsagePeriodKeys({
+      billingStartAt,
+      billingEndAt,
+      grants,
+    })
 
     // Calculate usage
     const usageResult = await this.calculateUsageOfFeatures({
@@ -457,6 +505,7 @@ export class RatingService {
       entitlement,
       billingStartAt,
       billingEndAt,
+      periodKeys,
       usageData: providedUsageData,
     })
 

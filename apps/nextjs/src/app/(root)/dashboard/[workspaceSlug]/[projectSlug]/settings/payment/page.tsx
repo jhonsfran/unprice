@@ -23,7 +23,9 @@ export default async function ProjectPaymentSettingsPage() {
   const enabledProviders = PAYMENT_PROVIDERS.filter((p) => !PROVIDER_META[p]?.disabled)
 
   const configs = await Promise.all(
-    enabledProviders.map((provider) => api.paymentProvider.getConfig({ paymentProvider: provider }))
+    enabledProviders.map((provider) =>
+      api.paymentProvider.getConnection({ paymentProvider: provider })
+    )
   )
 
   return (

@@ -206,6 +206,18 @@ export type UsageMode = keyof typeof USAGE_MODES_MAP
 export type FeatureType = keyof typeof FEATURE_TYPES_MAPS
 
 export const PAYMENT_PROVIDERS = ["stripe", "square", "sandbox"] as const
+export const PAYMENT_PROVIDER_CONNECTION_TYPES = [
+  "managed_connection",
+  "bring_your_own_key",
+] as const
+export const PAYMENT_PROVIDER_CONNECTION_MODES = ["test", "live"] as const
+export const PAYMENT_PROVIDER_CONNECTION_STATUSES = [
+  "not_connected",
+  "pending",
+  "active",
+  "restricted",
+  "disabled",
+] as const
 export const CURRENCIES = ["USD", "EUR"] as const
 export const STAGES = ["prod", "test", "dev"] as const
 export const STATUS_PLAN = ["draft", "published"] as const

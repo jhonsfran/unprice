@@ -14,6 +14,7 @@ import {
 describe("consumeGrantsByPriority", () => {
   const now = Date.UTC(2026, 2, 19, 12, 0, 0)
   const grantStart = now - 1000
+  const grantCycleStart = Date.UTC(2026, 2, 19, 0, 0, 0)
   const entitlementMonthEnd = Date.UTC(2026, 3, 19, 0, 0, 0)
 
   const monthlyReset: ResetConfig = {
@@ -275,9 +276,9 @@ describe("consumeGrantsByPriority", () => {
       grants: [grant({ allowanceUnits: 5, resetConfig: monthlyReset })],
       states: [
         state({
-          bucketKey: `grant_a:month:${grantStart}`,
-          periodKey: `month:${grantStart}`,
-          periodStartAt: grantStart,
+          bucketKey: `grant_a:month:${grantCycleStart}`,
+          periodKey: `month:${grantCycleStart}`,
+          periodStartAt: grantCycleStart,
           periodEndAt: entitlementMonthEnd,
         }),
       ],
@@ -302,8 +303,8 @@ describe("consumeGrantsByPriority", () => {
     expect(result.allocations[0]?.nextState).toEqual(
       expect.objectContaining({
         consumedInCurrentWindow: 3,
-        periodKey: `month:${grantStart}`,
-        periodStartAt: grantStart,
+        periodKey: `month:${grantCycleStart}`,
+        periodStartAt: grantCycleStart,
         periodEndAt: entitlementMonthEnd,
       })
     )
@@ -316,9 +317,9 @@ describe("consumeGrantsByPriority", () => {
       grants: [grant({ resetConfig: monthlyReset })],
       states: [
         state({
-          bucketKey: `grant_a:month:${grantStart}`,
-          periodKey: `month:${grantStart}`,
-          periodStartAt: grantStart,
+          bucketKey: `grant_a:month:${grantCycleStart}`,
+          periodKey: `month:${grantCycleStart}`,
+          periodStartAt: grantCycleStart,
           periodEndAt: entitlementMonthEnd,
           consumedInCurrentWindow: 99,
         }),
@@ -342,9 +343,9 @@ describe("consumeGrantsByPriority", () => {
       grants: [grant({ resetConfig: monthlyReset })],
       states: [
         state({
-          bucketKey: `grant_a:month:${grantStart}`,
-          periodKey: `month:${grantStart}`,
-          periodStartAt: grantStart,
+          bucketKey: `grant_a:month:${grantCycleStart}`,
+          periodKey: `month:${grantCycleStart}`,
+          periodStartAt: grantCycleStart,
           periodEndAt: entitlementMonthEnd,
           consumedInCurrentWindow: 6,
         }),
@@ -355,8 +356,8 @@ describe("consumeGrantsByPriority", () => {
     expect(result.allocations[0]?.nextState).toEqual(
       expect.objectContaining({
         consumedInCurrentWindow: 10,
-        periodKey: `month:${grantStart}`,
-        periodStartAt: grantStart,
+        periodKey: `month:${grantCycleStart}`,
+        periodStartAt: grantCycleStart,
         periodEndAt: entitlementMonthEnd,
       })
     )
@@ -373,9 +374,9 @@ describe("consumeGrantsByPriority", () => {
 
   it("returns reset bucket boundaries for reset grants", () => {
     expect(computeGrantPeriodBucket(grant({ resetConfig: monthlyReset }), now)).toEqual({
-      bucketKey: `grant_a:month:${grantStart}`,
-      periodKey: `month:${grantStart}`,
-      start: grantStart,
+      bucketKey: `grant_a:month:${grantCycleStart}`,
+      periodKey: `month:${grantCycleStart}`,
+      start: grantCycleStart,
       end: entitlementMonthEnd,
     })
   })

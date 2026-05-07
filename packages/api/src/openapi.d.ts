@@ -1623,6 +1623,11 @@ export interface operations {
            * @enum {string}
            */
           provider: "stripe" | "square" | "sandbox"
+          /**
+           * @description Force a fresh provider lookup instead of using the cached payment methods
+           * @example true
+           */
+          skipCache?: boolean
         }
       }
     }

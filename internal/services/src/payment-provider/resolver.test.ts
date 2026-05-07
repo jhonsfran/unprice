@@ -7,6 +7,7 @@ vi.mock("../../env", () => ({
   env: {
     ENCRYPTION_KEY: "test_encryption_key",
     NODE_ENV: "test",
+    STRIPE_API_KEY: "sk_test_platform",
   },
 }))
 
@@ -140,6 +141,38 @@ describe("PaymentProviderResolver", () => {
 
     expect(resolved.err).toBeDefined()
     expect(resolved.err?.message).toMatch(/Payment provider config not found/)
+  })
+
+  it("resolves managed Stripe with the platform key and connected account config", async () => {
+    const resolver = new PaymentProviderResolver({
+      db: createMockDb({
+        customerProviderIds: null,
+        paymentProviderConfig: {
+          id: "ppc_1",
+          projectId: "proj_1",
+          paymentProvider: "stripe",
+          connectionType: "managed_connection",
+          mode: "test",
+          status: "active",
+          key: null,
+          keyIv: null,
+          webhookSecret: null,
+          webhookSecretIv: null,
+          externalAccountId: "acct_123",
+          active: true,
+        },
+      }),
+      logger: createMockLogger(),
+    })
+
+    const resolved = await resolver.resolve({
+      projectId: "proj_1",
+      provider: "stripe",
+    })
+
+    expect(resolved.err).toBeUndefined()
+    expect(resolved.val?.provider).toBe("stripe")
+    expect(resolved.val?.capabilities.webhookSetup).toBe("platform_managed")
   })
 
   it("rejects webhook verification when sandbox config has no webhook secret", async () => {

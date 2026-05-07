@@ -15,6 +15,9 @@ import {
   INVOICE_STATUS,
   OVERAGE_STRATEGIES,
   PAYMENT_PROVIDERS,
+  PAYMENT_PROVIDER_CONNECTION_MODES,
+  PAYMENT_PROVIDER_CONNECTION_STATUSES,
+  PAYMENT_PROVIDER_CONNECTION_TYPES,
   PLAN_TYPES,
   ROLES_APP,
   STAGES,
@@ -41,6 +44,18 @@ export const aggregationMethodEnum = pgEnum("aggregation_method", AGGREGATION_ME
 export const tierModeEnum = pgEnum("tier_mode", TIER_MODES)
 export const usageModeEnum = pgEnum("usage_mode", USAGE_MODES)
 export const paymentProviderEnum = pgEnum("payment_providers", PAYMENT_PROVIDERS)
+export const paymentProviderConnectionTypeEnum = pgEnum(
+  "payment_provider_connection_type",
+  PAYMENT_PROVIDER_CONNECTION_TYPES
+)
+export const paymentProviderConnectionModeEnum = pgEnum(
+  "payment_provider_connection_mode",
+  PAYMENT_PROVIDER_CONNECTION_MODES
+)
+export const paymentProviderConnectionStatusEnum = pgEnum(
+  "payment_provider_connection_status",
+  PAYMENT_PROVIDER_CONNECTION_STATUSES
+)
 export const dueBehaviourEnum = pgEnum("due_behaviour", DUE_BEHAVIOUR)
 export const currencyEnum = pgEnum("currency", CURRENCIES)
 export const stageEnum = pgEnum("app_stages", STAGES)

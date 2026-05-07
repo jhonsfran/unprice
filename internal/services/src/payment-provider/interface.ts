@@ -67,6 +67,7 @@ export type PaymentProviderCapabilities = {
   savedPaymentMethods: boolean
   invoiceItemMutation: boolean
   asyncPaymentConfirmation: boolean
+  webhookSetup: "platform_managed" | "manual"
 }
 
 export type PaymentProviderWebhookHeaders = Record<string, string | string[] | undefined>

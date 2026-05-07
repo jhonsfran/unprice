@@ -21,6 +21,9 @@ SQL >
         {% if defined(feature_slugs) %}
             AND feature_slug IN {{ Array(feature_slugs, 'String') }}
         {% end %}
+        {% if defined(period_keys) %}
+            AND period_key IN {{ Array(period_keys, 'String') }}
+        {% end %}
         AND timestamp >= {{ Int64(start) }} AND timestamp < {{ Int64(end) }}
     GROUP BY project_id, customer_id, feature_slug
 
