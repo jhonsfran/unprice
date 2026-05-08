@@ -19,7 +19,7 @@ import {
   resolveRequestCustomerId,
 } from "./ingestEventsV1"
 
-const tags = ["ingestion"]
+const tags = ["events"]
 
 const syncEventSchema = rawEventSchema.extend({
   featureSlug: z.string().openapi({

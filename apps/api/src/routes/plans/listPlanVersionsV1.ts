@@ -12,8 +12,8 @@ import type { App } from "~/hono/app"
 const tags = ["plans"]
 
 export const route = createRoute({
-  path: "/v1/plans/listPlanVersions",
-  operationId: "plans.listPlanVersions",
+  path: "/v1/plans/versions/list",
+  operationId: "plans.listVersions",
   summary: "list all plan versions",
   description: "List all plan versions for a project",
   method: "post",

@@ -67,6 +67,34 @@ debugging shortcut that should influence future work.
 
 Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md).
 
+## 2026-05-08: Wallet Read API Display Amounts
+
+- Public wallet reads should expose customer-facing money objects, not only ledger-scale integers.
+  Include the raw `ledger_amount` for precision/debugging plus exact major-unit `amount`,
+  `currency`, and localized `display_amount`.
+- Capped subscription usage is wallet-backed. Tiny-tools usage E2E should detect
+  `subscriptionPhase.creditLinePolicy === "capped"` from entitlements and verify the wallet read
+  shape while reporting reserved and consumed wallet deltas.
+
+## 2026-05-08: API SDK Endpoint Drift Guard
+
+- Public Hono API routes that should be callable from `@unprice/api` should use SDK-shaped
+  `operationId`s. The SDK metadata test compares route operation IDs in `apps/api/src/routes/**`
+  with namespace methods exposed by `Unprice`; it intentionally excludes payment-provider
+  callback/webhook routes. Do not add a separate endpoint registry when the OpenAPI path types and
+  client method surface can be checked directly.
+- Keep public route `operationId`s aligned with the SDK namespace/method shape, not necessarily
+  with the API route folder that owns the HTTP handler. Keep the first OpenAPI tag aligned with the
+  operation namespace. The first path segment after `/v1` must also match the route namespace. For
+  example, `/v1/entitlements/get` should use `entitlements.get`
+  and tag `entitlements` so the generated OpenAPI contract points at the intuitive SDK call.
+- Keep SDK resource methods as one-object calls and group them by product concepts, not raw route
+  owners: `entitlements.get({ customerId })`, `subscriptions.get({ customerId })`,
+  `payments.methods.list({ customerId, provider })`, `usage.get({ range })`,
+  `features.list()`, `plans.getVersion({ planVersionId })`, and `invoices.get({ invoiceId })`.
+- Keep payment method endpoints under `/v1/payments/methods/*` and provider callback/webhook
+  endpoints under `/v1/payments/providers/*`; both live in `apps/api/src/routes/payments`.
+
 ## 2026-05-07: Payment Method Setup UX Cache Refresh
 
 - After returning from a provider payment-method setup flow, the dashboard must bypass the

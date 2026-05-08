@@ -39,7 +39,7 @@ export const getRealtimeTicket = protectedProjectProcedure
       })
     }
 
-    const { result, error } = await unprice.analytics.getRealtimeTicket({
+    const { result, error } = await unprice.realtime.createTicket({
       customerId: customer.id,
       projectId: customer.projectId,
     })

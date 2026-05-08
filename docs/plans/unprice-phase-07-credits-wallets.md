@@ -650,6 +650,7 @@ returns invoice header + projection.
 
 ```
 GET /v1/wallet → {
+  currency,
   available: { purchased, granted, total },
   reserved,
   consumed,
@@ -658,7 +659,9 @@ GET /v1/wallet → {
 ```
 
 [`apps/api/src/routes/wallet/getWalletV1.ts`](../../apps/api/src/routes/wallet/getWalletV1.ts)
-calls `WalletService.getWalletState`. All amounts at scale 8.
+calls `WalletService.getWalletState`. Wallet amount fields are display-ready
+objects containing `ledger_amount` (scale 8), exact major-unit `amount`,
+`currency`, and `display_amount`.
 
 ---
 

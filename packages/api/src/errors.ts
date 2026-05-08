@@ -110,6 +110,28 @@ export interface components {
         requestId: string
       }
     }
+    ErrPreconditionFailed: {
+      error: {
+        /**
+         * @description A machine readable error code.
+         * @example PRECONDITION_FAILED
+         * @enum {string}
+         */
+        code: "PRECONDITION_FAILED"
+        /**
+         * @description A link to our documentation with more details about this error code
+         * @example https://unprice.dev/docs/api-reference/errors/code/PRECONDITION_FAILED
+         */
+        docs: string
+        /** @description A human readable explanation of what went wrong */
+        message: string
+        /**
+         * @description Please always include the requestId in your error report
+         * @example req_1234
+         */
+        requestId: string
+      }
+    }
     ErrTooManyRequests: {
       error: {
         /**
@@ -164,6 +186,7 @@ export type ErrorResponse =
   | components["schemas"]["ErrForbidden"]
   | components["schemas"]["ErrNotFound"]
   | components["schemas"]["ErrConflict"]
+  | components["schemas"]["ErrPreconditionFailed"]
   | components["schemas"]["ErrTooManyRequests"]
   | components["schemas"]["ErrInternalServerError"]
 
@@ -177,6 +200,7 @@ export type ApiError =
   | components["schemas"]["ErrForbidden"]["error"]
   | components["schemas"]["ErrNotFound"]["error"]
   | components["schemas"]["ErrConflict"]["error"]
+  | components["schemas"]["ErrPreconditionFailed"]["error"]
   | components["schemas"]["ErrTooManyRequests"]["error"]
   | components["schemas"]["ErrInternalServerError"]["error"]
   | {

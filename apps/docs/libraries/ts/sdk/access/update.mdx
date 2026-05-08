@@ -1,0 +1,57 @@
+---
+title: "Update"
+description: "Update access controls for a customer"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.access.update({
+  customerId: "cus_1234567890",
+  updates: {
+    customerDisabled: true,
+    customerUsageLimitReached: false
+  }
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="customerId" type="string" required>
+    The customer ID to update.
+</ParamField>
+
+<ParamField body="updates" type="object" required>
+    Access-control fields to update for the customer.
+</ParamField>
+
+<ParamField body="updates.customerDisabled" type="boolean">
+    Disable or re-enable all feature access for the customer.
+</ParamField>
+
+<ParamField body="updates.customerUsageLimitReached" type="boolean">
+    Manually mark whether the customer reached a usage limit.
+</ParamField>
+
+<ParamField body="updates.subscriptionStatus" type="string">
+    Override the subscription status used for access checks.
+</ParamField>
+
+## Response
+
+Returns an empty object on success.

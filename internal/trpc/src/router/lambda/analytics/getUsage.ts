@@ -27,7 +27,7 @@ export const getUsage = protectedWorkspaceProcedure
       }
     }
 
-    const { result, error } = await unprice.analytics.getUsage({
+    const { result, error } = await unprice.usage.get({
       customer_id: customerId,
       range,
     })

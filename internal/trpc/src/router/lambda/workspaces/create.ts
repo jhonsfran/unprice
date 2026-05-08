@@ -33,10 +33,9 @@ export const create = protectedProcedure
 
     const isPersonal = membershipCount === 0
 
-    const { result: subscription, error: subscriptionErr } =
-      await unprice.customers.getSubscription({
-        customerId: opts.input.unPriceCustomerId,
-      })
+    const { result: subscription, error: subscriptionErr } = await unprice.subscriptions.get({
+      customerId: opts.input.unPriceCustomerId,
+    })
 
     if (subscriptionErr) {
       throw new TRPCError({

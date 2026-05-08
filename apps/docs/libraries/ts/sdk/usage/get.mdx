@@ -1,0 +1,57 @@
+---
+title: "Get"
+description: "Get usage analytics for a project or customer"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.usage.get({
+  range: "24h",
+  customer_id: "cus_1234567890"
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "usage": [
+    {
+      "project_id": "project_1234567890",
+      "customer_id": "cus_1234567890",
+      "feature_slug": "tokens",
+      "value_after": 30
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="range" type="string" required>
+    The usage window to inspect. Supported values include `24h`, `7d`, `30d`, and `90d`.
+</ParamField>
+
+<ParamField body="customer_id" type="string">
+    Optional customer ID to filter usage.
+</ParamField>
+
+<ParamField body="project_id" type="string">
+    Optional project ID. Only main-project keys can request another project.
+</ParamField>
+
+## Response
+
+<ResponseField name="usage" type="array" required>
+    Usage data points for the selected range.
+</ResponseField>

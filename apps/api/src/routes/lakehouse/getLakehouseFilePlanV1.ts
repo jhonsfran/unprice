@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -99,6 +100,7 @@ const responseSchema = z.object({
 export const route = createRoute({
   path: "/v1/lakehouse/file-plan",
   operationId: "lakehouse.getFilePlan",
+  hide: env.NODE_ENV === "production",
   summary: "get scoped lakehouse file plan",
   description:
     "Return temporary R2 credentials and matching lakehouse parquet files in one response.",

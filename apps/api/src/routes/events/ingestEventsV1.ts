@@ -18,7 +18,7 @@ import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["ingestion"]
+const tags = ["events"]
 const SAFE_QUEUE_SEND_RETRIES = 3
 const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
 

@@ -1,0 +1,40 @@
+---
+title: "Get"
+description: "Get an invoice with projected line items"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.invoices.get({
+  invoiceId: "inv_1234567890"
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "invoice": {
+    "id": "inv_1234567890",
+    "status": "paid",
+    "total_amount": 100000000
+  },
+  "lines": []
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField path="invoiceId" type="string" required>
+    The invoice ID to fetch.
+</ParamField>

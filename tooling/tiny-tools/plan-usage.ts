@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import { Unprice, type paths } from "@unprice/api"
 
 type VerifyResponse =
-  paths["/v1/customer/verify"]["post"]["responses"]["200"]["content"]["application/json"]
+  paths["/v1/entitlements/verify"]["post"]["responses"]["200"]["content"]["application/json"]
 type MeterConfig = NonNullable<VerifyResponse["meterConfig"]>
 type AggregationMethod = MeterConfig["aggregationMethod"]
 
@@ -271,7 +271,7 @@ async function discoverUsageFeature(): Promise<void> {
     return
   }
 
-  const { result, error } = await unprice.customers.getEntitlements({
+  const { result, error } = await unprice.entitlements.get({
     customerId: CUSTOMER_ID,
   })
 
@@ -312,7 +312,7 @@ async function trySelectUsageFeature(
   featureSlug: string,
   opts: { requireAllowed: boolean }
 ): Promise<boolean> {
-  const { result, error } = await unprice.customers.verify({
+  const { result, error } = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug,
   })
@@ -432,7 +432,7 @@ async function verifyUsageDelta(
 ): Promise<void> {
   assert(selectedUsageFeature, "usage feature should be selected before verifying usage")
 
-  const { result, error } = await unprice.customers.verify({
+  const { result, error } = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug: selectedUsageFeature.featureSlug,
   })

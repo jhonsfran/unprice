@@ -29,7 +29,7 @@ export const createWorkspace = async ({
     })
   }
 
-  const { result, error } = await unprice.customers.getSubscription({
+  const { result, error } = await unprice.subscriptions.get({
     customerId: unPriceCustomerId,
   })
 

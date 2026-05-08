@@ -70,7 +70,7 @@ What **is** needed:
 - [../../internal/services/src/ingestion/service.ts](../../internal/services/src/ingestion/service.ts) — `verifyFeatureStatus`, `ingestFeatureSync`
 - [../../internal/services/src/entitlements/service.ts](../../internal/services/src/entitlements/service.ts) — `buildUsageResponse`, display grouping
 - [../../internal/services/src/ingestion/message.ts](../../internal/services/src/ingestion/message.ts) — `filterResolvedStatesWithValidAggregationPayload`
-- [../../apps/api/src/routes/customer/verifyV1.ts](../../apps/api/src/routes/customer/verifyV1.ts) — current verify endpoint
+- [../../apps/api/src/routes/entitlements/verifyV1.ts](../../apps/api/src/routes/entitlements/verifyV1.ts) — current verify endpoint
 - [../../internal/db/src/schema/events.ts](../../internal/db/src/schema/events.ts) — events table
 - [./unprice-phase-06-agent-billing.md](./unprice-phase-06-agent-billing.md)
 - [./unprice-phase-07-credits-wallets.md](./unprice-phase-07-credits-wallets.md)
@@ -306,11 +306,11 @@ features that share the same `eventSlug`) or per individual feature.
 
 New routes:
 
-- `POST /v1/customer/verify-event` — batch verify all dimensions of an event
+- `POST /v1/events/verify` — batch verify all dimensions of an event
   (Slice 2)
-- `POST /v1/customer/report-event` — batch report usage for all dimensions
+- `POST /v1/events/report` — batch report usage for all dimensions
   (Slice 3)
-- `GET /v1/analytics/margins?customerId=X&period=...` — margin summary
+- `GET /v1/usage/margins?customerId=X&period=...` — margin summary
   (Slice 6)
 - `POST /v1/cost-tables` — create or update a cost table entry (Slice 4)
 - `GET /v1/cost-tables?featureSlug=X` — list cost table entries (Slice 4)

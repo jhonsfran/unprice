@@ -37,21 +37,23 @@ const unprice = new Unprice({
 Before performing an action, check if the customer has access and if they have enough balance for the specific operation.
 
 ```typescript
-const { result } = await unprice.customers.verify({
+const { result } = await unprice.entitlements.verify({
   customerId: "cust_123",
-  featureSlug: "ai-generations",
-  usage: 5 // Check if they can consume 5 units right now
+  featureSlug: "ai-generations"
 });
 
 if (result?.allowed) {
   // 1. Perform your operation...
 
   // 2. Then report the usage to update their balance
-  await unprice.customers.reportUsage({
+  await unprice.events.ingestSync({
+    idempotencyKey: "unique-id-for-this-request",
+    eventSlug: "ai_generation",
     customerId: "cust_123",
     featureSlug: "ai-generations",
-    usage: 5,
-    idempotenceKey: "unique-id-for-this-request"
+    properties: {
+      usage: 5
+    }
   });
 }
 ```

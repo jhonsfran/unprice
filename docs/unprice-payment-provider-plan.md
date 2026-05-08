@@ -730,7 +730,7 @@ signUp()
 2. Calls `paymentProviderService.signUp()` which creates a **Stripe Checkout session in `mode: "setup"`**
 3. Returns the Stripe Checkout URL to the SDK
 4. User fills payment details on Stripe's hosted page
-5. Stripe redirects to `/v1/paymentProvider/stripe/signUp/{sessionId}/{projectId}`
+5. Stripe redirects to `/v1/payments/providers/stripe/sign-up/{sessionId}/{projectId}`
 6. The callback handler retrieves the Stripe session, upserts the customer with `stripeCustomerId`, creates the subscription + phase
 
 ### Problems with the Current Checkout
@@ -755,8 +755,8 @@ This is duplicated logic. If you add Paddle, you'd need a third copy in `paddleS
 **3. The callback route is hardcoded per provider**
 
 ```
-/v1/paymentProvider/stripe/signUp/{sessionId}/{projectId}  ← Stripe
-/v1/paymentProvider/stripe/setup/{sessionId}/{projectId}   ← Stripe setup
+/v1/payments/providers/stripe/sign-up/{sessionId}/{projectId}  ← Stripe
+/v1/payments/providers/stripe/setup/{sessionId}/{projectId}    ← Stripe setup
 ```
 
 Each new provider means a new route with duplicated provisioning logic.

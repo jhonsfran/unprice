@@ -109,6 +109,10 @@ contain compatible background; keep them aligned when changing architecture rule
   contracts.
 - If a shared contract needs a new public path, add an explicit package export instead of importing
   through an unrelated module.
+- When adding new public API SDK methods in `packages/api`, prefer generating the SDK contract from
+  the OpenAPI spec instead of hand-writing path types. From `packages/api`, run `pnpm generate` to
+  download the current OpenAPI spec, then `pnpm build` to build the package. From the repo root use
+  `pnpm --filter @unprice/api generate` and then `pnpm --filter @unprice/api build`.
 
 ## Testing And Verification
 

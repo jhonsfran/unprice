@@ -310,7 +310,7 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
         setStepStatus("verification", "working")
         const verificationEvents = [1, 1, 1, 1]
         for (const _value of verificationEvents) {
-          const verificationResponse = await fetch(`${API_DOMAIN}v1/customer/verify`, {
+          const verificationResponse = await fetch(`${API_DOMAIN}v1/entitlements/verify`, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${apiKey}`,

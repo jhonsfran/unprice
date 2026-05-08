@@ -12,7 +12,7 @@ export const createPaymentMethod = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { successUrl, cancelUrl, customerId, paymentProvider } = opts.input
 
-    const response = await unprice.customers.createPaymentMethod({
+    const response = await unprice.payments.methods.create({
       successUrl,
       cancelUrl,
       customerId,

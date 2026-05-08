@@ -47,7 +47,7 @@ export default async function PlanPage({
           label={plan.active ? "active" : "inactive"}
           action={
             <div className="flex items-center space-x-2 rounded-md">
-              <CodeApiSheet defaultMethod="listPlanVersions">
+              <CodeApiSheet defaultMethod="listVersions">
                 <Button variant={"ghost"}>
                   <Code className="mr-2 h-4 w-4" />
                   API

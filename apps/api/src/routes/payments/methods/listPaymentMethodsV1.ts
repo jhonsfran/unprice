@@ -1,0 +1,91 @@
+import { createRoute } from "@hono/zod-openapi"
+import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
+import * as HttpStatusCodes from "~/util/http-status-codes"
+
+import { customerPaymentMethodSchema, paymentProviderSchema } from "@unprice/db/validators"
+import { z } from "zod"
+import { keyAuth } from "~/auth/key"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors"
+import { openApiErrorResponses } from "~/errors/openapi-responses"
+import type { App } from "~/hono/app"
+
+const tags = ["payments"]
+
+export const route = createRoute({
+  path: "/v1/payments/methods/list",
+  operationId: "payments.methods.list",
+  summary: "list payment methods",
+  description: "Get payment methods for a customer",
+  method: "post",
+  tags,
+  request: {
+    body: jsonContentRequired(
+      z.object({
+        customerId: z.string().openapi({
+          description: "The customer ID",
+          example: "cus_1H7KQFLr7RepUyQBKdnvY",
+        }),
+        provider: paymentProviderSchema.openapi({
+          description: "The payment provider",
+          example: "stripe",
+        }),
+        skipCache: z.boolean().optional().openapi({
+          description: "Force a fresh provider lookup instead of using the cached payment methods",
+          example: true,
+        }),
+      }),
+      "Body of the request"
+    ),
+  },
+  responses: {
+    [HttpStatusCodes.OK]: jsonContent(
+      customerPaymentMethodSchema.array(),
+      "The result of the get payment methods"
+    ),
+    ...openApiErrorResponses,
+  },
+})
+
+export type ListPaymentMethodsRequest = z.infer<
+  (typeof route.request.body)["content"]["application/json"]["schema"]
+>
+
+export type ListPaymentMethodsResponse = z.infer<
+  (typeof route.responses)[200]["content"]["application/json"]["schema"]
+>
+
+export const registerListPaymentMethodsV1 = (app: App) =>
+  app.openapi(route, async (c) => {
+    const { customerId, provider, skipCache } = c.req.valid("json")
+    const { customer } = c.get("services")
+
+    // validate the request
+    await keyAuth(c)
+
+    // TODO: check this an identify key can query all customers
+    const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
+
+    if (customerDataErr) {
+      throw toUnpriceApiError(customerDataErr)
+    }
+
+    if (!customerData) {
+      throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
+    }
+
+    // get payment methods from service
+    const result = await customer.getPaymentMethods({
+      customerId: customerData.id,
+      provider,
+      projectId: customerData.projectId,
+      opts: {
+        skipCache,
+      },
+    })
+
+    if (result.err) {
+      throw toUnpriceApiError(result.err)
+    }
+
+    return c.json(result.val, HttpStatusCodes.OK)
+  })

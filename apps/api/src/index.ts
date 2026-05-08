@@ -11,22 +11,25 @@ export { DurableObjectProject } from "~/project/do"
 export { IngestionAuditDO } from "~/ingestion/audit/IngestionAuditDO"
 export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 
-import { registerCreatePaymentMethodV1 } from "./routes/customer/createPaymentMethodV1"
-import { registerGetEntitlementsV1 } from "./routes/customer/getEntitlementsV1"
-import { registerGetPaymentMethodsV1 } from "./routes/customer/getPaymentMethodsV1"
-import { registerGetSubscriptionV1 } from "./routes/customer/getSubscriptionV1"
-import { registerSignUpV1 } from "./routes/customer/signUpV1"
-import { registerVerifyV1 } from "./routes/customer/verifyV1"
+import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
+import { registerSignUpV1 } from "./routes/customers/signUpV1"
+import { registerGetEntitlementsV1 } from "./routes/entitlements/getEntitlementsV1"
+import { registerVerifyV1 } from "./routes/entitlements/verifyV1"
 import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
+import { registerGetFeaturesV1 } from "./routes/features/getFeaturesV1"
 import { registerGetLakehouseFilePlanV1 } from "./routes/lakehouse/getLakehouseFilePlanV1"
-import { registerProviderSetupV1 } from "./routes/paymentProvider/providerSetupV1"
-import { registerProviderSignUpV1 } from "./routes/paymentProvider/providerSignUpV1"
-import { registerProviderStripeConnectWebhookV1 } from "./routes/paymentProvider/providerStripeConnectWebhookV1"
-import { registerProviderWebhookV1 } from "./routes/paymentProvider/providerWebhookV1"
+import { registerCreatePaymentMethodV1 } from "./routes/payments/methods/createPaymentMethodV1"
+import { registerListPaymentMethodsV1 } from "./routes/payments/methods/listPaymentMethodsV1"
+import { registerProviderSetupV1 } from "./routes/payments/providers/providerSetupV1"
+import { registerProviderSignUpV1 } from "./routes/payments/providers/providerSignUpV1"
+import { registerProviderStripeConnectWebhookV1 } from "./routes/payments/providers/providerStripeConnectWebhookV1"
+import { registerProviderWebhookV1 } from "./routes/payments/providers/providerWebhookV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
 import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
-import { registerGetFeaturesV1 } from "./routes/project/getFeaturesV1"
+import { registerGetRealtimeTicketV1 } from "./routes/realtime/getRealtimeTicketV1"
+import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
+import { registerGetAnalyticsUsageV1 } from "./routes/usage/getUsageV1"
 
 import { env } from "cloudflare:workers"
 import type { IngestionQueueMessage } from "@unprice/services/ingestion"
@@ -35,9 +38,6 @@ import { verifyRealtimeTicket } from "~/auth/ticket"
 import { consumeIngestionBatch } from "~/ingestion/service"
 import { obs } from "~/middleware/obs"
 import { apiEvlog } from "~/observability"
-import { registerGetRealtimeTicketV1 } from "./routes/analitycs/getRealtimeTicketV1"
-import { registerGetAnalyticsUsageV1 } from "./routes/analitycs/getUsageV1"
-import { registerUpdateACLV1 } from "./routes/customer/updateACLV1"
 import { registerGetInvoiceV1 } from "./routes/invoices/getInvoiceV1"
 import { registerGetWalletV1 } from "./routes/wallet/getWalletV1"
 
@@ -124,41 +124,52 @@ app.use(
   })
 )
 
+// Access routes
+registerUpdateACLV1(app)
+
 // Customer routes
-registerIngestEventsV1(app)
-registerIngestEventsSyncV1(app)
+registerSignUpV1(app)
+
+// Entitlement routes
 registerGetEntitlementsV1(app)
 registerVerifyV1(app)
-registerGetSubscriptionV1(app)
-registerGetPaymentMethodsV1(app)
-registerSignUpV1(app)
-registerCreatePaymentMethodV1(app)
-registerUpdateACLV1(app)
-// Project routes
+
+// Event routes
+registerIngestEventsV1(app)
+registerIngestEventsSyncV1(app)
+
+// Feature routes
 registerGetFeaturesV1(app)
 
-// Plans routes
-registerGetPlanVersionV1(app)
-registerListPlanVersionsV1(app)
+// Invoice routes
+registerGetInvoiceV1(app)
 
-// Payment provider routes
+// Lakehouse routes
+registerGetLakehouseFilePlanV1(app)
+
+// Payment routes
+registerListPaymentMethodsV1(app)
+registerCreatePaymentMethodV1(app)
 registerProviderSignUpV1(app)
 registerProviderSetupV1(app)
 registerProviderWebhookV1(app)
 registerProviderStripeConnectWebhookV1(app)
 
-// Analytics routes
-registerGetAnalyticsUsageV1(app)
+// Plans routes
+registerGetPlanVersionV1(app)
+registerListPlanVersionsV1(app)
+
+// Realtime routes
 registerGetRealtimeTicketV1(app)
 
-// Lakehouse routes
-registerGetLakehouseFilePlanV1(app)
+// Subscription routes
+registerGetSubscriptionV1(app)
+
+// Usage routes
+registerGetAnalyticsUsageV1(app)
 
 // Wallet routes
 registerGetWalletV1(app)
-
-// Invoice routes
-registerGetInvoiceV1(app)
 
 // Export handler
 const handler = {

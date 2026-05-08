@@ -45,7 +45,7 @@ export const UsageChartSkeleton = ({
         </EmptyPlaceholder.Description>
         {!error && (
           <EmptyPlaceholder.Action>
-            <CodeApiSheet defaultMethod="reportUsage">
+            <CodeApiSheet defaultMethod="ingestUsage">
               <Button size={"sm"} disabled={isLoading}>
                 <Code className="mr-2 h-4 w-4" />
                 Start usage

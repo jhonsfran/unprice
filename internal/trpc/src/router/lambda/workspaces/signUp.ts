@@ -22,6 +22,7 @@ export const signUp = protectedProcedure
       name: name,
       planVersionId,
       config,
+      creditLinePolicy: "uncapped",
       successUrl,
       cancelUrl,
       externalId: workspaceId,

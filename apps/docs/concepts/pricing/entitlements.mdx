@@ -23,34 +23,36 @@ For example, if you have a feature called "Monthly Exports" with a limit of 100,
 
 Using the Unprice SDK, you can perform different types of entitlement checks:
 
-### 1. Access & Usage Check (Can)
-Check if a customer has access to a feature, and optionally check if they have enough balance for a specific amount of usage.
+### 1. Access Check
+Check if a customer has access to a feature before doing work.
 
-**Why check usage in `can`?**
-Checking usage *before* performing an action (and before reporting it) allows you to fail gracefully without creating negative usage or partial transactions if the customer is over their limit.
+**Why check access first?**
+Checking before performing an action lets you fail gracefully when the customer is not entitled to the feature.
 
 ```typescript
-const { result, error } = await unprice.customers.verify({
+const { result, error } = await unprice.entitlements.verify({
   customerId: "cust_123",
-  featureSlug: "ai-generations",
-  usage: 5 // Check if customer can consume 5 units
+  featureSlug: "ai-generations"
 });
 
 if (result?.allowed) {
   // 1. Perform the expensive operation
-  // 2. Then report the usage (see below)
+  // 2. Then ingest usage (see below)
 }
 ```
 
-### 2. Report & Verify (Atomic)
-Report usage and verify access in a single atomic call. This is the most common way to track metered features.
+### 2. Ingest & Verify (Atomic)
+Ingest usage and verify access in a single call. This is the most common way to enforce metered features.
 
 ```typescript
-const { result, error } = await unprice.customers.reportUsage({
+const { result, error } = await unprice.events.ingestSync({
+  idempotencyKey: "unique-uuid-here",
+  eventSlug: "api_request",
   customerId: "cust_123",
   featureSlug: "api-requests",
-  usage: 30,
-  idempotenceKey: "unique-uuid-here"
+  properties: {
+    usage: 30
+  }
 });
 
 if (result?.allowed) {

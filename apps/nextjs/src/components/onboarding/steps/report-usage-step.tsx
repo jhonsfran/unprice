@@ -15,6 +15,8 @@ import { useTRPC } from "~/trpc/client"
 
 interface UsageReportResponse {
   success: boolean
+  allowed?: boolean
+  state?: "processed" | "rejected"
   message?: string
   usage?: number
   featureSlug?: string
@@ -22,7 +24,7 @@ interface UsageReportResponse {
   error?: string
   code?: string
   statusCode?: number
-  deniedReason?: string
+  rejectionReason?: string
 }
 
 export function ReportUsageStep({ className }: React.ComponentProps<"div"> & StepComponentProps) {
@@ -52,20 +54,25 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
 
   const features = planVersionData?.planVersion?.planFeatures || []
   const meteredFeatures = features.filter((f) => f.featureType === "usage")
+  const selectedPlanFeature = meteredFeatures.find((f) => f.feature?.slug === selectedFeature)
+  const selectedEventSlug = selectedPlanFeature?.meterConfig?.eventSlug ?? selectedFeature
 
   // Auto-select first metered feature
   if (!selectedFeature && meteredFeatures.length > 0) {
     setSelectedFeature(meteredFeatures[0]?.feature?.slug ?? "")
   }
 
-  const curlCommand = `curl -X POST ${API_DOMAIN}v1/customer/reportUsage \\
+  const curlCommand = `curl -X POST ${API_DOMAIN}v1/events/ingest/sync \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
+    "idempotencyKey": "${crypto.randomUUID()}",
+    "eventSlug": "${selectedEventSlug}",
     "customerId": "${customerId}",
     "featureSlug": "${selectedFeature}",
-    "usage": ${usageAmount},
-    "idempotenceKey": "${crypto.randomUUID()}"
+    "properties": {
+      "usage": ${usageAmount}
+    }
   }'`
 
   const handleCopy = async () => {
@@ -84,17 +91,20 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
     setIsLoading(true)
 
     try {
-      const response = await fetch(`${API_DOMAIN}v1/customer/reportUsage`, {
+      const response = await fetch(`${API_DOMAIN}v1/events/ingest/sync`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          idempotencyKey: crypto.randomUUID(),
+          eventSlug: selectedEventSlug,
           customerId,
           featureSlug: selectedFeature,
-          usage: Number(usageAmount),
-          idempotenceKey: crypto.randomUUID(),
+          properties: {
+            usage: Number(usageAmount),
+          },
         }),
       })
 
@@ -110,7 +120,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
         toast.error(data.message || "Request failed")
       } else {
         setReportResult(data)
-        toast.success("Usage reported successfully!")
+        toast.success("Usage ingested successfully!")
       }
       setResultKey((prev) => prev + 1)
     } catch (error) {
@@ -257,7 +267,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
                       <>
                         <XCircle className="h-5 w-5 text-red-500" />
                         <CardTitle className="text-red-600">
-                          {reportResult.deniedReason ? "Usage Denied" : "Request Failed"}
+                          {reportResult.rejectionReason ? "Usage Denied" : "Request Failed"}
                         </CardTitle>
                         {reportResult.statusCode && (
                           <span className="rounded bg-red-100 px-2 py-0.5 font-mono text-red-600 text-xs">

@@ -9,7 +9,7 @@ The Unprice API uses HTTP methods and generally follow the schema:
 https://api.unprice.dev/{version}/{service}/{method}
 ```
 
-For example `GET https://api.unprice.dev/v1/plans/getPlanVersion` to get the configuration of a plan.
+For example `GET https://api.unprice.dev/v1/plans/versions/get/{planVersionId}` to get the configuration of a plan.
 
 ## HTTP Methods
 
@@ -20,7 +20,7 @@ We strictly use only `GET` and `POST` methods. `PUT` and `DELETE` are not used.
 `GET` methods are used for reading data. Filtering, sorting, or pagination is done via query parameters.
 
 ```http
-curl "https://api.unprice.dev/v1/plans/getPlanVersion/plan_123"
+curl "https://api.unprice.dev/v1/plans/versions/get/plan_123"
   -H "Authorization: Bearer <API_KEY>"
 ```
 
@@ -30,7 +30,7 @@ curl "https://api.unprice.dev/v1/plans/getPlanVersion/plan_123"
 `POST` methods are used for creating, updating, and deleting data. Data is passed as `application/json` in the request body.
 
 ```http
-curl -XPOST "https://api.unprice.dev/v1/plans/listPlanVersions"
+curl -XPOST "https://api.unprice.dev/v1/plans/versions/list"
   -H "Authorization: Bearer <API_KEY>"
   -H "Content-Type: application/json"
   -d '{

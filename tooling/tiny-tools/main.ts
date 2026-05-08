@@ -174,7 +174,7 @@ let ingestionUnavailableReason: string | null = null
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 test("subscription: is active", async () => {
-  const { result, error } = await unprice.customers.getSubscription({
+  const { result, error } = await unprice.subscriptions.get({
     customerId: CUSTOMER_ID,
   })
 
@@ -190,7 +190,7 @@ test("subscription: is active", async () => {
 })
 
 test("entitlements: fetches list", async () => {
-  const { result, error } = await unprice.customers.getEntitlements({
+  const { result, error } = await unprice.entitlements.get({
     customerId: CUSTOMER_ID,
   })
 
@@ -218,7 +218,7 @@ test("verification: verify all entitlements", async () => {
   assert(entitlements.length > 0, "no entitlements loaded (did previous test fail?)")
 
   for (const ent of entitlements) {
-    const { result, error } = await unprice.customers.verify({
+    const { result, error } = await unprice.entitlements.verify({
       customerId: CUSTOMER_ID,
       featureSlug: ent.featureSlug,
     })
@@ -262,7 +262,7 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
   }
 
   // 1. Verify before ingestion
-  const before = await unprice.customers.verify({
+  const before = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -301,7 +301,7 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
   assert(ingestResult.result?.allowed === true, `ingestSync rejected: ${rejectionReason}`)
 
   // 4. Verify after ingestion — usage should have changed
-  const after = await unprice.customers.verify({
+  const after = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -336,7 +336,7 @@ test("async-ingestion: ingest and poll for eventual consistency", async () => {
   }
 
   // 1. Verify before
-  const before = await unprice.customers.verify({
+  const before = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -372,7 +372,7 @@ test("async-ingestion: ingest and poll for eventual consistency", async () => {
   while (Date.now() < deadline) {
     await sleep(500)
 
-    const check = await unprice.customers.verify({
+    const check = await unprice.entitlements.verify({
       customerId: CUSTOMER_ID,
       featureSlug: usageFeature.featureSlug,
     })
@@ -405,7 +405,7 @@ test("idempotency: duplicate key is deduplicated", async () => {
   }
 
   // 1. Verify baseline
-  const before = await unprice.customers.verify({
+  const before = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -444,7 +444,7 @@ test("idempotency: duplicate key is deduplicated", async () => {
   assert(!second.error, `second ingest error: ${second.error?.message}`)
 
   // 3. Verify usage increased only once
-  const after = await unprice.customers.verify({
+  const after = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -477,7 +477,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
   }
 
   // 1. Check current state
-  const check = await unprice.customers.verify({
+  const check = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -562,7 +562,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
 })
 
 test("analytics: getUsage returns data", async () => {
-  const { result, error } = await unprice.analytics.getUsage({
+  const { result, error } = await unprice.usage.get({
     customer_id: CUSTOMER_ID,
     range: "24h",
   })
@@ -583,7 +583,7 @@ test("analytics: getUsage returns data", async () => {
 
 test("verification: non-existent feature returns proper error", async () => {
   const fakeSlug = `fake_feature_${Date.now()}`
-  const { result, error } = await unprice.customers.verify({
+  const { result, error } = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
     featureSlug: fakeSlug,
   })
@@ -610,7 +610,7 @@ test("verification: non-existent feature returns proper error", async () => {
 
 test("verification: non-existent customer returns proper error", async () => {
   const fakeCustomer = `cus_fake_${Date.now()}`
-  const { result, error } = await unprice.customers.verify({
+  const { result, error } = await unprice.entitlements.verify({
     customerId: fakeCustomer,
     featureSlug: entitlements[0]?.featureSlug ?? "any",
   })

@@ -1,0 +1,48 @@
+---
+title: "Get"
+description: "Get wallet balances and active credits for a customer"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.wallet.get({
+  customerId: "cus_1234567890"
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "currency": "USD",
+  "available": {
+    "total": {
+      "ledger_amount": 100000000,
+      "amount": "1.00000000",
+      "currency": "USD",
+      "display_amount": "$1.00000000"
+    }
+  },
+  "credits": []
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField query="customerId" type="string" required>
+    The customer ID to load wallet state for.
+</ParamField>
+
+<ParamField query="projectId" type="string">
+    Optional project ID. Only main-project keys can request another project.
+</ParamField>

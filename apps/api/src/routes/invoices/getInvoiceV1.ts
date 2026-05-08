@@ -49,7 +49,7 @@ const invoiceResponseSchema = z.object({
 
 export const route = createRoute({
   path: "/v1/invoices/{invoiceId}",
-  operationId: "invoices.getInvoice",
+  operationId: "invoices.get",
   summary: "get invoice",
   description:
     "Fetch an invoice header along with its line items projected from the ledger. Amounts are at pgledger scale 8 ($1 = 100_000_000). Provider calls convert to currency minor units at the provider boundary.",

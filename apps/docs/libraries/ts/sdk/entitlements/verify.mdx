@@ -1,0 +1,68 @@
+---
+title: "Verify"
+description: "Check the current feature entitlement status for a customer"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.entitlements.verify({
+  customerId: "cus_1234567890",
+  featureSlug: "tokens"
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "allowed": true,
+  "status": "usage",
+  "featureSlug": "tokens",
+  "featureType": "usage",
+  "usage": 42,
+  "limit": 100,
+  "isLimitReached": false
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="customerId" type="string" required>
+    The customer ID to check.
+</ParamField>
+
+<ParamField body="featureSlug" type="string" required>
+    The feature slug to verify.
+</ParamField>
+
+<ParamField body="timestamp" type="number">
+    Optional epoch-millisecond timestamp for a recent point-in-time check.
+</ParamField>
+
+## Response
+
+<ResponseField name="allowed" type="boolean" required>
+    Whether the feature is usable for the customer at the requested timestamp.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+    The resolved entitlement status.
+</ResponseField>
+
+<ResponseField name="usage" type="number">
+    Current usage for usage-based features.
+</ResponseField>
+
+<ResponseField name="limit" type="number">
+    Configured limit for usage-based features, or `null` when unlimited.
+</ResponseField>
