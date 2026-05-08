@@ -1,5 +1,17 @@
 import { randomUUID } from "node:crypto"
-import { Unprice } from "@unprice/api"
+import { Unprice, type paths } from "@unprice/api"
+
+type GetEntitlementsResponse =
+  paths["/v1/entitlements/get"]["post"]["responses"]["200"]["content"]["application/json"]
+type CustomerEntitlement = GetEntitlementsResponse[number]
+type MeterConfig = NonNullable<CustomerEntitlement["featurePlanVersion"]["meterConfig"]>
+type AggregationMethod = MeterConfig["aggregationMethod"]
+type UsageFeature = {
+  featureSlug: string
+  eventSlug: string
+  aggregationMethod: AggregationMethod
+  aggregationField?: string
+}
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -75,14 +87,29 @@ function normalizeEntitlement(entitlement: unknown): { id: string; featureSlug: 
   }
 }
 
+function getMeterConfigFromEntitlement(entitlement: CustomerEntitlement): MeterConfig | null {
+  return entitlement.featurePlanVersion.meterConfig ?? null
+}
+
+function getUsageFeatureFromEntitlement(entitlement: CustomerEntitlement): UsageFeature | null {
+  const featureSlug = getFeatureSlug(entitlement)
+  const meterConfig = getMeterConfigFromEntitlement(entitlement)
+
+  if (!featureSlug || !meterConfig?.eventSlug) {
+    return null
+  }
+
+  return {
+    featureSlug,
+    eventSlug: meterConfig.eventSlug,
+    aggregationMethod: meterConfig.aggregationMethod,
+    aggregationField: meterConfig.aggregationField,
+  }
+}
+
 function buildIngestionProperties(
   usage: number,
-  meterConfig:
-    | {
-        aggregationMethod: "sum" | "count" | "max" | "latest"
-        aggregationField?: string
-      }
-    | undefined
+  meterConfig: Pick<MeterConfig, "aggregationMethod" | "aggregationField"> | undefined
 ): Record<string, unknown> | null {
   if (!meterConfig) return null
   if (meterConfig.aggregationMethod === "count") return {}
@@ -163,12 +190,7 @@ async function runTests() {
 
 let entitlements: Array<{ id: string; featureSlug: string }> = []
 // pick a usage-based feature for ingestion tests
-let usageFeature: {
-  featureSlug: string
-  eventSlug: string
-  aggregationMethod: string
-  aggregationField?: string
-} | null = null
+let usageFeature: UsageFeature | null = null
 let ingestionUnavailableReason: string | null = null
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -202,6 +224,9 @@ test("entitlements: fetches list", async () => {
   const normalizedEntitlements = (result ?? [])
     .map((entitlement) => normalizeEntitlement(entitlement))
     .filter((entitlement): entitlement is { id: string; featureSlug: string } => !!entitlement)
+  const usageFeatures = (result ?? [])
+    .map((entitlement) => getUsageFeatureFromEntitlement(entitlement))
+    .filter((feature): feature is UsageFeature => !!feature)
 
   assert(
     normalizedEntitlements.length === result?.length,
@@ -209,6 +234,8 @@ test("entitlements: fetches list", async () => {
   )
 
   entitlements = normalizedEntitlements
+  usageFeature = usageFeatures[0] ?? null
+
   console.info(
     `    found ${entitlements.length} entitlements: ${entitlements.map((e) => e.featureSlug).join(", ")}`
   )
@@ -229,17 +256,6 @@ test("verification: verify all entitlements", async () => {
       typeof result?.allowed === "boolean",
       `verify ${ent.featureSlug}: allowed should be boolean`
     )
-    assert(!!result?.status, `verify ${ent.featureSlug}: status should exist`)
-
-    // discover a usage-based feature for ingestion tests
-    if (result?.meterConfig?.eventSlug && !usageFeature) {
-      usageFeature = {
-        featureSlug: ent.featureSlug,
-        eventSlug: result?.meterConfig?.eventSlug,
-        aggregationMethod: result.meterConfig.aggregationMethod,
-        aggregationField: result?.meterConfig?.aggregationField,
-      }
-    }
   }
 
   if (usageFeature) {
@@ -555,9 +571,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
     )
     console.info(`    ingestion rejected at limit (${currentUsage}/${limit})`)
   } else {
-    console.info(
-      `    overage allowed (strategy: ${check.result?.overageStrategy}), usage=${currentUsage + overshoot}/${limit}`
-    )
+    console.info(`    overage allowed, usage=${currentUsage + overshoot}/${limit}`)
   }
 })
 
@@ -601,11 +615,11 @@ test("verification: non-existent feature returns proper error", async () => {
     `fake feature should not be allowed, got allowed=${result.allowed}`
   )
   assert(
-    result.status === "feature_missing" || result.status === "feature_inactive",
-    `expected feature_missing|feature_inactive, got ${result.status}`
+    result.rejectionReason === "NO_MATCHING_ENTITLEMENT",
+    `expected NO_MATCHING_ENTITLEMENT, got ${result.rejectionReason ?? "unknown"}`
   )
 
-  console.info(`    correctly denied: status=${result.status}`)
+  console.info(`    correctly denied: rejectionReason=${result.rejectionReason}`)
 })
 
 test("verification: non-existent customer returns proper error", async () => {
@@ -623,11 +637,11 @@ test("verification: non-existent customer returns proper error", async () => {
   assert(!!result, "result should exist")
   assert(result?.allowed === false, "fake customer should not be allowed")
   assert(
-    result.status === "customer_not_found",
-    `expected customer_not_found, got ${result.status}`
+    result.rejectionReason === "CUSTOMER_NOT_FOUND",
+    `expected CUSTOMER_NOT_FOUND, got ${result.rejectionReason ?? "unknown"}`
   )
 
-  console.info(`    correctly denied: status=${result.status}`)
+  console.info(`    correctly denied: rejectionReason=${result.rejectionReason}`)
 })
 
 // ─── Run ─────────────────────────────────────────────────────────────────────

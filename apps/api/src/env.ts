@@ -61,7 +61,8 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       CLOUDFLARE_API_TOKEN: z.string().optional(),
       CLOUDFLARE_ACCOUNT_ID: z.string(),
       CLOUDFLARE_CACHE_DOMAIN: z.string().optional(),
-      PIPELINE_EVENTS: cloudflarePipeline,
+      LOCAL_PIPELINE_URL: z.string().url().optional(),
+      PIPELINE_EVENTS: cloudflarePipeline.optional(),
       QUEUE_SHARD_0: cloudflareQueue,
       QUEUE_SHARD_1: cloudflareQueue,
       LAKEHOUSE: cloudflareR2Bucket,
@@ -81,6 +82,10 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       throw new Error(`Invalid environment variables in API: ${JSON.stringify(issues, null, 2)}`)
     },
   })
+
+  if (parsedEnv.APP_ENV !== "development" && !parsedEnv.PIPELINE_EVENTS) {
+    throw new Error("PIPELINE_EVENTS binding is required outside development")
+  }
 
   return {
     ...parsedEnv,

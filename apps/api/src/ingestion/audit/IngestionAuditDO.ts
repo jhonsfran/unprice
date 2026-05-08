@@ -1,4 +1,4 @@
-import type { Pipeline } from "cloudflare:pipelines"
+import type { Pipeline, PipelineRecord } from "cloudflare:pipelines"
 import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import type { AppLogger } from "@unprice/observability"
@@ -38,12 +38,16 @@ type CommitResult = {
 export class IngestionAuditDO extends DurableObject {
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly ready: Promise<void>
-  private readonly pipelineEvents: Pipeline
+  private readonly appEnv?: string
+  private readonly localPipelineUrl?: string
+  private readonly pipelineEvents?: Pipeline<PipelineRecord>
   private readonly logger: AppLogger
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env)
-    this.pipelineEvents = env.PIPELINE_EVENTS!
+    this.appEnv = env.APP_ENV?.trim()
+    this.localPipelineUrl = env.LOCAL_PIPELINE_URL?.trim()
+    this.pipelineEvents = env.PIPELINE_EVENTS
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
 
     const requestId = this.ctx.id.toString()
@@ -207,12 +211,12 @@ export class IngestionAuditDO extends DurableObject {
     }
 
     try {
-      const events = rows.map((row) => {
+      const events = rows.map((row): PipelineRecord => {
         const payload = JSON.parse(row.auditPayloadJson)
-        return parseLakehouseEvent("events", payload)
+        return parseLakehouseEvent("events", payload) as PipelineRecord
       })
 
-      await this.pipelineEvents.send(events)
+      await this.publishEvents(events)
 
       const now = Date.now()
       for (const row of rows) {
@@ -228,6 +232,43 @@ export class IngestionAuditDO extends DurableObject {
       return true
     } catch {
       return false
+    }
+  }
+
+  private async publishEvents(events: PipelineRecord[]): Promise<void> {
+    const localPipelineUrl = this.resolveLocalPipelineUrl()
+
+    if (localPipelineUrl) {
+      await this.sendToLocalPipeline(localPipelineUrl, events)
+      return
+    }
+
+    if (!this.pipelineEvents) {
+      throw new Error("PIPELINE_EVENTS binding is required when LOCAL_PIPELINE_URL is not set")
+    }
+
+    await this.pipelineEvents.send(events)
+  }
+
+  private resolveLocalPipelineUrl(): string | null {
+    if (this.appEnv && this.appEnv !== "development") {
+      return null
+    }
+
+    return this.localPipelineUrl && this.localPipelineUrl.length > 0 ? this.localPipelineUrl : null
+  }
+
+  private async sendToLocalPipeline(url: string, events: PipelineRecord[]): Promise<void> {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(events),
+    })
+
+    if (!response.ok) {
+      throw new Error(`local pipeline sink failed with status ${response.status}`)
     }
   }
 

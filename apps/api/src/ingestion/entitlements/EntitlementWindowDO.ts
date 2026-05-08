@@ -269,13 +269,18 @@ type PricedFact = {
 type FinalFlushResult =
   | {
       ok: true
-      outcome: "no_reservation" | "success"
+      outcome: "deferred" | "no_reservation" | "success"
+      reason?: "deletion_requested" | "pending_wallet_flush" | "recovery_required"
     }
   | {
       errorMessage?: string
       ok: false
       outcome: "exception" | "wallet_error"
     }
+
+type FinalFlushOptions = {
+  allowDeletionRequested?: boolean
+}
 
 const FLUSH_BATCH_SIZE = 500
 const FLUSH_INTERVAL_MS = 30_000
@@ -776,11 +781,7 @@ export class EntitlementWindowDO extends DurableObject {
               })
               .run()
 
-            // if limit exceeded, we should try to flush the reservation
-            const window = this.readWalletReservation(this.db)
-            if (window?.reservationId && !window.recoveryRequired && !window.deletionRequested) {
-              this.ctx.waitUntil(this.finalFlushInner(window))
-            }
+            this.ctx.waitUntil(this.finalFlush())
             result = deniedResult
             return deniedResult
           }
@@ -806,11 +807,7 @@ export class EntitlementWindowDO extends DurableObject {
               })
               .run()
 
-            // if wallet empty, we should try to flush the reservation
-            const window = this.readWalletReservation(this.db)
-            if (window?.reservationId && !window.recoveryRequired && !window.deletionRequested) {
-              this.ctx.waitUntil(this.finalFlushInner(window))
-            }
+            this.ctx.waitUntil(this.finalFlush())
 
             result = deniedResult
             return deniedResult
@@ -929,6 +926,13 @@ export class EntitlementWindowDO extends DurableObject {
       throw new Error("No currency found for entitlement")
     }
 
+    const isLimitReached =
+      overageStrategy !== "always" && limit !== null && Number.isFinite(available) && available <= 0
+
+    if (isLimitReached) {
+      this.ctx.waitUntil(this.finalFlush())
+    }
+
     return {
       usage,
       limit,
@@ -937,11 +941,7 @@ export class EntitlementWindowDO extends DurableObject {
         ledgerAmount: spendingAmount,
         scale: LEDGER_SCALE,
       },
-      isLimitReached:
-        overageStrategy !== "always" &&
-        limit !== null &&
-        Number.isFinite(available) &&
-        available <= 0,
+      isLimitReached,
     }
   }
 
@@ -1074,7 +1074,9 @@ export class EntitlementWindowDO extends DurableObject {
           }
 
           if (!hasPendingWalletFlush) {
-            const finalFlushResult = await this.finalFlush(window)
+            const finalFlushResult = await this.finalFlush({
+              allowDeletionRequested: isDeletionPending,
+            })
             wideEvent.final_flush_ok = finalFlushResult.ok
             wideEvent.final_flush_outcome = finalFlushResult.outcome
             if (!finalFlushResult.ok) {
@@ -1309,56 +1311,72 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   // Slice 7.7 final flush: recognize the unflushed tail of consumed and
-  // return any reserved remainder back to `available.purchased`. Runs
-  // from alarm() only after checking no refill is already in flight. We bump
-  // `flushSeq`, park `pendingFlushSeq`, and set `refillInFlight` before
-  // external wallet I/O so other alarm work does not race the closeout.
+  // return any reserved remainder back to `available.purchased`. Callers can
+  // schedule this path without pre-reading the reservation; the helper owns
+  // the recovery/deletion/pending-flush guards. We bump `flushSeq`, park
+  // `pendingFlushSeq`, and set `refillInFlight` before external wallet I/O
+  // so other alarm work does not race the closeout.
   // WalletService treats `flushAmount == 0` as "skip the recognize leg", so a
   // no-activity period end or a deletion without any events is cheap — only
   // the refund leg fires.
-  private async finalFlush(
-    window: NonNullable<ReturnType<typeof this.readWalletReservation>>
-  ): Promise<FinalFlushResult> {
+  private async finalFlush(options: FinalFlushOptions = {}): Promise<FinalFlushResult> {
     return runDoOperation(
       {
         requestId: this.ctx.id.toString(),
         service: "entitlementwindow",
         operation: "final_flush",
         waitUntil: (p) => this.ctx.waitUntil(p),
-        baseFields: {
-          reservation_id: window.reservationId,
-          project_id: window.projectId,
-          customer_id: window.customerId,
-          currency: window.currency,
-          reservation_end_at: window.reservationEndAt,
-        },
       },
-      async () => this.finalFlushInner(window)
+      async () => this.finalFlushInner(options)
     )
   }
 
-  private async finalFlushInner(
-    window: NonNullable<ReturnType<typeof this.readWalletReservation>>
-  ): Promise<FinalFlushResult> {
+  private async finalFlushInner(options: FinalFlushOptions): Promise<FinalFlushResult> {
     const startTime = Date.now()
+    const window = this.readWalletReservation(this.db)
     const wideEvent: Record<string, unknown> = {
       operation: "final_flush",
-      reservation_id: window.reservationId,
-      project_id: window.projectId,
-      customer_id: window.customerId,
-      currency: window.currency,
-      reservation_end_at: window.reservationEndAt,
+      reservation_id: window?.reservationId ?? null,
+      project_id: window?.projectId ?? null,
+      customer_id: window?.customerId ?? null,
+      currency: window?.currency ?? null,
+      reservation_end_at: window?.reservationEndAt ?? null,
     }
 
     try {
-      if (!window.reservationId || !window.projectId || !window.customerId) {
-        this.logger.error("final flush requested without a reservation", {
+      if (!window?.reservationId) {
+        wideEvent.outcome = "no_reservation"
+        return { ok: true, outcome: "no_reservation" }
+      }
+
+      if (!window.projectId || !window.customerId) {
+        this.logger.error("final flush requested without reservation identifiers", {
           reservationId: window.reservationId,
           projectId: window.projectId,
           customerId: window.customerId,
         })
         wideEvent.outcome = "no_reservation"
         return { ok: true, outcome: "no_reservation" }
+      }
+
+      if (window.recoveryRequired) {
+        wideEvent.outcome = "deferred"
+        wideEvent.reason = "recovery_required"
+        return { ok: true, outcome: "deferred", reason: "recovery_required" }
+      }
+
+      if (window.deletionRequested && !options.allowDeletionRequested) {
+        wideEvent.outcome = "deferred"
+        wideEvent.reason = "deletion_requested"
+        return { ok: true, outcome: "deferred", reason: "deletion_requested" }
+      }
+
+      if (this.hasPendingWalletFlush(window)) {
+        wideEvent.outcome = "deferred"
+        wideEvent.reason = "pending_wallet_flush"
+        wideEvent.pending_flush_seq = window.pendingFlushSeq
+        wideEvent.refill_in_flight = window.refillInFlight
+        return { ok: true, outcome: "deferred", reason: "pending_wallet_flush" }
       }
 
       const unflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
@@ -1437,8 +1455,8 @@ export class EntitlementWindowDO extends DurableObject {
     } catch (error) {
       this.logger.error(error, {
         context: "final flush threw unexpectedly",
-        flushSeq: window.flushSeq + 1,
-        reservationId: window.reservationId,
+        flushSeq: window ? window.flushSeq + 1 : null,
+        reservationId: window?.reservationId ?? null,
       })
       this.db
         .update(walletReservationTable)

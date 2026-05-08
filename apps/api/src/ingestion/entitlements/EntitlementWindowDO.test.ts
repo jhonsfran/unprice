@@ -1114,7 +1114,7 @@ describe("EntitlementWindowDO", () => {
     })
   })
 
-  it("does not close an active reservation from enforcement state reads", async () => {
+  it("closes an active reservation asynchronously when enforcement state reaches the limit", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1163,9 +1163,82 @@ describe("EntitlementWindowDO", () => {
     })
 
     expect(result).toMatchObject({ usage: 10, limit: 10, isLimitReached: true })
+    expect(state.waitUntilPromises).toHaveLength(1)
+
+    await Promise.all(state.waitUntilPromises)
+
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "res_verify_limit",
+        flushSeq: 5,
+        flushAmount: 2 * 100_000_000,
+        refillChunkAmount: 0,
+        final: true,
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
+  })
+
+  it("defers verify-path final flush when a wallet flush is already pending", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.grantWindowRows.set("grant_123:onetime:1773921540000", {
+      bucketKey: "grant_123:onetime:1773921540000",
+      grantId: "grant_123",
+      periodKey: "onetime:1773921540000",
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 10,
+      exhaustedAt: null,
+    })
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      reservationEndAt: BASE_NOW + 60_000,
+      usage: 10,
+      updatedAt: BASE_NOW,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_verify_pending",
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 10 * 100_000_000,
+      flushedAmount: 8 * 100_000_000,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 100_000_000,
+      refillInFlight: true,
+      flushSeq: 4,
+      pendingFlushSeq: 4,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: BASE_NOW - 30_000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const applyInput = createApplyInput({ limit: 10 })
+    const result = await durableObject.getEnforcementState({
+      entitlement: applyInput.entitlement,
+      grants: applyInput.grants,
+      now: BASE_NOW,
+    })
+
+    expect(result).toMatchObject({ usage: 10, limit: 10, isLimitReached: true })
+    expect(state.waitUntilPromises).toHaveLength(1)
+
+    await Promise.all(state.waitUntilPromises)
+
     expect(testState.flushReservation).not.toHaveBeenCalled()
-    expect(state.waitUntilPromises).toHaveLength(0)
-    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBe("res_verify_limit")
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
+      reservationId: "res_verify_pending",
+      refillInFlight: true,
+      pendingFlushSeq: 4,
+      flushSeq: 4,
+    })
   })
 
   it("does not write grant-window usage when an oversized event is rejected", async () => {

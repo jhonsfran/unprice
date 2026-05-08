@@ -79,6 +79,9 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
   optional uppercase `rejectionReason` from `INGESTION_REJECTION_REASONS`, optional
   `usage`/`limit`, and optional `spending` with `displayAmount`; do not expose internal entitlement
   metadata like meter config, overage strategy, effective windows, or synthetic status.
+- Tiny-tools usage discovery should read `featurePlanVersion.meterConfig` from
+  `entitlements.get`, then call `entitlements.verify` only for `allowed`, `usage`, `limit`, and
+  `rejectionReason`.
 
 ## 2026-05-08: Sync Ingestion Idempotency Replay
 
@@ -113,13 +116,21 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
 - Entitlement reservation `allocation_amount` is wallet runway, not consumed usage. It can exceed
   `consumed_amount` after a refill; explain it as initial reserve plus refill chunks minus flushed
   consumption, and keep the DO id in reservation metadata for traceability.
-- When usage reporting reaches an entitlement limit, close any active wallet reservation by
-  scheduling the DO final-flush path. Do not close reservations from verify/enforcement-state reads.
+- When usage reporting or entitlement verification observes a reached finite entitlement limit,
+  close any active wallet reservation by scheduling the DO final-flush path. Keep recovery,
+  deletion-cleanup, and pending wallet-flush skip guards inside the final-flush helper.
 - `WALLET_EMPTY` from `EntitlementWindowDO` can mean the DO-local reservation is underfunded, not
   that the customer wallet is empty. Before caching `WALLET_EMPTY`, synchronously flush+refill the
   reservation once from `WalletService`; only deny when the wallet cannot grant enough runway.
 - Prefer `wallet.balance` / `/v1/wallet/balance` for the public read surface. Keep `/v1/wallet` as
   a compatibility alias, and use `/v1/wallet/credits/{walletId}/balance` for one `wcr_...` credit.
+
+## 2026-05-08: Subscription Phase Credit Policy Immutability
+
+- Once a subscription phase is saved, keep its `creditLinePolicy` and `creditLineAmount`
+  immutable. The dashboard should show the saved values as disabled controls, and
+  `SubscriptionService.updatePhase` should preserve the stored values because wallet grants and
+  billing periods may already have been created from the original policy.
 
 ## 2026-05-08: API SDK Endpoint Drift Guard
 

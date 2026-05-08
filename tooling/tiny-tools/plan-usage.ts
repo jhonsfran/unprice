@@ -1,10 +1,17 @@
 import { randomUUID } from "node:crypto"
 import { Unprice, type paths } from "@unprice/api"
 
-type VerifyResponse =
-  paths["/v1/entitlements/verify"]["post"]["responses"]["200"]["content"]["application/json"]
-type MeterConfig = NonNullable<VerifyResponse["meterConfig"]>
+type GetEntitlementsResponse =
+  paths["/v1/entitlements/get"]["post"]["responses"]["200"]["content"]["application/json"]
+type CustomerEntitlement = GetEntitlementsResponse[number]
+type MeterConfig = NonNullable<CustomerEntitlement["featurePlanVersion"]["meterConfig"]>
 type AggregationMethod = MeterConfig["aggregationMethod"]
+type UsageFeature = {
+  featureSlug: string
+  eventSlug: string
+  aggregationMethod: AggregationMethod
+  aggregationField?: string
+}
 
 const UNPRICE_TOKEN = process.env.UNPRICE_TOKEN || ""
 const UNPRICE_API_URL = process.env.UNPRICE_API_URL || "http://localhost:8787"
@@ -37,12 +44,7 @@ const unprice = new Unprice({
   baseUrl: UNPRICE_API_URL,
 })
 
-let selectedUsageFeature: {
-  featureSlug: string
-  eventSlug: string
-  aggregationMethod: AggregationMethod
-  aggregationField?: string
-} | null = null
+let selectedUsageFeature: UsageFeature | null = null
 let currentUsage = 0
 let currentLimit: number | null | undefined = null
 let singleUsageBefore = 0
@@ -109,6 +111,26 @@ function getFeatureSlugFromEntitlement(entitlement: unknown): string | null {
 
   const nestedSlug = feature.slug
   return typeof nestedSlug === "string" && nestedSlug.trim() ? nestedSlug : null
+}
+
+function getMeterConfigFromEntitlement(entitlement: CustomerEntitlement): MeterConfig | null {
+  return entitlement.featurePlanVersion.meterConfig ?? null
+}
+
+function getUsageFeatureFromEntitlement(entitlement: CustomerEntitlement): UsageFeature | null {
+  const featureSlug = getFeatureSlugFromEntitlement(entitlement)
+  const meterConfig = getMeterConfigFromEntitlement(entitlement)
+
+  if (!featureSlug || !meterConfig?.eventSlug) {
+    return null
+  }
+
+  return {
+    featureSlug,
+    eventSlug: meterConfig.eventSlug,
+    aggregationMethod: meterConfig.aggregationMethod,
+    aggregationField: meterConfig.aggregationField,
+  }
 }
 
 function buildIngestionProperties(
@@ -266,11 +288,6 @@ async function step(name: string, fn: () => Promise<void>): Promise<void> {
 }
 
 async function discoverUsageFeature(): Promise<void> {
-  if (FEATURE_SLUG) {
-    await selectUsageFeature(FEATURE_SLUG)
-    return
-  }
-
   const { result, error } = await unprice.entitlements.get({
     customerId: CUSTOMER_ID,
   })
@@ -283,11 +300,26 @@ async function discoverUsageFeature(): Promise<void> {
   const featureSlugs = result
     .map((entitlement) => getFeatureSlugFromEntitlement(entitlement))
     .filter((featureSlug): featureSlug is string => !!featureSlug)
+  const usageFeatures = result
+    .map((entitlement) => getUsageFeatureFromEntitlement(entitlement))
+    .filter((feature): feature is UsageFeature => !!feature)
 
   assert(featureSlugs.length > 0, "could not resolve any feature slugs from customer entitlements")
 
-  for (const featureSlug of featureSlugs) {
-    const selected = await trySelectUsageFeature(featureSlug, { requireAllowed: false })
+  if (FEATURE_SLUG) {
+    const feature = usageFeatures.find((usageFeature) => usageFeature.featureSlug === FEATURE_SLUG)
+    assert(
+      feature,
+      `feature ${FEATURE_SLUG} is not a usage entitlement with meterConfig.eventSlug for customer ${CUSTOMER_ID}. Entitlements: ${featureSlugs.join(
+        ", "
+      )}`
+    )
+    await selectUsageFeature(feature)
+    return
+  }
+
+  for (const usageFeature of usageFeatures) {
+    const selected = await trySelectUsageFeature(usageFeature, { requireAllowed: false })
     if (selected) {
       return
     }
@@ -300,46 +332,49 @@ async function discoverUsageFeature(): Promise<void> {
   )
 }
 
-async function selectUsageFeature(featureSlug: string): Promise<void> {
-  const selected = await trySelectUsageFeature(featureSlug, { requireAllowed: true })
+async function selectUsageFeature(feature: UsageFeature): Promise<void> {
+  const selected = await trySelectUsageFeature(feature, { requireAllowed: true })
   assert(
     selected,
-    `feature ${featureSlug} is not an allowed usage feature with meterConfig.eventSlug for customer ${CUSTOMER_ID}`
+    `feature ${feature.featureSlug} is not an allowed usage feature for customer ${CUSTOMER_ID}`
   )
 }
 
 async function trySelectUsageFeature(
-  featureSlug: string,
+  feature: UsageFeature,
   opts: { requireAllowed: boolean }
 ): Promise<boolean> {
   const { result, error } = await unprice.entitlements.verify({
     customerId: CUSTOMER_ID,
-    featureSlug,
+    featureSlug: feature.featureSlug,
   })
 
-  if (error || !result?.meterConfig?.eventSlug) {
+  if (error) {
+    assert(!opts.requireAllowed, `verify ${feature.featureSlug} error: ${error.message}`)
+    return false
+  }
+
+  if (!result) {
+    assert(!opts.requireAllowed, `verify ${feature.featureSlug} result should exist`)
     return false
   }
 
   if (result.allowed !== true) {
     assert(
       !opts.requireAllowed,
-      `usage feature ${featureSlug} is not allowed, status=${result.status}`
+      `usage feature ${feature.featureSlug} is not allowed, rejectionReason=${
+        result.rejectionReason ?? "unknown"
+      }`
     )
     return false
   }
 
-  selectedUsageFeature = {
-    featureSlug,
-    eventSlug: result.meterConfig.eventSlug,
-    aggregationMethod: result.meterConfig.aggregationMethod,
-    aggregationField: result.meterConfig.aggregationField,
-  }
+  selectedUsageFeature = feature
   currentUsage = result.usage ?? 0
   currentLimit = result.limit
 
   console.info(
-    `    feature: ${featureSlug} (${selectedUsageFeature.eventSlug}, ${selectedUsageFeature.aggregationMethod})`
+    `    feature: ${feature.featureSlug} (${selectedUsageFeature.eventSlug}, ${selectedUsageFeature.aggregationMethod})`
   )
   console.info(`    baseline: usage=${currentUsage}, limit=${currentLimit ?? "none"}`)
   return true

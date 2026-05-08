@@ -131,6 +131,7 @@ export function SubscriptionPhaseForm({
   )
   const selectedCurrency = selectedPlanVersion?.currency ?? "USD"
   const creditLinePolicy = form.watch("creditLinePolicy")
+  const isCreditLinePolicyDisabled = editMode || !selectedPlanVersion
   const trialUnitLabel = selectedPlanVersion
     ? getTrialUnitLabel({
         billingInterval: selectedPlanVersion.billingConfig.billingInterval,
@@ -195,7 +196,7 @@ export function SubscriptionPhaseForm({
                     }
                   }}
                   value={field.value ?? "uncapped"}
-                  disabled={!selectedPlanVersion}
+                  disabled={isCreditLinePolicyDisabled}
                 >
                   <FormControl>
                     <SelectTrigger>
@@ -234,13 +235,15 @@ export function SubscriptionPhaseForm({
                     value={field.value}
                     onChange={field.onChange}
                     currency={selectedCurrency}
-                    disabled={!selectedPlanVersion || creditLinePolicy === "uncapped"}
+                    disabled={isCreditLinePolicyDisabled || creditLinePolicy === "uncapped"}
                   />
                 </FormControl>
                 <FormDescription>
-                  {creditLinePolicy === "uncapped"
-                    ? "Uncapped phases do not use a wallet credit amount."
-                    : "Empty derives from finite usage limits."}
+                  {editMode
+                    ? "Saved phases keep their original usage credit policy."
+                    : creditLinePolicy === "uncapped"
+                      ? "Uncapped phases do not use a wallet credit amount."
+                      : "Empty derives from finite usage limits."}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

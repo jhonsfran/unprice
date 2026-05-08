@@ -69,6 +69,15 @@ services:
       SRH_TOKEN: unprice
       SRH_CONNECTION_STRING: "redis://redis:6379"
 
+  local-pipeline:
+    image: docker.redpanda.com/redpandadata/connect:latest
+    command: ["run", "/connect.yaml"]
+    ports:
+      - "4195:4195"
+    volumes:
+      - ./tooling/local-pipeline/connect.yaml:/connect.yaml:ro
+      - ./tmp/lakehouse:/data
+
   mailpit:
     image: axllent/mailpit
     container_name: mailpit

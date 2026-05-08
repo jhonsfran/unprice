@@ -63,6 +63,7 @@ describe("IngestionAuditDO", () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
     vi.resetModules()
     testState.db = null
@@ -179,6 +180,51 @@ describe("IngestionAuditDO", () => {
     expect(db.rows.get("idem_publish")?.published_at).toBe(BASE_NOW)
   })
 
+  it("publishes to the local pipeline URL in development", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+    const pipelineEvents = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+    testState.db = db
+    vi.stubGlobal("fetch", fetchMock)
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        APP_ENV: "development",
+        LOCAL_PIPELINE_URL: "http://127.0.0.1:4195/ingest",
+        PIPELINE_EVENTS: pipelineEvents,
+      } as never
+    )
+
+    await durableObject.commit([
+      createLedgerEntry({
+        idempotencyKey: "idem_local",
+        payloadHash: "hash_local",
+      }),
+    ])
+
+    await durableObject.alarm()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:4195/ingest",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+      })
+    )
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+    expect(JSON.parse(String(request?.body))).toEqual([{ idempotency_key: "idem_local" }])
+    expect(pipelineEvents.send).not.toHaveBeenCalled()
+    expect(db.rows.get("idem_local")?.published_at).toBe(BASE_NOW)
+  })
+
   it("keeps rows unpublished and retries alarm when pipeline send fails", async () => {
     const IngestionAuditDO = await loadIngestionAuditDO()
     const state = createDurableObjectState()
@@ -205,6 +251,39 @@ describe("IngestionAuditDO", () => {
     await durableObject.alarm()
 
     expect(db.rows.get("idem_retry")?.published_at).toBeNull()
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+  })
+
+  it("keeps rows unpublished and retries alarm when local pipeline send fails", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503 })
+    testState.db = db
+    vi.stubGlobal("fetch", fetchMock)
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        APP_ENV: "development",
+        LOCAL_PIPELINE_URL: "http://127.0.0.1:4195/ingest",
+        PIPELINE_EVENTS: {
+          send: vi.fn().mockResolvedValue(undefined),
+        },
+      } as never
+    )
+
+    await durableObject.commit([
+      createLedgerEntry({
+        idempotencyKey: "idem_local_retry",
+        payloadHash: "hash_local_retry",
+      }),
+    ])
+
+    await durableObject.alarm()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(db.rows.get("idem_local_retry")?.published_at).toBeNull()
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 

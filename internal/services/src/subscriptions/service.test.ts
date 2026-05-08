@@ -317,6 +317,111 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     )
   })
 
+  it("keeps the saved credit line policy when updating a phase", async () => {
+    const now = Date.parse("2026-05-02T12:00:00.000Z")
+    const projectId = "proj_123"
+    const customerId = "cus_123"
+    const subscriptionId = "sub_123"
+    const phaseId = "phase_123"
+    const startAt = now - 1000
+    const endAt = now + 86_400_000
+    const storedCreditLineAmount = 10_000_000_000
+    const storedPhase = {
+      id: phaseId,
+      projectId,
+      subscriptionId,
+      planVersionId: "version_123",
+      paymentProvider: "sandbox",
+      paymentMethodId: null,
+      creditLinePolicy: "capped",
+      creditLineAmount: storedCreditLineAmount,
+      trialEndsAt: null,
+      trialUnits: 0,
+      startAt,
+      endAt: null,
+      metadata: null,
+      billingAnchor: 1,
+      items: [],
+      createdAtM: startAt,
+      updatedAtM: startAt,
+    }
+    const updatePhase = vi.fn().mockImplementation(async ({ data }) => ({
+      ...storedPhase,
+      ...data,
+      updatedAtM: now,
+    }))
+    const db = {} as Database
+    const repo = {
+      findSubscriptionWithPhases: vi.fn().mockResolvedValue({
+        id: subscriptionId,
+        projectId,
+        customerId,
+        active: true,
+        status: "active",
+        phases: [storedPhase],
+      }),
+      withTransaction: vi.fn(async (callback) =>
+        callback(
+          {
+            updatePhase,
+          },
+          db
+        )
+      ),
+    }
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      void promise
+    })
+    const getPhaseOwnedEntitlements = vi.fn().mockResolvedValue(Ok([]))
+    const logger = {
+      set: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    }
+    const service = new SubscriptionService({
+      db,
+      repo: repo as never,
+      logger: logger as never,
+      analytics: {} as never,
+      waitUntil,
+      cache: {} as never,
+      metrics: {} as never,
+      customerService: {} as never,
+      entitlementService: {
+        getPhaseOwnedEntitlements,
+      } as never,
+      billingService: {} as never,
+      ratingService: {} as never,
+      ledgerService: {} as never,
+    })
+
+    const result = await service.updatePhase({
+      input: {
+        ...storedPhase,
+        creditLinePolicy: "uncapped",
+        creditLineAmount: null,
+        endAt,
+      } as never,
+      subscriptionId,
+      projectId,
+      db,
+      now,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(updatePhase).toHaveBeenCalledWith({
+      phaseId,
+      data: {
+        startAt,
+        endAt,
+        creditLinePolicy: "capped",
+        creditLineAmount: storedCreditLineAmount,
+      },
+    })
+  })
+
   it("cancels active phases by narrowing entitlements and grants in Postgres", async () => {
     const now = Date.parse("2026-05-02T12:00:00.000Z")
     const projectId = "proj_123"

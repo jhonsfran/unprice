@@ -1249,10 +1249,7 @@ export class SubscriptionService {
     db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
-    const { startAt, endAt, items, id: phaseId, creditLinePolicy, creditLineAmount } = input
-    const creditLinePolicyToUse = creditLinePolicy ?? "uncapped"
-    const creditLineAmountToUse =
-      creditLinePolicyToUse === "uncapped" ? null : (creditLineAmount ?? null)
+    const { startAt, endAt, items, id: phaseId } = input
     const repo = this.repoForDatabase(db)
 
     let endAtToUse = endAt ?? undefined
@@ -1297,6 +1294,12 @@ export class SubscriptionService {
         })
       )
     }
+
+    // Credit line policy is fixed once a phase is persisted because wallet grants
+    // and billing periods may already have been created from the original policy.
+    const creditLinePolicyToUse = phaseToUpdate.creditLinePolicy ?? "uncapped"
+    const creditLineAmountToUse =
+      creditLinePolicyToUse === "uncapped" ? null : (phaseToUpdate.creditLineAmount ?? null)
 
     // update the phase with the new dates
     const phase = {

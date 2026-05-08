@@ -102,3 +102,5 @@ internal/lakehouse/lakenv/*
 
 .openlogs
 .claude/worktrees
+tmp/
+docs/plans/**
