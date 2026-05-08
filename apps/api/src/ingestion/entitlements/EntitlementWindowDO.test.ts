@@ -166,6 +166,10 @@ type FakeDbState = {
   grantRows: Map<string, GrantRow>
   grantWindowRows: Map<string, GrantWindowRow>
   deleteInArrayBatchSizes: number[]
+  failNextMeterWindowUpdate?: {
+    matchKey: string
+    error: Error
+  }
   maxDeleteInArrayValues?: number
 }
 
@@ -780,6 +784,39 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(0)
   })
 
+  it("retries Tinybird outbox after eviction before the delete commit", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 2, meterKey: DEFAULT_METER_KEY, valueAfter: 2 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.analyticsIngest.mockRejectedValueOnce(new Error("tinybird down"))
+
+    const first = new EntitlementWindowDO(state, createEnv())
+    await first.apply(createApplyInput())
+    await first.alarm()
+
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(db.outboxRows).toHaveLength(1)
+
+    // Same storage, new object instance: the in-memory isolate disappeared
+    // after Tinybird failed/before the outbox row could be deleted.
+    const revived = new EntitlementWindowDO(state, createEnv())
+    testState.analyticsIngest.mockResolvedValueOnce({
+      quarantined_rows: 0,
+      successful_rows: 1,
+    })
+
+    await revived.alarm()
+
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
+    expect(db.outboxRows).toHaveLength(0)
+  })
+
   it("does not call ledger/rating services for free features (no lazy reservation needed)", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -1304,6 +1341,30 @@ describe("EntitlementWindowDO", () => {
     expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
   })
 
+  it("replays committed idempotency rows after eviction without applying twice", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const input = createApplyInput()
+    const first = new EntitlementWindowDO(state, createEnv())
+    await expect(first.apply(input)).resolves.toEqual({ allowed: true })
+
+    const revived = new EntitlementWindowDO(state, createEnv())
+    await expect(revived.apply(input)).resolves.toEqual({ allowed: true })
+
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(db.idempotencyRows.size).toBe(1)
+    expect(db.outboxRows).toHaveLength(1)
+  })
+
   it("scheduleAlarm does not downgrade an earlier pending alarm", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -1378,6 +1439,67 @@ describe("EntitlementWindowDO", () => {
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)
     expect(row?.reservationId).toBe("res_lazy")
     expect(row?.allocationAmount).toBe(5 * 100_000_000)
+  })
+
+  it("replays lazy reservation bootstrap after eviction before local reservation commit", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.createReservation
+      .mockResolvedValueOnce({
+        err: null,
+        val: {
+          reservationId: "res_lazy",
+          allocationAmount: 5 * 100_000_000,
+          drainLegs: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        err: null,
+        val: {
+          reservationId: "res_lazy",
+          allocationAmount: 5 * 100_000_000,
+          drainLegs: [],
+          reused: "active",
+        },
+      })
+    db.failNextMeterWindowUpdate = {
+      matchKey: "reservationId",
+      error: new Error("evicted after createReservation"),
+    }
+
+    const input = createApplyInput()
+    const first = new EntitlementWindowDO(state, createEnv())
+    await expect(first.apply(input)).rejects.toThrow("evicted after createReservation")
+
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(db.idempotencyRows.size).toBe(0)
+    expect(db.outboxRows).toHaveLength(0)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
+
+    const revived = new EntitlementWindowDO(state, createEnv())
+    await expect(revived.apply(input)).resolves.toEqual({ allowed: true })
+
+    expect(testState.createReservation).toHaveBeenCalledTimes(2)
+    const expectedIdempotencyKey = `do_lazy:ce_123:onetime:${BASE_NOW - 60_000}`
+    expect(testState.createReservation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ idempotencyKey: expectedIdempotencyKey })
+    )
+    expect(testState.createReservation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ idempotencyKey: expectedIdempotencyKey })
+    )
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(db.idempotencyRows.get("idem_123")).toMatchObject({ allowed: true })
+    expect(db.outboxRows).toHaveLength(1)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBe("res_lazy")
   })
 
   it("denies with WALLET_EMPTY when the lazy bootstrap allocation is 0", async () => {
@@ -1948,6 +2070,98 @@ describe("EntitlementWindowDO", () => {
     expect(after.flushedAmount).toBe(100_000_000)
     // Lazy Neon connection was opened once for the flush call.
     expect(durableObject).toBeDefined()
+  })
+
+  it("replays wallet flush with the same seq after eviction loses the local fold", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 4 * 100_000_000,
+        flushedAmount: 5 * 100_000_000,
+        refundedAmount: 0,
+        drainLegs: [],
+      },
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 7,
+      pendingFlushSeq: null,
+    })
+    db.failNextMeterWindowUpdate = {
+      matchKey: "lastFlushedAt",
+      error: new Error("evicted after wallet commit"),
+    }
+
+    const first = new EntitlementWindowDO(state, createEnv())
+    await expect(first.apply(createApplyInput())).resolves.toEqual({ allowed: true })
+    await Promise.all(state.waitUntilPromises)
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 5 * 100_000_000,
+      flushedAmount: 0,
+      flushSeq: 7,
+      pendingFlushSeq: 8,
+      refillInFlight: false,
+    })
+
+    const revived = new EntitlementWindowDO(state, createEnv())
+    await revived.getEnforcementState()
+    await Promise.all(state.waitUntilPromises)
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(2)
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        reservationId: "res_abc",
+        flushSeq: 8,
+        flushAmount: 5 * 100_000_000,
+        refillChunkAmount: 4 * 100_000_000,
+      })
+    )
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        reservationId: "res_abc",
+        flushSeq: 8,
+        flushAmount: 5 * 100_000_000,
+        refillChunkAmount: 4 * 100_000_000,
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
+      allocationAmount: 9 * 100_000_000,
+      consumedAmount: 5 * 100_000_000,
+      flushedAmount: 5 * 100_000_000,
+      flushSeq: 8,
+      pendingFlushSeq: null,
+      refillInFlight: false,
+    })
   })
 
   it("does not auto-recover pending flushes marked recoveryRequired", async () => {
@@ -3642,6 +3856,11 @@ function buildFakeDrizzle(state: FakeDbState) {
               }
               const first = state.meterWindowRows.values().next().value
               if (!first) return
+              const failure = state.failNextMeterWindowUpdate
+              if (failure && failure.matchKey in patch) {
+                state.failNextMeterWindowUpdate = undefined
+                throw failure.error
+              }
               Object.assign(first, patch)
             },
           }

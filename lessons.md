@@ -97,6 +97,10 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
   original apply result, including `WALLET_EMPTY`/`LIMIT_EXCEEDED` messages.
 - Keep derived meter keys for storage and logs, but API-facing wallet-empty messages should use the
   configured meter/event slug instead of the full `slug=...|method=...|field=...` key.
+- Test `EntitlementWindowDO` eviction by constructing a new DO instance over the same fake durable
+  storage, not by trying to force Cloudflare OOM. Inject failures between external I/O and local
+  SQLite fold commits to prove idempotency rows, outbox rows, lazy reservation bootstrap, and
+  `pendingFlushSeq > flushSeq` recovery converge.
 
 ## 2026-05-08: Fractional Usage Tier Pricing
 
