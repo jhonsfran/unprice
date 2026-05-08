@@ -1,9 +1,12 @@
 import { createRoute } from "@hono/zod-openapi"
 import {
+  type FeatureUsagePeriodRow,
   analyticsIntervalSchema,
   getUsageResponseSchema,
   prepareInterval,
 } from "@unprice/analytics"
+import type { Currency } from "@unprice/db/validators"
+import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
@@ -14,11 +17,11 @@ import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
-const tags = ["usage"]
+const tags = ["analytics"]
 
 export const route = createRoute({
-  path: "/v1/usage/get",
-  operationId: "usage.get",
+  path: "/v1/analytics/usage/get",
+  operationId: "analytics.usage.get",
   summary: "get usage",
   description: "Get usage for a customer in a given range",
   method: "post",
@@ -62,6 +65,35 @@ export type GetAnalyticsUsageRequest = z.infer<
 export type GetAnalyticsUsageResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]
 >
+
+function trimInsignificantZeros(amount: string): string {
+  if (!amount.includes(".")) {
+    return amount
+  }
+
+  return amount.replace(/(\.\d*?[1-9])0+$/, "$1").replace(/\.0+$/, "")
+}
+
+function formatUsageResponse(
+  row: FeatureUsagePeriodRow,
+  fallbackCurrency: Currency
+): z.infer<typeof getUsageResponseSchema> {
+  const currency = row.currency ?? fallbackCurrency
+  const amount = trimInsignificantZeros(toDecimal(fromLedgerMinor(row.amount_after ?? 0, currency)))
+
+  return {
+    project_id: row.project_id,
+    customer_id: row.customer_id,
+    feature_slug: row.feature_slug,
+    usage: row.usage ?? row.value_after ?? 0,
+    spending: {
+      amount,
+      currency,
+      display_amount: formatMoney(amount, currency),
+    },
+  }
+}
+
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
@@ -79,6 +111,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     // main workspace can see all usage
     const isMain = key.project.workspace.isMain
     const projectID = isMain ? (projectId ? projectId : key.projectId) : key.projectId
+    const defaultCurrency = key.project.defaultCurrency
 
     if (!isMain && projectID !== projectId) {
       throw new UnpriceApiError({
@@ -90,7 +123,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     const cacheKey = `${projectID}:${customerId}:${range}`
 
     const { err, val: data } = await cache.getUsage.swr(cacheKey, async () => {
-      const result = analytics
+      const rows = await analytics
         .getFeaturesUsagePeriod({
           customer_id: customerId,
           project_id: projectID,
@@ -99,7 +132,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
         })
         .then((res) => res.data)
 
-      return result
+      return (rows ?? []).map((row) => formatUsageResponse(row, defaultCurrency))
     })
 
     const usage = data ?? []

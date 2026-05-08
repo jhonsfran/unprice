@@ -75,6 +75,13 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
 - Track both event spend and cumulative period spend in entitlement meter facts:
   `amount` is the signed price delta for the event, and `amount_after` is the total priced spend
   after that event, mirroring `delta` and `value_after`.
+- Keep `/v1/usage/get` customer-facing: Tinybird usage period endpoints should return raw
+  `usage`, `amount_after`, and `currency`; the Hono route owns formatting `amount_after` into
+  `{ amount, currency, display_amount }`.
+- During Tinybird endpoint schema rollouts, keep the analytics client row schema tolerant of the
+  previous response shape until the Cloud endpoint is deployed. For usage periods, accept legacy
+  `value_after` and let the Hono route fall back to project currency plus zero spend instead of
+  surfacing parser errors as `500`s.
 - Keep `entitlement/verify` as a compact decision response. Return `allowed`, `featureSlug`,
   optional uppercase `rejectionReason` from `INGESTION_REJECTION_REASONS`, optional
   `usage`/`limit`, and optional `spending` with `displayAmount`; do not expose internal entitlement

@@ -20,16 +20,16 @@ export function CustomerMetricsPanel(props: CustomerMetricsPanelProps) {
   const { usageRows, error } = props
 
   const sortedUsage = [...usageRows].sort((a, b) => {
-    if (b.value_after !== a.value_after) {
-      return b.value_after - a.value_after
+    if (b.usage !== a.usage) {
+      return b.usage - a.usage
     }
     return a.feature_slug.localeCompare(b.feature_slug)
   })
 
   const featureCount = sortedUsage.length
-  const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.value_after, 0)
+  const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.usage, 0)
   const topFeature = sortedUsage[0]?.feature_slug ?? "—"
-  const topFeatureUsage = sortedUsage[0]?.value_after ?? 0
+  const topFeatureUsage = sortedUsage[0]?.usage ?? 0
 
   return (
     <Card>
@@ -94,7 +94,7 @@ export function CustomerMetricsPanel(props: CustomerMetricsPanelProps) {
                       <span className="truncate font-medium text-sm">{row.feature_slug}</span>
                     </div>
                     <Badge variant="outline" className="justify-self-end font-mono text-xs">
-                      {formatUsage(row.value_after)}
+                      {formatUsage(row.usage)}
                     </Badge>
                   </div>
                 ))}

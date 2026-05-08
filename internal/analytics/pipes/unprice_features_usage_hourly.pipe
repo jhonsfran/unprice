@@ -6,7 +6,9 @@ SQL >
         customer_id,
         period_key,
         feature_slug,
-        argMaxState(value_after, timestamp) AS value
+        argMaxState(value_after, timestamp) AS value,
+        argMaxState(amount_after, timestamp) AS amount_after,
+        argMaxState(currency, timestamp) AS currency
     FROM unprice_entitlement_meter_facts
     GROUP BY
         date,

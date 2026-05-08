@@ -75,7 +75,7 @@ export interface paths {
     put?: never
     /**
      * get current feature status
-     * @description Resolve the current state of a feature for a customer and, for usage features, return the live meter method, limit, and usage.
+     * @description Resolve whether a feature is usable for a customer and, for usage features, return current usage, limit, and priced spend.
      */
     post: operations["entitlements.verify"]
     delete?: never
@@ -384,7 +384,7 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  "/v1/usage/get": {
+  "/v1/analytics/usage/get": {
     parameters: {
       query?: never
       header?: never
@@ -397,27 +397,7 @@ export interface paths {
      * get usage
      * @description Get usage for a customer in a given range
      */
-    post: operations["usage.get"]
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  "/v1/wallet": {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * get wallet state
-     * @description Current customer wallet balance plus active holds and credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.
-     */
-    get: operations["wallet.get"]
-    put?: never
-    post?: never
+    post: operations["analytics.usage.get"]
     delete?: never
     options?: never
     head?: never
@@ -436,6 +416,26 @@ export interface paths {
      * @description Current customer wallet balance plus active holds and credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.
      */
     get: operations["wallet.balance"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/wallet": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * get wallet balance
+     * @description Compatibility alias for /v1/wallet/balance. Current customer wallet balance plus active holds and credits.
+     */
+    get: operations["wallet.get"]
     put?: never
     post?: never
     delete?: never
@@ -1670,7 +1670,7 @@ export interface operations {
              */
             featureSlug: string
             /**
-             * @description Why the feature is not currently allowed, when applicable
+             * @description Why the feature is not usable. Omitted when allowed is true.
              * @example LIMIT_EXCEEDED
              * @enum {string}
              */
@@ -1694,15 +1694,15 @@ export interface operations {
              * @example 100
              */
             limit?: number | null
-            /** @description Current priced spend for usage features */
+            /** @description Current priced usage spend for usage-based features */
             spending?: {
               /**
-               * @description Current priced spend in ledger scale units
+               * @description Current priced usage spend in ledger scale units
                * @example 4200000000
                */
               ledgerAmount: number
               /**
-               * @description Currency for the current priced spend
+               * @description ISO currency code for the spending amount
                * @example USD
                */
               currency: string
@@ -1712,10 +1712,11 @@ export interface operations {
                */
               displayAmount: string
               /**
-               * @description Ledger scale for ledgerAmount
+               * @description Decimal scale for ledgerAmount
                * @example 8
+               * @enum {number}
                */
-              scale: number
+              scale: 8
             }
             /**
              * @description Optional detail about the verification result
@@ -4880,7 +4881,7 @@ export interface operations {
       }
     }
   }
-  "usage.get": {
+  "analytics.usage.get": {
     parameters: {
       query?: never
       header?: never
@@ -4922,7 +4923,12 @@ export interface operations {
               project_id: string
               customer_id?: string
               feature_slug: string
-              value_after: number
+              usage: number
+              spending: {
+                amount: string
+                currency: string
+                display_amount: string
+              }
             }[]
           }
         }
@@ -5001,7 +5007,7 @@ export interface operations {
       }
     }
   }
-  "wallet.get": {
+  "wallet.balance": {
     parameters: {
       query: {
         customerId: string
@@ -5013,7 +5019,7 @@ export interface operations {
     }
     requestBody?: never
     responses: {
-      /** @description The wallet state for a customer */
+      /** @description The wallet balance for a customer */
       200: {
         headers: {
           [name: string]: unknown
@@ -5136,7 +5142,141 @@ export interface operations {
       }
     }
   }
-  "wallet.balance": operations["wallet.get"]
+  "wallet.get": {
+    parameters: {
+      query: {
+        customerId: string
+        projectId?: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description The wallet balance for a customer */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @enum {string} */
+            currency: "USD" | "EUR"
+            available: {
+              ledger_amount: number
+              amount: string
+              /** @enum {string} */
+              currency: "USD" | "EUR"
+              display_amount: string
+            }
+            held: {
+              ledger_amount: number
+              amount: string
+              /** @enum {string} */
+              currency: "USD" | "EUR"
+              display_amount: string
+            }
+            credits: {
+              id: string
+              /** @enum {string} */
+              source: "promo" | "plan_included" | "trial" | "manual" | "credit_line"
+              issued: {
+                ledger_amount: number
+                amount: string
+                /** @enum {string} */
+                currency: "USD" | "EUR"
+                display_amount: string
+              }
+              available: {
+                ledger_amount: number
+                amount: string
+                /** @enum {string} */
+                currency: "USD" | "EUR"
+                display_amount: string
+              }
+              /** Format: date-time */
+              expires_at: string | null
+              /** Format: date-time */
+              created_at: string
+            }[]
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
   "wallet.creditBalance": {
     parameters: {
       query: {
@@ -5186,6 +5326,78 @@ export interface operations {
           }
         }
       }
-    } & Omit<operations["wallet.get"]["responses"], 200>
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
   }
 }

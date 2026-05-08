@@ -519,14 +519,18 @@ export class Unprice {
     }
   }
 
-  public get usage() {
+  public get analytics() {
     return {
-      get: (req: PostBody<"/v1/usage/get">): Promise<ApiResult<PostResponse<"/v1/usage/get">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/usage/get", {
-            body: req,
-          })
-        )
+      usage: {
+        get: (
+          req: PostBody<"/v1/analytics/usage/get">
+        ): Promise<ApiResult<PostResponse<"/v1/analytics/usage/get">>> => {
+          return this.toResult(
+            this.openapi.POST("/v1/analytics/usage/get", {
+              body: req,
+            })
+          )
+        },
       },
     }
   }

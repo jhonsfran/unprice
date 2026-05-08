@@ -133,7 +133,7 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.usage.get({
+} = await unprice.analytics.usage.get({
   project_id: "project_1GTzSGrapiBW1QwCL3Fcn",
   customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",
   range: "30d",
@@ -207,7 +207,7 @@ const { result, error } = await unprice.plans.listVersions({
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n  }),\n})',
     getUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/usage/get" +
+      "${baseUrl}/v1/analytics/usage/get" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    project_id: "project_1GTzSGrapiBW1QwCL3Fcn",\n    customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    range: "30d",\n  }),\n})',
     getPaymentMethods:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +

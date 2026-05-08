@@ -6776,12 +6776,12 @@
         }
       }
     },
-    "/v1/usage/get": {
+    "/v1/analytics/usage/get": {
       "post": {
-        "operationId": "usage.get",
+        "operationId": "analytics.usage.get",
         "summary": "get usage",
         "description": "Get usage for a customer in a given range",
-        "tags": ["usage"],
+        "tags": ["analytics"],
         "requestBody": {
           "description": "Body of the request for the get usage",
           "required": true,
@@ -6828,9 +6828,18 @@
                           "project_id": { "type": "string" },
                           "customer_id": { "type": "string" },
                           "feature_slug": { "type": "string" },
-                          "value_after": { "type": "number" }
+                          "usage": { "type": "number" },
+                          "spending": {
+                            "type": "object",
+                            "properties": {
+                              "amount": { "type": "string" },
+                              "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+                              "display_amount": { "type": "string" }
+                            },
+                            "required": ["amount", "currency", "display_amount"]
+                          }
                         },
-                        "required": ["project_id", "feature_slug", "value_after"]
+                        "required": ["project_id", "feature_slug", "usage", "spending"]
                       }
                     }
                   },

@@ -135,8 +135,8 @@ export function UsageStats() {
   }
 
   const sortedUsage = [...(usage.usage ?? [])].sort((a, b) => {
-    if (b.value_after !== a.value_after) {
-      return b.value_after - a.value_after
+    if (b.usage !== a.usage) {
+      return b.usage - a.usage
     }
 
     return a.feature_slug.localeCompare(b.feature_slug)
@@ -146,10 +146,10 @@ export function UsageStats() {
     return <UsageStatsEmptyState intervalLabel={intervalFilter.label} />
   }
 
-  const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.value_after, 0)
+  const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.usage, 0)
   const chartData = sortedUsage.map((row) => ({
     feature: row.feature_slug,
-    usage: row.value_after,
+    usage: row.usage,
   }))
   const chartHeight = Math.min(Math.max(chartData.length * 52, 280), 560)
 

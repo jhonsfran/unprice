@@ -6,7 +6,7 @@ description: "Get usage analytics for a project or customer"
 <RequestExample>
 
 ```ts
-const { result, error } = await unprice.usage.get({
+const { result, error } = await unprice.analytics.usage.get({
   range: "24h",
   customer_id: "cus_1234567890"
 });
@@ -29,7 +29,12 @@ console.log(result);
       "project_id": "project_1234567890",
       "customer_id": "cus_1234567890",
       "feature_slug": "tokens",
-      "value_after": 30
+      "usage": 30,
+      "spending": {
+        "amount": "0.0003",
+        "currency": "USD",
+        "display_amount": "$0"
+      }
     }
   ]
 }

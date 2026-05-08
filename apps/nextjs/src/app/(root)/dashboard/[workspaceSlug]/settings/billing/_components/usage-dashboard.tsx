@@ -20,15 +20,15 @@ function formatUsage(value: number): string {
 
 export function UsageDashboard({ usageRows, customerId, workspaceSlug }: UsageDashboardProps) {
   const sortedUsage = [...usageRows].sort((a, b) => {
-    if (b.value_after !== a.value_after) {
-      return b.value_after - a.value_after
+    if (b.usage !== a.usage) {
+      return b.usage - a.usage
     }
 
     return a.feature_slug.localeCompare(b.feature_slug)
   })
 
   const featureCount = sortedUsage.length
-  const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.value_after, 0)
+  const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.usage, 0)
 
   return (
     <Card>
@@ -88,7 +88,7 @@ export function UsageDashboard({ usageRows, customerId, workspaceSlug }: UsageDa
                   <span className="truncate font-medium text-sm">{row.feature_slug}</span>
                 </div>
                 <Badge variant="outline" className="justify-self-end font-mono text-xs">
-                  {formatUsage(row.value_after)}
+                  {formatUsage(row.usage)}
                 </Badge>
               </div>
             ))}

@@ -215,11 +215,28 @@ export const getAnalyticsVerificationsResponseSchema = z.object({
   p99_latency: z.number(),
 })
 
+export const featureUsagePeriodRowSchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string().optional(),
+  feature_slug: z.string(),
+  usage: z.number().optional(),
+  value_after: z.number().optional(),
+  amount_after: z.number().int().optional(),
+  currency: z.string().length(3).optional(),
+})
+
+export const usageSpendingResponseSchema = z.object({
+  amount: z.string(),
+  currency: z.string().length(3),
+  display_amount: z.string(),
+})
+
 export const getUsageResponseSchema = z.object({
   project_id: z.string(),
   customer_id: z.string().optional(),
   feature_slug: z.string(),
-  value_after: z.number(),
+  usage: z.number(),
+  spending: usageSpendingResponseSchema,
 })
 
 export const schemaPageHit = z.object({
@@ -346,6 +363,7 @@ export type PageAnalyticsEvent = z.infer<typeof pageEventSchema>
 export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>
 export type AnalyticsEventAction = z.infer<typeof analyticsEventSchema>["action"]
 export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
+export type FeatureUsagePeriodRow = z.infer<typeof featureUsagePeriodRowSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
@@ -383,6 +401,6 @@ export type PageBrowserVisits = Awaited<ReturnType<Analytics["getBrowserVisits"]
 export type PageOverview = Awaited<ReturnType<Analytics["getPagesOverview"]>>["data"]
 export type FeaturesUsage = Awaited<ReturnType<Analytics["getFeaturesUsage"]>>["data"]
 export type PlansConversion = Awaited<ReturnType<Analytics["getPlansConversion"]>>["data"]
-export type Usage = Awaited<ReturnType<Analytics["getFeaturesUsagePeriod"]>>["data"]
+export type Usage = GetUsageResponse[]
 
 export type Stats = z.infer<typeof statsSchema>
