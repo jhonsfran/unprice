@@ -310,6 +310,7 @@ describe("EntitlementWindowDO", () => {
     const payload = JSON.parse(db.outboxRows[0]!.payload)
     // 3 units @ $1.00 = $3.00 = 300_000_000 at LEDGER_SCALE (8)
     expect(payload.amount).toBe(300_000_000)
+    expect(payload.amount_after).toBe(300_000_000)
     expect(payload.amount_scale).toBe(8)
     expect(payload.currency).toBe("USD")
     expect(payload.priced_at).toBe(BASE_NOW)
@@ -458,6 +459,80 @@ describe("EntitlementWindowDO", () => {
     expect(state.alarmAt).toBeNull()
   })
 
+  it("closes an active reservation asynchronously when ingestion rejects on limit", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.grantWindowRows.set("grant_123:onetime:1773921540000", {
+      bucketKey: "grant_123:onetime:1773921540000",
+      grantId: "grant_123",
+      periodKey: "onetime:1773921540000",
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 6,
+      exhaustedAt: null,
+    })
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      reservationEndAt: BASE_NOW + 60_000,
+      usage: 6,
+      updatedAt: BASE_NOW,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_limit",
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 5 * 100_000_000,
+      flushedAmount: 2 * 100_000_000,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 100_000_000,
+      refillInFlight: false,
+      flushSeq: 2,
+      pendingFlushSeq: null,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: BASE_NOW - 30_000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 11 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        enforceLimit: true,
+        limit: 10,
+      })
+    )
+
+    expect(result).toEqual({
+      allowed: false,
+      deniedReason: "LIMIT_EXCEEDED",
+      message: expect.stringContaining(DEFAULT_METER_KEY),
+    })
+    await Promise.all(state.waitUntilPromises)
+
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "res_limit",
+        flushSeq: 3,
+        flushAmount: 3 * 100_000_000,
+        refillChunkAmount: 0,
+        final: true,
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
+      reservationId: null,
+    })
+  })
+
   it("rejects invalid apply payloads", async () => {
     const cases: Array<[string, Record<string, unknown>]> = [
       ["empty idempotency key", { idempotencyKey: "" }],
@@ -527,6 +602,7 @@ describe("EntitlementWindowDO", () => {
         idempotency_key: input.idempotencyKey,
         value_after: 2,
         amount: 200_000_000,
+        amount_after: 200_000_000,
         amount_scale: 8,
         currency: "USD",
       }),
@@ -554,13 +630,13 @@ describe("EntitlementWindowDO", () => {
         id: index,
         currency: "USD",
         payload: JSON.stringify({
-          id: `fact_${index}`,
           event_id: `evt_${index}`,
           idempotency_key: `idem_${index}`,
           project_id: "proj_123",
           customer_id: "cus_123",
           currency: "USD",
           customer_entitlement_id: "ce_123",
+          grant_id: "grant_123",
           feature_slug: "api_calls",
           period_key: "period_123",
           event_slug: "tokens_used",
@@ -614,13 +690,13 @@ describe("EntitlementWindowDO", () => {
         id: index,
         currency: "USD",
         payload: JSON.stringify({
-          id: `fact_${index}`,
           event_id: `evt_${index}`,
           idempotency_key: `idem_${index}`,
           project_id: "proj_123",
           customer_id: "cus_123",
           currency: "USD",
           customer_entitlement_id: "ce_123",
+          grant_id: "grant_123",
           feature_slug: "api_calls",
           period_key: "period_123",
           event_slug: "tokens_used",
@@ -857,6 +933,7 @@ describe("EntitlementWindowDO", () => {
     ])
     expect(payloads.map((payload) => payload.delta)).toEqual([3, 2])
     expect(payloads.map((payload) => payload.amount)).toEqual([300_000_000, 200_000_000])
+    expect(payloads.map((payload) => payload.amount_after)).toEqual([300_000_000, 200_000_000])
 
     expect(db.grantWindowRows.get(`grant_a:onetime:${BASE_NOW - 60_000}`)).toMatchObject({
       consumedInCurrentWindow: 3,
@@ -934,7 +1011,16 @@ describe("EntitlementWindowDO", () => {
     // isLimitReached against its own resolved state when needed.
     const result = await durableObject.getEnforcementState()
 
-    expect(result).toEqual({ usage: 0, limit: null, isLimitReached: false })
+    expect(result).toEqual({
+      usage: 0,
+      limit: null,
+      isLimitReached: false,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 0,
+        scale: 8,
+      },
+    })
   })
 
   it("getEnforcementState summarizes active grant-window usage", async () => {
@@ -964,6 +1050,11 @@ describe("EntitlementWindowDO", () => {
       usage: 7,
       limit: 100,
       isLimitReached: false,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 700_000_000,
+        scale: 8,
+      },
     })
 
     // Apply #2: usage 7 exactly at the new grant's limit 7 → reached
@@ -985,6 +1076,11 @@ describe("EntitlementWindowDO", () => {
       usage: 7,
       limit: 7,
       isLimitReached: true,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 700_000_000,
+        scale: 8,
+      },
     })
 
     // Apply #3: overageStrategy "always" suppresses isLimitReached for the active grant
@@ -1010,7 +1106,66 @@ describe("EntitlementWindowDO", () => {
       usage: 3,
       limit: 7,
       isLimitReached: false,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 300_000_000,
+        scale: 8,
+      },
     })
+  })
+
+  it("does not close an active reservation from enforcement state reads", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.grantWindowRows.set("grant_123:onetime:1773921540000", {
+      bucketKey: "grant_123:onetime:1773921540000",
+      grantId: "grant_123",
+      periodKey: "onetime:1773921540000",
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 10,
+      exhaustedAt: null,
+    })
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      reservationEndAt: BASE_NOW + 60_000,
+      usage: 10,
+      updatedAt: BASE_NOW,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_verify_limit",
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 10 * 100_000_000,
+      flushedAmount: 8 * 100_000_000,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 100_000_000,
+      refillInFlight: false,
+      flushSeq: 4,
+      pendingFlushSeq: null,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: BASE_NOW - 30_000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const applyInput = createApplyInput({ limit: 10 })
+    const result = await durableObject.getEnforcementState({
+      entitlement: applyInput.entitlement,
+      grants: applyInput.grants,
+      now: BASE_NOW,
+    })
+
+    expect(result).toMatchObject({ usage: 10, limit: 10, isLimitReached: true })
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    expect(state.waitUntilPromises).toHaveLength(0)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBe("res_verify_limit")
   })
 
   it("does not write grant-window usage when an oversized event is rejected", async () => {
@@ -1030,7 +1185,16 @@ describe("EntitlementWindowDO", () => {
     expect(denied.allowed).toBe(false)
 
     const result = await durableObject.getEnforcementState()
-    expect(result).toEqual({ usage: 0, limit: 10, isLimitReached: false })
+    expect(result).toEqual({
+      usage: 0,
+      limit: 10,
+      isLimitReached: false,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 0,
+        scale: 8,
+      },
+    })
   })
 
   it("rehydrates window state after eviction so alarm reads periodEndAt from SQLite", async () => {
@@ -1125,6 +1289,15 @@ describe("EntitlementWindowDO", () => {
         customerId: "cus_123",
         currency: "USD",
         entitlementId: "ce_123",
+        metadata: expect.objectContaining({
+          requestedBy: "durable_object",
+          requestedById: "do_123",
+          durableObjectId: "do_123",
+          customerEntitlementId: "ce_123",
+          featureSlug: "api_calls",
+          eventSlug: "tokens_used",
+          meterKey: DEFAULT_METER_KEY,
+        }),
       })
     )
     // The reservation is persisted onto the window so subsequent events use
@@ -1197,7 +1370,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeUndefined()
   })
 
-  it("denies with WALLET_EMPTY when the priced cost exceeds remaining allocation", async () => {
+  it("grows the reservation and allows the event when local allocation is short", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1207,6 +1380,86 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
+    testState.flushReservation.mockImplementation(
+      async (input: { flushAmount: number; refillChunkAmount: number }) => ({
+        err: null,
+        val: {
+          grantedAmount: input.refillChunkAmount,
+          flushedAmount: input.flushAmount,
+          refundedAmount: 0,
+          drainLegs: [],
+        },
+      })
+    )
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 2 * 100_000_000,
+      consumedAmount: 2 * 100_000_000,
+      flushedAmount: 0,
+      refillThresholdBps: 0,
+      refillChunkAmount: 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toEqual({ allowed: true })
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "res_abc",
+        flushSeq: 1,
+        flushAmount: 2 * 100_000_000,
+        refillChunkAmount: 3 * 100_000_000,
+        final: false,
+      })
+    )
+    expect(testState.engineApply).toHaveBeenCalledTimes(2)
+    expect(db.outboxRows).toHaveLength(1)
+    expect(db.idempotencyRows.get("idem_123")).toMatchObject({ allowed: true })
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.allocationAmount).toBe(5 * 100_000_000)
+    expect(row.consumedAmount).toBe(5 * 100_000_000)
+    expect(row.flushedAmount).toBe(2 * 100_000_000)
+    expect(row.flushSeq).toBe(1)
+    expect(row.pendingFlushSeq).toBeNull()
+    expect(row.refillInFlight).toBe(false)
+  })
+
+  it("denies with WALLET_EMPTY and closes the reservation when a synchronous refill cannot fund the event", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.flushReservation.mockImplementation(
+      async (input: { final: boolean; flushAmount: number; refillChunkAmount: number }) => ({
+        err: null,
+        val: {
+          grantedAmount: 0,
+          flushedAmount: input.flushAmount,
+          refundedAmount: input.final ? 10 : 0,
+          drainLegs: [],
+        },
+      })
+    )
 
     // Pre-seed the meter_window row as if activation had opened a reservation
     // with a $2 allocation, fully consumed but for 10 minor units (< $3 cost).
@@ -1218,6 +1471,8 @@ describe("EntitlementWindowDO", () => {
       usage: 0,
       updatedAt: null,
       createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
       reservationId: "res_abc",
       allocationAmount: 2 * 100_000_000,
       consumedAmount: 2 * 100_000_000 - 10,
@@ -1236,16 +1491,41 @@ describe("EntitlementWindowDO", () => {
     expect(first).toEqual({
       allowed: false,
       deniedReason: "WALLET_EMPTY",
-      message: expect.stringContaining("res_abc"),
+      message: "Wallet empty for meter tokens_used (reservation res_abc)",
     })
-    // Replay returns the stored denial, no second engine invocation.
+    // The first attempt rolls back, does one sync refill attempt, retries,
+    // persists the denial, then schedules a final flush. Replay returns the
+    // stored denial without touching the wallet again.
     expect(second).toEqual(first)
-    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(testState.engineApply).toHaveBeenCalledTimes(2)
+    expect(testState.flushReservation).toHaveBeenCalledTimes(2)
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        reservationId: "res_abc",
+        flushSeq: 1,
+        flushAmount: 2 * 100_000_000 - 10,
+        refillChunkAmount: 3 * 100_000_000 - 10,
+        final: false,
+      })
+    )
+    await Promise.all(state.waitUntilPromises)
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        reservationId: "res_abc",
+        flushSeq: 2,
+        flushAmount: 0,
+        refillChunkAmount: 0,
+        final: true,
+      })
+    )
     expect(db.idempotencyRows.size).toBe(1)
     expect(db.outboxRows).toHaveLength(0)
-    // No wallet update committed — transaction rolled back.
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(2 * 100_000_000 - 10)
-    expect(state.waitUntilPromises).toHaveLength(0)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.flushSeq).toBe(2)
+    expect(state.waitUntilPromises).toHaveLength(1)
   })
 
   it("deducts consumedAmount and triggers flush+refill when remaining falls below threshold", async () => {
@@ -1418,6 +1698,11 @@ describe("EntitlementWindowDO", () => {
       refillChunkAmount: 4 * 100_000_000,
       statementKey: `res_abc:${BASE_NOW + 60_000}`,
       final: false,
+      metadata: {
+        requestedBy: "durable_object",
+        requestedById: "do_123",
+        durableObjectId: "do_123",
+      },
       sourceId: "do_123",
     })
 
@@ -1905,13 +2190,13 @@ describe("EntitlementWindowDO", () => {
       id: 1,
       currency: "USD",
       payload: JSON.stringify({
-        id: "fact_123",
         event_id: "evt_123",
         idempotency_key: "idem_123",
         project_id: "proj_123",
         customer_id: "cus_123",
         currency: "USD",
         customer_entitlement_id: "ce_123",
+        grant_id: "grant_123",
         feature_slug: "api_calls",
         period_key: "period_123",
         event_slug: "tokens_used",
@@ -2231,6 +2516,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(1)
     const payload = JSON.parse(db.outboxRows[0]!.payload)
     expect(payload.amount).toBe(103_100_000)
+    expect(payload.amount_after).toBe(103_100_000)
     expect(payload.amount_scale).toBe(8)
     expect(payload.currency).toBe("EUR")
     expect(payload.value_after).toBe(31)
@@ -2303,6 +2589,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(1)
     const payload = JSON.parse(db.outboxRows[0]!.payload)
     expect(payload.amount).toBe(100_000)
+    expect(payload.amount_after).toBe(103_200_000)
     expect(payload.value_after).toBe(32)
 
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
@@ -2360,6 +2647,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(1)
     const payload = JSON.parse(db.outboxRows[0]!.payload)
     expect(payload.amount).toBe(105_000_000)
+    expect(payload.amount_after).toBe(105_000_000)
     expect(payload.delta).toBe(50)
   })
 
@@ -2401,6 +2689,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(1)
     const payload = JSON.parse(db.outboxRows[0]!.payload)
     expect(payload.amount).toBe(0)
+    expect(payload.amount_after).toBe(0)
     expect(payload.value_after).toBe(1)
   })
 
@@ -2466,6 +2755,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(1)
     const payload = JSON.parse(db.outboxRows[0]!.payload)
     expect(payload.amount).toBe(103_100_000)
+    expect(payload.amount_after).toBe(103_100_000)
     expect(payload.value_after).toBe(31)
   })
 
@@ -2897,6 +3187,11 @@ async function loadEntitlementWindowDO() {
       getEnforcementState: () => Promise<{
         isLimitReached: boolean
         limit: number | null
+        spending: {
+          currency: string
+          ledgerAmount: number
+          scale: number
+        }
         usage: number
       }>
     }

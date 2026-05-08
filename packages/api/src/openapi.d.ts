@@ -413,9 +413,49 @@ export interface paths {
     }
     /**
      * get wallet state
-     * @description Snapshot of the four customer sub-account balances (purchased, granted, reserved, consumed) plus active wallet credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.
+     * @description Current customer wallet balance plus active holds and credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.
      */
     get: operations["wallet.get"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/wallet/balance": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * get wallet balance
+     * @description Current customer wallet balance plus active holds and credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.
+     */
+    get: operations["wallet.balance"]
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/wallet/credits/{walletId}/balance": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * get wallet credit balance
+     * @description Current balance for one wallet credit owned by the customer. The walletId is the wcr_ ID returned in the wallet balance credits array.
+     */
+    get: operations["wallet.creditBalance"]
     put?: never
     post?: never
     delete?: never
@@ -1625,45 +1665,25 @@ export interface operations {
              */
             allowed: boolean
             /**
-             * @description The current verification status for the requested feature
-             * @example usage
-             * @enum {string}
-             */
-            status:
-              | "customer_not_found"
-              | "feature_inactive"
-              | "feature_missing"
-              | "invalid_entitlement_configuration"
-              | "non_usage"
-              | "usage"
-            /**
              * @description The feature slug that was verified
              * @example tokens
              */
             featureSlug: string
             /**
-             * @description The resolved feature type
-             * @example usage
+             * @description Why the feature is not currently allowed, when applicable
+             * @example LIMIT_EXCEEDED
              * @enum {string}
              */
-            featureType?: "flat" | "tier" | "package" | "usage"
-            /** @description The resolved meter configuration for usage-based features */
-            meterConfig?: {
-              eventId: string
-              eventSlug: string
-              /**
-               * @description How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value.
-               * @enum {string}
-               */
-              aggregationMethod: "sum" | "count" | "max" | "latest"
-              aggregationField?: string
-              filters?: {
-                [key: string]: string | undefined
-              }
-              groupBy?: string[]
-              /** @enum {string} */
-              windowSize?: "MINUTE" | "HOUR" | "DAY"
-            }
+            rejectionReason?:
+              | "CUSTOMER_NOT_FOUND"
+              | "EVENT_TOO_OLD"
+              | "INVALID_ENTITLEMENT_CONFIGURATION"
+              | "INVALID_AGGREGATION_PROPERTIES"
+              | "LIMIT_EXCEEDED"
+              | "LATE_EVENT_CLOSED_PERIOD"
+              | "NO_MATCHING_ENTITLEMENT"
+              | "UNROUTABLE_EVENT"
+              | "WALLET_EMPTY"
             /**
              * @description Current usage in the active meter window
              * @example 42
@@ -1674,27 +1694,29 @@ export interface operations {
              * @example 100
              */
             limit?: number | null
-            /**
-             * @description Whether the current usage has reached the current limit
-             * @example false
-             */
-            isLimitReached?: boolean
-            /**
-             * @description How the feature behaves once the limit is reached
-             * @example none
-             * @enum {string}
-             */
-            overageStrategy?: "none" | "last-call" | "always"
-            /**
-             * @description The customer entitlement effective start timestamp
-             * @example 1774094400000
-             */
-            effectiveAt?: number
-            /**
-             * @description The customer entitlement exclusive end timestamp
-             * @example null
-             */
-            expiresAt?: number | null
+            /** @description Current priced spend for usage features */
+            spending?: {
+              /**
+               * @description Current priced spend in ledger scale units
+               * @example 4200000000
+               */
+              ledgerAmount: number
+              /**
+               * @description Currency for the current priced spend
+               * @example USD
+               */
+              currency: string
+              /**
+               * @description Ready-to-render localized spending amount
+               * @example $42
+               */
+              displayAmount: string
+              /**
+               * @description Ledger scale for ledgerAmount
+               * @example 8
+               */
+              scale: number
+            }
             /**
              * @description Optional detail about the verification result
              * @example Unable to resolve the current meter window for this feature
@@ -5001,36 +5023,13 @@ export interface operations {
             /** @enum {string} */
             currency: "USD" | "EUR"
             available: {
-              purchased: {
-                ledger_amount: number
-                amount: string
-                /** @enum {string} */
-                currency: "USD" | "EUR"
-                display_amount: string
-              }
-              granted: {
-                ledger_amount: number
-                amount: string
-                /** @enum {string} */
-                currency: "USD" | "EUR"
-                display_amount: string
-              }
-              total: {
-                ledger_amount: number
-                amount: string
-                /** @enum {string} */
-                currency: "USD" | "EUR"
-                display_amount: string
-              }
-            }
-            reserved: {
               ledger_amount: number
               amount: string
               /** @enum {string} */
               currency: "USD" | "EUR"
               display_amount: string
             }
-            consumed: {
+            held: {
               ledger_amount: number
               amount: string
               /** @enum {string} */
@@ -5041,14 +5040,14 @@ export interface operations {
               id: string
               /** @enum {string} */
               source: "promo" | "plan_included" | "trial" | "manual" | "credit_line"
-              issued_amount: {
+              issued: {
                 ledger_amount: number
                 amount: string
                 /** @enum {string} */
                 currency: "USD" | "EUR"
                 display_amount: string
               }
-              remaining_amount: {
+              available: {
                 ledger_amount: number
                 amount: string
                 /** @enum {string} */
@@ -5136,5 +5135,57 @@ export interface operations {
         }
       }
     }
+  }
+  "wallet.balance": operations["wallet.get"]
+  "wallet.creditBalance": {
+    parameters: {
+      query: {
+        customerId: string
+        projectId?: string
+      }
+      header?: never
+      path: {
+        walletId: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description The balance for one wallet credit */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            /** @enum {string} */
+            currency: "USD" | "EUR"
+            wallet: {
+              id: string
+              /** @enum {string} */
+              source: "promo" | "plan_included" | "trial" | "manual" | "credit_line"
+              issued: {
+                ledger_amount: number
+                amount: string
+                /** @enum {string} */
+                currency: "USD" | "EUR"
+                display_amount: string
+              }
+              available: {
+                ledger_amount: number
+                amount: string
+                /** @enum {string} */
+                currency: "USD" | "EUR"
+                display_amount: string
+              }
+              /** Format: date-time */
+              expires_at: string | null
+              /** Format: date-time */
+              created_at: string
+            }
+          }
+        }
+      }
+    } & Omit<operations["wallet.get"]["responses"], 200>
   }
 }

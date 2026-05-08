@@ -64,21 +64,14 @@ describe("verifyV1 route", () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       allowed: true,
-      effectiveAt: requestStartedAt,
-      expiresAt: null,
       featureSlug: "api_calls",
-      featureType: "usage",
-      isLimitReached: false,
       limit: 100,
-      meterConfig: {
-        aggregationField: "amount",
-        aggregationMethod: "sum",
-        eventId: "meter_123",
-        eventSlug: "tokens_used",
+      spending: {
+        currency: "USD",
+        displayAmount: "$42",
+        ledgerAmount: 4_200_000_000,
+        scale: 8,
       },
-      overageStrategy: "none",
-      status: "usage",
-      timestamp: requestStartedAt,
       usage: 42,
     })
     expect(verifyFeatureStatus).toHaveBeenCalledWith({
@@ -126,21 +119,14 @@ function createTestApp(
     options.verifyFeatureStatus ??
     vi.fn().mockResolvedValue({
       allowed: true,
-      effectiveAt: Date.UTC(2026, 2, 21, 12, 0, 0),
-      expiresAt: null,
       featureSlug: "api_calls",
-      featureType: "usage",
-      isLimitReached: false,
       limit: 100,
-      meterConfig: {
-        aggregationField: "amount",
-        aggregationMethod: "sum",
-        eventId: "meter_123",
-        eventSlug: "tokens_used",
+      spending: {
+        currency: "USD",
+        displayAmount: "$42",
+        ledgerAmount: 4_200_000_000,
+        scale: 8,
       },
-      overageStrategy: "none",
-      status: "usage",
-      timestamp: Date.UTC(2026, 2, 21, 12, 0, 0),
       usage: 42,
     })
   const resolveCustomerId =

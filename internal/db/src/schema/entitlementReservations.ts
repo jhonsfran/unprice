@@ -39,6 +39,8 @@ export type EntitlementReservationDrainLeg = {
   grantSource?: string
 }
 
+export type EntitlementReservationMetadata = Record<string, unknown>
+
 export const entitlementReservations = pgTableProject(
   "entitlement_reservations",
   {
@@ -53,6 +55,8 @@ export const entitlementReservations = pgTableProject(
     consumedAmount: bigint("consumed_amount", { mode: "number" }).notNull().default(0),
     // Cumulative source attribution for funds moved into reserved.
     drainLegs: json("drain_legs").$type<EntitlementReservationDrainLeg[]>().notNull().default([]),
+    // Operational trace context for the reservation owner (for example the DO id).
+    metadata: json("metadata").$type<EntitlementReservationMetadata>(),
     // Refill trigger threshold in basis points of allocation (2000 = 20%).
     refillThresholdBps: integer("refill_threshold_bps").notNull().default(2000),
     // Size of each refill chunk in scale-8 minor units.

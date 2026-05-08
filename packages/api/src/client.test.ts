@@ -40,6 +40,8 @@ describe("Unprice client", () => {
     expect(typeof client.realtime.createTicket).toBe("function")
     expect(typeof client.subscriptions.get).toBe("function")
     expect(typeof client.usage.get).toBe("function")
+    expect(typeof client.wallet.balance).toBe("function")
+    expect(typeof client.wallet.creditBalance).toBe("function")
     expect(typeof client.wallet.get).toBe("function")
     expect("getPlanVersion" in client.plans).toBe(false)
     expect("getEntitlements" in client.customers).toBe(false)
@@ -109,17 +111,12 @@ describe("Unprice client", () => {
         return createJsonResponse({
           currency: "USD",
           available: {
-            purchased: amount,
-            granted: amount,
-            total: {
-              ...amount,
-              ledger_amount: 30,
-              amount: "0.00000030",
-              display_amount: "$0.00000030",
-            },
+            ...amount,
+            ledger_amount: 30,
+            amount: "0.00000030",
+            display_amount: "$0.00000030",
           },
-          reserved: amount,
-          consumed: amount,
+          held: amount,
           credits: [],
         })
       },
@@ -131,10 +128,57 @@ describe("Unprice client", () => {
     })
 
     expect(error).toBeUndefined()
-    expect(result?.available.total.ledger_amount).toBe(30)
+    expect(result?.available.ledger_amount).toBe(30)
     expect(requests[0]?.url).toBe(
       "https://example.com/v1/wallet?customerId=cus_123&projectId=prj_123"
     )
+  })
+
+  it("serializes wallet balance paths and query params", async () => {
+    const requests: Request[] = []
+    const amount = {
+      ledger_amount: 10,
+      amount: "0.00000010",
+      currency: "USD",
+      display_amount: "$0.00000010",
+    }
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      disableTelemetry: true,
+      retry: { attempts: 0 },
+      fetch: async (request) => {
+        requests.push(request.clone())
+        return createJsonResponse({
+          currency: "USD",
+          wallet: {
+            id: "wcr_123",
+            source: "credit_line",
+            issued: amount,
+            available: amount,
+            expires_at: null,
+            created_at: "2026-05-07T12:28:35.906Z",
+          },
+        })
+      },
+    })
+
+    await client.wallet.balance({
+      customerId: "cus_123",
+      projectId: "prj_123",
+    })
+    const { result, error } = await client.wallet.creditBalance({
+      customerId: "cus_123",
+      projectId: "prj_123",
+      walletId: "wcr_123",
+    })
+
+    expect(error).toBeUndefined()
+    expect(result?.wallet.id).toBe("wcr_123")
+    expect(requests.map((request) => request.url)).toEqual([
+      "https://example.com/v1/wallet/balance?customerId=cus_123&projectId=prj_123",
+      "https://example.com/v1/wallet/credits/wcr_123/balance?customerId=cus_123&projectId=prj_123",
+    ])
   })
 
   it("sends POST bodies through the typed OpenAPI transport", async () => {
@@ -148,7 +192,6 @@ describe("Unprice client", () => {
         requests.push(request.clone())
         return createJsonResponse({
           allowed: true,
-          status: "active",
           featureSlug: "tokens",
         })
       },
@@ -278,29 +321,24 @@ const collectApiRoutes = () => {
   const routeFiles = collectRouteFiles(resolve(__dirname, "../../../apps/api/src/routes"))
 
   return routeFiles
-    .map((file) => {
+    .flatMap((file) => {
       const source = readFileSync(file, "utf8")
-      const path = source.match(/path:\s*"([^"]+)"/)?.[1]
-      const method = source.match(/method:\s*"([^"]+)"/)?.[1]
-      const operationId = source.match(/operationId:\s*"([^"]+)"/)?.[1]
       const tag = source.match(/const tags = \[\s*"([^"]+)"/)?.[1]
 
-      if (!path) {
-        return null
-      }
+      return [...source.matchAll(/createRoute\(\{([\s\S]*?)\n\}\)/g)].map((match) => {
+        const routeSource = match[1] ?? ""
+        const path = routeSource.match(/path:\s*"([^"]+)"/)?.[1]
+        const method = routeSource.match(/method:\s*"([^"]+)"/)?.[1]
+        const operationId = routeSource.match(/operationId:\s*"([^"]+)"/)?.[1]
 
-      return {
-        method: method?.toUpperCase() ?? `MISSING_METHOD:${file}`,
-        operationId: operationId ?? `MISSING_OPERATION_ID:${file}`,
-        path,
-        tag: tag ?? `MISSING_TAG:${file}`,
-      }
+        return {
+          method: method?.toUpperCase() ?? `MISSING_METHOD:${file}`,
+          operationId: operationId ?? `MISSING_OPERATION_ID:${file}`,
+          path: path ?? `MISSING_PATH:${file}`,
+          tag: tag ?? `MISSING_TAG:${file}`,
+        }
+      })
     })
-    .filter(
-      (route): route is { method: string; operationId: string; path: string; tag: string } => {
-        return route !== null
-      }
-    )
     .sort((left, right) => left.operationId.localeCompare(right.operationId))
 }
 

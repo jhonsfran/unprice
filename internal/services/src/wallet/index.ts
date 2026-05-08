@@ -18,6 +18,7 @@ export {
   type ExpireGrantInput,
   type FlushReservationInput,
   type FlushReservationOutput,
+  type GetWalletCreditBalanceInput,
   type GetWalletStateInput,
   type SettleTopUpInput,
   type SettleTopUpOutput,

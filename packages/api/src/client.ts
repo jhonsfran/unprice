@@ -547,6 +547,32 @@ export class Unprice {
 
   public get wallet() {
     return {
+      balance: (
+        req: GetQuery<"/v1/wallet/balance">
+      ): Promise<ApiResult<GetResponse<"/v1/wallet/balance">>> => {
+        return this.toResult(
+          this.openapi.GET("/v1/wallet/balance", {
+            params: {
+              query: req,
+            },
+          })
+        )
+      },
+      creditBalance: (
+        req: GetPath<"/v1/wallet/credits/{walletId}/balance"> &
+          GetQuery<"/v1/wallet/credits/{walletId}/balance">
+      ): Promise<ApiResult<GetResponse<"/v1/wallet/credits/{walletId}/balance">>> => {
+        const { walletId, ...query } = req
+
+        return this.toResult(
+          this.openapi.GET("/v1/wallet/credits/{walletId}/balance", {
+            params: {
+              path: { walletId },
+              query,
+            },
+          })
+        )
+      },
       get: (req: GetQuery<"/v1/wallet">): Promise<ApiResult<GetResponse<"/v1/wallet">>> => {
         return this.toResult(
           this.openapi.GET("/v1/wallet", {

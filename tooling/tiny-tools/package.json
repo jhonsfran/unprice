@@ -11,6 +11,8 @@
     "e2e:signup:local": "UNPRICE_API_URL=http://localhost:8787 tsx plan-signup.ts",
     "e2e:usage": "tsx plan-usage.ts",
     "e2e:usage:local": "UNPRICE_API_URL=http://localhost:8787 tsx plan-usage.ts",
+    "e2e:wallet": "tsx plan-wallet.ts",
+    "e2e:wallet:local": "UNPRICE_API_URL=http://localhost:8787 tsx plan-wallet.ts",
     "clean": "git clean -xdf .next .turbo node_modules",
     "with-env": "infisical run --env=preview --path=/app --"
   },

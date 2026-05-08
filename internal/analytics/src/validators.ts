@@ -156,7 +156,6 @@ export const featureMetadataSchemaV1 = z.object({
 })
 
 export const entitlementMeterFactSchemaV1 = z.object({
-  id: z.string(),
   event_id: z.string(),
   idempotency_key: z.string(),
   project_id: z.string(),
@@ -170,9 +169,10 @@ export const entitlementMeterFactSchemaV1 = z.object({
   created_at: z.number().describe("timestamp of when the fact row was created"),
   delta: z.number(),
   value_after: z.number(),
-  grant_id: z.string().optional(),
+  grant_id: z.string(),
   feature_plan_version_id: z.string().nullable().optional(),
   amount: z.number().int(),
+  amount_after: z.number().int(),
   amount_scale: z.literal(LEDGER_SCALE),
   currency: z.string().length(3),
   priced_at: z.number().int(),

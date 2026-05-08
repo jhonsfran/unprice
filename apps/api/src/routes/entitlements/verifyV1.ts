@@ -1,11 +1,11 @@
 import { createRoute } from "@hono/zod-openapi"
-import { meterConfigSchema, overageStrategySchema, typeFeatureSchema } from "@unprice/db/validators"
+import { LEDGER_SCALE } from "@unprice/money"
 import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
-import { FEATURE_VERIFICATION_STATUSES } from "@unprice/services/ingestion"
+import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
 import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -23,20 +23,13 @@ const verifyFeatureStatusSchema = z.object({
     description: "Whether the feature is currently usable for the requested customer and timestamp",
     example: true,
   }),
-  status: z.enum(FEATURE_VERIFICATION_STATUSES).openapi({
-    description: "The current verification status for the requested feature",
-    example: "usage",
-  }),
   featureSlug: z.string().openapi({
     description: "The feature slug that was verified",
     example: "tokens",
   }),
-  featureType: typeFeatureSchema.optional().openapi({
-    description: "The resolved feature type",
-    example: "usage",
-  }),
-  meterConfig: meterConfigSchema.optional().openapi({
-    description: "The resolved meter configuration for usage-based features",
+  rejectionReason: z.enum(INGESTION_REJECTION_REASONS).optional().openapi({
+    description: "Why the feature is not usable. Omitted when allowed is true.",
+    example: "LIMIT_EXCEEDED",
   }),
   usage: z.number().optional().openapi({
     description: "Current usage in the active meter window",
@@ -46,25 +39,29 @@ const verifyFeatureStatusSchema = z.object({
     description: "Configured limit for the active meter window",
     example: 100,
   }),
-  isLimitReached: z.boolean().optional().openapi({
-    description: "Whether the current usage has reached the current limit",
-    example: false,
-  }),
-  overageStrategy: overageStrategySchema.optional().openapi({
-    description: "How the feature behaves once the limit is reached",
-    example: "none",
-  }),
-  effectiveAt: z
-    .number()
+  spending: z
+    .object({
+      ledgerAmount: z.number().int().openapi({
+        description: "Current priced usage spend in ledger scale units",
+        example: 4_200_000_000,
+      }),
+      currency: z.string().length(3).openapi({
+        description: "ISO currency code for the spending amount",
+        example: "USD",
+      }),
+      displayAmount: z.string().openapi({
+        description: "Ready-to-render localized spending amount",
+        example: "$42",
+      }),
+      scale: z.literal(LEDGER_SCALE).openapi({
+        description: "Decimal scale for ledgerAmount",
+        example: LEDGER_SCALE,
+      }),
+    })
     .optional()
     .openapi({
-      description: "The customer entitlement effective start timestamp",
-      example: Date.UTC(2026, 2, 21, 12, 0, 0),
+      description: "Current priced usage spend for usage-based features",
     }),
-  expiresAt: z.number().nullable().optional().openapi({
-    description: "The customer entitlement exclusive end timestamp",
-    example: null,
-  }),
   message: z.string().optional().openapi({
     description: "Optional detail about the verification result",
     example: "Unable to resolve the current meter window for this feature",
@@ -76,7 +73,7 @@ export const route = createRoute({
   operationId: "entitlements.verify",
   summary: "get current feature status",
   description:
-    "Resolve the current state of a feature for a customer and, for usage features, return the live meter method, limit, and usage.",
+    "Resolve whether a feature is usable for a customer and, for usage features, return current usage, limit, and priced spend.",
   method: "post",
   tags,
   request: {

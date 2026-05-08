@@ -22,6 +22,9 @@ E2E test suite for the Unprice public API (`@unprice/api`). Runs against any env
 # Against local dev server
 CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx pnpm --filter @unprice/tiny-tools e2e:local
 
+# Wallet-only checks
+CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx pnpm --filter @unprice/tiny-tools e2e:wallet:local
+
 # Against a specific environment
 CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx UNPRICE_API_URL=https://api.unprice.dev pnpm --filter @unprice/tiny-tools e2e
 
@@ -59,6 +62,16 @@ Tests run sequentially. Later tests reuse state discovered in earlier ones (e.g.
 | `verification: non-existent customer` | Fake customer ID returns `customer_not_found`, `feature_missing`, or API error |
 
 Ingestion tests (`sync-ingestion`, `async-ingestion`, `idempotency`, `limit-enforcement`) are automatically skipped if the customer has no usage-based features or the wallet is not funded for priced usage (`WALLET_EMPTY`).
+
+## Wallet E2E
+
+`pnpm --filter @unprice/tiny-tools e2e:wallet:local` runs wallet-specific checks without sending usage. It requires a customer with at least one capped entitlement and verifies:
+
+| Test | What it checks |
+|---|---|
+| `entitlements: customer has capped wallet-backed entitlement` | A capped entitlement exists, which means wallet-backed usage is expected |
+| `wallet: returns current available balance` | `wallet.get` returns display-ready `available` and `held` amounts |
+| `wallet: credits reconcile to available balance` | Active credit availability does not exceed wallet availability |
 
 ## Exit codes
 

@@ -16,8 +16,21 @@ export const walletCreditMetadataSchema = z.record(
 )
 export type WalletCreditMetadata = z.infer<typeof walletCreditMetadataSchema>
 
-export const entitlementReservationSelectSchema = createSelectSchema(schema.entitlementReservations)
-export const entitlementReservationInsertSchema = createInsertSchema(schema.entitlementReservations)
+export const entitlementReservationMetadataSchema = z.record(z.string(), z.unknown())
+export type EntitlementReservationMetadata = z.infer<typeof entitlementReservationMetadataSchema>
+
+export const entitlementReservationSelectSchema = createSelectSchema(
+  schema.entitlementReservations,
+  {
+    metadata: entitlementReservationMetadataSchema.nullable(),
+  }
+)
+export const entitlementReservationInsertSchema = createInsertSchema(
+  schema.entitlementReservations,
+  {
+    metadata: entitlementReservationMetadataSchema.nullable().optional(),
+  }
+)
 export type EntitlementReservation = typeof schema.entitlementReservations.$inferSelect
 
 export const walletTopupSelectSchema = createSelectSchema(schema.walletTopups)

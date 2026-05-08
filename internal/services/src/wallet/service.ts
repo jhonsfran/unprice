@@ -63,6 +63,7 @@ export interface CreateReservationInput {
   refillChunkAmount: number
   periodStartAt: Date
   periodEndAt: Date
+  metadata?: Record<string, unknown>
   idempotencyKey: string
 }
 
@@ -88,6 +89,7 @@ export interface FlushReservationInput {
   refillChunkAmount: number
   statementKey: string
   final: boolean
+  metadata?: Record<string, unknown>
   sourceId?: string
 }
 
@@ -159,6 +161,12 @@ export interface ExpireGrantInput {
 export interface GetWalletStateInput {
   projectId: string
   customerId: string
+}
+
+export interface GetWalletCreditBalanceInput {
+  projectId: string
+  customerId: string
+  walletId: string
 }
 
 export interface WalletBalances {
@@ -281,6 +289,7 @@ export class WalletService {
     }
 
     const keys = customerAccountKeys(input.customerId)
+    const reservationMetadata = this.normalizeJsonMetadata(input.metadata)
 
     const seeded = await this.ensureCustomerSeeded(
       input.projectId,
@@ -352,6 +361,7 @@ export class WalletService {
             id: input.idempotencyKey,
           },
           metadata: {
+            ...(reservationMetadata ?? {}),
             flow: "reserve",
             drain_source: "granted",
             reservation_id: reservationId,
@@ -373,6 +383,7 @@ export class WalletService {
             id: input.idempotencyKey,
           },
           metadata: {
+            ...(reservationMetadata ?? {}),
             flow: "reserve",
             drain_source: "purchased",
             reservation_id: reservationId,
@@ -395,6 +406,7 @@ export class WalletService {
         allocationAmount,
         consumedAmount: 0,
         drainLegs: this.toStoredDrainLegs(drainLegs),
+        ...(reservationMetadata ? { metadata: reservationMetadata } : {}),
         refillThresholdBps: input.refillThresholdBps,
         refillChunkAmount: input.refillChunkAmount,
         periodStartAt: input.periodStartAt,
@@ -422,6 +434,7 @@ export class WalletService {
     }
 
     const keys = customerAccountKeys(input.customerId)
+    const flushMetadata = this.normalizeJsonMetadata(input.metadata)
 
     const seeded = await this.ensureCustomerSeeded(
       input.projectId,
@@ -463,6 +476,7 @@ export class WalletService {
             amount: fromLedgerMinor(input.flushAmount, input.currency),
             source: { type: "wallet_flush_consume", id: idemBase },
             metadata: {
+              ...(flushMetadata ?? {}),
               flow: "flush",
               ...(input.sourceId ? { source_id: input.sourceId } : {}),
               reservation_id: input.reservationId,
@@ -496,6 +510,7 @@ export class WalletService {
                 id: `capture:${input.reservationId}:${input.flushSeq}:purchased`,
               },
               metadata: {
+                ...(flushMetadata ?? {}),
                 flow: "refund_reserved_cash",
                 source: "purchased",
                 reservation_id: input.reservationId,
@@ -519,6 +534,7 @@ export class WalletService {
                 id: `release:${input.reservationId}:${input.flushSeq}:${release.source}`,
               },
               metadata: {
+                ...(flushMetadata ?? {}),
                 flow: "release_reserved_credit",
                 source: release.source,
                 reservation_id: input.reservationId,
@@ -546,6 +562,7 @@ export class WalletService {
               amount: fromLedgerMinor(grantedDrained, input.currency),
               source: { type: "wallet_refill_granted", id: idemBase },
               metadata: {
+                ...(flushMetadata ?? {}),
                 flow: "refill",
                 drain_source: "granted",
                 reservation_id: input.reservationId,
@@ -564,6 +581,7 @@ export class WalletService {
               amount: fromLedgerMinor(purchasedDrained, input.currency),
               source: { type: "wallet_refill_purchased", id: idemBase },
               metadata: {
+                ...(flushMetadata ?? {}),
                 flow: "refill",
                 drain_source: "purchased",
                 reservation_id: input.reservationId,
@@ -906,6 +924,28 @@ export class WalletService {
       return this.handleUnexpected("wallet.get_state_failed", error, {
         customerId: input.customerId,
         projectId: input.projectId,
+      })
+    }
+  }
+
+  public async getWalletCreditBalance(
+    input: GetWalletCreditBalanceInput
+  ): Promise<Result<WalletCredit | null, UnPriceWalletError>> {
+    try {
+      const credit = await this.db.query.walletCredits.findFirst({
+        where: and(
+          eq(walletCredits.id, input.walletId),
+          eq(walletCredits.customerId, input.customerId),
+          eq(walletCredits.projectId, input.projectId)
+        ),
+      })
+
+      return Ok(credit ?? null)
+    } catch (error) {
+      return this.handleUnexpected("wallet.get_credit_balance_failed", error, {
+        customerId: input.customerId,
+        projectId: input.projectId,
+        walletId: input.walletId,
       })
     }
   }
@@ -1299,6 +1339,21 @@ export class WalletService {
       missing.push("kind")
     }
     return missing.length === 0 ? null : missing
+  }
+
+  private normalizeJsonMetadata(
+    metadata: Record<string, unknown> | undefined
+  ): Record<string, unknown> | null {
+    if (!metadata) return null
+
+    const normalized: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(metadata)) {
+      if (value !== undefined) {
+        normalized[key] = value
+      }
+    }
+
+    return Object.keys(normalized).length > 0 ? normalized : null
   }
 
   private wrapLedgerError(error: UnPriceLedgerError): UnPriceWalletError {

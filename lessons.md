@@ -67,14 +67,59 @@ debugging shortcut that should influence future work.
 
 Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md).
 
+## 2026-05-08: Entitlement Meter Facts And Verify Shape
+
+- Do not add a synthetic `id` to `unprice_entitlement_meter_facts`. Tinybird already dedupes these
+  rows with the ReplacingMergeTree sorting key built from existing business columns, so a repeated
+  ID only stores redundant data and makes the outbox payload larger.
+- Track both event spend and cumulative period spend in entitlement meter facts:
+  `amount` is the signed price delta for the event, and `amount_after` is the total priced spend
+  after that event, mirroring `delta` and `value_after`.
+- Keep `entitlement/verify` as a compact decision response. Return `allowed`, `featureSlug`,
+  optional uppercase `rejectionReason` from `INGESTION_REJECTION_REASONS`, optional
+  `usage`/`limit`, and optional `spending` with `displayAmount`; do not expose internal entitlement
+  metadata like meter config, overage strategy, effective windows, or synthetic status.
+
+## 2026-05-08: Sync Ingestion Idempotency Replay
+
+- For `/v1/events/ingest/sync`, do not use the ingestion audit `exists` check to synthesize a
+  duplicate response. Re-enter the entitlement window and let its idempotency table replay the
+  original apply result, including `WALLET_EMPTY`/`LIMIT_EXCEEDED` messages.
+- Keep derived meter keys for storage and logs, but API-facing wallet-empty messages should use the
+  configured meter/event slug instead of the full `slug=...|method=...|field=...` key.
+
+## 2026-05-08: Fractional Usage Tier Pricing
+
+- Meter deltas may be fractional, for example `0.1`, even though tier definitions use
+  integer `firstUnit`/`lastUnit` boundaries. Positive usage below the first tier boundary should
+  price against the first tier; tier calculators must return a calculation error for unmatched
+  quantities instead of assuming a tier exists and throwing a raw `TypeError`.
+- When multiplying Dinero prices by fractional usage, pass the quantity as a scaled amount
+  (`{ amount, scale }`) rather than a raw JS decimal. Raw decimals can throw or mis-price
+  sub-cent tier prices such as `0.001`.
+
 ## 2026-05-08: Wallet Read API Display Amounts
 
 - Public wallet reads should expose customer-facing money objects, not only ledger-scale integers.
   Include the raw `ledger_amount` for precision/debugging plus exact major-unit `amount`,
   `currency`, and localized `display_amount`.
-- Capped subscription usage is wallet-backed. Tiny-tools usage E2E should detect
-  `subscriptionPhase.creditLinePolicy === "capped"` from entitlements and verify the wallet read
-  shape while reporting reserved and consumed wallet deltas.
+- Keep public wallet reads current-state focused: expose simple display fields such as `available`
+  and `held`, not raw accounting buckets like `granted`, `reserved`, and `consumed`. The consumed
+  ledger account can include non-wallet subscription charges and is easy to misread as current
+  wallet usage.
+- Capped subscription usage is wallet-backed. Keep wallet assertions in the dedicated
+  `tooling/tiny-tools/plan-wallet.ts` E2E; usage E2E should stay focused on ingestion and exact
+  entitlement usage deltas.
+- Entitlement reservation `allocation_amount` is wallet runway, not consumed usage. It can exceed
+  `consumed_amount` after a refill; explain it as initial reserve plus refill chunks minus flushed
+  consumption, and keep the DO id in reservation metadata for traceability.
+- When usage reporting reaches an entitlement limit, close any active wallet reservation by
+  scheduling the DO final-flush path. Do not close reservations from verify/enforcement-state reads.
+- `WALLET_EMPTY` from `EntitlementWindowDO` can mean the DO-local reservation is underfunded, not
+  that the customer wallet is empty. Before caching `WALLET_EMPTY`, synchronously flush+refill the
+  reservation once from `WalletService`; only deny when the wallet cannot grant enough runway.
+- Prefer `wallet.balance` / `/v1/wallet/balance` for the public read surface. Keep `/v1/wallet` as
+  a compatibility alias, and use `/v1/wallet/credits/{walletId}/balance` for one `wcr_...` credit.
 
 ## 2026-05-08: API SDK Endpoint Drift Guard
 

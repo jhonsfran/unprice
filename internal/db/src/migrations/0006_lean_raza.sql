@@ -1,0 +1,1 @@
+ALTER TABLE "unprice_entitlement_reservations" ADD COLUMN "metadata" json;

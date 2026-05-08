@@ -457,4 +457,87 @@ describe("grant pricing helpers", () => {
     ).toBe(103_100_000)
     expect(computeMaxMarginalPriceMinor(priceConfig)).toBe(103_100_000)
   })
+
+  it("prices positive fractional tier usage against the first tier", () => {
+    const priceConfig = {
+      tierMode: "volume",
+      usageMode: "tier",
+      tiers: [
+        {
+          firstUnit: 1,
+          lastUnit: null,
+          unitPrice: price("1.00", EUR),
+          flatPrice: price("0.00", EUR),
+        },
+      ],
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaMinor({
+        priceConfig,
+        usageBefore: 0,
+        usageAfter: 0.1,
+      })
+    ).toBe(10_000_000)
+  })
+
+  it("normalizes binary floating point residue in fractional usage", () => {
+    const priceConfig = {
+      tierMode: "volume",
+      usageMode: "tier",
+      tiers: [
+        {
+          firstUnit: 1,
+          lastUnit: null,
+          unitPrice: price("1.00", EUR),
+          flatPrice: price("0.00", EUR),
+        },
+      ],
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaMinor({
+        priceConfig,
+        usageBefore: 0.2,
+        usageAfter: 0.1 + 0.2,
+      })
+    ).toBe(10_000_000)
+  })
+
+  it("prices fractional sub-cent tier deltas at ledger scale", () => {
+    const priceConfig = {
+      tierMode: "volume",
+      usageMode: "tier",
+      tiers: [
+        {
+          firstUnit: 1,
+          lastUnit: 1000,
+          unitPrice: price("0.001", EUR),
+          flatPrice: price("1.00", EUR),
+        },
+        {
+          firstUnit: 1001,
+          lastUnit: null,
+          unitPrice: price("0.1", EUR),
+          flatPrice: price("0.00", EUR),
+        },
+      ],
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaMinor({
+        priceConfig,
+        usageBefore: 0,
+        usageAfter: 0.1,
+      })
+    ).toBe(100_010_000)
+
+    expect(
+      computeUsagePriceDeltaMinor({
+        priceConfig,
+        usageBefore: 9.71,
+        usageAfter: 9.81,
+      })
+    ).toBe(10_000)
+  })
 })

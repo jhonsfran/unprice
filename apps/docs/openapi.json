@@ -1911,7 +1911,7 @@
       "post": {
         "operationId": "entitlements.verify",
         "summary": "get current feature status",
-        "description": "Resolve the current state of a feature for a customer and, for usage features, return the live meter method, limit, and usage.",
+        "description": "Resolve whether a feature is usable for a customer and, for usage features, return the current usage, limit, and priced spend.",
         "tags": ["entitlements"],
         "requestBody": {
           "description": "Body of the request",
@@ -1955,50 +1955,26 @@
                       "description": "Whether the feature is currently usable for the requested customer and timestamp",
                       "example": true
                     },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "customer_not_found",
-                        "feature_inactive",
-                        "feature_missing",
-                        "invalid_entitlement_configuration",
-                        "non_usage",
-                        "usage"
-                      ],
-                      "description": "The current verification status for the requested feature",
-                      "example": "usage"
-                    },
                     "featureSlug": {
                       "type": "string",
                       "description": "The feature slug that was verified",
                       "example": "tokens"
                     },
-                    "featureType": {
+                    "rejectionReason": {
                       "type": "string",
-                      "enum": ["flat", "tier", "package", "usage"],
-                      "description": "The resolved feature type",
-                      "example": "usage"
-                    },
-                    "meterConfig": {
-                      "type": "object",
-                      "properties": {
-                        "eventId": { "type": "string", "minLength": 1 },
-                        "eventSlug": { "type": "string", "minLength": 1 },
-                        "aggregationMethod": {
-                          "type": "string",
-                          "enum": ["sum", "count", "max", "latest"],
-                          "description": "How to aggregate usage events within the current billing period. 'sum' totals values, 'count' counts events, 'max' keeps the highest value, and 'latest' keeps the most recent value."
-                        },
-                        "aggregationField": { "type": "string", "minLength": 1 },
-                        "filters": {
-                          "type": "object",
-                          "additionalProperties": { "type": "string" }
-                        },
-                        "groupBy": { "type": "array", "items": { "type": "string" } },
-                        "windowSize": { "type": "string", "enum": ["MINUTE", "HOUR", "DAY"] }
-                      },
-                      "required": ["eventId", "eventSlug", "aggregationMethod"],
-                      "description": "The resolved meter configuration for usage-based features"
+                      "enum": [
+                        "CUSTOMER_NOT_FOUND",
+                        "EVENT_TOO_OLD",
+                        "INVALID_ENTITLEMENT_CONFIGURATION",
+                        "INVALID_AGGREGATION_PROPERTIES",
+                        "LIMIT_EXCEEDED",
+                        "LATE_EVENT_CLOSED_PERIOD",
+                        "NO_MATCHING_ENTITLEMENT",
+                        "UNROUTABLE_EVENT",
+                        "WALLET_EMPTY"
+                      ],
+                      "description": "Why the feature is not currently allowed, when applicable",
+                      "example": "LIMIT_EXCEEDED"
                     },
                     "usage": {
                       "type": "number",
@@ -2011,27 +1987,32 @@
                       "description": "Configured limit for the active meter window",
                       "example": 100
                     },
-                    "isLimitReached": {
-                      "type": "boolean",
-                      "description": "Whether the current usage has reached the current limit",
-                      "example": false
-                    },
-                    "overageStrategy": {
-                      "type": "string",
-                      "enum": ["none", "last-call", "always"],
-                      "description": "How the feature behaves once the limit is reached",
-                      "example": "none"
-                    },
-                    "effectiveAt": {
-                      "type": "number",
-                      "description": "The customer entitlement effective start timestamp",
-                      "example": 1774094400000
-                    },
-                    "expiresAt": {
-                      "type": "number",
-                      "nullable": true,
-                      "description": "The customer entitlement exclusive end timestamp",
-                      "example": null
+                    "spending": {
+                      "type": "object",
+                      "properties": {
+                        "ledgerAmount": {
+                          "type": "number",
+                          "description": "Current priced spend in ledger scale units",
+                          "example": 4200000000
+                        },
+                        "currency": {
+                          "type": "string",
+                          "description": "Currency for the current priced spend",
+                          "example": "USD"
+                        },
+                        "displayAmount": {
+                          "type": "string",
+                          "description": "Ready-to-render localized spending amount",
+                          "example": "$42"
+                        },
+                        "scale": {
+                          "type": "number",
+                          "description": "Ledger scale for ledgerAmount",
+                          "example": 8
+                        }
+                      },
+                      "required": ["ledgerAmount", "currency", "displayAmount", "scale"],
+                      "description": "Current priced spend for usage features"
                     },
                     "message": {
                       "type": "string",
@@ -2039,7 +2020,7 @@
                       "example": "Unable to resolve the current meter window for this feature"
                     }
                   },
-                  "required": ["allowed", "status", "featureSlug"]
+                  "required": ["allowed", "featureSlug"]
                 }
               }
             }
@@ -6919,7 +6900,7 @@
       "get": {
         "operationId": "wallet.get",
         "summary": "get wallet state",
-        "description": "Snapshot of the four customer sub-account balances (purchased, granted, reserved, consumed) plus active wallet credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.",
+        "description": "Current customer wallet balance plus active holds and credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.",
         "tags": ["wallet"],
         "parameters": [
           {
@@ -6955,42 +6936,6 @@
                     "available": {
                       "type": "object",
                       "properties": {
-                        "purchased": {
-                          "type": "object",
-                          "properties": {
-                            "ledger_amount": { "type": "integer", "minimum": 0 },
-                            "amount": { "type": "string" },
-                            "currency": { "type": "string", "enum": ["USD", "EUR"] },
-                            "display_amount": { "type": "string" }
-                          },
-                          "required": ["ledger_amount", "amount", "currency", "display_amount"]
-                        },
-                        "granted": {
-                          "type": "object",
-                          "properties": {
-                            "ledger_amount": { "type": "integer", "minimum": 0 },
-                            "amount": { "type": "string" },
-                            "currency": { "type": "string", "enum": ["USD", "EUR"] },
-                            "display_amount": { "type": "string" }
-                          },
-                          "required": ["ledger_amount", "amount", "currency", "display_amount"]
-                        },
-                        "total": {
-                          "type": "object",
-                          "properties": {
-                            "ledger_amount": { "type": "integer", "minimum": 0 },
-                            "amount": { "type": "string" },
-                            "currency": { "type": "string", "enum": ["USD", "EUR"] },
-                            "display_amount": { "type": "string" }
-                          },
-                          "required": ["ledger_amount", "amount", "currency", "display_amount"]
-                        }
-                      },
-                      "required": ["purchased", "granted", "total"]
-                    },
-                    "reserved": {
-                      "type": "object",
-                      "properties": {
                         "ledger_amount": { "type": "integer", "minimum": 0 },
                         "amount": { "type": "string" },
                         "currency": { "type": "string", "enum": ["USD", "EUR"] },
@@ -6998,7 +6943,7 @@
                       },
                       "required": ["ledger_amount", "amount", "currency", "display_amount"]
                     },
-                    "consumed": {
+                    "held": {
                       "type": "object",
                       "properties": {
                         "ledger_amount": { "type": "integer", "minimum": 0 },
@@ -7018,7 +6963,7 @@
                             "type": "string",
                             "enum": ["promo", "plan_included", "trial", "manual", "credit_line"]
                           },
-                          "issued_amount": {
+                          "issued": {
                             "type": "object",
                             "properties": {
                               "ledger_amount": { "type": "integer", "minimum": 0 },
@@ -7028,7 +6973,7 @@
                             },
                             "required": ["ledger_amount", "amount", "currency", "display_amount"]
                           },
-                          "remaining_amount": {
+                          "available": {
                             "type": "object",
                             "properties": {
                               "ledger_amount": { "type": "integer", "minimum": 0 },
@@ -7048,15 +6993,15 @@
                         "required": [
                           "id",
                           "source",
-                          "issued_amount",
-                          "remaining_amount",
+                          "issued",
+                          "available",
                           "expires_at",
                           "created_at"
                         ]
                       }
                     }
                   },
-                  "required": ["currency", "available", "reserved", "consumed", "credits"]
+                  "required": ["currency", "available", "held", "credits"]
                 }
               }
             }

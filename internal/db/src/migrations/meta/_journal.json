@@ -43,6 +43,13 @@
       "when": 1778152293938,
       "tag": "0005_conscious_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778253747603,
+      "tag": "0006_lean_raza",
+      "breakpoints": true
     }
   ]
 }

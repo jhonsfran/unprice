@@ -441,6 +441,46 @@ describe("WalletService.createReservation", () => {
     expect(val?.drainLegs.map((l) => l.grantId)).toEqual(["wcr_soon", "wcr_far"])
   })
 
+  it("stores reservation metadata and forwards it to reserve ledger transfers", async () => {
+    const { state, wallet } = buildService()
+    state.balances[keys.purchased] = 2 * DOLLAR
+
+    const { err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: "ent_1",
+      requestedAmount: 2 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-01-01"),
+      periodEndAt: new Date("2026-02-01"),
+      metadata: {
+        requestedBy: "durable_object",
+        requestedById: "do_123",
+        ignored: undefined,
+      },
+      idempotencyKey: "reserve:metadata",
+    })
+
+    expect(err).toBeUndefined()
+    const reservationInsert = state.inserts.find((i) => i.table === "entitlementReservations")
+    expect(reservationInsert?.values).toMatchObject({
+      metadata: {
+        requestedBy: "durable_object",
+        requestedById: "do_123",
+      },
+    })
+    expect(state.transfers[0]?.metadata).toMatchObject({
+      requestedBy: "durable_object",
+      requestedById: "do_123",
+      flow: "reserve",
+      reservation_id: expect.any(String),
+      entitlement_id: "ent_1",
+    })
+    expect(state.transfers[0]?.metadata).not.toHaveProperty("ignored")
+  })
+
   it("skips grants with remaining_amount = 0 and returns partial fulfillment", async () => {
     const { state, wallet } = buildService()
     // Partially-consumed grant still active, but only 1 DOLLAR remains.
@@ -565,6 +605,10 @@ describe("WalletService.flushReservation", () => {
       refillChunkAmount: 3 * DOLLAR,
       statementKey: "stmt_1",
       final: false,
+      metadata: {
+        requestedBy: "durable_object",
+        requestedById: "do_123",
+      },
     })
 
     expect(err).toBeUndefined()
@@ -585,6 +629,11 @@ describe("WalletService.flushReservation", () => {
     expect(state.transfers[1]).toMatchObject({
       fromAccount: keys.granted,
       toAccount: keys.reserved,
+    })
+    expect(state.transfers[1]?.metadata).toMatchObject({
+      requestedBy: "durable_object",
+      requestedById: "do_123",
+      flow: "refill",
     })
     expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(1 * DOLLAR)
     expect(state.transfers[2]).toMatchObject({
@@ -1021,5 +1070,32 @@ describe("WalletService.getWalletState", () => {
       consumed: 0,
     })
     expect(val?.credits).toEqual([])
+  })
+})
+
+describe("WalletService.getWalletCreditBalance", () => {
+  const customerId = "cus_abc"
+  const projectId = "prj_abc"
+
+  it("returns a wallet credit by customer and wallet id", async () => {
+    const { state, wallet } = buildService()
+    seedGrant(state, {
+      id: "wcr_target",
+      customerId,
+      projectId,
+      issuedAmount: 10 * DOLLAR,
+      remainingAmount: 7 * DOLLAR,
+      expiresAt: new Date("2026-12-01"),
+    })
+
+    const { val, err } = await wallet.getWalletCreditBalance({
+      projectId,
+      customerId,
+      walletId: "wcr_target",
+    })
+
+    expect(err).toBeUndefined()
+    expect(val?.id).toBe("wcr_target")
+    expect(val?.remainingAmount).toBe(7 * DOLLAR)
   })
 })

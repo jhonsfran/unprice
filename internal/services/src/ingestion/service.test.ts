@@ -138,6 +138,64 @@ describe("IngestionService entitlement routing", () => {
     )
   })
 
+  it("replays sync entitlement-window denials instead of treating audited duplicates as processed", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+      message: "Wallet empty for meter api_calls (reservation res_123)",
+    })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply,
+      getEnforcementState: vi.fn(),
+    })
+    const exists = vi.fn().mockResolvedValue(["idem_123"])
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn().mockResolvedValue({ inserted: 0, duplicates: 1, conflicts: 0 }),
+          exists,
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.ingestFeatureSync({
+      featureSlug: entitlement.featureSlug,
+      message: {
+        version: 1,
+        projectId: entitlement.projectId,
+        customerId: entitlement.customerId,
+        requestId: "req_123",
+        receivedAt: SERVICE_NOW,
+        idempotencyKey: "idem_123",
+        id: "evt_123",
+        slug: "usage.recorded",
+        timestamp: Date.UTC(2026, 2, 19),
+        properties: { amount: 1 },
+      },
+    })
+
+    expect(result).toEqual({
+      allowed: false,
+      message: "Wallet empty for meter api_calls (reservation res_123)",
+      rejectionReason: "WALLET_EMPTY",
+      state: "rejected",
+    })
+    expect(exists).not.toHaveBeenCalled()
+    expect(apply).toHaveBeenCalledTimes(1)
+  })
+
   it("rejects duplicate active entitlements for the same customer feature", async () => {
     const entitlement = createEntitlement()
     const apply = vi.fn().mockResolvedValue({ allowed: true })
@@ -204,7 +262,7 @@ describe("IngestionService entitlement routing", () => {
     )
   })
 
-  it("returns customer_not_found when verifying a missing customer", async () => {
+  it("returns CUSTOMER_NOT_FOUND when verifying a missing customer", async () => {
     const service = new IngestionService({
       cache: createCache(),
       entitlementService: {
@@ -233,11 +291,11 @@ describe("IngestionService entitlement routing", () => {
     expect(result).toMatchObject({
       allowed: false,
       featureSlug: "api_calls",
-      status: "customer_not_found",
+      rejectionReason: "CUSTOMER_NOT_FOUND",
     })
   })
 
-  it("returns feature_missing when the customer exists without a matching entitlement", async () => {
+  it("returns NO_MATCHING_ENTITLEMENT when the customer exists without a matching entitlement", async () => {
     const service = new IngestionService({
       cache: createCache(),
       entitlementService: {
@@ -266,7 +324,120 @@ describe("IngestionService entitlement routing", () => {
     expect(result).toMatchObject({
       allowed: false,
       featureSlug: "missing_feature",
-      status: "feature_missing",
+      rejectionReason: "NO_MATCHING_ENTITLEMENT",
+    })
+  })
+
+  it("returns compact usage verification state with current spend", async () => {
+    const entitlement = createEntitlement()
+    const getEnforcementState = vi.fn().mockResolvedValue({
+      usage: 42,
+      limit: 100,
+      isLimitReached: false,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 4_200_000_000,
+        scale: 8,
+      },
+    })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply: vi.fn(),
+      getEnforcementState,
+    })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn(),
+          exists: vi.fn(),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.verifyFeatureStatus({
+      customerId: entitlement.customerId,
+      featureSlug: entitlement.featureSlug,
+      projectId: entitlement.projectId,
+      timestamp: SERVICE_NOW,
+    })
+
+    expect(result).toEqual({
+      allowed: true,
+      featureSlug: "api_calls",
+      limit: 100,
+      spending: {
+        currency: "USD",
+        displayAmount: "$42",
+        ledgerAmount: 4_200_000_000,
+        scale: 8,
+      },
+      usage: 42,
+    })
+  })
+
+  it("returns LIMIT_EXCEEDED when usage verification reaches the entitlement limit", async () => {
+    const entitlement = createEntitlement()
+    const getEnforcementState = vi.fn().mockResolvedValue({
+      usage: 100,
+      limit: 100,
+      isLimitReached: true,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 10_000_000_000,
+        scale: 8,
+      },
+    })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply: vi.fn(),
+      getEnforcementState,
+    })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn(),
+          exists: vi.fn(),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    await expect(
+      service.verifyFeatureStatus({
+        customerId: entitlement.customerId,
+        featureSlug: entitlement.featureSlug,
+        projectId: entitlement.projectId,
+        timestamp: SERVICE_NOW,
+      })
+    ).resolves.toMatchObject({
+      allowed: false,
+      featureSlug: "api_calls",
+      limit: 100,
+      rejectionReason: "LIMIT_EXCEEDED",
+      spending: {
+        displayAmount: "$100",
+        ledgerAmount: 10_000_000_000,
+      },
+      usage: 100,
     })
   })
 

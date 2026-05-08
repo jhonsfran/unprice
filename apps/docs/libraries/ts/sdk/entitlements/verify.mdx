@@ -25,12 +25,15 @@ console.log(result);
 ```json
 {
   "allowed": true,
-  "status": "usage",
   "featureSlug": "tokens",
-  "featureType": "usage",
   "usage": 42,
   "limit": 100,
-  "isLimitReached": false
+  "spending": {
+    "ledgerAmount": 4200000000,
+    "currency": "USD",
+    "displayAmount": "$42",
+    "scale": 8
+  }
 }
 ```
 </ResponseExample>
@@ -55,8 +58,12 @@ console.log(result);
     Whether the feature is usable for the customer at the requested timestamp.
 </ResponseField>
 
-<ResponseField name="status" type="string" required>
-    The resolved entitlement status.
+<ResponseField name="featureSlug" type="string" required>
+    The feature slug that was verified.
+</ResponseField>
+
+<ResponseField name="rejectionReason" type="string">
+    Why the feature is not usable. Omitted when `allowed` is `true`.
 </ResponseField>
 
 <ResponseField name="usage" type="number">
@@ -65,4 +72,24 @@ console.log(result);
 
 <ResponseField name="limit" type="number">
     Configured limit for usage-based features, or `null` when unlimited.
+</ResponseField>
+
+<ResponseField name="spending" type="object">
+    Current priced usage spend for usage-based features.
+</ResponseField>
+
+<ResponseField name="spending.ledgerAmount" type="number">
+    Current spend in ledger scale units.
+</ResponseField>
+
+<ResponseField name="spending.currency" type="string">
+    ISO currency code for the spend.
+</ResponseField>
+
+<ResponseField name="spending.displayAmount" type="string">
+    Ready-to-render localized spend, such as `$42`.
+</ResponseField>
+
+<ResponseField name="spending.scale" type="number">
+    Decimal scale for `ledgerAmount`. Currently `8`.
 </ResponseField>

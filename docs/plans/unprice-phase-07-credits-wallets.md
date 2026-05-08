@@ -649,19 +649,24 @@ returns invoice header + projection.
 ## Read API
 
 ```
-GET /v1/wallet → {
+GET /v1/wallet/balance → {
   currency,
-  available: { purchased, granted, total },
-  reserved,
-  consumed,
+  available,
+  held,
   credits: WalletCredit[]
 }
 ```
 
 [`apps/api/src/routes/wallet/getWalletV1.ts`](../../apps/api/src/routes/wallet/getWalletV1.ts)
-calls `WalletService.getWalletState`. Wallet amount fields are display-ready
-objects containing `ledger_amount` (scale 8), exact major-unit `amount`,
-`currency`, and `display_amount`.
+calls `WalletService.getWalletState`; `GET /v1/wallet` remains a compatibility alias.
+The public response is intentionally
+current-state focused: `available` is spendable wallet balance and `held` is
+balance reserved for accepted usage that is still settling. Wallet amount
+fields are display-ready objects containing `ledger_amount` (scale 8), exact
+major-unit `amount`, `currency`, and `display_amount`.
+
+`GET /v1/wallet/credits/{walletId}/balance?customerId=...` returns the balance for
+one `wcr_...` credit owned by that customer.
 
 ---
 

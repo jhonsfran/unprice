@@ -10,6 +10,7 @@ import type {
 } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import type { Cache } from "../cache/service"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import type { EntitlementService } from "../entitlements/service"
@@ -23,6 +24,7 @@ import {
 } from "./audit"
 import {
   EVENTS_SCHEMA_VERSION,
+  type EntitlementWindowState,
   type FeatureVerificationResult,
   type IngestionMessageProcessingResult,
   type IngestionOutcome,
@@ -87,7 +89,10 @@ type HandleMessageParams = {
 
 type EntitlementWindowApplyResult = {
   allowed: boolean
-  deniedReason?: "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
+  deniedReason?: Extract<
+    IngestionRejectionReason,
+    "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
+  >
   message?: string
 }
 
@@ -115,11 +120,7 @@ export type EntitlementWindowApplyInput = {
 
 export type EntitlementWindowController = {
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
-  getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<{
-    isLimitReached: boolean
-    limit: number | null
-    usage: number
-  }>
+  getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
 }
 
 export interface EntitlementWindowClient {
@@ -237,13 +238,6 @@ export class IngestionService {
       })
     }
 
-    if (await this.isKnownByAudit(projectId, customerId, message.idempotencyKey)) {
-      return this.toSyncResult({
-        allowed: true,
-        outcome: { state: "processed" },
-      })
-    }
-
     const applyResult = await this.applyEntitlement({
       customerId,
       enforceLimit: true,
@@ -289,11 +283,7 @@ export class IngestionService {
       return {
         allowed: false,
         featureSlug,
-        status:
-          preparedContext.rejectionReason === "CUSTOMER_NOT_FOUND"
-            ? "customer_not_found"
-            : "feature_missing",
-        timestamp,
+        rejectionReason: preparedContext.rejectionReason,
       }
     }
 
@@ -316,8 +306,7 @@ export class IngestionService {
       return {
         allowed: false,
         featureSlug,
-        status: "invalid_entitlement_configuration",
-        timestamp,
+        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
       }
     }
 
@@ -327,8 +316,7 @@ export class IngestionService {
       return {
         allowed: false,
         featureSlug,
-        status: "feature_missing",
-        timestamp,
+        rejectionReason: "NO_MATCHING_ENTITLEMENT",
       }
     }
 
@@ -336,9 +324,6 @@ export class IngestionService {
       return {
         allowed: true,
         featureSlug,
-        featureType: entitlement.featureType,
-        status: "non_usage",
-        timestamp,
       }
     }
 
@@ -346,10 +331,8 @@ export class IngestionService {
       return {
         allowed: false,
         featureSlug,
-        featureType: "usage",
         message: "Usage feature is missing meter configuration",
-        status: "invalid_entitlement_configuration",
-        timestamp,
+        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
       }
     }
 
@@ -372,15 +355,9 @@ export class IngestionService {
     return {
       allowed: !enforcementState.isLimitReached,
       featureSlug,
-      featureType: "usage",
-      isLimitReached: enforcementState.isLimitReached,
       limit: enforcementState.limit,
-      meterConfig: entitlement.meterConfig,
-      overageStrategy: entitlement.overageStrategy,
-      status: "usage",
-      effectiveAt: entitlement.effectiveAt,
-      expiresAt: entitlement.expiresAt,
-      timestamp,
+      rejectionReason: enforcementState.isLimitReached ? "LIMIT_EXCEEDED" : undefined,
+      spending: formatVerificationSpending(enforcementState.spending),
       usage: enforcementState.usage,
     }
   }
@@ -727,28 +704,6 @@ export class IngestionService {
     this.waitUntil(
       this.commitOutcomesToAudit(message.projectId, message.customerId, [{ message, outcome }])
     )
-  }
-
-  private async isKnownByAudit(
-    projectId: string,
-    customerId: string,
-    idempotencyKey: string
-  ): Promise<boolean> {
-    try {
-      const shardIndex = selectIngestionAuditShardIndex(idempotencyKey)
-      const knownKeys = await this.auditClient
-        .getAuditStub({ projectId, customerId, shardIndex })
-        .exists([idempotencyKey])
-      return knownKeys.length > 0
-    } catch (error) {
-      this.logger.warn("audit idempotency pre-check failed, falling through", {
-        projectId,
-        customerId,
-        idempotencyKey,
-        error,
-      })
-      return false
-    }
   }
 
   private async filterCrossPeriodDuplicates(
@@ -1201,6 +1156,17 @@ function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueu
 
 function isUsageEntitlement(entitlement: IngestionEntitlement): boolean {
   return entitlement.featureType === "usage" && Boolean(entitlement.meterConfig)
+}
+
+function formatVerificationSpending(spending: EntitlementWindowState["spending"]) {
+  const amount = toDecimal(fromLedgerMinor(spending.ledgerAmount, spending.currency))
+
+  return {
+    currency: spending.currency,
+    displayAmount: formatMoney(amount, spending.currency),
+    ledgerAmount: spending.ledgerAmount,
+    scale: spending.scale,
+  }
 }
 
 function toResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
