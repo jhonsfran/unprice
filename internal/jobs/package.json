@@ -7,8 +7,8 @@
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "typecheck": "tsc --noEmit",
-    "dev:trigger": "pnpm dlx trigger.dev@3.3.17 dev",
-    "deploy:trigger-prod": "npx trigger.dev@3.3.17 deploy",
+    "dev:trigger": "pnpm dlx trigger.dev@4.4.5 dev",
+    "deploy:trigger-prod": "npx trigger.dev@4.4.5 deploy",
     "delete": "pnpm tsx src/delete.ts"
   },
   "exports": {
@@ -18,14 +18,14 @@
   "dependencies": {
     "@infisical/sdk": "^3.0.4",
     "@t3-oss/env-core": "^0.12.0",
-    "@trigger.dev/build": "^3.3.17",
-    "@trigger.dev/sdk": "3.3.17",
+    "@trigger.dev/build": "^4.4.5",
+    "@trigger.dev/sdk": "4.4.5",
     "@unprice/db": "workspace:^",
     "@unprice/observability": "workspace:^",
     "@unprice/services": "workspace:^",
     "@unprice/analytics": "workspace:^",
     "@unprice/api": "workspace:^",
-    "trigger.dev": "3.3.17",
+    "trigger.dev": "4.4.5",
     "zod": "^3.24.2"
   },
   "devDependencies": {

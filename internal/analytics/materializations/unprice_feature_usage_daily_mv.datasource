@@ -11,17 +11,6 @@ SCHEMA >
     `amount_after` AggregateFunction(argMax, Int64, Int64),
     `currency` AggregateFunction(argMax, String, Int64),
 
-FORWARD_QUERY >
-    SELECT
-        date,
-        project_id,
-        customer_id,
-        feature_slug,
-        period_key,
-        CAST(value, 'AggregateFunction(argMax, Decimal64(4), Int64)') AS value,
-        defaultValueOfTypeName('AggregateFunction(argMax, Int64, Int64)') AS amount_after,
-        defaultValueOfTypeName('AggregateFunction(argMax, String, Int64)') AS currency
-
 ENGINE AggregatingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(date)
 ENGINE_SORTING_KEY (project_id, customer_id, period_key, feature_slug, date)

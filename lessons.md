@@ -13,6 +13,18 @@ debugging shortcut that should influence future work.
 - Do not record secrets, tokens, private customer data, or one-off local noise.
 - If a lesson changes an architecture rule, update or create an ADR and link it.
 
+## 2026-05-09: Cloudflare Durable Object class removal
+
+- If deploy fails with “does not export class `X` which is depended on by
+  existing Durable Objects”, the account still registers that class from an
+  older deploy. After removing the binding from `wrangler.jsonc`, add a new
+  migration tag with
+  `"deleted_classes": ["X"]` in   `apps/api/wrangler.jsonc` for the affected
+  `env.*` blocks. This permanently deletes all DO instances of that class.
+  If only production ever shipped the removed class, add the `deleted_classes`
+  migration under `env.prod` only. Docs:
+  [Durable Objects migrations](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/).
+
 ## 2026-05-06: Wallet, Payment Provider, And Activation Lessons
 
 - `pay_in_advance` only means fixed subscription charges bill at period start.
