@@ -179,9 +179,6 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
 - Keep `/v1/events/ingest/sync` on the low-latency auth path like entitlement verification:
   bypass the API-key rate-limit binding and use `Server-Timing` spans around the service call so
   auth, routing, entitlement apply, and audit commit latency can be separated in traces.
-- `IngestionAuditDO` has a single static SQLite schema; initialize it with direct
-  `CREATE ... IF NOT EXISTS` statements instead of Drizzle's migration runner to reduce cold-start
-  work on the strict sync audit commit path.
 - When a wallet final flush is pending, persist that it is final before external wallet I/O.
   Recovery must replay a pending final flush as `final: true`; replaying it as a mid-period refill
   can strand a locally open reservation after the wallet reservation has already reconciled.
@@ -202,6 +199,10 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
 - Test `wallet_only` as its own service workflow: assert wallet accounts/grants/reservations,
   final flush/renewal behavior, balanced wallet ledger entries, and absence of invoice rows or
   payment-provider invoice calls.
+- For the metering/billing invariant plan, keep the scope service-only: golden cases,
+  property-based tests, stateful model-based lifecycle tests, scenario DSL, and ledger invariants.
+  API, SDK, load, and external verifier coverage can reuse the DSL later, but they should not drive
+  the core money-path correctness plan.
 
 ## 2026-05-07: Payment Method Setup UX Cache Refresh
 
