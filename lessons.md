@@ -19,11 +19,23 @@ debugging shortcut that should influence future work.
   existing Durable Objects”, the account still registers that class from an
   older deploy. After removing the binding from `wrangler.jsonc`, add a new
   migration tag with
-  `"deleted_classes": ["X"]` in   `apps/api/wrangler.jsonc` for the affected
+  `"deleted_classes": ["X"]` in `apps/api/wrangler.jsonc` for the affected
   `env.*` blocks. This permanently deletes all DO instances of that class.
   If only production ever shipped the removed class, add the `deleted_classes`
   migration under `env.prod` only. Docs:
   [Durable Objects migrations](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/).
+
+## 2026-05-09: Wrangler Action secret bulk before deploy (API 10214)
+
+- `cloudflare/wrangler-action` runs `uploadSecrets` **before** `wrangler deploy`
+  when `secrets:` is set (`wrangler secret bulk` then deploy). That can fail with
+  API **10214** (“latest version isn't currently deployed”) when Worker Versions /
+  rollout state is inconsistent.
+- Omit `secrets:` and run **`wrangler secret bulk` in `postCommands`** after
+  deploy (see `apps/api/scripts/ci-write-worker-secrets-file.mjs` and
+  `.github/workflows/job_deploy_api.yaml`). Alternatively, with Node 22+ and
+  wrangler ≥ 4.74, **`wrangler deploy --secrets-file …`** uploads code and secrets
+  together.
 
 ## 2026-05-06: Wallet, Payment Provider, And Activation Lessons
 
