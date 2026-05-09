@@ -9,7 +9,9 @@ SQL >
         project_id,
         {% if defined(customer_id) %} customer_id, {% end %}
         feature_slug,
-        toFloat64(argMaxMerge(value)) as value_after
+        toFloat64(argMaxMerge(value)) as usage,
+        argMaxMerge(amount_after) as amount_after,
+        argMaxMerge(currency) as currency
     FROM
     {% if defined(interval_days) %}
         {% if Int32(interval_days) > 180 %}

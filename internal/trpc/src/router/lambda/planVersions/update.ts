@@ -26,6 +26,9 @@ export const update = protectedProjectProcedure
       metadata,
       autoRenew,
       trialUnits,
+      collectionMethod,
+      dueBehaviour,
+      paymentMethodRequired,
     } = opts.input
 
     const project = opts.ctx.project
@@ -49,6 +52,9 @@ export const update = protectedProjectProcedure
       metadata,
       autoRenew,
       trialUnits,
+      collectionMethod,
+      dueBehaviour,
+      paymentMethodRequired,
     })
 
     if (err) {

@@ -1,70 +1,78 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, eq, inArray, sql } from "@unprice/db"
+import type { Database } from "@unprice/db"
+import { hashStringSHA256, newId } from "@unprice/db/utils"
 import {
-  billingPeriods,
-  creditGrants,
-  invoiceCreditApplications,
-  invoiceItems,
-  invoices,
-} from "@unprice/db/schema"
-import { formatAmountDinero, hashStringSHA256, newId } from "@unprice/db/utils"
-import {
-  type AggregationMethod,
-  type CalculatedPrice,
   type CollectionMethod,
   type Currency,
   type Customer,
-  type Entitlement,
-  type EntitlementState,
-  type FeatureType,
-  type InvoiceItemExtended,
   type InvoiceStatus,
   type PaymentProvider,
   type SubscriptionInvoice,
-  calculateCycleWindow,
-  calculateFreeUnits,
   calculateNextNCycles,
-  calculatePricePerFeature,
   calculateProration,
-  calculateWaterfallPrice,
-  type configFeatureSchema,
-  type grantSchemaExtended,
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { formatAmountForProvider, toLedgerMinor } from "@unprice/money"
 import { addDays } from "date-fns"
-import type { z } from "zod"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
+import type { InvoiceLine, LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
-import { SubscriptionMachine } from "../subscriptions/machine"
-import { SubscriptionLock } from "../subscriptions/subscriptionLock"
-import { toErrorContext } from "../utils/log-context"
+import {
+  type InvoiceSubscriptionOutcome,
+  providerStatusToInvoiceEvent,
+  transitionInvoiceStatus,
+} from "../payment-provider/invoice-state-machine"
+import type { RatingService } from "../rating/service"
+import type { RatedCharge, RatingInput } from "../rating/types"
+import type { SubscriptionMachine } from "../subscriptions/machine"
+import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
+import { withLockedMachine } from "../subscriptions/withLockedMachine"
+import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
+import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
+import { DrizzleBillingRepository } from "./repository.drizzle"
+import { billingStrategyFor } from "./strategy"
 
-interface ComputeInvoiceItemsResult {
-  id: string
-  totalAmount: number
-  unitAmount: number
-  subtotalAmount: number
-  quantity: number
-  prorate: number
-  description?: string
-  cycleStartAt: number
-  cycleEndAt: number
+type ComputeCurrentUsageResult = RatedCharge
+
+export interface InvoiceStatementLine {
+  entryId: string
+  statementKey: string
+  kind: string
+  description: string | null
+  quantity: number | null
+  amount: number
+  currency: Currency
+  createdAt: Date
 }
 
-interface ComputeCurrentUsageResult {
-  grantId?: string | null
-  price: CalculatedPrice
-  prorate: number
+type BillingPeriodStatementRow = {
+  id: string
+  statementKey: string
+  type: "normal" | "trial"
+  invoiceAt: number
   cycleStartAt: number
-  cycleEndAt: number
-  usage: number
-  included: number
-  limit: number
-  isTrial: boolean
+  subscriptionItem: {
+    units: number | null
+    featurePlanVersion: {
+      featureType: string
+      feature: {
+        title: string
+        slug: string
+      }
+    }
+  }
+}
+
+function normalizeProviderTimestamp(timestamp: number | undefined, fallback: number): number {
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
+    return fallback
+  }
+
+  return timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp
 }
 
 export class BillingService {
@@ -77,6 +85,9 @@ export class BillingService {
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly customerService: CustomerService
   private readonly grantsManager: GrantsManager
+  private readonly ratingService: RatingService
+  private readonly ledgerService: LedgerGateway
+  private readonly walletService: WalletService
 
   constructor({
     db,
@@ -87,6 +98,9 @@ export class BillingService {
     metrics,
     customerService,
     grantsManager,
+    ratingService,
+    ledgerService,
+    walletService,
   }: {
     db: Database
     logger: Logger
@@ -97,6 +111,9 @@ export class BillingService {
     metrics: Metrics
     customerService: CustomerService
     grantsManager: GrantsManager
+    ratingService: RatingService
+    ledgerService: LedgerGateway
+    walletService: WalletService
   }) {
     this.db = db
     this.logger = logger
@@ -106,6 +123,9 @@ export class BillingService {
     this.waitUntil = waitUntil
     this.customerService = customerService
     this.grantsManager = grantsManager
+    this.ratingService = ratingService
+    this.ledgerService = ledgerService
+    this.walletService = walletService
   }
 
   private setLockContext(context: {
@@ -123,145 +143,33 @@ export class BillingService {
     subscriptionId: string
     projectId: string
     now: number
-    // new options
     lock?: boolean
     ttlMs?: number
     db?: Database
     dryRun?: boolean
     run: (m: SubscriptionMachine) => Promise<T>
   }): Promise<T> {
-    const {
-      subscriptionId,
-      projectId,
-      now,
-      run,
-      lock: shouldLock = true,
-      ttlMs = 30_000,
-      db,
-      dryRun = false,
-    } = args
-
-    const trx = db ?? this.db
-
-    // create the lock if it should be locked
-    const lock =
-      shouldLock && !dryRun ? new SubscriptionLock({ db: trx, projectId, subscriptionId }) : null
-
-    if (lock) {
-      const acquired = await lock.acquire({
-        ttlMs,
-        now,
-        staleTakeoverMs: 120_000,
-        ownerStaleMs: ttlMs,
-      })
-      this.setLockContext({
-        type: "normal",
-        resource: "subscription",
-        action: "acquire",
-        acquired,
-        ttl_ms: ttlMs,
-      })
-      if (!acquired) {
-        this.logger.warn("subscription lock acquire returned false; lock may be held", {
-          subscriptionId,
-          projectId,
-          ttlMs,
-        })
-      }
-      if (!acquired) throw new UnPriceBillingError({ message: "SUBSCRIPTION_BUSY" })
-    }
-
-    // heartbeat to keep the lock alive for long transitions
-    const stopHeartbeat = lock
-      ? (() => {
-          let stopped = false
-          const startedAt = Date.now()
-          const renewEveryMs = Math.max(1_000, Math.floor(ttlMs / 2))
-          const maxHoldMs = Math.max(ttlMs * 10, 2 * 60_000) // cap renewals to avoid indefinite locks
-
-          const interval = setInterval(async () => {
-            if (stopped) return
-            const elapsed = Date.now() - startedAt
-            if (elapsed > maxHoldMs) {
-              this.setLockContext({
-                type: "normal",
-                resource: "subscription",
-                action: "heartbeat_stopped",
-                acquired: false,
-                ttl_ms: ttlMs,
-                max_hold_ms: maxHoldMs,
-              })
-              this.logger.warn("subscription lock heartbeat maxHoldMs reached; stopping renew", {
-                subscriptionId,
-                projectId,
-                ttlMs,
-                maxHoldMs,
-              })
-              stopped = true
-              clearInterval(interval)
-              return
-            }
-            try {
-              const ok = await lock.extend({ ttlMs })
-              if (!ok) {
-                this.setLockContext({
-                  type: "normal",
-                  resource: "subscription",
-                  action: "extend",
-                  acquired: false,
-                  ttl_ms: ttlMs,
-                })
-                this.logger.warn("subscription lock extend returned false; lock may be lost", {
-                  subscriptionId,
-                  projectId,
-                })
-              }
-            } catch (e) {
-              this.setLockContext({
-                type: "normal",
-                resource: "subscription",
-                action: "extend_error",
-                acquired: false,
-                ttl_ms: ttlMs,
-              })
-              this.logger.error("subscription lock heartbeat extend failed", {
-                error: toErrorContext(e),
-                subscriptionId,
-                projectId,
-              })
-            }
-          }, renewEveryMs)
-
-          return () => {
-            stopped = true
-            clearInterval(interval)
-          }
-        })()
-      : () => {}
-
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      customer: this.customerService,
-      db: trx,
-      dryRun,
-    })
-
-    if (err) {
-      stopHeartbeat()
-      if (lock) await lock.release()
-      throw err
-    }
+    const trx = args.db ?? this.db
 
     try {
-      return await run(machine)
-    } finally {
-      await machine.shutdown()
-      stopHeartbeat()
-      if (lock) await lock.release()
+      return await withLockedMachine({
+        ...args,
+        db: trx,
+        repo: new DrizzleSubscriptionRepository(trx),
+        logger: this.logger,
+        analytics: this.analytics,
+        customer: this.customerService,
+        ratingService: this.ratingService,
+        ledgerService: this.ledgerService,
+        walletService: this.walletService,
+        setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
+          this.setLockContext(ctx),
+      })
+    } catch (e) {
+      if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
+        throw new UnPriceBillingError({ message: "SUBSCRIPTION_BUSY" })
+      }
+      throw e
     }
   }
 
@@ -340,13 +248,13 @@ export class BillingService {
             await machine.reportInvoiceFailure({ invoiceId, error: col.err.message })
             throw col.err
           }
-          const { totalCents, status } = col.val
+          const { totalAmount, status } = col.val
           if (status === "paid" || status === "void") {
             await machine.reportInvoiceSuccess({ invoiceId })
           } else if (status === "failed") {
             await machine.reportPaymentFailure({ invoiceId, error: "Payment failed" })
           }
-          return { total: totalCents, status }
+          return { total: totalAmount, status }
         },
       })
       return Ok(res)
@@ -355,23 +263,304 @@ export class BillingService {
     }
   }
 
+  public async reconcileInvoiceFromProvider({
+    projectId,
+    subscriptionId,
+    invoiceId,
+    now = Date.now(),
+  }: {
+    projectId: string
+    subscriptionId: string
+    invoiceId: string
+    now?: number
+  }): Promise<
+    Result<
+      {
+        changed: boolean
+        providerStatus: string | null
+        status: InvoiceStatus
+      },
+      UnPriceBillingError
+    >
+  > {
+    try {
+      const res = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        lock: true,
+        run: async (machine) => {
+          const reconciled = await this._reconcileInvoiceFromProvider({
+            invoiceId,
+            projectId,
+            machine,
+            now,
+          })
+
+          if (reconciled.err) {
+            throw reconciled.err
+          }
+
+          return reconciled.val
+        },
+      })
+
+      return Ok(res)
+    } catch (e) {
+      return Err(e as UnPriceBillingError)
+    }
+  }
+
+  private async _reconcileInvoiceFromProvider({
+    invoiceId,
+    projectId,
+    machine,
+    now,
+  }: {
+    invoiceId: string
+    projectId: string
+    machine: SubscriptionMachine
+    now: number
+  }): Promise<
+    Result<
+      {
+        changed: boolean
+        providerStatus: string | null
+        status: InvoiceStatus
+      },
+      UnPriceBillingError
+    >
+  > {
+    const billingRepo = new DrizzleBillingRepository(this.db)
+    const invoice = await billingRepo.findInvoiceById({ invoiceId, projectId })
+
+    if (!invoice) {
+      return Err(new UnPriceBillingError({ message: "Invoice not found" }))
+    }
+
+    if (["paid", "void"].includes(invoice.status)) {
+      return Ok({
+        changed: false,
+        providerStatus: null,
+        status: invoice.status,
+      })
+    }
+
+    if (!invoice.invoicePaymentProviderId) {
+      return Err(
+        new UnPriceBillingError({
+          message: "Invoice has no invoice id from the payment provider",
+        })
+      )
+    }
+
+    const { err: paymentProviderErr, val: paymentProviderService } =
+      await this.customerService.getPaymentProvider({
+        customerId: invoice.customerId,
+        projectId,
+        provider: invoice.paymentProvider,
+      })
+
+    if (paymentProviderErr) {
+      return Err(new UnPriceBillingError({ message: paymentProviderErr.message }))
+    }
+
+    const providerInvoice = await paymentProviderService.getStatusInvoice({
+      invoiceId: invoice.invoicePaymentProviderId,
+    })
+
+    if (providerInvoice.err) {
+      return Err(new UnPriceBillingError({ message: providerInvoice.err.message }))
+    }
+
+    const providerStatus = providerInvoice.val.status
+    const event = providerStatusToInvoiceEvent(providerStatus)
+    const transition = transitionInvoiceStatus({
+      currentStatus: invoice.status,
+      event,
+    })
+
+    if (transition.event === "noop") {
+      this.logger.info("invoice reconciler: provider state has no local transition", {
+        invoiceId: invoice.id,
+        projectId,
+        providerStatus,
+        currentStatus: invoice.status,
+        reason: transition.reason,
+      })
+
+      return Ok({
+        changed: false,
+        providerStatus,
+        status: invoice.status,
+      })
+    }
+
+    if (transition.settleWallet) {
+      const settled = await settlePrepaidInvoiceToWallet({
+        walletService: this.walletService,
+        invoice,
+      })
+
+      if (settled.err) {
+        return Err(
+          new UnPriceBillingError({
+            message: `Failed to settle prepaid invoice ${invoice.id} to wallet: ${settled.err.message}`,
+          })
+        )
+      }
+    }
+
+    const nextMetadata = {
+      ...(invoice.metadata ?? {}),
+      reason:
+        transition.subscriptionOutcome === "success"
+          ? providerStatus === "void"
+            ? "invoice_voided"
+            : "payment_received"
+          : "payment_failed",
+      note: `Invoice reconciled from provider status ${providerStatus}`,
+    } as SubscriptionInvoice["metadata"]
+
+    const updated = await billingRepo.updateInvoiceIfStatus({
+      invoiceId: invoice.id,
+      projectId,
+      allowedFromStatuses: transition.allowedFromStatuses,
+      data: {
+        status: transition.nextStatus,
+        ...(transition.nextStatus === "paid"
+          ? {
+              paidAt: normalizeProviderTimestamp(providerInvoice.val.paidAt, now),
+              invoicePaymentProviderUrl:
+                providerInvoice.val.invoiceUrl ?? invoice.invoicePaymentProviderUrl,
+            }
+          : {}),
+        ...(transition.nextStatus === "void"
+          ? {
+              invoicePaymentProviderUrl:
+                providerInvoice.val.invoiceUrl ?? invoice.invoicePaymentProviderUrl,
+            }
+          : {}),
+        metadata: nextMetadata,
+        updatedAtM: now,
+      },
+    })
+
+    if (!updated) {
+      this.logger.warn("invoice reconciler: invoice transition skipped by state guard", {
+        invoiceId: invoice.id,
+        projectId,
+        providerStatus,
+        currentStatus: invoice.status,
+        targetStatus: transition.nextStatus,
+      })
+
+      return Ok({
+        changed: false,
+        providerStatus,
+        status: invoice.status,
+      })
+    }
+
+    const subscriptionReconciled = await this.reconcileSubscriptionOutcomeOnce({
+      billingRepo,
+      invoice: updated,
+      machine,
+      outcome: transition.subscriptionOutcome,
+      failureMessage: `Provider invoice status: ${providerStatus}`,
+      now,
+    })
+
+    if (subscriptionReconciled.err) {
+      return subscriptionReconciled
+    }
+
+    this.logger.info("invoice reconciled from provider", {
+      invoiceId: invoice.id,
+      projectId,
+      providerStatus,
+      fromStatus: invoice.status,
+      toStatus: updated.status,
+    })
+
+    return Ok({
+      changed: true,
+      providerStatus,
+      status: updated.status,
+    })
+  }
+
+  private async reconcileSubscriptionOutcomeOnce({
+    billingRepo,
+    invoice,
+    machine,
+    outcome,
+    failureMessage,
+    now,
+  }: {
+    billingRepo: DrizzleBillingRepository
+    invoice: SubscriptionInvoice
+    machine: SubscriptionMachine
+    outcome: InvoiceSubscriptionOutcome
+    failureMessage: string
+    now: number
+  }): Promise<Result<void, UnPriceBillingError>> {
+    const metadata = (invoice.metadata ?? {}) as {
+      subscriptionReconciledOutcome?: InvoiceSubscriptionOutcome
+    } & Record<string, unknown>
+
+    if (metadata.subscriptionReconciledOutcome === outcome) {
+      this.logger.info("invoice reconciler: subscription already reconciled with outcome", {
+        invoiceId: invoice.id,
+        subscriptionId: invoice.subscriptionId,
+        outcome,
+      })
+      return Ok(undefined)
+    }
+
+    const machineResult =
+      outcome === "success"
+        ? await machine.reportInvoiceSuccess({ invoiceId: invoice.id })
+        : await machine.reportPaymentFailure({
+            invoiceId: invoice.id,
+            error: failureMessage,
+          })
+
+    if (machineResult.err) {
+      return Err(new UnPriceBillingError({ message: machineResult.err.message }))
+    }
+
+    await billingRepo.updateInvoice({
+      invoiceId: invoice.id,
+      projectId: invoice.projectId,
+      data: {
+        metadata: {
+          ...metadata,
+          subscriptionReconciledAt: now,
+          subscriptionReconciledOutcome: outcome,
+        },
+        updatedAtM: now,
+      },
+    })
+
+    return Ok(undefined)
+  }
+
   private async _collectInvoicePayment(payload: {
     invoiceId: string
     projectId: string
     now: number
   }): Promise<Result<SubscriptionInvoice, UnPriceBillingError>> {
     const { invoiceId, projectId, now } = payload
+    const billingRepo = new DrizzleBillingRepository(this.db)
 
     // Get invoice details
-    const invoice = await this.db.query.invoices.findFirst({
-      where: (table, { eq, and }) => and(eq(table.id, invoiceId), eq(table.projectId, projectId)),
-    })
+    const invoice = await billingRepo.findInvoiceById({ invoiceId, projectId })
 
     if (!invoice) {
       return Err(new UnPriceBillingError({ message: "Invoice not found" }))
     }
 
-    const MAX_PAYMENT_ATTEMPTS = 10
     const invoicePaymentProviderId = invoice.invoicePaymentProviderId
     const paymentMethodId = invoice.paymentMethodId
 
@@ -496,16 +685,13 @@ export class BillingService {
       // if the invoice is paid or void, we update the invoice status
       if (["paid", "void"].includes(statusPaymentProviderInvoice.val.status)) {
         // update the invoice status
-        const updatedInvoice = await this.db
-          .update(invoices)
-          .set({
+        const updatedInvoice = await billingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId,
+          data: {
             status: statusPaymentProviderInvoice.val.status as InvoiceStatus,
             paidAt: statusPaymentProviderInvoice.val.paidAt,
             invoicePaymentProviderUrl: statusPaymentProviderInvoice.val.invoiceUrl,
-            paymentAttempts: [
-              ...(invoice.paymentAttempts ?? []),
-              ...statusPaymentProviderInvoice.val.paymentAttempts,
-            ],
             metadata: {
               ...(invoice.metadata ?? {}),
               reason: "payment_received",
@@ -514,10 +700,8 @@ export class BillingService {
                   ? "Invoice paid successfully"
                   : "Invoice voided",
             },
-          })
-          .where(eq(invoices.id, invoice.id))
-          .returning()
-          .then((res) => res[0])
+          },
+        })
 
         if (!updatedInvoice) {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
@@ -526,25 +710,22 @@ export class BillingService {
         return Ok(updatedInvoice)
       }
 
-      // 3 attempts max for the invoice and the past due date is suppased
-      if (
-        (invoice.paymentAttempts?.length &&
-          invoice.paymentAttempts.length >= MAX_PAYMENT_ATTEMPTS) ||
-        (invoice.pastDueAt && invoice.pastDueAt < now)
-      ) {
+      // Past due date reached — fail the invoice. Retry-attempt caps are no
+      // longer tracked on the invoice row; the row only carries header and
+      // collection state.
+      if (invoice.pastDueAt && invoice.pastDueAt < now) {
         // update the invoice status
-        const updatedInvoice = await this.db
-          .update(invoices)
-          .set({
+        const updatedInvoice = await billingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId,
+          data: {
             status: "failed",
             metadata: {
               reason: "pending_expiration",
               note: "Invoice has reached the maximum number of payment attempts and the past due date is suppased",
             },
-          })
-          .where(eq(invoices.id, invoice.id))
-          .returning()
-          .then((res) => res[0])
+          },
+        })
 
         if (!updatedInvoice) {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
@@ -570,89 +751,105 @@ export class BillingService {
       if (["paid", "void"].includes(statusInvoice.val.status)) {
         // update the invoice status if the payment is successful
         // if not add the failed attempt
-        const updatedInvoice = await this.db
-          .update(invoices)
-          .set({
+        const updatedInvoice = await billingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId,
+          data: {
             status: statusInvoice.val.status as InvoiceStatus,
             ...(statusInvoice.val.status === "paid" ? { paidAt: Date.now() } : {}),
             ...(statusInvoice.val.status === "paid"
               ? { invoicePaymentProviderUrl: statusInvoice.val.invoiceUrl }
               : {}),
-            paymentAttempts: [
-              ...(invoice.paymentAttempts ?? []),
-              ...statusInvoice.val.paymentAttempts,
-            ],
-          })
-          .where(eq(invoices.id, invoice.id))
-          .returning()
-          .then((res) => res[0])
+          },
+        })
 
         if (!updatedInvoice) {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
         }
 
+        if (statusInvoice.val.status === "paid") {
+          const settled = await settlePrepaidInvoiceToWallet({
+            walletService: this.walletService,
+            invoice: updatedInvoice,
+          })
+          if (settled.err) {
+            return Err(
+              new UnPriceBillingError({
+                message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
+              })
+            )
+          }
+        }
+
         return Ok(updatedInvoice)
       }
 
-      const stripePaymentInvoice = await paymentProviderService.collectPayment({
+      const providerPaymentInvoice = await paymentProviderService.collectPayment({
         invoiceId: invoicePaymentProviderId,
         paymentMethodId: paymentMethodId,
       })
 
-      if (stripePaymentInvoice.err) {
-        // update the attempt if the payment failed
-        await this.db
-          .update(invoices)
-          .set({
-            // set the intempts to failed
-            paymentAttempts: [
-              ...(invoice.paymentAttempts ?? []),
-              { status: "failed", createdAt: Date.now() },
-            ],
+      if (providerPaymentInvoice.err) {
+        // Mark the invoice as failed; retry-attempt history is not tracked on
+        // the invoice row.
+        await billingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId,
+          data: {
             metadata: {
               reason: "payment_failed",
-              note: `Payment failed: ${stripePaymentInvoice.err.message}`,
+              note: `Payment failed: ${providerPaymentInvoice.err.message}`,
             },
-          })
-          .where(eq(invoices.id, invoice.id))
+          },
+        })
 
         return Err(
           new UnPriceBillingError({
-            message: `Error collecting payment: ${stripePaymentInvoice.err.message}`,
+            message: `Error collecting payment: ${providerPaymentInvoice.err.message}`,
           })
         )
       }
 
-      const paymentStatus = stripePaymentInvoice.val.status
+      const paymentStatus = providerPaymentInvoice.val.status
       const isPaid = ["paid", "void"].includes(paymentStatus)
 
       // update the invoice status if the payment is successful
       // if not add the failed attempt
-      const updatedInvoice = await this.db
-        .update(invoices)
-        .set({
+      const updatedInvoice = await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId,
+        data: {
           status: isPaid ? "paid" : "unpaid",
           ...(isPaid ? { paidAt: Date.now() } : {}),
-          ...(isPaid ? { invoicePaymentProviderUrl: stripePaymentInvoice.val.invoiceUrl } : {}),
-          paymentAttempts: [
-            ...(invoice.paymentAttempts ?? []),
-            {
-              status: isPaid ? "paid" : paymentStatus,
-              createdAt: Date.now(),
-            },
-          ],
+          ...(isPaid ? { invoicePaymentProviderUrl: providerPaymentInvoice.val.invoiceUrl } : {}),
           metadata: {
             ...(invoice.metadata ?? {}),
             reason: isPaid ? "payment_received" : "payment_pending",
             note: isPaid ? "Invoice paid successfully" : `Payment pending for ${paymentStatus}`,
           },
-        })
-        .where(eq(invoices.id, invoice.id))
-        .returning()
-        .then((res) => res[0])
+        },
+      })
 
       if (!updatedInvoice) {
         return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+      }
+
+      // Synchronous providers (Sandbox today) confirm payment inline rather
+      // than via webhook, so the wallet settlement that the webhook handler
+      // does for Stripe must happen here too — otherwise the receivable IOU
+      // opened at invoice creation never gets cleared.
+      if (paymentStatus === "paid") {
+        const settled = await settlePrepaidInvoiceToWallet({
+          walletService: this.walletService,
+          invoice: updatedInvoice,
+        })
+        if (settled.err) {
+          return Err(
+            new UnPriceBillingError({
+              message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
+            })
+          )
+        }
       }
 
       return Ok(updatedInvoice)
@@ -660,22 +857,23 @@ export class BillingService {
 
     // send the invoice to the customer and wait for the payment
     if (invoice.collectionMethod === "send_invoice") {
-      const stripeSendInvoice = await paymentProviderService.sendInvoice({
+      const providerSendInvoice = await paymentProviderService.sendInvoice({
         invoiceId: invoicePaymentProviderId,
       })
 
-      if (stripeSendInvoice.err) {
+      if (providerSendInvoice.err) {
         return Err(
           new UnPriceBillingError({
-            message: `Error sending invoice: ${stripeSendInvoice.err.message}`,
+            message: `Error sending invoice: ${providerSendInvoice.err.message}`,
           })
         )
       }
 
       // update the invoice status if send invoice is successful
-      const updatedInvoice = await this.db
-        .update(invoices)
-        .set({
+      const updatedInvoice = await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId,
+        data: {
           status: "waiting",
           sentAt: Date.now(),
           metadata: {
@@ -683,10 +881,8 @@ export class BillingService {
             reason: "payment_pending",
             note: "Invoice sent to the customer, waiting for payment",
           },
-        })
-        .where(eq(invoices.id, invoice.id))
-        .returning()
-        .then((res) => res[0])
+        },
+      })
 
       if (!updatedInvoice) {
         return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
@@ -711,8 +907,8 @@ export class BillingService {
   }): Promise<
     Result<
       {
-        providerInvoiceId?: string
-        providerInvoiceUrl?: string
+        providerInvoiceId: string | null
+        providerInvoiceUrl: string | null
         invoiceId: string
         status: InvoiceStatus
       },
@@ -720,43 +916,86 @@ export class BillingService {
     >
   > {
     try {
+      const { err: openInvoiceDataErr, val: openInvoiceData } = await this.getOpenInvoiceData({
+        subscriptionId,
+        projectId,
+        now,
+        invoiceId,
+      })
+
+      if (openInvoiceDataErr) {
+        return Err(openInvoiceDataErr)
+      }
+
       const res = await this.withSubscriptionMachine({
         subscriptionId,
         projectId,
         now,
         lock: false, // no need to lock it here
         run: async (machine) => {
+          // Already past draft (and provider id stamped if non-zero) → no-op.
+          // The dedup check on `status !== "draft"` is the source of truth;
+          // a draft row is the *only* state where finalize work is allowed.
+          if (openInvoiceData.status !== "draft") {
+            return {
+              providerInvoiceId: openInvoiceData.invoicePaymentProviderId,
+              providerInvoiceUrl: openInvoiceData.invoicePaymentProviderUrl,
+              invoiceId: openInvoiceData.id,
+              status: openInvoiceData.status,
+            }
+          }
+
+          // For non-zero invoices we push to the payment provider FIRST and
+          // then flip local status, so a partial failure (provider error) leaves
+          // the row in `draft` and the existing `finilizingSchedule` cron picks
+          // it up on the next tick. If the provider id is already stamped (a
+          // previous attempt succeeded at create+finalize but crashed before
+          // the local status flip), we skip the provider work and proceed
+          // straight to the status flip — `paymentProviderService.createInvoice`
+          // is not idempotent on Stripe, so we must not call it twice.
+          let providerInvoiceId = openInvoiceData.invoicePaymentProviderId
+          let providerInvoiceUrl = openInvoiceData.invoicePaymentProviderUrl
+          const skipProvider = openInvoiceData.totalAmount === 0
+
+          if (!skipProvider && !providerInvoiceId) {
+            const upserted = await this._upsertPaymentProviderInvoice({
+              invoice: openInvoiceData,
+              now,
+            })
+
+            if (upserted.err) {
+              await this._bumpFinalizeAttempt({
+                invoice: openInvoiceData,
+                lastError: upserted.err.message,
+              })
+              await machine.reportInvoiceFailure({
+                invoiceId: openInvoiceData.id,
+                error: upserted.err.message,
+              })
+              throw upserted.err
+            }
+
+            providerInvoiceId = upserted.val.providerInvoiceId ?? null
+            providerInvoiceUrl = upserted.val.providerInvoiceUrl ?? null
+          }
+
           const fin = await this._finalizeInvoice({
-            subscriptionId,
-            projectId,
+            invoice: openInvoiceData,
+            providerInvoiceId,
+            providerInvoiceUrl,
             now,
-            invoiceId,
           })
 
           if (fin.err) {
             throw fin.err
           }
 
-          const providerInvoiceData = await this._upsertPaymentProviderInvoice({
-            invoiceId: fin.val.id,
-            projectId,
-          })
-
-          if (providerInvoiceData.err) {
-            // report failed invoice
-            await machine.reportInvoiceFailure({
-              invoiceId: fin.val.id,
-              error: providerInvoiceData.err.message,
-            })
-            throw providerInvoiceData.err
-          }
-
           // report successful invoice
           await machine.reportInvoiceSuccess({ invoiceId: fin.val.id })
 
           return {
-            providerInvoiceId: providerInvoiceData.val.providerInvoiceId,
-            providerInvoiceUrl: providerInvoiceData.val.providerInvoiceUrl,
+            providerInvoiceId,
+            providerInvoiceUrl,
             invoiceId: fin.val.id,
             status: fin.val.status,
           }
@@ -765,7 +1004,22 @@ export class BillingService {
 
       return Ok(res)
     } catch (e) {
-      return Err(e as UnPriceBillingError)
+      if (e instanceof UnPriceBillingError) {
+        return Err(e)
+      }
+
+      this.logger.error(e as Error, {
+        context: "Failed to finalize invoice",
+        invoiceId,
+        projectId,
+        subscriptionId,
+      })
+
+      return Err(
+        new UnPriceBillingError({
+          message: "Unable to finalize invoice. Please try again or contact support.",
+        })
+      )
     }
   }
 
@@ -779,238 +1033,94 @@ export class BillingService {
     projectId: string
     invoiceId: string
     now: number
-  }): Promise<
-    Result<
-      SubscriptionInvoice & { invoiceItems: InvoiceItemExtended[]; customer: Customer },
-      UnPriceBillingError
-    >
-  > {
+  }): Promise<Result<SubscriptionInvoice & { customer: Customer }, UnPriceBillingError>> {
     try {
       const invoice = await this.db.query.invoices.findFirst({
-        with: {
-          customer: true,
-          invoiceItems: {
-            with: {
-              featurePlanVersion: {
-                with: {
-                  feature: true,
-                },
-              },
-            },
-          },
-        },
-        where: (inv, { and, eq, inArray, lte, or, isNull }) =>
-          or(
-            // for invoices that have not been finilized yet
-            and(
-              eq(inv.projectId, projectId),
-              eq(inv.id, invoiceId),
-              eq(inv.subscriptionId, subscriptionId),
-              eq(inv.status, "draft"),
-              lte(inv.dueAt, now)
-            ),
-            // for invoices that have been finilized but not sent to the payment provider
-            and(
-              eq(inv.projectId, projectId),
-              eq(inv.id, invoiceId),
-              eq(inv.subscriptionId, subscriptionId),
-              inArray(inv.status, ["unpaid", "waiting"]),
-              isNull(inv.invoicePaymentProviderId),
-              lte(inv.dueAt, now)
-            )
+        with: { customer: true },
+        where: (inv, { and, eq }) =>
+          and(
+            eq(inv.projectId, projectId),
+            eq(inv.id, invoiceId),
+            eq(inv.subscriptionId, subscriptionId)
           ),
         orderBy: (inv, { asc }) => asc(inv.dueAt),
       })
 
       if (!invoice) {
+        return Err(new UnPriceBillingError({ message: "Invoice not found" }))
+      }
+
+      if (invoice.status === "draft" && invoice.dueAt > now) {
+        const readyAt = new Date(invoice.dueAt).toLocaleString("en-US", {
+          dateStyle: "medium",
+          timeStyle: "short",
+          timeZone: "UTC",
+        })
+
         return Err(
-          new UnPriceBillingError({ message: "Invoice not found or not due to be processed" })
+          new UnPriceBillingError({
+            message: `Invoice is not ready to finalize yet. It can be finalized after ${readyAt} UTC.`,
+          })
         )
       }
 
       return Ok(invoice)
     } catch (e) {
-      return Err(e as UnPriceBillingError)
+      this.logger.error(e as Error, {
+        context: "Failed to load invoice for finalization",
+        invoiceId,
+        projectId,
+        subscriptionId,
+      })
+
+      return Err(
+        new UnPriceBillingError({
+          message: "Unable to load invoice for finalization. Please try again.",
+        })
+      )
     }
   }
 
-  // only compute/persist amounts, apply credits, create/update/finalize the provider invoice.
+  /**
+   * Invoice lines are projected from the ledger (see `LedgerGateway.getInvoiceLines`),
+   * not assembled from an `invoice_items` table. Finalization here is a
+   * header-only transition: move the invoice from `draft` to `unpaid` (or
+   * `void` when `totalAmount === 0`) and stamp `issueDate`. Provider-side
+   * invoice creation runs separately in
+   * `_upsertPaymentProviderInvoice` (called *before* this method by the
+   * public `finalizeInvoice` wrapper) so a provider failure leaves the row
+   * in `draft` for the cron to retry.
+   */
   private async _finalizeInvoice({
-    subscriptionId,
-    projectId,
+    invoice,
+    providerInvoiceId,
+    providerInvoiceUrl,
     now,
-    invoiceId,
   }: {
-    subscriptionId: string
-    projectId: string
+    invoice: SubscriptionInvoice
+    providerInvoiceId: string | null
+    providerInvoiceUrl: string | null
     now: number
-    invoiceId: string
   }): Promise<Result<SubscriptionInvoice, UnPriceBillingError>> {
-    const { err: openInvoiceDataErr, val: openInvoiceData } = await this.getOpenInvoiceData({
-      subscriptionId,
-      projectId,
-      now,
-      invoiceId,
-    })
-
-    if (openInvoiceDataErr) {
-      return Err(openInvoiceDataErr)
-    }
-
-    // if invoice already processed, skip it
-    if (openInvoiceData.invoicePaymentProviderId || openInvoiceData.status !== "draft") {
-      return Ok(openInvoiceData)
-    }
-
-    // only kind period or trial are supported
-    // for getting the quantity and price
-    // TODO: we need to handle the other cases as well (credit and discount)
-    const invoiceItemsToUpdate = openInvoiceData.invoiceItems
-      .filter((item) => item.featurePlanVersionId !== null)
-      .filter((item) => item.subscriptionItemId !== null)
-      .filter((item) => item.kind === "period" || item.kind === "trial")
-
-    if (invoiceItemsToUpdate.length === 0) {
-      return Ok(openInvoiceData)
-    }
-
-    // compute the invoice items for getting the right quantities and prices
-    const { val: billableItems, err: billableItemsErr } = await this._computeInvoiceItems({
-      invoice: openInvoiceData,
-      items: invoiceItemsToUpdate as InvoiceItemExtended[],
-    })
-
-    if (billableItemsErr) {
-      this.logger.error("Error computing invoice items", {
-        statementKey: openInvoiceData.statementKey,
-        subscriptionId: openInvoiceData.subscriptionId,
-        projectId: openInvoiceData.projectId,
-        customerId: openInvoiceData.customerId,
-      })
-
-      return Err(new UnPriceBillingError({ message: billableItemsErr.message }))
-    }
-
-    // all this happends in a transaction
     const result = await this.db.transaction(async (tx) => {
       try {
-        const billableItemsIds = billableItems.items.map((item) => item.id)
+        const txBillingRepo = new DrizzleBillingRepository(tx)
+        const statusInvoice = invoice.totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
 
-        // we update in a single query
-        const quantityChunks = []
-        const totalAmountChunks = []
-        const unitAmountChunks = []
-        const subtotalAmountChunks = []
-        const descriptionChunks = []
-
-        if (billableItems.items.length > 0) {
-          quantityChunks.push(sql`(case`)
-          totalAmountChunks.push(sql`(case`)
-          unitAmountChunks.push(sql`(case`)
-          subtotalAmountChunks.push(sql`(case`)
-          descriptionChunks.push(sql`(case`)
-
-          for (const item of billableItems.items) {
-            quantityChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.quantity} as int)`
-            )
-            totalAmountChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.totalAmount} as int)`
-            )
-            unitAmountChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.unitAmount} as int)`
-            )
-            subtotalAmountChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then cast(${item.subtotalAmount} as int)`
-            )
-            descriptionChunks.push(
-              sql`when ${invoiceItems.id} = ${item.id} then ${item.description}`
-            )
-          }
-
-          // add end) to the chunks
-          quantityChunks.push(sql`end)`)
-          totalAmountChunks.push(sql`end)`)
-          unitAmountChunks.push(sql`end)`)
-          subtotalAmountChunks.push(sql`end)`)
-          descriptionChunks.push(sql`end)`)
-
-          const sqlQueryQuantity = sql.join(quantityChunks, sql.raw(" "))
-          const sqlQueryTotalAmount = sql.join(totalAmountChunks, sql.raw(" "))
-          const sqlQueryUnitAmount = sql.join(unitAmountChunks, sql.raw(" "))
-          const sqlQuerySubtotalAmount = sql.join(subtotalAmountChunks, sql.raw(" "))
-          const sqlQueryDescription = sql.join(descriptionChunks, sql.raw(" "))
-
-          // for every invoice item we update the invoice item
-          // one single query for updating the invoice items
-          await tx
-            .update(invoiceItems)
-            .set({
-              quantity: sqlQueryQuantity,
-              unitAmountCents: sqlQueryUnitAmount,
-              amountTotal: sqlQueryTotalAmount,
-              amountSubtotal: sqlQuerySubtotalAmount,
-              description: sqlQueryDescription,
-            })
-            .where(
-              and(
-                eq(invoiceItems.invoiceId, openInvoiceData.id),
-                eq(invoiceItems.projectId, projectId),
-                inArray(invoiceItems.id, billableItemsIds)
-              )
-            )
-        }
-
-        // get the subtotal amount
-        const subtotalAmount = billableItems.items.reduce((a, i) => a + i.subtotalAmount, 0)
-        const totalAmount = billableItems.items.reduce((a, i) => a + i.totalAmount, 0)
-
-        // apply credits if any
-        const { err: applyCreditsErr, val: applyCreditsResult } = await this._applyCredits({
-          db: tx, // execute in the same transaction
-          invoice: { ...openInvoiceData, subtotalCents: subtotalAmount, totalCents: totalAmount },
-          now,
-        })
-
-        if (applyCreditsErr) {
-          this.logger.error("Error applying credits", {
-            invoiceId: openInvoiceData.id,
-            projectId: openInvoiceData.projectId,
-          })
-
-          // we throw an error to rollback the transaction
-          throw applyCreditsErr
-        }
-
-        const finalTotalAmount = applyCreditsResult.remainingInvoiceTotal
-        const finalSubtotalAmount = subtotalAmount - applyCreditsResult.applied
-
-        // void the billing period if the total amount is 0 or proration factor is 0
-        const statusInvoice = totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
-
-        // update the invoice
-        const updatedInvoice = await tx
-          .update(invoices)
-          .set({
-            subtotalCents: finalSubtotalAmount,
-            totalCents: finalTotalAmount,
+        const updatedInvoice = await txBillingRepo.updateInvoice({
+          invoiceId: invoice.id,
+          projectId: invoice.projectId,
+          data: {
             status: statusInvoice,
             issueDate: now,
+            ...(providerInvoiceId ? { invoicePaymentProviderId: providerInvoiceId } : {}),
+            ...(providerInvoiceUrl ? { invoicePaymentProviderUrl: providerInvoiceUrl } : {}),
             metadata: {
-              ...(openInvoiceData.metadata ?? {}),
-              // TODO: change who is finalizing the invoice
-              note: "Finilized by scheduler",
+              ...(invoice.metadata ?? {}),
+              note: "Finalized by scheduler",
             },
-          })
-          .where(
-            and(
-              eq(invoices.id, openInvoiceData.id),
-              eq(invoices.projectId, projectId),
-              eq(invoices.subscriptionId, subscriptionId)
-            )
-          )
-          .returning()
-          .then((res) => res[0])
+          },
+        })
 
         if (!updatedInvoice) {
           throw new Error("Error updating invoice")
@@ -1018,10 +1128,10 @@ export class BillingService {
 
         return updatedInvoice
       } catch (error) {
-        this.logger.error("Error finalizing invoice", {
-          invoiceId: openInvoiceData.id,
-          projectId: openInvoiceData.projectId,
-          error: toErrorContext(error),
+        this.logger.error(error, {
+          context: "Error finalizing invoice",
+          invoiceId: invoice.id,
+          projectId: invoice.projectId,
         })
         tx.rollback()
         throw error
@@ -1031,791 +1141,197 @@ export class BillingService {
     return Ok(result)
   }
 
-  private async _computeInvoiceItems(payload: {
-    invoice: SubscriptionInvoice
-    items: InvoiceItemExtended[]
+  /**
+   * Provider-side invoice creation: resolve the configured payment provider,
+   * `createInvoice` → `addInvoiceItem` per ledger line → `finalizeInvoice`,
+   * and return the provider's invoice id/url so the local row can stamp them.
+   *
+   * Idempotency contract:
+   *   - This method is only called when the local row is in `draft` AND
+   *     `invoicePaymentProviderId` is empty. The caller filters those.
+   *   - On error, the caller bumps `metadata.finalizeAttempts` and leaves
+   *     the row in `draft`. The next `finilizingSchedule` cron tick retries.
+   *   - We persist the provider id immediately after `createInvoice`
+   *     succeeds, *before* `addInvoiceItem`/`finalizeInvoice`, so that a
+   *     mid-flight crash doesn't orphan a Stripe invoice. A retry sees the
+   *     id stamped and skips this method entirely (the public wrapper just
+   *     does the local status flip; the invoice reconciler polls the provider
+   *     afterward if webhook delivery never arrives).
+   */
+  private async _upsertPaymentProviderInvoice({
+    invoice,
+    now,
+  }: {
+    invoice: SubscriptionInvoice & { customer: Customer }
+    now: number
   }): Promise<
     Result<
-      {
-        items: ComputeInvoiceItemsResult[]
-      },
-      UnPriceBillingError
-    >
-  > {
-    const { invoice, items } = payload
-
-    // from the invoice items we can get different cycle groups
-    // lets group them by cycle start at and end at
-    // for instance when we have a change in midcycle we have different periods for every item
-    const cycleGroups = items.reduce(
-      (acc, item) => {
-        const key = `${item.cycleStartAt}-${item.cycleEndAt}`
-        if (!acc[key]) {
-          acc[key] = []
-        }
-        acc[key].push(item)
-        return acc
-      },
-      {} as Record<string, InvoiceItemExtended[]>
-    )
-
-    const updatedItems = [] as ComputeInvoiceItemsResult[]
-
-    try {
-      // 1. Fetch all active grants for this customer at the given time
-      const { val: allGrants, err: grantsErr } = await this.grantsManager.getGrantsForCustomer({
-        customerId: invoice.customerId,
-        projectId: invoice.projectId,
-        now: invoice.dueAt, // we need the grants at the time of the invoice
-      })
-
-      if (grantsErr) {
-        return Err(new UnPriceBillingError({ message: grantsErr.message }))
-      }
-
-      // Group grants by feature slug
-      const grantsByFeature = new Map<string, typeof allGrants.grants>()
-      for (const grant of allGrants.grants) {
-        const slug = grant.featurePlanVersion.feature.slug
-        if (!grantsByFeature.has(slug)) {
-          grantsByFeature.set(slug, [])
-        }
-        grantsByFeature.get(slug)!.push(grant)
-      }
-
-      for (const cycleKey of Object.keys(cycleGroups)) {
-        const [cycleStartAt, cycleEndAt] = cycleKey.split("-").map(Number) as [number, number]
-        const cycleGroup = cycleGroups[cycleKey]!
-
-        // Process usage features
-        // We need to group invoice items by feature to handle multiple items for same feature
-        const itemsByFeature = new Map<string, InvoiceItemExtended[]>()
-        const nonUsageItems: InvoiceItemExtended[] = []
-
-        for (const item of cycleGroup) {
-          if (item.subscriptionItemId && item.featurePlanVersion!.featureType === "usage") {
-            const slug = item.featurePlanVersion!.feature.slug
-            if (!itemsByFeature.has(slug)) {
-              itemsByFeature.set(slug, [])
-            }
-            itemsByFeature.get(slug)!.push(item)
-          } else {
-            nonUsageItems.push(item)
-          }
-        }
-
-        // Batch fetch usage data for all usage features in this cycle
-        const usageFeaturesToFetch: Array<{
-          featureSlug: string
-          aggregationMethod: AggregationMethod
-          featureType: FeatureType
-        }> = []
-
-        const featureMetadata = new Map<
-          string,
-          {
-            grants: typeof allGrants.grants
-            items: InvoiceItemExtended[]
-            entitlement: Omit<Entitlement, "id">
-          }
-        >()
-
-        // Pre-compute entitlement states for all usage features to get aggregation methods
-        for (const [featureSlug, featureItems] of itemsByFeature.entries()) {
-          const featureGrants = grantsByFeature.get(featureSlug) ?? []
-
-          // Compute entitlement state to get aggregation method
-          const computedStateResult = await this.grantsManager.computeEntitlementState({
-            grants: featureGrants,
-            customerId: invoice.customerId,
-            projectId: invoice.projectId,
-          })
-
-          if (computedStateResult.err) {
-            this.logger.error("Failed to compute entitlement state for feature", {
-              featureSlug,
-              error: toErrorContext(computedStateResult.err),
-            })
-            continue
-          }
-
-          const entitlement = computedStateResult.val
-
-          featureMetadata.set(featureSlug, {
-            grants: featureGrants,
-            items: featureItems,
-            entitlement,
-          })
-
-          const aggregationMethod = entitlement.meterConfig?.aggregationMethod
-
-          if (entitlement.featureType === "usage" && aggregationMethod) {
-            usageFeaturesToFetch.push({
-              featureSlug,
-              aggregationMethod,
-              featureType: entitlement.featureType,
-            })
-          }
-        }
-
-        // Batch fetch usage data for all usage features in this cycle
-        let batchUsageData: { featureSlug: string; usage: number }[] | undefined
-
-        if (usageFeaturesToFetch.length > 0) {
-          const { err: usageErr, val: fetchedUsageData } =
-            await this.analytics.getUsageBillingFeatures({
-              customerId: invoice.customerId,
-              projectId: invoice.projectId,
-              features: usageFeaturesToFetch,
-              startAt: cycleStartAt,
-              endAt: cycleEndAt,
-            })
-
-          if (usageErr) {
-            this.logger.error("Failed to batch fetch usage data for cycle", {
-              error: toErrorContext(usageErr),
-              cycleKey,
-            })
-            return Err(new UnPriceBillingError({ message: usageErr.message }))
-          }
-
-          batchUsageData = fetchedUsageData
-        }
-
-        // Process usage items using calculateFeaturePrice
-        for (const [featureSlug, metadata] of featureMetadata.entries()) {
-          const featureGrants = metadata.grants
-          const featureItems = metadata.items
-
-          const calcResult = await this.calculateFeaturePrice({
-            projectId: invoice.projectId,
-            customerId: invoice.customerId,
-            featureSlug,
-            grants: featureGrants,
-            startAt: cycleStartAt,
-            endAt: cycleEndAt,
-            usageData: batchUsageData, // Pass pre-fetched usage data
-          })
-
-          if (calcResult.err) {
-            this.logger.error("Error calculating feature price", {
-              featureSlug,
-              error: toErrorContext(calcResult.err),
-            })
-            // Continue with other features? Or fail invoice?
-            // Existing logic failed the invoice on error.
-            return Err(new UnPriceBillingError({ message: calcResult.err.message }))
-          }
-
-          if (calcResult.val.length === 0) {
-            // If no calculation result (e.g. no grants), ensure we zero out the items
-            // instead of dropping them, which would cause invoice total mismatch
-            for (const item of featureItems) {
-              updatedItems.push({
-                id: item.id,
-                totalAmount: 0,
-                unitAmount: 0,
-                subtotalAmount: 0,
-                prorate: item.prorationFactor ?? 1,
-                description: item.description
-                  ? item.description.toUpperCase()
-                  : item.featurePlanVersion!.feature.title.toUpperCase(),
-                cycleStartAt: cycleStartAt,
-                cycleEndAt: cycleEndAt,
-                quantity: 0,
-              })
-            }
-          } else {
-            for (const res of calcResult.val) {
-              const targetItem = featureItems[0]
-
-              if (targetItem) {
-                const unitAmountCents = formatAmountDinero(res.price.unitPrice.dinero).amount
-                const totalAmountCents = formatAmountDinero(res.price.totalPrice.dinero).amount
-                const subtotalAmountCents = formatAmountDinero(
-                  res.price.subtotalPrice.dinero
-                ).amount
-
-                let description = targetItem.description ?? ""
-                let descriptionDetail = ""
-
-                if (res.prorate !== 1) {
-                  const endAt = Number.isFinite(res.cycleEndAt) ? res.cycleEndAt : cycleEndAt // fallback if somehow invalid
-
-                  const billingPeriod = `${new Date(res.cycleStartAt).toISOString().split("T")[0]} to ${
-                    new Date(endAt).toISOString().split("T")[0]
-                  }`
-
-                  descriptionDetail += res.isTrial
-                    ? ` trial (${billingPeriod})`
-                    : ` prorated (${billingPeriod})`
-                }
-
-                // Switch description logic
-                switch (targetItem.featurePlanVersion!.featureType) {
-                  case "usage":
-                    description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - tier usage ${descriptionDetail}`
-                    break
-                  case "flat":
-                    description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - flat ${descriptionDetail}`
-                    break
-                  case "package":
-                    description = `${targetItem.featurePlanVersion!.feature.title.toUpperCase()} - package ${descriptionDetail}`
-                    break
-                  default:
-                    description = targetItem.featurePlanVersion!.feature.title.toUpperCase()
-                }
-
-                updatedItems.push({
-                  id: targetItem.id,
-                  totalAmount: totalAmountCents,
-                  unitAmount: unitAmountCents,
-                  subtotalAmount: subtotalAmountCents,
-                  prorate: res.prorate,
-                  description,
-                  cycleStartAt: res.cycleStartAt,
-                  cycleEndAt: res.cycleEndAt,
-                  quantity: res.usage,
-                })
-              }
-            }
-          }
-        }
-
-        // Process non-usage items (flat, package, tier with no usage?)
-        // Same logic as before
-        for (const item of nonUsageItems) {
-          // ... existing logic for non-usage items ...
-          // Copy from previous implementation
-          let quantity = item.quantity
-          let totalAmount = 0
-          let unitAmount = 0
-          let subtotalAmount = 0
-
-          const isTrial = item.kind === "trial"
-
-          const { val: priceCalculation, err: priceCalculationErr } = calculatePricePerFeature({
-            config: item.featurePlanVersion!.config,
-            featureType: item.featurePlanVersion!.featureType,
-            quantity: quantity,
-            prorate: item.prorationFactor,
-          })
-
-          if (priceCalculationErr) {
-            return Err(new UnPriceBillingError({ message: priceCalculationErr.message }))
-          }
-
-          const formattedTotalAmount = formatAmountDinero(priceCalculation.totalPrice.dinero)
-          const formattedUnitAmount = formatAmountDinero(priceCalculation.unitPrice.dinero)
-          const formattedSubtotalAmount = formatAmountDinero(priceCalculation.subtotalPrice.dinero)
-
-          unitAmount = formattedUnitAmount.amount
-          subtotalAmount = formattedSubtotalAmount.amount
-          totalAmount = isTrial ? 0 : formattedTotalAmount.amount
-
-          let description = ""
-          let descriptionDetail = ""
-
-          if (item.prorationFactor !== 1) {
-            // cycleEndAt in invoice items is bigint, should be finite number, but checking just in case
-            const endAt = Number.isFinite(item.cycleEndAt) ? item.cycleEndAt : new Date().getTime() // fallback if somehow invalid
-
-            const billingPeriod = `${new Date(item.cycleStartAt).toISOString().split("T")[0]} to ${
-              new Date(endAt).toISOString().split("T")[0]
-            }`
-
-            descriptionDetail +=
-              item.kind === "trial" ? ` trial (${billingPeriod})` : ` prorated (${billingPeriod})`
-          }
-
-          // Switch description logic
-          switch (item.featurePlanVersion!.featureType) {
-            case "flat":
-              description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - flat ${descriptionDetail}`
-              break
-            case "package": {
-              const quantityPackages = Math.ceil(quantity / item.featurePlanVersion!.config?.units!)
-              quantity = quantityPackages
-              description = `${item.featurePlanVersion!.feature.title.toUpperCase()} - ${quantityPackages} package of ${item.featurePlanVersion!.config?.units!} units ${descriptionDetail}`
-              break
-            }
-            default:
-              description = item.featurePlanVersion!.feature.title.toUpperCase()
-          }
-
-          updatedItems.push({
-            id: item.id,
-            totalAmount,
-            unitAmount,
-            subtotalAmount,
-            prorate: item.prorationFactor,
-            description,
-            cycleStartAt: item.cycleStartAt,
-            cycleEndAt: item.cycleEndAt,
-            quantity,
-          })
-        }
-      }
-
-      return Ok({
-        items: updatedItems,
-      })
-    } catch (e) {
-      const error = e as Error
-      this.logger.error("Error calculating invoice items price", {
-        error: toErrorContext(error),
-      })
-      return Err(new UnPriceBillingError({ message: `Unhandled error: ${error.message}` }))
-    }
-  }
-
-  private async _upsertPaymentProviderInvoice(opts: {
-    invoiceId: string
-    projectId: string
-  }): Promise<
-    Result<
-      { providerInvoiceId?: string; providerInvoiceUrl?: string },
+      { providerInvoiceId: string; providerInvoiceUrl: string },
       UnPriceBillingError | FetchError
     >
   > {
-    const { default: pLimit } = await import("p-limit")
-
-    const invoice = await this.db.query.invoices.findFirst({
-      with: {
-        customer: true,
-        invoiceItems: {
-          with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
-          },
-        },
-      },
-      where: (table, { eq, and }) =>
-        and(eq(table.id, opts.invoiceId), eq(table.projectId, opts.projectId)),
-    })
-
-    if (!invoice) {
-      return Err(new UnPriceBillingError({ message: "Invoice not found" }))
-    }
-
-    if (["draft"].includes(invoice.status)) {
-      return Err(new UnPriceBillingError({ message: "Invoice is not ready to process" }))
-    }
-
-    if (invoice.status === "void" || invoice.totalCents === 0) {
-      return Ok({
-        providerInvoiceId: "",
-        providerInvoiceUrl: "",
-      })
-    }
-
-    // if already processed
-    if (invoice.invoicePaymentProviderId) {
-      return Ok({
-        providerInvoiceId: invoice.invoicePaymentProviderId,
-        providerInvoiceUrl: invoice.invoicePaymentProviderUrl ?? "",
-      })
-    }
-
-    const description = `Invoice ${invoice.statementDateString}`
-    const customFields = [
-      { name: "Billing Period", value: invoice.statementDateString },
-      { name: "statementKey", value: invoice.statementKey },
-    ]
-    const basePayload = {
-      currency: invoice.currency,
-      collectionMethod: invoice.collectionMethod,
-      customerName: invoice.customer.name,
-      email: invoice.customer.email,
-      description,
-      dueDate: invoice.dueAt ?? undefined,
-      customFields,
-    } as const
-
-    let providerInvoiceId = invoice.invoicePaymentProviderId ?? ""
-    let providerInvoiceUrl = invoice.invoicePaymentProviderUrl ?? ""
+    const billingRepo = new DrizzleBillingRepository(this.db)
 
     const { val: paymentProviderService, err: paymentProviderErr } =
       await this.customerService.getPaymentProvider({
-        customerId: invoice.customer.id,
+        customerId: invoice.customerId,
         projectId: invoice.projectId,
         provider: invoice.paymentProvider,
       })
 
     if (paymentProviderErr) {
+      return Err(new UnPriceBillingError({ message: paymentProviderErr.message }))
+    }
+
+    // Project the ledger lines that will become provider invoice items. Same
+    // primitive the read-side API uses (`getInvoiceV1`, `getInvoiceById`), so
+    // what we send to Stripe matches what we display to the customer.
+    const linesResult = await this.ledgerService.getInvoiceLines({
+      projectId: invoice.projectId,
+      statementKey: invoice.statementKey,
+    })
+
+    if (linesResult.err) {
+      return Err(new UnPriceBillingError({ message: linesResult.err.message }))
+    }
+
+    const lines = linesResult.val.filter(
+      (line) => (line.metadata as Record<string, unknown> | null)?.billing_period_id != null
+    )
+
+    if (lines.length === 0) {
+      // Nothing to push. A non-zero `totalAmount` with no lines is a data
+      // integrity error — surface it loudly rather than silently creating an
+      // empty Stripe invoice.
       return Err(
         new UnPriceBillingError({
-          message: `getPaymentProvider failed: ${paymentProviderErr.message}`,
+          message: `No ledger lines for invoice ${invoice.id} (statement ${invoice.statementKey})`,
         })
       )
     }
 
-    // upsert provider invoice
-    if (!providerInvoiceId) {
-      const created = await paymentProviderService.createInvoice(basePayload)
+    // 1) Create the provider invoice header.
+    const created = await paymentProviderService.createInvoice({
+      currency: invoice.currency,
+      customerName: invoice.customer.name ?? invoice.customer.email,
+      email: invoice.customer.email,
+      collectionMethod: invoice.collectionMethod,
+      description: `Statement ${invoice.statementDateString}`,
+      dueDate: invoice.dueAt,
+    })
 
-      if (created.err) {
-        return Err(
-          new UnPriceBillingError({ message: `createInvoice failed: ${created.err.message}` })
-        )
-      }
-      providerInvoiceId = created.val?.invoiceId ?? ""
-      providerInvoiceUrl = created.val?.invoiceUrl ?? ""
-    } else {
-      const updated = await paymentProviderService.updateInvoice({
+    if (created.err) {
+      return Err(created.err)
+    }
+
+    const providerInvoiceId = created.val.invoiceId
+    const providerInvoiceUrl = created.val.invoiceUrl
+
+    // Persist the provider id immediately so a crash in the next steps
+    // doesn't orphan the Stripe invoice from this row.
+    await billingRepo.updateInvoice({
+      invoiceId: invoice.id,
+      projectId: invoice.projectId,
+      data: {
+        invoicePaymentProviderId: providerInvoiceId,
+        invoicePaymentProviderUrl: providerInvoiceUrl,
+        updatedAtM: now,
+      },
+    })
+
+    // 2) Push one item per ledger line. Ledger amounts are at `LEDGER_SCALE = 8`;
+    //    `formatAmountForProvider` quantizes to currency minor units (cents)
+    //    — the only shape Stripe accepts.
+    for (const line of lines) {
+      const meta = (line.metadata as Record<string, unknown> | null) ?? {}
+      const totalMinor = formatAmountForProvider(line.amount).amount
+      const cycleStart = meta.cycle_start_at as number | undefined
+      const cycleEnd = meta.cycle_end_at as number | undefined
+      const prorationFactor = meta.proration_factor as number | undefined
+
+      const itemResult = await paymentProviderService.addInvoiceItem({
         invoiceId: providerInvoiceId,
-        collectionMethod: basePayload.collectionMethod,
-        description: basePayload.description,
-        dueDate: basePayload.dueDate,
-        customFields: basePayload.customFields,
+        name: line.description ?? "Subscription charge",
+        description: line.description ?? undefined,
+        isProrated: typeof prorationFactor === "number" && prorationFactor !== 1,
+        totalAmount: totalMinor,
+        quantity: line.quantity ?? 1,
+        currency: line.currency,
+        period:
+          typeof cycleStart === "number" && typeof cycleEnd === "number"
+            ? { start: cycleStart, end: cycleEnd }
+            : undefined,
+        metadata: {
+          billing_period_id: String(meta.billing_period_id ?? ""),
+          subscription_id: String(meta.subscription_id ?? ""),
+          subscription_item_id: String(meta.subscription_item_id ?? ""),
+          kind: line.kind,
+        },
       })
 
-      if (updated.err) {
-        return Err(
-          new UnPriceBillingError({ message: `updateInvoice failed: ${updated.err.message}` })
-        )
-      }
-
-      providerInvoiceUrl = updated.val?.invoiceUrl ?? ""
-    }
-
-    // Reconcile items by subscriptionItemId metadata
-    const current = await paymentProviderService.getInvoice({ invoiceId: providerInvoiceId })
-
-    if (current.err) {
-      return Err(new UnPriceBillingError({ message: `getInvoice failed: ${current.err.message}` }))
-    }
-
-    const bySubId = new Map<string, string>()
-    let creditLineId: string | undefined
-
-    // get the existing invoice item id by subscription item id and credit line id
-    for (const it of current.val.items) {
-      const subId = it.metadata?.subscriptionItemId
-      if (subId) bySubId.set(subId, it.id)
-
-      // get the credit line id
-      if (it.metadata?.kind === "credit_applied" && it.metadata?.invoiceId === invoice.id) {
-        creditLineId = it.id
+      if (itemResult.err) {
+        return Err(itemResult.err)
       }
     }
 
-    // Upsert line items with bounded concurrency
-    const limit = pLimit(10) // 10 is the max number of concurrent requests to the payment provider
-    const tasks: Promise<unknown>[] = []
-
-    for (const item of invoice.invoiceItems) {
-      // all items should have a feature plan version
-      // TODO: how to handle credits and discounts?
-      if (!item.featurePlanVersion) continue
-
-      // if the total amount and subtotal amount are 0 we skip the creation of the invoice item
-      if (item.amountTotal === 0 && item.amountSubtotal === 0) continue
-      const subId = item.subscriptionItemId ?? ""
-      const isProrated = (item.prorationFactor ?? 1) !== 1
-      // get the existing invoice item id by subscription item id
-      const existingId = subId ? bySubId.get(subId) : undefined
-
-      const period = {
-        start: Math.floor(item.cycleStartAt / 1000),
-        end: Math.floor(item.cycleEndAt / 1000),
-      }
-
-      if (existingId) {
-        tasks.push(
-          limit(async () => {
-            const res = await paymentProviderService.updateInvoiceItem({
-              invoiceItemId: existingId,
-              totalAmount: item.amountTotal,
-              name: item.description ?? "",
-              isProrated,
-              quantity: item.quantity,
-              // add the subscription item id to the metadata to be able to update the invoice item
-              metadata: subId ? { subscriptionItemId: subId } : undefined,
-              description: item.description ?? "",
-              period,
-            })
-            if (res.err) throw new Error(`updateInvoiceItem failed: ${res.err.message}`)
-          })
-        )
-      } else {
-        tasks.push(
-          limit(async () => {
-            const res = await paymentProviderService.addInvoiceItem({
-              invoiceId: providerInvoiceId,
-              name: item.featurePlanVersion!.feature.slug,
-              // TODO: there is an edge case where if the feature is tier based with flat charges
-              // the flat charge is combined with the tier charge and the total amount is not correct
-              // we need to add a separate line item for the flat charge
-              description: item.description ?? "",
-              isProrated,
-              totalAmount: item.amountTotal,
-              unitAmount: item.unitAmountCents ?? undefined, // ignored in amount-path by provider
-              quantity: item.quantity,
-              currency: invoice.currency,
-              metadata: subId ? { subscriptionItemId: subId } : undefined,
-              period,
-            })
-            if (res.err) throw new Error(`addInvoiceItem failed: ${res.err.message}`)
-          })
-        )
-      }
-    }
-
-    // apply credits
-    if (
-      invoice.amountCreditUsed &&
-      invoice.amountCreditUsed > 0 &&
-      invoice.totalCents &&
-      invoice.totalCents > 0
-    ) {
-      const credit = invoice.amountCreditUsed
-      tasks.push(
-        limit(async () => {
-          if (creditLineId) {
-            const res = await paymentProviderService.updateInvoiceItem({
-              invoiceItemId: creditLineId,
-              totalAmount: -credit,
-              name: "Credits applied",
-              isProrated: false,
-              quantity: 1,
-              metadata: { kind: "credit_applied", invoiceId: invoice.id },
-              description: "Customer credits applied",
-            })
-            if (res.err) throw new Error(`updateInvoiceItem(credit) failed: ${res.err.message}`)
-          } else {
-            const res = await paymentProviderService.addInvoiceItem({
-              invoiceId: providerInvoiceId,
-              name: "Credits applied",
-              description: "Customer credits applied",
-              isProrated: false,
-              totalAmount: -credit, // negative
-              unitAmount: -credit, // ensure Stripe wrapper uses 'amount' for no-product items
-              quantity: 1,
-              currency: invoice.currency,
-              metadata: { kind: "credit_applied", invoiceId: invoice.id },
-            })
-            if (res.err) throw new Error(`addInvoiceItem(credit) failed: ${res.err.message}`)
-          }
-        })
-      )
-    }
-
-    // Execute all item upserts
-    try {
-      await Promise.all(tasks)
-    } catch (e) {
-      const error = e as Error
-      this.logger.error("Provider item upsert failed", {
-        error: toErrorContext(error),
-        invoiceId: invoice.id,
-      })
-      return Err(new UnPriceBillingError({ message: error.message }))
-    }
-
-    // Re-fetch to validate totals and capture item IDs for persistence
-    const { err: verifyErr, val: invoiceFromProvider } = await paymentProviderService.getInvoice({
+    // 3) Finalize so the invoice is visible/collectible. Sandbox treats this
+    //    as a no-op; Stripe transitions `draft` → `open`.
+    const finalizeResult = await paymentProviderService.finalizeInvoice({
       invoiceId: providerInvoiceId,
     })
 
-    if (verifyErr) {
-      return Err(
-        new UnPriceBillingError({
-          message: `getInvoice verification failed: ${verifyErr.message}`,
-        })
-      )
+    if (finalizeResult.err) {
+      return Err(finalizeResult.err)
     }
-
-    if (invoiceFromProvider.total !== invoice.totalCents) {
-      this.logger.error("Provider invoice total mismatch", {
-        invoiceId: invoice.id,
-        providerInvoiceId,
-        internalTotal: invoice.totalCents,
-        providerTotal: invoiceFromProvider.total,
-      })
-
-      // before returning we need to save the invoice from the provider to debug
-      // the newly created invoice from the provider remains as draft to be able to debug if necessary
-      // next iteration we will try to finalize the invoice again
-      await this.db.transaction(async (tx) => {
-        await tx
-          .update(invoices)
-          .set({
-            status: "draft", // we need to set the status to draft to be able to debug
-            metadata: {
-              ...(invoice.metadata ?? {}),
-              reason: "invoice_failed",
-              note: "Failed to finalize invoice due to provider invoice total mismatch",
-            },
-          })
-          .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, invoice.projectId)))
-      })
-
-      return Err(
-        new UnPriceBillingError({
-          message: `Provider total does not match internal total: ${invoice.totalCents} !== ${invoiceFromProvider.total}`,
-        })
-      )
-    }
-
-    // finilize the invoice only if status is !"open," "paid," "uncollectible," or "void."
-    if (!["open", "paid", "uncollectible", "void"].includes(invoiceFromProvider.status ?? "")) {
-      // Finalize provider invoice (no send/charge here)
-      const fin = await paymentProviderService.finalizeInvoice({ invoiceId: providerInvoiceId })
-      if (fin.err) {
-        return Err(
-          new UnPriceBillingError({ message: `finalizeInvoice failed: ${fin.err.message}` })
-        )
-      }
-    }
-
-    // Persist provider ids and item provider ids using the last snapshot (no remote calls in tx)
-    const providerItemBySub = new Map<string, string>()
-    for (const it of invoiceFromProvider.items) {
-      const subId = it.metadata?.subscriptionItemId
-      if (subId) providerItemBySub.set(subId, it.id)
-    }
-
-    // Persist provider ids in a short tx
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(invoices)
-        .set({
-          invoicePaymentProviderId: providerInvoiceId,
-          invoicePaymentProviderUrl: providerInvoiceUrl,
-          metadata: {
-            ...(invoice.metadata ?? {}),
-            note: "Invoice finalized successfully",
-          },
-        })
-        .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, invoice.projectId)))
-
-      for (const item of invoice.invoiceItems) {
-        const subId = item.subscriptionItemId ?? ""
-        const id = subId ? providerItemBySub.get(subId) : undefined
-        if (!id) continue
-        await tx
-          .update(invoiceItems)
-          .set({ itemProviderId: id })
-          .where(and(eq(invoiceItems.id, item.id), eq(invoiceItems.projectId, item.projectId)))
-      }
-    })
 
     return Ok({ providerInvoiceId, providerInvoiceUrl })
   }
 
   /**
-   * Applies available customer credits to an invoice total.
-   * - Picks active, non-expired grants (same currency/provider), FIFO by earliest expiry.
-   * - Creates `invoice_credit_applications`, updates `credit_grants.amount_used` (+deactivate when fully used).
-   * - Updates `invoices.amountCreditUsed` and `invoices.total` accordingly.
+   * Records a failed finalize attempt in `invoice.metadata` so operators can
+   * spot stuck invoices via the `finilizingSchedule` warn log. Best-effort:
+   * a failure here is logged but doesn't fail the parent (the parent already
+   * threw with the real error).
    */
-  private async _applyCredits(input: {
-    db: Database
+  private async _bumpFinalizeAttempt({
+    invoice,
+    lastError,
+  }: {
     invoice: SubscriptionInvoice
-    now: number
-  }): Promise<
-    Result<
-      {
-        applied: number
-        remainingInvoiceTotal: number
-        applications: { grantId: string; amount: number }[]
-      },
-      UnPriceBillingError | FetchError
-    >
-  > {
-    const { db, invoice, now } = input
-
-    return db.transaction(async (tx) => {
-      const { projectId, customerId, id: invoiceId, currency, paymentProvider } = invoice
-
-      // Nothing to apply if already zero or void/paid
-      const currentTotalBeforeCredits = invoice.totalCents ?? 0
-      if (currentTotalBeforeCredits <= 0 || ["void", "paid"].includes(invoice.status)) {
-        return Ok({
-          applied: 0,
-          remainingInvoiceTotal: currentTotalBeforeCredits,
-          applications: [],
-        })
-      }
-
-      // Already-applied credits for this invoice (idempotency)
-      const existingApps = await tx.query.invoiceCreditApplications.findMany({
-        where: (a, { and, eq }) => and(eq(a.projectId, projectId), eq(a.invoiceId, invoiceId)),
+    lastError: string
+  }): Promise<void> {
+    try {
+      const billingRepo = new DrizzleBillingRepository(this.db)
+      const meta = (invoice.metadata ?? {}) as Record<string, unknown>
+      const prev = typeof meta.finalizeAttempts === "number" ? meta.finalizeAttempts : 0
+      await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
+        data: {
+          metadata: {
+            ...meta,
+            finalizeAttempts: prev + 1,
+            lastFinalizeError: lastError,
+            lastFinalizeAttemptAt: Date.now(),
+          },
+        },
       })
-      const alreadyApplied = existingApps.reduce((sum, a) => sum + a.amountApplied, 0)
-
-      // Eligible credit grants (active, not expired, with available > 0)
-      const grants = await tx.query.creditGrants.findMany({
-        where: (g, { and, eq, or, isNull, gt }) =>
-          and(
-            eq(g.projectId, projectId),
-            eq(g.customerId, customerId),
-            eq(g.currency, currency),
-            eq(g.paymentProvider, paymentProvider),
-            eq(g.active, true),
-            or(isNull(g.expiresAt), gt(g.expiresAt, now))
-          ),
-        orderBy: (g, { asc }) => asc(g.expiresAt), // FIFO by earliest expiry
+    } catch (error) {
+      this.logger.error(error as Error, {
+        context: "Failed to record finalize attempt",
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
       })
-
-      let remaining = Math.max(0, currentTotalBeforeCredits - alreadyApplied)
-      let applied = 0
-      const applications: { grantId: string; amount: number }[] = []
-
-      for (const grant of grants) {
-        if (remaining <= 0) break
-        const available = Math.max(0, grant.totalAmount - grant.amountUsed)
-        const toApply = Math.min(available, remaining)
-        if (toApply <= 0) continue
-
-        // Record application (per-invoice idempotency is protected by 'remaining')
-        await tx.insert(invoiceCreditApplications).values({
-          id: newId("invoice_credit_application"),
-          projectId,
-          invoiceId,
-          creditGrantId: grant.id,
-          amountApplied: toApply,
-        })
-
-        // Update grant usage (deactivate if fully used)
-        const newUsed = grant.amountUsed + toApply
-        await tx
-          .update(creditGrants)
-          .set({
-            amountUsed: newUsed,
-            active: newUsed < grant.totalAmount,
-          })
-          .where(and(eq(creditGrants.id, grant.id), eq(creditGrants.projectId, projectId)))
-
-        applied += toApply
-        remaining -= toApply
-        applications.push({ grantId: grant.id, amount: toApply })
-      }
-
-      const newAmountCreditUsed = alreadyApplied + applied
-      const newTotal = Math.max(0, (invoice.subtotalCents ?? 0) - newAmountCreditUsed)
-
-      // Persist only if anything changed or if idempotent recompute
-      await tx
-        .update(invoices)
-        .set({
-          amountCreditUsed: newAmountCreditUsed,
-          totalCents: newTotal,
-          metadata: { ...(invoice.metadata ?? {}), credits: "Credits applied" },
-        })
-        .where(and(eq(invoices.id, invoice.id), eq(invoices.projectId, projectId)))
-
-      return Ok({ applied, remainingInvoiceTotal: newTotal, applications })
-    })
+    }
   }
 
-  // this will materialize all the pending billing periods for the current phase or ended phases in the last N days
-  // the idea is to keep a record of every billing cycle for the subscription
-  // this way we can rely on these records to finalize and bill the invoices
+  /**
+   * Customer credits live in `wallet_credits` and drain through the
+   * reservation/flush pipeline. The legacy `credit_grants` +
+   * `invoice_credit_applications` path is deleted. Any credit application at
+   * invoice time should instead route through `WalletService.adjust` or drain
+   * naturally during reservation.
+   */
   private async _generateBillingPeriods({
     subscriptionId,
     projectId,
@@ -1872,146 +1388,88 @@ export class BillingService {
 
     const result = await trx
       .transaction(async (tx) => {
+        const txBillingRepo = new DrizzleBillingRepository(tx)
         for (const phase of phases) {
           // 0. Cap any existing pending periods for this phase that exceed the phase end date
           // this is useful for mid-cycle cancellations or plan changes
           if (phase.endAt) {
             // update billing periods
             if (!dryRun) {
-              await tx
-                .update(billingPeriods)
-                .set({
-                  cycleEndAt: sql`LEAST(${billingPeriods.cycleEndAt}, ${phase.endAt})`,
-                  invoiceAt:
-                    phase.planVersion.whenToBill === "pay_in_arrear"
-                      ? sql`LEAST(${billingPeriods.invoiceAt}, ${phase.endAt})`
-                      : billingPeriods.invoiceAt,
-                })
-                .where(
-                  and(
-                    eq(billingPeriods.subscriptionPhaseId, phase.id),
-                    eq(billingPeriods.status, "pending"),
-                    sql`${billingPeriods.cycleEndAt} > ${phase.endAt}`
-                  )
-                )
+              await txBillingRepo.capPendingPeriodsAtPhaseEnd({
+                phaseId: phase.id,
+                phaseEndAt: phase.endAt,
+                whenToBill: phase.planVersion.whenToBill,
+              })
             }
 
-            // 0.1 Handle credits for already invoiced/paid periods that are now shortened (Prepaid Billing)
-            const invoicedPeriods = await tx.query.billingPeriods.findMany({
-              where: (bp, ops) =>
-                ops.and(
-                  ops.eq(bp.subscriptionPhaseId, phase.id),
-                  ops.eq(bp.status, "invoiced"),
-                  ops.gt(bp.cycleEndAt, phase.endAt!)
-                ),
+            // 0.1 Shorten already-invoiced periods that now exceed the
+            // new phase end, and issue a prorated refund for the
+            // unearned portion. Refunds are wallet-credit only: we credit the
+            // customer's `available.purchased` sub-account via
+            // `WalletService.adjust`, sourced from `platform.funding.manual`.
+            // Paid amount is summed from ledger entries tagged with
+            // `billing_period_id` in metadata.
+            const invoicedPeriods = await txBillingRepo.listInvoicedPeriodsExceedingPhaseEnd({
+              phaseId: phase.id,
+              phaseEndAt: phase.endAt!,
             })
 
             for (const period of invoicedPeriods) {
-              // Find the specific invoice item for this billing period to get the actual amount paid
-              const itemLine = await tx.query.invoiceItems.findFirst({
-                with: {
-                  invoice: true,
-                  subscriptionItem: {
-                    with: {
-                      featurePlanVersion: true,
-                    },
-                  },
-                },
-                where: (ii, ops) =>
-                  ops.and(
-                    ops.eq(ii.billingPeriodId, period.id),
-                    ops.eq(ii.projectId, phase.projectId)
-                  ),
-              })
-
-              // do not consider draft or void invoices
-              if (
-                itemLine?.subscriptionItem &&
-                itemLine.amountTotal > 0 &&
-                itemLine.invoice.status === "paid" &&
-                // IMPORTANT: Proration only makes sense for non-usage items (Flat, Tier, Package)
-                // For usage items, the customer pays for what they used up to the end date.
-                itemLine.subscriptionItem.featurePlanVersion.featureType !== "usage"
-              ) {
-                // Check if we've already generated a credit for this specific billing period
-                const existingCredit = await tx.query.creditGrants.findFirst({
-                  where: (cg, ops) =>
-                    ops.and(
-                      ops.eq(cg.projectId, phase.projectId),
-                      ops.eq(cg.customerId, phase.subscription.customerId),
-                      // double check we are not duplicating the credit
-                      sql`${cg.metadata}->>'billingPeriodId' = ${period.id}`
-                    ),
-                })
-
-                if (!existingCredit) {
-                  // Use the item's own billing config for accurate proration
-                  const itemBillingConfig =
-                    itemLine.subscriptionItem.featurePlanVersion.billingConfig
-                  const oldProrationFactor = itemLine.prorationFactor ?? 1
-
-                  const proration = calculateProration({
-                    serviceStart: period.cycleStartAt,
-                    serviceEnd: phase.endAt!,
-                    effectiveStartDate: phase.startAt,
-                    billingConfig: {
-                      ...itemBillingConfig,
-                      // Ensure we use the numeric anchor from the phase
-                      billingAnchor: phase.billingAnchor,
-                    },
+              const refundAmount = dryRun
+                ? 0
+                : await this.computeProratedRefundAmount(tx, {
+                    period,
+                    phaseEndAt: phase.endAt!,
+                    phaseStartAt: phase.startAt,
+                    billingAnchor: phase.billingAnchor,
+                    billingConfig: phase.planVersion.billingConfig,
                   })
 
-                  const newProrationFactor = proration.prorationFactor
-
-                  if (newProrationFactor < oldProrationFactor) {
-                    // Calculate credit based on the reduction in the proration factor
-                    const unearnedFraction = 1 - newProrationFactor / oldProrationFactor
-                    const creditAmount = Math.floor(itemLine.amountTotal * unearnedFraction)
-
-                    if (!dryRun && creditAmount > 0) {
-                      await tx.insert(creditGrants).values({
-                        id: newId("customer_credit"),
-                        projectId: phase.projectId,
-                        customerId: phase.subscription.customerId,
-                        currency: phase.planVersion.currency,
-                        paymentProvider: phase.planVersion.paymentProvider,
-                        totalAmount: creditAmount,
-                        amountUsed: 0,
-                        reason: "mid_cycle_change",
-                        active: true,
-                        metadata: {
-                          billingPeriodId: period.id,
-                          originalInvoiceId: itemLine.invoiceId,
-                          originalInvoiceStatus: itemLine.invoice.status,
-                          note: `Prorated refund for shortened cycle ${new Date(period.cycleStartAt).toISOString()} - ${new Date(period.cycleEndAt).toISOString()}`,
-                        },
-                      })
-                    }
+              if (!dryRun) {
+                if (refundAmount > 0) {
+                  const { err } = await this.walletService.adjust(
+                    {
+                      projectId: phase.projectId,
+                      customerId: phase.subscription.customerId,
+                      currency: phase.planVersion.currency,
+                      signedAmount: refundAmount,
+                      actorId: "system:mid-cycle-shortening",
+                      reason: `Prorated refund for shortened cycle ${new Date(period.cycleStartAt).toISOString()} - ${new Date(phase.endAt!).toISOString()}`,
+                      source: "purchased",
+                      idempotencyKey: `mid_cycle_refund:${period.id}:${phase.endAt}`,
+                      metadata: {
+                        billing_period_id: period.id,
+                        phase_id: phase.id,
+                        kind: "mid_cycle_refund",
+                      },
+                    },
+                    tx
+                  )
+                  if (err) {
+                    this.logger.error(err, {
+                      context: "billing.mid_cycle_refund_failed",
+                      periodId: period.id,
+                      phaseId: phase.id,
+                    })
+                    throw err
                   }
                 }
-              }
 
-              // Update the invoiced period to reflect the new shortened end date in the database
-              if (!dryRun) {
-                await tx
-                  .update(billingPeriods)
-                  .set({ cycleEndAt: phase.endAt })
-                  .where(eq(billingPeriods.id, period.id))
+                await txBillingRepo.shortenBillingPeriod({
+                  periodId: period.id,
+                  cycleEndAt: phase.endAt!,
+                })
               }
             }
           }
 
           for (const item of phase.items) {
             // 1. Find the last period for this item to make per-item backfill
-            const lastForItem = await tx.query.billingPeriods.findFirst({
-              where: (bp, ops) =>
-                ops.and(
-                  ops.eq(bp.projectId, phase.projectId),
-                  ops.eq(bp.subscriptionId, phase.subscriptionId),
-                  ops.eq(bp.subscriptionPhaseId, phase.id),
-                  ops.eq(bp.subscriptionItemId, item.id)
-                ),
-              orderBy: (bp, ops) => ops.desc(bp.cycleEndAt),
+            const lastForItem = await txBillingRepo.getLastPeriodForItem({
+              projectId: phase.projectId,
+              subscriptionId: phase.subscriptionId,
+              subscriptionPhaseId: phase.id,
+              subscriptionItemId: item.id,
             })
 
             const cursorStart = lastForItem ? lastForItem.cycleEndAt : phase.startAt
@@ -2038,18 +1496,21 @@ export class BillingService {
             const billingPeriodValues = await Promise.all(
               windows.map(async (w) => {
                 const whenToBill = phase.planVersion.whenToBill
-                const invoiceAt = w.isTrial
-                  ? w.end
-                  : whenToBill === "pay_in_advance"
-                    ? w.start
-                    : w.end
+                // Fixed subscription charges can bill at period start for
+                // advance plans. Usage is always actuals-based, so it invoices
+                // at period end after events have landed.
+                const billsAtPeriodStart = whenToBill
+                  ? billingStrategyFor(whenToBill).billPhaseTrigger === "period_start" &&
+                    item.featurePlanVersion.featureType !== "usage"
+                  : false
+                const invoiceAt = w.isTrial ? w.end : billsAtPeriodStart ? w.start : w.end
                 const statementKey = await this.computeStatementKey({
                   projectId: phase.projectId,
                   customerId: phase.subscription.customerId,
                   subscriptionId: phase.subscriptionId,
                   invoiceAt,
                   currency: phase.planVersion.currency,
-                  paymentProvider: phase.planVersion.paymentProvider,
+                  paymentProvider: phase.paymentProvider,
                   collectionMethod: phase.planVersion.collectionMethod,
                 })
 
@@ -2068,7 +1529,7 @@ export class BillingService {
                   invoiceAt,
                   whenToBill,
                   invoiceId: null,
-                  amountEstimateCents: null,
+                  amountEstimate: null,
                   reason: w.isTrial ? ("trial" as const) : ("normal" as const),
                 }
               })
@@ -2077,19 +1538,9 @@ export class BillingService {
             // 4. Batch insert billing periods for this item
             if (billingPeriodValues.length > 0) {
               if (!dryRun) {
-                await tx
-                  .insert(billingPeriods)
-                  .values(billingPeriodValues)
-                  .onConflictDoNothing({
-                    target: [
-                      billingPeriods.projectId,
-                      billingPeriods.subscriptionId,
-                      billingPeriods.subscriptionPhaseId,
-                      billingPeriods.subscriptionItemId,
-                      billingPeriods.cycleStartAt,
-                      billingPeriods.cycleEndAt,
-                    ],
-                  })
+                await txBillingRepo.createPeriodsBatch({
+                  periods: billingPeriodValues,
+                })
               }
               cyclesCreated += billingPeriodValues.length
             }
@@ -2098,17 +1549,14 @@ export class BillingService {
         return Ok({ phasesProcessed: phases.length, cyclesCreated })
       })
       .catch((error) => {
-        this.logger.error(
-          `Error in billing period backfill transaction, ${error instanceof Error ? error.message : String(error)}`,
-          {
-            error,
-            subscriptionId,
-            projectId,
-            now,
-            phases: phases.length,
-            cyclesCreated,
-          }
-        )
+        this.logger.error(error, {
+          context: "Error in billing period backfill transaction",
+          subscriptionId,
+          projectId,
+          now,
+          phases: phases.length,
+          cyclesCreated,
+        })
 
         return Err(
           new UnPriceBillingError({
@@ -2120,488 +1568,171 @@ export class BillingService {
     return result
   }
 
-  /**
-   * Calculates the billing window based on entitlement state and time parameters.
-   * Handles both 'now' and explicit startAt/endAt scenarios.
-   */
-  private calculateBillingWindow({
-    entitlement,
-    now,
-    startAt,
-    endAt,
-  }: {
-    entitlement: Omit<Entitlement, "id">
-    now?: number
-    startAt?: number
-    endAt?: number
-  }): Result<{ billingStartAt: number; billingEndAt: number }, UnPriceBillingError> {
-    const resetConfig = entitlement.resetConfig
-
-    // If explicit dates provided, use them
-    if (startAt !== undefined && endAt !== undefined) {
-      if (startAt >= endAt) {
-        return Err(
-          new UnPriceBillingError({
-            message: `Invalid billing window: startAt (${startAt}) must be before endAt (${endAt})`,
-          })
-        )
-      }
-      return Ok({ billingStartAt: startAt, billingEndAt: endAt })
-    }
-
-    // Calculate from 'now' if provided
-    if (now !== undefined) {
-      if (resetConfig) {
-        const cycleWindow = calculateCycleWindow({
-          now,
-          effectiveStartDate: entitlement.effectiveAt,
-          effectiveEndDate: entitlement.expiresAt,
-          config: {
-            name: resetConfig.name,
-            interval: resetConfig.resetInterval,
-            intervalCount: resetConfig.resetIntervalCount,
-            planType: resetConfig.planType,
-            anchor: resetConfig.resetAnchor,
-          },
-          trialEndsAt: null,
-        })
-
-        if (cycleWindow) {
-          return Ok({
-            billingStartAt: cycleWindow.start,
-            billingEndAt: cycleWindow.end,
-          })
-        }
-      }
-
-      // Fallback: use grant effective dates
-      const billingStartAt = entitlement.effectiveAt
-      // max int64 that represent the max date
-      const billingEndAt = entitlement.expiresAt ?? new Date("9999-12-31").getTime()
-
-      if (billingStartAt >= billingEndAt) {
-        return Err(
-          new UnPriceBillingError({
-            message: `Invalid billing window: startAt (${billingStartAt}) must be before endAt (${billingEndAt})`,
-          })
-        )
-      }
-
-      return Ok({ billingStartAt, billingEndAt })
-    }
-
-    return Err(
-      new UnPriceBillingError({
-        message: "Either 'now' or both 'startAt' and 'endAt' must be provided",
-      })
-    )
+  public async calculateFeaturePrice(
+    params: RatingInput
+  ): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
+    const result = await this.ratingService.rateBillingPeriod(params)
+    return result.err
+      ? Err(new UnPriceBillingError({ message: result.err.message }))
+      : Ok(result.val)
   }
 
-  /**
-   * Calculates usage data for features based on grants, entitlement state, and billing window.
-   * This method handles fetching usage data (if not provided) and computing total usage amounts.
-   * Can be reused across calculateFeaturePrice and estimatePriceCurrentUsage.
-   *
-   * @returns Object containing usage information including usage, and isUsageFeature flag
-   */
-  private async calculateUsageOfFeatures({
+  public async getInvoiceStatementLines({
     projectId,
-    customerId,
-    featureSlug,
-    entitlement,
-    billingStartAt,
-    billingEndAt,
-    usageData: providedUsageData,
+    invoiceId,
+    statementKey,
+    currency,
   }: {
     projectId: string
-    customerId: string
-    featureSlug: string
-    entitlement: Omit<Entitlement, "id">
-    billingStartAt: number
-    billingEndAt: number
-    usageData?: { featureSlug: string; usage: number }[]
-  }): Promise<
-    Result<
-      {
-        usage: number
-        isUsageFeature: boolean
-      },
-      UnPriceBillingError
-    >
-  > {
-    // Validate billing window
-    if (billingStartAt >= billingEndAt) {
-      return Err(
-        new UnPriceBillingError({
-          message: `Invalid billing window: startAt (${billingStartAt}) must be before endAt (${billingEndAt})`,
+    invoiceId: string
+    statementKey: string
+    currency: Currency
+  }): Promise<Result<InvoiceStatementLine[], UnPriceBillingError>> {
+    const linesResult = await this.ledgerService.getInvoiceLines({
+      projectId,
+      statementKey,
+    })
+
+    if (linesResult.err) {
+      return Err(new UnPriceBillingError({ message: linesResult.err.message }))
+    }
+
+    const ledgerLines = linesResult.val
+    const billedPeriodIds = new Set(
+      ledgerLines
+        .map((line: InvoiceLine) => {
+          const metadata = line.metadata as Record<string, unknown> | null
+          const billingPeriodId = metadata?.billing_period_id
+          return typeof billingPeriodId === "string" ? billingPeriodId : null
         })
-      )
-    }
+        .filter((billingPeriodId): billingPeriodId is string => billingPeriodId !== null)
+    )
 
-    const featureType = entitlement.featureType
-    const aggregationMethod = entitlement.meterConfig?.aggregationMethod
-    const isUsageFeature = featureType === "usage"
-
-    // For non-usage features, return early with zero usage
-    if (!isUsageFeature) {
-      return Ok({
-        usage: 0,
-        isUsageFeature: false,
-      })
-    }
-
-    if (!aggregationMethod) {
-      return Err(
-        new UnPriceBillingError({
-          message: `Usage feature ${featureSlug} is missing an aggregation method`,
-        })
-      )
-    }
-
-    // Use provided usage data if available, otherwise fetch it
-    let usageData: { featureSlug: string; usage: number }[]
-    if (providedUsageData && providedUsageData.length > 0) {
-      usageData = providedUsageData
-    } else {
-      // Fetch TOTAL usage for this feature (no grant filtering)
-      const { err: usageErr, val: fetchedUsageData } = await this.analytics.getUsageBillingFeatures(
-        {
-          customerId,
-          projectId,
-          features: [
-            {
-              featureSlug,
-              aggregationMethod,
-              featureType,
+    const periods = (await this.db.query.billingPeriods.findMany({
+      with: {
+        subscriptionItem: {
+          with: {
+            featurePlanVersion: {
+              with: {
+                feature: true,
+              },
             },
-          ],
-          startAt: billingStartAt,
-          endAt: billingEndAt,
-        }
-      )
-
-      if (usageErr) {
-        this.logger.error("Failed to get usage for feature", {
-          featureSlug,
-          customerId,
-          projectId,
-          billingStartAt,
-          billingEndAt,
-          error: toErrorContext(usageErr),
-        })
-        return Err(new UnPriceBillingError({ message: usageErr.message }))
-      }
-
-      usageData = fetchedUsageData
-    }
-
-    // Extract usage values for the specific feature
-    const featureUsage = usageData.find((u) => u.featureSlug === featureSlug)
-    const currentCycleUsage = featureUsage?.usage ?? 0
-
-    return Ok({
-      usage: currentCycleUsage,
-      isUsageFeature: true,
-    })
-  }
-
-  /**
-   * Calculates proration for a grant within a billing window.
-   */
-  private calculateGrantProration({
-    grant,
-    billingStartAt,
-    billingEndAt,
-    resetConfig,
-  }: {
-    grant: z.infer<typeof grantSchemaExtended>
-    billingStartAt: number
-    billingEndAt: number
-    resetConfig: Omit<EntitlementState, "id">["resetConfig"]
-  }): { prorationFactor: number; referenceCycleStart: number; referenceCycleEnd: number } {
-    // Calculate proration based on the billing period
-    // The service window is the intersection of the grant active period and the billing cycle
-    const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
-    const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
-
-    // if grant is trial, proration factor should be 0
-    if (grant.type === "trial") {
-      return {
-        prorationFactor: 0,
-        referenceCycleStart: grantServiceStart,
-        referenceCycleEnd: grantServiceEnd,
-      }
-    }
-
-    if (resetConfig) {
-      const proration = calculateProration({
-        serviceStart: grantServiceStart,
-        serviceEnd: grantServiceEnd,
-        effectiveStartDate: grant.effectiveAt, // used for anchor calculation
-        billingConfig: {
-          name: resetConfig.name,
-          billingInterval: resetConfig.resetInterval,
-          billingIntervalCount: resetConfig.resetIntervalCount,
-          planType: resetConfig.planType,
-          billingAnchor: resetConfig.resetAnchor,
+          },
         },
-      })
-      return proration
-    }
+      },
+      where: (period, { and, eq }) =>
+        and(eq(period.projectId, projectId), eq(period.invoiceId, invoiceId)),
+      orderBy: (period, { asc }) => [asc(period.cycleStartAt), asc(period.id)],
+    })) as BillingPeriodStatementRow[]
 
-    return {
-      prorationFactor: 1,
-      referenceCycleStart: grantServiceStart,
-      referenceCycleEnd: grantServiceEnd,
-    }
+    const zeroLines = periods
+      .filter((period) => !billedPeriodIds.has(period.id))
+      .map(
+        (period): InvoiceStatementLine => ({
+          entryId: `billing-period:${period.id}`,
+          statementKey: period.statementKey,
+          kind: period.type === "trial" ? "trial" : "period",
+          description: period.subscriptionItem.featurePlanVersion.feature.title,
+          quantity: period.subscriptionItem.units ?? 0,
+          amount: 0,
+          currency,
+          createdAt: new Date(period.invoiceAt),
+        })
+      )
+
+    const projectedLedgerLines = ledgerLines.map(
+      (line): InvoiceStatementLine => ({
+        entryId: line.entryId,
+        statementKey: line.statementKey,
+        kind: line.kind,
+        description: line.description,
+        quantity: line.quantity,
+        amount: toLedgerMinor(line.amount),
+        currency: line.currency,
+        createdAt: line.createdAt,
+      })
+    )
+
+    return Ok([...projectedLedgerLines, ...zeroLines])
   }
 
   /**
-   * Calculates the price for a feature based on grants, usage, and billing period.
-   * Handles waterfall attribution of usage across multiple grants and calculates proration.
+   * Compute the unearned portion of a paid billing period that has
+   * been shortened to `phaseEndAt`. The paid amount is summed from
+   * ledger entries tagged `billing_period_id = period.id` — the authoritative
+   * record of what the customer actually paid for this period.
+   *
+   * Returns 0 when:
+   * - the invoice is not paid (nothing to refund yet)
+   * - no ledger entries exist for this period (e.g. trial period)
+   * - the new proration factor is >= the old one (nothing unearned)
    */
-  public async calculateFeaturePrice(
-    params:
-      | {
-          projectId: string
-          customerId: string
-          featureSlug: string
-          now: number
-          grants?: z.infer<typeof grantSchemaExtended>[]
-          startAt?: never
-          endAt?: never
-          usageData?: { featureSlug: string; usage: number }[]
-        }
-      | {
-          projectId: string
-          customerId: string
-          featureSlug: string
-          startAt: number
-          endAt: number
-          grants?: z.infer<typeof grantSchemaExtended>[]
-          now?: never
-          usageData?: { featureSlug: string; usage: number }[]
-        }
-  ): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
-    const {
-      projectId,
-      customerId,
-      featureSlug,
-      grants: providedGrants,
-      usageData: providedUsageData,
-    } = params
-    const now = "now" in params ? params.now : undefined
-    const startAt = "startAt" in params ? params.startAt : undefined
-    const endAt = "endAt" in params ? params.endAt : undefined
-
-    // Validate required parameters
-    if (!projectId || !customerId || !featureSlug) {
-      return Err(
-        new UnPriceBillingError({
-          message: "Missing required parameters: projectId, customerId, or featureSlug",
-        })
-      )
-    }
-
-    // Fetch grants if not provided
-    let grants: z.infer<typeof grantSchemaExtended>[]
-    if (providedGrants) {
-      grants = providedGrants
-    } else {
-      // Fetch all grants for customer and filter by feature slug
-      const { val: grantsResult, err: grantsErr } = await this.grantsManager.getGrantsForCustomer(
-        now !== undefined
-          ? { customerId, projectId, now }
-          : { customerId, projectId, startAt: startAt!, endAt: endAt! }
-      )
-
-      if (grantsErr) {
-        this.logger.error("Failed to get grants for customer", {
-          customerId,
-          projectId,
-          featureSlug,
-          error: toErrorContext(grantsErr),
-        })
-        return Err(new UnPriceBillingError({ message: grantsErr.message }))
-      }
-
-      // Filter grants by feature slug
-      grants = grantsResult.grants.filter((g) => g.featurePlanVersion.feature.slug === featureSlug)
-    }
-
-    if (grants.length === 0) {
-      return Ok([])
-    }
-
-    // Compute entitlement state
-    const computedStateResult = await this.grantsManager.computeEntitlementState({
-      grants,
-      customerId,
-      projectId,
-    })
-
-    if (computedStateResult.err) {
-      this.logger.error("Failed to compute entitlement state", {
-        featureSlug,
-        customerId,
-        projectId,
-        error: toErrorContext(computedStateResult.err),
-      })
-      return Err(new UnPriceBillingError({ message: computedStateResult.err.message }))
-    }
-
-    const entitlement = computedStateResult.val
-
-    // Calculate billing window using extracted method
-    const billingWindowResult = this.calculateBillingWindow({
-      entitlement,
-      now,
-      startAt,
-      endAt,
-    })
-
-    if (billingWindowResult.err) {
-      return Err(billingWindowResult.err)
-    }
-
-    const { billingStartAt, billingEndAt } = billingWindowResult.val
-
-    // Calculate usage using extracted method
-    const usageResult = await this.calculateUsageOfFeatures({
-      projectId,
-      customerId,
-      featureSlug,
-      entitlement,
-      billingStartAt,
-      billingEndAt,
-      usageData: providedUsageData,
-    })
-
-    if (usageResult.err) {
-      return Err(usageResult.err)
-    }
-
-    const { usage } = usageResult.val
-
-    // Track remaining usage for waterfall attribution
-    const pricingGrants: Array<{
-      id: string
-      limit?: number | null
-      priority?: number | null
-      config: z.infer<typeof configFeatureSchema>
-      prorate?: number
-    }> = []
-
-    const grantMetadata = new Map<
-      string,
-      {
+  private async computeProratedRefundAmount(
+    tx: Database,
+    input: {
+      period: {
+        id: string
+        projectId: string
+        invoiceId: string | null
         cycleStartAt: number
         cycleEndAt: number
-        included: number
-        isTrial: boolean
-        limit: number
       }
-    >()
-
-    // Prepare grants for waterfall calculation
-    for (const grant of grants) {
-      const grantServiceStart = Math.max(billingStartAt, grant.effectiveAt)
-      const grantServiceEnd = Math.min(billingEndAt, grant.expiresAt ?? Number.POSITIVE_INFINITY)
-
-      // Validate grant service window
-      if (grantServiceStart >= grantServiceEnd) {
-        continue
-      }
-
-      const grantLimit = grant.limit ?? Number.POSITIVE_INFINITY
-
-      // Calculate proration
-      const proration = this.calculateGrantProration({
-        grant,
-        billingStartAt,
-        billingEndAt,
-        resetConfig: entitlement.resetConfig,
-      })
-
-      // Calculate free units
-      const freeUnitsResult = calculateFreeUnits({
-        config: grant.featurePlanVersion.config,
-        featureType: grant.featurePlanVersion.featureType,
-      })
-
-      if (freeUnitsResult.err) {
-        this.logger.warn("Failed to calculate free units for grant", {
-          grantId: grant.id,
-          featureSlug,
-          error: toErrorContext(freeUnitsResult.err),
-        })
-      }
-
-      const freeUnits = freeUnitsResult.val ?? 0
-
-      pricingGrants.push({
-        id: grant.id,
-        limit: grant.limit,
-        priority: grant.priority,
-        config: grant.featurePlanVersion.config,
-        prorate: proration.prorationFactor,
-      })
-
-      grantMetadata.set(grant.id, {
-        cycleStartAt: grant.effectiveAt,
-        cycleEndAt: grant.expiresAt ?? Number.POSITIVE_INFINITY,
-        included: freeUnits,
-        isTrial: grant.type === "trial",
-        limit: grantLimit,
-      })
+      phaseEndAt: number
+      phaseStartAt: number
+      billingAnchor: number
+      billingConfig: import("@unprice/db/validators").BillingConfig
     }
+  ): Promise<number> {
+    const { period, phaseEndAt, phaseStartAt, billingAnchor, billingConfig } = input
 
-    // Call waterfall calculation
-    const waterfallResult = calculateWaterfallPrice({
-      grants: pricingGrants,
-      usage,
-      featureType: entitlement.featureType,
+    if (!period.invoiceId) return 0
+
+    // Only paid invoices can generate refunds — otherwise we'd be
+    // refunding money the customer never spent.
+    const invoice = await tx.query.invoices.findFirst({
+      columns: { status: true, statementKey: true },
+      where: (inv, { and, eq }) =>
+        and(eq(inv.id, period.invoiceId!), eq(inv.projectId, period.projectId)),
     })
 
-    if (waterfallResult.err) {
-      return Err(new UnPriceBillingError({ message: waterfallResult.err.message }))
-    }
+    if (!invoice || invoice.status !== "paid") return 0
 
-    const result: ComputeCurrentUsageResult[] = []
+    // Compute old (full period) and new (shortened) proration factors.
+    const originalProration = calculateProration({
+      serviceStart: period.cycleStartAt,
+      serviceEnd: period.cycleEndAt,
+      effectiveStartDate: phaseStartAt,
+      billingConfig: { ...billingConfig, billingAnchor },
+    })
+    const newProration = calculateProration({
+      serviceStart: period.cycleStartAt,
+      serviceEnd: phaseEndAt,
+      effectiveStartDate: phaseStartAt,
+      billingConfig: { ...billingConfig, billingAnchor },
+    })
 
-    for (const item of waterfallResult.val.items) {
-      if (item.grantId) {
-        const metadata = grantMetadata.get(item.grantId)
-        if (metadata) {
-          result.push({
-            grantId: item.grantId,
-            price: item.price,
-            prorate: pricingGrants.find((g) => g.id === item.grantId)?.prorate ?? 1,
-            cycleStartAt: metadata.cycleStartAt,
-            cycleEndAt: metadata.cycleEndAt,
-            usage: item.usage,
-            included: metadata.included,
-            limit: metadata.limit,
-            isTrial: metadata.isTrial,
-          })
-        }
-      } else {
-        // Unattributed usage
-        result.push({
-          grantId: null,
-          price: item.price,
-          prorate: 1,
-          cycleStartAt: billingStartAt,
-          cycleEndAt: billingEndAt,
-          usage: item.usage,
-          included: 0,
-          limit: 0,
-          isTrial: false,
-        })
-      }
-    }
+    const oldFactor = originalProration.prorationFactor
+    const newFactor = newProration.prorationFactor
+    if (!oldFactor || newFactor >= oldFactor) return 0
 
-    return Ok(result)
+    // Sum the ledger entries that credit `customer.*.consumed` for this billing
+    // period. Uses the same projection contract as the invoice-lines read path.
+    const linesResult = await this.ledgerService.getInvoiceLines({
+      projectId: period.projectId,
+      statementKey: invoice.statementKey,
+    })
+    if (linesResult.err) return 0
+
+    const paidMinor = linesResult.val.reduce((sum, line) => {
+      if (line.metadata?.billing_period_id !== period.id) return sum
+      const snap = line.amount.toJSON()
+      return sum + snap.amount
+    }, 0)
+
+    if (paidMinor <= 0) return 0
+
+    const unearnedFraction = 1 - newFactor / oldFactor
+    return Math.floor(paidMinor * unearnedFraction)
   }
 
   public async estimatePriceCurrentUsage({
@@ -2615,205 +1746,14 @@ export class BillingService {
     now?: number
     usageOverrides?: Map<string, number>
   }): Promise<Result<ComputeCurrentUsageResult[], UnPriceBillingError>> {
-    const result: ComputeCurrentUsageResult[] = []
-
-    // Get all active grants for the customer to determine which features to process
-    const { val: grantsResult, err: grantsErr } = await this.grantsManager.getGrantsForCustomer({
+    this.logger.warn("estimatePriceCurrentUsage is pending customer-entitlement billing rewrite", {
       customerId,
       projectId,
       now,
+      hasUsageOverrides: Boolean(usageOverrides?.size),
     })
 
-    if (grantsErr) {
-      this.logger.error("Failed to get grants for customer", {
-        customerId,
-        projectId,
-        error: toErrorContext(grantsErr),
-      })
-      return Err(new UnPriceBillingError({ message: grantsErr.message }))
-    }
-
-    if (grantsResult.grants.length === 0) {
-      return Ok([])
-    }
-
-    // Group grants by feature slug to process each feature
-    const grantsByFeature = new Map<string, typeof grantsResult.grants>()
-
-    for (const grant of grantsResult.grants) {
-      const featureSlug = grant.featurePlanVersion.feature.slug
-      if (!grantsByFeature.has(featureSlug)) {
-        grantsByFeature.set(featureSlug, [])
-      }
-      grantsByFeature.get(featureSlug)!.push(grant)
-    }
-
-    // Pre-compute entitlement states and billing windows for all features to batch fetch usage data
-    const usageFeaturesToFetch: Array<{
-      featureSlug: string
-      aggregationMethod: AggregationMethod
-      featureType: FeatureType
-      billingStartAt: number
-      billingEndAt: number
-    }> = []
-
-    const featureMetadata = new Map<
-      string,
-      {
-        grants: typeof grantsResult.grants
-        entitlement: Omit<Entitlement, "id">
-        billingStartAt: number
-        billingEndAt: number
-      }
-    >()
-
-    for (const [featureSlug, featureGrants] of grantsByFeature.entries()) {
-      // Compute entitlement state to determine feature type and billing window
-      const computedStateResult = await this.grantsManager.computeEntitlementState({
-        grants: featureGrants,
-        customerId,
-        projectId,
-      })
-
-      if (computedStateResult.err) {
-        this.logger.error("Failed to compute entitlement state", {
-          featureSlug,
-          error: toErrorContext(computedStateResult.err),
-        })
-        continue
-      }
-
-      const entitlement = computedStateResult.val
-
-      // Calculate billing window using extracted method
-      const billingWindowResult = this.calculateBillingWindow({
-        entitlement,
-        now,
-      })
-
-      if (billingWindowResult.err) {
-        this.logger.error("Failed to calculate billing window", {
-          featureSlug,
-          error: toErrorContext(billingWindowResult.err),
-        })
-        continue
-      }
-
-      const { billingStartAt, billingEndAt } = billingWindowResult.val
-
-      featureMetadata.set(featureSlug, {
-        grants: featureGrants,
-        entitlement,
-        billingStartAt,
-        billingEndAt,
-      })
-
-      // Collect usage features for batch fetching
-      if (
-        entitlement.featureType === "usage" &&
-        entitlement.meterConfig?.aggregationMethod &&
-        !usageOverrides?.has(featureSlug)
-      ) {
-        usageFeaturesToFetch.push({
-          featureSlug,
-          aggregationMethod: entitlement.meterConfig.aggregationMethod,
-          featureType: entitlement.featureType,
-          billingStartAt,
-          billingEndAt,
-        })
-      }
-    }
-
-    // Batch fetch usage data for all usage features
-    // Group by billing window to make optimal queries
-    const usageDataByWindow = new Map<string, { featureSlug: string; usage: number }[]>()
-
-    // Add usage overrides to the window map as if they were fetched
-    if (usageOverrides) {
-      for (const [featureSlug, usage] of usageOverrides.entries()) {
-        const metadata = featureMetadata.get(featureSlug)
-        if (!metadata) continue
-
-        const windowKey = `${metadata.billingStartAt}-${metadata.billingEndAt}`
-        if (!usageDataByWindow.has(windowKey)) {
-          usageDataByWindow.set(windowKey, [])
-        }
-        usageDataByWindow.get(windowKey)!.push({ featureSlug, usage })
-      }
-    }
-
-    if (usageFeaturesToFetch.length > 0) {
-      // Group features by billing window to minimize queries
-      const featuresByWindow = new Map<string, typeof usageFeaturesToFetch>()
-      for (const feature of usageFeaturesToFetch) {
-        const windowKey = `${feature.billingStartAt}-${feature.billingEndAt}`
-        if (!featuresByWindow.has(windowKey)) {
-          featuresByWindow.set(windowKey, [])
-        }
-        featuresByWindow.get(windowKey)!.push(feature)
-      }
-
-      // Fetch usage data for each unique billing window
-      for (const [windowKey, features] of featuresByWindow.entries()) {
-        const [billingStartAt, billingEndAt] = windowKey.split("-").map(Number) as [number, number]
-
-        const { err: usageErr, val: fetchedUsageData } =
-          await this.analytics.getUsageBillingFeatures({
-            customerId,
-            projectId,
-            features: features.map((f) => ({
-              featureSlug: f.featureSlug,
-              aggregationMethod: f.aggregationMethod,
-              featureType: f.featureType,
-            })),
-            startAt: billingStartAt,
-            endAt: billingEndAt,
-          })
-
-        if (usageErr) {
-          this.logger.error("Failed to batch fetch usage data", {
-            error: toErrorContext(usageErr),
-            windowKey,
-          })
-          // Continue with other windows, but log error
-          continue
-        }
-
-        usageDataByWindow.set(windowKey, fetchedUsageData)
-      }
-    }
-
-    // Process each feature - pass grants and usage data to avoid duplicate fetching
-    for (const [featureSlug, metadata] of featureMetadata.entries()) {
-      // Get usage data for this feature's billing window if it's a usage feature
-      let usageDataForFeature: { featureSlug: string; usage: number }[] | undefined
-
-      if (metadata.entitlement.featureType === "usage") {
-        const windowKey = `${metadata.billingStartAt}-${metadata.billingEndAt}`
-        usageDataForFeature = usageDataByWindow.get(windowKey)
-      }
-
-      const calculationResult = await this.calculateFeaturePrice({
-        projectId,
-        customerId,
-        featureSlug,
-        now,
-        grants: metadata.grants, // Pass already-fetched grants for efficiency
-        usageData: usageDataForFeature, // Pass pre-fetched usage data
-      })
-
-      if (calculationResult.err) {
-        this.logger.error("Failed to calculate feature price", {
-          featureSlug,
-          error: toErrorContext(calculationResult.err),
-        })
-        continue
-      }
-
-      result.push(...calculationResult.val)
-    }
-
-    return Ok(result)
+    return Ok([])
   }
 
   // all variables that affect the invoice should be included in the statement key

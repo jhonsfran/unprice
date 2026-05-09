@@ -14,10 +14,12 @@ export default function TrialUnitsFormField<TFieldValues extends FormValues>({
   form,
   isDisabled,
   className,
+  unitLabel = "days",
 }: {
   form: UseFormReturn<TFieldValues>
   isDisabled?: boolean
   className?: string
+  unitLabel?: string
 }) {
   return (
     <FormField
@@ -26,21 +28,20 @@ export default function TrialUnitsFormField<TFieldValues extends FormValues>({
       render={({ field }) => (
         <FormItem className={cn("flex w-full flex-col", className)}>
           <div className="flex items-center gap-1">
-            <FormLabel>Trial Units</FormLabel>
+            <FormLabel>Trial Duration</FormLabel>
             <Tooltip>
               <TooltipTrigger asChild>
                 <HelpCircle className="size-3.5 text-muted-foreground" />
               </TooltipTrigger>
               <TooltipContent side="right" className="max-w-[250px]">
-                Free trial duration based on the billing interval (e.g., 7 units = 7 days for daily
-                billing).
+                Free trial duration. Minute-billed plans use minutes; all other plans use days.
               </TooltipContent>
             </Tooltip>
           </div>
           <FormControl className="w-full">
             <InputWithAddons
               {...field}
-              trailing={"units"}
+              trailing={unitLabel}
               value={field.value ?? 0}
               disabled={isDisabled}
             />

@@ -13,6 +13,7 @@ import { planVersionRouter } from "./planVersions"
 import { planRouter } from "./plans"
 import { projectRouter } from "./projects"
 import { subscriptionRouter } from "./subscriptions"
+import { walletsRouter } from "./wallets"
 import { workspaceRouter } from "./workspaces"
 
 // Deployed to /trpc/lambda/**
@@ -35,6 +36,7 @@ export const lambdaEndpoints = {
   pages: pageRouter,
   paymentProvider: paymentProviderRouter,
   analytics: analyticsRouter,
+  wallets: walletsRouter,
 }
 
 export const lambdaRouter = createTRPCRouter(lambdaEndpoints)

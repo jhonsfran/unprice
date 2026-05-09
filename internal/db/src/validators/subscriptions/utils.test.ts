@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { calculateDateAt, calculateProration, getAnchor, getBillingCycleMessage } from "./utils"
+import {
+  calculateDateAt,
+  calculateProration,
+  getAnchor,
+  getBillingCycleMessage,
+  getTrialIntervalForBillingInterval,
+  getTrialUnitLabel,
+} from "./utils"
 import type { Config } from "./utils"
 
 const utcDate = (date: string, time = "00:00:00.000") => new Date(`${date}T${time}Z`).getTime()
@@ -57,6 +64,22 @@ describe("calculateDateAt", () => {
     })
 
     expect(end).toBe(utcDate("2026-01-01", "12:00:00.000"))
+  })
+})
+
+describe("getTrialIntervalForBillingInterval", () => {
+  it("uses minutes for minute-billed plans", () => {
+    expect(getTrialIntervalForBillingInterval("minute")).toBe("minute")
+    expect(getTrialUnitLabel({ billingInterval: "minute", units: 5 })).toBe("minutes")
+  })
+
+  it("uses days for non-minute billing periods", () => {
+    expect(getTrialIntervalForBillingInterval("day")).toBe("day")
+    expect(getTrialIntervalForBillingInterval("week")).toBe("day")
+    expect(getTrialIntervalForBillingInterval("month")).toBe("day")
+    expect(getTrialIntervalForBillingInterval("year")).toBe("day")
+    expect(getTrialIntervalForBillingInterval("onetime")).toBe("day")
+    expect(getTrialUnitLabel({ billingInterval: "month", units: 1 })).toBe("day")
   })
 })
 
@@ -153,6 +176,25 @@ describe("calculateProration", () => {
         billingInterval: "month",
         billingIntervalCount: 1,
         billingAnchor: 15,
+        planType: "recurring",
+      },
+    })
+    expect(prorationFactor).toBeCloseTo(1)
+  })
+
+  it("treats sub-day starts as full days for monthly dayOfCreation billing", () => {
+    const effectiveStart = utc("2026-05-07", "12:05:00.000")
+    const serviceStart = utc("2026-05-07", "12:05:00.000")
+    const serviceEnd = utc("2026-06-07", "00:00:00.000")
+    const { prorationFactor } = calculateProration({
+      serviceStart,
+      serviceEnd,
+      effectiveStartDate: effectiveStart,
+      billingConfig: {
+        name: "m",
+        billingInterval: "month",
+        billingIntervalCount: 1,
+        billingAnchor: "dayOfCreation",
         planType: "recurring",
       },
     })

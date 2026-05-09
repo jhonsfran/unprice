@@ -3,10 +3,15 @@
   "version": "1.0.0",
   "description": "",
   "main": "can.js",
+  "scripts": {
+    "build:lifecycle": "esbuild lifecycle.js --bundle --platform=browser --format=esm --external:k6 --external:k6/* --outfile=dist/lifecycle.js",
+    "lifecycle": "pnpm build:lifecycle && docker run --env-file .env --rm --network=host -i grafana/k6 run - < dist/lifecycle.js"
+  },
   "keywords": [],
   "author": "",
   "license": "AGPL-3.0",
   "devDependencies": {
+    "esbuild": "0.25.12",
     "k6": "^0.0.0"
   }
 }

@@ -28,13 +28,9 @@ if (customer.plan === "PRO") { // <-- mapping to PRO plan means when the plan ch
 
 // with Unprice
 // Verify if the customer has access to the feature
-const { result, error } = await unprice.customers.verify({
+const { result, error } = await unprice.entitlements.verify({
   customerId: customer.unpriceCustomerId,
-  featureSlug: "tokens", // map your feature code
-  metadata: {
-    action: "create",
-    country: "US"
-  }
+  featureSlug: "tokens" // map your feature code
 });
 
 if (error) {
@@ -44,7 +40,7 @@ if (error) {
   return;
 }
 
-if (result.access) {
+if (result.allowed) {
   // let custor use tokens
   // because now the feature is tied to the customer itself and not the plan
   // you can change the features of your customer without touching your code
@@ -85,17 +81,13 @@ console.log(result);
     </CodeGroup>
   </Accordion>
   <Accordion title="Verify features">
-    Can method verify if the customer has access to the feature, whether is a flat feature or a usage based one.
-    See more [here](/libraries/ts/sdk/overview)
+    Verify checks if the customer has access to a feature, whether it is a flat feature or a usage-based one.
+    See more [here](/libraries/ts/sdk/entitlements/verify)
 
     ```ts
-    const { result, error } = await unprice.customers.verify({
+    const { result, error } = await unprice.entitlements.verify({
       customerId: "cus_1234567890",
-      featureSlug: "tokens",
-      metadata: {
-        action: "create",
-        country: "US"
-      }
+      featureSlug: "tokens"
     });
 
     if (error) {
@@ -112,14 +104,13 @@ console.log(result);
     Depending on the feature, you can report usage.
 
     ```ts
-    const { result, error } = await unprice.customers.reportUsage({
+    const { result, error } = await unprice.events.ingestSync({
+      idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
+      eventSlug: "tokens_used",
       customerId: "cus_1234567890",
       featureSlug: "tokens",
-      usage: 30,
-      idempotenceKey: "123e4567-e89b-12d3-a456-426614174000",
-      metadata: {
-        action: "create",
-        country: "US"
+      properties: {
+        usage: 30
       }
     });
 

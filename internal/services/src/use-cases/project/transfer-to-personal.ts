@@ -3,7 +3,6 @@ import * as schema from "@unprice/db/schema"
 import type { Project } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { toErrorContext } from "../../utils/log-context"
 
 type TransferToPersonalDeps = {
   db: Database
@@ -94,8 +93,8 @@ export async function transferToPersonal(
     })
   } catch (error) {
     const e = error as Error
-    deps.logger.error("error transferring project to personal workspace", {
-      error: toErrorContext(e),
+    deps.logger.error(e, {
+      context: "error transferring project to personal workspace",
       projectId: project.id,
       userId,
     })

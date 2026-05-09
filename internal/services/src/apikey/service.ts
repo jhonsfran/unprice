@@ -102,8 +102,8 @@ export class ApiKeysService {
     )
 
     if (err) {
-      this.logger.error("error listing api keys by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing api keys by project",
         projectId,
       })
       return Err(err)
@@ -122,11 +122,13 @@ export class ApiKeysService {
     isRoot,
     name,
     expiresAt,
+    defaultCustomerId,
   }: {
     projectId: string
     isRoot: boolean
     name: string
     expiresAt?: number | null
+    defaultCustomerId?: string | null
   }): Promise<Result<ApiKey & { key: string }, FetchError>> {
     const apiKey = newId("apikey_key")
     const apiKeyId = newId("apikey")
@@ -142,6 +144,7 @@ export class ApiKeysService {
           expiresAt,
           projectId,
           isRoot,
+          defaultCustomerId,
         })
         .returning()
         .then((rows) => rows[0] ?? null),
@@ -153,8 +156,8 @@ export class ApiKeysService {
     )
 
     if (err) {
-      this.logger.error("error creating api key", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating api key",
         projectId,
       })
       return Err(err)
@@ -198,8 +201,8 @@ export class ApiKeysService {
     )
 
     if (err) {
-      this.logger.error("error revoking api keys", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error revoking api keys",
         projectId,
       })
       return Err(err)
@@ -282,13 +285,14 @@ export class ApiKeysService {
           expiresAt: true,
           revokedAt: true,
           hash: true,
+          defaultCustomerId: true,
         },
         where: (apikey, { eq }) => eq(apikey.hash, keyHash),
       })
       .catch((e) => {
         this.logger.set({ error: toErrorContext(e) })
-        this.logger.error(`Error fetching apikey from db: ${e.message}`, {
-          error: toErrorContext(e),
+        this.logger.error(e, {
+          context: `Error fetching apikey from db: ${e.message}`,
           keyHash,
         })
 
@@ -391,8 +395,8 @@ export class ApiKeysService {
           skipCache: false,
         }
       ).catch(async (err) => {
-        this.logger.error(`verify error, retrying without cache, ${err.message}`, {
-          error: toErrorContext(err),
+        this.logger.error(err, {
+          context: `verify error, retrying without cache, ${err.message}`,
         })
 
         await this.cache.apiKeyByHash.remove(await this.hash(req.key))
@@ -407,8 +411,8 @@ export class ApiKeysService {
       })
 
       if (result.err) {
-        this.logger.error("Error verifying apikey after retrying without cache", {
-          error: toErrorContext(result.err),
+        this.logger.error(result.err, {
+          context: "Error verifying apikey after retrying without cache",
         })
 
         return result
@@ -455,8 +459,8 @@ export class ApiKeysService {
       return Ok(apiKey)
     } catch (e) {
       const error = e as Error
-      this.logger.error("Unhandled error while getting the apikey", {
-        error: toErrorContext(error),
+      this.logger.error(error, {
+        context: "Unhandled error while getting the apikey",
       })
 
       return Err(
@@ -516,15 +520,133 @@ export class ApiKeysService {
       newKey,
     }
 
-    // update cache
+    // evict stale entry under old hash, then cache under new hash
     this.waitUntil(
-      this.cache.apiKeyByHash.set(apiKeyHash, {
-        ...apiKey,
-        ...newApiKey,
-      })
+      this.cache.apiKeyByHash.remove(req.keyHash).then(() =>
+        this.cache.apiKeyByHash.set(apiKeyHash, {
+          ...apiKey,
+          ...newApiKey,
+        })
+      )
     )
 
     return Ok(newApiKeyExtended)
+  }
+
+  public async bindCustomer({
+    apikeyId,
+    customerId,
+    projectId,
+  }: {
+    apikeyId: string
+    customerId: string
+    projectId: string
+  }): Promise<Result<{ state: "ok" } | { state: "not_found" }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(apikeys)
+        .set({
+          defaultCustomerId: customerId,
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(apikeys.id, apikeyId), eq(apikeys.projectId, projectId)))
+        .returning({
+          hash: apikeys.hash,
+        }),
+      (error) =>
+        new FetchError({
+          message: `error binding customer to api key: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error(err, {
+        context: "error binding customer to api key",
+        projectId,
+        apikeyId,
+        customerId,
+      })
+      return Err(err)
+    }
+
+    if (val.length === 0) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    this.waitUntil(Promise.all(val.map((apikey) => this.cache.apiKeyByHash.remove(apikey.hash))))
+
+    return Ok({
+      state: "ok",
+    })
+  }
+
+  public async unbindCustomer({
+    apikeyId,
+    projectId,
+  }: {
+    apikeyId: string
+    projectId: string
+  }): Promise<Result<{ state: "ok" } | { state: "not_found" }, FetchError>> {
+    const { val, err } = await wrapResult(
+      this.db
+        .update(apikeys)
+        .set({
+          defaultCustomerId: null,
+          updatedAtM: Date.now(),
+        })
+        .where(and(eq(apikeys.id, apikeyId), eq(apikeys.projectId, projectId)))
+        .returning({
+          hash: apikeys.hash,
+        }),
+      (error) =>
+        new FetchError({
+          message: `error unbinding customer from api key: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error(err, {
+        context: "error unbinding customer from api key",
+        projectId,
+        apikeyId,
+      })
+      return Err(err)
+    }
+
+    if (val.length === 0) {
+      return Ok({
+        state: "not_found",
+      })
+    }
+
+    this.waitUntil(Promise.all(val.map((apikey) => this.cache.apiKeyByHash.remove(apikey.hash))))
+
+    return Ok({
+      state: "ok",
+    })
+  }
+
+  public async resolveCustomerId(req: {
+    key: string
+  }): Promise<Result<string | null, SchemaError | FetchError | UnPriceApiKeyError>> {
+    const { val, err } = await this.getApiKey(
+      {
+        key: req.key,
+      },
+      {
+        skipCache: false,
+      }
+    )
+
+    if (err) {
+      return Err(err)
+    }
+
+    return Ok(val.defaultCustomerId ?? null)
   }
 
   /**

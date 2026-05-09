@@ -4,7 +4,6 @@ import { createSlug, newId } from "@unprice/db/utils"
 import type { Page } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { toErrorContext } from "../utils/log-context"
 
 export class PageService {
   private readonly db: Database
@@ -61,8 +60,8 @@ export class PageService {
     )
 
     if (err) {
-      this.logger.error("error creating page", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating page",
         projectId,
         subdomain,
       })
@@ -105,8 +104,8 @@ export class PageService {
     )
 
     if (err) {
-      this.logger.error("error publishing page", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error publishing page",
         projectId,
         pageId,
       })
@@ -146,8 +145,8 @@ export class PageService {
     )
 
     if (err) {
-      this.logger.error("error removing page", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error removing page",
         projectId,
         pageId,
       })
@@ -196,8 +195,8 @@ export class PageService {
     )
 
     if (err) {
-      this.logger.error("error uploading page logo", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error uploading page logo",
         projectId,
         name,
       })
@@ -235,8 +234,8 @@ export class PageService {
     )
 
     if (err) {
-      this.logger.error("error getting page by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting page by id",
         projectId,
         pageId,
       })
@@ -263,8 +262,8 @@ export class PageService {
     )
 
     if (err) {
-      this.logger.error("error getting page by domain", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting page by domain",
         domain,
       })
       return Err(err)
@@ -301,8 +300,8 @@ export class PageService {
     )
 
     if (err) {
-      this.logger.error("error listing pages by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing pages by project",
         projectId,
       })
       return Err(err)
@@ -371,8 +370,8 @@ export class PageService {
     )
 
     if (err) {
-      this.logger.error("error updating page", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating page",
         projectId,
         pageId,
       })

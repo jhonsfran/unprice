@@ -18,15 +18,6 @@ export const finilizingSchedule = schedules.task({
     const openInvoices = await db.query.invoices.findMany({
       with: {
         customer: true,
-        invoiceItems: {
-          with: {
-            featurePlanVersion: {
-              with: {
-                feature: true,
-              },
-            },
-          },
-        },
       },
       where: (inv, { and, eq, inArray, lte, or, isNull }) =>
         or(
@@ -44,6 +35,31 @@ export const finilizingSchedule = schedules.task({
     })
 
     logger.info(`Found ${openInvoices.length} open invoices for finilizing`)
+
+    // Surface stuck-draft invoices for ops. Threshold: > 5 prior finalize
+    // attempts (provider has been failing repeatedly) OR draft for > 1h past
+    // dueAt. The warn line is the alarm hook — operators tail logs for
+    // `stale_draft_invoice` and page on it.
+    const oneHourMs = 60 * 60 * 1000
+    for (const inv of openInvoices) {
+      if (inv.status !== "draft") continue
+      const meta = (inv.metadata ?? {}) as {
+        finalizeAttempts?: number
+        lastFinalizeError?: string
+      }
+      const attempts = meta.finalizeAttempts ?? 0
+      const overdueByMs = now - inv.dueAt
+      if (attempts > 5 || overdueByMs > oneHourMs) {
+        logger.warn("stale_draft_invoice", {
+          invoiceId: inv.id,
+          projectId: inv.projectId,
+          subscriptionId: inv.subscriptionId,
+          finalizeAttempts: attempts,
+          overdueByMs,
+          lastFinalizeError: meta.lastFinalizeError,
+        })
+      }
+    }
 
     if (openInvoices.length === 0) {
       return {

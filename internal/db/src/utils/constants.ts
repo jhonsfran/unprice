@@ -14,24 +14,27 @@ export const TIER_MODES_MAP = {
 export const FEATURE_TYPES_MAPS = {
   flat: {
     code: "flat",
-    label: "Flat",
-    description: "One fixed price — quantity is set when the customer subscribes",
+    label: "Pay monthly",
+    shortLabel: "Monthly",
+    description: "Customer pays the same fixed price every billing period.",
   },
   tier: {
     code: "tier",
-    label: "Tier",
-    description: "Price varies by quantity — quantity is set when the customer subscribes",
+    label: "Pay by volume",
+    shortLabel: "Tiered",
+    description: "Price changes as the customer chooses more units up front.",
   },
   package: {
     code: "package",
-    label: "Package",
-    description: "Price per bundle of units — quantity is set when the customer subscribes",
+    label: "Pay by bundle",
+    shortLabel: "Bundle",
+    description: "Customer buys fixed-size bundles, e.g., 1,000 calls for $10.",
   },
   usage: {
     code: "usage",
-    label: "Usage",
-    description:
-      "Price based on actual consumption — tracked automatically during the billing period",
+    label: "Pay per use",
+    shortLabel: "Metered",
+    description: "Customer is charged for what they actually use during the period.",
   },
 } as const
 
@@ -203,6 +206,18 @@ export type UsageMode = keyof typeof USAGE_MODES_MAP
 export type FeatureType = keyof typeof FEATURE_TYPES_MAPS
 
 export const PAYMENT_PROVIDERS = ["stripe", "square", "sandbox"] as const
+export const PAYMENT_PROVIDER_CONNECTION_TYPES = [
+  "managed_connection",
+  "bring_your_own_key",
+] as const
+export const PAYMENT_PROVIDER_CONNECTION_MODES = ["test", "live"] as const
+export const PAYMENT_PROVIDER_CONNECTION_STATUSES = [
+  "not_connected",
+  "pending",
+  "active",
+  "restricted",
+  "disabled",
+] as const
 export const CURRENCIES = ["USD", "EUR"] as const
 export const STAGES = ["prod", "test", "dev"] as const
 export const STATUS_PLAN = ["draft", "published"] as const
@@ -214,6 +229,8 @@ export const STATUS_PLAN = ["draft", "published"] as const
 export const SUBSCRIPTION_STATUS = [
   "active", // the subscription is active
   "trialing", // the subscription is trialing
+  "pending_payment", // pay-in-advance plan waiting on first payment webhook before becoming active
+  "pending_activation", // wallet activation (period grants) failed at create or renew; retry sweeper re-attempts. Ingestion is blocked until grants are issued.
   "canceled", // the subscription is cancelled
   "expired", // the subscription has expired - no auto-renew
   "past_due", // the subscription is past due - payment pending
@@ -222,24 +239,24 @@ export const SUBSCRIPTION_STATUS = [
 export const PLAN_TYPES = ["recurring", "onetime"] as const
 export const ROLES_APP = ["OWNER", "ADMIN", "MEMBER"] as const
 export const WHEN_TO_BILLING = ["pay_in_advance", "pay_in_arrear"] as const
-export const ENTITLEMENT_MERGING_POLICY = ["sum", "max", "min", "replace"] as const
+export const CREDIT_LINE_POLICIES = ["capped", "uncapped"] as const
 export const DUE_BEHAVIOUR = ["cancel", "downgrade"] as const
 export const GRANT_TYPES = ["subscription", "manual", "promotion", "trial", "addon"] as const
 export const SUBJECT_TYPES = ["project", "plan", "plan_version", "customer"] as const
 export const INVOICE_STATUS = ["unpaid", "paid", "waiting", "void", "draft", "failed"] as const
-export const INVOICE_ITEM_KIND = [
-  "period",
-  "tax",
-  "discount",
-  "refund",
-  "adjustment",
-  "trial",
-] as const
 export const FEATURE_CONFIG_TYPES = ["feature", "addon"] as const
 export const COLLECTION_METHODS = ["charge_automatically", "send_invoice"] as const
 export const BILLING_PERIOD_STATUS = ["pending", "invoiced", "voided"] as const
 export const BILLING_PERIOD_TYPE = ["normal", "trial"] as const
 export const OVERAGE_STRATEGIES = ["none", "last-call", "always"] as const
+export const WALLET_TOPUP_STATUSES = ["pending", "completed", "failed", "expired"] as const
+export const WALLET_CREDIT_SOURCES = [
+  "promo",
+  "plan_included",
+  "trial",
+  "manual",
+  "credit_line",
+] as const
 
 export const TIER_MODES = Object.keys(TIER_MODES_MAP) as unknown as readonly [
   TierMode,

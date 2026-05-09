@@ -1,18 +1,18 @@
-import type { Pipeline } from "cloudflare:pipelines"
+import type { Pipeline, PipelineRecord } from "cloudflare:pipelines"
 import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
-import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
-import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
-import { and, asc, eq, isNull, lt, sql } from "drizzle-orm"
+import type { AppLogger } from "@unprice/observability"
+import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
+import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
-import { apiDrain } from "~/observability"
+import { createDoLogger, runDoOperation } from "~/observability"
 import { ingestionAuditTable, schema } from "./db/schema"
 import migrations from "./drizzle/migrations"
 
 const TABLE_NAME = "ingestion_audit"
 
-const AUDIT_RETENTION_MS = MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000 // 7 days after the event
+const AUDIT_RETENTION_MS = DO_IDEMPOTENCY_TTL_MS
 const OUTBOX_BATCH_SIZE = 500 // 500 rows
 const RETENTION_CLEANUP_BATCH_SIZE = 5000 // 5000 rows
 const ALARM_RETRY_DELAY_MS = 30_000 // 30 seconds
@@ -38,18 +38,21 @@ type CommitResult = {
 export class IngestionAuditDO extends DurableObject {
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly ready: Promise<void>
-  private readonly pipelineEvents: Pipeline
+  private readonly appEnv?: string
+  private readonly localPipelineUrl?: string
+  private readonly pipelineEvents?: Pipeline<PipelineRecord>
   private readonly logger: AppLogger
+  private alarmScheduled = false
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env)
-    this.pipelineEvents = env.PIPELINE_EVENTS!
+    this.appEnv = env.APP_ENV?.trim()
+    this.localPipelineUrl = env.LOCAL_PIPELINE_URL?.trim()
+    this.pipelineEvents = env.PIPELINE_EVENTS
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
 
     const requestId = this.ctx.id.toString()
-    const { logger } = createStandaloneRequestLogger({ requestId }, { flush: apiDrain?.flush })
-
-    this.logger = logger
+    this.logger = createDoLogger(requestId)
     this.logger.set({
       requestId,
       service: "ingestionaudit",
@@ -65,6 +68,22 @@ export class IngestionAuditDO extends DurableObject {
     })
   }
 
+  public async exists(idempotencyKeys: string[]): Promise<string[]> {
+    await this.ready
+
+    if (idempotencyKeys.length === 0) {
+      return []
+    }
+
+    const rows = this.db
+      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
+      .from(ingestionAuditTable)
+      .where(inArray(ingestionAuditTable.idempotencyKey, idempotencyKeys))
+      .all()
+
+    return rows.map((r) => r.idempotencyKey)
+  }
+
   public async commit(entries: LedgerEntry[]): Promise<CommitResult> {
     await this.ready
 
@@ -72,6 +91,19 @@ export class IngestionAuditDO extends DurableObject {
       return { inserted: 0, duplicates: 0, conflicts: 0 }
     }
 
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "ingestionaudit",
+        operation: "commit",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+        baseFields: { entry_count: entries.length },
+      },
+      async () => this.commitInner(entries)
+    )
+  }
+
+  private async commitInner(entries: LedgerEntry[]): Promise<CommitResult> {
     let inserted = 0
     let duplicates = 0
     let conflicts = 0
@@ -117,12 +149,27 @@ export class IngestionAuditDO extends DurableObject {
       await this.ensureAlarm()
     }
 
+    this.logger.set({ inserted, duplicates, conflicts })
+    this.logger.info("ingestion audit commit", { inserted, duplicates, conflicts })
     return { inserted, duplicates, conflicts }
   }
 
   async alarm(): Promise<void> {
     await this.ready
+    this.alarmScheduled = false
 
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "ingestionaudit",
+        operation: "alarm",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+      },
+      async () => this.alarmInner()
+    )
+  }
+
+  private async alarmInner(): Promise<void> {
     const published = await this.publishUnpublishedRows()
     this.cleanupExpiredRows()
     this.checkStuckRows()
@@ -133,13 +180,18 @@ export class IngestionAuditDO extends DurableObject {
       .where(isNull(ingestionAuditTable.publishedAt))
       .get()
 
-    if (hasUnpublished && hasUnpublished.cnt > 0) {
+    const remaining = hasUnpublished?.cnt ?? 0
+    this.logger.set({ published, unpublished_remaining: remaining })
+
+    if (remaining > 0) {
       if (published) {
         await this.ensureAlarm()
       } else {
         await this.ctx.storage.setAlarm(Date.now() + ALARM_RETRY_DELAY_MS)
       }
     }
+
+    this.logger.info("ingestion audit alarm", { published, unpublished_remaining: remaining })
   }
 
   private async publishUnpublishedRows(): Promise<boolean> {
@@ -161,12 +213,12 @@ export class IngestionAuditDO extends DurableObject {
     }
 
     try {
-      const events = rows.map((row) => {
+      const events = rows.map((row): PipelineRecord => {
         const payload = JSON.parse(row.auditPayloadJson)
-        return parseLakehouseEvent("events", payload)
+        return parseLakehouseEvent("events", payload) as PipelineRecord
       })
 
-      await this.pipelineEvents.send(events)
+      await this.publishEvents(events)
 
       const now = Date.now()
       for (const row of rows) {
@@ -182,6 +234,43 @@ export class IngestionAuditDO extends DurableObject {
       return true
     } catch {
       return false
+    }
+  }
+
+  private async publishEvents(events: PipelineRecord[]): Promise<void> {
+    const localPipelineUrl = this.resolveLocalPipelineUrl()
+
+    if (localPipelineUrl) {
+      await this.sendToLocalPipeline(localPipelineUrl, events)
+      return
+    }
+
+    if (!this.pipelineEvents) {
+      throw new Error("PIPELINE_EVENTS binding is required when LOCAL_PIPELINE_URL is not set")
+    }
+
+    await this.pipelineEvents.send(events)
+  }
+
+  private resolveLocalPipelineUrl(): string | null {
+    if (this.appEnv && this.appEnv !== "development") {
+      return null
+    }
+
+    return this.localPipelineUrl && this.localPipelineUrl.length > 0 ? this.localPipelineUrl : null
+  }
+
+  private async sendToLocalPipeline(url: string, events: PipelineRecord[]): Promise<void> {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(events),
+    })
+
+    if (!response.ok) {
+      throw new Error(`local pipeline sink failed with status ${response.status}`)
     }
   }
 
@@ -221,9 +310,14 @@ export class IngestionAuditDO extends DurableObject {
   }
 
   private async ensureAlarm(): Promise<void> {
+    if (this.alarmScheduled) {
+      return
+    }
+
     const current = await this.ctx.storage.getAlarm()
     if (current === null) {
       await this.ctx.storage.setAlarm(Date.now() + 1000)
     }
+    this.alarmScheduled = true
   }
 }

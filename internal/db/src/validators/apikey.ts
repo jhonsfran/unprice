@@ -13,6 +13,7 @@ export const createApiKeySchema = insertApiKeySchema
   .pick({
     name: true,
     expiresAt: true,
+    defaultCustomerId: true,
   })
   .extend({
     projectSlug: z.string().optional(),
@@ -31,6 +32,7 @@ export const apiKeyExtendedSelectSchema = selectApiKeySchema
     expiresAt: true,
     revokedAt: true,
     hash: true,
+    defaultCustomerId: true,
   })
   .extend({
     project: projectExtendedSelectSchema,

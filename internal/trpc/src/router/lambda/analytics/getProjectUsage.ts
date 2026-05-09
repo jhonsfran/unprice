@@ -28,7 +28,7 @@ export const getProjectUsage = protectedProjectProcedure
       }
     }
 
-    const { result, error } = await unprice.analytics.getUsage({
+    const { result, error } = await unprice.analytics.usage.get({
       customer_id: customerId,
       project_id: projectId,
       range,

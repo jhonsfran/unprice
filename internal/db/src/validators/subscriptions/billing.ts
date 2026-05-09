@@ -1,5 +1,13 @@
 import type { BillingConfig } from "../shared"
-import { addByInterval, getAnchor, setUtc, setUtcDay, startOfUtcDay, startOfUtcHour } from "./utils"
+import {
+  addByInterval,
+  getAnchor,
+  normalizeBillingStartForInterval,
+  setUtc,
+  setUtcDay,
+  startOfUtcDay,
+  startOfUtcHour,
+} from "./utils"
 
 export interface CycleWindow {
   start: number
@@ -63,13 +71,18 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   // --- 3. Recurring Plan Validation and Setup (No changes needed) ---
   const { interval, intervalCount, anchor } = config
 
-  const anchorValue = getAnchor(effectiveStartDate, interval, anchor)
+  const normalizedEffectiveStartDate = normalizeBillingStartForInterval(
+    effectiveStartDate,
+    interval
+  )
+  const anchorValue = getAnchor(normalizedEffectiveStartDate, interval, anchor)
 
-  const paidPeriodStart = trialEndsAt
+  const rawPaidPeriodStart = trialEndsAt
     ? Math.max(effectiveStartDate, trialEndsAt)
     : effectiveStartDate
+  const paidPeriodStart = normalizeBillingStartForInterval(rawPaidPeriodStart, interval)
 
-  if (now < paidPeriodStart) {
+  if (now < rawPaidPeriodStart) {
     return null
   }
 

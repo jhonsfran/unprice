@@ -13,7 +13,6 @@ export const create = protectedProjectProcedure
     })
   )
   .mutation(async (opts) => {
-    const { phases, ...rest } = opts.input
     // only owner and admin can create a subscription
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
@@ -25,7 +24,7 @@ export const create = protectedProjectProcedure
         logger: opts.ctx.logger,
       },
       {
-        input: rest,
+        input: opts.input,
         projectId: opts.ctx.project.id,
       }
     )

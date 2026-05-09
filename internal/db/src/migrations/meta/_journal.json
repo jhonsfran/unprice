@@ -5,15 +5,50 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1773655629602,
-      "tag": "0000_illegal_thor_girl",
+      "when": 1777833929914,
+      "tag": "0000_living_penance",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1774125033406,
-      "tag": "0001_next_vector",
+      "when": 1777834220388,
+      "tag": "0001_cloudy_swarm",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777836939727,
+      "tag": "0002_special_mordo",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1778097509534,
+      "tag": "0003_glamorous_jazinda",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1778098790780,
+      "tag": "0004_right_weapon_omega",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1778152293938,
+      "tag": "0005_conscious_malice",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778253747603,
+      "tag": "0006_lean_raza",
       "breakpoints": true
     }
   ]

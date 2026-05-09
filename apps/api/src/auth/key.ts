@@ -7,7 +7,10 @@ import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
 // verify is sensitive to latency
-const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set(["/v1/customer/verify"])
+const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set([
+  "/v1/entitlements/verify",
+  "/v1/events/ingest/sync",
+])
 
 /**
  * keyAuth takes the bearer token from the request and verifies the key
@@ -128,12 +131,14 @@ export async function keyAuth(c: Context<HonoEnv>) {
         limiter: c.env.RL_FREE_6000_60s,
       })
     } catch (rateLimitError) {
-      logger.error("apikey rate limit check failed", {
-        path: requestPath,
-        workspaceId: key.project.workspaceId,
-        error:
-          rateLimitError instanceof Error ? rateLimitError.message : String(rateLimitError ?? ""),
-      })
+      logger.error(
+        rateLimitError instanceof Error ? rateLimitError.message : String(rateLimitError ?? ""),
+        {
+          path: requestPath,
+          workspaceId: key.project.workspaceId,
+          context: "apikey rate limit check failed",
+        }
+      )
     }
   }
 
@@ -246,18 +251,16 @@ export function validateIsAllowedToAccessProject({
   key: ApiKeyExtended
   requestedProjectId: string
 }) {
-  const projectID = isMain
-    ? requestedProjectId
-      ? requestedProjectId
-      : key.projectId
-    : key.projectId
-
-  if (!isMain && projectID !== key.projectId) {
-    throw new UnpriceApiError({
-      code: "FORBIDDEN",
-      message: "You are not allowed to access this app analytics.",
-    })
+  if (isMain) {
+    return requestedProjectId || key.projectId
   }
 
-  return projectID
+  if (!requestedProjectId || requestedProjectId === key.projectId) {
+    return key.projectId
+  }
+
+  throw new UnpriceApiError({
+    code: "FORBIDDEN",
+    message: "You are not allowed to access a different project.",
+  })
 }

@@ -2,14 +2,17 @@ import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
 import { extendZodWithOpenApi } from "zod-openapi"
 import * as schema from "../schema"
-import { billingIntervalSchema, currencySchema, paymentProviderSchema } from "./shared"
+import {
+  billingIntervalSchema,
+  creditLinePolicySchema,
+  currencySchema,
+  paymentProviderSchema,
+} from "./shared"
 import { subscriptionItemsConfigSchema } from "./subscriptions/items"
 
 extendZodWithOpenApi(z)
 
 export const customerMetadataSchema = z.object({
-  stripeSubscriptionId: z.string().optional(),
-  stripeDefaultPaymentMethodId: z.string().optional(),
   // analytics
   country: z.string().optional(),
   region: z.string().optional(),
@@ -89,6 +92,16 @@ export const customerSignUpSchema = z
           units: 100,
         },
       ],
+    }),
+    creditLinePolicy: creditLinePolicySchema.default("uncapped").openapi({
+      description:
+        "Usage credit policy for the initial subscription phase. Uncapped allows postpaid usage without wallet reservation; capped uses a finite credit amount or derives one from finite usage limits.",
+      example: "uncapped",
+    }),
+    creditLineAmount: z.coerce.number().int().min(0).nullable().optional().openapi({
+      description:
+        "Optional capped usage credit amount as a ledger-scale minor-unit integer. Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.",
+      example: 10_000_000_000,
     }),
     externalId: z.string().optional().openapi({
       description:
@@ -175,7 +188,7 @@ export const createPaymentMethodResponseSchema = z.object({
   }),
 })
 
-export const stripeSetupSchema = z.object({
+export const customerSessionCustomerSchema = z.object({
   id: z.string().min(1, "Customer id is required"),
   name: z.string().optional(),
   email: z.string().email(),
@@ -195,10 +208,12 @@ export const customerSetUpSchema = z.object({
   paymentProvider: paymentProviderSchema,
 })
 
-export const stripePlanVersionSchema = z.object({
+export const customerSessionPlanVersionSchema = z.object({
   id: z.string().min(1, "Plan version id is required"),
   projectId: z.string().min(1, "Project id is required"),
   config: subscriptionItemsConfigSchema.optional(),
+  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
+  creditLineAmount: z.number().int().min(0).nullable().optional(),
   paymentMethodRequired: z.boolean(),
 })
 
@@ -216,10 +231,10 @@ export const customerPaymentMethodSchema = z.object({
   brand: z.string().optional(),
 })
 
-export type StripePlanVersion = z.infer<typeof stripePlanVersionSchema>
 export type Customer = z.infer<typeof customerSelectSchema>
 export type InsertCustomer = z.infer<typeof customerInsertBaseSchema>
-export type StripeSetup = z.infer<typeof stripeSetupSchema>
+export type CustomerSessionCustomer = z.infer<typeof customerSessionCustomerSchema>
 export type CustomerSignUp = z.infer<typeof customerSignUpSchema>
 export type CustomerSetUp = z.infer<typeof customerSetUpSchema>
 export type CustomerPaymentMethod = z.infer<typeof customerPaymentMethodSchema>
+export type CustomerSessionPlanVersion = z.infer<typeof customerSessionPlanVersionSchema>

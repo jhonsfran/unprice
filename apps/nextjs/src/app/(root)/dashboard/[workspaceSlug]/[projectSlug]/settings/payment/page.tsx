@@ -1,29 +1,48 @@
+import { PAYMENT_PROVIDERS } from "@unprice/db/utils"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { api } from "~/trpc/server"
-import { StripePaymentConfigForm } from "./_components/stripe-payment-config-form"
+import { PaymentProviderConfigForm } from "./_components/payment-provider-config-form"
+
+const PROVIDER_META: Record<string, { disabled?: boolean }> = {
+  stripe: {},
+  sandbox: {},
+  square: {
+    disabled: true,
+  },
+}
 
 export default async function ProjectPaymentSettingsPage() {
-  const provider = await api.paymentProvider.getConfig({
-    paymentProvider: "stripe",
-  })
+  const enabledProviders = PAYMENT_PROVIDERS.filter((p) => !PROVIDER_META[p]?.disabled)
+
+  const configs = await Promise.all(
+    enabledProviders.map((provider) =>
+      api.paymentProvider.getConnection({ paymentProvider: provider })
+    )
+  )
 
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-row items-center justify-between">
           <div className="flex flex-col space-y-1.5">
-            <CardTitle>Stripe Privider</CardTitle>
+            <CardTitle>Payment providers</CardTitle>
             <CardDescription>
-              Connect your Stripe account to enable payments for your project
+              Enable the providers that plan versions can use for new subscriptions.
             </CardDescription>
           </div>
         </div>
       </CardHeader>
-      <CardContent>
-        <StripePaymentConfigForm
-          provider={provider.paymentProviderConfig}
-          paymentProvider="stripe"
-        />
+      <CardContent className="space-y-4">
+        {enabledProviders.map((provider, i) => {
+          return (
+            <section key={provider} className={i > 0 ? "pt-1" : undefined}>
+              <PaymentProviderConfigForm
+                provider={configs[i]?.paymentProviderConfig}
+                paymentProvider={provider}
+              />
+            </section>
+          )
+        })}
       </CardContent>
     </Card>
   )

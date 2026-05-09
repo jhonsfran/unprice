@@ -2,7 +2,6 @@ import { type Database, and, eq } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { toErrorContext } from "../../utils/log-context"
 
 type ResendInviteDeps = {
   db: Database
@@ -64,8 +63,8 @@ export async function resendInvite(
     })
   } catch (error) {
     const e = error as Error
-    deps.logger.error("error resending workspace invite", {
-      error: toErrorContext(e),
+    deps.logger.error(e, {
+      context: "error resending workspace invite",
       workspaceId: workspace.id,
       email,
     })

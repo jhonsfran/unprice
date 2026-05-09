@@ -4,7 +4,6 @@ import { newId } from "@unprice/db/utils"
 import type { Event } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { toErrorContext } from "../utils/log-context"
 
 export class EventService {
   private readonly db: Database
@@ -52,8 +51,8 @@ export class EventService {
     )
 
     if (err) {
-      this.logger.error("error creating event", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating event",
         projectId,
         slug,
       })
@@ -90,8 +89,8 @@ export class EventService {
     )
 
     if (err) {
-      this.logger.error("error listing events by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing events by project",
         projectId,
       })
       return Err(err)
@@ -125,8 +124,8 @@ export class EventService {
     )
 
     if (existingEventErr) {
-      this.logger.error("error getting event by id", {
-        error: toErrorContext(existingEventErr),
+      this.logger.error(existingEventErr, {
+        context: "error getting event by id",
         projectId,
         eventId: id,
       })
@@ -166,8 +165,8 @@ export class EventService {
     )
 
     if (err) {
-      this.logger.error("error updating event", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating event",
         projectId,
         eventId: id,
       })

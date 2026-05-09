@@ -1,3 +1,4 @@
+import { LEDGER_SCALE } from "@unprice/money"
 import * as z from "zod"
 import type { Analytics } from "./analytics"
 
@@ -155,12 +156,11 @@ export const featureMetadataSchemaV1 = z.object({
 })
 
 export const entitlementMeterFactSchemaV1 = z.object({
-  id: z.string(),
   event_id: z.string(),
   idempotency_key: z.string(),
   project_id: z.string(),
   customer_id: z.string(),
-  stream_id: z.string(),
+  customer_entitlement_id: z.string(),
   feature_slug: z.string(),
   period_key: z.string(),
   event_slug: z.string(),
@@ -169,6 +169,13 @@ export const entitlementMeterFactSchemaV1 = z.object({
   created_at: z.number().describe("timestamp of when the fact row was created"),
   delta: z.number(),
   value_after: z.number(),
+  grant_id: z.string(),
+  feature_plan_version_id: z.string().nullable().optional(),
+  amount: z.number().int(),
+  amount_after: z.number().int(),
+  amount_scale: z.literal(LEDGER_SCALE),
+  currency: z.string().length(3),
+  priced_at: z.number().int(),
 })
 
 export const auditLogSchemaV1 = z.object({
@@ -208,11 +215,28 @@ export const getAnalyticsVerificationsResponseSchema = z.object({
   p99_latency: z.number(),
 })
 
+export const featureUsagePeriodRowSchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string().optional(),
+  feature_slug: z.string(),
+  usage: z.number().optional(),
+  value_after: z.number().optional(),
+  amount_after: z.number().int().optional(),
+  currency: z.string().length(3).optional(),
+})
+
+export const usageSpendingResponseSchema = z.object({
+  amount: z.string(),
+  currency: z.string().length(3),
+  display_amount: z.string(),
+})
+
 export const getUsageResponseSchema = z.object({
   project_id: z.string(),
   customer_id: z.string().optional(),
   feature_slug: z.string(),
-  value_after: z.number(),
+  usage: z.number(),
+  spending: usageSpendingResponseSchema,
 })
 
 export const schemaPageHit = z.object({
@@ -339,6 +363,7 @@ export type PageAnalyticsEvent = z.infer<typeof pageEventSchema>
 export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>
 export type AnalyticsEventAction = z.infer<typeof analyticsEventSchema>["action"]
 export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
+export type FeatureUsagePeriodRow = z.infer<typeof featureUsagePeriodRowSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
@@ -376,6 +401,6 @@ export type PageBrowserVisits = Awaited<ReturnType<Analytics["getBrowserVisits"]
 export type PageOverview = Awaited<ReturnType<Analytics["getPagesOverview"]>>["data"]
 export type FeaturesUsage = Awaited<ReturnType<Analytics["getFeaturesUsage"]>>["data"]
 export type PlansConversion = Awaited<ReturnType<Analytics["getPlansConversion"]>>["data"]
-export type Usage = Awaited<ReturnType<Analytics["getFeaturesUsagePeriod"]>>["data"]
+export type Usage = GetUsageResponse[]
 
 export type Stats = z.infer<typeof statsSchema>

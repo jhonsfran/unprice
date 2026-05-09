@@ -1,5 +1,5 @@
 "use client"
-import * as currencies from "@dinero.js/currencies"
+import * as currencies from "dinero.js/currencies"
 import { AnimatePresence, motion } from "framer-motion"
 import { ChevronDown, LayoutGrid, Settings, Trash2, X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -15,7 +15,6 @@ import {
   useFieldArray,
 } from "react-hook-form"
 
-import { currencySymbol } from "@unprice/db/utils"
 import { nFormatter } from "@unprice/db/utils"
 import type {
   Currency,
@@ -29,6 +28,7 @@ import {
   createDefaultSubscriptionConfig,
   getBillingCycleMessage,
 } from "@unprice/db/validators"
+import { currencySymbol } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import {

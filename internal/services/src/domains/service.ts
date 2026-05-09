@@ -3,7 +3,6 @@ import { domains as domainsTable } from "@unprice/db/schema"
 import type { Domain } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { toErrorContext } from "../utils/log-context"
 
 export class DomainService {
   private readonly db: Database
@@ -40,8 +39,8 @@ export class DomainService {
     )
 
     if (err) {
-      this.logger.error("error checking domain existence", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error checking domain existence",
         name,
       })
       return Err(err)
@@ -67,8 +66,8 @@ export class DomainService {
     )
 
     if (err) {
-      this.logger.error("error listing domains by workspace", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing domains by workspace",
         workspaceId,
       })
       return Err(err)
@@ -97,8 +96,8 @@ export class DomainService {
     )
 
     if (err) {
-      this.logger.error("error getting domain by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting domain by id",
         domainId,
         workspaceId,
       })
@@ -138,8 +137,8 @@ export class DomainService {
     )
 
     if (err) {
-      this.logger.error("error creating domain", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating domain",
         domainId,
         workspaceId,
       })
@@ -175,8 +174,8 @@ export class DomainService {
     )
 
     if (err) {
-      this.logger.error("error updating domain", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating domain",
         domainId,
         workspaceId,
       })
@@ -205,8 +204,8 @@ export class DomainService {
     )
 
     if (err) {
-      this.logger.error("error removing domain", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error removing domain",
         domainId,
       })
       return Err(err)
@@ -239,8 +238,8 @@ export class DomainService {
     )
 
     if (err) {
-      this.logger.error("error setting domain verification status", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error setting domain verification status",
         workspaceId,
         name,
       })

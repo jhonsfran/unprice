@@ -1,3 +1,4 @@
+import createOpenApiClient, { type Client as OpenApiClient } from "openapi-fetch"
 import { version } from "../package.json"
 import type { ApiError, ErrorResponse } from "./errors"
 import type { paths } from "./openapi"
@@ -22,28 +23,40 @@ export type UnpriceOptions = {
   disableTelemetry?: boolean
 
   /**
-   * Retry on network errors
+   * Retry on network and server errors.
    */
   retry?: {
     /**
-     * How many attempts should be made
-     * The maximum number of requests will be `attempts + 1`
-     * `0` means no retries
+     * How many attempts should be made.
+     * The maximum number of requests will be `attempts + 1`.
+     * `0` means no retries.
      *
-     * @default 5
+     * @default 2
      */
     attempts?: number
     /**
-     * Return how many milliseconds to wait until the next attempt is made
+     * Return how many milliseconds to wait until the next attempt is made.
      *
      * @default `(retryCount) => Math.round(Math.exp(retryCount) * 10)),`
      */
     backoff?: (retryCount: number) => number
   }
   /**
-   * Customize the `fetch` cache behaviour
+   * Customize the `fetch` cache behaviour.
    */
   cache?: RequestCache
+
+  /**
+   * Custom fetch implementation for non-standard runtimes or tests.
+   */
+  fetch?: (input: Request) => Promise<Response>
+
+  /**
+   * Log retry attempts with `console.debug`.
+   *
+   * @default false
+   */
+  debug?: boolean
 
   /**
    * The version of the SDK instantiating this client.
@@ -55,32 +68,89 @@ export type UnpriceOptions = {
   wrapperSdkVersion?: string
 
   /**
-   * Additional headers to send with the request
+   * Additional headers to send with the request.
    */
   headers?: Record<string, string>
 }
 
-type LegacyPostRequest = Record<string, unknown>
-type LegacyPostResponse = Record<string, unknown>
+type JsonContent<TResponse> = TResponse extends {
+  content: {
+    "application/json": infer TContent
+  }
+}
+  ? TContent
+  : never
 
-type ApiRequest = {
-  path: string[]
-} & (
+type JsonRequestBody<TOperation> = TOperation extends {
+  requestBody: {
+    content: {
+      "application/json": infer TBody
+    }
+  }
+}
+  ? TBody
+  : never
+
+type JsonResponse<TOperation, TStatus extends number> = TOperation extends {
+  responses: infer TResponses
+}
+  ? TStatus extends keyof TResponses
+    ? JsonContent<TResponses[TStatus]>
+    : never
+  : never
+
+type PostBody<TPath extends keyof paths> = paths[TPath] extends { post: infer TOperation }
+  ? JsonRequestBody<TOperation>
+  : never
+
+type PostResponse<TPath extends keyof paths, TStatus extends number = 200> = paths[TPath] extends {
+  post: infer TOperation
+}
+  ? JsonResponse<TOperation, TStatus>
+  : never
+
+type GetResponse<TPath extends keyof paths, TStatus extends number = 200> = paths[TPath] extends {
+  get: infer TOperation
+}
+  ? JsonResponse<TOperation, TStatus>
+  : never
+
+type GetQuery<TPath extends keyof paths> = paths[TPath] extends {
+  get: {
+    parameters: {
+      query: infer TQuery
+    }
+  }
+}
+  ? TQuery
+  : never
+
+type GetPath<TPath extends keyof paths> = paths[TPath] extends {
+  get: {
+    parameters: {
+      path: infer TPathParams
+    }
+  }
+}
+  ? TPathParams
+  : never
+
+type OpenApiResponse<TResult> = Promise<
   | {
-      method: "GET"
-      body?: never
-      query?: Record<string, string | number | boolean | null>
+      data: TResult
+      error?: never
+      response: Response
     }
   | {
-      method: "POST"
-      body?: unknown
-      query?: never
+      data?: never
+      error: unknown
+      response: Response
     }
-)
+>
 
-type Result<R> =
+export type ApiResult<TResult> =
   | {
-      result: R
+      result: TResult
       error?: never
     }
   | {
@@ -88,12 +158,55 @@ type Result<R> =
       error: ApiError
     }
 
+export type Result<TResult> = ApiResult<TResult>
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
+const isApiError = (value: unknown): value is ApiError => {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    typeof value.code === "string" &&
+    typeof value.message === "string" &&
+    typeof value.docs === "string" &&
+    typeof value.requestId === "string"
+  )
+}
+
+const isErrorResponse = (value: unknown): value is ErrorResponse => {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return isApiError(value.error)
+}
+
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (typeof error === "string") {
+    return error
+  }
+
+  return "No response"
+}
+
 export class Unprice {
   private readonly baseUrl: string
   private readonly token: string
   private readonly cache?: RequestCache
+  private readonly debug: boolean
   private readonly telemetry?: Telemetry | null
-  private readonly headers?: Record<string, string>
+  private readonly headers: Record<string, string>
+  private readonly fetchImpl: (input: Request) => Promise<Response>
+  private readonly openapi: OpenApiClient<paths>
   public readonly retry: {
     attempts: number
     backoff: (retryCount: number) => number
@@ -102,6 +215,9 @@ export class Unprice {
   constructor(opts: UnpriceOptions) {
     this.baseUrl = opts.baseUrl ?? "https://api.unprice.dev"
     this.token = opts.token
+    this.debug = opts.debug ?? false
+    this.fetchImpl = opts.fetch ?? ((input) => fetch(input))
+
     if (!opts.disableTelemetry) {
       this.telemetry = getTelemetry(opts)
     }
@@ -109,7 +225,7 @@ export class Unprice {
     this.headers = opts.headers ?? {}
     this.cache = opts.cache ?? "default"
     /**
-     * Even though typescript should prevent this, some people still pass undefined or empty strings
+     * Even though TypeScript should prevent this, some people still pass undefined or empty strings.
      */
     if (!this.token) {
       throw new Error(
@@ -121,11 +237,17 @@ export class Unprice {
       attempts: opts.retry?.attempts ?? 2,
       backoff: opts.retry?.backoff ?? ((n) => Math.round(Math.exp(n) * 10)),
     }
+
+    this.openapi = createOpenApiClient<paths>({
+      baseUrl: this.baseUrl,
+      cache: this.cache,
+      fetch: (request) => this.fetchWithRetry(request),
+      headers: this.getHeaders(),
+    })
   }
 
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
       Authorization: `Bearer ${this.token}`,
       "unprice-request-source": `sdk@${version}`,
     }
@@ -141,336 +263,344 @@ export class Unprice {
     return { ...headers, ...this.headers }
   }
 
-  private async fetch<TResult>(req: ApiRequest): Promise<Result<TResult>> {
-    let res: Response | null = null
-    let err: Error | null = null
-    for (let i = 0; i <= this.retry.attempts; i++) {
-      const url = new URL(`${this.baseUrl}/${req.path.join("/")}`)
+  private async fetchWithRetry(request: Request): Promise<Response> {
+    let response: Response | null = null
+    let err: unknown = null
 
-      const optionsRequest = {
-        method: req.method,
-        headers: this.getHeaders(),
-        cache: this.cache,
-      } as RequestInit
+    for (let attempt = 0; attempt <= this.retry.attempts; attempt++) {
+      try {
+        response = await this.fetchImpl(request.clone())
+        err = null
+      } catch (error) {
+        response = null
+        err = error
+      }
 
-      if (req.query) {
-        for (const [k, v] of Object.entries(req.query)) {
-          if (typeof v === "undefined" || v === null) {
-            continue
-          }
-          url.searchParams.set(k, v.toString())
+      if (response && response.status < 500) {
+        return response
+      }
+
+      if (attempt === this.retry.attempts) {
+        break
+      }
+
+      const backoff = this.retry.backoff(attempt)
+
+      if (this.debug) {
+        const requestId = response?.headers.get("unprice-request-id") ?? "N/A"
+        console.debug(
+          `attempt ${attempt + 1} of ${this.retry.attempts + 1} to reach ${
+            request.url
+          } failed, retrying in ${backoff} ms: status=${response?.status} | ${requestId}`
+        )
+      }
+
+      await sleep(backoff)
+    }
+
+    if (response) {
+      return response
+    }
+
+    throw err instanceof Error ? err : new Error(getErrorMessage(err))
+  }
+
+  private toFetchError(error: unknown): ApiError {
+    return {
+      code: "FETCH_ERROR",
+      message: getErrorMessage(error),
+      docs: "https://developer.mozilla.org/en-US/docs/Web/API/fetch",
+      requestId: "N/A",
+    }
+  }
+
+  private toApiError(error: unknown, response: Response): ApiError {
+    if (isErrorResponse(error)) {
+      return error.error
+    }
+
+    if (isApiError(error)) {
+      return error
+    }
+
+    const requestId = response.headers.get("unprice-request-id") ?? "N/A"
+    const statusText = response.statusText ? ` ${response.statusText}` : ""
+
+    return {
+      code: "FETCH_ERROR",
+      message: `Unexpected API response: ${response.status}${statusText}`,
+      docs: "https://docs.unprice.dev/api-reference/errors",
+      requestId,
+    }
+  }
+
+  private async toResult<TResult>(request: OpenApiResponse<TResult>): Promise<ApiResult<TResult>> {
+    try {
+      const response = await request
+
+      if ("error" in response) {
+        return {
+          error: this.toApiError(response.error, response.response),
         }
       }
 
-      if (req.body) {
-        optionsRequest.body = JSON.stringify(req.body)
+      return {
+        result: response.data as TResult,
       }
-
-      res = await fetch(url, optionsRequest).catch((e: Error) => {
-        err = e
-        return null // set `res` to `null`
-      })
-
-      // 200-299 -> success
-      if (res && res.status >= 200 && res.status <= 299) {
-        return { result: (await res.json()) as TResult }
+    } catch (error) {
+      return {
+        error: this.toFetchError(error),
       }
-
-      // 400-499 -> client error, retries are futile
-      if (res && res.status >= 400 && res.status <= 499) {
-        return (await res.json()) as ErrorResponse
-      }
-
-      const backoff = this.retry.backoff(i)
-
-      console.debug(
-        `attempt ${i + 1} of ${
-          this.retry.attempts + 1
-        } to reach ${url} failed, retrying in ${backoff} ms: status=${
-          res?.status
-        } | ${res?.headers.get("unprice-request-id")}`
-      )
-
-      await new Promise((r) => setTimeout(r, backoff))
     }
+  }
 
-    if (res) {
-      return (await res.json()) as ErrorResponse
-    }
-
-    const lastErr = err as Error | null
-    const message =
-      lastErr instanceof Error ? lastErr.message : lastErr != null ? String(lastErr) : "No response"
+  public get access() {
     return {
-      error: {
-        code: "FETCH_ERROR",
-        message,
-        docs: "https://developer.mozilla.org/en-US/docs/Web/API/fetch",
-        requestId: "N/A",
+      update: (
+        req: PostBody<"/v1/access/update">
+      ): Promise<ApiResult<PostResponse<"/v1/access/update">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/access/update", {
+            body: req,
+          })
+        )
       },
     }
   }
 
   public get customers() {
     return {
-      getEntitlements: async (
-        req: paths["/v1/customer/getEntitlements"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/getEntitlements"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "getEntitlements"],
-          method: "POST",
-          body: req,
-        })
+      signUp: (
+        req: PostBody<"/v1/customers/sign-up">
+      ): Promise<ApiResult<PostResponse<"/v1/customers/sign-up">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/customers/sign-up", {
+            body: req,
+          })
+        )
+      },
+    }
+  }
+
+  public get entitlements() {
+    return {
+      get: (
+        req: PostBody<"/v1/entitlements/get">
+      ): Promise<ApiResult<PostResponse<"/v1/entitlements/get">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/entitlements/get", {
+            body: req,
+          })
+        )
       },
 
-      getSubscription: async (
-        req: paths["/v1/customer/getSubscription"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/getSubscription"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "getSubscription"],
-          method: "POST",
-          body: req,
-        })
-      },
-
-      getPlanVersion: async (
-        planVersionId: string
-      ): Promise<
-        Result<
-          paths["/v1/plans/getPlanVersion/{planVersionId}"]["get"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "plans", "getPlanVersion", planVersionId],
-          method: "GET",
-        })
-      },
-
-      verify: async (
-        req: paths["/v1/customer/verify"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/verify"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "verify"],
-          method: "POST",
-          body: req,
-        })
-      },
-
-      getPaymentMethods: async (
-        req: paths["/v1/customer/getPaymentMethods"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/getPaymentMethods"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "getPaymentMethods"],
-          method: "POST",
-          body: req,
-        })
-      },
-
-      createPaymentMethod: async (
-        req: paths["/v1/customer/createPaymentMethod"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/createPaymentMethod"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "createPaymentMethod"],
-          method: "POST",
-          body: req,
-        })
-      },
-
-      signUp: async (
-        req: paths["/v1/customer/signUp"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/signUp"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "signUp"],
-          method: "POST",
-          body: req,
-        })
-      },
-
-      updateACL: async (
-        req: paths["/v1/customer/updateACL"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/customer/updateACL"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "customer", "updateACL"],
-          method: "POST",
-          body: req,
-        })
+      verify: (
+        req: PostBody<"/v1/entitlements/verify">
+      ): Promise<ApiResult<PostResponse<"/v1/entitlements/verify">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/entitlements/verify", {
+            body: req,
+          })
+        )
       },
     }
   }
 
   public get events() {
     return {
-      ingest: async (
-        req: paths["/v1/events/ingest"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/events/ingest"]["post"]["responses"]["202"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "events", "ingest"],
-          method: "POST",
-          body: req,
-        })
+      ingest: (
+        req: PostBody<"/v1/events/ingest">
+      ): Promise<ApiResult<PostResponse<"/v1/events/ingest", 202>>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/events/ingest", {
+            body: req,
+          })
+        )
       },
 
-      ingestSync: async (
-        req: paths["/v1/events/ingest/sync"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/events/ingest/sync"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "events", "ingest", "sync"],
-          method: "POST",
-          body: req,
-        })
+      ingestSync: (
+        req: PostBody<"/v1/events/ingest/sync">
+      ): Promise<ApiResult<PostResponse<"/v1/events/ingest/sync">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/events/ingest/sync", {
+            body: req,
+          })
+        )
       },
     }
   }
 
-  public get projects() {
+  public get features() {
     return {
-      getFeatures: async (): Promise<
-        Result<
-          paths["/v1/project/getFeatures"]["get"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "project", "getFeatures"],
-          method: "GET",
-        })
+      list: (): Promise<ApiResult<GetResponse<"/v1/features/list">>> => {
+        return this.toResult(this.openapi.GET("/v1/features/list"))
       },
     }
   }
 
   public get lakehouse() {
     return {
-      getFilePlan: async (
-        req: paths["/v1/lakehouse/file-plan"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/lakehouse/file-plan"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "lakehouse", "file-plan"],
-          method: "POST",
-          body: req,
-        })
+      getFilePlan: (
+        req: PostBody<"/v1/lakehouse/file-plan">
+      ): Promise<ApiResult<PostResponse<"/v1/lakehouse/file-plan">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/lakehouse/file-plan", {
+            body: req,
+          })
+        )
       },
     }
   }
 
   public get plans() {
+    const getVersion = (
+      req: GetPath<"/v1/plans/versions/get/{planVersionId}">
+    ): Promise<ApiResult<GetResponse<"/v1/plans/versions/get/{planVersionId}">>> => {
+      return this.toResult(
+        this.openapi.GET("/v1/plans/versions/get/{planVersionId}", {
+          params: {
+            path: req,
+          },
+        })
+      )
+    }
+
     return {
-      listPlanVersions: async (
-        req: paths["/v1/plans/listPlanVersions"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/plans/listPlanVersions"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "plans", "listPlanVersions"],
-          method: "POST",
-          body: req,
-        })
+      listVersions: (
+        req: PostBody<"/v1/plans/versions/list">
+      ): Promise<ApiResult<PostResponse<"/v1/plans/versions/list">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/plans/versions/list", {
+            body: req,
+          })
+        )
       },
-      getPlanVersion: async (
-        planVersionId: string
-      ): Promise<
-        Result<
-          paths["/v1/plans/getPlanVersion/{planVersionId}"]["get"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "plans", "getPlanVersion", planVersionId],
-          method: "GET",
-        })
+      getVersion,
+    }
+  }
+
+  public get payments() {
+    return {
+      methods: {
+        list: (
+          req: PostBody<"/v1/payments/methods/list">
+        ): Promise<ApiResult<PostResponse<"/v1/payments/methods/list">>> => {
+          return this.toResult(
+            this.openapi.POST("/v1/payments/methods/list", {
+              body: req,
+            })
+          )
+        },
+
+        create: (
+          req: PostBody<"/v1/payments/methods/create">
+        ): Promise<ApiResult<PostResponse<"/v1/payments/methods/create">>> => {
+          return this.toResult(
+            this.openapi.POST("/v1/payments/methods/create", {
+              body: req,
+            })
+          )
+        },
+      },
+    }
+  }
+
+  public get subscriptions() {
+    return {
+      get: (
+        req: PostBody<"/v1/subscriptions/get">
+      ): Promise<ApiResult<PostResponse<"/v1/subscriptions/get">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/subscriptions/get", {
+            body: req,
+          })
+        )
       },
     }
   }
 
   public get analytics() {
     return {
-      getUsage: async (
-        req: paths["/v1/analytics/usage"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/analytics/usage"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "analytics", "usage"],
-          method: "POST",
-          body: req,
-        })
+      usage: {
+        get: (
+          req: PostBody<"/v1/analytics/usage/get">
+        ): Promise<ApiResult<PostResponse<"/v1/analytics/usage/get">>> => {
+          return this.toResult(
+            this.openapi.POST("/v1/analytics/usage/get", {
+              body: req,
+            })
+          )
+        },
       },
+    }
+  }
 
-      // NOTE: Temporary loose typing while OpenAPI path mapping is being migrated.
-      getRealtimeUsage: async (req: LegacyPostRequest): Promise<Result<LegacyPostResponse>> => {
-        return await this.fetch({
-          path: ["v1", "analytics", "realtime"],
-          method: "POST",
-          body: req,
-        })
+  public get realtime() {
+    return {
+      createTicket: (
+        req: PostBody<"/v1/realtime/tickets/create">
+      ): Promise<ApiResult<PostResponse<"/v1/realtime/tickets/create">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/realtime/tickets/create", {
+            body: req,
+          })
+        )
       },
+    }
+  }
 
-      // NOTE: Temporary loose typing while OpenAPI path mapping is being migrated.
-      getVerifications: async (req: LegacyPostRequest): Promise<Result<LegacyPostResponse>> => {
-        return await this.fetch({
-          path: ["v1", "analytics", "verifications"],
-          method: "POST",
-          body: req,
-        })
+  public get wallet() {
+    return {
+      balance: (
+        req: GetQuery<"/v1/wallet/balance">
+      ): Promise<ApiResult<GetResponse<"/v1/wallet/balance">>> => {
+        return this.toResult(
+          this.openapi.GET("/v1/wallet/balance", {
+            params: {
+              query: req,
+            },
+          })
+        )
       },
+      creditBalance: (
+        req: GetPath<"/v1/wallet/credits/{walletId}/balance"> &
+          GetQuery<"/v1/wallet/credits/{walletId}/balance">
+      ): Promise<ApiResult<GetResponse<"/v1/wallet/credits/{walletId}/balance">>> => {
+        const { walletId, ...query } = req
 
-      /**
-       * Issue a short-lived ticket for customer realtime websocket access.
-       * Requires a session token (e.g. Auth.js session) when used for dashboard realtime.
-       */
-      getRealtimeTicket: async (
-        req: paths["/v1/analytics/realtime/ticket"]["post"]["requestBody"]["content"]["application/json"]
-      ): Promise<
-        Result<
-          paths["/v1/analytics/realtime/ticket"]["post"]["responses"]["200"]["content"]["application/json"]
-        >
-      > => {
-        return await this.fetch({
-          path: ["v1", "analytics", "realtime", "ticket"],
-          method: "POST",
-          body: req,
-        })
+        return this.toResult(
+          this.openapi.GET("/v1/wallet/credits/{walletId}/balance", {
+            params: {
+              path: { walletId },
+              query,
+            },
+          })
+        )
+      },
+      get: (req: GetQuery<"/v1/wallet">): Promise<ApiResult<GetResponse<"/v1/wallet">>> => {
+        return this.toResult(
+          this.openapi.GET("/v1/wallet", {
+            params: {
+              query: req,
+            },
+          })
+        )
+      },
+    }
+  }
+
+  public get invoices() {
+    return {
+      get: (
+        req: GetPath<"/v1/invoices/{invoiceId}">
+      ): Promise<ApiResult<GetResponse<"/v1/invoices/{invoiceId}">>> => {
+        return this.toResult(
+          this.openapi.GET("/v1/invoices/{invoiceId}", {
+            params: {
+              path: req,
+            },
+          })
+        )
       },
     }
   }

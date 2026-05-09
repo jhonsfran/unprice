@@ -1,5 +1,6 @@
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "../hono/env"
+import { flushApiDrainWithDiagnostics } from "../observability"
 
 export function obs(): MiddlewareHandler<HonoEnv> {
   return async (c, next) => {
@@ -45,10 +46,13 @@ export function obs(): MiddlewareHandler<HonoEnv> {
             await Promise.race([
               Promise.all([
                 metrics.flush().catch((err: Error) => {
-                  logger.emit("error", "Failed to flush metrics", { error: err.message })
+                  console.error("error: failed to flush metrics", { error: err.message })
                 }),
                 logger.flush().catch((err: Error) => {
-                  logger.emit("error", "Failed to flush logger", { error: err.message })
+                  console.error("Failed to flush API logs to Axiom", {
+                    context: "request_logger",
+                    error: err.message,
+                  })
                 }),
               ]),
               new Promise<void>((resolve) => setTimeout(() => resolve(), FLUSH_TIMEOUT_MS)),
@@ -57,6 +61,7 @@ export function obs(): MiddlewareHandler<HonoEnv> {
             logger.emit("error", "Error during background flush", {
               error: error instanceof Error ? error.message : String(error ?? "unknown"),
             })
+            await flushApiDrainWithDiagnostics("background_flush_error")
           }
         })()
       )

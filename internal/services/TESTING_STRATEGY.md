@@ -50,7 +50,7 @@ State machines (Subscriptions) and Usage Reporting can suffer from race conditio
 
 ### 3. Centralized Test Factories
 Mock data drift is a common source of false positives/negatives.
-- **Solution:** `createMockEntitlementState` and `createMockGrant` in `test-utils.ts` provide a single source of truth for mock data structures, ensuring all tests use valid, up-to-date schemas.
+- **Solution:** `createMockGrant` in `test-utils.ts` provides a single source of truth for grant mock data, ensuring tests use valid, up-to-date schemas.
 
 ### 4. Dry-Run Billing Capability
 Generating invoices is a destructive operation (state changes).

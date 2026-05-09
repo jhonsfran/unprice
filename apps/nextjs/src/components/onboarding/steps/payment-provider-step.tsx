@@ -2,7 +2,7 @@ import { GalleryVerticalEnd } from "lucide-react"
 
 import { type StepComponentProps, useOnboarding } from "@onboardjs/react"
 import { cn } from "@unprice/ui/utils"
-import { StripePaymentConfigForm } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/_components/stripe-payment-config-form"
+import { PaymentProviderConfigForm } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/settings/payment/_components/payment-provider-config-form"
 
 export function PaymentProviderStep({
   className,
@@ -23,12 +23,12 @@ export function PaymentProviderStep({
             Connect a Payment Provider
           </h1>
           <div className="animate-content text-center text-sm delay-0!">
-            A payment provider is required to publish plans. Use the sandbox now, then connect your
-            real Stripe account when you are ready to go live.
+            A payment provider is required to publish plans. Start with sandbox now, then configure
+            your production provider when you are ready to go live.
           </div>
         </div>
         <div className="animate-content delay-200!">
-          <StripePaymentConfigForm
+          <PaymentProviderConfigForm
             isOnboarding={true}
             paymentProvider="sandbox"
             skip={true}

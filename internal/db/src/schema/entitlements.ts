@@ -1,175 +1,106 @@
-import { not, relations } from "drizzle-orm"
-import {
-  bigint,
-  boolean,
-  foreignKey,
-  index,
-  integer,
-  json,
-  primaryKey,
-  unique,
-  uniqueIndex,
-  varchar,
-} from "drizzle-orm/pg-core"
+import { relations } from "drizzle-orm"
+import { bigint, foreignKey, index, integer, json, primaryKey, unique } from "drizzle-orm/pg-core"
 
-import { pgTableProject } from "../utils/_table"
-import { projectID } from "../utils/sql"
-
-import { sql } from "drizzle-orm"
 import type { z } from "zod"
+import { pgTableProject } from "../utils/_table"
 import { cuid, timestamps } from "../utils/fields"
+import { projectID } from "../utils/sql"
 import type {
-  entitlementGrantsSnapshotSchema,
-  entitlementMetadataSchema,
+  customerEntitlementMetadataSchema,
   grantsMetadataSchema,
 } from "../validators/entitlements"
-import type { meterConfigSchema, resetConfigSchema } from "../validators/shared"
 import { customers } from "./customers"
-import {
-  entitlementMergingPolicyEnum,
-  grantTypeEnum,
-  overageStrategyEnum,
-  subjectTypeEnum,
-  typeFeatureEnum,
-} from "./enums"
+import { grantTypeEnum, overageStrategyEnum } from "./enums"
 import { planVersionFeatures } from "./planVersionFeatures"
 import { projects } from "./projects"
+import { subscriptionItems, subscriptionPhases, subscriptions } from "./subscriptions"
 
-// entitlements are a snapshot of the grants grouped by subject and feature
-// if there are more than one grant for the same subject and feature, the entitlements will be merged using the merging policy
-// but still having them inside grants as json for billing attribution
-// the uniqueness is based on the customerId, featureSlug
-// IMPORTANT: All grants for the same featureSlug MUST have the same:
-//   - featureType
-//   - resetConfig
-//   - meterConfig for usage features
-//   - unitOfMeasure
-// Only limit and hardLimit can differ (merged by priority)
-// The effective values are stored directly in the entitlement for performance
-export const entitlements = pgTableProject(
-  "entitlements",
+export const customerEntitlements = pgTableProject(
+  "customer_entitlements",
   {
     ...projectID,
     ...timestamps,
     customerId: cuid("customer_id").notNull(),
-    featureSlug: varchar("feature_slug", { length: 64 }).notNull(),
-
-    // Effective configuration (must be same across all grants)
-    // if grants don't share the same config then we take the highest priority grant config
-    featureType: typeFeatureEnum("feature_type").notNull(),
-    // unit of measurement for the entitlement (computed winner from grants)
-    unitOfMeasure: varchar("unit_of_measure", { length: 24 }).notNull().default("units"),
-    // null here mean the entitlement never resets
-    resetConfig: json("reset_config").$type<
-      (z.infer<typeof resetConfigSchema> & { resetAnchor: number }) | null
-    >(),
-    // canonical meter definition for usage features
-    meterConfig: json("meter_config").$type<z.infer<typeof meterConfigSchema> | null>(),
-    // A flag to mark which version is currently active
-    isCurrent: boolean("is_current").notNull().default(true),
-
-    // merging policy for the entitlement - sum, max, min, replace, etc.
-    // sum limits, max limit, min limit, replace limit and units
-    // this normally is decided by the feature type
-    mergingPolicy: entitlementMergingPolicyEnum("merging_policy").notNull().default("sum"),
-
-    // Computed from active grants
-    limit: integer("limit"), // null = unlimited
-
-    // effective at is the date when the entitlement was created
+    featurePlanVersionId: cuid("feature_plan_version_id").notNull(),
+    subscriptionId: cuid("subscription_id"),
+    subscriptionPhaseId: cuid("subscription_phase_id"),
+    subscriptionItemId: cuid("subscription_item_id"),
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
-    // expires at is the date when the entitlement will expire
     expiresAt: bigint("expires_at", { mode: "number" }),
-
-    // grants snapshot is the snapshot of the grants that were applied to the customer at the time of the entitlement
-    // grants are consumed by priority, so the higher priority will be consumed first
-    // usage records are associated to the entitlement and the grant id for billing attribution
-    grants: json("grants")
-      .$type<z.infer<typeof entitlementGrantsSnapshotSchema>[]>()
-      .notNull()
-      .default([]),
-
-    // metadata for the entitlement
-    metadata: json("metadata").$type<z.infer<typeof entitlementMetadataSchema>>(),
+    overageStrategy: overageStrategyEnum("overage_strategy").notNull().default("none"),
+    metadata: json("metadata").$type<z.infer<typeof customerEntitlementMetadataSchema>>(),
   },
   (table) => ({
     primary: primaryKey({
       columns: [table.id, table.projectId],
-      name: "pk_entitlement",
+      name: "customer_entitlements_pkey",
     }),
-    // customer can only have ONE "current" entitlement per feature,
-    // but unlimited historical (isCurrent = false) entitlements!
-    uniqueCurrentSubjectFeature: uniqueIndex("unique_current_subject_feature")
-      .on(table.projectId, table.customerId, table.featureSlug)
-      .where(sql`${table.isCurrent} = true`),
-    // Index for the Edge Cache Worker to quickly grab the 30-day window
-    idxEdgeCache: index("idx_entitlements_edge_cache").on(
+    idxCustomerWindow: index("idx_customer_entitlements_customer_window").on(
       table.projectId,
       table.customerId,
-      table.featureSlug,
-      table.effectiveAt
+      table.effectiveAt,
+      table.expiresAt
     ),
-    projectfk: foreignKey({
-      columns: [table.projectId],
-      foreignColumns: [projects.id],
-      name: "project_id_fkey",
-    }),
+    idxPhaseSource: index("idx_customer_entitlements_phase_source").on(
+      table.projectId,
+      table.customerId,
+      table.subscriptionPhaseId,
+      table.featurePlanVersionId,
+      table.effectiveAt,
+      table.expiresAt
+    ),
+    uniqueSourceWindow: unique("unique_customer_entitlement_source_window")
+      .on(
+        table.projectId,
+        table.customerId,
+        table.featurePlanVersionId,
+        table.subscriptionId,
+        table.subscriptionPhaseId,
+        table.subscriptionItemId,
+        table.effectiveAt,
+        table.expiresAt
+      )
+      .nullsNotDistinct(),
     customerfk: foreignKey({
       columns: [table.customerId, table.projectId],
       foreignColumns: [customers.id, customers.projectId],
-      name: "customer_id_fkey",
+      name: "customer_entitlements_customer_id_fkey",
+    }).onDelete("cascade"),
+    featurePlanVersionfk: foreignKey({
+      columns: [table.featurePlanVersionId, table.projectId],
+      foreignColumns: [planVersionFeatures.id, planVersionFeatures.projectId],
+      name: "customer_entitlements_feature_plan_version_id_fkey",
+    }).onDelete("no action"),
+    subscriptionfk: foreignKey({
+      columns: [table.subscriptionId, table.projectId],
+      foreignColumns: [subscriptions.id, subscriptions.projectId],
+      name: "customer_entitlements_subscription_id_fkey",
+    }).onDelete("cascade"),
+    subscriptionPhasefk: foreignKey({
+      columns: [table.subscriptionPhaseId, table.projectId],
+      foreignColumns: [subscriptionPhases.id, subscriptionPhases.projectId],
+      name: "customer_entitlements_subscription_phase_id_fkey",
+    }).onDelete("cascade"),
+    subscriptionItemfk: foreignKey({
+      columns: [table.subscriptionItemId, table.projectId],
+      foreignColumns: [subscriptionItems.id, subscriptionItems.projectId],
+      name: "customer_entitlements_subscription_item_id_fkey",
     }).onDelete("cascade"),
   })
 )
 
-// Grants are the limits and overrides that are applied to a feature plan version
-// for a given subject (workspace, project, plan, plan_version, customer)
-// append only
+// Grants are append-only allowance chunks under one customer entitlement.
 export const grants = pgTableProject(
   "grants",
   {
     ...projectID,
     ...timestamps,
-    name: varchar("name", { length: 64 }).notNull(),
-    // featurePlanVersionId is the id of the feature plan version that the grant is applied to
-    featurePlanVersionId: cuid("feature_plan_version_id").notNull(),
-    // what is the source of the grant?
+    customerEntitlementId: cuid("customer_entitlement_id").notNull(),
     type: grantTypeEnum("type").notNull(),
-    subjectType: subjectTypeEnum("subject_type").notNull(),
-    // id of the subject to which the grant is applied
-    // when project is the subject, the subjectId is the projectId
-    // all customers with that subjectId will have the grant applied
-    subjectId: cuid("subject_id").notNull(),
-    // priority defines the merge order higher priority will be consumed first, comes from the type of the grant
-    // subscription priority 10
-    // trial priority 80
-    // promotion priority 90
-    // manual priority 100
     priority: integer("priority").notNull().default(0),
+    allowanceUnits: integer("allowance_units"),
     effectiveAt: bigint("effective_at", { mode: "number" }).notNull(),
     expiresAt: bigint("expires_at", { mode: "number" }),
-    // whether the grant is auto renewed or not
-    // grants with auto renew true must have a subscription item id
-    autoRenew: boolean("auto_renew").notNull().default(true),
-    // deleted flag is used to delete a grant
-    // when deleting a grant, we set the deleted flag to true and create a new one
-    // this is useful to keep append only history of the grants and reproduce any entitlement state at any time
-    deleted: boolean("deleted").notNull().default(false),
-    // when the grant is deleted, we store the date when it was deleted
-    // grants can be changed mid cycle and we need to keep the history of the changes
-    deletedAt: bigint("deleted_at", { mode: "number" }),
-
-    // ****************** overrides from plan version feature ******************
-    // we have it here so we can override them if needed
-    // limit is the limit of the feature that the customer is entitled to
-    limit: integer("limit"),
-    overageStrategy: overageStrategyEnum("overage_strategy").notNull().default("none"),
-    // amount of units the grant gives to the subject
-    units: integer("units"),
-    // anchor is the anchor of the grant to calculate the cycle boundaries
-    anchor: integer("anchor").notNull().default(0),
-    // ****************** end overrides from plan version feature ******************
-
     metadata: json("metadata").$type<z.infer<typeof grantsMetadataSchema>>(),
   },
   (table) => ({
@@ -177,41 +108,27 @@ export const grants = pgTableProject(
       columns: [table.id, table.projectId],
       name: "pk_grant",
     }),
-    // Composite index for finding active grants by subject+feature
-    idxSubjectFeatureEffective: index("idx_grants_subject_feature_effective")
-      .on(
-        table.projectId,
-        table.subjectId,
-        table.subjectType,
-        table.featurePlanVersionId,
-        table.effectiveAt,
-        table.expiresAt
-      )
-      .where(not(table.deleted)),
-    // unique index for the grant
+    idxCustomerEntitlementEffective: index("idx_grants_customer_entitlement_effective").on(
+      table.projectId,
+      table.customerEntitlementId,
+      table.effectiveAt,
+      table.expiresAt,
+      table.priority
+    ),
     uniqueGrant: unique("unique_grant")
       .on(
         table.projectId,
-        table.subjectId,
-        table.subjectType,
-        table.featurePlanVersionId,
+        table.customerEntitlementId,
         table.type,
         table.effectiveAt,
         table.expiresAt
       )
       .nullsNotDistinct(),
-    // Index for grant invalidation queries by featurePlanVersion
-    idxFeatureVersionEffective: index("idx_grants_feature_version_effective").on(
-      table.projectId,
-      table.featurePlanVersionId,
-      table.effectiveAt,
-      table.expiresAt
-    ),
-    featurePlanVersionfk: foreignKey({
-      columns: [table.featurePlanVersionId, table.projectId],
-      foreignColumns: [planVersionFeatures.id, planVersionFeatures.projectId],
-      name: "feature_plan_version_id_fkey",
-    }).onDelete("no action"),
+    customerEntitlementfk: foreignKey({
+      columns: [table.customerEntitlementId, table.projectId],
+      foreignColumns: [customerEntitlements.id, customerEntitlements.projectId],
+      name: "grants_customer_entitlement_id_fkey",
+    }).onDelete("cascade"),
     projectfk: foreignKey({
       columns: [table.projectId],
       foreignColumns: [projects.id],
@@ -220,24 +137,41 @@ export const grants = pgTableProject(
   })
 )
 
-export const entitlementsRelations = relations(entitlements, ({ one }) => ({
-  customer: one(customers, {
-    fields: [entitlements.customerId, entitlements.projectId],
-    references: [customers.id, customers.projectId],
-  }),
-  project: one(projects, {
-    fields: [entitlements.projectId],
-    references: [projects.id],
-  }),
-}))
-
 export const grantsRelations = relations(grants, ({ one }) => ({
   project: one(projects, {
     fields: [grants.projectId],
     references: [projects.id],
   }),
+  customerEntitlement: one(customerEntitlements, {
+    fields: [grants.customerEntitlementId, grants.projectId],
+    references: [customerEntitlements.id, customerEntitlements.projectId],
+  }),
+}))
+
+export const customerEntitlementsRelations = relations(customerEntitlements, ({ many, one }) => ({
+  project: one(projects, {
+    fields: [customerEntitlements.projectId],
+    references: [projects.id],
+  }),
+  customer: one(customers, {
+    fields: [customerEntitlements.customerId, customerEntitlements.projectId],
+    references: [customers.id, customers.projectId],
+  }),
   featurePlanVersion: one(planVersionFeatures, {
-    fields: [grants.featurePlanVersionId, grants.projectId],
+    fields: [customerEntitlements.featurePlanVersionId, customerEntitlements.projectId],
     references: [planVersionFeatures.id, planVersionFeatures.projectId],
   }),
+  subscription: one(subscriptions, {
+    fields: [customerEntitlements.subscriptionId, customerEntitlements.projectId],
+    references: [subscriptions.id, subscriptions.projectId],
+  }),
+  subscriptionPhase: one(subscriptionPhases, {
+    fields: [customerEntitlements.subscriptionPhaseId, customerEntitlements.projectId],
+    references: [subscriptionPhases.id, subscriptionPhases.projectId],
+  }),
+  subscriptionItem: one(subscriptionItems, {
+    fields: [customerEntitlements.subscriptionItemId, customerEntitlements.projectId],
+    references: [subscriptionItems.id, subscriptionItems.projectId],
+  }),
+  grants: many(grants),
 }))

@@ -93,9 +93,14 @@ export const AUTH_ROUTES = {
   NEW_PASSWORD: "/auth/new-password",
 }
 
-// stripe configuration endpoints
-export const STRIPE_SIGNUP_CALLBACK_PREFIX_URL = `${API_DOMAIN}v1/paymentProvider/stripe/signUp`
-export const STRIPE_SETUP_CALLBACK_PREFIX_URL = `${API_DOMAIN}v1/paymentProvider/stripe/setup`
+// payment provider callback endpoints
+export const PAYMENT_PROVIDER_CALLBACK_PREFIX_URL = `${API_DOMAIN}v1/paymentProvider`
+
+export const getPaymentProviderSignUpCallbackPrefixUrl = (provider: string) =>
+  `${PAYMENT_PROVIDER_CALLBACK_PREFIX_URL}/${provider}/signUp`
+
+export const getPaymentProviderSetupCallbackPrefixUrl = (provider: string) =>
+  `${PAYMENT_PROVIDER_CALLBACK_PREFIX_URL}/${provider}/setup`
 
 export const RESTRICTED_SUBDOMAINS = new Set(["www", "app", "api", "sites", "builderai", "unprice"])
 

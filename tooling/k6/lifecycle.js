@@ -3,6 +3,7 @@ import { check, fail, sleep } from "k6"
 import exec from "k6/execution"
 import http from "k6/http"
 import { Counter } from "k6/metrics"
+import { Unprice } from "../../packages/api/src/index"
 
 const customersCreated = new Counter("customers_created")
 const usageEventsSent = new Counter("usage_events_sent")
@@ -38,35 +39,6 @@ export const options = {
   },
 }
 
-function authHeaders() {
-  return {
-    Authorization: `Bearer ${API_TOKEN}`,
-    "Content-Type": "application/json",
-  }
-}
-
-function post(path, payload, tags = {}) {
-  return http.post(`${BASE_URL}${path}`, JSON.stringify(payload), {
-    headers: authHeaders(),
-    tags,
-  })
-}
-
-function _get(path, tags = {}) {
-  return http.get(`${BASE_URL}${path}`, {
-    headers: authHeaders(),
-    tags,
-  })
-}
-
-function parseJson(response) {
-  try {
-    return response.json()
-  } catch (_err) {
-    return null
-  }
-}
-
 function hardFail(message) {
   if (exec?.test?.abort) {
     exec.test.abort(message)
@@ -74,63 +46,140 @@ function hardFail(message) {
   fail(message)
 }
 
-function unwrapResponse(response) {
-  const body = parseJson(response)
-  if (response.status >= 200 && response.status <= 299) {
-    return { result: body, __response: response }
+class K6Headers {
+  constructor(init = {}) {
+    this.values = new Map()
+
+    if (init instanceof K6Headers) {
+      for (const [key, value] of init.entries()) {
+        this.set(key, value)
+      }
+      return
+    }
+
+    if (typeof init.entries === "function") {
+      for (const [key, value] of init.entries()) {
+        this.set(key, value)
+      }
+      return
+    }
+
+    for (const [key, value] of Object.entries(init)) {
+      this.set(key, Array.isArray(value) ? value.join(",") : value)
+    }
   }
-  const errorBody = body?.error ? body.error : body
-  return {
-    error: {
-      code: errorBody?.code || `HTTP_${response.status}`,
-      message: errorBody?.message || response.body,
-      requestId: errorBody?.requestId || response.headers["unprice-request-id"] || "N/A",
-    },
-    __response: response,
+
+  append(key, value) {
+    const normalizedKey = key.toLowerCase()
+    const currentValue = this.values.get(normalizedKey)
+    this.values.set(normalizedKey, currentValue ? `${currentValue}, ${value}` : String(value))
+  }
+
+  delete(key) {
+    this.values.delete(key.toLowerCase())
+  }
+
+  entries() {
+    return this.values.entries()
+  }
+
+  get(key) {
+    return this.values.get(key.toLowerCase()) ?? null
+  }
+
+  set(key, value) {
+    this.values.set(key.toLowerCase(), String(value))
   }
 }
 
-function createSdkClient() {
-  return {
-    plans: {
-      listPlanVersions(req) {
-        const response = post("/v1/plans/listPlanVersions", req, { name: "plan-list" })
-        return unwrapResponse(response)
-      },
-    },
-    customers: {
-      signUp(req) {
-        const response = post("/v1/customer/signUp", req, { name: "customer-signup" })
-        return unwrapResponse(response)
-      },
-      getEntitlements(req) {
-        const response = post("/v1/customer/getEntitlements", req, {
-          name: "customer-get-entitlements",
-        })
-        return unwrapResponse(response)
-      },
-      getSubscription(req) {
-        const response = post("/v1/customer/getSubscription", req, {
-          name: "customer-get-subscription",
-        })
-        return unwrapResponse(response)
-      },
-      verify(req) {
-        const response = post("/v1/customer/verify", req, { name: "customer-verify" })
-        return unwrapResponse(response)
-      },
-    },
-    events: {
-      ingest(req) {
-        const response = post("/v1/events/ingest", req, { name: "events-ingest" })
-        return unwrapResponse(response)
-      },
-      ingestSync(req) {
-        const response = post("/v1/events/ingest/sync", req, { name: "events-ingest-sync" })
-        return unwrapResponse(response)
-      },
-    },
+class K6Request {
+  constructor(input, init = {}) {
+    const source = typeof input === "string" ? null : input
+    this.url = typeof input === "string" ? input : input.url
+    this.method = init.method ?? source?.method ?? "GET"
+    this.headers = new K6Headers(init.headers ?? source?.headers ?? {})
+    this.body = init.body ?? source?.body
   }
+
+  clone() {
+    return new K6Request(this.url, {
+      body: this.body,
+      headers: this.headers,
+      method: this.method,
+    })
+  }
+}
+
+class K6Response {
+  constructor(response) {
+    this.body = response.body
+    this.headers = new K6Headers(response.headers)
+    this.ok = response.status >= 200 && response.status <= 299
+    this.status = response.status
+    this.statusText = response.status_text ?? String(response.status)
+  }
+
+  async json() {
+    return JSON.parse(this.body)
+  }
+
+  async text() {
+    return this.body ?? ""
+  }
+}
+
+if (!globalThis.Headers) {
+  globalThis.Headers = K6Headers
+}
+
+if (!globalThis.Request) {
+  globalThis.Request = K6Request
+}
+
+if (!globalThis.Response) {
+  globalThis.Response = K6Response
+}
+
+if (!globalThis.FormData) {
+  globalThis.FormData = class FormData {}
+}
+
+function k6Fetch(request) {
+  const requestPath = request.url.startsWith(BASE_URL)
+    ? request.url.slice(BASE_URL.length).split("?")[0] || "/"
+    : request.url
+  const response = http.request(request.method, request.url, request.body, {
+    headers: Object.fromEntries(request.headers.entries()),
+    tags: {
+      name: `${request.method} ${requestPath}`,
+    },
+  })
+
+  return Promise.resolve(new K6Response(response))
+}
+
+function describeSdkError(result) {
+  if (!result?.error) {
+    return "unknown SDK error"
+  }
+
+  return `${result.error.code}: ${result.error.message} (${result.error.requestId})`
+}
+
+function isRateLimited(result) {
+  return result?.error?.code === "RATE_LIMITED"
+}
+
+function createSdkClient() {
+  return new Unprice({
+    baseUrl: BASE_URL,
+    disableTelemetry: true,
+    fetch: k6Fetch,
+    retry: {
+      attempts: 0,
+    },
+    token: API_TOKEN,
+  })
 }
 
 function randomFrom(list) {
@@ -147,20 +196,6 @@ function uuidV4() {
     const v = c === "x" ? r : (r & 0x3) | 0x8
     return v.toString(16)
   })
-}
-
-function classifyIngestion429(response) {
-  const body = parseJson(response)
-
-  if (body?.error?.code === "RATE_LIMITED" || body?.code === "RATE_LIMITED") {
-    return "rate_limited"
-  }
-
-  if (body?.deniedReason === "LIMIT_EXCEEDED" || body?.rejectionReason === "LIMIT_EXCEEDED") {
-    return "usage_limited"
-  }
-
-  return "unknown"
 }
 
 function classifySyncIngestionRejection(result) {
@@ -203,32 +238,30 @@ function rotateFeatureSlugs(featureSlugs) {
   return ordered
 }
 
-function _resolvePlanSlug(sdk) {
+async function _resolvePlanSlug(sdk) {
   if (PLAN_SLUG) {
     return PLAN_SLUG
   }
 
-  const listPlanVersionsResult = sdk.plans.listPlanVersions({
+  const listVersionsResult = await sdk.plans.listVersions({
     onlyPublished: true,
     onlyLatest: true,
     billingInterval: BILLING_INTERVAL,
     currency: CURRENCY,
   })
 
-  const isOk = check(listPlanVersionsResult.__response, {
-    "listPlanVersions status is 200": (r) => r.status === 200,
+  const isOk = check(listVersionsResult, {
+    "plans.listVersions succeeds": (res) => !res.error && Array.isArray(res.result?.planVersions),
   })
 
-  if (!isOk || listPlanVersionsResult.error) {
-    fail(
-      `listPlanVersions failed: status=${listPlanVersionsResult.__response.status} body=${listPlanVersionsResult.__response.body}`
-    )
+  if (!isOk || listVersionsResult.error) {
+    fail(`plans.listVersions failed: ${describeSdkError(listVersionsResult)}`)
   }
 
-  const planVersions = listPlanVersionsResult.result?.planVersions || []
+  const planVersions = listVersionsResult.result?.planVersions || []
 
   if (planVersions.length === 0) {
-    fail("listPlanVersions returned no plan versions")
+    fail("listVersions returned no plan versions")
   }
 
   const noPaymentPlans = planVersions.filter((pv) => pv?.paymentMethodRequired === false)
@@ -244,52 +277,48 @@ function _resolvePlanSlug(sdk) {
   const selectedPlanSlug = selected?.plan?.slug
 
   if (!selectedPlanSlug) {
-    fail("Could not resolve planSlug from listPlanVersions response")
+    fail("Could not resolve planSlug from listVersions response")
   }
 
   return selectedPlanSlug
 }
 
-function resolveEntitlementFeatureSlugs(sdk, customerId) {
+async function resolveEntitlementFeatureSlugs(sdk, customerId) {
   const deadlineAt = Date.now() + PROVISIONING_TIMEOUT_MS
 
   // let's give some time to update its state
   sleep(3)
 
   while (Date.now() < deadlineAt) {
-    const subscriptionResult = sdk.customers.getSubscription({ customerId })
+    const subscriptionResult = await sdk.subscriptions.get({ customerId })
 
-    if (subscriptionResult.__response.status === 429) {
+    if (isRateLimited(subscriptionResult)) {
       sleep(PROVISIONING_POLL_MS / 1000)
       continue
     }
 
-    const subscriptionOk = check(subscriptionResult.__response, {
-      "getSubscription status is 200": (r) => r.status === 200,
+    const subscriptionOk = check(subscriptionResult, {
+      "subscriptions.get succeeds": (res) => !res.error && !!res.result,
     })
 
     if (!subscriptionOk || subscriptionResult.error) {
-      hardFail(
-        `getSubscription failed: status=${subscriptionResult.__response.status} body=${subscriptionResult.__response.body}`
-      )
+      hardFail(`subscriptions.get failed: ${describeSdkError(subscriptionResult)}`)
     }
 
     const hasActivePhase = Boolean(subscriptionResult.result?.activePhase)
-    const entitlementsResult = sdk.customers.getEntitlements({ customerId })
+    const entitlementsResult = await sdk.entitlements.get({ customerId })
 
-    if (entitlementsResult.__response.status === 429) {
+    if (isRateLimited(entitlementsResult)) {
       sleep(PROVISIONING_POLL_MS / 1000)
       continue
     }
 
-    const isOk = check(entitlementsResult.__response, {
-      "getEntitlements status is 200": (r) => r.status === 200,
+    const isOk = check(entitlementsResult, {
+      "entitlements.get succeeds": (res) => !res.error && Array.isArray(res.result),
     })
 
     if (!isOk || entitlementsResult.error) {
-      hardFail(
-        `getEntitlements failed: status=${entitlementsResult.__response.status} body=${entitlementsResult.__response.body}`
-      )
+      hardFail(`entitlements.get failed: ${describeSdkError(entitlementsResult)}`)
     }
 
     const slugs = Array.isArray(entitlementsResult.result)
@@ -310,27 +339,28 @@ function resolveEntitlementFeatureSlugs(sdk, customerId) {
   )
 }
 
-function resolveUsageTargets(sdk, customerId, featureSlugs) {
+async function resolveUsageTargets(sdk, customerId, featureSlugs) {
   const targets = []
 
   for (const featureSlug of featureSlugs) {
     let verifyResult = null
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const result = sdk.customers.verify({ customerId, featureSlug })
+      const result = await sdk.entitlements.verify({ customerId, featureSlug })
 
-      if (result.__response.status === 429) {
+      if (isRateLimited(result)) {
         sleep(PROVISIONING_POLL_MS / 1000)
         continue
       }
 
-      const verifyOk = check(result.__response, {
-        "verify status is 200 during usage target resolution": (r) => r.status === 200,
+      const verifyOk = check(result, {
+        "entitlements.verify succeeds during usage target resolution": (res) =>
+          !res.error && !!res.result,
       })
 
       if (!verifyOk || result.error) {
         hardFail(
-          `verify failed while resolving usage targets: status=${result.__response.status} body=${result.__response.body}`
+          `entitlements.verify failed while resolving usage targets: ${describeSdkError(result)}`
         )
       }
 
@@ -360,12 +390,13 @@ function resolveUsageTargets(sdk, customerId, featureSlugs) {
   return targets
 }
 
-function provisionCustomerForVu(sdk) {
+async function provisionCustomerForVu(sdk) {
   // const resolvedPlanSlug = resolvePlanSlug(sdk)
 
   for (let attempt = 0; attempt < SIGNUP_RETRY_MAX; attempt += 1) {
     const suffix = `${Date.now()}-${__VU}-${attempt}`
     const signUpPayload = {
+      creditLinePolicy: "uncapped",
       name: `k6-customer-${suffix}`,
       email: `k6+${suffix}@example.com`,
       successUrl: SUCCESS_URL,
@@ -373,9 +404,9 @@ function provisionCustomerForVu(sdk) {
       planSlug: PLAN_SLUG,
     }
 
-    const signUpResult = sdk.customers.signUp(signUpPayload)
+    const signUpResult = await sdk.customers.signUp(signUpPayload)
 
-    if (signUpResult.__response.status === 429) {
+    if (isRateLimited(signUpResult)) {
       const backoffMs = SIGNUP_RETRY_BACKOFF_MS * (attempt + 1)
 
       if (attempt < SIGNUP_RETRY_MAX - 1) {
@@ -384,22 +415,20 @@ function provisionCustomerForVu(sdk) {
       }
 
       hardFail(
-        `signUp rate-limited after ${SIGNUP_RETRY_MAX} attempts. Last body=${signUpResult.__response.body}`
+        `signUp rate-limited after ${SIGNUP_RETRY_MAX} attempts. Last error=${describeSdkError(signUpResult)}`
       )
     }
 
-    const signUpOk = check(signUpResult.__response, {
-      "signUp status is 200": (r) => r.status === 200,
+    const signUpOk = check(signUpResult, {
+      "customers.signUp succeeds": (res) => !res.error && !!res.result,
     })
 
     if (!signUpOk || signUpResult.error) {
-      hardFail(
-        `signUp failed: status=${signUpResult.__response.status} body=${signUpResult.__response.body}`
-      )
+      hardFail(`customers.signUp failed: ${describeSdkError(signUpResult)}`)
     }
 
     if (signUpResult.result?.success === false) {
-      hardFail(`signUp returned success=false: body=${signUpResult.__response.body}`)
+      hardFail("customers.signUp returned success=false")
     }
 
     if (signUpResult.result?.url && signUpResult.result.url !== SUCCESS_URL) {
@@ -411,11 +440,13 @@ function provisionCustomerForVu(sdk) {
     const customerId = signUpResult.result?.customerId
 
     if (!customerId) {
-      hardFail(`signUp response missing customerId: body=${signUpResult.__response.body}`)
+      hardFail(
+        `customers.signUp response missing customerId: ${JSON.stringify(signUpResult.result)}`
+      )
     }
 
-    const entitlementFeatureSlugs = resolveEntitlementFeatureSlugs(sdk, customerId)
-    const usageTargets = resolveUsageTargets(sdk, customerId, entitlementFeatureSlugs)
+    const entitlementFeatureSlugs = await resolveEntitlementFeatureSlugs(sdk, customerId)
+    const usageTargets = await resolveUsageTargets(sdk, customerId, entitlementFeatureSlugs)
 
     customersCreated.add(1)
 
@@ -429,14 +460,14 @@ function provisionCustomerForVu(sdk) {
   hardFail(`signUp failed after ${SIGNUP_RETRY_MAX} attempts`)
 }
 
-export default function () {
+export default async function () {
   if (!API_TOKEN) {
     fail("Missing UNPRICE_TOKEN env var")
   }
 
   const sdk = createSdkClient()
   if (!vuCustomerId || vuEntitlementFeatureSlugs.length === 0 || vuUsageTargets.length === 0) {
-    const provisioned = provisionCustomerForVu(sdk)
+    const provisioned = await provisionCustomerForVu(sdk)
     vuCustomerId = provisioned.customerId
     vuEntitlementFeatureSlugs = provisioned.entitlementFeatureSlugs
     vuUsageTargets = provisioned.usageTargets
@@ -461,7 +492,7 @@ export default function () {
         )
       }
 
-      const usageResult = sdk.events.ingestSync({
+      const usageResult = await sdk.events.ingestSync({
         customerId,
         featureSlug: usageTarget.featureSlug,
         eventSlug: usageTarget.eventSlug,
@@ -469,55 +500,43 @@ export default function () {
         idempotencyKey: uuidV4(),
       })
 
-      const usageOk = check(usageResult.__response, {
-        "ingestSync status is 200 or 429": (r) => r.status === 200 || r.status === 429,
-      })
-
-      if (!usageOk) {
-        hardFail(
-          `ingestSync failed: status=${usageResult.__response.status} body=${usageResult.__response.body}`
-        )
-      }
-
-      if (usageResult.__response.status === 200) {
-        if (usageResult.result?.allowed) {
-          if (candidateIndex > 0) {
-            usageEventsRerouted.add(1)
-          }
-          eventHandled = true
-          break
-        }
-
-        const rejectedType = classifySyncIngestionRejection(usageResult)
-
-        if (rejectedType === "usage_limited") {
-          usageEventsLimitExceeded.add(1)
-
-          if (candidateIndex < featureCandidates.length - 1) {
-            continue
-          }
-
-          eventHandled = true
-          break
-        }
-
-        hardFail(
-          `ingestSync rejected unexpectedly: status=${usageResult.__response.status} body=${usageResult.__response.body}`
-        )
-      }
-
-      const status429Type = classifyIngestion429(usageResult.__response)
-
-      if (status429Type === "rate_limited") {
+      if (isRateLimited(usageResult)) {
         usageEventsRateLimited.add(1)
         sleep(PROVISIONING_POLL_MS / 1000)
         eventHandled = true
         break
       }
 
-      hardFail(
-        `ingestSync returned unknown 429 shape: status=${usageResult.__response.status} body=${usageResult.__response.body}`
-      )
+      const usageOk = check(usageResult, {
+        "events.ingestSync succeeds": (res) => !res.error && !!res.result,
+      })
+
+      if (!usageOk || usageResult.error) {
+        hardFail(`events.ingestSync failed: ${describeSdkError(usageResult)}`)
+      }
+
+      if (usageResult.result?.allowed) {
+        if (candidateIndex > 0) {
+          usageEventsRerouted.add(1)
+        }
+        eventHandled = true
+        break
+      }
+
+      const rejectedType = classifySyncIngestionRejection(usageResult)
+
+      if (rejectedType === "usage_limited") {
+        usageEventsLimitExceeded.add(1)
+
+        if (candidateIndex < featureCandidates.length - 1) {
+          continue
+        }
+
+        eventHandled = true
+        break
+      }
+
+      hardFail(`events.ingestSync rejected unexpectedly: ${JSON.stringify(usageResult.result)}`)
     }
 
     if (!eventHandled) {
@@ -528,13 +547,13 @@ export default function () {
   }
 
   for (let i = 0; i < VERIFY_EVENTS_PER_CUSTOMER; i += 1) {
-    const verifyResult = sdk.customers.verify({
+    const verifyResult = await sdk.entitlements.verify({
       customerId,
       featureSlug: randomFrom(verifyFeatureSlugs),
     })
 
-    check(verifyResult.__response, {
-      "verify status is 200": (r) => r.status === 200,
+    check(verifyResult, {
+      "entitlements.verify succeeds": (res) => !res.error && !!res.result,
     })
 
     verifyEventsSent.add(1)

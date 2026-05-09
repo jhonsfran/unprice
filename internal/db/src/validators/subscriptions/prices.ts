@@ -1,11 +1,11 @@
-import * as currencies from "@dinero.js/currencies"
 import type { Dinero } from "dinero.js"
 import { add, dinero, isZero, multiply, toDecimal, trimScale } from "dinero.js"
+import * as currencies from "dinero.js/currencies"
 import { z } from "zod"
 
 import type { Result } from "@unprice/error"
 import { Err, Ok, type SchemaError } from "@unprice/error"
-import { calculatePercentage, formatMoney } from "../../utils"
+import { calculatePercentage, formatMoney } from "@unprice/money"
 import type { PlanVersionExtended } from "../planVersions"
 import { type Currency, typeFeatureSchema } from "../shared"
 import { UnPriceCalculationError } from "./../errors"
@@ -29,7 +29,52 @@ const calculatePriceSchema = z.object({
   hasUsage: z.boolean().optional(),
 })
 
-const unitsSchema = z.coerce.number().int().min(0)
+const unitsSchema = z.coerce.number().min(0)
+
+function toDineroMultiplier(quantity: number): number | { amount: number; scale: number } {
+  if (Number.isInteger(quantity)) {
+    return quantity
+  }
+
+  const normalized = normalizeDecimalString(quantity)
+  const [whole, fraction = ""] = normalized.split(".")
+  const trimmedFraction = fraction.replace(/0+$/, "")
+
+  if (trimmedFraction.length === 0) {
+    return Number(whole)
+  }
+
+  const amount = Number(`${whole}${trimmedFraction}`.replace(/^0+(?=\d)/, ""))
+
+  return {
+    amount,
+    scale: trimmedFraction.length,
+  }
+}
+
+function normalizeDecimalString(quantity: number): string {
+  const raw = Number(quantity.toPrecision(15)).toString()
+
+  if (!raw.includes("e") && !raw.includes("E")) {
+    return raw
+  }
+
+  const [coefficient = "0", exponentText = "0"] = raw.split(/[eE]/)
+  const exponent = Number(exponentText)
+  const [whole = "0", fraction = ""] = coefficient.split(".")
+  const digits = `${whole}${fraction}`.replace(/^0+(?=\d)/, "")
+  const decimalIndex = whole.length + exponent
+
+  if (decimalIndex <= 0) {
+    return `0.${"0".repeat(Math.abs(decimalIndex))}${digits}`
+  }
+
+  if (decimalIndex >= digits.length) {
+    return `${digits}${"0".repeat(decimalIndex - digits.length)}`
+  }
+
+  return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`
+}
 
 export interface CalculatedPrice {
   unitPrice: z.infer<typeof calculatePriceSchema>
@@ -57,7 +102,9 @@ export const calculateFlatPricePlan = ({
   prorate?: number
 }): Result<z.infer<typeof calculatePriceSchema>, UnPriceCalculationError> => {
   const defaultDineroCurrency = currencies[planVersion.currency]
-  let total = dinero({ amount: 0, currency: defaultDineroCurrency })
+  // `Dinero<number>` (default scale=string) so `add` accepts CalculatedPrice
+  // dineros that aren't narrowed to "USD"|"EUR".
+  let total: Dinero<number> = dinero({ amount: 0, currency: defaultDineroCurrency })
   let hasUsage = false
 
   // here we are getting the price of flat features because that determines the plan price
@@ -109,7 +156,7 @@ export const calculateTotalPricePlan = ({
   currency: Currency
 }): Result<z.infer<typeof calculatePriceSchema>, UnPriceCalculationError> => {
   const defaultDineroCurrency = currencies[currency]
-  let total = dinero({ amount: 0, currency: defaultDineroCurrency })
+  let total: Dinero<number> = dinero({ amount: 0, currency: defaultDineroCurrency })
 
   for (const feature of features) {
     // flat features are always quantity 1
@@ -338,9 +385,11 @@ export const calculateTierPrice = ({
   // tier mode is volume, then all units are priced based on the final tier reached
   if (tierMode === "volume") {
     // find the tier that the quantity falls into
-    const tier = tiers.find(
-      (tier) => quantity >= tier.firstUnit && (tier.lastUnit === null || quantity <= tier.lastUnit)
-    )! // we are sure the quantity falls into a tier
+    const tier = findTierForQuantity(tiers, quantity)
+
+    if (!tier) {
+      return Err(new UnPriceCalculationError({ message: "No pricing tier found for quantity" }))
+    }
 
     // flat price is prorated; per-unit charges are NOT prorated
     const flatNonProrated = trimScale(dinero(tier.flatPrice.dinero))
@@ -350,7 +399,7 @@ export const calculateTierPrice = ({
         : flatNonProrated
 
     const unitPriceNoProration = trimScale(dinero(tier.unitPrice.dinero))
-    const subtotalPerUnit = trimScale(multiply(unitPriceNoProration, quantity))
+    const subtotalPerUnit = trimScale(multiply(unitPriceNoProration, toDineroMultiplier(quantity)))
 
     // subtotal: per-unit x quantity + flat (non-prorated)
     const dineroSubtotalPrice = isZero(flatNonProrated)
@@ -398,9 +447,11 @@ export const calculateTierPrice = ({
     let remaining = quantity // make a copy, so we don't mutate the original
 
     // find the tier that the quantity falls into
-    const tier = tiers.find(
-      (tier) => quantity >= tier.firstUnit && (tier.lastUnit === null || quantity <= tier.lastUnit)
-    )! // we are sure the quantity falls into a tier
+    const tier = findTierForQuantity(tiers, quantity)
+
+    if (!tier) {
+      return Err(new UnPriceCalculationError({ message: "No pricing tier found for quantity" }))
+    }
 
     // we know the currency is the same for all tiers
     const defaultCurrency = tier.unitPrice.dinero.currency.code as keyof typeof currencies
@@ -430,7 +481,7 @@ export const calculateTierPrice = ({
 
       const unitPrice = dinero(tier.unitPrice.dinero)
       // multiply the unit price by the quantity calculation
-      total = add(total, multiply(unitPrice, quantityCalculation))
+      total = add(total, multiply(unitPrice, toDineroMultiplier(quantityCalculation)))
     }
 
     // add the flat price of the tier the quantity falls into if it exists
@@ -473,6 +524,21 @@ export const calculateTierPrice = ({
   }
 
   return Err(new UnPriceCalculationError({ message: "unknown tier mode" }))
+}
+
+function findTierForQuantity(
+  tiers: z.infer<typeof tiersSchema>[],
+  quantity: number
+): z.infer<typeof tiersSchema> | undefined {
+  const firstTier = tiers[0]
+
+  if (firstTier && quantity > 0 && quantity < firstTier.firstUnit) {
+    return firstTier
+  }
+
+  return tiers.find(
+    (tier) => quantity >= tier.firstUnit && (tier.lastUnit === null || quantity <= tier.lastUnit)
+  )
 }
 
 export const calculatePackagePrice = ({
@@ -525,11 +591,12 @@ export const calculatePackagePrice = ({
 
   const packageCount = Math.ceil(quantity / units)
   const dineroPrice = dinero(price.dinero)
-  const dineroSubtotalPrice = trimScale(multiply(dineroPrice, packageCount))
+  const packageMultiplier = toDineroMultiplier(packageCount)
+  const dineroSubtotalPrice = trimScale(multiply(dineroPrice, packageMultiplier))
   const total =
     prorate !== undefined
-      ? trimScale(calculatePercentage(multiply(dineroPrice, packageCount), prorate))
-      : trimScale(multiply(dineroPrice, packageCount))
+      ? trimScale(calculatePercentage(multiply(dineroPrice, packageMultiplier), prorate))
+      : trimScale(multiply(dineroPrice, packageMultiplier))
 
   const unit =
     prorate !== undefined
@@ -576,11 +643,12 @@ export const calculateUnitPrice = ({
   isFlat?: boolean
 }): Result<CalculatedPrice, UnPriceCalculationError> => {
   const dineroPrice = trimScale(dinero(price.dinero))
-  const dineroSubtotalPrice = trimScale(multiply(dineroPrice, quantity))
+  const quantityMultiplier = toDineroMultiplier(quantity)
+  const dineroSubtotalPrice = trimScale(multiply(dineroPrice, quantityMultiplier))
   const total =
     prorate !== undefined
-      ? trimScale(calculatePercentage(multiply(dineroPrice, quantity), prorate))
-      : trimScale(multiply(dineroPrice, quantity))
+      ? trimScale(calculatePercentage(multiply(dineroPrice, quantityMultiplier), prorate))
+      : trimScale(multiply(dineroPrice, quantityMultiplier))
 
   const unit =
     prorate !== undefined ? trimScale(calculatePercentage(dineroPrice, prorate)) : dineroPrice

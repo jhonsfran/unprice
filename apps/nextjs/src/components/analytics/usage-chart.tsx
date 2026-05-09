@@ -45,7 +45,7 @@ export const UsageChartSkeleton = ({
         </EmptyPlaceholder.Description>
         {!error && (
           <EmptyPlaceholder.Action>
-            <CodeApiSheet defaultMethod="reportUsage">
+            <CodeApiSheet defaultMethod="ingestUsage">
               <Button size={"sm"} disabled={isLoading}>
                 <Code className="mr-2 h-4 w-4" />
                 Start usage
@@ -99,7 +99,7 @@ export function UsageChart() {
 
   const chartData = usage.usage.map((v) => ({
     feature: v.feature_slug,
-    usage: v.value_after,
+    usage: v.usage,
   }))
 
   const maxHeight = 400

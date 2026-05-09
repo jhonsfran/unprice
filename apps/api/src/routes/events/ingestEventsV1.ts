@@ -13,13 +13,12 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
-import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["ingestion"]
+const tags = ["events"]
 const SAFE_QUEUE_SEND_RETRIES = 3
 const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
 
@@ -40,10 +39,13 @@ export const rawEventSchema = z.object({
     description: "The event slug",
     example: "tokens_used",
   }),
-  customerId: z.string().openapi({
-    description: "The unprice customer id",
-    example: "cus_123",
-  }),
+  customerId: z
+    .string()
+    .openapi({
+      description: "The unprice customer id",
+      example: "cus_123",
+    })
+    .optional(),
   timestamp: z
     .number()
     .openapi({
@@ -101,13 +103,39 @@ export const registerIngestEventsV1 = (app: App) =>
 
     // 1. auth for the request
     const key = await keyAuth(c)
+    const customerId = resolveRequestCustomerId({
+      explicitCustomerId: body.customerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
+
+    if (!customerId) {
+      throw new UnpriceApiError({
+        code: "BAD_REQUEST",
+        message: "customerId is required when the API key has no default customer binding",
+      })
+    }
+
     // 2. resolve the proper project Id if this is called from main project
-    const projectId = await resolveContextProjectId(c, key.projectId, body.customerId)
+    const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     try {
       // 3. events that are too old doesn't get pass, also events that are too far from the future.
       validateEventTimestamp(timestamp, receivedAt)
     } catch (error) {
+      if (error instanceof EventTimestampTooOldError) {
+        logEventTooOldRejection({
+          customerId,
+          eventId: body.id,
+          eventSlug: body.eventSlug,
+          eventTimestamp: timestamp,
+          idempotencyKey: body.idempotencyKey,
+          logger,
+          now: receivedAt,
+          projectId,
+          maxEventAgeMs: error.context?.maxEventAgeMs,
+        })
+      }
+
       if (
         error instanceof EventTimestampTooFarInFutureError ||
         error instanceof EventTimestampTooOldError
@@ -133,6 +161,7 @@ export const registerIngestEventsV1 = (app: App) =>
         ...body,
         idempotencyKey,
       },
+      customerId,
       projectId,
       receivedAt,
       requestId,
@@ -142,13 +171,11 @@ export const registerIngestEventsV1 = (app: App) =>
     // shard by customerid to make sure the messages of specific customer go to the same queue
     // this way we can group them together in background
     const selectedQueue =
-      availableQueues[selectQueueShardIndex(body.customerId, availableQueues.length)]!
+      availableQueues[selectQueueShardIndex(customerId, availableQueues.length)]!
 
     // This sends the message in background to avoid blocking the requests
-    // There is a retry mechanism and last option we send to analytics events
     c.executionCtx.waitUntil(
       safeSendToQueue({
-        env: c.env,
         queue: selectedQueue,
         message,
         logger,
@@ -176,50 +203,39 @@ export function selectQueueShardIndex(customerId: string, shardCount = 2): numbe
 }
 
 export async function safeSendToQueue(params: {
-  env: Env
   logger: AppLogger
   queue: Queue<IngestionQueueMessage>
   message: IngestionQueueMessage
 }): Promise<void> {
-  const { env, logger, queue, message } = params
+  const { logger, queue, message } = params
 
-  try {
-    for (let attempt = 0; attempt < SAFE_QUEUE_SEND_RETRIES; attempt++) {
-      try {
-        await queue.send(message)
-        return
-      } catch (error) {
-        logger.warn("raw ingestion queue send failed", {
-          attempt: attempt + 1,
-          maxAttempts: SAFE_QUEUE_SEND_RETRIES,
-          projectId: message.projectId,
-          customerId: message.customerId,
-          eventId: message.id,
-          idempotencyKey: message.idempotencyKey,
-          error,
-        })
+  for (let attempt = 0; attempt < SAFE_QUEUE_SEND_RETRIES; attempt++) {
+    try {
+      await queue.send(message)
+      return
+    } catch (error) {
+      logger.warn("raw ingestion queue send failed", {
+        attempt: attempt + 1,
+        maxAttempts: SAFE_QUEUE_SEND_RETRIES,
+        projectId: message.projectId,
+        customerId: message.customerId,
+        eventId: message.id,
+        idempotencyKey: message.idempotencyKey,
+        error,
+      })
 
-        if (attempt < SAFE_QUEUE_SEND_RETRIES - 1) {
-          await sleep(SAFE_QUEUE_SEND_BASE_DELAY_MS * 2 ** attempt)
-        }
+      if (attempt < SAFE_QUEUE_SEND_RETRIES - 1) {
+        await sleep(SAFE_QUEUE_SEND_BASE_DELAY_MS * 2 ** attempt)
       }
     }
-
-    // write the message to analytics as fallback
-    env.FALLBACK_ANALYTICS.writeDataPoint({
-      indexes: [message.projectId, message.customerId, message.slug],
-      doubles: [message.timestamp, message.receivedAt],
-      blobs: [message.id, message.requestId, JSON.stringify(message)],
-    })
-  } catch (error) {
-    logger.error("raw ingestion background send failed permanently", {
-      projectId: message.projectId,
-      customerId: message.customerId,
-      eventId: message.id,
-      idempotencyKey: message.idempotencyKey,
-      error,
-    })
   }
+
+  logger.error("raw ingestion background send failed permanently", {
+    projectId: message.projectId,
+    customerId: message.customerId,
+    eventId: message.id,
+    idempotencyKey: message.idempotencyKey,
+  })
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -232,18 +248,19 @@ export function generateEventId(now = Date.now()): string {
 
 export function buildIngestionQueueMessage(params: {
   body: IngestEventsRequest
+  customerId: string
   projectId: string
   receivedAt: number
   requestId: string
   timestamp: number
 }): IngestionQueueMessage {
-  const { body, projectId, receivedAt, requestId, timestamp } = params
+  const { body, customerId, projectId, receivedAt, requestId, timestamp } = params
   const eventId = body.id ?? generateEventId(receivedAt)
 
   return ingestionQueueMessageSchema.parse({
     version: 1,
     projectId,
-    customerId: body.customerId,
+    customerId,
     requestId,
     receivedAt,
     idempotencyKey: body.idempotencyKey,
@@ -251,6 +268,38 @@ export function buildIngestionQueueMessage(params: {
     slug: body.eventSlug,
     timestamp,
     properties: body.properties,
+  })
+}
+
+export function resolveRequestCustomerId(params: {
+  explicitCustomerId?: string
+  defaultCustomerId?: string | null
+}): string | null {
+  return params.explicitCustomerId ?? params.defaultCustomerId ?? null
+}
+
+export function logEventTooOldRejection(params: {
+  customerId: string
+  eventId?: string | undefined
+  eventSlug: string
+  eventTimestamp: number
+  idempotencyKey: string
+  logger: Pick<AppLogger, "warn">
+  maxEventAgeMs?: number | undefined
+  now: number
+  projectId: string
+}): void {
+  params.logger.warn("raw ingestion event rejected as too old", {
+    projectId: params.projectId,
+    customerId: params.customerId,
+    eventId: params.eventId,
+    eventSlug: params.eventSlug,
+    idempotencyKey: params.idempotencyKey,
+    eventTimestamp: params.eventTimestamp,
+    now: params.now,
+    eventAgeMs: params.now - params.eventTimestamp,
+    maxEventAgeMs: params.maxEventAgeMs,
+    rejectionReason: "EVENT_TOO_OLD",
   })
 }
 

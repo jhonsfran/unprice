@@ -6,7 +6,10 @@ export const env = createEnv({
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
     APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
   },
-  server: {},
+  server: {
+    STRIPE_API_KEY: z.string().optional(),
+    STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
+  },
   runtimeEnv: process.env,
   skipValidation: !!process.env.SKIP_ENV_VALIDATION || process.env.npm_lifecycle_event === "lint",
   onValidationError: (issues) => {

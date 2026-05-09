@@ -1,5 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
-import { MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
+import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
 import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -43,6 +43,7 @@ const requestBody = {
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
+  defaultCustomerId: "cus_default_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
@@ -75,12 +76,9 @@ describe("ingestEventsV1 helpers", () => {
     expect(generateEventId(requestBody.timestamp)).toBe("evt_01ARYZ6S41TSV4RRFFQ69G5FAV")
   })
 
-  it("retries queue send and falls back to analytics engine", async () => {
+  it("retries queue send and logs an error when all attempts fail", async () => {
     const queue: Pick<Queue<IngestionQueueMessage>, "send"> = {
       send: vi.fn().mockRejectedValue(new Error("queue down")),
-    }
-    const analytics: Pick<AnalyticsEngineDataset, "writeDataPoint"> = {
-      writeDataPoint: vi.fn(),
     }
     const logger: Pick<AppLogger, "error" | "warn"> = {
       error: vi.fn(),
@@ -88,9 +86,6 @@ describe("ingestEventsV1 helpers", () => {
     }
 
     await safeSendToQueue({
-      env: {
-        FALLBACK_ANALYTICS: analytics,
-      },
       logger,
       queue: queue as Queue<IngestionQueueMessage>,
       message: {
@@ -108,8 +103,8 @@ describe("ingestEventsV1 helpers", () => {
     })
 
     expect(queue.send).toHaveBeenCalledTimes(3)
-    expect(analytics.writeDataPoint).toHaveBeenCalledTimes(1)
     expect(logger.warn).toHaveBeenCalledTimes(3)
+    expect(logger.error).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -211,12 +206,12 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx } = createTestApp()
+    const { app, env, executionCtx, logger } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
         ...requestBody,
-        timestamp: requestBody.timestamp - MAX_EVENT_AGE_MS - 1,
+        timestamp: requestBody.timestamp - INGESTION_MAX_EVENT_AGE_MS - 1,
       }),
       env,
       executionCtx
@@ -226,6 +221,15 @@ describe("ingestEventsV1 route", () => {
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         code: "BAD_REQUEST",
+      })
+    )
+    expect(logger.warn).toHaveBeenCalledWith(
+      "raw ingestion event rejected as too old",
+      expect.objectContaining({
+        projectId: "proj_123",
+        customerId: requestBody.customerId,
+        idempotencyKey: requestBody.idempotencyKey,
+        rejectionReason: "EVENT_TOO_OLD",
       })
     )
   })
@@ -280,11 +284,98 @@ describe("ingestEventsV1 route", () => {
       })
     )
   })
+
+  it("resolves customer id from the API key binding when omitted in the request", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: undefined,
+      }),
+      env,
+      executionCtx
+    )
+    await Promise.all(waitUntilPromises)
+
+    expect(response.status).toBe(202)
+
+    const selectedQueue =
+      selectQueueShardIndex(verifiedKey.defaultCustomerId) === 0
+        ? env.QUEUE_SHARD_0
+        : env.QUEUE_SHARD_1
+
+    expect(selectedQueue.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: verifiedKey.defaultCustomerId,
+      })
+    )
+  })
+
+  it("uses explicit customerId from body even when key has a different default", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: "cus_explicit_999",
+      }),
+      env,
+      executionCtx
+    )
+    await Promise.all(waitUntilPromises)
+
+    expect(response.status).toBe(202)
+
+    const selectedQueue =
+      selectQueueShardIndex("cus_explicit_999") === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
+
+    expect(selectedQueue.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerId: "cus_explicit_999",
+      })
+    )
+  })
+
+  it("returns 400 when customerId is omitted and the api key has no default customer", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+    authMocks.keyAuth.mockResolvedValueOnce({
+      ...verifiedKey,
+      defaultCustomerId: null,
+    })
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: undefined,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "BAD_REQUEST",
+        message: "customerId is required when the API key has no default customer binding",
+      })
+    )
+  })
 })
 
 function createTestApp() {
   const app = new OpenAPIHono<HonoEnv>()
   const waitUntilPromises: Promise<unknown>[] = []
+  const logger = createRouteLogger()
 
   app.use(timing())
 
@@ -300,8 +391,9 @@ function createTestApp() {
   app.use("*", async (c, next) => {
     c.set("requestId", "req_123")
     c.set("requestStartedAt", Date.now())
+    c.set("logger", logger as AppLogger)
     c.set("services", {
-      logger: createRouteLogger(),
+      logger,
     })
 
     await next()
@@ -318,9 +410,6 @@ function createTestApp() {
     QUEUE_SHARD_1: {
       send: vi.fn().mockResolvedValue(undefined),
     },
-    FALLBACK_ANALYTICS: {
-      writeDataPoint: vi.fn(),
-    },
   }
 
   const executionCtx = {
@@ -330,7 +419,7 @@ function createTestApp() {
     },
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, waitUntilPromises }
+  return { app, env, executionCtx, logger, waitUntilPromises }
 }
 
 function buildRequest(body: Record<string, unknown> = requestBody) {

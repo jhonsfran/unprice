@@ -11,14 +11,14 @@ import CopyToClipboard from "./copy-to-clipboard"
 // Sample code examples for different frameworks and methods
 export const codeExamples = {
   sdk: {
-    verifyFeature: `import { Unprice } from "@unprice/api"
+    verifyEntitlement: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
 // verify access to a feature
-const { result, error } = await unprice.customers.verify({
+const { result, error } = await unprice.entitlements.verify({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   featureSlug: "feature-1",
 })
@@ -32,7 +32,7 @@ if (!result.allowed) {
   console.error("Customer does not have access to feature")
 }
 `,
-    reportUsage: `import { Unprice } from "@unprice/api"
+    ingestUsage: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
@@ -82,14 +82,16 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.customers.getEntitlements("cus_1GTzSGrapiBW1QwCL3Fcn")
+} = await unprice.entitlements.get({
+  customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+})
 
 if (error) {
   console.error(error.message)
   return
 }
 `,
-    resetEntitlements: `import { Unprice } from "@unprice/api"
+    getWallet: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
@@ -98,7 +100,7 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.customers.resetEntitlements({
+} = await unprice.wallet.get({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
 })
 `,
@@ -111,7 +113,9 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.customers.getSubscription("cus_1GTzSGrapiBW1QwCL3Fcn")
+} = await unprice.subscriptions.get({
+  customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+})
 
 if (error) {
   console.error(error.message)
@@ -129,7 +133,7 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.analytics.getUsage({
+} = await unprice.analytics.usage.get({
   project_id: "project_1GTzSGrapiBW1QwCL3Fcn",
   customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",
   range: "30d",
@@ -146,7 +150,7 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.customers.getPaymentMethods({
+const { result, error } = await unprice.payments.methods.list({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   provider: "stripe",
 })
@@ -157,65 +161,65 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.customers.createPaymentMethod({
+const { result, error } = await unprice.payments.methods.create({
   paymentProvider: "stripe",
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   successUrl: "http://your-app.com/dashboard",
   cancelUrl: "http://your-app.com/failed",
 })
 `,
-    listPlanVersions: `import { Unprice } from "@unprice/api"
+    listVersions: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.plans.listPlanVersions({
+const { result, error } = await unprice.plans.listVersions({
   billingInterval: "month",
   currency: "USD",
 })
 `,
   },
   fetch: {
-    verifyFeature:
+    verifyEntitlement:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/verify" +
+      "${baseUrl}/v1/entitlements/verify" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n  }),\n})',
-    reportUsage:
+    ingestUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
       "${baseUrl}/v1/events/ingest/sync" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",\n    eventSlug: "feature-1",\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n    properties: {\n      usage: 30,\n    },\n  }),\n})',
     signUp:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/signUp" +
+      "${baseUrl}/v1/customers/sign-up" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    name: "John Doe",\n    email: "seb@unprice.dev",\n    planVersionId: "plan_version_1",\n    successUrl: "http://your-app.com/dashboard",\n    cancelUrl: "http://your-app.com/failed",\n  }),\n})',
     getEntitlements:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/cus_1GTzSGrapiBW1QwCL3Fcn/getEntitlements" +
-      '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
-    resetEntitlements:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/resetEntitlements" +
+      "${baseUrl}/v1/entitlements/get" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n  }),\n})',
+    getWallet:
+      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
+      "${baseUrl}/v1/wallet?customerId=cus_1GTzSGrapiBW1QwCL3Fcn" +
+      '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
     getSubscription:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/cus_1GTzSGrapiBW1QwCL3Fcn/getSubscription" +
-      '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
+      "${baseUrl}/v1/subscriptions/get" +
+      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n  }),\n})',
     getUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/analytics/usage" +
+      "${baseUrl}/v1/analytics/usage/get" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    project_id: "project_1GTzSGrapiBW1QwCL3Fcn",\n    customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    range: "30d",\n  }),\n})',
     getPaymentMethods:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/getPaymentMethods" +
+      "${baseUrl}/v1/payments/methods/list" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    provider: "stripe",\n  }),\n})',
     createPaymentMethod:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customer/createPaymentMethod" +
+      "${baseUrl}/v1/payments/methods/create" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    paymentProvider: "stripe",\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    successUrl: "http://your-app.com/dashboard",\n    cancelUrl: "http://your-app.com/failed",\n  }),\n})',
-    listPlanVersions:
+    listVersions:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/plans/listPlanVersions" +
+      "${baseUrl}/v1/plans/versions/list" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    billingInterval: "month",\n    currency: "USD",\n  }),\n})',
   },
 }
@@ -228,7 +232,7 @@ export function SDKDemo({
   showBorderBeam = true,
 }: { className?: string; defaultMethod?: method; showBorderBeam?: boolean }) {
   const [activeFramework, setActiveFramework] = useState("sdk")
-  const [activeMethod, setActiveMethod] = useState(defaultMethod ?? "verifyFeature")
+  const [activeMethod, setActiveMethod] = useState(defaultMethod ?? "verifyEntitlement")
 
   // Get the methods for the active framework
   let methods = Object.keys(codeExamples[activeFramework as keyof typeof codeExamples])
@@ -242,7 +246,7 @@ export function SDKDemo({
   const code =
     codeExamples[activeFramework as keyof typeof codeExamples][
       activeMethod as keyof typeof codeExamples.sdk
-    ] ?? codeExamples.sdk.verifyFeature
+    ] ?? codeExamples.sdk.verifyEntitlement
 
   return (
     <div

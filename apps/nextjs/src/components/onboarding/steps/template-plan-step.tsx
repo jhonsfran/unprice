@@ -1,4 +1,3 @@
-import * as currencies from "@dinero.js/currencies"
 import { type StepComponentProps, useOnboarding } from "@onboardjs/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { slugify } from "@unprice/db/utils"
@@ -12,6 +11,7 @@ import type {
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
+import * as currencies from "dinero.js/currencies"
 import { AlertTriangle, CheckCircle2, Loader2, Sparkles } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useTRPC } from "~/trpc/client"

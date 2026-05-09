@@ -18,8 +18,9 @@ import { startTransition, useState } from "react"
 import { createPortal } from "react-dom"
 
 import { useMutation } from "@tanstack/react-query"
-import type { PlanVersionFeatureDragDrop, PlanVersionFeatureInsert } from "@unprice/db/validators"
-import { useActiveFeature, useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
+import type { PlanVersionFeatureDragDrop } from "@unprice/db/validators"
+import { GripVertical } from "lucide-react"
+import { useActivePlanVersion, usePlanFeaturesList } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 import { FeaturePlan } from "./feature-plan"
@@ -34,30 +35,12 @@ const dropAnimation: DropAnimation = {
   }),
 }
 
-function toPlanVersionFeatureCreatePayload(
-  planFeatureVersion: PlanVersionFeatureDragDrop
-): PlanVersionFeatureInsert {
-  return {
-    planVersionId: planFeatureVersion.planVersionId,
-    featureId: planFeatureVersion.featureId,
-    featureType: planFeatureVersion.featureType,
-    config: planFeatureVersion.config,
-    billingConfig: planFeatureVersion.billingConfig,
-    resetConfig: planFeatureVersion.resetConfig,
-    metadata: planFeatureVersion.metadata,
-    order: planFeatureVersion.order,
-    defaultQuantity: planFeatureVersion.defaultQuantity ?? 1,
-    limit: planFeatureVersion.limit ?? undefined,
-    type: planFeatureVersion.type,
-    unitOfMeasure: planFeatureVersion.unitOfMeasure,
-    meterConfig: planFeatureVersion.meterConfig ?? undefined,
-  }
-}
-
 export default function DragDrop({ children }: { children: React.ReactNode }) {
   const [clonedFeatures, setClonedFeatures] = useState<PlanVersionFeatureDragDrop[] | null>(null)
+  // Local state for the DragOverlay clone — keeps drag UI independent of `activeFeature`
+  // so dragging a closed card doesn't accidentally expand it.
+  const [draggingFeature, setDraggingFeature] = useState<PlanVersionFeatureDragDrop | null>(null)
   const router = useRouter()
-  const [activeFeature, setActiveFeature] = useActiveFeature()
   const [planFeaturesList, setPlanFeaturesList] = usePlanFeaturesList()
   const [activePlanVersion] = useActivePlanVersion()
   const isPublished = activePlanVersion?.status === "published"
@@ -71,131 +54,56 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
     })
   )
 
-  // TODO: when this takes too long we should show a loading state
-  const createPlanVersionFeatures = useMutation(
-    trpc.planVersionFeatures.create.mutationOptions({
-      onSuccess: ({ planVersionFeature }) => {
-        // Update the entire features list to maintain consistency with drag-drop
-        setPlanFeaturesList((features) => {
-          return features.map((feature) =>
-            feature.featureId === planVersionFeature.featureId
-              ? { ...feature, ...planVersionFeature }
-              : feature
-          )
-        })
-      },
-      // Optionally add optimistic updates
-      onMutate: (planVersionFeature) => {
-        const previousFeatures = planFeaturesList
+  // Persist the new order for an already-saved feature.
+  // Library items are added via click-to-add (see feature-list.tsx), not drag, so this only handles reorder.
+  function persistOrder(planFeatureVersion: PlanVersionFeatureDragDrop) {
+    if (!planFeatureVersion.id) return
 
-        setPlanFeaturesList((features) =>
-          features.map((feature) =>
-            feature.featureId === planVersionFeature.featureId
-              ? {
-                  ...feature,
-                  ...planVersionFeature,
-                  metadata: {
-                    realtime:
-                      planVersionFeature.metadata?.realtime ?? feature.metadata?.realtime ?? false,
-                    notifyUsageThreshold:
-                      planVersionFeature.metadata?.notifyUsageThreshold ??
-                      feature.metadata?.notifyUsageThreshold ??
-                      95,
-                    overageStrategy:
-                      planVersionFeature.metadata?.overageStrategy ??
-                      feature.metadata?.overageStrategy ??
-                      "none",
-                    blockCustomer:
-                      planVersionFeature.metadata?.blockCustomer ??
-                      feature.metadata?.blockCustomer ??
-                      false,
-                    hidden:
-                      planVersionFeature.metadata?.hidden ?? feature.metadata?.hidden ?? false,
-                  },
-                }
-              : feature
-          )
-        )
-
-        return { previousFeatures }
-      },
-      onError: (error, __, context) => {
-        // Rollback on error
-        if (context?.previousFeatures) {
-          setPlanFeaturesList(context.previousFeatures)
-        } else {
-          setPlanFeaturesList(clonedFeatures ?? [])
-        }
-        toastAction("error", error.message)
-      },
-    })
-  )
-
-  function onChanges(planFeatureVersion: PlanVersionFeatureDragDrop) {
     startTransition(() => {
-      // look for the index of the active feature to see if it is already in the list
       const activeIndex = planFeaturesList.findIndex(
         (t) => t.featureId === planFeatureVersion.featureId
       )
       const previousIndex = planFeaturesList[activeIndex - 1]
       const nextIndex = planFeaturesList[activeIndex + 1]
 
-      // we are calculating the order of the feature based on the previous and next feature
-      // we average those two numbers to get the order of the feature
-      // we give a default value of 1024 so there is always a space between the features
-      // this approach avoids the need to update all the features when we reorder them
+      // average neighbours' orders so we don't have to renumber the whole list
+      let nextOrder: number
       if (!previousIndex && nextIndex) {
-        // if the feature is the first one in the list
-        planFeatureVersion.order = nextIndex.order / 2
+        nextOrder = nextIndex.order / 2
       } else if (previousIndex && !nextIndex) {
-        // if the feature is the last one in the list
-        planFeatureVersion.order = previousIndex.order + 1024
+        nextOrder = previousIndex.order + 1024
       } else if (previousIndex && nextIndex) {
-        // if the feature is in the middle of the list
-        planFeatureVersion.order = (previousIndex.order + nextIndex.order) / 2
+        nextOrder = (previousIndex.order + nextIndex.order) / 2
       } else {
-        // if the feature is the only one in the list
-        planFeatureVersion.order = 1024
+        nextOrder = 1024
       }
 
-      if (!planFeatureVersion.id) {
-        // create a new plan feature
-        void createPlanVersionFeatures.mutateAsync(
-          toPlanVersionFeatureCreatePayload(planFeatureVersion)
-        )
-      } else {
-        const clonedOrderFeatures = clonedFeatures?.filter((f) => f.id).map((t) => t.order) ?? []
+      const previousOrders = clonedFeatures?.filter((f) => f.id).map((t) => t.order) ?? []
+      const currentOrders = planFeaturesList.filter((f) => f.id).map((t) => t.order) ?? []
 
-        const currentOrderFeatures = planFeaturesList.filter((f) => f.id).map((t) => t.order) ?? []
-
-        // if the order of the features is the same we don't need to update
-        if (clonedOrderFeatures.toString() === currentOrderFeatures.toString()) {
-          return
-        }
-
-        // update the order of the feature
-        void updatePlanVersionFeatures.mutateAsync({
-          id: planFeatureVersion.id,
-          planVersionId: planFeatureVersion.planVersionId,
-          order: planFeatureVersion.order,
-        })
+      // no-op if order didn't actually change
+      if (previousOrders.toString() === currentOrders.toString()) {
+        return
       }
+
+      void updatePlanVersionFeatures.mutateAsync({
+        id: planFeatureVersion.id,
+        planVersionId: planFeatureVersion.planVersionId,
+        order: nextOrder,
+      })
     })
   }
 
-  // sensor are the way we can control how the drag and drop works
-  // we have some components inside the feature that are interactive like buttons
-  // so we need to delay the drag and drop when the user clicks on those buttons
-  // otherwise the drag and drop will start when the user clicks on the buttons
+  // sensors are how we control when the drag and drop activates
+  // there are interactive controls inside the feature card (buttons), so we delay
+  // drag activation until the user moves a small distance
   const sensors = useSensors(
     useSensor(MouseSensor, {
-      // Require the mouse to move by 10 pixels before activating
       activationConstraint: {
         distance: 10,
       },
     }),
     useSensor(TouchSensor, {
-      // Press delay of 250ms, with tolerance of 5px of movement
       activationConstraint: {
         delay: 250,
         tolerance: 5,
@@ -207,6 +115,8 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
     const { active } = event
     const activeData = active.data.current
 
+    setDraggingFeature(null)
+
     if (isPublished) {
       return
     }
@@ -215,15 +125,16 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
 
     const planFeatureVersion = activeData.planFeatureVersion as PlanVersionFeatureDragDrop
 
-    onChanges(planFeatureVersion)
+    persistOrder(planFeatureVersion)
 
     setClonedFeatures(null)
   }
 
   const onDragCancel = () => {
+    setDraggingFeature(null)
+
     if (clonedFeatures) {
-      // Reset items to their original state in case items have been
-      setClonedFeatures(planFeaturesList)
+      setPlanFeaturesList(clonedFeatures)
     }
 
     setClonedFeatures(null)
@@ -233,18 +144,18 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
     if (isPublished) {
       toastAction(
         "error",
-        "You cannot add features to a published plan version. Please create a new version or duplicate the current one."
+        "You cannot reorder features in a published plan version. Please create a new version or duplicate the current one."
       )
       return
     }
 
-    // just copy the features in case the user cancels the drag
+    // snapshot for rollback if drag is cancelled
     setClonedFeatures(planFeaturesList)
 
-    if (["Feature", "FeaturePlan"].includes(event.active.data.current?.mode as string)) {
-      setActiveFeature(event.active.data.current?.planFeatureVersion as PlanVersionFeatureDragDrop)
-
-      return
+    if (event.active.data.current?.mode === "FeaturePlan") {
+      setDraggingFeature(
+        event.active.data.current?.planFeatureVersion as PlanVersionFeatureDragDrop
+      )
     }
   }
 
@@ -255,11 +166,8 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
       return
     }
 
-    // only process if there is an over item
     if (!over) return
 
-    // over represents the item that is being dragged over
-    // active represents the item that is being dragged
     const activeId = active.id
     const overId = over.id
 
@@ -270,40 +178,15 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
 
     if (!activeData) return
 
-    // FeaturePlan represents a feature that is already inside the plan version list
+    // we only care about reordering within the attached list
     const isOverAFeaturePlan = overData?.mode === "FeaturePlan"
-    // Feature represents a feature inside the feature list
-    const isActiveAFeature = activeData?.mode === "Feature"
+    if (!isOverAFeaturePlan) return
 
-    const planFeatureVersion = activeData.planFeatureVersion as PlanVersionFeatureDragDrop
-
-    // look for the index of the active feature to see if it is already in the list
-    const activeIndex = planFeaturesList.findIndex((t) => t.featureId === activeId)
-    const activeFeatureInList = planFeaturesList[activeIndex]
-
-    // set the new list of features given the new order
     setPlanFeaturesList((featuresList) => {
-      const features = featuresList
-      // I'm dropping a Feature over another Feature
-      if (isOverAFeaturePlan || isActiveAFeature) {
-        // check the index of the feature that is being dragged over
-        const overIndex = features.findIndex((t) => t.featureId === overId)
-        // if the active feature is not in the list we add it
-        // otherwise we just reorder the list
-        const result = activeFeatureInList
-          ? arrayMove(features, activeIndex, overIndex)
-          : arrayMove([...features, planFeatureVersion], activeIndex, overIndex)
-
-        return result
-      }
-      // I'm dropping a Feature over the drop area
-      // if the active feature is not in the list we add it
-      // otherwise we just reorder the list
-      const result = activeFeatureInList
-        ? arrayMove(features, activeIndex, activeIndex)
-        : [...features, planFeatureVersion]
-
-      return result
+      const activeIndex = featuresList.findIndex((t) => t.featureId === activeId)
+      const overIndex = featuresList.findIndex((t) => t.featureId === overId)
+      if (activeIndex === -1 || overIndex === -1) return featuresList
+      return arrayMove(featuresList, activeIndex, overIndex)
     })
   }
 
@@ -327,8 +210,17 @@ export default function DragDrop({ children }: { children: React.ReactNode }) {
         "document" in window &&
         createPortal(
           <DragOverlay adjustScale={false} dropAnimation={dropAnimation}>
-            {activeFeature && (
-              <FeaturePlan mode={"FeaturePlan"} planFeatureVersion={activeFeature} />
+            {draggingFeature && (
+              <FeaturePlan
+                mode={"FeaturePlan"}
+                planFeatureVersion={draggingFeature}
+                isDragging
+                renderDragHandle={() => (
+                  <span className="flex size-4 items-center justify-center text-foreground">
+                    <GripVertical className="size-3.5" />
+                  </span>
+                )}
+              />
             )}
           </DragOverlay>,
           document.body

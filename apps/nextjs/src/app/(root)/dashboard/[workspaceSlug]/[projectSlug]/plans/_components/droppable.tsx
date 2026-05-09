@@ -27,7 +27,7 @@ export function DroppableContainer({ id, children, disabled }: FeatureGroupProps
   return (
     <div
       ref={disabled ? undefined : setNodeRef}
-      className={cn("flex h-min-[700px] w-full flex-shrink-0 snap-center flex-col space-y-2")}
+      className={cn("flex w-full flex-1 flex-shrink-0 snap-center flex-col space-y-2")}
     >
       {children}
     </div>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query"
 import type { PaymentProvider } from "@unprice/db/validators"
 import { SubmitButton } from "~/components/submit-button"
 import { useTRPC } from "~/trpc/client"
@@ -10,36 +10,35 @@ export function PaymentMethodButton({
   successUrl,
   cancelUrl,
   paymentProvider,
+  hasPaymentMethods,
+  isRefreshing,
+  onProviderSessionStarted,
 }: {
   customerId: string
   successUrl: string
   cancelUrl: string
   paymentProvider: PaymentProvider
+  hasPaymentMethods?: boolean
+  isRefreshing?: boolean
+  onProviderSessionStarted?: () => void
 }) {
   const trpc = useTRPC()
-  const { isLoading, data } = useQuery(
-    trpc.customers.listPaymentMethods.queryOptions(
-      {
-        customerId,
-        provider: paymentProvider,
-      },
-      {
-        enabled: !!customerId,
-        retry: false,
-      }
-    )
-  )
 
   const createSession = useMutation(
     trpc.customers.createPaymentMethod.mutationOptions({
       onSuccess: (data) => {
-        // redirect in a new tab to avoid blocking the UI
-        if (data?.url) window.open(data?.url, "_blank")
+        if (!data?.url) return
+
+        onProviderSessionStarted?.()
+
+        // Keep the subscription draft open while the provider flow runs separately.
+        const providerWindow = window.open(data.url, "_blank")
+        if (!providerWindow) {
+          window.location.assign(data.url)
+        }
       },
     })
   )
-
-  const defaultPaymentMethod = data?.paymentMethods.at(0)
 
   return (
     <SubmitButton
@@ -55,9 +54,9 @@ export function PaymentMethodButton({
         })
       }}
       isSubmitting={createSession.isPending}
-      isDisabled={createSession.isPending || isLoading}
-      isLoading={isLoading}
-      label={!defaultPaymentMethod ? "Add Payment Method" : "Billing Portal"}
+      isDisabled={!customerId || createSession.isPending || isRefreshing}
+      isLoading={createSession.isPending}
+      label={hasPaymentMethods ? "Billing Portal" : "Add Payment Method"}
     />
   )
 }

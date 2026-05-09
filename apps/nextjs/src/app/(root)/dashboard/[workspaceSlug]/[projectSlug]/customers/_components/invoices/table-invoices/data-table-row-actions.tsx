@@ -36,6 +36,12 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
   const trpc = useTRPC()
   const subscriptionId = invoice.subscriptionId
   const invoiceId = invoice.id
+  const canFinalize = invoice.status === "draft" && invoice.dueAt <= Date.now()
+  const finalizeReadyAt = new Date(invoice.dueAt).toLocaleString()
+  const finalizeBlockedMessage =
+    invoice.status === "draft"
+      ? `Invoice is not ready to finalize yet. Try again after ${finalizeReadyAt}.`
+      : "Only draft invoices can be finalized."
 
   const machine = useMutation(trpc.subscriptions.machine.mutationOptions({}))
 
@@ -94,6 +100,13 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           <DropdownMenuItem
             onClick={(e) => {
               e.preventDefault()
+
+              if (!canFinalize) {
+                toast.error(finalizeBlockedMessage)
+                setOpen(false)
+                return
+              }
+
               onFinalizeInvoice()
               setOpen(false)
             }}

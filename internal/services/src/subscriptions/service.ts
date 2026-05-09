@@ -1,14 +1,9 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, type SQL, and, count, eq, getTableColumns, inArray, sql } from "@unprice/db"
+import type { Database } from "@unprice/db"
+import { newId } from "@unprice/db/utils"
 import {
-  customers,
-  grants,
-  subscriptionItems,
-  subscriptionPhases,
-  subscriptions,
-} from "@unprice/db/schema"
-import { newId, withDateFilters, withPagination } from "@unprice/db/utils"
-import {
+  type CustomerEntitlement,
+  type Grant,
   type GrantType,
   type InsertSubscription,
   type InsertSubscriptionPhase,
@@ -20,20 +15,28 @@ import {
   calculateDateAt,
   createDefaultSubscriptionConfig,
   getAnchor,
+  getTrialIntervalForBillingInterval,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { env } from "../../env"
 import type { BillingService } from "../billing/service"
+import { billingStrategyFor } from "../billing/strategy"
 import type { Cache } from "../cache/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import type { EntitlementService } from "../entitlements/service"
+import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
+import { getPaymentProviderCapabilities } from "../payment-provider/service"
+import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
+import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
-import { SubscriptionMachine } from "./machine"
-import { SubscriptionLock } from "./subscriptionLock"
+import type { SubscriptionMachine } from "./machine"
+import type { SubscriptionRepository } from "./repository"
 import type { SusbriptionMachineStatus } from "./types"
+import { withLockedMachine } from "./withLockedMachine"
 
 type PhaseGrantType = Extract<GrantType, "trial" | "subscription">
 
@@ -46,42 +49,59 @@ interface PhaseGrantItemInput {
 }
 
 interface PhaseGrantTarget {
-  key: string
   type: PhaseGrantType
+  customerEntitlementId: string
+  allowanceUnits: number | null
+  effectiveAt: number
+  expiresAt: number | null
+}
+
+interface PhaseEntitlementTarget {
+  key: string
   subscriptionItemId: string
   featurePlanVersionId: string
   effectiveAt: number
   expiresAt: number | null
-  limit: number | null
-  units: number | null
+  allowanceUnits: number | null
   overageStrategy: OverageStrategy
-  anchor: number
 }
 
-type PhaseOwnedGrant = typeof grants.$inferSelect
+type PhaseOwnedEntitlement = CustomerEntitlement & {
+  grants?: Grant[]
+}
 
 export class SubscriptionService {
   private readonly db: Database
+  private readonly repo: SubscriptionRepository
   private readonly logger: Logger
   private readonly analytics: Analytics
-  private readonly cache: Cache
   private readonly metrics: Metrics
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private readonly waitUntil: (promise: Promise<any>) => void
   private readonly customerService: CustomerService
+  private readonly entitlementService: EntitlementService
   private readonly billingService: BillingService
+  private readonly ratingService: RatingService
+  private readonly ledgerService: LedgerGateway
+  private readonly walletService: WalletService | undefined
 
   constructor({
     db,
+    repo,
     logger,
     analytics,
     waitUntil,
-    cache,
+    cache: _cache,
     metrics,
     customerService,
+    entitlementService,
     billingService,
+    ratingService,
+    ledgerService,
+    walletService,
   }: {
     db: Database
+    repo: SubscriptionRepository
     logger: Logger
     analytics: Analytics
     // biome-ignore lint/suspicious/noExplicitAny: <explanation>
@@ -89,16 +109,24 @@ export class SubscriptionService {
     cache: Cache
     metrics: Metrics
     customerService: CustomerService
+    entitlementService: EntitlementService
     billingService: BillingService
+    ratingService: RatingService
+    ledgerService: LedgerGateway
+    walletService?: WalletService
   }) {
     this.db = db
+    this.repo = repo
     this.logger = logger
     this.analytics = analytics
-    this.cache = cache
     this.metrics = metrics
     this.waitUntil = waitUntil
     this.customerService = customerService
+    this.entitlementService = entitlementService
     this.billingService = billingService
+    this.ratingService = ratingService
+    this.ledgerService = ledgerService
+    this.walletService = walletService
   }
 
   private setLockContext(context: {
@@ -123,17 +151,8 @@ export class SubscriptionService {
     })
   }
 
-  /**
-   * Builds a stable reconciliation key for a phase-owned grant.
-   *
-   * We key by `featurePlanVersionId + grant type` because a phase currently
-   * materializes at most one subscription item per feature plan version.
-   */
-  private getPhaseGrantKey(input: {
-    featurePlanVersionId: string
-    type: PhaseGrantType
-  }) {
-    return `${input.featurePlanVersionId}:${input.type}`
+  private repoForDatabase(db?: Database) {
+    return db && this.repo.forDatabase ? this.repo.forDatabase(db) : this.repo
   }
 
   /**
@@ -180,18 +199,22 @@ export class SubscriptionService {
    */
   private buildPhaseGrantTargets({
     phase,
+    entitlements,
     items,
   }: {
     phase: {
       id: string
-      billingAnchor: number
       startAt: number
       endAt: number | null
       trialEndsAt: number | null
     }
+    entitlements: PhaseOwnedEntitlement[]
     items: PhaseGrantItemInput[]
   }): PhaseGrantTarget[] {
     const targets: PhaseGrantTarget[] = []
+    const allowanceBySubscriptionItemId = new Map(
+      items.map((item) => [item.id, this.getPhaseGrantAllowance(item)])
+    )
 
     const grantWindows: Array<{
       type: PhaseGrantType
@@ -221,22 +244,23 @@ export class SubscriptionService {
       })
     }
 
-    for (const item of items) {
+    for (const entitlement of entitlements) {
       for (const grantWindow of grantWindows) {
+        const effectiveAt = Math.max(entitlement.effectiveAt, grantWindow.effectiveAt)
+        const expiresAt = minNullableExpiry(entitlement.expiresAt, grantWindow.expiresAt)
+
+        if (expiresAt !== null && effectiveAt >= expiresAt) {
+          continue
+        }
+
         targets.push({
-          key: this.getPhaseGrantKey({
-            featurePlanVersionId: item.featurePlanVersionId,
-            type: grantWindow.type,
-          }),
           type: grantWindow.type,
-          subscriptionItemId: item.id,
-          featurePlanVersionId: item.featurePlanVersionId,
-          effectiveAt: grantWindow.effectiveAt,
-          expiresAt: grantWindow.expiresAt,
-          limit: item.units ?? item.featureLimit ?? null,
-          units: item.units,
-          overageStrategy: item.overageStrategy,
-          anchor: phase.billingAnchor,
+          customerEntitlementId: entitlement.id,
+          allowanceUnits: entitlement.subscriptionItemId
+            ? (allowanceBySubscriptionItemId.get(entitlement.subscriptionItemId) ?? null)
+            : null,
+          effectiveAt,
+          expiresAt,
         })
       }
     }
@@ -244,41 +268,289 @@ export class SubscriptionService {
     return targets
   }
 
-  /**
-   * Compares the mutable billing attributes of a grant with the desired phase
-   * target. Metadata is intentionally excluded so it stays informational only.
-   */
-  private hasSameGrantConfiguration(existingGrant: PhaseOwnedGrant, target: PhaseGrantTarget) {
+  private getPhaseEntitlementKey(input: { subscriptionItemId: string }) {
+    return input.subscriptionItemId
+  }
+
+  private getPhaseGrantAllowance(item: PhaseGrantItemInput): number | null {
+    return item.units ?? item.featureLimit ?? null
+  }
+
+  private buildPhaseEntitlementTargets({
+    phase,
+    items,
+  }: {
+    phase: {
+      startAt: number
+      endAt: number | null
+    }
+    items: PhaseGrantItemInput[]
+  }): PhaseEntitlementTarget[] {
+    return items.map((item) => ({
+      key: this.getPhaseEntitlementKey({ subscriptionItemId: item.id }),
+      subscriptionItemId: item.id,
+      featurePlanVersionId: item.featurePlanVersionId,
+      effectiveAt: phase.startAt,
+      expiresAt: phase.endAt ?? null,
+      allowanceUnits: this.getPhaseGrantAllowance(item),
+      overageStrategy: item.overageStrategy,
+    }))
+  }
+
+  private hasSameEntitlementConfiguration(
+    existingEntitlement: PhaseOwnedEntitlement,
+    target: PhaseEntitlementTarget
+  ) {
+    const grants = existingEntitlement.grants ?? []
+    const hasSameAllowance =
+      grants.length === 0 || grants.every((grant) => grant.allowanceUnits === target.allowanceUnits)
+
     return (
-      existingGrant.featurePlanVersionId === target.featurePlanVersionId &&
-      existingGrant.type === target.type &&
-      existingGrant.limit === target.limit &&
-      existingGrant.units === target.units &&
-      existingGrant.overageStrategy === target.overageStrategy &&
-      existingGrant.anchor === target.anchor
+      existingEntitlement.subscriptionItemId === target.subscriptionItemId &&
+      existingEntitlement.featurePlanVersionId === target.featurePlanVersionId &&
+      hasSameAllowance &&
+      existingEntitlement.overageStrategy === target.overageStrategy
     )
   }
 
-  /**
-   * Same configuration plus identical time bounds, used for future-dated grants
-   * that can be kept as-is during phase edits.
-   */
-  private hasExactFutureGrant(existingGrant: PhaseOwnedGrant, target: PhaseGrantTarget) {
+  private hasExactEntitlement(
+    existingEntitlement: CustomerEntitlement,
+    target: PhaseEntitlementTarget
+  ) {
     return (
-      this.hasSameGrantConfiguration(existingGrant, target) &&
-      existingGrant.effectiveAt === target.effectiveAt &&
-      existingGrant.expiresAt === target.expiresAt
+      this.hasSameEntitlementConfiguration(existingEntitlement, target) &&
+      existingEntitlement.effectiveAt === target.effectiveAt &&
+      existingEntitlement.expiresAt === target.expiresAt
     )
   }
 
+  private async expirePhaseEntitlements({
+    entitlements,
+    projectId,
+    db,
+    now,
+  }: {
+    entitlements: PhaseOwnedEntitlement[]
+    projectId: string
+    db: Database
+    now: number
+  }): Promise<Result<void, UnPriceSubscriptionError>> {
+    for (const entitlement of entitlements) {
+      if (entitlement.expiresAt !== null && entitlement.expiresAt <= now) {
+        continue
+      }
+
+      const expireResult = await this.entitlementService.expireCustomerEntitlement({
+        id: entitlement.id,
+        projectId,
+        expiresAt: now,
+        db,
+      })
+
+      if (expireResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: expireResult.err.message,
+          })
+        )
+      }
+    }
+
+    return Ok(undefined)
+  }
+
+  private async syncPhaseEntitlements({
+    customerId,
+    subscriptionId,
+    phase,
+    items,
+    db,
+    now,
+  }: {
+    customerId: string
+    subscriptionId: string
+    phase: {
+      id: string
+      projectId: string
+      startAt: number
+      endAt: number | null
+    }
+    items: PhaseGrantItemInput[]
+    db: Database
+    now: number
+  }): Promise<Result<void, UnPriceSubscriptionError>> {
+    const featurePlanVersionIds = [...new Set(items.map((item) => item.featurePlanVersionId))]
+    const phaseOwnedEntitlementsResult = await this.entitlementService.getPhaseOwnedEntitlements({
+      projectId: phase.projectId,
+      customerId,
+      subscriptionPhaseId: phase.id,
+      featurePlanVersionIds,
+      phaseStartAt: phase.startAt,
+      phaseEndAt: phase.endAt ?? null,
+      db,
+    })
+
+    if (phaseOwnedEntitlementsResult.err) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: phaseOwnedEntitlementsResult.err.message,
+        })
+      )
+    }
+
+    const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
+
+    if (!isActivePhase && phaseOwnedEntitlementsResult.val.length === 0) {
+      return Ok(undefined)
+    }
+
+    const desiredTargets = this.buildPhaseEntitlementTargets({
+      phase,
+      items,
+    })
+    const existingByKey = new Map<string, CustomerEntitlement[]>()
+
+    for (const entitlement of phaseOwnedEntitlementsResult.val) {
+      if (!entitlement.subscriptionItemId) {
+        continue
+      }
+
+      const key = this.getPhaseEntitlementKey({
+        subscriptionItemId: entitlement.subscriptionItemId,
+      })
+      existingByKey.set(key, [...(existingByKey.get(key) ?? []), entitlement])
+    }
+
+    const keepEntitlementIds = new Set<string>()
+    const entitlementsToExpire = new Map<string, CustomerEntitlement>()
+    const entitlementExpiryUpdates = new Map<
+      string,
+      {
+        entitlement: CustomerEntitlement
+        expiresAt: number | null
+      }
+    >()
+    const targetsToCreate: PhaseEntitlementTarget[] = []
+
+    for (const target of desiredTargets) {
+      const currentCandidates = existingByKey.get(target.key) ?? []
+      const exactMatch = currentCandidates.find((entitlement) =>
+        this.hasExactEntitlement(entitlement, target)
+      )
+
+      if (exactMatch) {
+        keepEntitlementIds.add(exactMatch.id)
+        continue
+      }
+
+      const configurationMatch = currentCandidates.find(
+        (entitlement) =>
+          this.hasSameEntitlementConfiguration(entitlement, target) &&
+          entitlement.effectiveAt === target.effectiveAt
+      )
+
+      if (configurationMatch) {
+        keepEntitlementIds.add(configurationMatch.id)
+
+        if (configurationMatch.expiresAt !== target.expiresAt) {
+          entitlementExpiryUpdates.set(configurationMatch.id, {
+            entitlement: configurationMatch,
+            expiresAt: target.expiresAt,
+          })
+        }
+
+        continue
+      }
+
+      for (const entitlement of currentCandidates) {
+        entitlementsToExpire.set(entitlement.id, entitlement)
+      }
+
+      const targetIsCurrent =
+        target.effectiveAt <= now && (target.expiresAt === null || target.expiresAt >= now)
+      const replacingExisting = currentCandidates.length > 0
+
+      targetsToCreate.push({
+        ...target,
+        effectiveAt: targetIsCurrent && replacingExisting ? now : target.effectiveAt,
+      })
+    }
+
+    for (const entitlement of phaseOwnedEntitlementsResult.val) {
+      if (!keepEntitlementIds.has(entitlement.id)) {
+        entitlementsToExpire.set(entitlement.id, entitlement)
+      }
+    }
+
+    const expireResult = await this.expirePhaseEntitlements({
+      entitlements: [...entitlementsToExpire.values()],
+      projectId: phase.projectId,
+      db,
+      now,
+    })
+
+    if (expireResult.err) {
+      return expireResult
+    }
+
+    for (const { entitlement, expiresAt } of entitlementExpiryUpdates.values()) {
+      if (entitlementsToExpire.has(entitlement.id)) {
+        continue
+      }
+
+      const expireEntitlementResult = await this.entitlementService.expireCustomerEntitlement({
+        id: entitlement.id,
+        projectId: phase.projectId,
+        expiresAt,
+        db,
+      })
+
+      if (expireEntitlementResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: expireEntitlementResult.err.message,
+          })
+        )
+      }
+    }
+
+    for (const target of targetsToCreate) {
+      const createEntitlementResult = await this.entitlementService.createCustomerEntitlement({
+        entitlement: {
+          id: newId("customer_entitlement"),
+          projectId: phase.projectId,
+          customerId,
+          featurePlanVersionId: target.featurePlanVersionId,
+          subscriptionId,
+          subscriptionPhaseId: phase.id,
+          subscriptionItemId: target.subscriptionItemId,
+          effectiveAt: target.effectiveAt,
+          expiresAt: target.expiresAt,
+          overageStrategy: target.overageStrategy,
+          metadata: {
+            subscriptionId,
+            subscriptionPhaseId: phase.id,
+            subscriptionItemId: target.subscriptionItemId,
+          },
+        },
+        db,
+      })
+
+      if (createEntitlementResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: createEntitlementResult.err.message,
+          })
+        )
+      }
+    }
+
+    return Ok(undefined)
+  }
+
   /**
-   * Reconciles the grants that should exist for a subscription phase.
-   *
-   * Rules:
-   * - active phase changes end the old grants at `now` and create replacements
-   * - future phase changes replace only future-dated grants
-   * - metadata is written for observability, but ownership matching is derived
-   *   from the phase's feature plan versions and time window
+   * Ensures each phase entitlement has its default allowance grants.
+   * Grant creation is idempotent by entitlement, grant type, and time window.
    */
   private async syncPhaseGrants({
     customerId,
@@ -293,7 +565,6 @@ export class SubscriptionService {
     phase: {
       id: string
       projectId: string
-      billingAnchor: number
       startAt: number
       endAt: number | null
       trialEndsAt: number | null
@@ -304,196 +575,76 @@ export class SubscriptionService {
   }): Promise<Result<void, UnPriceSubscriptionError>> {
     const grantsManager = this.createGrantManager(db)
     const featurePlanVersionIds = [...new Set(items.map((item) => item.featurePlanVersionId))]
-    const { err: existingErr, val: phaseOwnedGrants } = await grantsManager.getPhaseOwnedGrants({
+    const phaseOwnedEntitlementsResult = await this.entitlementService.getPhaseOwnedEntitlements({
       projectId: phase.projectId,
       customerId,
       subscriptionPhaseId: phase.id,
       featurePlanVersionIds,
       phaseStartAt: phase.startAt,
       phaseEndAt: phase.endAt,
+      db,
     })
 
-    if (existingErr) {
+    if (phaseOwnedEntitlementsResult.err) {
       return Err(
         new UnPriceSubscriptionError({
-          message: existingErr.message,
+          message: phaseOwnedEntitlementsResult.err.message,
         })
       )
     }
 
     const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
 
-    if (!isActivePhase && phaseOwnedGrants.length === 0) {
+    if (!isActivePhase && phaseOwnedEntitlementsResult.val.length === 0) {
       return Ok(undefined)
     }
 
+    const expiredEntitlementIds = phaseOwnedEntitlementsResult.val
+      .filter((entitlement) => entitlement.expiresAt !== null && entitlement.expiresAt <= now)
+      .map((entitlement) => entitlement.id)
+
+    if (expiredEntitlementIds.length > 0) {
+      const expireGrantsResult = await grantsManager.expireGrantsForEntitlements({
+        projectId: phase.projectId,
+        customerEntitlementIds: expiredEntitlementIds,
+        expiresAt: now,
+        db,
+      })
+
+      if (expireGrantsResult.err) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: expireGrantsResult.err.message,
+          })
+        )
+      }
+    }
+
+    const grantableEntitlements = phaseOwnedEntitlementsResult.val.filter(
+      (entitlement) => entitlement.expiresAt === null || entitlement.expiresAt > now
+    )
+
     const desiredTargets = this.buildPhaseGrantTargets({
       phase,
+      entitlements: grantableEntitlements,
       items,
     })
 
-    const currentGrantsByKey = new Map<string, PhaseOwnedGrant[]>()
-    const futureGrantsByKey = new Map<string, PhaseOwnedGrant[]>()
-
-    for (const grant of phaseOwnedGrants) {
-      const key = this.getPhaseGrantKey({
-        featurePlanVersionId: grant.featurePlanVersionId,
-        type: grant.type as PhaseGrantType,
-      })
-
-      if (grant.effectiveAt > now) {
-        futureGrantsByKey.set(key, [...(futureGrantsByKey.get(key) ?? []), grant])
-        continue
-      }
-
-      if (grant.expiresAt === null || grant.expiresAt > now) {
-        currentGrantsByKey.set(key, [...(currentGrantsByKey.get(key) ?? []), grant])
-      }
-    }
-
-    const keepGrantIds = new Set<string>()
-    const grantIdsToExpire = new Set<string>()
-    const grantIdsToDelete = new Set<string>()
-    const grantExpiryUpdates = new Map<string, number | null>()
-    const targetsToCreate: PhaseGrantTarget[] = []
-
     for (const target of desiredTargets) {
-      const currentCandidates = currentGrantsByKey.get(target.key) ?? []
-      const futureCandidates = futureGrantsByKey.get(target.key) ?? []
-      const targetIsCurrent =
-        target.effectiveAt <= now && (target.expiresAt === null || target.expiresAt > now)
-
-      if (targetIsCurrent) {
-        const currentMatch = currentCandidates.find((grant) =>
-          this.hasSameGrantConfiguration(grant, target)
-        )
-
-        if (currentMatch) {
-          keepGrantIds.add(currentMatch.id)
-
-          if (currentMatch.expiresAt !== target.expiresAt) {
-            grantExpiryUpdates.set(currentMatch.id, target.expiresAt)
-          }
-        } else {
-          for (const grant of currentCandidates) {
-            grantIdsToExpire.add(grant.id)
-          }
-
-          targetsToCreate.push({
-            ...target,
-            effectiveAt: now,
-          })
-        }
-
-        for (const grant of futureCandidates) {
-          grantIdsToDelete.add(grant.id)
-        }
-        continue
-      }
-
-      const futureMatch = futureCandidates.find((grant) => this.hasExactFutureGrant(grant, target))
-
-      if (futureMatch) {
-        keepGrantIds.add(futureMatch.id)
-      } else {
-        for (const grant of futureCandidates) {
-          grantIdsToDelete.add(grant.id)
-        }
-
-        targetsToCreate.push(target)
-      }
-
-      for (const grant of currentCandidates) {
-        grantIdsToExpire.add(grant.id)
-      }
-    }
-
-    for (const grantsByKey of currentGrantsByKey.values()) {
-      for (const grant of grantsByKey) {
-        if (!keepGrantIds.has(grant.id)) {
-          grantIdsToExpire.add(grant.id)
-        }
-      }
-    }
-
-    for (const grantsByKey of futureGrantsByKey.values()) {
-      for (const grant of grantsByKey) {
-        if (!keepGrantIds.has(grant.id)) {
-          grantIdsToDelete.add(grant.id)
-        }
-      }
-    }
-
-    for (const grantId of grantIdsToDelete) {
-      grantIdsToExpire.delete(grantId)
-      grantExpiryUpdates.delete(grantId)
-    }
-
-    if (grantIdsToExpire.size > 0) {
-      await db
-        .update(grants)
-        .set({
-          expiresAt: now,
-          updatedAtM: now,
-        })
-        .where(
-          and(inArray(grants.id, [...grantIdsToExpire]), eq(grants.projectId, phase.projectId))
-        )
-    }
-
-    for (const [grantId, expiresAt] of grantExpiryUpdates.entries()) {
-      if (grantIdsToExpire.has(grantId) || grantIdsToDelete.has(grantId)) continue
-
-      await db
-        .update(grants)
-        .set({
-          expiresAt,
-          updatedAtM: now,
-        })
-        .where(and(eq(grants.id, grantId), eq(grants.projectId, phase.projectId)))
-    }
-
-    if (grantIdsToDelete.size > 0) {
-      const deletePhaseOwnedGrantsResult = await grantsManager.deletePhaseOwnedGrants({
-        projectId: phase.projectId,
-        customerId,
-        subscriptionPhaseId: phase.id,
-        featurePlanVersionIds,
-        phaseStartAt: phase.startAt,
-        phaseEndAt: phase.endAt,
-        grantIds: [...grantIdsToDelete],
-      })
-
-      if (deletePhaseOwnedGrantsResult.err) {
-        return Err(
-          new UnPriceSubscriptionError({
-            message: deletePhaseOwnedGrantsResult.err.message,
-          })
-        )
-      }
-    }
-
-    for (const target of targetsToCreate) {
       const createGrantResult = await grantsManager.createGrant({
+        db,
         grant: {
           id: newId("grant"),
-          name: "Base Plan",
           projectId: phase.projectId,
+          customerEntitlementId: target.customerEntitlementId,
           effectiveAt: target.effectiveAt,
           expiresAt: target.expiresAt,
           type: target.type,
-          subjectType: "customer",
-          subjectId: customerId,
-          featurePlanVersionId: target.featurePlanVersionId,
-          autoRenew: false,
-          limit: target.limit,
-          overageStrategy: target.overageStrategy,
-          units: target.units,
-          anchor: target.anchor,
+          allowanceUnits: target.allowanceUnits,
           metadata: {
             subscriptionId,
             subscriptionPhaseId: phase.id,
-            subscriptionItemId: target.subscriptionItemId,
+            customerEntitlementId: target.customerEntitlementId,
           },
         },
       })
@@ -655,11 +806,15 @@ export class SubscriptionService {
       trialUnits,
       metadata,
       config,
+      paymentProvider,
+      creditLinePolicy,
+      creditLineAmount,
       paymentMethodId,
       startAt,
       endAt,
       subscriptionId,
     } = input
+    const repo = this.repoForDatabase(db)
 
     const startAtToUse = startAt ?? now
     const endAtToUse = endAt ?? undefined
@@ -674,11 +829,8 @@ export class SubscriptionService {
     }
 
     // get subscription with phases from start date
-    const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
-      where: (sub, { eq }) => eq(sub.id, subscriptionId),
-      with: {
-        phases: true,
-      },
+    const subscriptionWithPhases = await repo.findSubscriptionWithPhases({
+      subscriptionId,
     })
 
     if (!subscriptionWithPhases) {
@@ -778,12 +930,8 @@ export class SubscriptionService {
       )
     }
 
-    // check if payment method is required for the plan version
     const paymentMethodRequired = versionData.paymentMethodRequired
-    const trialUnitsToUse =
-      paymentMethodRequired && paymentMethodId && paymentMethodId !== ""
-        ? (trialUnits ?? versionData.trialUnits ?? 0)
-        : 0
+    const trialUnitsToUse = trialUnits ?? versionData.trialUnits ?? 0
     const billingAnchorToUse = getAnchor(
       startAtToUse,
       versionData.billingConfig.billingInterval,
@@ -799,13 +947,16 @@ export class SubscriptionService {
     // if (billingAnchorToUse === "dayOfCreation") {
     //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
     // }
-    // let's skip the payment method validation if the payment provider is sandbox
-    const paymentProvider = versionData.paymentProvider
+    const paymentProviderToUse = paymentProvider ?? versionData.paymentProvider
+    const providerCaps = getPaymentProviderCapabilities(paymentProviderToUse)
+    const creditLinePolicyToUse = creditLinePolicy ?? "uncapped"
+    const creditLineAmountToUse =
+      creditLinePolicyToUse === "uncapped" ? null : (creditLineAmount ?? null)
 
-    // validate payment method is required and if not provided
+    // skip payment method validation for providers without async payment confirmation
     if (
       paymentMethodRequired &&
-      paymentProvider !== "sandbox" &&
+      providerCaps.asyncPaymentConfirmation &&
       (!paymentMethodId || paymentMethodId === "")
     ) {
       return Err(
@@ -838,13 +989,13 @@ export class SubscriptionService {
       configItemsSubscription = config
     }
 
-    // calculate trials only if payment method is set and required for the plan version
+    // Minute-billed plans support minute trials for local/test loops. All other plans use trial days.
     let trialsEndAt = null
     if (trialUnitsToUse > 0) {
       trialsEndAt = calculateDateAt({
         startDate: startAtToUse,
         config: {
-          interval: versionData.billingConfig.billingInterval,
+          interval: getTrialIntervalForBillingInterval(versionData.billingConfig.billingInterval),
           units: trialUnitsToUse,
         },
       })
@@ -873,29 +1024,24 @@ export class SubscriptionService {
       )
     }
 
-    const result = await (db ?? this.db).transaction(async (trx) => {
-      // create the subscription phase
-      const phase = await trx
-        .insert(subscriptionPhases)
-        .values({
-          id: newId("subscription_phase"),
-          projectId,
-          planVersionId,
-          subscriptionId,
-          paymentMethodId,
-          trialEndsAt: trialsEndAt,
-          trialUnits: trialUnitsToUse,
-          startAt: startAtToUse,
-          endAt: endAtToUse,
-          metadata,
-          billingAnchor: billingAnchorToUse ?? 0,
-        })
-        .returning()
-        .catch((e) => {
-          this.logger.error(e.message)
-          throw e
-        })
-        .then((re) => re[0])
+    const result = await repo.withTransaction(async (txRepo, txDb) => {
+      const writeDb = txDb ?? db ?? this.db
+      const phase = await txRepo.insertPhase({
+        id: newId("subscription_phase"),
+        projectId,
+        planVersionId,
+        subscriptionId,
+        paymentMethodId: paymentMethodId ?? null,
+        paymentProvider: paymentProviderToUse,
+        creditLinePolicy: creditLinePolicyToUse,
+        creditLineAmount: creditLineAmountToUse,
+        trialEndsAt: trialsEndAt,
+        trialUnits: trialUnitsToUse,
+        startAt: startAtToUse,
+        endAt: endAtToUse,
+        metadata: metadata ?? null,
+        billingAnchor: billingAnchorToUse ?? 0,
+      })
 
       if (!phase) {
         return Err(
@@ -915,15 +1061,7 @@ export class SubscriptionService {
         subscriptionId,
       }))
 
-      await trx
-        .insert(subscriptionItems)
-        .values(subscriptionItemValues)
-        .returning()
-        .catch((e) => {
-          this.logger.error(e.message)
-          trx.rollback()
-          throw e
-        })
+      await txRepo.insertItems({ items: subscriptionItemValues })
 
       const normalizedPhaseItems = this.normalizePhaseGrantItems(
         subscriptionItemValues.map((item) => {
@@ -951,18 +1089,39 @@ export class SubscriptionService {
       const isActivePhase = phase.startAt <= now && (phase.endAt ?? Number.POSITIVE_INFINITY) >= now
 
       if (isActivePhase) {
-        const status = trialUnitsToUse > 0 ? "trialing" : "active"
-        await trx
-          .update(subscriptions)
-          .set({
+        // Status decision tree, in priority order:
+        //   trialing       — plan grants trial units.
+        //   pending_payment — invoice-driven mode that bills upfront and
+        //                    requires a payment method but no funds have
+        //                    settled yet. The bootstrap topup/invoice will
+        //                    fire PAYMENT_SUCCESS to flip us to `active`.
+        //   active         — phases whose first invoice is not blocking
+        //                    activation, including capped/uncapped usage
+        //                    phases and free / no-payment-method plans.
+        // versionData.whenToBill is non-null in the schema (default
+        // "pay_in_advance"), but some legacy/test fixtures omit it. Treat
+        // missing as "not advance billing" — same as the prior `===` check.
+        const versionStrategy = versionData.whenToBill
+          ? billingStrategyFor(versionData.whenToBill)
+          : null
+        const isAdvancePending =
+          versionStrategy?.billPhaseTrigger === "period_start" &&
+          paymentMethodRequired &&
+          (!paymentMethodId || paymentMethodId === "")
+        const status =
+          trialUnitsToUse > 0 ? "trialing" : isAdvancePending ? "pending_payment" : "active"
+        await txRepo.updateSubscription({
+          subscriptionId,
+          projectId,
+          data: {
             active: true,
             status,
             planSlug: versionData.plan.slug,
             currentCycleStartAt: calculatedBillingCycle.start,
             currentCycleEndAt: calculatedBillingCycle.end,
-            renewAt: calculatedBillingCycle.start, // we schedule the renewal for the start of the cycle always
-          })
-          .where(and(eq(subscriptions.id, subscriptionId), eq(subscriptions.projectId, projectId)))
+            renewAt: calculatedBillingCycle.start,
+          },
+        })
 
         // Update the access control list status in the cache
         this.waitUntil(
@@ -973,12 +1132,25 @@ export class SubscriptionService {
           })
         )
 
+        const syncPhaseEntitlementsResult = await this.syncPhaseEntitlements({
+          customerId: subscriptionWithPhases.customerId,
+          subscriptionId,
+          phase,
+          items: normalizedPhaseItems,
+          db: writeDb,
+          now,
+        })
+
+        if (syncPhaseEntitlementsResult.err) {
+          return syncPhaseEntitlementsResult
+        }
+
         const syncPhaseGrantsResult = await this.syncPhaseGrants({
           customerId: subscriptionWithPhases.customerId,
           subscriptionId,
           phase,
           items: normalizedPhaseItems,
-          db: trx,
+          db: writeDb,
           now,
         })
 
@@ -1023,16 +1195,9 @@ export class SubscriptionService {
   }): Promise<Result<boolean, UnPriceSubscriptionError | SchemaError>> {
     // only allow that are not active
     // and are not in the past
-    const phase = await this.db.query.subscriptionPhases.findFirst({
-      with: {
-        items: true,
-        subscription: {
-          with: {
-            customer: true,
-          },
-        },
-      },
-      where: (phase, { eq, and }) => and(eq(phase.id, phaseId), eq(phase.projectId, projectId)),
+    const phase = await this.repo.findPhaseWithItemsAndSubscription({
+      phaseId,
+      projectId,
     })
 
     if (!phase) {
@@ -1054,38 +1219,13 @@ export class SubscriptionService {
       )
     }
 
-    const result = await this.db.transaction(async (trx) => {
-      const grantService = this.createGrantManager(trx)
-
-      // removing the phase will cascade to the subscription items and entitlements
-      const subscriptionPhase = await trx
-        .delete(subscriptionPhases)
-        .where(and(eq(subscriptionPhases.id, phaseId), eq(subscriptionPhases.projectId, projectId)))
-        .returning()
-        .then((re) => re[0])
+    const result = await this.repo.withTransaction(async (txRepo) => {
+      const subscriptionPhase = await txRepo.deletePhase({ phaseId, projectId })
 
       if (!subscriptionPhase) {
         return Err(
           new UnPriceSubscriptionError({
             message: "Error while removing subscription phase",
-          })
-        )
-      }
-
-      // remove the grants for the customer - soft delete
-      const deletePhaseOwnedGrantsResult = await grantService.deletePhaseOwnedGrants({
-        projectId,
-        customerId: phase.subscription.customerId,
-        subscriptionPhaseId: phase.id,
-        featurePlanVersionIds: [...new Set(phase.items.map((item) => item.featurePlanVersionId))],
-        phaseStartAt: phase.startAt,
-        phaseEndAt: phase.endAt,
-      })
-
-      if (deletePhaseOwnedGrantsResult.err) {
-        return Err(
-          new UnPriceSubscriptionError({
-            message: deletePhaseOwnedGrantsResult.err.message,
           })
         )
       }
@@ -1110,6 +1250,7 @@ export class SubscriptionService {
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
     const { startAt, endAt, items, id: phaseId } = input
+    const repo = this.repoForDatabase(db)
 
     let endAtToUse = endAt ?? undefined
 
@@ -1119,24 +1260,10 @@ export class SubscriptionService {
     }
 
     // get subscription with phases from start date
-    const subscriptionWithPhases = await (db ?? this.db).query.subscriptions.findFirst({
-      where: (sub, { eq, and }) => and(eq(sub.id, subscriptionId), eq(sub.projectId, projectId)),
-      with: {
-        phases: {
-          where: (phase, { gte }) => gte(phase.startAt, startAt),
-          with: {
-            items: {
-              with: {
-                featurePlanVersion: {
-                  with: {
-                    feature: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+    const subscriptionWithPhases = await repo.findSubscriptionWithPhases({
+      subscriptionId,
+      projectId,
+      phasesFromStartAt: startAt,
     })
 
     if (!subscriptionWithPhases) {
@@ -1168,6 +1295,12 @@ export class SubscriptionService {
       )
     }
 
+    // Credit line policy is fixed once a phase is persisted because wallet grants
+    // and billing periods may already have been created from the original policy.
+    const creditLinePolicyToUse = phaseToUpdate.creditLinePolicy ?? "uncapped"
+    const creditLineAmountToUse =
+      creditLinePolicyToUse === "uncapped" ? null : (phaseToUpdate.creditLineAmount ?? null)
+
     // update the phase with the new dates
     const phase = {
       ...phaseToUpdate,
@@ -1188,17 +1321,17 @@ export class SubscriptionService {
 
     // we allow to set the end date before the current billing cycle end date to allow mid-cycle cancellations
     // if the end date is less than the current date, it will be set to the current date by endAtToUse logic above
-    const result = await (db ?? this.db).transaction(async (trx) => {
-      // create the subscription phase
-      const subscriptionPhase = await trx
-        .update(subscriptionPhases)
-        .set({
+    const result = await repo.withTransaction(async (txRepo, txDb) => {
+      const writeDb = txDb ?? db ?? this.db
+      const subscriptionPhase = await txRepo.updatePhase({
+        phaseId: input.id,
+        data: {
           startAt: startAt,
           endAt: endAtToUse ?? null,
-        })
-        .where(eq(subscriptionPhases.id, input.id))
-        .returning()
-        .then((re) => re[0])
+          creditLinePolicy: creditLinePolicyToUse,
+          creditLineAmount: creditLineAmountToUse,
+        },
+      })
 
       if (!subscriptionPhase) {
         return Err(
@@ -1219,36 +1352,13 @@ export class SubscriptionService {
       })
 
       if (itemsToChange?.length) {
-        const sqlChunksItems: SQL[] = []
-
-        const ids: string[] = []
-        sqlChunksItems.push(sql`(case`)
-
-        for (const item of itemsToChange) {
-          sqlChunksItems.push(
-            item.units === null
-              ? sql`when ${subscriptionItems.id} = ${item.id} then NULL`
-              : sql`when ${subscriptionItems.id} = ${item.id} then cast(${item.units} as int)`
-          )
-          ids.push(item.id)
-        }
-
-        sqlChunksItems.push(sql`end)`)
-
-        const finalSqlItems: SQL = sql.join(sqlChunksItems, sql.raw(" "))
-
-        await trx
-          .update(subscriptionItems)
-          .set({ units: finalSqlItems })
-          .where(
-            and(inArray(subscriptionItems.id, ids), eq(subscriptionItems.projectId, projectId))
-          )
-          .catch((e) => {
-            this.logger.error(e.message)
-            throw new UnPriceSubscriptionError({
-              message: `Error while updating subscription items: ${e.message}`,
-            })
-          })
+        await txRepo.updateItemUnits({
+          projectId,
+          updates: itemsToChange.map((item) => ({
+            id: item.id,
+            units: item.units ?? null,
+          })),
+        })
       }
 
       const updatedPhaseItems = itemsFromPhase.map((item) => {
@@ -1259,19 +1369,36 @@ export class SubscriptionService {
         }
       })
 
+      const syncPhaseEntitlementsResult = await this.syncPhaseEntitlements({
+        customerId: subscriptionWithPhases.customerId,
+        subscriptionId,
+        phase: {
+          id: subscriptionPhase.id,
+          projectId,
+          startAt: subscriptionPhase.startAt,
+          endAt: subscriptionPhase.endAt,
+        },
+        items: this.normalizePhaseGrantItems(updatedPhaseItems),
+        db: writeDb,
+        now,
+      })
+
+      if (syncPhaseEntitlementsResult.err) {
+        return syncPhaseEntitlementsResult
+      }
+
       const syncPhaseGrantsResult = await this.syncPhaseGrants({
         customerId: subscriptionWithPhases.customerId,
         subscriptionId,
         phase: {
           id: subscriptionPhase.id,
           projectId,
-          billingAnchor: subscriptionPhase.billingAnchor,
           startAt: subscriptionPhase.startAt,
           endAt: subscriptionPhase.endAt,
           trialEndsAt: subscriptionPhase.trialEndsAt,
         },
         items: this.normalizePhaseGrantItems(updatedPhaseItems),
-        db: trx,
+        db: writeDb,
         now,
       })
 
@@ -1297,6 +1424,168 @@ export class SubscriptionService {
     return result
   }
 
+  public async cancelSubscription({
+    subscriptionId,
+    projectId,
+    endAt,
+    now,
+  }: {
+    subscriptionId: string
+    projectId: string
+    endAt?: number
+    now: number
+  }): Promise<Result<Subscription, UnPriceSubscriptionError>> {
+    const cancelAt = Math.max(endAt ?? now, now)
+    const subscriptionWithPhases = await this.repo.findSubscriptionWithPhases({
+      subscriptionId,
+      projectId,
+    })
+
+    if (!subscriptionWithPhases) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Subscription not found",
+        })
+      )
+    }
+
+    if (!subscriptionWithPhases.active || subscriptionWithPhases.status === "canceled") {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Subscription is not active",
+        })
+      )
+    }
+
+    const phasesToClose = subscriptionWithPhases.phases.filter(
+      (phase) => phase.startAt <= cancelAt && (phase.endAt ?? Number.POSITIVE_INFINITY) > cancelAt
+    )
+
+    const result = await this.repo.withTransaction(async (txRepo, txDb) => {
+      const writeDb = txDb ?? this.db
+      for (const phase of phasesToClose) {
+        const updatedPhase = await txRepo.updatePhase({
+          phaseId: phase.id,
+          data: { endAt: cancelAt },
+        })
+
+        if (!updatedPhase) {
+          return Err(
+            new UnPriceSubscriptionError({
+              message: "Error while updating subscription phase",
+            })
+          )
+        }
+
+        const items = this.normalizePhaseGrantItems(phase.items ?? [])
+        const phaseForSync = {
+          id: phase.id,
+          projectId,
+          startAt: phase.startAt,
+          endAt: cancelAt,
+        }
+
+        const syncEntitlementsResult = await this.syncPhaseEntitlements({
+          customerId: subscriptionWithPhases.customerId,
+          subscriptionId,
+          phase: phaseForSync,
+          items,
+          db: writeDb,
+          now: cancelAt,
+        })
+
+        if (syncEntitlementsResult.err) {
+          return syncEntitlementsResult
+        }
+
+        const entitlementsResult = await this.entitlementService.getPhaseOwnedEntitlements({
+          projectId,
+          customerId: subscriptionWithPhases.customerId,
+          subscriptionPhaseId: phase.id,
+          featurePlanVersionIds: [...new Set(items.map((item) => item.featurePlanVersionId))],
+          phaseStartAt: phase.startAt,
+          phaseEndAt: cancelAt,
+          db: writeDb,
+        })
+
+        if (entitlementsResult.err) {
+          return Err(
+            new UnPriceSubscriptionError({
+              message: entitlementsResult.err.message,
+            })
+          )
+        }
+
+        const expireGrantsResult = await this.createGrantManager(
+          writeDb
+        ).expireGrantsForEntitlements({
+          projectId,
+          customerEntitlementIds: entitlementsResult.val.map((entitlement) => entitlement.id),
+          expiresAt: cancelAt,
+          db: writeDb,
+        })
+
+        if (expireGrantsResult.err) {
+          return Err(
+            new UnPriceSubscriptionError({
+              message: expireGrantsResult.err.message,
+            })
+          )
+        }
+      }
+
+      const metadata = subscriptionWithPhases.metadata ?? {}
+      const metadataRecord =
+        typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}
+      const existingDates =
+        "dates" in metadataRecord &&
+        metadataRecord.dates &&
+        typeof metadataRecord.dates === "object" &&
+        !Array.isArray(metadataRecord.dates)
+          ? metadataRecord.dates
+          : {}
+
+      const subscription = await txRepo.updateSubscription({
+        subscriptionId,
+        projectId,
+        data: {
+          active: false,
+          status: "canceled",
+          metadata: {
+            ...metadataRecord,
+            reason: "cancelled",
+            dates: {
+              ...existingDates,
+              cancelAt,
+            },
+          },
+        },
+      })
+
+      if (!subscription) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "Error while canceling subscription",
+          })
+        )
+      }
+
+      return Ok(subscription)
+    })
+
+    if (!result.err) {
+      this.waitUntil(
+        this.customerService.updateAccessControlList({
+          customerId: subscriptionWithPhases.customerId,
+          projectId,
+          updates: { subscriptionStatus: "canceled" },
+        })
+      )
+    }
+
+    return result
+  }
+
   public async createSubscription({
     input,
     projectId,
@@ -1309,6 +1598,7 @@ export class SubscriptionService {
     const { customerId, metadata, timezone } = input
 
     const trx = db ?? this.db
+    const repo = this.repoForDatabase(db)
 
     const customerData = await trx.query.customers.findFirst({
       with: {
@@ -1352,26 +1642,17 @@ export class SubscriptionService {
 
     const subscriptionId = newId("subscription")
 
-    const newSubscription = await trx
-      .insert(subscriptions)
-      .values({
-        id: subscriptionId,
-        projectId,
-        customerId: customerData.id,
-        active: false,
-        status: "active",
-        timezone: timezoneToUse,
-        metadata: metadata,
-        // provisional values
-        currentCycleStartAt: Date.now(),
-        currentCycleEndAt: Date.now(),
-      })
-      .returning()
-      .then((re) => re[0])
-      .catch((e) => {
-        this.logger.error(e.message)
-        return null
-      })
+    const newSubscription = await repo.insertSubscription({
+      id: subscriptionId,
+      projectId,
+      customerId: customerData.id,
+      active: false,
+      status: "active",
+      timezone: timezoneToUse,
+      metadata: metadata ?? null,
+      currentCycleStartAt: Date.now(),
+      currentCycleEndAt: Date.now(),
+    })
 
     if (!newSubscription) {
       return Err(
@@ -1391,22 +1672,7 @@ export class SubscriptionService {
     subscriptionId: string
     projectId: string
   }): Promise<Subscription | null> {
-    const subscriptionData = await this.db.query.subscriptions.findFirst({
-      with: {
-        project: true,
-      },
-      where: (subscription, operators) =>
-        operators.and(
-          operators.eq(subscription.id, subscriptionId),
-          operators.eq(subscription.projectId, projectId)
-        ),
-    })
-
-    if (!subscriptionData?.id) {
-      return null
-    }
-
-    return subscriptionData
+    return this.repo.findSubscription({ subscriptionId, projectId })
   }
 
   public async getSubscriptionById({
@@ -1415,35 +1681,11 @@ export class SubscriptionService {
     subscriptionId: string
   }): Promise<Result<unknown | null, UnPriceSubscriptionError>> {
     try {
-      const subscriptionData = await this.db.query.subscriptions.findFirst({
-        where: (subscription, { eq }) => eq(subscription.id, subscriptionId),
-        with: {
-          phases: {
-            with: {
-              planVersion: {
-                with: {
-                  plan: true,
-                },
-              },
-              items: {
-                with: {
-                  featurePlanVersion: {
-                    with: {
-                      feature: true,
-                    },
-                  },
-                },
-              },
-            },
-            orderBy: (phases, { asc }) => asc(phases.startAt),
-          },
-        },
-      })
-
+      const subscriptionData = await this.repo.findSubscriptionFull({ subscriptionId })
       return Ok(subscriptionData ?? null)
     } catch (err) {
-      this.logger.error("error getting subscription by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting subscription by id",
         subscriptionId,
       })
       return Err(
@@ -1467,75 +1709,22 @@ export class SubscriptionService {
     from?: number | null
     to?: number | null
   }): Promise<Result<{ subscriptions: unknown[]; pageCount: number }, UnPriceSubscriptionError>> {
-    const columns = getTableColumns(subscriptions)
-    const customerColumns = getTableColumns(customers)
-
     try {
-      const expressions = [eq(columns.projectId, projectId)]
-
-      const { data, total } = await this.db.transaction(async (tx) => {
-        const query = tx
-          .select({
-            subscriptions: subscriptions,
-            customer: customerColumns,
-          })
-          .from(subscriptions)
-          .innerJoin(
-            customers,
-            and(
-              eq(subscriptions.customerId, customers.id),
-              eq(customers.projectId, subscriptions.projectId)
-            )
-          )
-          .$dynamic()
-
-        const whereQuery = withDateFilters<Subscription>(
-          expressions,
-          columns.createdAtM,
-          from ?? null,
-          to ?? null
-        )
-
-        const data = await withPagination(
-          query,
-          whereQuery,
-          [
-            {
-              column: columns.createdAtM,
-              order: "desc",
-            },
-          ],
-          page,
-          pageSize
-        )
-
-        const total = await tx
-          .select({
-            count: count(),
-          })
-          .from(subscriptions)
-          .where(whereQuery)
-          .execute()
-          .then((res) => res[0]?.count ?? 0)
-
-        const subscriptionsData = data.map((row) => ({
-          ...row.subscriptions,
-          customer: row.customer,
-        }))
-
-        return {
-          data: subscriptionsData,
-          total,
-        }
+      const result = await this.repo.listSubscriptionsByProject({
+        projectId,
+        page,
+        pageSize,
+        from,
+        to,
       })
 
       return Ok({
-        subscriptions: data,
-        pageCount: Math.ceil(total / pageSize),
+        subscriptions: result.subscriptions,
+        pageCount: result.pageCount,
       })
     } catch (err) {
-      this.logger.error("error listing subscriptions by project", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing subscriptions by project",
         projectId,
       })
 
@@ -1555,19 +1744,15 @@ export class SubscriptionService {
     projectId: string
   }): Promise<Result<Subscription[], UnPriceSubscriptionError>> {
     try {
-      const subscriptionData = await this.db.query.subscriptions.findMany({
-        with: {
-          phases: {
-            where: (phase, { eq }) => eq(phase.planVersionId, planVersionId),
-          },
-        },
-        where: (subscription, { eq }) => eq(subscription.projectId, projectId),
+      const subscriptionData = await this.repo.listSubscriptionsByPlanVersion({
+        planVersionId,
+        projectId,
       })
 
-      return Ok(subscriptionData as Subscription[])
+      return Ok(subscriptionData)
     } catch (err) {
-      this.logger.error("error listing subscriptions by plan version", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing subscriptions by plan version",
         planVersionId,
         projectId,
       })
@@ -1584,133 +1769,29 @@ export class SubscriptionService {
     subscriptionId: string
     projectId: string
     now: number
-    // new options
     lock?: boolean
     ttlMs?: number
     run: (m: SubscriptionMachine) => Promise<T>
   }): Promise<T> {
-    const { subscriptionId, projectId, now, run, lock: shouldLock = true, ttlMs = 30_000 } = args
-
-    // create the lock if it should be locked
-    const lock = shouldLock
-      ? new SubscriptionLock({ db: this.db, projectId, subscriptionId })
-      : null
-
-    if (lock) {
-      const acquired = await lock.acquire({
-        ttlMs,
-        now,
-        staleTakeoverMs: 120_000,
-        ownerStaleMs: ttlMs,
-      })
-      this.setLockContext({
-        type: "normal",
-        resource: "subscription",
-        action: "acquire",
-        acquired,
-        ttl_ms: ttlMs,
-      })
-
-      if (!acquired) {
-        this.logger.warn("subscription lock acquire returned false; lock may be held", {
-          subscriptionId,
-          projectId,
-          ttlMs,
-        })
-      }
-      if (!acquired) throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
-    }
-
-    // heartbeat to keep the lock alive for long transitions
-    const stopHeartbeat = lock
-      ? (() => {
-          let stopped = false
-          const startedAt = Date.now()
-          const renewEveryMs = Math.max(1_000, Math.floor(ttlMs / 2))
-          const maxHoldMs = Math.max(ttlMs * 10, 2 * 60_000) // cap renewals to avoid indefinite locks
-
-          const interval = setInterval(async () => {
-            if (stopped) return
-            const elapsed = Date.now() - startedAt
-            if (elapsed > maxHoldMs) {
-              this.setLockContext({
-                type: "normal",
-                resource: "subscription",
-                action: "heartbeat_stopped",
-                acquired: false,
-                ttl_ms: ttlMs,
-                max_hold_ms: maxHoldMs,
-              })
-              this.logger.warn("subscription lock heartbeat maxHoldMs reached; stopping renew", {
-                subscriptionId,
-                projectId,
-                ttlMs,
-                maxHoldMs,
-              })
-              stopped = true
-              clearInterval(interval)
-              return
-            }
-            try {
-              const ok = await lock.extend({ ttlMs })
-              if (!ok) {
-                this.setLockContext({
-                  type: "normal",
-                  resource: "subscription",
-                  action: "extend",
-                  acquired: false,
-                  ttl_ms: ttlMs,
-                })
-                this.logger.warn("subscription lock extend returned false; lock may be lost", {
-                  subscriptionId,
-                  projectId,
-                })
-              }
-            } catch (e) {
-              this.setLockContext({
-                type: "normal",
-                resource: "subscription",
-                action: "extend_error",
-                acquired: false,
-                ttl_ms: ttlMs,
-              })
-              this.logger.error("subscription lock heartbeat extend failed", {
-                error: toErrorContext(e),
-                subscriptionId,
-                projectId,
-              })
-            }
-          }, renewEveryMs)
-
-          return () => {
-            stopped = true
-            clearInterval(interval)
-          }
-        })()
-      : () => {}
-
-    const { err, val: machine } = await SubscriptionMachine.create({
-      now,
-      subscriptionId,
-      projectId,
-      logger: this.logger,
-      analytics: this.analytics,
-      customer: this.customerService,
-      db: this.db,
-    })
-
-    if (err) {
-      stopHeartbeat()
-      if (lock) await lock.release()
-      throw err
-    }
-
     try {
-      return await run(machine)
-    } finally {
-      await machine.shutdown()
-      stopHeartbeat()
-      if (lock) await lock.release()
+      return await withLockedMachine({
+        ...args,
+        db: this.db,
+        repo: this.repo,
+        logger: this.logger,
+        analytics: this.analytics,
+        customer: this.customerService,
+        ratingService: this.ratingService,
+        ledgerService: this.ledgerService,
+        walletService: this.walletService,
+        setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
+          this.setLockContext(ctx),
+      })
+    } catch (e) {
+      if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
+        throw new UnPriceSubscriptionError({ message: "SUBSCRIPTION_BUSY" })
+      }
+      throw e
     }
   }
 
@@ -1737,6 +1818,53 @@ export class SubscriptionService {
       return Ok({ status })
     } catch (e) {
       return Err(e as UnPriceSubscriptionError)
+    }
+  }
+
+  public async activateWallet({
+    subscriptionId,
+    projectId,
+    now = Date.now(),
+  }: {
+    subscriptionId: string
+    projectId: string
+    now?: number
+  }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError> | null> {
+    if (!this.walletService) return null
+
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        lock: false,
+        run: async (machine) => {
+          const result = await machine.activate()
+          if (result.err) throw result.err
+          return result.val
+        },
+      })
+
+      // The activating actor parks failed activations in `pending_activation`
+      // (a recoverable, sweeper-driven state) instead of throwing. Surface
+      // that as Err here so callers (create.ts, retry sweeper) treat it as a
+      // failure and don't return a "succeeded" Result with an empty wallet.
+      if (status === "pending_activation") {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "Wallet activation failed; subscription parked in pending_activation",
+            context: { subscriptionId, projectId, status },
+          })
+        )
+      }
+
+      return Ok({ status })
+    } catch (e) {
+      return Err(
+        e instanceof UnPriceSubscriptionError
+          ? e
+          : new UnPriceSubscriptionError({ message: (e as Error).message })
+      )
     }
   }
 
@@ -1773,4 +1901,66 @@ export class SubscriptionService {
       return Err(e as UnPriceSubscriptionError)
     }
   }
+
+  public async reconcilePaymentOutcome({
+    subscriptionId,
+    projectId,
+    invoiceId,
+    outcome,
+    failureMessage,
+    now = Date.now(),
+  }: {
+    subscriptionId: string
+    projectId: string
+    invoiceId: string
+    outcome: "success" | "failure"
+    failureMessage?: string
+    now?: number
+  }): Promise<Result<{ status: SusbriptionMachineStatus }, UnPriceSubscriptionError>> {
+    try {
+      const status = await this.withSubscriptionMachine({
+        subscriptionId,
+        projectId,
+        now,
+        lock: true,
+        run: async (machine) => {
+          if (outcome === "success") {
+            const ok = await machine.reportPaymentSuccess({ invoiceId })
+            if (ok.err) {
+              throw ok.err
+            }
+            return ok.val
+          }
+
+          const failed = await machine.reportPaymentFailure({
+            invoiceId,
+            error: failureMessage ?? "Payment failed from provider webhook",
+          })
+          if (failed.err) {
+            throw failed.err
+          }
+          return failed.val
+        },
+      })
+
+      return Ok({ status })
+    } catch (error) {
+      return Err(
+        error instanceof UnPriceSubscriptionError
+          ? error
+          : new UnPriceSubscriptionError({
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to reconcile subscription payment outcome",
+            })
+      )
+    }
+  }
+}
+
+function minNullableExpiry(left: number | null, right: number | null): number | null {
+  if (left === null) return right
+  if (right === null) return left
+  return Math.min(left, right)
 }

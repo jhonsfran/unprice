@@ -27,8 +27,8 @@ export const getPlanClickBySessionId = protectedProcedure
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
 
-      opts.ctx.logger.error("getPlanClickBySessionId failed", {
-        error: errorMessage,
+      opts.ctx.logger.error(err, {
+        context: "getPlanClickBySessionId failed",
         isTimeout: errorMessage.includes("timeout"),
       })
 

@@ -1,0 +1,43 @@
+---
+title: "List"
+description: "List features for the authenticated project"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.features.list();
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "features": [
+    {
+      "id": "feat_1234567890",
+      "slug": "tokens",
+      "title": "Tokens"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Request
+
+No parameters required.
+
+## Response
+
+<ResponseField name="features" type="array" required>
+    Features owned by the authenticated project.
+</ResponseField>

@@ -1,0 +1,18 @@
+input:
+  http_server:
+    path: /ingest
+    allowed_verbs: [POST]
+    sync_response:
+      status: "200"
+      headers:
+        Content-Type: application/json
+
+pipeline:
+  processors:
+    - unarchive:
+        format: json_array
+
+output:
+  file:
+    path: /data/events.ndjson
+    codec: lines

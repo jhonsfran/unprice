@@ -8,11 +8,15 @@ import { GrantsManager } from "./entitlements/grants"
 import { EntitlementService } from "./entitlements/service"
 import { EventService } from "./events/service"
 import { FeatureService } from "./features/service"
+import { LedgerGateway } from "./ledger"
 import { PageService } from "./pages/service"
 import { PaymentProviderResolver } from "./payment-provider/resolver"
 import { PlanService } from "./plans/service"
 import { ProjectService } from "./projects/service"
+import { RatingService } from "./rating/service"
+import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
+import { WalletService } from "./wallet"
 import { WorkspaceService } from "./workspaces/service"
 
 /**
@@ -33,10 +37,13 @@ export interface ServiceContext {
   workspaces: WorkspaceService
   grantsManager: GrantsManager
   paymentProviderResolver: PaymentProviderResolver
+  rating: RatingService
+  ledger: LedgerGateway
   billing: BillingService
   subscriptions: SubscriptionService
   entitlements: EntitlementService
   plans: PlanService
+  wallet: WalletService
 }
 
 /**
@@ -55,6 +62,11 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   const paymentProviderResolver = new PaymentProviderResolver({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
+  const ledger = new LedgerGateway({
     db: deps.db,
     logger: deps.logger,
   })
@@ -128,6 +140,18 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   // 2. Services with deps on leaves
+  const rating = new RatingService({
+    logger: deps.logger,
+    analytics: deps.analytics,
+    grantsManager,
+  })
+
+  const wallet = new WalletService({
+    db: deps.db,
+    logger: deps.logger,
+    ledgerGateway: ledger,
+  })
+
   const billing = new BillingService({
     db: deps.db,
     logger: deps.logger,
@@ -137,17 +161,9 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     metrics: deps.metrics,
     customerService: customers,
     grantsManager,
-  })
-
-  const subscriptions = new SubscriptionService({
-    db: deps.db,
-    logger: deps.logger,
-    analytics: deps.analytics,
-    waitUntil: deps.waitUntil,
-    cache: deps.cache,
-    metrics: deps.metrics,
-    customerService: customers,
-    billingService: billing,
+    ratingService: rating,
+    ledgerService: ledger,
+    walletService: wallet,
   })
 
   const entitlements = new EntitlementService({
@@ -162,6 +178,22 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     billingService: billing,
   })
 
+  const subscriptions = new SubscriptionService({
+    db: deps.db,
+    repo: new DrizzleSubscriptionRepository(deps.db),
+    logger: deps.logger,
+    analytics: deps.analytics,
+    waitUntil: deps.waitUntil,
+    cache: deps.cache,
+    metrics: deps.metrics,
+    customerService: customers,
+    entitlementService: entitlements,
+    billingService: billing,
+    ratingService: rating,
+    ledgerService: ledger,
+    walletService: wallet,
+  })
+
   return {
     analytics,
     apikeys,
@@ -174,9 +206,12 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     workspaces,
     grantsManager,
     paymentProviderResolver,
+    rating,
+    ledger,
     billing,
     subscriptions,
     entitlements,
     plans,
+    wallet,
   }
 }

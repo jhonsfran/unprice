@@ -1,20 +1,22 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { customerSessions, customers } from "@unprice/db/schema"
+import { customerProviderIds, customerSessions, customers } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
+import { getPaymentProviderCapabilities } from "../../payment-provider/service"
+import { checkPaymentProviderAvailability } from "../payment-provider/availability"
+import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 type SignUpDeps = {
   services: Pick<ServiceContext, "plans" | "customers" | "subscriptions">
   db: Database
   logger: Logger
   analytics: Analytics
-  // biome-ignore lint/suspicious/noExplicitAny: platform-specific promise handler
-  waitUntil: (promise: Promise<any>) => void
+  waitUntil: (promise: Promise<unknown>) => void
 }
 
 type SignUpInput = {
@@ -35,6 +37,18 @@ type SignUpContext = {
   customerId: string
   successUrl: string
   cancelUrl: string
+}
+
+function normalizePhaseCreditLine(input: {
+  creditLinePolicy?: CustomerSignUp["creditLinePolicy"]
+  creditLineAmount?: CustomerSignUp["creditLineAmount"]
+}) {
+  const creditLinePolicy = input.creditLinePolicy ?? "uncapped"
+
+  return {
+    creditLinePolicy,
+    creditLineAmount: creditLinePolicy === "uncapped" ? null : (input.creditLineAmount ?? null),
+  }
 }
 
 function isExternalIdConflictError(error: unknown): boolean {
@@ -290,6 +304,7 @@ async function handlePaymentRequiredFlow(
   const paymentProvider = planVersion.paymentProvider
   const paymentRequired = planVersion.paymentMethodRequired
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
+  const phaseCreditLine = normalizePhaseCreditLine(input)
 
   const { err: paymentProviderErr, val: paymentProviderService } =
     await deps.services.customers.getPaymentProvider({
@@ -320,6 +335,8 @@ async function handlePaymentRequiredFlow(
         id: planVersion.id,
         projectId: projectId,
         config: config,
+        creditLinePolicy: phaseCreditLine.creditLinePolicy,
+        creditLineAmount: phaseCreditLine.creditLineAmount,
         paymentMethodRequired: paymentRequired,
       },
       metadata: {
@@ -403,6 +420,8 @@ async function handleDirectProvisioningFlow(
 > {
   const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
   const { email, name, config, timezone, metadata, externalId } = input
+  const paymentProvider = planVersion.paymentProvider
+  const phaseCreditLine = normalizePhaseCreditLine(input)
 
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
   const customerMetadata = externalId ? { ...metadata, externalId } : metadata
@@ -434,6 +453,23 @@ async function handleDirectProvisioningFlow(
         )
       }
 
+      // Providers that don't support async payment confirmation (e.g. sandbox)
+      // won't go through the redirect-based sign-up flow, so we create the
+      // provider mapping here using the internal customer id.
+      const providerCaps = getPaymentProviderCapabilities(paymentProvider)
+      if (!providerCaps.asyncPaymentConfirmation) {
+        await tx.insert(customerProviderIds).values({
+          id: newId("customer_provider"),
+          projectId,
+          customerId: newCustomer.id,
+          provider: paymentProvider,
+          providerCustomerId: newCustomer.id,
+          metadata: {
+            setupSessionId: "direct_signup",
+          },
+        })
+      }
+
       const { err, val: newSubscription } = await deps.services.subscriptions.createSubscription({
         input: {
           customerId: newCustomer.id,
@@ -460,6 +496,9 @@ async function handleDirectProvisioningFlow(
           planVersionId: planVersion.id,
           startAt: phaseTimestamp,
           config: config,
+          paymentProvider: paymentProvider,
+          creditLinePolicy: phaseCreditLine.creditLinePolicy,
+          creditLineAmount: phaseCreditLine.creditLineAmount,
           paymentMethodRequired: planVersion.paymentMethodRequired,
           customerId: newCustomer.id,
           subscriptionId: newSubscription.id,
@@ -486,12 +525,19 @@ async function handleDirectProvisioningFlow(
         },
       })
 
-      return Ok({ customerId: newCustomer.id })
+      return Ok({ customerId: newCustomer.id, subscriptionId: newSubscription.id })
     })
 
     if (txResult.err) {
       return Err(txResult.err)
     }
+
+    await activateWalletIfSubscriptionIsActive(deps, {
+      subscriptionId: txResult.val.subscriptionId,
+      projectId,
+      context:
+        "customer signup wallet activation failed; subscription parked in pending_activation",
+    })
 
     deps.waitUntil(
       deps.analytics.ingestEvents({
@@ -560,6 +606,27 @@ export async function signUp(
 
   const { planVersion, pageId } = planResolution.val
 
+  const providerAvailability = await checkPaymentProviderAvailability(deps, {
+    projectId,
+    paymentProvider: planVersion.paymentProvider,
+  })
+
+  if (providerAvailability.err) {
+    return Err(providerAvailability.err)
+  }
+
+  if (!providerAvailability.val.available) {
+    return Err(
+      new UnPriceCustomerError({
+        code:
+          providerAvailability.val.reason === "not_ready"
+            ? "PAYMENT_PROVIDER_ERROR"
+            : "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
+        message: providerAvailability.val.message,
+      })
+    )
+  }
+
   if (input.externalId) {
     const { err: existingCustomerErr, val: existingCustomer } =
       await deps.services.customers.getCustomerByExternalId(projectId, input.externalId, {
@@ -601,9 +668,9 @@ export async function signUp(
     },
   })
 
-  const isSandbox = planVersion.paymentProvider === "sandbox"
+  const capabilities = getPaymentProviderCapabilities(planVersion.paymentProvider)
 
-  if (planVersion.paymentMethodRequired && !isSandbox) {
+  if (planVersion.paymentMethodRequired && capabilities.asyncPaymentConfirmation) {
     return handlePaymentRequiredFlow(deps, context)
   }
 

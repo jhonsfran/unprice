@@ -1,0 +1,1329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Plan Version — Pro · v3 · Draft</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..900,0..100&family=Hanken+Grotesk:wght@300..800&family=JetBrains+Mono:wght@300..700&display=swap"
+  rel="stylesheet"
+/>
+<style>
+  :root {
+    --paper: #f4efe3;
+    --paper-soft: #ece5d2;
+    --paper-warm: #fdf9ec;
+    --ink: #161410;
+    --ink-2: #4a463d;
+    --ink-3: #7a7567;
+    --rule: #cdc6b1;
+    --rule-soft: #ddd5be;
+    --ember: #b53d18;
+    --ember-soft: #e9c4b4;
+    --forest: #2c4a3a;
+    --forest-soft: #b9c8bc;
+    --sun: #c08a1a;
+    --shadow: 0 1px 0 rgba(22, 20, 16, 0.04);
+    --serif: "Fraunces", ui-serif, Georgia, serif;
+    --sans: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "ss01", "ss02", "cv11";
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.06 0 0 0 0 0.05 0 0 0 0 0.04 0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity: 0.6;
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* ───────────────────────── masthead ───────────────────────── */
+  .masthead {
+    position: relative;
+    z-index: 2;
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper);
+  }
+
+  .masthead-strip {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 28px;
+    border-bottom: 1px solid var(--rule-soft);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+  }
+  .masthead-strip span + span { color: var(--ink-2); }
+
+  .masthead-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 28px 16px;
+    gap: 24px;
+  }
+
+  .crumb {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .crumb a { color: var(--ink-3); text-decoration: none; border-bottom: 1px dotted var(--rule); padding-bottom: 1px; }
+  .crumb a:hover { color: var(--ember); border-bottom-color: var(--ember); }
+  .crumb span.sep { opacity: 0.4; }
+  .crumb span.current { color: var(--ink); }
+
+  .masthead-title {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    flex: 1;
+    justify-content: center;
+  }
+  .masthead-title h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-variation-settings: "opsz" 144, "SOFT" 30;
+    font-size: 32px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .masthead-title h1 em {
+    font-style: italic;
+    color: var(--ember);
+    font-variation-settings: "opsz" 144, "SOFT" 100;
+  }
+
+  .pill {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    background: transparent;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .pill::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .pill.draft { color: var(--sun); }
+  .pill.published { color: var(--forest); }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .btn {
+    font-family: var(--sans);
+    font-size: 13.5px;
+    font-weight: 500;
+    line-height: 1;
+    padding: 10px 16px;
+    border-radius: 2px;
+    border: 1px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.12s ease;
+    letter-spacing: 0.01em;
+  }
+  .btn:hover { transform: translateY(-1px); background: var(--ember); border-color: var(--ember); }
+  .btn.ghost {
+    background: transparent;
+    color: var(--ink-2);
+    border-color: var(--rule);
+  }
+  .btn.ghost:hover { color: var(--ink); border-color: var(--ink); background: transparent; }
+  .btn.primary { background: var(--ember); border-color: var(--ember); color: #fff8eb; }
+  .btn.primary:hover { background: #99320d; border-color: #99320d; }
+
+  /* ───────────────────────── shell layout ───────────────────────── */
+  .shell {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 280px 1fr 380px;
+    gap: 0;
+    min-height: calc(100vh - 90px);
+  }
+
+  .rail {
+    border-right: 1px solid var(--rule);
+    padding: 28px 24px;
+    background: linear-gradient(180deg, var(--paper) 0%, var(--paper-soft) 100%);
+  }
+  .rail.right {
+    border-right: none;
+    border-left: 1px solid var(--rule);
+    background: var(--paper-warm);
+    padding: 28px 24px;
+  }
+
+  .canvas {
+    padding: 36px 44px 80px;
+    max-width: 820px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  /* ───────────────────────── left rail ───────────────────────── */
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    margin: 0 0 14px;
+    font-weight: 500;
+  }
+
+  .meta-card {
+    border-top: 1px solid var(--ink);
+    border-bottom: 1px solid var(--rule);
+    padding: 18px 0 16px;
+    margin-bottom: 22px;
+  }
+  .meta-card h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 26px;
+    line-height: 1.05;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .meta-card .v-tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  dl.meta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 8px 14px;
+    margin: 0 0 22px;
+    align-items: baseline;
+  }
+  dl.meta dt {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-3);
+  }
+  dl.meta dd {
+    margin: 0;
+    font-size: 14px;
+    color: var(--ink);
+    font-feature-settings: "tnum" on;
+  }
+  dl.meta dd .mono { font-family: var(--mono); }
+
+  .edit-link {
+    font-size: 13px;
+    color: var(--ember);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--ember);
+    padding-bottom: 1px;
+    cursor: pointer;
+  }
+  .edit-link:hover { color: #7c2a10; border-bottom-color: #7c2a10; }
+
+  .summary-strip {
+    border-top: 1px solid var(--rule);
+    padding-top: 22px;
+    margin-top: 22px;
+  }
+  .summary-strip .num {
+    font-family: var(--serif);
+    font-size: 38px;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    margin: 0 0 2px;
+    font-variation-settings: "opsz" 144;
+  }
+  .summary-strip .num em { color: var(--ember); font-style: italic; }
+  .summary-strip .num-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+  }
+
+  /* ───────────────────────── canvas ───────────────────────── */
+  .page-head {
+    margin-bottom: 24px;
+  }
+  .page-head h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-variation-settings: "opsz" 144, "SOFT" 50;
+    font-size: 56px;
+    line-height: 0.95;
+    letter-spacing: -0.025em;
+    margin: 0 0 14px;
+    max-width: 12ch;
+  }
+  .page-head h2 em {
+    font-style: italic;
+    color: var(--ember);
+  }
+  .page-head .lede {
+    font-size: 16px;
+    color: var(--ink-2);
+    line-height: 1.55;
+    max-width: 56ch;
+  }
+
+  .add-feature {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px dashed var(--rule);
+    border-radius: 2px;
+    margin: 28px 0 14px;
+    background: rgba(255, 249, 238, 0.5);
+    cursor: text;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .add-feature:hover { border-color: var(--ember); background: var(--paper-warm); }
+  .add-feature .plus {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 22px;
+    color: var(--ember);
+    line-height: 1;
+    width: 22px;
+    text-align: center;
+  }
+  .add-feature input {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    outline: none;
+    font-family: var(--sans);
+    font-size: 14.5px;
+    color: var(--ink);
+  }
+  .add-feature input::placeholder { color: var(--ink-3); font-style: italic; }
+  .add-feature kbd {
+    font-family: var(--mono);
+    font-size: 10px;
+    border: 1px solid var(--rule);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--ink-3);
+    background: var(--paper);
+  }
+
+  /* feature stack */
+  .feature {
+    border-top: 1px solid var(--ink);
+    padding: 22px 0 22px;
+    position: relative;
+    transition: padding 0.2s ease;
+  }
+  .feature:last-child { border-bottom: 1px solid var(--rule); }
+  .feature .grip {
+    position: absolute;
+    left: -22px;
+    top: 28px;
+    width: 14px;
+    color: var(--rule);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1;
+    cursor: grab;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .feature:hover .grip { opacity: 1; }
+
+  .feature-head {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 18px;
+    align-items: start;
+    cursor: pointer;
+  }
+
+  .feature-name {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .feature-name h3 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 22px;
+    line-height: 1.15;
+    margin: 0;
+    letter-spacing: -0.01em;
+    font-variation-settings: "opsz" 36;
+  }
+  .feature-name .slug {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .feature-summary {
+    margin: 4px 0 0;
+    color: var(--ink-2);
+    font-size: 14px;
+  }
+  .feature-summary .accent { color: var(--ember); font-weight: 500; }
+
+  .feature-price {
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    font-feature-settings: "tnum" on;
+    line-height: 1.4;
+  }
+  .feature-price .label {
+    display: block;
+    font-size: 10px;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    margin-bottom: 4px;
+  }
+  .feature-price .v {
+    font-family: var(--serif);
+    font-size: 20px;
+    font-variation-settings: "opsz" 36;
+  }
+
+  .badges {
+    display: flex;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    padding: 3px 8px;
+    border-radius: 2px;
+    background: var(--paper-soft);
+    color: var(--ink-2);
+    border: 1px solid var(--rule-soft);
+  }
+  .badge.live { background: var(--forest-soft); color: var(--forest); border-color: var(--forest); }
+  .badge.flag { background: var(--ember-soft); color: var(--ember); border-color: var(--ember); }
+
+  /* expanded feature editor */
+  .feature.open {
+    background: var(--paper-warm);
+    margin: 0 -28px;
+    padding: 28px 28px 30px;
+    border-top: 1px solid var(--ember);
+    border-bottom: 1px solid var(--ember);
+  }
+  .feature.open + .feature { border-top: 1px solid var(--ink); }
+  .feature.open .grip { color: var(--ember-soft); opacity: 1; left: 6px; }
+
+  .editor {
+    margin-top: 24px;
+    padding-top: 22px;
+    border-top: 1px dashed var(--rule);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 26px;
+  }
+
+  .field-group h4 {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+    font-weight: 500;
+    margin: 0 0 12px;
+  }
+
+  /* model chooser */
+  .model-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .model {
+    padding: 16px 14px 14px;
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    position: relative;
+  }
+  .model:hover { border-color: var(--ink); }
+  .model.selected {
+    border-color: var(--ember);
+    background: #fff;
+    box-shadow: 0 0 0 1px var(--ember) inset, 0 6px 24px -12px rgba(181, 61, 24, 0.4);
+  }
+  .model.selected::after {
+    content: "✓";
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    color: var(--ember);
+    font-family: var(--serif);
+    font-size: 14px;
+    font-style: italic;
+  }
+  .model .icon {
+    font-family: var(--serif);
+    font-size: 24px;
+    line-height: 1;
+    margin-bottom: 8px;
+    color: var(--ember);
+    font-style: italic;
+    font-variation-settings: "opsz" 144;
+  }
+  .model .t {
+    font-family: var(--serif);
+    font-size: 16px;
+    font-weight: 400;
+    margin-bottom: 4px;
+    line-height: 1.2;
+    letter-spacing: -0.005em;
+  }
+  .model .d {
+    font-size: 12px;
+    color: var(--ink-3);
+    line-height: 1.4;
+    margin-bottom: 10px;
+  }
+  .model .ex {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-2);
+    border-top: 1px dashed var(--rule);
+    padding-top: 8px;
+    margin-top: auto;
+  }
+  .model .ex span { color: var(--ember); }
+
+  /* rules editor */
+  .rules { display: flex; flex-direction: column; gap: 10px; }
+  .rule {
+    display: grid;
+    grid-template-columns: 28px 1fr 28px;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+  }
+  .rule .num {
+    font-family: var(--serif);
+    font-size: 18px;
+    font-style: italic;
+    color: var(--ember);
+    text-align: center;
+    font-variation-settings: "opsz" 36;
+  }
+  .rule-text {
+    font-size: 14px;
+    color: var(--ink);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.7;
+  }
+  .rule-text .lit { color: var(--ink-3); font-size: 13px; }
+  .rule-text input.in {
+    border: 0;
+    border-bottom: 1px solid var(--ink);
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--ink);
+    width: 70px;
+    padding: 2px 4px;
+    text-align: center;
+    outline: none;
+    font-feature-settings: "tnum" on;
+  }
+  .rule-text input.in.wide { width: 100px; }
+  .rule-text input.in:focus { border-bottom-color: var(--ember); color: var(--ember); }
+  .rule-text .pricer {
+    background: var(--paper-warm);
+    border: 1px solid var(--ember-soft);
+    border-radius: 2px;
+    padding: 4px 8px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ember);
+    display: inline-flex;
+    gap: 2px;
+    align-items: center;
+  }
+  .rule-text .pricer input { border: 0; background: transparent; outline: none; font: inherit; color: inherit; width: 60px; text-align: right; }
+  .rule .x {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .rule .x:hover { color: var(--ember); border-color: var(--ember-soft); }
+
+  .add-rule {
+    display: inline-flex;
+    align-self: flex-start;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 0;
+    color: var(--ember);
+    cursor: pointer;
+    font-family: var(--sans);
+    font-size: 13px;
+    padding: 4px 0 6px;
+    border-bottom: 1px dotted var(--ember);
+  }
+  .add-rule:hover { color: #7c2a10; border-bottom-color: #7c2a10; }
+  .add-rule .plus { font-family: var(--serif); font-style: italic; font-size: 17px; line-height: 0.8; }
+
+  /* meter strip — for usage features */
+  .meter {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    padding: 14px;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+  }
+  .meter label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .meter label .l {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink-3);
+  }
+  .meter select, .meter input {
+    border: 0;
+    border-bottom: 1px solid var(--ink);
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    padding: 4px 0;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path fill='%23161410' d='M5 7.5L1 3.5h8z'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 0 center;
+    padding-right: 14px;
+  }
+
+  /* advanced disclosure */
+  details.advanced {
+    border-top: 1px dashed var(--rule);
+    padding-top: 16px;
+  }
+  details.advanced summary {
+    cursor: pointer;
+    list-style: none;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  details.advanced summary::-webkit-details-marker { display: none; }
+  details.advanced summary::before {
+    content: "+";
+    font-family: var(--serif);
+    font-size: 14px;
+    color: var(--ember);
+    font-style: italic;
+  }
+  details.advanced[open] summary::before { content: "−"; }
+  details.advanced summary:hover { color: var(--ink); }
+  details.advanced .adv-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 14px;
+  }
+
+  .editor-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 18px;
+    border-top: 1px dashed var(--rule);
+    margin-top: 4px;
+  }
+  .editor-actions .left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .danger-link {
+    background: transparent;
+    border: 0;
+    color: var(--ink-3);
+    font-family: var(--sans);
+    font-size: 12.5px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 4px;
+  }
+  .danger-link:hover { color: var(--ember); }
+
+  /* ───────────────────────── invoice rail ───────────────────────── */
+  .invoice {
+    position: sticky;
+    top: 24px;
+    background: #fdfaef;
+    border: 1px solid var(--ink);
+    box-shadow: 6px 6px 0 var(--ink);
+    padding: 26px 24px 22px;
+  }
+  .invoice .receipt-strip {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed var(--rule);
+  }
+  .invoice .receipt-strip .l {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+  }
+  .invoice .receipt-strip .r {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--ink-3);
+  }
+  .invoice h3 {
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 28px;
+    line-height: 1.05;
+    margin: 0 0 4px;
+    letter-spacing: -0.015em;
+    font-variation-settings: "opsz" 144;
+  }
+  .invoice .charge {
+    font-family: var(--serif);
+    font-size: 44px;
+    line-height: 1;
+    margin: 8px 0 4px;
+    letter-spacing: -0.025em;
+    font-variation-settings: "opsz" 144, "SOFT" 30;
+    font-feature-settings: "tnum" on;
+  }
+  .invoice .charge .cents { font-size: 22px; vertical-align: super; line-height: 1; color: var(--ink-2); margin-left: 2px; }
+  .invoice .charge .per { font-size: 14px; color: var(--ink-3); font-family: var(--sans); margin-left: 4px; font-variation-settings: normal; }
+
+  .invoice .lines {
+    list-style: none;
+    margin: 18px 0 0;
+    padding: 0;
+    border-top: 1px solid var(--ink);
+  }
+  .invoice .lines li {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .invoice .lines li:last-child { border-bottom: 0; }
+  .invoice .lines .name { font-size: 14px; line-height: 1.35; color: var(--ink); }
+  .invoice .lines .name small { display: block; color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+  .invoice .lines .price {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--ink);
+    font-feature-settings: "tnum" on;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .invoice .lines .price.free { color: var(--forest); font-style: italic; font-family: var(--serif); font-size: 14px; font-variation-settings: "opsz" 36; }
+  .invoice .lines .price.usage { color: var(--ember); }
+
+  .invoice .total {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--ink);
+    align-items: baseline;
+  }
+  .invoice .total .l {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--ink-3);
+  }
+  .invoice .total .v {
+    font-family: var(--serif);
+    font-size: 26px;
+    letter-spacing: -0.015em;
+    font-variation-settings: "opsz" 144;
+    font-feature-settings: "tnum" on;
+  }
+
+  .invoice .ftr {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--rule);
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink-3);
+  }
+
+  /* live highlight pulse — when invoice updates */
+  @keyframes pulse {
+    0%, 100% { background-color: transparent; }
+    20% { background-color: rgba(192, 138, 26, 0.18); }
+  }
+  .invoice .lines li.changed { animation: pulse 1.4s ease 0.2s; }
+
+  /* ───────────────────────── footer ledger ───────────────────────── */
+  footer.ledger {
+    border-top: 1px solid var(--ink);
+    padding: 14px 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-3);
+    background: var(--paper);
+    position: relative;
+    z-index: 2;
+  }
+  footer.ledger em {
+    color: var(--ember);
+    font-family: var(--serif);
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 13px;
+    font-variation-settings: "opsz" 36;
+  }
+
+  /* responsive */
+  @media (max-width: 1180px) {
+    .shell { grid-template-columns: 240px 1fr 320px; }
+    .canvas { padding: 28px 28px 60px; }
+  }
+  @media (max-width: 980px) {
+    .shell { grid-template-columns: 1fr; }
+    .rail, .rail.right { border: 0; border-bottom: 1px solid var(--rule); }
+    .invoice { position: static; }
+    .page-head h2 { font-size: 42px; }
+  }
+</style>
+</head>
+<body>
+  <!-- ───────────────────── masthead ───────────────────── -->
+  <header class="masthead">
+    <div class="masthead-strip">
+      <span>Unprice · Plan Press</span>
+      <span>Vol. III · No. 14 — Sat 02 May 2026</span>
+      <span>Project · acme-prod</span>
+    </div>
+
+    <div class="masthead-main">
+      <nav class="crumb">
+        <a href="#">Plans</a>
+        <span class="sep">/</span>
+        <a href="#">Pro</a>
+        <span class="sep">/</span>
+        <span class="current">v3 · draft</span>
+      </nav>
+
+      <div class="masthead-title">
+        <h1>The <em>Pro</em> plan</h1>
+        <span class="pill draft">Draft · v3</span>
+      </div>
+
+      <div class="actions">
+        <button class="btn ghost">Discard</button>
+        <button class="btn ghost">Preview</button>
+        <button class="btn primary">Publish version</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ───────────────────── shell ───────────────────── -->
+  <div class="shell">
+
+    <!-- ─── left rail: version metadata ─── -->
+    <aside class="rail">
+      <p class="eyebrow">This version</p>
+
+      <div class="meta-card">
+        <h2>Pro · v3</h2>
+        <span class="v-tag">Draft — last edit 4m ago</span>
+      </div>
+
+      <dl class="meta">
+        <dt>Currency</dt><dd>USD</dd>
+        <dt>Billing</dt><dd>Monthly · day 1</dd>
+        <dt>Trial</dt><dd>14 days</dd>
+        <dt>Collection</dt><dd>Auto-charge</dd>
+        <dt>Provider</dt><dd>Stripe</dd>
+        <dt>ID</dt><dd><span class="mono" style="font-size: 11px; color: var(--ink-3);">pv_2k9j…ax3p</span></dd>
+      </dl>
+
+      <a class="edit-link">Edit version settings →</a>
+
+      <div class="summary-strip">
+        <p class="num"><em>4</em> features</p>
+        <span class="num-label">Active in this version</span>
+      </div>
+      <div class="summary-strip" style="border-top: 1px solid var(--rule); padding-top: 18px; margin-top: 18px;">
+        <p class="num"><em>$29</em><span style="font-size: 16px; color: var(--ink-3); font-style: normal;"> /mo base</span></p>
+        <span class="num-label">Plus metered usage</span>
+      </div>
+    </aside>
+
+    <!-- ─── canvas: features ─── -->
+    <main class="canvas">
+      <div class="page-head">
+        <h2>Features &amp; <em>pricing</em>.</h2>
+        <p class="lede">
+          Stack the features customers receive. Configure how each one is billed.
+          The receipt on the right reflects exactly what your customer will see.
+        </p>
+      </div>
+
+      <!-- add feature: command-palette style -->
+      <label class="add-feature">
+        <span class="plus">+</span>
+        <input placeholder="Add a feature — type to search or create…" />
+        <kbd>⌘K</kbd>
+      </label>
+
+      <!-- ────── feature 1: included flat ────── -->
+      <article class="feature">
+        <span class="grip">≡</span>
+        <header class="feature-head">
+          <div>
+            <div class="feature-name">
+              <h3>Seats</h3>
+              <span class="slug">team_seats</span>
+            </div>
+            <p class="feature-summary">Up to <span class="accent">5 users included</span> — extra seats charged in tiers.</p>
+            <div class="badges">
+              <span class="badge">Per seat</span>
+              <span class="badge">Tiered</span>
+            </div>
+          </div>
+          <div class="feature-price">
+            <span class="label">Starts at</span>
+            <span class="v">$0</span>
+            <span style="display:block; font-size: 11px; color: var(--ink-3); margin-top: 4px;">then $8/seat</span>
+          </div>
+        </header>
+      </article>
+
+      <!-- ────── feature 2: usage with embedded editor (OPEN) ────── -->
+      <article class="feature open">
+        <span class="grip">≡</span>
+        <header class="feature-head">
+          <div>
+            <div class="feature-name">
+              <h3>API calls</h3>
+              <span class="slug">api_requests</span>
+            </div>
+            <p class="feature-summary">First <span class="accent">10,000 free</span>, then tiered down to $0.0008.</p>
+            <div class="badges">
+              <span class="badge live">● Live metered</span>
+              <span class="badge">3 tiers</span>
+            </div>
+          </div>
+          <div class="feature-price">
+            <span class="label">From</span>
+            <span class="v">$0.001</span>
+            <span style="display:block; font-size: 11px; color: var(--ink-3); margin-top: 4px;">/ call</span>
+          </div>
+        </header>
+
+        <!-- inline editor -->
+        <div class="editor">
+
+          <!-- 1. how customers pay -->
+          <div class="field-group">
+            <h4>How customers pay</h4>
+            <div class="model-grid">
+              <div class="model">
+                <div class="icon">①</div>
+                <div class="t">Included</div>
+                <div class="d">Free with the plan, optional cap.</div>
+                <div class="ex">"Includes <span>10k calls</span>"</div>
+              </div>
+              <div class="model selected">
+                <div class="icon">②</div>
+                <div class="t">Pay per use</div>
+                <div class="d">Charged on actual consumption. Optional tiers.</div>
+                <div class="ex">"$0.001 × <span>23,400 calls</span>"</div>
+              </div>
+              <div class="model">
+                <div class="icon">③</div>
+                <div class="t">Pre-paid bundle</div>
+                <div class="d">Customer buys N units up front.</div>
+                <div class="ex">"<span>5 packs</span> × $20"</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. metering source (only for usage) -->
+          <div class="field-group">
+            <h4>What we measure</h4>
+            <div class="meter">
+              <label>
+                <span class="l">Event</span>
+                <select>
+                  <option>api.request — 4 fields</option>
+                  <option>llm.completion</option>
+                  <option>storage.write</option>
+                </select>
+              </label>
+              <label>
+                <span class="l">Aggregate</span>
+                <select>
+                  <option>Sum of input_tokens</option>
+                  <option>Count of events</option>
+                  <option>Maximum value</option>
+                  <option>Latest value</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- 3. pricing rules — natural language -->
+          <div class="field-group">
+            <h4>Pricing rules <span style="text-transform:none; letter-spacing:0; color: var(--ink-3); font-family: var(--sans);">— evaluated graduated, top to bottom</span></h4>
+
+            <div class="rules">
+              <div class="rule">
+                <span class="num">1</span>
+                <div class="rule-text">
+                  <span class="lit">First</span>
+                  <input class="in" value="10,000" />
+                  <span class="lit">calls per month —</span>
+                  <span class="pricer" style="background: var(--forest-soft); border-color: var(--forest); color: var(--forest);">
+                    Free
+                  </span>
+                </div>
+                <button class="x" aria-label="Remove rule">×</button>
+              </div>
+
+              <div class="rule">
+                <span class="num">2</span>
+                <div class="rule-text">
+                  <span class="lit">Next</span>
+                  <input class="in" value="90,000" />
+                  <span class="lit">calls —</span>
+                  <span class="pricer">
+                    $<input value="0.001" />
+                  </span>
+                  <span class="lit">/ call</span>
+                </div>
+                <button class="x" aria-label="Remove rule">×</button>
+              </div>
+
+              <div class="rule">
+                <span class="num">3</span>
+                <div class="rule-text">
+                  <span class="lit">After that —</span>
+                  <span class="pricer">
+                    $<input value="0.0008" />
+                  </span>
+                  <span class="lit">/ call</span>
+                </div>
+                <button class="x" aria-label="Remove rule">×</button>
+              </div>
+
+              <button class="add-rule"><span class="plus">+</span> Add another rule</button>
+            </div>
+          </div>
+
+          <!-- 4. advanced settings — collapsed by default -->
+          <details class="advanced">
+            <summary>Advanced — billing cadence, reset, overage</summary>
+            <div class="adv-grid">
+              <label>
+                <span class="l" style="font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-3); display:block; margin-bottom: 4px;">Billing cycle</span>
+                <select style="width: 100%; padding: 6px 14px 6px 0; border: 0; border-bottom: 1px solid var(--ink); background: transparent; font: 13px var(--mono); appearance: none; -webkit-appearance:none; outline:none;">
+                  <option>Same as plan (monthly)</option>
+                  <option>Bill weekly</option>
+                  <option>Bill on use</option>
+                </select>
+              </label>
+              <label>
+                <span class="l" style="font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-3); display:block; margin-bottom: 4px;">Counter resets</span>
+                <select style="width: 100%; padding: 6px 14px 6px 0; border: 0; border-bottom: 1px solid var(--ink); background: transparent; font: 13px var(--mono); appearance: none; -webkit-appearance:none; outline:none;">
+                  <option>Monthly on day 1</option>
+                  <option>Daily at 00:00 UTC</option>
+                  <option>Never (lifetime)</option>
+                </select>
+              </label>
+              <label>
+                <span class="l" style="font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-3); display:block; margin-bottom: 4px;">Over the limit</span>
+                <select style="width: 100%; padding: 6px 14px 6px 0; border: 0; border-bottom: 1px solid var(--ink); background: transparent; font: 13px var(--mono); appearance: none; -webkit-appearance:none; outline:none;">
+                  <option>Block further usage (hard stop)</option>
+                  <option>Allow one final call</option>
+                  <option>Always allow (soft cap)</option>
+                </select>
+              </label>
+              <label>
+                <span class="l" style="font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-3); display:block; margin-bottom: 4px;">Visibility</span>
+                <select style="width: 100%; padding: 6px 14px 6px 0; border: 0; border-bottom: 1px solid var(--ink); background: transparent; font: 13px var(--mono); appearance: none; -webkit-appearance:none; outline:none;">
+                  <option>Show on public pricing page</option>
+                  <option>Hidden (internal use)</option>
+                </select>
+              </label>
+            </div>
+          </details>
+
+          <div class="editor-actions">
+            <div class="left">
+              <button class="danger-link">Remove from plan</button>
+            </div>
+            <div style="display:flex; gap: 10px; align-items: center;">
+              <span style="font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-3);">Auto-saved · 4s ago</span>
+              <button class="btn ghost">Collapse</button>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ────── feature 3: included ────── -->
+      <article class="feature">
+        <span class="grip">≡</span>
+        <header class="feature-head">
+          <div>
+            <div class="feature-name">
+              <h3>Email support</h3>
+              <span class="slug">support_email</span>
+            </div>
+            <p class="feature-summary">Always included for Pro customers. <span class="accent">No usage cap.</span></p>
+            <div class="badges">
+              <span class="badge">Included</span>
+            </div>
+          </div>
+          <div class="feature-price">
+            <span class="label">Cost</span>
+            <span class="v" style="font-family: var(--serif); font-style: italic; color: var(--forest);">Free</span>
+          </div>
+        </header>
+      </article>
+
+      <!-- ────── feature 4: storage with hard limit ────── -->
+      <article class="feature">
+        <span class="grip">≡</span>
+        <header class="feature-head">
+          <div>
+            <div class="feature-name">
+              <h3>Storage</h3>
+              <span class="slug">storage_gb</span>
+            </div>
+            <p class="feature-summary">Up to <span class="accent">100 GB</span> included. Hard limit when reached.</p>
+            <div class="badges">
+              <span class="badge">Included · capped</span>
+              <span class="badge flag">Hard stop</span>
+            </div>
+          </div>
+          <div class="feature-price">
+            <span class="label">In plan</span>
+            <span class="v">100 GB</span>
+          </div>
+        </header>
+      </article>
+
+    </main>
+
+    <!-- ─── right rail: live invoice preview ─── -->
+    <aside class="rail right">
+      <div class="invoice">
+        <div class="receipt-strip">
+          <span class="l">Customer Receipt — Preview</span>
+          <span class="r">USD</span>
+        </div>
+
+        <h3>Pro</h3>
+        <p style="margin: 0 0 0 0; color: var(--ink-3); font-size: 13px;">Billed monthly · 14-day trial</p>
+
+        <div class="charge">
+          $29<span class="cents">.00</span><span class="per">/ month base</span>
+        </div>
+
+        <p style="font-size: 12px; color: var(--ink-3); margin: 8px 0 0; font-style: italic;">
+          Plus metered usage, billed in arrears.
+        </p>
+
+        <ul class="lines">
+          <li>
+            <div class="name">
+              5 team seats included
+              <small>Then $8 per additional seat (tiered)</small>
+            </div>
+            <span class="price free">included</span>
+          </li>
+          <li class="changed">
+            <div class="name">
+              First 10,000 API calls
+              <small>Per month · resets day 1</small>
+            </div>
+            <span class="price free">included</span>
+          </li>
+          <li class="changed">
+            <div class="name">
+              Then 10,001 — 100,000 calls
+              <small>Charged when consumed</small>
+            </div>
+            <span class="price usage">$0.001 / ea</span>
+          </li>
+          <li class="changed">
+            <div class="name">
+              100,001+ calls
+              <small>Volume discount</small>
+            </div>
+            <span class="price usage">$0.0008 / ea</span>
+          </li>
+          <li>
+            <div class="name">
+              Email support
+              <small>Always included</small>
+            </div>
+            <span class="price free">included</span>
+          </li>
+          <li>
+            <div class="name">
+              100 GB storage
+              <small>Hard limit · upgrade if exceeded</small>
+            </div>
+            <span class="price free">included</span>
+          </li>
+        </ul>
+
+        <div class="total">
+          <span class="l">Today's charge</span>
+          <span class="v">$0.00</span>
+        </div>
+        <div class="total" style="border-top: 1px dashed var(--rule); margin-top: 6px; padding-top: 8px;">
+          <span class="l">After trial</span>
+          <span class="v">$29.00</span>
+        </div>
+
+        <div class="ftr">
+          <span>Auto-charged</span>
+          <span>Stripe</span>
+        </div>
+      </div>
+
+      <p style="margin: 16px 0 0; font-size: 12px; color: var(--ink-3); line-height: 1.5; padding: 0 4px;">
+        This receipt updates as you edit. Customers see this exact breakdown at checkout
+        and on every monthly invoice.
+      </p>
+    </aside>
+
+  </div>
+
+  <footer class="ledger">
+    <span>End of v3 draft</span>
+    <em>Sent into the world, with care.</em>
+    <span>Saved · 4 seconds ago</span>
+  </footer>
+</body>
+</html>

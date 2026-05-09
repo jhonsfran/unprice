@@ -37,7 +37,7 @@ export default async function PlanSubscriptionsPage({
       header={
         <HeaderTab
           title="Subscriptions"
-          description="Observe active value flows and manage how your customers engage with your product."
+          description="Manages the subscriptions of your customers."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="getSubscription">

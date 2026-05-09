@@ -2,19 +2,25 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unpr
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { SubscriptionForm } from "../../_components/subscriptions/subscription-form"
 
-export default async function NewSubscriptionPage() {
+export default async function NewSubscriptionPage({
+  searchParams,
+}: {
+  searchParams: {
+    customerId?: string
+  }
+}) {
   return (
     <DashboardShell>
       <div className="flex flex-col items-center justify-center">
         <Card variant="ghost" className="w-full">
           <CardHeader>
-            <CardTitle>Create Workspace</CardTitle>
-            <CardDescription>Create a new workspace to get started.</CardDescription>
+            <CardTitle>Create Subscription</CardTitle>
+            <CardDescription>Configure the subscription for the selected customer.</CardDescription>
           </CardHeader>
           <CardContent className="py-4">
             <SubscriptionForm
               defaultValues={{
-                customerId: "",
+                customerId: searchParams.customerId ?? "",
                 phases: [],
                 timezone: "UTC",
               }}

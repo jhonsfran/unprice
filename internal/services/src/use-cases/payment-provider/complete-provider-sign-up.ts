@@ -1,0 +1,474 @@
+import type { Analytics } from "@unprice/analytics"
+import { type Database, and, eq, sql } from "@unprice/db"
+import { customerProviderIds, customers } from "@unprice/db/schema"
+import { newId } from "@unprice/db/utils"
+import type { PaymentProvider } from "@unprice/db/validators"
+import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
+import type { Logger } from "@unprice/logs"
+import { z } from "zod"
+import type { ServiceContext } from "../../context"
+import { UnPriceCustomerError } from "../../customers/errors"
+import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
+
+export type CompleteProviderSignUpDeps = {
+  services: Pick<ServiceContext, "customers" | "subscriptions">
+  db: Database
+  logger: Logger
+  analytics: Analytics
+  waitUntil: (promise: Promise<unknown>) => void
+}
+
+type CompleteProviderSignUpInput = {
+  projectId: string
+  sessionId: string
+  provider: PaymentProvider
+}
+
+type CompleteProviderSignUpOutput = {
+  redirectUrl: string
+}
+
+type DbOrTx = Database | Parameters<Parameters<Database["transaction"]>[0]>[0]
+
+const providerSignUpMetadataSchema = z.object({
+  customerSessionId: z.string().describe("The unprice customer session id"),
+  successUrl: z.string().url().describe("The success url"),
+  cancelUrl: z.string().url().describe("The cancel url"),
+})
+
+function buildProviderMetadata({
+  subscriptionId,
+  defaultPaymentMethodId,
+  customerSessionId,
+  unpriceSubscriptionId,
+}: {
+  subscriptionId: string | null
+  defaultPaymentMethodId: string | null
+  customerSessionId: string
+  unpriceSubscriptionId?: string | null
+}) {
+  return {
+    ...(subscriptionId ? { subscriptionId } : {}),
+    ...(defaultPaymentMethodId ? { defaultPaymentMethodId } : {}),
+    ...(unpriceSubscriptionId ? { unpriceSubscriptionId } : {}),
+    customerSessionId,
+  }
+}
+
+function isExternalIdConflictError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false
+  }
+
+  const dbError = error as {
+    code?: string
+    constraint?: string
+    message?: string
+  }
+
+  return (
+    dbError.code === "23505" &&
+    (dbError.constraint === "cp_external_id_idx" ||
+      dbError.message?.includes("cp_external_id_idx") ||
+      dbError.message?.includes("external_id") ||
+      false)
+  )
+}
+
+async function acquireProviderSignUpLock({
+  tx,
+  projectId,
+  customerSessionId,
+}: {
+  tx: DbOrTx
+  projectId: string
+  customerSessionId: string
+}) {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`provider-signup:${projectId}:${customerSessionId}`}))`
+  )
+}
+
+async function findExistingSubscriptionWithPhase({
+  db,
+  projectId,
+  customerId,
+  planVersionId,
+}: {
+  db: DbOrTx
+  projectId: string
+  customerId: string
+  planVersionId: string
+}) {
+  return db.query.subscriptions.findFirst({
+    with: {
+      phases: {
+        where: (phase, { and: andOp, eq: eqOp }) =>
+          andOp(eqOp(phase.projectId, projectId), eqOp(phase.planVersionId, planVersionId)),
+        orderBy: (phase, { desc }) => [desc(phase.createdAtM)],
+        limit: 1,
+      },
+    },
+    where: (subscription, { and: andOp, eq: eqOp }) =>
+      andOp(eqOp(subscription.projectId, projectId), eqOp(subscription.customerId, customerId)),
+    orderBy: (subscription, { desc }) => [desc(subscription.createdAtM)],
+  })
+}
+
+export async function completeProviderSignUp(
+  deps: CompleteProviderSignUpDeps,
+  input: CompleteProviderSignUpInput
+): Promise<Result<CompleteProviderSignUpOutput, FetchError | UnPriceCustomerError>> {
+  const { projectId, sessionId, provider } = input
+
+  deps.logger.set({
+    business: {
+      operation: "payment_provider.complete_signup",
+      project_id: projectId,
+    },
+  })
+
+  const { err: paymentProviderErr, val: paymentProviderService } =
+    await deps.services.customers.getPaymentProvider({
+      projectId,
+      provider,
+    })
+
+  if (paymentProviderErr) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "PAYMENT_PROVIDER_ERROR",
+        message: paymentProviderErr.message,
+      })
+    )
+  }
+
+  const { err: getSessionErr, val: providerSession } = await paymentProviderService.getSession({
+    sessionId,
+  })
+
+  if (getSessionErr) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "PAYMENT_PROVIDER_ERROR",
+        message: getSessionErr.message,
+      })
+    )
+  }
+
+  const metadata = providerSignUpMetadataSchema.safeParse(providerSession.metadata)
+
+  if (!metadata.success) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "PAYMENT_PROVIDER_ERROR",
+        message: `Invalid metadata for provider sign up: ${metadata.error.message}`,
+      })
+    )
+  }
+
+  paymentProviderService.setCustomerId(providerSession.customerId)
+
+  const { err: getPaymentMethodsErr, val: paymentMethods } =
+    await paymentProviderService.listPaymentMethods({
+      limit: 1,
+    })
+
+  if (getPaymentMethodsErr) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "PAYMENT_PROVIDER_ERROR",
+        message: getPaymentMethodsErr.message,
+      })
+    )
+  }
+
+  const defaultPaymentMethodId = paymentMethods.at(0)?.id ?? null
+
+  const { val: customerSession, err: customerSessionErr } = await wrapResult(
+    deps.db.query.customerSessions.findFirst({
+      where: (session, { and, eq }) => and(eq(session.id, metadata.data.customerSessionId)),
+    }),
+    (error) =>
+      new FetchError({
+        message: `Error loading customer session for provider sign up: ${error.message}`,
+        retry: false,
+      })
+  )
+
+  if (customerSessionErr) {
+    deps.logger.error(customerSessionErr, {
+      context: "Error loading customer session for provider sign up",
+      projectId,
+      customerSessionId: metadata.data.customerSessionId,
+      provider,
+    })
+
+    return Err(customerSessionErr)
+  }
+
+  if (!customerSession) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "CUSTOMER_SESSION_NOT_FOUND",
+        message: "Customer session not found",
+      })
+    )
+  }
+
+  let customerUnprice: {
+    id: string
+    projectId: string
+  } | null = null
+
+  try {
+    customerUnprice = await deps.db
+      .insert(customers)
+      .values({
+        id: customerSession.customer.id,
+        projectId: customerSession.customer.projectId,
+        externalId: customerSession.customer.externalId,
+        name: customerSession.customer.name ?? "",
+        email: customerSession.customer.email ?? "",
+        defaultCurrency: customerSession.customer.currency,
+        active: true,
+        timezone: customerSession.customer.timezone,
+        metadata: customerSession.customer.metadata,
+      })
+      .onConflictDoUpdate({
+        target: [customers.id, customers.projectId],
+        set: {
+          externalId: customerSession.customer.externalId,
+          name: customerSession.customer.name ?? "",
+          email: customerSession.customer.email ?? "",
+          defaultCurrency: customerSession.customer.currency,
+          active: true,
+          timezone: customerSession.customer.timezone,
+          metadata: customerSession.customer.metadata,
+        },
+      })
+      .returning()
+      .then((rows) => rows.at(0) ?? null)
+  } catch (error) {
+    if (isExternalIdConflictError(error)) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "CUSTOMER_EXTERNAL_ID_CONFLICT",
+          message: "External customer id already exists for this project",
+        })
+      )
+    }
+
+    deps.logger.error(error, {
+      context: "Error upserting customer for provider sign up",
+      projectId,
+      customerSessionId: customerSession.id,
+      provider,
+    })
+
+    return Err(
+      new FetchError({
+        message: `Error upserting customer for provider sign up: ${(error as Error).message}`,
+        retry: false,
+      })
+    )
+  }
+
+  if (!customerUnprice) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "CUSTOMER_NOT_CREATED",
+        message: "Failed to upsert customer",
+      })
+    )
+  }
+
+  const subscriptionResult = await deps.db.transaction(async (tx) => {
+    await acquireProviderSignUpLock({
+      tx,
+      projectId,
+      customerSessionId: customerSession.id,
+    })
+
+    const existingSubscription = await findExistingSubscriptionWithPhase({
+      db: tx,
+      projectId,
+      customerId: customerUnprice.id,
+      planVersionId: customerSession.planVersion.id,
+    })
+
+    const existingSubscriptionId = existingSubscription?.id ?? null
+    const existingPhase = existingSubscription?.phases.at(0) ?? null
+
+    const baseProviderMetadata = buildProviderMetadata({
+      subscriptionId: providerSession.subscriptionId,
+      defaultPaymentMethodId,
+      customerSessionId: customerSession.id,
+      unpriceSubscriptionId: existingSubscriptionId,
+    })
+
+    const { err: providerMappingErr } = await wrapResult(
+      tx
+        .insert(customerProviderIds)
+        .values({
+          id: newId("customer_provider"),
+          projectId,
+          customerId: customerUnprice.id,
+          provider,
+          providerCustomerId: providerSession.customerId,
+          metadata: baseProviderMetadata,
+        })
+        .onConflictDoUpdate({
+          target: [
+            customerProviderIds.projectId,
+            customerProviderIds.customerId,
+            customerProviderIds.provider,
+          ],
+          set: {
+            providerCustomerId: providerSession.customerId,
+            metadata: baseProviderMetadata,
+          },
+        }),
+      (error) =>
+        new FetchError({
+          message: `Error upserting customer provider mapping: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (providerMappingErr) {
+      return Err(providerMappingErr)
+    }
+
+    const subscriptionData = existingSubscription
+      ? existingSubscription
+      : await deps.services.subscriptions
+          .createSubscription({
+            projectId: customerSession.customer.projectId,
+            input: {
+              customerId: customerUnprice.id,
+            },
+            db: tx,
+          })
+          .then((result) => {
+            if (result.err) {
+              return result
+            }
+
+            return Ok(result.val)
+          })
+
+    if ("err" in subscriptionData && subscriptionData.err) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "SUBSCRIPTION_NOT_CREATED",
+          message: subscriptionData.err.message,
+        })
+      )
+    }
+
+    const subscription = "val" in subscriptionData ? subscriptionData.val : subscriptionData
+
+    if (!existingPhase) {
+      const sessionCreditLinePolicy = customerSession.planVersion.creditLinePolicy ?? "uncapped"
+      const phaseTimestamp = Date.now()
+      const { err: createPhaseErr } = await deps.services.subscriptions.createPhase({
+        input: {
+          startAt: phaseTimestamp,
+          planVersionId: customerSession.planVersion.id,
+          config: customerSession.planVersion.config,
+          creditLinePolicy: sessionCreditLinePolicy,
+          creditLineAmount:
+            sessionCreditLinePolicy === "uncapped"
+              ? null
+              : (customerSession.planVersion.creditLineAmount ?? null),
+          paymentProvider: provider,
+          paymentMethodId: defaultPaymentMethodId,
+          subscriptionId: subscription.id,
+          customerId: customerUnprice.id,
+          paymentMethodRequired: customerSession.planVersion.paymentMethodRequired,
+        },
+        projectId,
+        db: tx,
+        now: phaseTimestamp,
+      })
+
+      if (createPhaseErr) {
+        return Err(
+          new UnPriceCustomerError({
+            code: "PHASE_NOT_CREATED",
+            message: createPhaseErr.message,
+          })
+        )
+      }
+    }
+
+    const { err: updateProviderMappingErr } = await wrapResult(
+      tx
+        .update(customerProviderIds)
+        .set({
+          metadata: buildProviderMetadata({
+            subscriptionId: providerSession.subscriptionId,
+            defaultPaymentMethodId,
+            customerSessionId: customerSession.id,
+            unpriceSubscriptionId: subscription.id,
+          }),
+        })
+        .where(
+          and(
+            eq(customerProviderIds.projectId, projectId),
+            eq(customerProviderIds.customerId, customerUnprice.id),
+            eq(customerProviderIds.provider, provider)
+          )
+        ),
+      (error) =>
+        new FetchError({
+          message: `Error updating customer provider mapping: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (updateProviderMappingErr) {
+      return Err(updateProviderMappingErr)
+    }
+
+    return Ok({ subscriptionId: subscription.id })
+  })
+
+  if (subscriptionResult.err) {
+    deps.logger.error(subscriptionResult.err, {
+      context: "Error completing provider sign up",
+      projectId,
+      customerId: customerUnprice.id,
+      provider,
+    })
+    return Err(subscriptionResult.err)
+  }
+
+  await activateWalletIfSubscriptionIsActive(deps, {
+    subscriptionId: subscriptionResult.val.subscriptionId,
+    projectId,
+    context:
+      "payment provider signup wallet activation failed; subscription parked in pending_activation",
+  })
+
+  deps.waitUntil(
+    deps.analytics.ingestEvents({
+      action: "signup",
+      version: "1",
+      session_id: customerSession.metadata?.sessionId ?? "",
+      project_id: projectId,
+      timestamp: new Date().toISOString(),
+      payload: {
+        customer_id: customerUnprice.id,
+        plan_version_id: customerSession.planVersion.id,
+        page_id: customerSession.metadata?.pageId ?? "",
+        status: "signup_success",
+      },
+    })
+  )
+
+  return Ok({
+    redirectUrl: metadata.data.successUrl,
+  })
+}

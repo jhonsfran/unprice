@@ -1,6 +1,6 @@
 import type { AppLogger } from "@unprice/observability"
 import type { Cache } from "@unprice/services/cache"
-import type { GrantsManager } from "@unprice/services/entitlements"
+import type { EntitlementService } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
 import { CloudflareAuditClient } from "./audit/client"
 import { CloudflareEntitlementWindowClient } from "./entitlements/client"
@@ -24,7 +24,7 @@ describe("createIngestionService", () => {
           swr: vi.fn(),
         },
       } as unknown as Pick<Cache, "ingestionPreparedGrantContext">,
-      grantsManager: {} as GrantsManager,
+      entitlementService: {} as EntitlementService,
       logger: {
         warn: vi.fn(),
         error: vi.fn(),

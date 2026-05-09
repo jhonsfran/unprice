@@ -6,7 +6,6 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { z } from "zod"
 import type { Cache } from "../../cache/service"
-import { toErrorContext } from "../../utils/log-context"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
 
@@ -133,8 +132,8 @@ export async function inviteMember(
     })
   } catch (error) {
     const e = error as Error
-    deps.logger.error("error inviting workspace member", {
-      error: toErrorContext(e),
+    deps.logger.error(e, {
+      context: "error inviting workspace member",
       workspaceId: workspace.id,
       userId,
       email,

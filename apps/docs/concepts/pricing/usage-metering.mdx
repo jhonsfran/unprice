@@ -126,12 +126,13 @@ Examples:
 For these metrics, report usage directly from the request path as the action happens.
 
 ```ts
-const { result, error } = await unprice.customers.reportUsage({
+const { result, error } = await unprice.events.ingestSync({
+  idempotencyKey: request.id,
+  eventSlug: "api_request",
   customerId: "cus_1234567890",
   featureSlug: "api-requests",
-  usage: 1,
-  idempotenceKey: request.id,
-  metadata: {
+  properties: {
+    usage: 1,
     route: "/v1/chat/completions",
     method: "POST"
   }
@@ -206,12 +207,12 @@ async function syncActiveSeats(customerId: string) {
 
   const activeSeats = row[0]?.active_seats ?? 0;
 
-  await unprice.customers.reportUsage({
+  await unprice.events.ingest({
+    idempotencyKey: `active-seats:${customerId}:${new Date().toISOString().slice(0, 13)}`,
+    eventSlug: "active_seats_snapshot",
     customerId,
-    featureSlug: "active-seats",
-    usage: activeSeats,
-    idempotenceKey: `active-seats:${customerId}:${new Date().toISOString().slice(0, 13)}`,
-    metadata: {
+    properties: {
+      usage: activeSeats,
       source: "cron",
       metricType: "snapshot"
     }
@@ -265,4 +266,4 @@ This keeps your billing architecture consistent:
 Next steps:
 
 - Read [Entitlements](/concepts/pricing/entitlements) to understand how features become customer access rules.
-- Read [Report Usage](/libraries/ts/sdk/customers/report-usage) for the SDK contract and request shape.
+- Read [Ingest Sync](/libraries/ts/sdk/events/ingest-sync) for the SDK contract and request shape.

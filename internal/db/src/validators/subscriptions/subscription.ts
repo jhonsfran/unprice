@@ -14,7 +14,11 @@ import { planSelectBaseSchema } from "../plans"
 import { projectSelectBaseSchema } from "../project"
 import { UnPriceCalculationError } from "./../errors"
 import { configPackageSchema } from "./../planVersionFeatures"
-import { subscriptionStatusSchema } from "./../shared"
+import {
+  creditLinePolicySchema,
+  paymentProviderSchema,
+  subscriptionStatusSchema,
+} from "./../shared"
 import {
   type SubscriptionItem,
   type SubscriptionItemConfig,
@@ -50,6 +54,40 @@ export const invoiceMetadataSchema = z.object({
   note: z.string().optional().describe("Note about the invoice"),
   reason: reasonSchema.optional().describe("Reason for the invoice"),
   credits: z.string().optional().describe("Credits applied to the invoice"),
+  finalizeAttempts: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe(
+      "Number of times the finalize cron has attempted to push this invoice to the provider"
+    ),
+  lastFinalizeError: z
+    .string()
+    .optional()
+    .describe("Last error message from the finalize cron — operator-visible only"),
+  lastFinalizeAttemptAt: z
+    .number()
+    .int()
+    .optional()
+    .describe("Epoch ms timestamp of the last finalize attempt"),
+  // Idempotency markers for the webhook → subscription reconcile step. Set
+  // by `applyWebhookEvent` after `reconcilePaymentOutcome` succeeds so that
+  // a webhook retry which arrives after the invoice has already transitioned
+  // to its terminal status can skip the subscription state-machine call
+  // instead of replaying it (replay would re-fire side effects like
+  // `renewing` at end-of-cycle). Outcome is recorded so a later
+  // payment.reversed / payment.dispute_reversed flips the marker and the
+  // machine sees the new transition.
+  subscriptionReconciledAt: z
+    .number()
+    .int()
+    .optional()
+    .describe("Epoch ms timestamp of the last successful reconcile against the subscription"),
+  subscriptionReconciledOutcome: z
+    .enum(["success", "failure"])
+    .optional()
+    .describe("Outcome of the last successful reconcile against the subscription"),
 })
 
 export const subscriptionMetadataSchema = z.object({
@@ -78,6 +116,9 @@ export const subscriptionSelectSchema = createSelectSchema(subscriptions, {
 
 export const subscriptionPhaseSelectSchema = createSelectSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
+  paymentProvider: paymentProviderSchema,
+  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
+  creditLineAmount: z.coerce.number().int().min(0).nullable(),
   trialUnits: z.coerce.number().int().min(0).default(0),
   metadata: subscriptionPhaseMetadataSchema,
 })
@@ -99,6 +140,9 @@ export const subscriptionPhaseExtendedSchema = subscriptionPhaseSelectSchema.ext
 
 export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhases, {
   planVersionId: z.string().min(1, { message: "Plan version is required" }),
+  paymentProvider: paymentProviderSchema,
+  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
+  creditLineAmount: z.coerce.number().int().min(0).nullable().optional(),
   metadata: subscriptionPhaseMetadataSchema,
   trialUnits: z.coerce.number().int().min(0).default(0),
 })
@@ -111,6 +155,7 @@ export const subscriptionPhaseInsertSchema = createInsertSchema(subscriptionPhas
   .partial({
     id: true,
     customerId: true,
+    paymentProvider: true,
     paymentMethodId: true,
     config: true,
     items: true,
@@ -158,7 +203,7 @@ export const subscriptionInsertSchema = createInsertSchema(subscriptions, {
             if (phase.trialUnits < 0) {
               return ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: "Trial days must be greater than 0",
+                message: "Trial duration cannot be negative",
                 path: [index, "trialUnits"],
               })
             }

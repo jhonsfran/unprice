@@ -1,7 +1,11 @@
 "use client"
 import { useMutation } from "@tanstack/react-query"
-import type { InsertPlanVersion } from "@unprice/db/validators"
-import { planVersionSelectBaseSchema, versionInsertBaseSchema } from "@unprice/db/validators"
+import {
+  type InsertPlanVersion,
+  getTrialUnitLabel,
+  planVersionSelectBaseSchema,
+  versionInsertBaseSchema,
+} from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { Form, FormDescription, FormLabel } from "@unprice/ui/form"
 import { cn } from "@unprice/ui/utils"
@@ -62,6 +66,11 @@ export function PlanVersionForm({
     schema: versionInsertBaseSchema,
     defaultValues: defaultValues,
   })
+  const billingInterval = form.watch("billingConfig.billingInterval")
+  const trialUnits = form.watch("trialUnits")
+  const trialUnitLabel = billingInterval
+    ? getTrialUnitLabel({ billingInterval, units: trialUnits })
+    : "days"
 
   const createPlanVersion = useMutation(
     trpc.planVersions.create.mutationOptions({
@@ -164,7 +173,7 @@ export function PlanVersionForm({
 
           <BillingConfigFormField form={form} isDisabled={isPublished} />
 
-          <TrialUnitsFormField form={form} isDisabled={isPublished} />
+          <TrialUnitsFormField form={form} isDisabled={isPublished} unitLabel={trialUnitLabel} />
 
           <WhenToBillFormField form={form} isDisabled={isPublished} />
 

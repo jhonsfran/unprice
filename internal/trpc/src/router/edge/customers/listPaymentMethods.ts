@@ -10,6 +10,7 @@ export const listPaymentMethods = protectedWorkspaceProcedure
     z.object({
       customerId: z.string(),
       provider: paymentProviderSchema,
+      skipCache: z.boolean().optional(),
     })
   )
   .output(
@@ -18,11 +19,12 @@ export const listPaymentMethods = protectedWorkspaceProcedure
     })
   )
   .query(async (opts) => {
-    const { customerId, provider } = opts.input
+    const { customerId, provider, skipCache } = opts.input
 
-    const result = await unprice.customers.getPaymentMethods({
+    const result = await unprice.payments.methods.list({
       customerId,
       provider,
+      skipCache,
     })
 
     if (result.error) {

@@ -1,7 +1,8 @@
 import { dinero, toDecimal } from "dinero.js"
 import { describe, expect, it } from "vitest"
 
-import * as currencies from "@dinero.js/currencies"
+import { toLedgerMinor } from "@unprice/money"
+import * as currencies from "dinero.js/currencies"
 import type { Feature } from "../features"
 import type { PlanVersionFeature } from "../planVersionFeatures"
 import type { PlanVersionExtended } from "../planVersions"
@@ -71,6 +72,51 @@ describe("pricing calculators", () => {
     expect(toDecimal(val!.subtotalPrice.dinero)).toBe("16.00")
     // total: 3*2 + (10 * 0.5) = 11
     expect(toDecimal(val!.totalPrice.dinero)).toBe("11.00")
+  })
+
+  it("calculateTierPrice volume: prices fractional usage below firstUnit with the first tier", () => {
+    const unitPrice = dinero({ amount: 100, currency: currencies.USD }) // $1
+    const flatPrice = dinero({ amount: 0, currency: currencies.USD })
+
+    const { val, err } = calculateTierPrice({
+      tiers: [
+        {
+          unitPrice: { dinero: unitPrice.toJSON(), displayAmount: "1.00" },
+          flatPrice: { dinero: flatPrice.toJSON(), displayAmount: "0.00" },
+          firstUnit: 1,
+          lastUnit: null,
+        },
+      ],
+      quantity: 0.1,
+      tierMode: "volume",
+      isUsageBased: true,
+    })
+
+    expect(err).toBeUndefined()
+    expect(toDecimal(val!.totalPrice.dinero)).toBe("0.10")
+  })
+
+  it("calculateTierPrice volume: prices fractional usage with sub-cent unit prices", () => {
+    const unitPrice = dinero({ amount: 1, currency: currencies.EUR, scale: 3 }) // EUR 0.001
+    const flatPrice = dinero({ amount: 100, currency: currencies.EUR, scale: 2 }) // EUR 1
+
+    const { val, err } = calculateTierPrice({
+      tiers: [
+        {
+          unitPrice: { dinero: unitPrice.toJSON(), displayAmount: "0.001" },
+          flatPrice: { dinero: flatPrice.toJSON(), displayAmount: "1.00" },
+          firstUnit: 1,
+          lastUnit: 1000,
+        },
+      ],
+      quantity: 0.1,
+      tierMode: "volume",
+      isUsageBased: true,
+    })
+
+    expect(err).toBeUndefined()
+    expect(toDecimal(val!.totalPrice.dinero)).toBe("1.0001")
+    expect(toLedgerMinor(val!.totalPrice.dinero)).toBe(100_010_000)
   })
 
   it("calculateTierPrice graduated: accumulates across tiers and applies flat fee (prorated) on the tier reached", () => {

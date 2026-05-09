@@ -7,6 +7,7 @@ import {
   type AnalyticsEventAction,
   analyticsEventSchema,
   entitlementMeterFactSchemaV1,
+  featureUsagePeriodRowSchema,
   pageEventSchema,
   schemaPlanClick,
 } from "./validators"
@@ -232,10 +233,7 @@ export class Analytics {
           }
         }),
       data: z.object({
-        project_id: z.string(),
-        customer_id: z.string().optional(),
-        feature_slug: z.string(),
-        value_after: z.number(),
+        ...featureUsagePeriodRowSchema.shape,
       }),
       opts: {
         cache: "no-store",
@@ -272,7 +270,9 @@ export class Analytics {
     return this.readClient.buildPipe({
       pipe: "v1_get_feature_usage_no_duplicates",
       parameters: z.object({
+        customer_entitlement_ids: z.array(z.string()).optional(),
         feature_slugs: z.array(z.string()).optional(),
+        period_keys: z.array(z.string()).optional(),
         customer_id: z.string(),
         project_id: z.string(),
         start: z.number(),
@@ -295,12 +295,15 @@ export class Analytics {
   // TODO: add telemtry for this endpoint to know how many times it's being called and the latency
   public async getUsageBillingFeatures({
     customerId,
+    customerEntitlementIds,
     projectId,
     features,
     startAt,
     endAt,
+    periodKeys,
   }: {
     customerId: string
+    customerEntitlementIds?: string[]
     projectId: string
     features: {
       featureSlug: string
@@ -309,6 +312,7 @@ export class Analytics {
     }[]
     startAt: number
     endAt: number
+    periodKeys?: string[]
   }): Promise<
     Result<{ featureSlug: string; usage: number }[], FetchError | UnPriceAnalyticsError>
   > {
@@ -322,8 +326,13 @@ export class Analytics {
 
     const totalPeriodUsages = await this.getBillingUsage({
       customer_id: customerId,
+      customer_entitlement_ids:
+        customerEntitlementIds && customerEntitlementIds.length > 0
+          ? customerEntitlementIds
+          : undefined,
       project_id: projectId,
       feature_slugs: featureSlugsArray,
+      period_keys: periodKeys && periodKeys.length > 0 ? periodKeys : undefined,
       start: startAt,
       end: endAt,
     })
@@ -331,8 +340,10 @@ export class Analytics {
       .catch((error) => {
         this.logger.error(`Error getBillingUsage:${error.message}`, {
           customerId,
+          customerEntitlementIds,
           projectId,
           feature_slugs: featureSlugsArray,
+          periodKeys,
           startAt,
           endAt,
         })
@@ -402,12 +413,8 @@ export class Analytics {
       project_id: projectId,
       period_key: periodKey,
     }).catch((error) => {
-      this.logger.error("Error getting features usage", {
-        error: {
-          message: error instanceof Error ? error.message : String(error),
-          type: error instanceof Error ? error.name : undefined,
-          stack: error instanceof Error ? error.stack : undefined,
-        },
+      this.logger.error(error, {
+        context: "Error getting features usage",
         customerId,
         projectId,
         periodKey,

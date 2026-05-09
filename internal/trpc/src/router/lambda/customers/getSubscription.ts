@@ -2,9 +2,7 @@ import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
 
-type CustomerSubscriptionResult = Awaited<
-  ReturnType<typeof unprice.customers.getSubscription>
->["result"]
+type CustomerSubscriptionResult = Awaited<ReturnType<typeof unprice.subscriptions.get>>["result"]
 
 export const getSubscription = protectedProjectProcedure
   .input(
@@ -21,7 +19,7 @@ export const getSubscription = protectedProjectProcedure
     const { customerId } = opts.input
     const { project } = opts.ctx
 
-    const { result, error } = await unprice.customers.getSubscription({
+    const { result, error } = await unprice.subscriptions.get({
       customerId,
       projectId: project.id,
     })

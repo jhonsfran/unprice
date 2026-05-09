@@ -111,7 +111,11 @@ export function CurrencyFormField<TFieldValues extends FormValues>({
   )
 }
 
-export function PaymentProviderFormField<TFieldValues extends FormValues>({
+interface PaymentProviderFormValues extends FieldValues {
+  paymentProvider?: PaymentProvider
+}
+
+export function PaymentProviderFormField<TFieldValues extends PaymentProviderFormValues>({
   form,
   isDisabled,
   workspaceSlug,

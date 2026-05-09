@@ -1,22 +1,32 @@
+import type {
+  BillingConfig,
+  ConfigFeatureVersionType,
+  CreditLinePolicy,
+  CustomerEntitlementExtended,
+  FeatureType,
+  MeterConfig,
+  OverageStrategy,
+  ResetConfig,
+} from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import type { Cache } from "../cache/service"
-import {
-  type GrantsManager,
-  type IngestionResolvedState,
-  MAX_EVENT_AGE_MS,
-  UnPriceGrantError,
-} from "../entitlements"
+import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
+import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import {
   type IngestionAuditClient,
+  type IngestionAuditCommitResult,
   type IngestionAuditEntry,
   computeCanonicalAuditId,
   computePayloadHash,
   selectIngestionAuditShardIndex,
 } from "./audit"
+import { UnPriceIngestionError } from "./errors"
 import {
   EVENTS_SCHEMA_VERSION,
+  type EntitlementWindowState,
   type FeatureVerificationResult,
   type IngestionMessageProcessingResult,
   type IngestionOutcome,
@@ -25,27 +35,50 @@ import {
 } from "./interface"
 import {
   type IngestionQueueMessage,
-  computeResolvedStatePeriodEndAt,
-  computeResolvedStatePeriodKey,
+  filterIngestionEntitlementsWithValidAggregationPayload,
+  isIngestionEntitlementActiveAt,
 } from "./message"
-export type IngestionCandidateGrants = Parameters<
-  GrantsManager["resolveIngestionStatesFromGrants"]
->[0]["grants"]
+
+export type IngestionGrant = {
+  allowanceUnits: number | null
+  effectiveAt: number
+  expiresAt: number | null
+  grantId: string
+  priority: number
+}
+
+export type IngestionEntitlement = {
+  creditLinePolicy: CreditLinePolicy
+  customerEntitlementId: string
+  customerId: string
+  effectiveAt: number
+  expiresAt: number | null
+  featureConfig: ConfigFeatureVersionType
+  featurePlanVersionId: string
+  featureSlug: string
+  featureType: FeatureType
+  grants: IngestionGrant[]
+  meterConfig: MeterConfig | null
+  overageStrategy: OverageStrategy
+  projectId: string
+  resetConfig: ResetConfig | null
+}
+
+export type IngestionCandidateEntitlements = IngestionEntitlement[]
 
 export type PreparedCustomerMessageGroup = {
-  candidateGrants: IngestionCandidateGrants
+  candidateEntitlements: IngestionCandidateEntitlements
   messages: IngestionQueueMessage[]
   rejectionReason?: IngestionRejectionReason
 }
 
 export type PreparedCustomerGrantContext = {
-  candidateGrants: IngestionCandidateGrants
+  candidateEntitlements: IngestionCandidateEntitlements
   rejectionReason?: IngestionRejectionReason
 }
-import { IngestionStateResolutionService } from "./state-resolution-service"
 
 type IngestionContext = {
-  candidateGrants: IngestionCandidateGrants
+  candidateEntitlements: IngestionCandidateEntitlements
   customerId: string
   message: IngestionQueueMessage
   projectId: string
@@ -56,68 +89,48 @@ type HandleMessageParams = {
   rejectionReason?: IngestionRejectionReason
 }
 
-type ApplyResolvedStatesParams = {
-  customerId: string
-  message: IngestionQueueMessage
-  processableStates: IngestionResolvedState[]
-  projectId: string
+type EntitlementWindowApplyResult = {
+  allowed: boolean
+  deniedReason?: Extract<
+    IngestionRejectionReason,
+    "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
+  >
+  message?: string
 }
 
-type ApplyResolvedStateParams = {
-  customerId: string
-  enforceLimit: boolean
-  message: IngestionQueueMessage
-  projectId: string
-  state: IngestionResolvedState
+export type EntitlementWindowStateInput = {
+  entitlement: IngestionEntitlement & { meterConfig: MeterConfig }
+  grants: IngestionGrant[]
+  now: number
 }
 
 export type EntitlementWindowApplyInput = {
   customerId: string
   enforceLimit: boolean
+  entitlement: IngestionEntitlement & { meterConfig: MeterConfig }
   event: {
     id: string
     properties: Record<string, unknown>
     slug: string
     timestamp: number
   }
-  featureSlug: string
+  grants: IngestionGrant[]
   idempotencyKey: string
-  limit: IngestionResolvedState["limit"]
-  meters: IngestionResolvedState["meterConfig"][]
   now: number
-  overageStrategy: IngestionResolvedState["overageStrategy"]
-  periodEndAt: number
-  periodKey: string
   projectId: string
-  streamId: string
 }
 
 export type EntitlementWindowController = {
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
-  getEnforcementState: (input: {
-    limit: IngestionResolvedState["limit"]
-    meterConfig: IngestionResolvedState["meterConfig"]
-    overageStrategy: IngestionResolvedState["overageStrategy"]
-  }) => Promise<{
-    isLimitReached: boolean
-    limit: number | null
-    usage: number
-  }>
+  getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
 }
 
 export interface EntitlementWindowClient {
   getEntitlementWindowStub(params: {
+    customerEntitlementId: string
     customerId: string
-    periodKey: string
     projectId: string
-    streamId: string
   }): EntitlementWindowController
-}
-
-type EntitlementWindowApplyResult = {
-  allowed: boolean
-  deniedReason?: "LIMIT_EXCEEDED"
-  message?: string
 }
 
 type Result<T, E> = { err: E; val?: undefined } | { err?: undefined; val: T }
@@ -132,11 +145,14 @@ type ShardedAuditEntry = {
   shardIndex: number
 }
 
+type CommitAuditOptions = {
+  strict?: boolean
+}
+
 const GRANT_CONTEXT_CACHE_BUCKET_MS = 300_000
 
 export class IngestionService {
-  private readonly stateResolutionService: IngestionStateResolutionService
-  private readonly grantsManager: GrantsManager
+  private readonly entitlementService: EntitlementService
   private readonly entitlementWindowClient: EntitlementWindowClient
   private readonly auditClient: IngestionAuditClient
   private readonly cache: Pick<Cache, "ingestionPreparedGrantContext">
@@ -146,24 +162,20 @@ export class IngestionService {
 
   constructor(opts: {
     cache: Pick<Cache, "ingestionPreparedGrantContext">
+    entitlementService: EntitlementService
     entitlementWindowClient: EntitlementWindowClient
-    grantsManager: GrantsManager
     auditClient: IngestionAuditClient
     logger: Logger
     now?: () => number
     waitUntil: (promise: Promise<unknown>) => void
   }) {
+    this.entitlementService = opts.entitlementService
     this.entitlementWindowClient = opts.entitlementWindowClient
     this.auditClient = opts.auditClient
     this.cache = opts.cache
     this.logger = opts.logger
-    this.grantsManager = opts.grantsManager
     this.now = opts.now ?? (() => Date.now())
     this.waitUntil = opts.waitUntil
-    this.stateResolutionService = new IngestionStateResolutionService({
-      grantsManager: this.grantsManager,
-      logger: this.logger,
-    })
   }
 
   public async ingestFeatureSync(params: {
@@ -172,31 +184,30 @@ export class IngestionService {
   }): Promise<IngestionSyncResult> {
     const { featureSlug, message } = params
     const { customerId, projectId } = message
+
+    const tooOldOutcome = this.resolveTooOldOutcome({
+      customerId,
+      message,
+      now: this.now(),
+      projectId,
+    })
+
+    if (tooOldOutcome) {
+      return this.rejectSyncMessage({
+        customerId,
+        message,
+        messageText: "Event timestamp is older than the maximum accepted age",
+        projectId,
+        rejectionReason: "EVENT_TOO_OLD",
+      })
+    }
+
     const preparedContext = await this.prepareCustomerGrantContext({
       customerId,
       projectId,
-      startAt: Math.max(0, message.timestamp - MAX_EVENT_AGE_MS),
+      startAt: Math.max(0, message.timestamp - INGESTION_MAX_EVENT_AGE_MS),
       endAt: message.timestamp,
     })
-
-    if (preparedContext.rejectionReason === "CUSTOMER_NOT_FOUND") {
-      const outcome: IngestionOutcome = {
-        state: "rejected",
-        rejectionReason: preparedContext.rejectionReason,
-      }
-      this.logRejectedMessage({
-        customerId,
-        message,
-        projectId,
-        rejectionReason: outcome.rejectionReason,
-      })
-      this.commitToAuditAsync(message, outcome)
-
-      return this.toSyncResult({
-        allowed: false,
-        outcome,
-      })
-    }
 
     if (preparedContext.rejectionReason) {
       return this.rejectSyncMessage({
@@ -207,26 +218,24 @@ export class IngestionService {
       })
     }
 
-    const resolvedStatesResult = await this.resolveSyncFeatureState({
-      candidateGrants: preparedContext.candidateGrants,
-      customerId,
+    const processableEntitlementsResult = this.resolveSyncFeatureEntitlements({
+      candidateEntitlements: preparedContext.candidateEntitlements,
       featureSlug,
       message,
-      projectId,
     })
 
-    if (resolvedStatesResult.err) {
+    if (processableEntitlementsResult.err) {
       return this.rejectSyncMessage({
         customerId,
         message,
         projectId,
-        rejectionReason: resolvedStatesResult.err,
+        rejectionReason: processableEntitlementsResult.err,
       })
     }
 
-    const [resolvedState] = resolvedStatesResult.val
+    const [entitlement] = processableEntitlementsResult.val
 
-    if (!resolvedState) {
+    if (!entitlement) {
       return this.rejectSyncMessage({
         customerId,
         message,
@@ -235,22 +244,13 @@ export class IngestionService {
       })
     }
 
-    const applyResult = await this.applyResolvedState({
+    const applyResult = await this.applyEntitlement({
       customerId,
       enforceLimit: true,
+      entitlement,
       message,
       projectId,
-      state: resolvedState,
     })
-
-    if (!applyResult) {
-      return this.rejectSyncMessage({
-        customerId,
-        message,
-        projectId,
-        rejectionReason: "UNROUTABLE_EVENT",
-      })
-    }
 
     if (!applyResult.allowed) {
       return this.rejectSyncMessage({
@@ -263,7 +263,14 @@ export class IngestionService {
     }
 
     const outcome: IngestionOutcome = { state: "processed" }
-    this.commitToAuditAsync(message, outcome)
+    await this.commitOutcomesToAudit(
+      message.projectId,
+      message.customerId,
+      [{ message, outcome }],
+      {
+        strict: true,
+      }
+    )
 
     return this.toSyncResult({
       allowed: true,
@@ -281,159 +288,89 @@ export class IngestionService {
     const preparedContext = await this.prepareCustomerGrantContext({
       customerId,
       projectId,
-      startAt: Math.max(0, timestamp - MAX_EVENT_AGE_MS),
+      startAt: Math.max(0, timestamp - INGESTION_MAX_EVENT_AGE_MS),
       endAt: timestamp,
     })
 
-    if (preparedContext.rejectionReason === "CUSTOMER_NOT_FOUND") {
+    if (preparedContext.rejectionReason) {
       return {
         allowed: false,
         featureSlug,
-        status: "customer_not_found",
-        timestamp,
+        rejectionReason: preparedContext.rejectionReason,
       }
     }
 
-    const resolvedFeatureStateResult = await this.grantsManager.resolveFeatureStateAtTimestamp({
-      customerId,
-      featureSlug,
-      grants: preparedContext.candidateGrants,
-      projectId,
-      timestamp,
-    })
+    const matchingEntitlements = preparedContext.candidateEntitlements.filter(
+      (candidate) =>
+        candidate.featureSlug === featureSlug &&
+        isIngestionEntitlementActiveAt(candidate, timestamp)
+    )
 
-    if (resolvedFeatureStateResult.err) {
-      this.logger.warn("invalid active grant configuration for feature verification", {
-        customerId,
-        error: resolvedFeatureStateResult.err.message,
-        featureSlug,
+    if (matchingEntitlements.length > 1) {
+      this.logger.error("multiple active entitlements matched feature verification", {
         projectId,
-        timestamp,
+        customerId,
+        featureSlug,
+        customerEntitlementIds: matchingEntitlements.map(
+          (entitlement) => entitlement.customerEntitlementId
+        ),
       })
 
       return {
         allowed: false,
         featureSlug,
-        message: resolvedFeatureStateResult.err.message,
-        status: "invalid_entitlement_configuration",
-        timestamp,
+        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
       }
     }
 
-    const resolvedFeatureState = resolvedFeatureStateResult.val
+    const entitlement = matchingEntitlements[0]
 
-    if (resolvedFeatureState.kind === "feature_missing") {
+    if (!entitlement) {
       return {
         allowed: false,
         featureSlug,
-        status: "feature_missing",
-        timestamp,
+        rejectionReason: "NO_MATCHING_ENTITLEMENT",
       }
     }
 
-    if (resolvedFeatureState.kind === "feature_inactive") {
-      return {
-        allowed: false,
-        featureSlug,
-        status: "feature_inactive",
-        timestamp,
-      }
-    }
-
-    if (resolvedFeatureState.kind === "non_usage") {
+    if (entitlement.featureType !== "usage") {
       return {
         allowed: true,
         featureSlug,
-        featureType: resolvedFeatureState.entitlement.featureType,
-        status: "non_usage",
-        timestamp,
       }
     }
 
-    const { state } = resolvedFeatureState
-    let periodKey: string | null = null
-    try {
-      periodKey = computeResolvedStatePeriodKey(state, timestamp)
-    } catch (error) {
-      const detail = {
-        customerId,
-        error,
-        featureSlug,
-        meterConfig: state.meterConfig,
-        projectId,
-        activeGrantIds: state.activeGrantIds,
-        resetConfig: state.resetConfig,
-        streamEndAt: state.streamEndAt,
-        streamId: state.streamId,
-        streamStartAt: state.streamStartAt,
-        timestamp,
-      }
-
-      this.logger.warn(
-        "invalid resolved-state period configuration for feature verification",
-        detail
-      )
-      this.logger.debug(
-        "invalid entitlement configuration details for feature verification",
-        detail
-      )
-
+    if (!entitlement.meterConfig) {
       return {
         allowed: false,
         featureSlug,
-        featureType: "usage",
-        message: "Unable to resolve the current meter window for this feature",
-        status: "invalid_entitlement_configuration",
-        timestamp,
+        message: "Usage feature is missing meter configuration",
+        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
       }
     }
 
-    if (!periodKey) {
-      this.logger.warn("unable to resolve feature verification period key", {
-        customerId,
-        featureSlug,
-        projectId,
-        streamId: state.streamId,
-        timestamp,
-      })
-
-      return {
-        allowed: false,
-        featureSlug,
-        featureType: "usage",
-        message: "Unable to resolve the current meter window for this feature",
-        status: "invalid_entitlement_configuration",
-        timestamp,
-      }
+    const applyEntitlement = {
+      ...entitlement,
+      meterConfig: entitlement.meterConfig,
     }
-
     const enforcementState = await this.entitlementWindowClient
       .getEntitlementWindowStub({
+        customerEntitlementId: entitlement.customerEntitlementId,
         customerId,
-        periodKey,
         projectId,
-        streamId: state.streamId,
       })
       .getEnforcementState({
-        limit: state.limit,
-        meterConfig: state.meterConfig,
-        overageStrategy: state.overageStrategy,
+        entitlement: applyEntitlement,
+        grants: entitlement.grants,
+        now: timestamp,
       })
 
     return {
       allowed: !enforcementState.isLimitReached,
       featureSlug,
-      featureType: "usage",
-      isLimitReached: enforcementState.isLimitReached,
       limit: enforcementState.limit,
-      meterConfig: state.meterConfig,
-      overageStrategy: state.overageStrategy,
-      periodKey,
-      status: "usage",
-      streamEndAt: state.streamEndAt,
-      streamId: state.streamId,
-      streamStartAt: state.streamStartAt,
-      timestamp,
+      rejectionReason: enforcementState.isLimitReached ? "LIMIT_EXCEEDED" : undefined,
+      spending: formatVerificationSpending(enforcementState.spending),
       usage: enforcementState.usage,
     }
   }
@@ -447,28 +384,62 @@ export class IngestionService {
     const messages = [...params.messages].sort(sortIngestionMessages)
 
     try {
-      const preparedGroup = await this.prepareCustomerMessageGroup({
+      const { freshMessages, tooOldOutcomes } = this.partitionTooOldMessages({
         customerId,
         messages,
         projectId,
       })
 
-      const outcomes =
-        preparedGroup.rejectionReason === "CUSTOMER_NOT_FOUND"
-          ? this.buildCustomerNotFoundOutcomes(preparedGroup.messages, {
-              customerId,
-              projectId,
-              rejectionReason: preparedGroup.rejectionReason,
-            })
-          : await this.processPreparedMessages(preparedGroup.messages, {
-              candidateGrants: preparedGroup.candidateGrants,
-              customerId,
-              projectId,
-              rejectionReason: preparedGroup.rejectionReason,
-            })
+      if (tooOldOutcomes.length > 0) {
+        await this.commitOutcomesToAudit(projectId, customerId, tooOldOutcomes)
+      }
 
-      await this.commitOutcomesToAudit(projectId, customerId, outcomes)
-      return this.mapOutcomesToAckResults(outcomes)
+      if (freshMessages.length === 0) {
+        return this.mapOutcomesToAckResults(tooOldOutcomes)
+      }
+
+      const preparedGroup = await this.prepareCustomerMessageGroup({
+        customerId,
+        messages: freshMessages,
+        projectId,
+      })
+
+      if (preparedGroup.rejectionReason === "CUSTOMER_NOT_FOUND") {
+        const outcomes = this.buildCustomerNotFoundOutcomes(preparedGroup.messages, {
+          customerId,
+          projectId,
+          rejectionReason: preparedGroup.rejectionReason,
+        })
+        await this.commitOutcomesToAudit(projectId, customerId, outcomes)
+        return [
+          ...this.mapOutcomesToAckResults(outcomes),
+          ...this.mapOutcomesToAckResults(tooOldOutcomes),
+        ]
+      }
+
+      const { fresh, duplicateOutcomes } = await this.filterCrossPeriodDuplicates(
+        projectId,
+        customerId,
+        preparedGroup.messages
+      )
+
+      const freshOutcomes =
+        fresh.length > 0
+          ? await this.processPreparedMessages(fresh, {
+              candidateEntitlements: preparedGroup.candidateEntitlements,
+              customerId,
+              projectId,
+              rejectionReason: preparedGroup.rejectionReason,
+            })
+          : []
+
+      await this.commitOutcomesToAudit(projectId, customerId, freshOutcomes)
+
+      return [
+        ...this.mapOutcomesToAckResults(freshOutcomes),
+        ...duplicateOutcomes.map(({ message }) => this.ackMessage(message)),
+        ...this.mapOutcomesToAckResults(tooOldOutcomes),
+      ]
     } catch (error) {
       this.logger.error("raw ingestion queue processing failed", {
         projectId,
@@ -480,6 +451,71 @@ export class IngestionService {
     }
   }
 
+  private partitionTooOldMessages(params: {
+    customerId: string
+    messages: IngestionQueueMessage[]
+    projectId: string
+  }): {
+    freshMessages: IngestionQueueMessage[]
+    tooOldOutcomes: MessageOutcome[]
+  } {
+    const now = this.now()
+    const freshMessages: IngestionQueueMessage[] = []
+    const tooOldOutcomes: MessageOutcome[] = []
+
+    for (const message of params.messages) {
+      const outcome = this.resolveTooOldOutcome({
+        customerId: params.customerId,
+        message,
+        now,
+        projectId: params.projectId,
+      })
+
+      if (!outcome) {
+        freshMessages.push(message)
+        continue
+      }
+
+      this.logRejectedMessage({
+        customerId: params.customerId,
+        message,
+        projectId: params.projectId,
+        rejectionReason: outcome.rejectionReason,
+      })
+      tooOldOutcomes.push({ message, outcome })
+    }
+
+    return { freshMessages, tooOldOutcomes }
+  }
+
+  private resolveTooOldOutcome(params: {
+    customerId: string
+    message: IngestionQueueMessage
+    now: number
+    projectId: string
+  }): IngestionOutcome | null {
+    const eventAgeMs = params.now - params.message.timestamp
+    if (eventAgeMs <= INGESTION_MAX_EVENT_AGE_MS) {
+      return null
+    }
+
+    this.logger.warn("raw ingestion event rejected as too old", {
+      projectId: params.projectId,
+      customerId: params.customerId,
+      eventId: params.message.id,
+      eventSlug: params.message.slug,
+      idempotencyKey: params.message.idempotencyKey,
+      eventTimestamp: params.message.timestamp,
+      receivedAt: params.message.receivedAt,
+      now: params.now,
+      eventAgeMs,
+      maxEventAgeMs: INGESTION_MAX_EVENT_AGE_MS,
+      rejectionReason: "EVENT_TOO_OLD",
+    })
+
+    return { state: "rejected", rejectionReason: "EVENT_TOO_OLD" }
+  }
+
   private async handleMessage(params: HandleMessageParams): Promise<IngestionOutcome> {
     const { context, rejectionReason } = params
     const { customerId, message, projectId } = context
@@ -488,18 +524,25 @@ export class IngestionService {
       return { state: "rejected", rejectionReason }
     }
 
-    const processableStatesResult = await this.resolveProcessableStates(context)
+    const processableEntitlementsResult = this.resolveProcessableEntitlements(context)
 
-    if (processableStatesResult.err) {
-      return { state: "rejected", rejectionReason: processableStatesResult.err }
+    if (processableEntitlementsResult.err) {
+      return { state: "rejected", rejectionReason: processableEntitlementsResult.err }
     }
 
-    await this.applyResolvedStates({
-      customerId,
-      message,
-      processableStates: processableStatesResult.val,
-      projectId,
-    })
+    for (const entitlement of processableEntitlementsResult.val) {
+      const applyResult = await this.applyEntitlement({
+        customerId,
+        enforceLimit: false,
+        entitlement,
+        message,
+        projectId,
+      })
+
+      if (!applyResult.allowed && applyResult.deniedReason === "LATE_EVENT_CLOSED_PERIOD") {
+        return { state: "rejected", rejectionReason: applyResult.deniedReason }
+      }
+    }
 
     return { state: "processed" }
   }
@@ -532,7 +575,7 @@ export class IngestionService {
   private async processPreparedMessages(
     messages: IngestionQueueMessage[],
     params: {
-      candidateGrants: IngestionCandidateGrants
+      candidateEntitlements: IngestionCandidateEntitlements
       customerId: string
       projectId: string
       rejectionReason?: IngestionRejectionReason
@@ -543,7 +586,7 @@ export class IngestionService {
     for (const message of messages) {
       const outcome = await this.handleMessage({
         context: {
-          candidateGrants: params.candidateGrants,
+          candidateEntitlements: params.candidateEntitlements,
           customerId: params.customerId,
           message,
           projectId: params.projectId,
@@ -569,11 +612,12 @@ export class IngestionService {
   private async commitOutcomesToAudit(
     projectId: string,
     customerId: string,
-    outcomes: MessageOutcome[]
+    outcomes: MessageOutcome[],
+    options: CommitAuditOptions = {}
   ): Promise<void> {
     const auditEntries = await this.buildAuditEntries(projectId, customerId, outcomes)
     const auditEntriesByShard = this.bucketAuditEntriesByShard(auditEntries)
-    await this.flushAuditEntries(projectId, customerId, auditEntriesByShard)
+    await this.flushAuditEntries(projectId, customerId, auditEntriesByShard, options)
   }
 
   private async buildAuditEntries(
@@ -637,37 +681,60 @@ export class IngestionService {
   private async flushAuditEntries(
     projectId: string,
     customerId: string,
-    auditEntriesByShard: Map<number, IngestionAuditEntry[]>
+    auditEntriesByShard: Map<number, IngestionAuditEntry[]>,
+    options: CommitAuditOptions = {}
   ): Promise<void> {
-    // Cloudflare Queues is at-least-once. Duplicate deliveries are expected here and
-    // tolerated because EntitlementWindowDO is the sole correctness boundary for usage.
-    const commitPromises = [...auditEntriesByShard.entries()].map(([shardIndex, entries]) =>
-      this.auditClient
-        .getAuditStub({
-          projectId,
-          customerId,
-          shardIndex,
-        })
-        .commit(entries)
-        .then((result) => {
-          if (result.conflicts > 0) {
-            this.logger.warn("audit payload conflicts detected", {
-              projectId,
-              customerId,
-              conflicts: result.conflicts,
-              shardIndex,
-            })
-          }
-        })
-        .catch((error) => {
-          this.logger.error("audit commit failed", {
+    const commitPromises = [...auditEntriesByShard.entries()].map(async ([shardIndex, entries]) => {
+      let result: IngestionAuditCommitResult
+
+      try {
+        result = await this.auditClient
+          .getAuditStub({
             projectId,
             customerId,
             shardIndex,
-            error,
           })
+          .commit(entries)
+      } catch (error) {
+        this.logger.error("audit commit failed", {
+          projectId,
+          customerId,
+          shardIndex,
+          error: formatUnknownError(error),
         })
-    )
+
+        if (options.strict) {
+          throw error
+        }
+
+        return
+      }
+
+      if (result.conflicts > 0) {
+        this.logger.warn("audit payload conflicts detected", {
+          projectId,
+          customerId,
+          conflicts: result.conflicts,
+          idempotencyKeys: entries.map((entry) => entry.idempotencyKey),
+          shardIndex,
+        })
+
+        if (options.strict) {
+          throw new UnPriceIngestionError({
+            code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
+            message:
+              "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+            context: {
+              customerId,
+              projectId,
+              conflicts: result.conflicts,
+              idempotencyKeys: entries.map((entry) => entry.idempotencyKey),
+              shardIndex,
+            },
+          })
+        }
+      }
+    })
 
     await Promise.all(commitPromises)
   }
@@ -678,18 +745,80 @@ export class IngestionService {
     )
   }
 
-  private mapOutcomesToAckResults(outcomes: MessageOutcome[]): IngestionMessageProcessingResult[] {
-    return outcomes.map((outcome) => this.ackMessage(outcome.message))
+  private async filterCrossPeriodDuplicates(
+    projectId: string,
+    customerId: string,
+    messages: IngestionQueueMessage[]
+  ): Promise<{
+    duplicateOutcomes: MessageOutcome[]
+    fresh: IngestionQueueMessage[]
+  }> {
+    if (messages.length === 0) {
+      return { fresh: [], duplicateOutcomes: [] }
+    }
+
+    try {
+      const keysByShard = new Map<number, string[]>()
+
+      for (const message of messages) {
+        const shardIndex = selectIngestionAuditShardIndex(message.idempotencyKey)
+        const existing = keysByShard.get(shardIndex)
+        if (existing) {
+          existing.push(message.idempotencyKey)
+        } else {
+          keysByShard.set(shardIndex, [message.idempotencyKey])
+        }
+      }
+
+      const shardResults = await Promise.all(
+        [...keysByShard.entries()].map(([shardIndex, keys]) =>
+          this.auditClient.getAuditStub({ projectId, customerId, shardIndex }).exists(keys)
+        )
+      )
+
+      const knownKeys = new Set(shardResults.flat())
+
+      if (knownKeys.size === 0) {
+        return { fresh: messages, duplicateOutcomes: [] }
+      }
+
+      const fresh: IngestionQueueMessage[] = []
+      const duplicateOutcomes: MessageOutcome[] = []
+
+      for (const message of messages) {
+        if (knownKeys.has(message.idempotencyKey)) {
+          duplicateOutcomes.push({
+            message,
+            outcome: { state: "processed" },
+          })
+        } else {
+          fresh.push(message)
+        }
+      }
+
+      if (duplicateOutcomes.length > 0) {
+        this.logger.info("cross-period duplicates filtered", {
+          projectId,
+          customerId,
+          duplicateCount: duplicateOutcomes.length,
+          freshCount: fresh.length,
+        })
+      }
+
+      return { fresh, duplicateOutcomes }
+    } catch (error) {
+      this.logger.warn("audit cross-period dedup failed, processing all messages", {
+        projectId,
+        customerId,
+        messageCount: messages.length,
+        error,
+      })
+      return { fresh: messages, duplicateOutcomes: [] }
+    }
   }
 
-  private async resolveSyncFeatureState(params: {
-    candidateGrants: IngestionCandidateGrants
-    customerId: string
-    featureSlug: string
-    message: IngestionQueueMessage
-    projectId: string
-  }): Promise<Result<IngestionResolvedState[], IngestionRejectionReason>> {
-    return this.stateResolutionService.resolveSyncFeatureState(params)
+  private mapOutcomesToAckResults(outcomes: MessageOutcome[]): IngestionMessageProcessingResult[] {
+    return outcomes.map((outcome) => this.ackMessage(outcome.message))
   }
 
   private async prepareCustomerMessageGroup(params: {
@@ -705,20 +834,20 @@ export class IngestionService {
     if (!earliestMessage || !latestMessage) {
       return {
         messages,
-        candidateGrants: [],
+        candidateEntitlements: [],
       }
     }
 
     const preparedContext = await this.prepareCustomerGrantContext({
       customerId,
       projectId,
-      startAt: Math.max(0, earliestMessage.timestamp - MAX_EVENT_AGE_MS),
+      startAt: Math.max(0, earliestMessage.timestamp - INGESTION_MAX_EVENT_AGE_MS),
       endAt: latestMessage.timestamp,
     })
 
     return {
       messages,
-      candidateGrants: preparedContext.candidateGrants,
+      candidateEntitlements: preparedContext.candidateEntitlements,
       rejectionReason: preparedContext.rejectionReason,
     }
   }
@@ -735,10 +864,10 @@ export class IngestionService {
     const cachedResult = await cachedQuery({
       cache: this.cache.ingestionPreparedGrantContext,
       cacheKey,
-      load: () => this.loadCustomerGrantContext(params),
+      load: () => this.loadCustomerEntitlementContext(params),
       wrapLoadError: (error) =>
         new FetchError({
-          message: `unable to prepare cached grant context - ${error.message}`,
+          message: `unable to prepare cached entitlement context - ${error.message}`,
           retry: false,
           context: {
             customerId: params.customerId,
@@ -751,19 +880,19 @@ export class IngestionService {
     })
 
     if (cachedResult.err) {
-      this.logger.warn("failed to use cached grant context, falling back to direct load", {
+      this.logger.warn("failed to use cached entitlement context, falling back to direct load", {
         customerId: params.customerId,
         projectId: params.projectId,
         error: cachedResult.err.message,
       })
 
-      return this.loadCustomerGrantContext(params)
+      return this.loadCustomerEntitlementContext(params)
     }
 
     return cachedResult.val
   }
 
-  private async loadCustomerGrantContext(params: {
+  private async loadCustomerEntitlementContext(params: {
     customerId: string
     endAt: number
     projectId: string
@@ -771,28 +900,71 @@ export class IngestionService {
   }): Promise<PreparedCustomerGrantContext> {
     const { customerId, endAt, projectId, startAt } = params
 
-    const { err, val } = await this.grantsManager.getGrantsForCustomer({
+    const entitlementsResult = await this.entitlementService.getCustomerEntitlementsForCustomer({
       projectId,
       customerId,
       startAt,
       endAt,
     })
 
-    if (err) {
-      if (err instanceof UnPriceGrantError && err.code === "CUSTOMER_NOT_FOUND") {
+    if (entitlementsResult.err) {
+      throw entitlementsResult.err
+    }
+
+    const candidateEntitlements = entitlementsResult.val.map((entitlement) =>
+      this.toIngestionEntitlement(entitlement)
+    )
+
+    if (candidateEntitlements.length === 0) {
+      const customerExists = await this.entitlementService.customerExists({
+        projectId,
+        customerId,
+      })
+
+      if (customerExists.err) {
+        throw customerExists.err
+      }
+
+      if (!customerExists.val) {
         return {
-          candidateGrants: [],
+          candidateEntitlements,
           rejectionReason: "CUSTOMER_NOT_FOUND",
         }
       }
-      throw err
     }
 
-    const candidateGrants = val.grants
-
     return {
-      candidateGrants,
-      rejectionReason: hasUsageGrant(candidateGrants) ? undefined : "NO_MATCHING_ENTITLEMENT",
+      candidateEntitlements,
+      rejectionReason: candidateEntitlements.some(isUsageEntitlement)
+        ? undefined
+        : "NO_MATCHING_ENTITLEMENT",
+    }
+  }
+
+  private toIngestionEntitlement(entitlement: CustomerEntitlementExtended): IngestionEntitlement {
+    return {
+      creditLinePolicy: entitlement.subscriptionPhase?.creditLinePolicy ?? "uncapped",
+      customerEntitlementId: entitlement.id,
+      customerId: entitlement.customerId,
+      effectiveAt: entitlement.effectiveAt,
+      expiresAt: entitlement.expiresAt,
+      featureConfig: entitlement.featurePlanVersion.config,
+      featurePlanVersionId: entitlement.featurePlanVersionId,
+      featureSlug: entitlement.featurePlanVersion.feature.slug,
+      featureType: entitlement.featurePlanVersion.featureType,
+      grants: (entitlement.grants ?? []).map((grant) => ({
+        allowanceUnits: grant.allowanceUnits,
+        effectiveAt: grant.effectiveAt,
+        expiresAt: grant.expiresAt,
+        grantId: grant.id,
+        priority: grant.priority,
+      })),
+      meterConfig: entitlement.featurePlanVersion.meterConfig ?? null,
+      overageStrategy: entitlement.overageStrategy,
+      projectId: entitlement.projectId,
+      resetConfig:
+        entitlement.featurePlanVersion.resetConfig ??
+        toResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig),
     }
   }
 
@@ -818,51 +990,100 @@ export class IngestionService {
     }
   }
 
-  private async resolveProcessableStates(
+  private resolveSyncFeatureEntitlements(params: {
+    candidateEntitlements: IngestionCandidateEntitlements
+    featureSlug: string
+    message: IngestionQueueMessage
+  }): Result<IngestionEntitlement[], IngestionRejectionReason> {
+    const entitlements = params.candidateEntitlements.filter(
+      (entitlement) => entitlement.featureSlug === params.featureSlug
+    )
+
+    if (entitlements.length === 0) {
+      return { err: "NO_MATCHING_ENTITLEMENT" }
+    }
+
+    return this.filterProcessableEntitlements({
+      message: params.message,
+      entitlements,
+    })
+  }
+
+  private resolveProcessableEntitlements(
     context: IngestionContext
-  ): Promise<Result<IngestionResolvedState[], IngestionRejectionReason>> {
-    return this.stateResolutionService.resolveProcessableStates(context)
+  ): Result<IngestionEntitlement[], IngestionRejectionReason> {
+    return this.filterProcessableEntitlements({
+      message: context.message,
+      entitlements: context.candidateEntitlements,
+    })
   }
 
-  private async applyResolvedStates(params: ApplyResolvedStatesParams): Promise<void> {
-    const { customerId, message, processableStates, projectId } = params
+  private filterProcessableEntitlements(params: {
+    message: IngestionQueueMessage
+    entitlements: IngestionEntitlement[]
+  }): Result<IngestionEntitlement[], IngestionRejectionReason> {
+    const matchingEntitlements = params.entitlements.filter(
+      (entitlement) =>
+        entitlement.featureType === "usage" &&
+        entitlement.meterConfig?.eventSlug === params.message.slug &&
+        isIngestionEntitlementActiveAt(entitlement, params.message.timestamp)
+    )
 
-    for (const state of processableStates) {
-      await this.applyResolvedState({
-        customerId,
-        enforceLimit: false,
-        message,
-        projectId,
-        state,
+    if (matchingEntitlements.length === 0) {
+      return { err: "UNROUTABLE_EVENT" }
+    }
+
+    if (matchingEntitlements.length > 1) {
+      this.logger.error("multiple active entitlements matched ingestion event", {
+        projectId: params.message.projectId,
+        customerId: params.message.customerId,
+        eventId: params.message.id,
+        eventSlug: params.message.slug,
+        customerEntitlementIds: matchingEntitlements.map(
+          (entitlement) => entitlement.customerEntitlementId
+        ),
       })
+
+      return { err: "INVALID_ENTITLEMENT_CONFIGURATION" }
     }
+
+    const processableEntitlements = filterIngestionEntitlementsWithValidAggregationPayload({
+      entitlements: matchingEntitlements,
+      event: params.message,
+    })
+
+    if (processableEntitlements.length === 0) {
+      return { err: "INVALID_AGGREGATION_PROPERTIES" }
+    }
+
+    return { val: processableEntitlements }
   }
 
-  private async applyResolvedState(
-    params: ApplyResolvedStateParams
-  ): Promise<EntitlementWindowApplyResult | null> {
-    const { customerId, enforceLimit, message, projectId, state } = params
-
-    const periodKey = computeResolvedStatePeriodKey(state, message.timestamp)
-
-    if (!periodKey) {
-      this.logger.debug("period key doesn't exist")
-      return null
-    }
-
-    const periodEndAt = computeResolvedStatePeriodEndAt(state, message.timestamp)
-
-    if (periodEndAt === null) {
-      this.logger.debug("period end doesn't exist")
-      return null
+  private async applyEntitlement(params: {
+    customerId: string
+    enforceLimit: boolean
+    entitlement: IngestionEntitlement
+    message: IngestionQueueMessage
+    projectId: string
+  }): Promise<EntitlementWindowApplyResult> {
+    const { customerId, enforceLimit, entitlement, message, projectId } = params
+    if (!entitlement.meterConfig) {
+      return {
+        allowed: false,
+        deniedReason: "LIMIT_EXCEEDED",
+        message: "Usage entitlement is missing meter configuration",
+      }
     }
 
     const stub = this.entitlementWindowClient.getEntitlementWindowStub({
+      customerEntitlementId: entitlement.customerEntitlementId,
       customerId,
-      periodKey,
       projectId,
-      streamId: state.streamId,
     })
+    const applyEntitlement = {
+      ...entitlement,
+      meterConfig: entitlement.meterConfig,
+    }
 
     return stub.apply({
       event: {
@@ -871,18 +1092,13 @@ export class IngestionService {
         timestamp: message.timestamp,
         properties: message.properties,
       },
+      entitlement: applyEntitlement,
       idempotencyKey: message.idempotencyKey,
       projectId,
       customerId,
-      streamId: state.streamId,
-      featureSlug: state.featureSlug,
-      periodKey,
-      meters: [state.meterConfig],
-      limit: state.limit,
-      overageStrategy: state.overageStrategy,
+      grants: entitlement.grants,
       enforceLimit,
       now: message.receivedAt,
-      periodEndAt,
     })
   }
 
@@ -918,7 +1134,14 @@ export class IngestionService {
       projectId,
       rejectionReason: outcome.rejectionReason,
     })
-    this.commitToAuditAsync(message, outcome)
+    await this.commitOutcomesToAudit(
+      message.projectId,
+      message.customerId,
+      [{ message, outcome }],
+      {
+        strict: true,
+      }
+    )
 
     return this.toSyncResult({
       allowed: false,
@@ -973,14 +1196,43 @@ function toEventDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10)
 }
 
+function formatUnknownError(error: unknown): Record<string, unknown> | string {
+  if (error instanceof Error) {
+    return {
+      type: error.name,
+      message: error.message,
+      stack: error.stack,
+    }
+  }
+
+  return String(error ?? "unknown")
+}
+
 function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueueMessage): number {
   return left.timestamp - right.timestamp || left.idempotencyKey.localeCompare(right.idempotencyKey)
 }
 
-function hasUsageGrant(candidateGrants: IngestionCandidateGrants): boolean {
-  return candidateGrants.some(
-    (grant) =>
-      grant.featurePlanVersion.featureType === "usage" &&
-      Boolean(grant.featurePlanVersion.meterConfig)
-  )
+function isUsageEntitlement(entitlement: IngestionEntitlement): boolean {
+  return entitlement.featureType === "usage" && Boolean(entitlement.meterConfig)
+}
+
+function formatVerificationSpending(spending: EntitlementWindowState["spending"]) {
+  const amount = toDecimal(fromLedgerMinor(spending.ledgerAmount, spending.currency))
+
+  return {
+    currency: spending.currency,
+    displayAmount: formatMoney(amount, spending.currency),
+    ledgerAmount: spending.ledgerAmount,
+    scale: spending.scale,
+  }
+}
+
+function toResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
+  return {
+    name: billingConfig.name,
+    resetInterval: billingConfig.billingInterval,
+    resetIntervalCount: billingConfig.billingIntervalCount,
+    planType: billingConfig.planType,
+    resetAnchor: "dayOfCreation",
+  }
 }

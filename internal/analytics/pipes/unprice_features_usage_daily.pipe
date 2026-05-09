@@ -6,7 +6,9 @@ SQL >
         customer_id,
         period_key,
         feature_slug,
-        argMaxMergeState(value) AS value
+        argMaxMergeState(value) AS value,
+        argMaxMergeState(amount_after) AS amount_after,
+        argMaxMergeState(currency) AS currency
     FROM unprice_feature_usage_hourly_mv
     GROUP BY
         date,

@@ -107,36 +107,67 @@
                   "libraries/ts/sdk/overview",
                   {
                     "group": "Customers",
+                    "pages": ["libraries/ts/sdk/customers/signup"]
+                  },
+                  {
+                    "group": "Access",
+                    "pages": ["libraries/ts/sdk/access/update"]
+                  },
+                  {
+                    "group": "Entitlements",
                     "pages": [
-                      "libraries/ts/sdk/customers/signup",
-                      "libraries/ts/sdk/customers/get-subscription",
-                      "libraries/ts/sdk/customers/get-entitlements",
-                      "libraries/ts/sdk/customers/reset-entitlements",
-                      "libraries/ts/sdk/customers/get-payment-methods",
-                      "libraries/ts/sdk/customers/create-payment-method",
-                      "libraries/ts/sdk/customers/can",
-                      "libraries/ts/sdk/customers/get-usage",
-                      "libraries/ts/sdk/customers/report-usage",
-                      "libraries/ts/sdk/customers/update-acl"
+                      "libraries/ts/sdk/entitlements/get",
+                      "libraries/ts/sdk/entitlements/verify"
                     ]
                   },
                   {
-                    "group": "Projects",
-                    "pages": ["libraries/ts/sdk/projects/get-features"]
+                    "group": "Events",
+                    "pages": [
+                      "libraries/ts/sdk/events/ingest",
+                      "libraries/ts/sdk/events/ingest-sync"
+                    ]
                   },
                   {
-                    "group": "Analytics",
+                    "group": "Features",
+                    "pages": ["libraries/ts/sdk/features/list"]
+                  },
+                  {
+                    "group": "Invoices",
+                    "pages": ["libraries/ts/sdk/invoices/get"]
+                  },
+                  {
+                    "group": "Lakehouse",
+                    "pages": ["libraries/ts/sdk/lakehouse/get-file-plan"]
+                  },
+                  {
+                    "group": "Payments",
                     "pages": [
-                      "libraries/ts/sdk/analytics/get-usage",
-                      "libraries/ts/sdk/analytics/get-verifications"
+                      "libraries/ts/sdk/payments/list-methods",
+                      "libraries/ts/sdk/payments/create-method"
                     ]
                   },
                   {
                     "group": "Plans",
                     "pages": [
-                      "libraries/ts/sdk/plans/get-plan-version",
-                      "libraries/ts/sdk/plans/list-plan-versions"
+                      "libraries/ts/sdk/plans/get-version",
+                      "libraries/ts/sdk/plans/list-versions"
                     ]
+                  },
+                  {
+                    "group": "Realtime",
+                    "pages": ["libraries/ts/sdk/realtime/create-ticket"]
+                  },
+                  {
+                    "group": "Subscriptions",
+                    "pages": ["libraries/ts/sdk/subscriptions/get"]
+                  },
+                  {
+                    "group": "Usage",
+                    "pages": ["libraries/ts/sdk/usage/get"]
+                  },
+                  {
+                    "group": "Wallet",
+                    "pages": ["libraries/ts/sdk/wallet/get"]
                   }
                 ]
               }

@@ -1,4 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
+import type { AppLogger } from "@unprice/observability"
+import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
+import { UnPriceIngestionError } from "@unprice/services/ingestion"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -41,6 +44,7 @@ const requestBody = {
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
+  defaultCustomerId: "cus_default_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
@@ -111,6 +115,137 @@ describe("ingestEventsSyncV1 route", () => {
       }),
     })
   })
+
+  it("resolves customer id from key binding when request customerId is omitted", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: undefined,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(ingestFeatureSync).toHaveBeenCalledWith({
+      featureSlug: "api_calls",
+      message: expect.objectContaining({
+        customerId: verifiedKey.defaultCustomerId,
+      }),
+    })
+  })
+
+  it("uses explicit customerId from body even when key has a different default", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: "cus_explicit_999",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(ingestFeatureSync).toHaveBeenCalledWith({
+      featureSlug: "api_calls",
+      message: expect.objectContaining({
+        customerId: "cus_explicit_999",
+      }),
+    })
+  })
+
+  it("returns 400 when customerId is omitted and key has no default binding", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+    authMocks.keyAuth.mockResolvedValueOnce({
+      ...verifiedKey,
+      defaultCustomerId: null,
+    })
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        customerId: undefined,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "BAD_REQUEST",
+        message: "customerId is required when the API key has no default customer binding",
+      })
+    )
+  })
+
+  it("returns 400 and logs when the raw event timestamp is older than the max accepted age", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync, logger } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        timestamp: requestBody.timestamp - INGESTION_MAX_EVENT_AGE_MS - 1,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    expect(ingestFeatureSync).not.toHaveBeenCalled()
+    expect(logger.warn).toHaveBeenCalledWith(
+      "raw ingestion event rejected as too old",
+      expect.objectContaining({
+        projectId: "proj_123",
+        customerId: requestBody.customerId,
+        idempotencyKey: requestBody.idempotencyKey,
+        rejectionReason: "EVENT_TOO_OLD",
+      })
+    )
+  })
+
+  it("maps audit payload conflicts to 409 conflict", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+    ingestFeatureSync.mockRejectedValueOnce(
+      new UnPriceIngestionError({
+        code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
+        message:
+          "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+        context: {
+          idempotencyKeys: ["idem_123"],
+          shardIndex: 20,
+        },
+      })
+    )
+
+    const response = await app.fetch(buildRequest(), env, executionCtx)
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      code: "CONFLICT",
+      message:
+        "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+    })
+  })
 })
 
 function createTestApp() {
@@ -119,13 +254,13 @@ function createTestApp() {
     allowed: true,
     state: "processed",
   })
+  const logger = createRouteLogger()
 
   app.use(timing())
 
   app.onError((error, c) => {
     if (error instanceof UnpriceApiError) {
-      const status = error.code === "RATE_LIMITED" ? 429 : 400
-      return c.json({ code: error.code, message: error.message }, status)
+      return c.json({ code: error.code, message: error.message }, error.status)
     }
 
     throw error
@@ -134,6 +269,7 @@ function createTestApp() {
   app.use("*", async (c, next) => {
     c.set("requestId", "req_123")
     c.set("requestStartedAt", Date.now())
+    c.set("logger", logger as AppLogger)
     c.set("services", {
       ingestion: {
         ingestFeatureSync,
@@ -155,7 +291,7 @@ function createTestApp() {
     waitUntil: vi.fn(),
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, ingestFeatureSync }
+  return { app, env, executionCtx, ingestFeatureSync, logger }
 }
 
 function buildRequest(body: Record<string, unknown> = requestBody) {
@@ -167,4 +303,12 @@ function buildRequest(body: Record<string, unknown> = requestBody) {
     },
     body: JSON.stringify(body),
   })
+}
+
+function createRouteLogger(): Pick<AppLogger, "error" | "warn" | "set"> {
+  return {
+    error: vi.fn(),
+    warn: vi.fn(),
+    set: vi.fn(),
+  }
 }

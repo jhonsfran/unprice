@@ -4,7 +4,7 @@ import { auth } from "@unprice/auth/server"
 import { createTRPCContext } from "@unprice/trpc"
 import { edgeRouter } from "@unprice/trpc/router/edge"
 import { geolocation } from "@vercel/functions"
-import { getRequestLoggers, withEvlog } from "~/lib/evlog"
+import { getRequestLoggers, withEvlog } from "~/lib/observability"
 import { CorsOptions, setCorsHeaders } from "../../../_enableCors"
 
 export const runtime = "edge"

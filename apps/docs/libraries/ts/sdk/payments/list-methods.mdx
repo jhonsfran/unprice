@@ -1,0 +1,75 @@
+---
+title: "List Payment Methods"
+description: "Get payment methods for a customer"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.payments.methods.list({
+  customerId: "cus_1234567890",
+  provider: "stripe"
+});
+
+if (error) {
+  // handle potential network or bad request error
+  // a link to our docs will be in the `error.docs` field
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+[
+  {
+    "id": "pm_1234567890",
+    "name": "John Doe",
+    "last4": "4242",
+    "expMonth": 12,
+    "expYear": 2024,
+    "brand": "visa"
+  }
+]
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="customerId" type="string" required>
+    The ID of the customer to get payment methods for
+</ParamField>
+
+<ParamField body="provider" type="string" enum="stripe,square" required>
+    The payment provider to get payment methods from
+</ParamField>
+
+## Response
+
+<ResponseField name="[].id" type="string" required>
+    The ID of the payment method
+</ResponseField>
+
+<ResponseField name="[].name" type="string">
+    The name on the payment method
+</ResponseField>
+
+<ResponseField name="[].last4" type="string">
+    The last 4 digits of the payment method
+</ResponseField>
+
+<ResponseField name="[].expMonth" type="number">
+    The expiration month of the payment method
+</ResponseField>
+
+<ResponseField name="[].expYear" type="number">
+    The expiration year of the payment method
+</ResponseField>
+
+<ResponseField name="[].brand" type="string">
+    The brand of the payment method (e.g., visa, mastercard)
+</ResponseField>

@@ -104,6 +104,8 @@ jobs:
             AXIOM_DATASET
             UPSTASH_REDIS_REST_URL
             UPSTASH_REDIS_REST_TOKEN
+            STRIPE_API_KEY
+            STRIPE_CONNECT_WEBHOOK_SECRET
             UNPRICE_API_KEY
             UNPRICE_API_URL
           vars: |
@@ -134,3 +136,5 @@ jobs:
           UPSTASH_REDIS_REST_TOKEN: ${{ env.UPSTASH_REDIS_REST_TOKEN }}
           UNPRICE_API_KEY: ${{ env.UNPRICE_API_KEY }}
           UNPRICE_API_URL: ${{ env.UNPRICE_API_URL }}
+          STRIPE_API_KEY: ${{ env.STRIPE_API_KEY }}
+          STRIPE_CONNECT_WEBHOOK_SECRET: ${{ env.STRIPE_CONNECT_WEBHOOK_SECRET }}

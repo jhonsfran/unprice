@@ -3,12 +3,8 @@ import { cuid } from "./fields"
 
 // for rest of tables
 export const projectID = {
-  get id() {
-    return cuid("id").notNull()
-  },
-  get projectId() {
-    return cuid("project_id")
-      .notNull()
-      .references(() => projects.id, { onDelete: "cascade" })
-  },
+  id: cuid("id").notNull(),
+  projectId: cuid("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
 }

@@ -14,6 +14,24 @@ export const configSchema = z.object({
 })
 export type Config = z.infer<typeof configSchema>
 
+export function getTrialIntervalForBillingInterval(
+  billingInterval: BillingInterval
+): Extract<BillingInterval, "day" | "minute"> {
+  return billingInterval === "minute" ? "minute" : "day"
+}
+
+export function getTrialUnitLabel({
+  billingInterval,
+  units,
+}: {
+  billingInterval: BillingInterval
+  units?: number | null
+}): string {
+  const trialInterval = getTrialIntervalForBillingInterval(billingInterval)
+
+  return units === 1 ? trialInterval : `${trialInterval}s`
+}
+
 // =================================================================================
 // 2. STANDALONE UTILITY FUNCTION: calculateTrialEndsAt
 // This function can be exported and used anywhere in the system to determine
@@ -167,6 +185,17 @@ export function addByInterval(date: Date, interval: BillingInterval, count: numb
   }
 }
 
+export function usesDayBasedBilling(interval: BillingInterval): boolean {
+  return interval !== "minute" && interval !== "onetime"
+}
+
+export function normalizeBillingStartForInterval(
+  timestamp: number,
+  interval: BillingInterval
+): number {
+  return usesDayBasedBilling(interval) ? startOfUtcDay(new Date(timestamp)).getTime() : timestamp
+}
+
 /**
  * Calculates a proration factor for a given service window [serviceStart, serviceEnd),
  * using the real recurring cycle derived from the billing config.
@@ -186,21 +215,31 @@ export function calculateProration(params: {
 }): { prorationFactor: number; referenceCycleStart: number; referenceCycleEnd: number } {
   const { serviceStart, serviceEnd, effectiveStartDate, billingConfig } = params
 
-  if (serviceEnd <= serviceStart) {
-    return { prorationFactor: 0, referenceCycleStart: serviceStart, referenceCycleEnd: serviceEnd }
-  }
-
   // Onetime plans have no recurring notion; treat any window as fully billable.
   if (billingConfig.planType === "onetime") {
     return { prorationFactor: 1, referenceCycleStart: serviceStart, referenceCycleEnd: serviceEnd }
   }
 
   const { billingInterval, billingIntervalCount } = billingConfig
+  const normalizedServiceStart = normalizeBillingStartForInterval(serviceStart, billingInterval)
+  const normalizedEffectiveStartDate = normalizeBillingStartForInterval(
+    effectiveStartDate,
+    billingInterval
+  )
+
+  if (serviceEnd <= normalizedServiceStart) {
+    return {
+      prorationFactor: 0,
+      referenceCycleStart: normalizedServiceStart,
+      referenceCycleEnd: serviceEnd,
+    }
+  }
+
   const anchorValue = (billingConfig as Partial<BillingConfig>).billingAnchor ?? "dayOfCreation"
-  const anchor = getAnchor(effectiveStartDate, billingInterval, anchorValue)
+  const anchor = getAnchor(normalizedEffectiveStartDate, billingInterval, anchorValue)
 
   // Compute the first anchored cycle start on or after effectiveStartDate.
-  const startRef = new Date(effectiveStartDate)
+  const startRef = new Date(normalizedEffectiveStartDate)
   let firstCycleStart: Date
   switch (billingInterval) {
     case "minute": {
@@ -228,7 +267,7 @@ export function calculateProration(params: {
       throw new Error(`Invalid billing interval: ${billingInterval}`)
   }
 
-  if (firstCycleStart.getTime() < effectiveStartDate) {
+  if (firstCycleStart.getTime() < normalizedEffectiveStartDate) {
     firstCycleStart = addByInterval(firstCycleStart, billingInterval, billingIntervalCount)
   }
 
@@ -255,7 +294,7 @@ export function calculateProration(params: {
     return { prorationFactor: 0, referenceCycleStart, referenceCycleEnd }
   }
 
-  const windowDuration = serviceEnd - serviceStart
+  const windowDuration = serviceEnd - normalizedServiceStart
   const prorationFactor = Math.min(1, Math.max(0, windowDuration / fullCycleDuration))
 
   return { prorationFactor, referenceCycleStart, referenceCycleEnd }

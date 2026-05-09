@@ -41,7 +41,7 @@ export function PlanVersionDialog({
               planId: "",
               projectId: "",
               currency: "USD",
-              paymentProvider: "stripe",
+              paymentProvider: "sandbox",
               description: "",
               collectionMethod: "charge_automatically",
               whenToBill: "pay_in_advance",

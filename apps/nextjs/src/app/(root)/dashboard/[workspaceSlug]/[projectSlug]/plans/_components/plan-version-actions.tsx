@@ -1,6 +1,6 @@
 "use client"
 
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import type { ElementRef } from "react"
 import { forwardRef, startTransition } from "react"
 
@@ -9,8 +9,9 @@ import { LoadingAnimation } from "@unprice/ui/loading-animation"
 import { toast } from "@unprice/ui/sonner"
 
 import { useMutation } from "@tanstack/react-query"
+import { useStore } from "jotai"
 import { ConfirmAction } from "~/components/confirm-action"
-import { usePlanFeaturesList } from "~/hooks/use-features"
+import { configPlanFeaturesListAtom } from "~/hooks/use-features"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
@@ -25,11 +26,11 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
   (props, ref) => {
     const { planVersionId, onConfirmAction, classNames, variant = "primary" } = props
     const router = useRouter()
-    const [planFeatures] = usePlanFeaturesList()
+    // Read the atom lazily via the store rather than subscribing — subscribing here causes
+    // a "Cannot update a component while rendering a different component" warning when the
+    // atom is hydrated by PlanFeatureList further down the tree.
+    const store = useStore()
     const trpc = useTRPC()
-
-    // is valid when all features have config
-    const isValidConfig = Object.values(planFeatures).every((f) => f.id !== undefined)
 
     const publishVersion = useMutation(
       trpc.planVersions.publish.mutationOptions({
@@ -41,6 +42,8 @@ const PlanVersionPublish = forwardRef<ElementRef<"button">, PlanVersionPublishPr
 
     function onPublishVersion() {
       startTransition(() => {
+        const planFeatures = store.get(configPlanFeaturesListAtom)
+        const isValidConfig = Object.values(planFeatures).every((f) => f.id !== undefined)
         if (!isValidConfig) {
           toastAction("error", "There are some features without configuration. try again")
           return
@@ -198,4 +201,59 @@ const PlanVersionDeactivate = forwardRef<ElementRef<"button">, PlanVersionDuplic
 
 PlanVersionDeactivate.displayName = "PlanVersionDeactivate"
 
-export { PlanVersionDeactivate, PlanVersionDuplicate, PlanVersionPublish }
+const PlanVersionDelete = forwardRef<ElementRef<"button">, PlanVersionDuplicateProps>(
+  (props, ref) => {
+    const { planVersionId, classNames, onConfirmAction } = props
+    const router = useRouter()
+    const pathname = usePathname()
+    const trpc = useTRPC()
+
+    const deleteVersion = useMutation(
+      trpc.planVersions.remove.mutationOptions({
+        onSuccess: ({ planVersion }) => {
+          // Navigate up to the plan overview if we were on this version's page,
+          // then refresh to invalidate the RSC cache so the deleted version is
+          // no longer shown in the parent versions table.
+          if (pathname.includes(planVersion.id)) {
+            router.push(pathname.replace(`/${planVersion.id}`, ""))
+          }
+          router.refresh()
+        },
+      })
+    )
+
+    function onDeleteVersion() {
+      startTransition(() => {
+        toast.promise(deleteVersion.mutateAsync({ id: planVersionId }), {
+          loading: "Deleting...",
+          success: "Version deleted",
+        })
+      })
+    }
+
+    return (
+      <ConfirmAction
+        title="Delete this version?"
+        message="This will permanently delete the draft. Customers on other versions are unaffected. This action cannot be undone."
+        confirmAction={() => {
+          onConfirmAction?.()
+          onDeleteVersion()
+        }}
+      >
+        <Button
+          ref={ref}
+          className={classNames}
+          variant={"custom"}
+          disabled={deleteVersion.isPending}
+        >
+          Delete version
+          {deleteVersion.isPending && <LoadingAnimation className={"ml-2"} />}
+        </Button>
+      </ConfirmAction>
+    )
+  }
+)
+
+PlanVersionDelete.displayName = "PlanVersionDelete"
+
+export { PlanVersionDeactivate, PlanVersionDelete, PlanVersionDuplicate, PlanVersionPublish }

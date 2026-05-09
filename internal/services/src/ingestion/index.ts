@@ -1,6 +1,6 @@
 export * from "./audit"
 export * from "./consumer"
+export * from "./errors"
 export * from "./interface"
 export * from "./message"
 export * from "./service"
-export * from "./state-resolution-service"

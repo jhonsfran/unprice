@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
-const TEST_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
-const TEST_AUDIT_RETENTION_MS = TEST_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000
+const TEST_INGESTION_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
+const TEST_DO_IDEMPOTENCY_TTL_MS = TEST_INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000
+const TEST_AUDIT_RETENTION_MS = TEST_DO_IDEMPOTENCY_TTL_MS
 
 type DrizzleCondition = {
   kind: "and" | "eq" | "isNull" | "lt"
@@ -62,6 +63,7 @@ describe("IngestionAuditDO", () => {
   })
 
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
     vi.resetModules()
     testState.db = null
@@ -178,6 +180,51 @@ describe("IngestionAuditDO", () => {
     expect(db.rows.get("idem_publish")?.published_at).toBe(BASE_NOW)
   })
 
+  it("publishes to the local pipeline URL in development", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+    const pipelineEvents = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+    testState.db = db
+    vi.stubGlobal("fetch", fetchMock)
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        APP_ENV: "development",
+        LOCAL_PIPELINE_URL: "http://127.0.0.1:4195/ingest",
+        PIPELINE_EVENTS: pipelineEvents,
+      } as never
+    )
+
+    await durableObject.commit([
+      createLedgerEntry({
+        idempotencyKey: "idem_local",
+        payloadHash: "hash_local",
+      }),
+    ])
+
+    await durableObject.alarm()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:4195/ingest",
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+      })
+    )
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+    expect(JSON.parse(String(request?.body))).toEqual([{ idempotency_key: "idem_local" }])
+    expect(pipelineEvents.send).not.toHaveBeenCalled()
+    expect(db.rows.get("idem_local")?.published_at).toBe(BASE_NOW)
+  })
+
   it("keeps rows unpublished and retries alarm when pipeline send fails", async () => {
     const IngestionAuditDO = await loadIngestionAuditDO()
     const state = createDurableObjectState()
@@ -204,6 +251,39 @@ describe("IngestionAuditDO", () => {
     await durableObject.alarm()
 
     expect(db.rows.get("idem_retry")?.published_at).toBeNull()
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+  })
+
+  it("keeps rows unpublished and retries alarm when local pipeline send fails", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503 })
+    testState.db = db
+    vi.stubGlobal("fetch", fetchMock)
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        APP_ENV: "development",
+        LOCAL_PIPELINE_URL: "http://127.0.0.1:4195/ingest",
+        PIPELINE_EVENTS: {
+          send: vi.fn().mockResolvedValue(undefined),
+        },
+      } as never
+    )
+
+    await durableObject.commit([
+      createLedgerEntry({
+        idempotencyKey: "idem_local_retry",
+        payloadHash: "hash_local_retry",
+      }),
+    ])
+
+    await durableObject.alarm()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(db.rows.get("idem_local_retry")?.published_at).toBeNull()
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
@@ -246,6 +326,17 @@ describe("IngestionAuditDO", () => {
       first_seen_at: BASE_NOW - 1000,
       published_at: BASE_NOW - 1,
     })
+    db.rows.set("within_retention_margin", {
+      idempotency_key: "within_retention_margin",
+      canonical_audit_id: "canonical_within_retention_margin",
+      payload_hash: "hash_within_retention_margin",
+      status: "processed",
+      rejection_reason: null,
+      result_json: '{"state":"processed"}',
+      audit_payload_json: '{"idempotency_key":"within_retention_margin"}',
+      first_seen_at: BASE_NOW - TEST_INGESTION_MAX_EVENT_AGE_MS - 24 * 60 * 60 * 1000,
+      published_at: BASE_NOW - 1,
+    })
 
     const durableObject = new IngestionAuditDO(
       state as never,
@@ -261,6 +352,7 @@ describe("IngestionAuditDO", () => {
     expect(db.rows.has("old_published")).toBe(false)
     expect(db.rows.has("old_unpublished")).toBe(true)
     expect(db.rows.has("fresh_published")).toBe(true)
+    expect(db.rows.has("within_retention_margin")).toBe(true)
   })
 })
 
@@ -279,14 +371,14 @@ async function loadIngestionAuditDO() {
     parseLakehouseEvent: vi.fn((_source: string, payload: unknown) => payload),
   }))
 
-  vi.doMock("@unprice/observability", () => ({
-    createStandaloneRequestLogger: vi.fn(() => ({
-      logger: testState.logger,
-    })),
-  }))
+  vi.doMock("@unprice/observability", () => ({}))
 
   vi.doMock("~/observability", () => ({
-    apiDrain: null,
+    createDoLogger: vi.fn(() => testState.logger),
+    runDoOperation: vi.fn(
+      async <T>(_params: unknown, fn: (logger: typeof testState.logger) => Promise<T>) =>
+        fn(testState.logger)
+    ),
   }))
 
   vi.doMock("drizzle-orm/durable-sqlite", () => ({

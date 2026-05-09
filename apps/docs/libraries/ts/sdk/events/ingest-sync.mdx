@@ -1,0 +1,58 @@
+---
+title: "Ingest Sync"
+description: "Synchronously verify and ingest one feature event"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.events.ingestSync({
+  idempotencyKey: "idem_123",
+  eventSlug: "tokens_used",
+  featureSlug: "tokens",
+  customerId: "cus_1234567890",
+  properties: {
+    amount: 1
+  }
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "allowed": true,
+  "state": "processed"
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="featureSlug" type="string" required>
+    The feature slug to verify while ingesting.
+</ParamField>
+
+<ParamField body="idempotencyKey" type="string" required>
+    Logical key used to deduplicate the event.
+</ParamField>
+
+<ParamField body="eventSlug" type="string" required>
+    The event slug configured in Unprice.
+</ParamField>
+
+<ParamField body="properties" type="object" required>
+    Event properties used by meters.
+</ParamField>
+
+## Response
+
+Returns whether the event was processed or rejected for the targeted feature.

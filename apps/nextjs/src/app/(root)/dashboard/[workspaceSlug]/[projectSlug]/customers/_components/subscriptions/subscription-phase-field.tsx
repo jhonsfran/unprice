@@ -1,5 +1,10 @@
 "use client"
-import type { InsertSubscription, InsertSubscriptionPhase } from "@unprice/db/validators"
+import {
+  type InsertSubscription,
+  type InsertSubscriptionPhase,
+  getTrialUnitLabel,
+} from "@unprice/db/validators"
+import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { FormDescription, FormLabel, FormMessage } from "@unprice/ui/form"
@@ -53,6 +58,8 @@ export default function SubscriptionPhaseFormField({
     startAt: Date.now(),
     subscriptionId,
     paymentMethodRequired: false,
+    creditLinePolicy: "uncapped",
+    creditLineAmount: null,
     trialUnits: 0,
   } as InsertSubscriptionPhase
 
@@ -150,9 +157,9 @@ export default function SubscriptionPhaseFormField({
           <Typography variant="h5">Phases configuration</Typography>
         </FormLabel>
         <FormDescription>
-          Each phase represents a different period of time for the subscription. You can add trial
-          days for avery phase, and configure the billing method. The subscription needs to have at
-          least one phase.
+          Each phase represents a different period of time for the subscription. You can add a trial
+          duration for every phase and configure the billing method. The subscription needs to have
+          at least one phase.
         </FormDescription>
         {errors.phases && <FormMessage>{getErrorMessage(errors, "phases")}</FormMessage>}
       </div>
@@ -179,15 +186,10 @@ export default function SubscriptionPhaseFormField({
 
                 if (!selectedPlanVersion) return null
 
-                // default trial unit is days but when the interval is minute, we need to show the minutes
-                const trialUnitsMessage =
-                  phase.trialUnits === 1
-                    ? selectedPlanVersion.billingConfig.billingInterval === "minute"
-                      ? "minute"
-                      : "day"
-                    : selectedPlanVersion.billingConfig.billingInterval === "minute"
-                      ? "minutes"
-                      : "days"
+                const trialUnitsMessage = getTrialUnitLabel({
+                  billingInterval: selectedPlanVersion.billingConfig.billingInterval,
+                  units: phase.trialUnits,
+                })
 
                 return (
                   <div key={phase.id} className="relative">
@@ -217,6 +219,9 @@ export default function SubscriptionPhaseFormField({
                                 <span className="ml-1">{"active phase"}</span>
                               </div>
                             )}
+                            <Badge className="ml-2">
+                              {formatPhaseCreditLinePolicy(phase, selectedPlanVersion.currency)}
+                            </Badge>
                           </Typography>
                           <Typography variant="p" affects="removePaddingMargin">
                             from {formatDate(phase.startAt, timezone, "MMM dd, yyyy")} to{" "}
@@ -241,6 +246,8 @@ export default function SubscriptionPhaseFormField({
                                   selectedPlanVersion.paymentMethodRequired ?? false,
                                 planVersionId: selectedPlanVersion.id,
                                 trialUnits: selectedPlanVersion.trialUnits,
+                                creditLinePolicy: phase.creditLinePolicy ?? "uncapped",
+                                creditLineAmount: phase.creditLineAmount ?? null,
                               })
                               setDialogOpen(true)
                             }}
@@ -440,4 +447,19 @@ export default function SubscriptionPhaseFormField({
       </PropagationStopper>
     </div>
   )
+}
+
+function formatPhaseCreditLinePolicy(
+  phase: Pick<InsertSubscriptionPhase, "creditLinePolicy" | "creditLineAmount">,
+  currency: string
+): string {
+  if ((phase.creditLinePolicy ?? "uncapped") === "uncapped") {
+    return "uncapped usage"
+  }
+
+  if (phase.creditLineAmount === null || phase.creditLineAmount === undefined) {
+    return "derived usage cap"
+  }
+
+  return `${formatMoney(toDecimal(fromLedgerMinor(phase.creditLineAmount, currency)), currency)} cap`
 }

@@ -25,6 +25,9 @@ export const create = protectedProjectProcedure
       paymentProvider,
       trialUnits,
       autoRenew,
+      collectionMethod,
+      dueBehaviour,
+      paymentMethodRequired,
     } = opts.input
     const project = opts.ctx.project
     const { plans } = opts.ctx.services
@@ -50,6 +53,9 @@ export const create = protectedProjectProcedure
       paymentProvider,
       trialUnits: trialUnits ?? 0,
       autoRenew,
+      collectionMethod: collectionMethod ?? "charge_automatically",
+      dueBehaviour: dueBehaviour ?? "cancel",
+      paymentMethodRequired,
     })
 
     if (err) {

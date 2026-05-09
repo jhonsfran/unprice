@@ -6,6 +6,7 @@ import type { RouterOutputs } from "@unprice/trpc/routes"
 import { CreditCard } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { startTransition } from "react"
+import { formatDate } from "~/lib/dates"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
@@ -16,6 +17,12 @@ export function InvoiceActions({ invoice }: { invoice: SubscriptionInvoice }) {
   const trpc = useTRPC()
   const subscriptionId = invoice.subscriptionId
   const invoiceId = invoice.id
+  const canFinalize = invoice.status === "draft" && invoice.dueAt <= Date.now()
+  const finalizeReadyAt = formatDate(
+    invoice.dueAt,
+    invoice.subscription.timezone,
+    "MMMM d, yyyy hh:mm a"
+  )
 
   const machine = useMutation(trpc.subscriptions.machine.mutationOptions({}))
 
@@ -65,6 +72,11 @@ export function InvoiceActions({ invoice }: { invoice: SubscriptionInvoice }) {
         e.preventDefault()
 
         if (["draft"].includes(invoice.status)) {
+          if (!canFinalize) {
+            toast.error(`Invoice is not ready to finalize yet. Try again after ${finalizeReadyAt}.`)
+            return
+          }
+
           onFinalizeInvoice()
         } else if (["waiting", "unpaid", "failed"].includes(invoice.status)) {
           onCollectPayment()

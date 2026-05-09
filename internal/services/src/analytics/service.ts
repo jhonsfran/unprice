@@ -1,4 +1,3 @@
-import * as currencies from "@dinero.js/currencies"
 import {
   type Analytics,
   type Interval,
@@ -9,11 +8,12 @@ import {
 } from "@unprice/analytics"
 import { type Database, and, between, count, eq } from "@unprice/db"
 import { features, plans, subscriptions, versions } from "@unprice/db/schema"
-import { currencySymbol } from "@unprice/db/utils"
 import { calculateFlatPricePlan } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { add, dinero, toDecimal } from "dinero.js"
+import { currencySymbol } from "@unprice/money"
+import { type Dinero, add, dinero, toDecimal } from "dinero.js"
+import * as currencies from "dinero.js/currencies"
 import type { z } from "zod"
 import { toErrorContext } from "../utils/log-context"
 
@@ -112,8 +112,8 @@ export class AnalyticsService {
     )
 
     if (err) {
-      this.logger.error("failed to fetch plans stats", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "failed to fetch plans stats",
         projectId,
       })
       return Err(err)
@@ -199,8 +199,8 @@ export class AnalyticsService {
     )
 
     if (err) {
-      this.logger.error("failed to fetch overview stats", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "failed to fetch overview stats",
         projectId,
       })
       return Err(err)
@@ -208,7 +208,7 @@ export class AnalyticsService {
 
     const defaultDineroCurrency = currencies[defaultCurrency]
 
-    let total = dinero({ amount: 0, currency: defaultDineroCurrency })
+    let total: Dinero<number> = dinero({ amount: 0, currency: defaultDineroCurrency })
 
     const stats = {
       newSignups: {
@@ -293,8 +293,8 @@ export class AnalyticsService {
     )
 
     if (pageErr) {
-      this.logger.error("failed to query page for country visits", {
-        error: toErrorContext(pageErr),
+      this.logger.error(pageErr, {
+        context: "failed to query page for country visits",
         projectId,
         pageId,
       })
@@ -323,8 +323,8 @@ export class AnalyticsService {
     )
 
     if (err) {
-      this.logger.error("failed to fetch country visits", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "failed to fetch country visits",
         projectId,
         pageId,
         intervalDays: days,
@@ -360,8 +360,8 @@ export class AnalyticsService {
     )
 
     if (pageErr) {
-      this.logger.error("failed to query page for browser visits", {
-        error: toErrorContext(pageErr),
+      this.logger.error(pageErr, {
+        context: "failed to query page for browser visits",
         projectId,
         pageId,
       })
@@ -390,8 +390,8 @@ export class AnalyticsService {
     )
 
     if (err) {
-      this.logger.error("failed to fetch browser visits", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "failed to fetch browser visits",
         projectId,
         pageId,
         intervalDays: days,
@@ -433,8 +433,8 @@ export class AnalyticsService {
       )
 
       if (err) {
-        this.logger.error("failed to fetch pages overview", {
-          error: toErrorContext(err),
+        this.logger.error(err, {
+          context: "failed to fetch pages overview",
           projectId,
           intervalDays: days,
         })
@@ -456,8 +456,8 @@ export class AnalyticsService {
     )
 
     if (pageErr) {
-      this.logger.error("failed to query page for pages overview", {
-        error: toErrorContext(pageErr),
+      this.logger.error(pageErr, {
+        context: "failed to query page for pages overview",
         projectId,
         pageId,
       })
@@ -484,8 +484,8 @@ export class AnalyticsService {
     )
 
     if (err) {
-      this.logger.error("failed to fetch pages overview", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "failed to fetch pages overview",
         projectId,
         pageId,
         intervalDays: days,
@@ -520,8 +520,8 @@ export class AnalyticsService {
     )
 
     if (err) {
-      this.logger.error("failed to fetch customer for realtime ticket", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "failed to fetch customer for realtime ticket",
         projectId,
         customerId,
       })

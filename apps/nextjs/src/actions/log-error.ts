@@ -1,6 +1,6 @@
 "use server"
 
-import { getRequestLoggers, withEvlog } from "~/lib/evlog"
+import { getRequestLoggers, withEvlog } from "~/lib/observability"
 
 export const logError = withEvlog(async (error: Error | string, errorInfo?: unknown) => {
   const message = typeof error === "string" ? error : error.message

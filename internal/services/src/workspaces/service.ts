@@ -12,7 +12,6 @@ import type {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { z } from "zod"
-import { toErrorContext } from "../utils/log-context"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
 type WorkspaceMember = z.infer<typeof listMembersSchema>
@@ -53,8 +52,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error getting workspace by slug", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error getting workspace by slug",
         slug,
       })
       return Err(err)
@@ -82,8 +81,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error counting workspace memberships by user", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error counting workspace memberships by user",
         userId,
       })
       return Err(err)
@@ -187,8 +186,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error creating workspace record", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error creating workspace record",
         userId,
         unPriceCustomerId,
       })
@@ -220,8 +219,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error listing workspace members", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing workspace members",
         workspaceId,
       })
       return Err(err)
@@ -252,8 +251,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error deactivating workspace by id", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error deactivating workspace by id",
         workspaceId,
       })
       return Err(err)
@@ -279,8 +278,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error listing workspace invites", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing workspace invites",
         workspaceId,
       })
       return Err(err)
@@ -315,8 +314,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error updating invite role", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating invite role",
         workspaceId,
         email,
       })
@@ -359,8 +358,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error updating member role", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error updating member role",
         workspaceId,
         userId,
       })
@@ -402,8 +401,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error deleting invite", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error deleting invite",
         workspaceId,
         email,
       })
@@ -444,8 +443,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error renaming workspace", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error renaming workspace",
         workspaceId,
       })
       return Err(err)
@@ -512,8 +511,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error removing workspace member", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error removing workspace member",
         workspaceId,
         userId,
       })
@@ -556,8 +555,8 @@ export class WorkspaceService {
     )
 
     if (err) {
-      this.logger.error("error listing workspaces by user", {
-        error: toErrorContext(err),
+      this.logger.error(err, {
+        context: "error listing workspaces by user",
         userId,
       })
       return Err(err)

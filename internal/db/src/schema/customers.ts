@@ -17,9 +17,9 @@ import { projectID } from "../utils/sql"
 import { id, timestamps } from "../utils/fields"
 import type {
   customerMetadataSchema,
+  customerSessionCustomerSchema,
   customerSessionMetadataSchema,
-  stripePlanVersionSchema,
-  stripeSetupSchema,
+  customerSessionPlanVersionSchema,
 } from "../validators/customer"
 
 import { currencyEnum } from "./enums"
@@ -37,7 +37,6 @@ export const customers = pgTableProject(
     description: text("description"),
     externalId: text("external_id"),
     metadata: json("metadata").$type<z.infer<typeof customerMetadataSchema>>(),
-    stripeCustomerId: text("stripe_customer_id").unique("stripe_customer_unique"),
     active: boolean("active").notNull().default(true),
     isMain: boolean("is_main").notNull().default(false),
     // all customers will have a default currency - normally the currency of the project
@@ -69,8 +68,10 @@ export const customers = pgTableProject(
 export const customerSessions = pgTableProject("customer_sessions", {
   ...id,
   ...timestamps,
-  customer: json("customer").notNull().$type<z.infer<typeof stripeSetupSchema>>(),
-  planVersion: json("plan_version").notNull().$type<z.infer<typeof stripePlanVersionSchema>>(),
+  customer: json("customer").notNull().$type<z.infer<typeof customerSessionCustomerSchema>>(),
+  planVersion: json("plan_version")
+    .notNull()
+    .$type<z.infer<typeof customerSessionPlanVersionSchema>>(),
   metadata: json("metadata").$type<z.infer<typeof customerSessionMetadataSchema>>(),
 })
 

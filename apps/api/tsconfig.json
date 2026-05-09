@@ -1,6 +1,7 @@
 {
   "extends": "@unprice/tsconfig/base.json",
   "compilerOptions": {
+    "target": "ES2020",
     /* Specify what module code is generated. */
     "module": "esnext",
     /* Specify how TypeScript looks up a file from a given module specifier. */

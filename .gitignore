@@ -99,3 +99,8 @@ internal/lakehouse/lakenv/*
 **/__pycache__/**
 **/.venv/**
 .sisyphus
+
+.openlogs
+.claude/worktrees
+tmp/
+docs/plans/**

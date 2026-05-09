@@ -184,7 +184,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     const ingestion = createIngestionService({
       cache,
-      grantsManager: svcCtx.grantsManager,
+      entitlementService: svcCtx.entitlements,
       logger,
       env: c.env,
       waitUntil,
@@ -205,6 +205,8 @@ export function init(): MiddlewareHandler<HonoEnv> {
       apikey,
       customer: svcCtx.customers,
       plans: svcCtx.plans,
+      ledger: svcCtx.ledger,
+      wallet: svcCtx.wallet,
     })
 
     metrics.emit({

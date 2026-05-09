@@ -47,6 +47,7 @@ export type SubscriptionEvent =
   | { type: "CANCEL" }
   | { type: "CHANGE" }
   | { type: "INVOICE" }
+  | { type: "ACTIVATE" }
 
 export type SubscriptionGuards = {
   type:

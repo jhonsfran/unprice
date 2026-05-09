@@ -1,6 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and as dbAnd, eq } from "@unprice/db"
-import { subscriptions } from "@unprice/db/schema"
+import type { Database } from "@unprice/db"
 import type { Customer, Subscription, SubscriptionStatus } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -19,6 +18,14 @@ import { UnPriceMachineError } from "./errors"
 
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
+import type { LedgerGateway } from "../ledger"
+import type { RatingService } from "../rating/service"
+import { deriveActivationInputsFromPlan } from "../use-cases/billing/derive-provision-inputs"
+import {
+  type ActivateSubscriptionDeps,
+  activateSubscription,
+} from "../use-cases/billing/provision-period"
+import type { WalletService } from "../wallet"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
   canRenew,
@@ -28,8 +35,10 @@ import {
   isCurrentPhaseNull,
   isSubscriptionActive,
   isTrialExpired,
+  isWalletOnlyBilling,
 } from "./guards"
 import { invoiceSubscription, loadSubscription, renewSubscription } from "./invokes"
+import type { SubscriptionRepository } from "./repository"
 import type {
   MachineTags,
   SubscriptionActions,
@@ -60,9 +69,13 @@ export class SubscriptionMachine {
   private logger: Logger
   private actor!: AnyActorRef
   private db: Database
+  private repo: SubscriptionRepository
   private now: number
   private customerService: CustomerService
   private grantService: GrantsManager
+  private ratingService: RatingService
+  private ledgerService: LedgerGateway
+  private walletService: WalletService | null
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -77,16 +90,24 @@ export class SubscriptionMachine {
     analytics,
     logger,
     customer,
+    ratingService,
+    ledgerService,
+    walletService,
     now,
     db,
+    repo,
   }: {
     subscriptionId: string
     projectId: string
     analytics: Analytics
     logger: Logger
     customer: CustomerService
+    ratingService: RatingService
+    ledgerService: LedgerGateway
+    walletService?: WalletService
     now: number
     db: Database
+    repo: SubscriptionRepository
   }) {
     this.subscriptionId = subscriptionId
     this.projectId = projectId
@@ -94,7 +115,14 @@ export class SubscriptionMachine {
     this.logger = logger
     this.now = now
     this.customerService = customer
+    this.ratingService = ratingService
+    this.ledgerService = ledgerService
+    // Nullable on purpose: older callers that don't wire wallet through
+    // skip the `activating` state via a guard; once every caller passes
+    // walletService this can become required. See `shouldActivate`.
+    this.walletService = walletService ?? null
     this.db = db
+    this.repo = repo
     this.machine = this.createMachineSubscription()
     this.grantService = new GrantsManager({ db: db, logger: logger })
   }
@@ -125,14 +153,14 @@ export class SubscriptionMachine {
             input: {
               context: SubscriptionContext
               logger: Logger
-              db: Database
+              repo: SubscriptionRepository
               customerService: CustomerService
             }
           }) => {
             const result = await loadSubscription({
               context: input.context,
               logger: input.logger,
-              db: input.db,
+              repo: input.repo,
               customerService: input.customerService,
             })
 
@@ -142,14 +170,105 @@ export class SubscriptionMachine {
         invoiceSubscription: fromPromise(
           async ({
             input,
-          }: { input: { context: SubscriptionContext; logger: Logger; db: Database } }) => {
+          }: {
+            input: {
+              context: SubscriptionContext
+              logger: Logger
+              db: Database
+              repo: SubscriptionRepository
+              ratingService: RatingService
+              ledgerService: LedgerGateway
+            }
+          }) => {
             const result = await invoiceSubscription({
               context: input.context,
               logger: input.logger,
               db: input.db,
+              repo: input.repo,
+              ratingService: input.ratingService,
+              ledgerService: input.ledgerService,
             })
 
             return result
+          }
+        ),
+        activateSubscription: fromPromise(
+          async ({
+            input,
+          }: {
+            input: {
+              context: SubscriptionContext
+              db: Database
+              walletService: WalletService | null
+              ledgerService: LedgerGateway
+              logger: Logger
+            }
+          }) => {
+            // If wallet is not wired in for this machine instance, the
+            // activating state is a no-op pass-through. Callers that need
+            // wallet activation wire walletService through
+            // SubscriptionMachine.create.
+            if (!input.walletService) {
+              return {
+                skipped: true as const,
+                grantsIssued: [] as Array<{ grantId: string; amount: number; source: string }>,
+              }
+            }
+
+            const derived = await deriveActivationInputsFromPlan(input.db, {
+              subscriptionId: input.context.subscriptionId,
+              projectId: input.context.projectId,
+            })
+
+            if (!derived) {
+              return {
+                skipped: true as const,
+                grantsIssued: [] as Array<{ grantId: string; amount: number; source: string }>,
+              }
+            }
+
+            // Activation issues period grants only.
+            // - Reservations: lazy in EntitlementWindowDO on first priced event.
+            // - Base fees / usage: settled by `invoiceSubscription` at period
+            //   boundaries.
+            // - Trial credits: issued at `trialing` entry, not here.
+            const periodStartAt = new Date(
+              input.context.subscription.currentCycleStartAt ?? input.context.now
+            )
+            const periodEndAt = new Date(
+              input.context.subscription.currentCycleEndAt ?? input.context.now
+            )
+
+            const deps: ActivateSubscriptionDeps = {
+              services: {
+                wallet: input.walletService,
+                ledger: input.ledgerService,
+                // activateSubscription only calls `services.wallet`; the
+                // `subscriptions` and `ledger` fields on the Pick type
+                // are not dereferenced.
+                subscriptions: undefined as never,
+              },
+              db: input.db,
+              logger: input.logger,
+            }
+
+            const result = await activateSubscription(deps, {
+              subscriptionId: input.context.subscriptionId,
+              projectId: input.context.projectId,
+              periodStartAt,
+              periodEndAt,
+              idempotencyKey: `cycle:${input.context.subscriptionId}:${periodStartAt.toISOString()}`,
+              grants: derived.grants,
+            })
+
+            if (result.err) {
+              throw result.err
+            }
+
+            return {
+              skipped: false as const,
+              grantsIssued: result.val.grantsIssued,
+            }
           }
         ),
         renewSubscription: fromPromise(
@@ -160,14 +279,14 @@ export class SubscriptionMachine {
               context: SubscriptionContext
               logger: Logger
               customerService: CustomerService
-              db: Database
+              repo: SubscriptionRepository
             }
           }) => {
             const result = await renewSubscription({
               context: input.context,
               logger: input.logger,
               customerService: input.customerService,
-              db: input.db,
+              repo: input.repo,
             })
 
             return result
@@ -183,6 +302,7 @@ export class SubscriptionMachine {
         isCurrentPhaseNull: isCurrentPhaseNull,
         isSubscriptionActive: isSubscriptionActive,
         isAdvanceBilling: isAdvanceBilling,
+        isWalletOnlyBilling: isWalletOnlyBilling,
       },
       actions: {
         logStateTransition: ({ context, event }) =>
@@ -222,7 +342,7 @@ export class SubscriptionMachine {
             input: ({ context }) => ({
               context,
               logger: this.logger,
-              db: this.db,
+              repo: this.repo,
               customerService: this.customerService,
             }),
             onDone: {
@@ -278,6 +398,16 @@ export class SubscriptionMachine {
             {
               target: "active",
               guard: ({ context }) => context.subscription.status === "active",
+              actions: "logStateTransition",
+            },
+            {
+              target: "pending_payment",
+              guard: ({ context }) => context.subscription.status === "pending_payment",
+              actions: "logStateTransition",
+            },
+            {
+              target: "pending_activation",
+              guard: ({ context }) => context.subscription.status === "pending_activation",
               actions: "logStateTransition",
             },
             {
@@ -379,15 +509,47 @@ export class SubscriptionMachine {
             ],
           },
         },
+        pending_payment: {
+          tags: ["subscription"],
+          description:
+            "Pay-in-advance plan waiting on the first payment provider webhook before the subscription becomes active. Customer cannot consume usage yet — the EntitlementWindowDO denies events while the wallet is empty.",
+          on: {
+            // First successful payment of the bootstrap invoice settles the
+            // wallet topup; the webhook fires PAYMENT_SUCCESS, which moves us
+            // into `activating` to issue period grants and flip to `active`.
+            PAYMENT_SUCCESS: {
+              target: "activating",
+              actions: "logStateTransition",
+            },
+            // Provider declined the first payment. Surface as `past_due` so
+            // the same retry/dunning flow that handles renewal failures kicks
+            // in — no special-case path for first-payment failure.
+            PAYMENT_FAILURE: {
+              target: "past_due",
+              actions: "logStateTransition",
+            },
+            CANCEL: {
+              target: "canceling",
+              actions: "logStateTransition",
+            },
+          },
+        },
         invoicing: {
           tags: ["machine", "transition"],
           description: "Invoicing the subscription depending on the whenToBill setting",
           invoke: {
             id: "invoiceSubscription",
             src: "invoiceSubscription",
-            input: ({ context }) => ({ context, logger: this.logger, db: this.db }),
+            input: ({ context }) => ({
+              context,
+              logger: this.logger,
+              db: this.db,
+              repo: this.repo,
+              ratingService: this.ratingService,
+              ledgerService: this.ledgerService,
+            }),
             onDone: {
-              target: "active",
+              target: "activating",
               actions: [
                 assign({
                   subscription: ({ event, context }) => {
@@ -415,6 +577,7 @@ export class SubscriptionMachine {
                         note: "Invoice failed after trying to invoice",
                       },
                     },
+                    repo: this.repo,
                   }),
                 assign({
                   error: ({ event }) => ({
@@ -436,10 +599,10 @@ export class SubscriptionMachine {
               context,
               customerService: this.customerService,
               logger: this.logger,
-              db: this.db,
+              repo: this.repo,
             }),
             onDone: {
-              target: "active",
+              target: "activating",
               actions: [
                 assign({
                   subscription: ({ event, context }) => {
@@ -467,10 +630,70 @@ export class SubscriptionMachine {
             },
           },
         },
+        activating: {
+          tags: ["machine", "transition"],
+          description:
+            "Issues plan-included credits for the current billing period. Runs after invoicing or renewal, before the subscription enters `active`. No-op when walletService isn't wired in.",
+          invoke: {
+            id: "activateSubscription",
+            src: "activateSubscription",
+            input: ({ context }) => ({
+              context,
+              db: this.db,
+              walletService: this.walletService,
+              ledgerService: this.ledgerService,
+              logger: this.logger,
+            }),
+            onDone: {
+              target: "active",
+              actions: ["logStateTransition"],
+            },
+            // Activation failure is recoverable: park the subscription in
+            // `pending_activation` (a tagged subscription state, so the
+            // status persists to the DB) and let the activation sweeper
+            // retry. The previous `error` (final) target left the machine
+            // dead while the DB row stayed `active` — paid plans then had no
+            // grants and ingestion saw a green light.
+            onError: {
+              target: "pending_activation",
+              actions: [
+                assign({
+                  error: ({ event }) => ({
+                    message: `Activation failed: ${(event.error as Error)?.message ?? "Unknown error"}`,
+                  }),
+                }),
+                "logStateTransition",
+              ],
+            },
+          },
+        },
+        pending_activation: {
+          tags: ["subscription"],
+          description:
+            "Wallet activation failed (period grants could not be issued). The subscription is parked here until the activation sweeper retries successfully. Ingestion is denied while in this state.",
+          on: {
+            // Sweeper / manual retry path. Re-enters `activating` which
+            // re-runs grant issuance under the same advisory lock; grant
+            // idempotency keys keep retries convergent on the same
+            // wallet_credits rows.
+            ACTIVATE: {
+              target: "activating",
+              actions: "logStateTransition",
+            },
+            CANCEL: {
+              target: "canceling",
+              actions: "logStateTransition",
+            },
+          },
+        },
         active: {
           tags: ["subscription"],
           description: "Subscription is active",
           on: {
+            ACTIVATE: {
+              target: "activating",
+              actions: "logStateTransition",
+            },
             CANCEL: {
               target: "canceling",
               actions: "logStateTransition",
@@ -578,6 +801,18 @@ export class SubscriptionMachine {
             ],
             INVOICE: [
               {
+                // Wallet-only subscriptions never invoice — usage drains the
+                // wallet directly. Reject INVOICE so a stray scheduler tick
+                // can't push the machine through the BILL phase.
+                guard: "isWalletOnlyBilling",
+                target: "error",
+                actions: assign({
+                  error: () => ({
+                    message: "Cannot invoice wallet-only subscription (BILL phase is skipped)",
+                  }),
+                }),
+              },
+              {
                 guard: and(["hasValidPaymentMethod"]),
                 target: "invoicing",
                 actions: "logStateTransition",
@@ -652,6 +887,15 @@ export class SubscriptionMachine {
             },
             INVOICE: [
               {
+                guard: "isWalletOnlyBilling",
+                target: "error",
+                actions: assign({
+                  error: () => ({
+                    message: "Cannot invoice wallet-only subscription (BILL phase is skipped)",
+                  }),
+                }),
+              },
+              {
                 guard: and(["hasValidPaymentMethod"]),
                 target: "invoicing",
                 actions: "logStateTransition",
@@ -717,26 +961,49 @@ export class SubscriptionMachine {
         if (currentState === lastPersisted) return
 
         try {
-          await this.db
-            .update(subscriptions)
-            .set({
+          await this.repo.updateSubscription({
+            subscriptionId: this.subscriptionId,
+            projectId: this.projectId,
+            data: {
               status: currentState as SubscriptionStatus,
               active: !["expired", "canceled"].includes(currentState),
-            })
-            .where(
-              dbAnd(
-                eq(subscriptions.id, this.subscriptionId),
-                eq(subscriptions.projectId, this.projectId)
-              )
-            )
+            },
+          })
+
+          // Keep the ACL cache in sync. The bouncer reads from it (Edge,
+          // ~0-10ms latency) and denies/allows ingestion based on the
+          // subscriptionStatus. Without this, transitions like
+          // active → pending_activation / past_due would only take effect
+          // after the SWR TTL elapses, leaving the customer's events
+          // unblocked for the cache window. Best-effort: failures here
+          // do not roll back the persisted status — the cache will catch
+          // up on the next miss.
+          const customerId = snapshot.context.customer?.id
+          if (customerId) {
+            try {
+              await this.customerService.updateAccessControlList({
+                customerId,
+                projectId: this.projectId,
+                updates: { subscriptionStatus: currentState as SubscriptionStatus },
+              })
+            } catch (cacheErr) {
+              this.logger.warn("Failed to refresh ACL cache after status change", {
+                subscriptionId: this.subscriptionId,
+                projectId: this.projectId,
+                customerId,
+                state: currentState,
+                error: (cacheErr as Error).message,
+              })
+            }
+          }
 
           lastPersisted = currentState as SubscriptionStatus
         } catch (err) {
-          this.logger.error("Failed to update subscription status", {
+          this.logger.error(err as Error, {
             subscriptionId: this.subscriptionId,
             projectId: this.projectId,
             state: currentState,
-            error: (err as Error).message,
+            context: "Failed to update subscription status",
           })
         }
       },
@@ -765,8 +1032,12 @@ export class SubscriptionMachine {
     analytics: Analytics
     logger: Logger
     customer: CustomerService
+    ratingService: RatingService
+    ledgerService: LedgerGateway
+    walletService?: WalletService
     now: number
     db: Database
+    repo: SubscriptionRepository
     dryRun?: boolean
   }): Promise<Result<SubscriptionMachine, UnPriceMachineError>> {
     const subscription = new SubscriptionMachine(payload)
@@ -860,6 +1131,15 @@ export class SubscriptionMachine {
 
   public async invoice(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
     return this.sendAndWait({ type: "INVOICE" }, { tag: "subscription", timeout: 30000 })
+  }
+
+  /**
+   * Triggers wallet activation for an already-active subscription. Used when
+   * a subscription is created directly as active (e.g. sandbox provider, no
+   * trial).
+   */
+  public async activate(): Promise<Result<SusbriptionMachineStatus, UnPriceMachineError>> {
+    return this.sendAndWait({ type: "ACTIVATE" }, { tag: "subscription", timeout: 15000 })
   }
 
   public async reportPaymentSuccess({

@@ -1,1156 +1,817 @@
+import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
-import { computePayloadHash, selectIngestionAuditShardIndex } from "./audit"
-import type { IngestionQueueBatch } from "./consumer"
-import {
-  createBatchMessage,
-  createBooleanGrant,
-  createRawBatchMessage,
-  createResolvedState,
-  createServiceHarness,
-  createUsageGrant,
-  mapFeatureStatesBySlug,
-} from "./testing/serviceTestHarness"
+import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
+import type { UnPriceIngestionError } from "./errors"
+import { type IngestionEntitlement, IngestionService } from "./service"
 
-vi.mock("@unprice/lakehouse", () => ({
-  getLakehouseSourceCurrentVersion: vi.fn(() => 2),
-  parseLakehouseEvent: vi.fn((_source: string, payload: unknown) => payload),
-}))
+const SERVICE_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 
-describe("IngestionService", () => {
-  it("drops malformed queue messages and acks them", async () => {
-    const { consumer, mocks } = createServiceHarness()
-    const malformed = createRawBatchMessage({
-      customerId: "cus_123",
-      projectId: "proj_123",
+describe("IngestionService entitlement routing", () => {
+  it("loads customer entitlements and routes by customerEntitlementId", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({ allowed: true })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply,
+      getEnforcementState: vi.fn(),
     })
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
 
-    await consumer.consumeBatch({
-      messages: [malformed.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(malformed.ack).toHaveBeenCalledTimes(1)
-    expect(malformed.retry).not.toHaveBeenCalled()
-    expect(mocks.getGrantsForCustomer).not.toHaveBeenCalled()
-    expect(mocks.commit).not.toHaveBeenCalled()
-    expect(mocks.logger.error).toHaveBeenCalledWith(
-      "dropping malformed ingestion queue message",
-      expect.objectContaining({
-        errors: expect.any(Array),
-      })
-    )
-  })
-
-  it("acks duplicate messages from the same batch before the expensive processing path", async () => {
-    const { consumer, mocks } = createServiceHarness()
-    const first = createBatchMessage({
-      id: "evt_first",
-      idempotencyKey: "idem_shared",
-    })
-    const duplicate = createBatchMessage({
-      id: "evt_duplicate",
-      idempotencyKey: "idem_shared",
-    })
-
-    await consumer.consumeBatch({
-      messages: [first.message, duplicate.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(first.ack).toHaveBeenCalledTimes(1)
-    expect(duplicate.ack).toHaveBeenCalledTimes(1)
-    expect(first.retry).not.toHaveBeenCalled()
-    expect(duplicate.retry).not.toHaveBeenCalled()
-    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        idempotencyKey: "idem_shared",
-        status: "rejected",
-        rejectionReason: "NO_MATCHING_ENTITLEMENT",
-      }),
-    ])
-    expect(mocks.apply).not.toHaveBeenCalled()
-  })
-
-  it("commits a rejected audit entry when the customer is missing", async () => {
-    const { consumer, mocks } = createServiceHarness({
-      customer: null,
-    })
-    const message = createBatchMessage({
-      id: "evt_missing_customer",
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        status: "rejected",
-        rejectionReason: "CUSTOMER_NOT_FOUND",
-      }),
-    ])
-    expect(mocks.apply).not.toHaveBeenCalled()
-  })
-
-  it("acks and commits NO_MATCHING_ENTITLEMENT when no usage entitlements are available", async () => {
-    const { consumer, mocks } = createServiceHarness({
-      grants: [createBooleanGrant()],
-    })
-    const message = createBatchMessage({
-      id: "evt_no_usage_entitlement",
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        status: "rejected",
-        rejectionReason: "NO_MATCHING_ENTITLEMENT",
-      }),
-    ])
-  })
-
-  it("routes processable events through a stable stream identity", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { consumer, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [createResolvedState(timestamp)],
-    })
-    const message = createBatchMessage({
-      id: "evt_stream",
-      idempotencyKey: "idem_stream",
-      timestamp,
-      properties: {
-        amount: 7,
-      },
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
-    expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
-    expect(mocks.getEntitlementWindowStub).toHaveBeenCalledTimes(1)
-    expect(mocks.getEntitlementWindowStub.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({
-        streamId: "stream_123",
-      })
-    )
-    expect(mocks.apply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        streamId: "stream_123",
-        featureSlug: "api_calls",
-        limit: 100,
-      })
-    )
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        idempotencyKey: "idem_stream",
-        status: "processed",
-      }),
-    ])
-  })
-
-  it("retries the entire group when processing fails with an unrecoverable error", async () => {
-    const { consumer, mocks } = createServiceHarness({
-      customer: null,
-    })
-
-    // Override getGrantsForCustomer to throw instead of returning a result
-    mocks.getGrantsForCustomer.mockRejectedValue(new Error("unrecoverable DB error"))
-
-    const message = createBatchMessage({
-      id: "evt_processing_failure",
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.commit).not.toHaveBeenCalled()
-    expect(message.ack).not.toHaveBeenCalled()
-    expect(message.retry).toHaveBeenCalledTimes(1)
-  })
-
-  it("rejects invalid aggregation payloads without calling the entitlement DO", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { consumer, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [createResolvedState(timestamp)],
-    })
-    const message = createBatchMessage({
-      id: "evt_invalid_aggregation",
-      timestamp,
-      properties: {},
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
-    expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        status: "rejected",
-        rejectionReason: "INVALID_AGGREGATION_PROPERTIES",
-      }),
-    ])
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-  })
-
-  it("accepts parseable numeric-string aggregation payloads and processes the event", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { consumer, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [createResolvedState(timestamp)],
-    })
-    const message = createBatchMessage({
-      id: "evt_valid_numeric_string_aggregation",
-      timestamp,
-      properties: {
-        amount: "4.5",
-      },
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(mocks.resolveIngestionStatesFromGrants).toHaveBeenCalledTimes(1)
-    expect(mocks.apply).toHaveBeenCalledTimes(1)
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        status: "processed",
-      }),
-    ])
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-  })
-
-  it("rejects ingestion with INVALID_ENTITLEMENT_CONFIGURATION when grant resolution fails", async () => {
-    const { consumer, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolveIngestionStatesError: new Error("bad grant configuration"),
-    })
-    const message = createBatchMessage({
-      id: "evt_invalid_entitlement_config",
-      properties: {
-        amount: 2,
-      },
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        status: "rejected",
-        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
-      }),
-    ])
-  })
-
-  it("rejects ingestion with INVALID_ENTITLEMENT_CONFIGURATION when period key calculation throws", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { consumer, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [
-        createResolvedState(timestamp, {
-          resetConfig: {
-            name: "daily",
-            resetInterval: "day",
-            resetIntervalCount: 1,
-            resetAnchor: 99,
-            planType: "recurring",
-          },
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue(
+          Ok([
+            {
+              id: entitlement.customerEntitlementId,
+              projectId: entitlement.projectId,
+              customerId: entitlement.customerId,
+              featurePlanVersionId: entitlement.featurePlanVersionId,
+              subscriptionId: null,
+              subscriptionPhaseId: null,
+              subscriptionItemId: null,
+              effectiveAt: entitlement.effectiveAt,
+              expiresAt: entitlement.expiresAt,
+              overageStrategy: entitlement.overageStrategy,
+              metadata: null,
+              createdAtM: 0,
+              updatedAtM: 0,
+              grants: [
+                {
+                  id: "grant_123",
+                  projectId: entitlement.projectId,
+                  customerEntitlementId: entitlement.customerEntitlementId,
+                  type: "subscription",
+                  priority: 10,
+                  allowanceUnits: 100,
+                  effectiveAt: entitlement.effectiveAt,
+                  expiresAt: entitlement.expiresAt,
+                  metadata: null,
+                  createdAtM: 0,
+                  updatedAtM: 0,
+                },
+              ],
+              featurePlanVersion: {
+                id: entitlement.featurePlanVersionId,
+                projectId: entitlement.projectId,
+                planVersionId: "version_123",
+                type: "feature",
+                featureId: "feature_123",
+                featureType: "usage",
+                unitOfMeasure: "units",
+                config: entitlement.featureConfig,
+                billingConfig: {
+                  name: "monthly",
+                  billingInterval: "month",
+                  billingIntervalCount: 1,
+                  billingAnchor: "dayOfCreation",
+                  planType: "recurring",
+                },
+                resetConfig: null,
+                metadata: null,
+                order: 1,
+                defaultQuantity: 1,
+                limit: 100,
+                meterConfig: entitlement.meterConfig,
+                createdAtM: 0,
+                updatedAtM: 0,
+                feature: {
+                  id: "feature_123",
+                  projectId: entitlement.projectId,
+                  slug: entitlement.featureSlug,
+                  type: "usage",
+                  title: "API calls",
+                  description: null,
+                  metadata: null,
+                  createdAtM: 0,
+                  updatedAtM: 0,
+                },
+              },
+            },
+          ] as never)
+        ),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
         }),
-      ],
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
     })
-    const message = createBatchMessage({
-      id: "evt_invalid_period_config",
-      timestamp,
-      properties: {
-        amount: 3,
+
+    const result = await service.ingestFeatureSync({
+      featureSlug: entitlement.featureSlug,
+      message: {
+        version: 1,
+        projectId: entitlement.projectId,
+        customerId: entitlement.customerId,
+        requestId: "req_123",
+        receivedAt: Date.now(),
+        idempotencyKey: "idem_123",
+        id: "evt_123",
+        slug: "usage.recorded",
+        timestamp: Date.UTC(2026, 2, 19),
+        properties: { amount: 1 },
       },
     })
 
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.commit).toHaveBeenCalledWith([
+    expect(result.allowed).toBe(true)
+    expect(getEntitlementWindowStub).toHaveBeenCalledWith({
+      customerEntitlementId: entitlement.customerEntitlementId,
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+    })
+    expect(apply).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: "rejected",
-        rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
-      }),
-    ])
-    expect(mocks.logger.warn).toHaveBeenCalledWith(
-      "invalid resolved-state period configuration for ingestion",
-      expect.objectContaining({
-        event: expect.objectContaining({
-          id: "evt_invalid_period_config",
+        entitlement: expect.objectContaining({
+          customerEntitlementId: entitlement.customerEntitlementId,
         }),
-        invalidStates: expect.arrayContaining([
+        grants: [
           expect.objectContaining({
-            featureSlug: "api_calls",
-            streamId: "stream_123",
-            errorMessage: expect.stringContaining("daily intervals"),
+            grantId: "grant_123",
+            allowanceUnits: 100,
           }),
-        ]),
+        ],
       })
     )
   })
 
-  it("ingests a single feature synchronously using waitUntil for the audit commit", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const state = createResolvedState(timestamp)
-    const { service, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [state],
-      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
+  it("replays sync entitlement-window denials instead of treating audited duplicates as processed", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+      message: "Wallet empty for meter api_calls (reservation res_123)",
     })
-    const message = createBatchMessage({
-      id: "evt_sync_feature",
-      timestamp,
-      properties: {
-        amount: 5,
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply,
+      getEnforcementState: vi.fn(),
+    })
+    const exists = vi.fn().mockResolvedValue(["idem_123"])
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn().mockResolvedValue({ inserted: 0, duplicates: 1, conflicts: 0 }),
+          exists,
+        }),
       },
-    }).message.body
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
 
     const result = await service.ingestFeatureSync({
-      featureSlug: "api_calls",
-      message,
+      featureSlug: entitlement.featureSlug,
+      message: {
+        version: 1,
+        projectId: entitlement.projectId,
+        customerId: entitlement.customerId,
+        requestId: "req_123",
+        receivedAt: SERVICE_NOW,
+        idempotencyKey: "idem_123",
+        id: "evt_123",
+        slug: "usage.recorded",
+        timestamp: Date.UTC(2026, 2, 19),
+        properties: { amount: 1 },
+      },
     })
 
     expect(result).toEqual({
-      allowed: true,
-      message: undefined,
-      rejectionReason: undefined,
-      state: "processed",
-    })
-    expect(mocks.resolveFeatureStateAtTimestamp).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customerId: "cus_123",
-        featureSlug: "api_calls",
-        projectId: "proj_123",
-        timestamp,
-      })
-    )
-    expect(mocks.apply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        enforceLimit: true,
-        featureSlug: "api_calls",
-      })
-    )
-    expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
-  })
-
-  it("enforces sync limits and verify reports only persisted usage", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const state = createResolvedState(timestamp, {
-      limit: 10,
-      meterConfig: {
-        eventId: "meter_limit",
-        eventSlug: "tokens_used",
-        aggregationMethod: "sum",
-        aggregationField: "amount",
-      },
-    })
-    const { service, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [state],
-      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
-    })
-    const firstMessage = createBatchMessage({
-      id: "evt_sync_allowed",
-      idempotencyKey: "idem_sync_allowed",
-      timestamp,
-      properties: {
-        amount: 7,
-      },
-    }).message.body
-    const secondMessage = createBatchMessage({
-      id: "evt_sync_denied",
-      idempotencyKey: "idem_sync_denied",
-      timestamp: timestamp + 1,
-      properties: {
-        amount: 5,
-      },
-    }).message.body
-
-    const firstResult = await service.ingestFeatureSync({
-      featureSlug: "api_calls",
-      message: firstMessage,
-    })
-    const secondResult = await service.ingestFeatureSync({
-      featureSlug: "api_calls",
-      message: secondMessage,
-    })
-    const verifyResult = await service.verifyFeatureStatus({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp: timestamp + 1,
-    })
-
-    expect(firstResult).toEqual({
-      allowed: true,
-      message: undefined,
-      rejectionReason: undefined,
-      state: "processed",
-    })
-    expect(secondResult).toEqual({
       allowed: false,
-      message: expect.stringContaining("Limit exceeded"),
-      rejectionReason: "LIMIT_EXCEEDED",
+      message: "Wallet empty for meter api_calls (reservation res_123)",
+      rejectionReason: "WALLET_EMPTY",
       state: "rejected",
     })
-    expect(verifyResult).toEqual(
-      expect.objectContaining({
-        allowed: true,
-        status: "usage",
-        usage: 7,
-        limit: 10,
-        isLimitReached: false,
-      })
-    )
-    expect(mocks.apply).toHaveBeenCalledTimes(2)
-    expect(mocks.apply).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        enforceLimit: true,
-      })
-    )
-    expect(mocks.apply).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        enforceLimit: true,
-      })
-    )
+    expect(exists).not.toHaveBeenCalled()
+    expect(apply).toHaveBeenCalledTimes(1)
   })
 
-  it("batches audit commits per touched shard instead of per event", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const [firstKey, secondKey] = findIdempotencyKeysForSameAuditShard()
-    const { consumer, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [createResolvedState(timestamp)],
-    })
-    const firstMessage = createBatchMessage({
-      id: "evt_same_shard_1",
-      idempotencyKey: firstKey,
-      timestamp,
-      properties: { amount: 2 },
-    })
-    const secondMessage = createBatchMessage({
-      id: "evt_same_shard_2",
-      idempotencyKey: secondKey,
-      timestamp: timestamp + 1,
-      properties: { amount: 3 },
+  it("fails sync ingestion when the strict audit commit fails", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({ allowed: true })
+    const waitUntil = vi.fn()
+    const commit = vi.fn().mockRejectedValue(new Error("audit unavailable"))
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: {
+        getEntitlementWindowStub: vi.fn().mockReturnValue({
+          apply,
+          getEnforcementState: vi.fn(),
+        }),
+      },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil,
     })
 
-    await consumer.consumeBatch({
-      messages: [firstMessage.message, secondMessage.message],
-    } as unknown as IngestionQueueBatch)
+    await expect(
+      service.ingestFeatureSync({
+        featureSlug: entitlement.featureSlug,
+        message: {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { amount: 1 },
+        },
+      })
+    ).rejects.toThrow("audit unavailable")
 
-    const expectedShardIndex = selectIngestionAuditShardIndex(firstKey)
-
-    expect(selectIngestionAuditShardIndex(secondKey)).toBe(expectedShardIndex)
-    expect(mocks.getAuditStub).toHaveBeenCalledTimes(1)
-    expect(mocks.getAuditStub).toHaveBeenCalledWith({
-      customerId: "cus_123",
-      projectId: "proj_123",
-      shardIndex: expectedShardIndex,
-    })
-    expect(mocks.commit).toHaveBeenCalledTimes(1)
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        idempotencyKey: firstKey,
-        status: "processed",
-      }),
-      expect.objectContaining({
-        idempotencyKey: secondKey,
-        status: "processed",
-      }),
-    ])
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(waitUntil).not.toHaveBeenCalled()
   })
 
-  it("rejects synchronous feature ingestion when the customer is missing", async () => {
-    const { service, mocks } = createServiceHarness({
-      customer: null,
+  it("throws a typed ingestion error when strict audit detects a payload conflict", async () => {
+    const entitlement = createEntitlement()
+    const logger = createLogger()
+    const waitUntil = vi.fn()
+    const commit = vi.fn().mockResolvedValue({ inserted: 0, duplicates: 0, conflicts: 1 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: {
+        getEntitlementWindowStub: vi.fn().mockReturnValue({
+          apply: vi.fn().mockResolvedValue({ allowed: true }),
+          getEnforcementState: vi.fn(),
+        }),
+      },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil,
     })
-    const message = createBatchMessage({
-      id: "evt_sync_missing_customer",
-    }).message.body
+
+    await expect(
+      service.ingestFeatureSync({
+        featureSlug: entitlement.featureSlug,
+        message: {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { amount: 1 },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
+      message:
+        "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+    } satisfies Partial<UnPriceIngestionError>)
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "audit payload conflicts detected",
+      expect.objectContaining({
+        conflicts: 1,
+        idempotencyKeys: ["idem_123"],
+      })
+    )
+    expect(logger.error).not.toHaveBeenCalled()
+    expect(waitUntil).not.toHaveBeenCalled()
+  })
+
+  it("rejects duplicate active entitlements for the same customer feature", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({ allowed: true })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply,
+      getEnforcementState: vi.fn(),
+    })
+    const logger = createLogger()
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue(
+          Ok([
+            createCustomerEntitlementRecord(entitlement),
+            createCustomerEntitlementRecord({
+              ...entitlement,
+              customerEntitlementId: "ce_duplicate",
+              featurePlanVersionId: "fpv_duplicate",
+            }),
+          ] as never)
+        ),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 }),
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
 
     const result = await service.ingestFeatureSync({
-      featureSlug: "api_calls",
-      message,
+      featureSlug: entitlement.featureSlug,
+      message: {
+        version: 1,
+        projectId: entitlement.projectId,
+        customerId: entitlement.customerId,
+        requestId: "req_123",
+        receivedAt: Date.now(),
+        idempotencyKey: "idem_123",
+        id: "evt_123",
+        slug: "usage.recorded",
+        timestamp: Date.UTC(2026, 2, 19),
+        properties: { amount: 1 },
+      },
     })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       allowed: false,
-      message: undefined,
+      rejectionReason: "INVALID_ENTITLEMENT_CONFIGURATION",
+      state: "rejected",
+    })
+    expect(getEntitlementWindowStub).not.toHaveBeenCalled()
+    expect(apply).not.toHaveBeenCalled()
+    expect(logger.error).toHaveBeenCalledWith(
+      "multiple active entitlements matched ingestion event",
+      expect.objectContaining({
+        customerEntitlementIds: ["ce_123", "ce_duplicate"],
+      })
+    )
+  })
+
+  it("returns CUSTOMER_NOT_FOUND when verifying a missing customer", async () => {
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue(Ok([])),
+        customerExists: vi.fn().mockResolvedValue(Ok(false)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn(),
+          exists: vi.fn(),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.verifyFeatureStatus({
+      customerId: "cus_missing",
+      featureSlug: "api_calls",
+      projectId: "proj_123",
+      timestamp: SERVICE_NOW,
+    })
+
+    expect(result).toMatchObject({
+      allowed: false,
+      featureSlug: "api_calls",
       rejectionReason: "CUSTOMER_NOT_FOUND",
-      state: "rejected",
     })
-    expect(mocks.apply).not.toHaveBeenCalled()
-    expect(mocks.waitUntil).toHaveBeenCalledTimes(1)
   })
 
-  it("returns an active non-usage feature without meter state", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { service, mocks } = createServiceHarness({
-      grants: [createBooleanGrant()],
-      resolvedFeatureState: {
-        kind: "non_usage",
-        entitlement: {
-          featureType: "flat",
-        } as never,
+  it("returns NO_MATCHING_ENTITLEMENT when the customer exists without a matching entitlement", async () => {
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue(Ok([])),
+        customerExists: vi.fn().mockResolvedValue(Ok(true)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn(),
+          exists: vi.fn(),
+        }),
       },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
     })
 
     const result = await service.verifyFeatureStatus({
       customerId: "cus_123",
-      featureSlug: "team_members",
+      featureSlug: "missing_feature",
       projectId: "proj_123",
-      timestamp,
+      timestamp: SERVICE_NOW,
+    })
+
+    expect(result).toMatchObject({
+      allowed: false,
+      featureSlug: "missing_feature",
+      rejectionReason: "NO_MATCHING_ENTITLEMENT",
+    })
+  })
+
+  it("returns compact usage verification state with current spend", async () => {
+    const entitlement = createEntitlement()
+    const getEnforcementState = vi.fn().mockResolvedValue({
+      usage: 42,
+      limit: 100,
+      isLimitReached: false,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 4_200_000_000,
+        scale: 8,
+      },
+    })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply: vi.fn(),
+      getEnforcementState,
+    })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn(),
+          exists: vi.fn(),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.verifyFeatureStatus({
+      customerId: entitlement.customerId,
+      featureSlug: entitlement.featureSlug,
+      projectId: entitlement.projectId,
+      timestamp: SERVICE_NOW,
     })
 
     expect(result).toEqual({
       allowed: true,
-      featureSlug: "team_members",
-      featureType: "flat",
-      status: "non_usage",
-      timestamp,
+      featureSlug: "api_calls",
+      limit: 100,
+      spending: {
+        currency: "USD",
+        displayAmount: "$42",
+        ledgerAmount: 4_200_000_000,
+        scale: 8,
+      },
+      usage: 42,
     })
-    expect(mocks.getEnforcementState).not.toHaveBeenCalled()
   })
 
-  it("returns invalid_entitlement_configuration for verify when feature state resolution fails", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const { service } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolveFeatureStateError: new Error("bad feature config"),
+  it("returns LIMIT_EXCEEDED when usage verification reaches the entitlement limit", async () => {
+    const entitlement = createEntitlement()
+    const getEnforcementState = vi.fn().mockResolvedValue({
+      usage: 100,
+      limit: 100,
+      isLimitReached: true,
+      spending: {
+        currency: "USD",
+        ledgerAmount: 10_000_000_000,
+        scale: 8,
+      },
+    })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply: vi.fn(),
+      getEnforcementState,
     })
 
-    const result = await service.verifyFeatureStatus({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp,
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn(),
+          exists: vi.fn(),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
     })
 
-    expect(result).toEqual({
+    await expect(
+      service.verifyFeatureStatus({
+        customerId: entitlement.customerId,
+        featureSlug: entitlement.featureSlug,
+        projectId: entitlement.projectId,
+        timestamp: SERVICE_NOW,
+      })
+    ).resolves.toMatchObject({
       allowed: false,
       featureSlug: "api_calls",
-      message: "bad feature config",
-      status: "invalid_entitlement_configuration",
-      timestamp,
+      limit: 100,
+      rejectionReason: "LIMIT_EXCEEDED",
+      spending: {
+        displayAmount: "$100",
+        ledgerAmount: 10_000_000_000,
+      },
+      usage: 100,
     })
   })
 
-  it("returns invalid_entitlement_configuration for verify when period key calculation throws", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const invalidState = createResolvedState(timestamp, {
-      resetConfig: {
-        name: "daily",
-        resetInterval: "day",
-        resetIntervalCount: 1,
-        resetAnchor: 99,
-        planType: "recurring",
-      },
-    })
-    const { service, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([invalidState]),
-      resolvedStates: [invalidState],
-    })
-
-    const result = await service.verifyFeatureStatus({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp,
-    })
-
-    expect(result).toEqual({
+  it("records late closed-period DO denials as rejected queue outcomes", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({
       allowed: false,
-      featureSlug: "api_calls",
-      featureType: "usage",
-      message: "Unable to resolve the current meter window for this feature",
-      status: "invalid_entitlement_configuration",
-      timestamp,
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+      message: "closed period",
     })
-    expect(mocks.getEnforcementState).not.toHaveBeenCalled()
-    expect(mocks.logger.warn).toHaveBeenCalledWith(
-      "invalid resolved-state period configuration for feature verification",
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply,
+      getEnforcementState: vi.fn(),
+    })
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: Date.now(),
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { amount: 1 },
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.disposition.action).toBe("ack")
+    expect(commit).toHaveBeenCalledTimes(1)
+
+    const [entries] = commit.mock.calls[0]!
+    expect(entries[0]).toMatchObject({
+      idempotencyKey: "idem_123",
+      status: "rejected",
+      rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
+    expect(JSON.parse(entries[0].resultJson)).toEqual({
+      state: "rejected",
+      rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
+  })
+
+  it("rejects queue messages older than the ingestion cap before entitlement processing", async () => {
+    const entitlement = createEntitlement()
+    const getCustomerEntitlementsForCustomer = vi.fn()
+    const getEntitlementWindowStub = vi.fn()
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const logger = createLogger()
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer,
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW - INGESTION_MAX_EVENT_AGE_MS - 10_000,
+          idempotencyKey: "idem_too_old",
+          id: "evt_too_old",
+          slug: "usage.recorded",
+          timestamp: SERVICE_NOW - INGESTION_MAX_EVENT_AGE_MS - 1,
+          properties: { amount: 1 },
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.disposition.action).toBe("ack")
+    expect(getCustomerEntitlementsForCustomer).not.toHaveBeenCalled()
+    expect(getEntitlementWindowStub).not.toHaveBeenCalled()
+    expect(logger.warn).toHaveBeenCalledWith(
+      "raw ingestion event rejected as too old",
       expect.objectContaining({
-        featureSlug: "api_calls",
+        projectId: entitlement.projectId,
+        customerId: entitlement.customerId,
+        idempotencyKey: "idem_too_old",
+        rejectionReason: "EVENT_TOO_OLD",
       })
     )
-  })
+    expect(commit).toHaveBeenCalledTimes(1)
 
-  it("fans out one async event to five entitlements and verify returns per-feature usage", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const states = [
-      createResolvedState(timestamp, {
-        featureSlug: "feature_sum",
-        streamId: "stream_sum",
-        meterConfig: {
-          eventId: "meter_sum",
-          eventSlug: "tokens_used",
-          aggregationMethod: "sum",
-          aggregationField: "amount",
-        },
-      }),
-      createResolvedState(timestamp, {
-        featureSlug: "feature_count",
-        streamId: "stream_count",
-        limit: 3,
-        meterConfig: {
-          eventId: "meter_count",
-          eventSlug: "tokens_used",
-          aggregationMethod: "count",
-        },
-      }),
-      createResolvedState(timestamp, {
-        featureSlug: "feature_max",
-        streamId: "stream_max",
-        meterConfig: {
-          eventId: "meter_max",
-          eventSlug: "tokens_used",
-          aggregationMethod: "max",
-          aggregationField: "peak",
-        },
-      }),
-      createResolvedState(timestamp, {
-        featureSlug: "feature_latest",
-        streamId: "stream_latest",
-        meterConfig: {
-          eventId: "meter_latest",
-          eventSlug: "tokens_used",
-          aggregationMethod: "latest",
-          aggregationField: "current",
-        },
-      }),
-      createResolvedState(timestamp, {
-        featureSlug: "feature_sum_text",
-        streamId: "stream_sum_text",
-        meterConfig: {
-          eventId: "meter_sum_text",
-          eventSlug: "tokens_used",
-          aggregationMethod: "sum",
-          aggregationField: "creditsText",
-        },
-      }),
-    ]
-    const { consumer, service, mocks } = createServiceHarness({
-      grants: states.map((state) =>
-        createUsageGrant({
-          featureSlug: state.featureSlug,
-        })
-      ),
-      resolvedStates: states,
-      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug(states),
+    const [entries] = commit.mock.calls[0]!
+    expect(entries[0]).toMatchObject({
+      idempotencyKey: "idem_too_old",
+      status: "rejected",
+      rejectionReason: "EVENT_TOO_OLD",
     })
-    const message = createBatchMessage({
-      id: "evt_fan_out",
-      idempotencyKey: "idem_fan_out",
-      timestamp,
-      properties: {
-        amount: 7,
-        peak: 11,
-        current: 9,
-        creditsText: "4.5",
-      },
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    expect(mocks.apply).toHaveBeenCalledTimes(5)
-    for (const call of mocks.apply.mock.calls) {
-      expect(call[0]).toEqual(
-        expect.objectContaining({
-          enforceLimit: false,
-        })
-      )
-    }
-
-    const [sumFeature, countFeature, maxFeature, latestFeature, sumTextFeature] = await Promise.all(
-      [
-        service.verifyFeatureStatus({
-          customerId: "cus_123",
-          featureSlug: "feature_sum",
-          projectId: "proj_123",
-          timestamp,
-        }),
-        service.verifyFeatureStatus({
-          customerId: "cus_123",
-          featureSlug: "feature_count",
-          projectId: "proj_123",
-          timestamp,
-        }),
-        service.verifyFeatureStatus({
-          customerId: "cus_123",
-          featureSlug: "feature_max",
-          projectId: "proj_123",
-          timestamp,
-        }),
-        service.verifyFeatureStatus({
-          customerId: "cus_123",
-          featureSlug: "feature_latest",
-          projectId: "proj_123",
-          timestamp,
-        }),
-        service.verifyFeatureStatus({
-          customerId: "cus_123",
-          featureSlug: "feature_sum_text",
-          projectId: "proj_123",
-          timestamp,
-        }),
-      ]
-    )
-
-    expect(sumFeature).toEqual(expect.objectContaining({ status: "usage", usage: 7 }))
-    expect(countFeature).toEqual(expect.objectContaining({ status: "usage", usage: 1 }))
-    expect(maxFeature).toEqual(expect.objectContaining({ status: "usage", usage: 11 }))
-    expect(latestFeature).toEqual(expect.objectContaining({ status: "usage", usage: 9 }))
-    expect(sumTextFeature).toEqual(expect.objectContaining({ status: "usage", usage: 4.5 }))
-    // batch ingest populates the shared cache; verify calls within the same bucket reuse it
-    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(1)
-  })
-
-  it("reloads grant context when verify crosses the in-memory cache bucket", async () => {
-    const baseTimestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const state = createResolvedState(baseTimestamp)
-    const { service, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
-      resolvedStates: [state],
-      now: () => baseTimestamp,
-    })
-
-    await service.verifyFeatureStatus({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp: baseTimestamp,
-    })
-
-    await service.verifyFeatureStatus({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp: baseTimestamp + 300_000,
-    })
-
-    expect(mocks.getGrantsForCustomer).toHaveBeenCalledTimes(2)
-  })
-
-  it("keeps async ingestion non-blocking when usage exceeds limits and verify reports limit reached", async () => {
-    const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-    const state = createResolvedState(timestamp, {
-      limit: 5,
-      meterConfig: {
-        eventId: "meter_async_limit",
-        eventSlug: "tokens_used",
-        aggregationMethod: "sum",
-        aggregationField: "amount",
-      },
-    })
-    const { consumer, service, mocks } = createServiceHarness({
-      grants: [createUsageGrant()],
-      resolvedStates: [state],
-      resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
-    })
-    const message = createBatchMessage({
-      id: "evt_async_limit",
-      idempotencyKey: "idem_async_limit",
-      timestamp,
-      properties: {
-        amount: 10,
-      },
-    })
-
-    await consumer.consumeBatch({
-      messages: [message.message],
-    } as unknown as IngestionQueueBatch)
-
-    const verifyResult = await service.verifyFeatureStatus({
-      customerId: "cus_123",
-      featureSlug: "api_calls",
-      projectId: "proj_123",
-      timestamp,
-    })
-
-    expect(message.ack).toHaveBeenCalledTimes(1)
-    expect(message.retry).not.toHaveBeenCalled()
-    expect(mocks.commit).toHaveBeenCalledWith([
-      expect.objectContaining({
-        status: "processed",
-      }),
-    ])
-    expect(verifyResult).toEqual(
-      expect.objectContaining({
-        allowed: false,
-        status: "usage",
-        usage: 10,
-        limit: 5,
-        isLimitReached: true,
-      })
-    )
-  })
-
-  it.each([
-    {
-      aggregationMethod: "sum" as const,
-      aggregationField: "amount",
-      expectedUsage: 4.25,
-      properties: {
-        amount: "4.25",
-      },
-    },
-    {
-      aggregationMethod: "count" as const,
-      aggregationField: undefined,
-      expectedUsage: 1,
-      properties: {},
-    },
-    {
-      aggregationMethod: "max" as const,
-      aggregationField: "peak",
-      expectedUsage: 8,
-      properties: {
-        peak: 8,
-      },
-    },
-    {
-      aggregationMethod: "latest" as const,
-      aggregationField: "current",
-      expectedUsage: 6,
-      properties: {
-        current: 6,
-      },
-    },
-  ])(
-    "processes async payloads for $aggregationMethod meters and verify returns exact usage",
-    async (scenario) => {
-      const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-      const state = createResolvedState(timestamp, {
-        featureSlug: "feature_matrix",
-        streamId: `stream_${scenario.aggregationMethod}`,
-        meterConfig: {
-          eventId: `meter_${scenario.aggregationMethod}`,
-          eventSlug: "tokens_used",
-          aggregationMethod: scenario.aggregationMethod,
-          ...(scenario.aggregationField ? { aggregationField: scenario.aggregationField } : {}),
-        },
-      })
-      const { consumer, service } = createServiceHarness({
-        grants: [
-          createUsageGrant({
-            featureSlug: "feature_matrix",
-          }),
-        ],
-        resolvedStates: [state],
-        resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
-      })
-      const message = createBatchMessage({
-        id: `evt_matrix_${scenario.aggregationMethod}`,
-        idempotencyKey: `idem_matrix_${scenario.aggregationMethod}`,
-        timestamp,
-        properties: scenario.properties,
-      })
-
-      await consumer.consumeBatch({
-        messages: [message.message],
-      } as unknown as IngestionQueueBatch)
-
-      const verifyResult = await service.verifyFeatureStatus({
-        customerId: "cus_123",
-        featureSlug: "feature_matrix",
-        projectId: "proj_123",
-        timestamp,
-      })
-
-      expect(verifyResult).toEqual(
-        expect.objectContaining({
-          status: "usage",
-          usage: scenario.expectedUsage,
-        })
-      )
-    }
-  )
-
-  it.each([
-    {
-      aggregationMethod: "sum" as const,
-      aggregationField: "amount",
-      properties: {},
-    },
-    {
-      aggregationMethod: "max" as const,
-      aggregationField: "peak",
-      properties: {
-        peak: "invalid",
-      },
-    },
-    {
-      aggregationMethod: "latest" as const,
-      aggregationField: "current",
-      properties: {},
-    },
-  ])(
-    "rejects invalid async aggregation payloads for $aggregationMethod with INVALID_AGGREGATION_PROPERTIES",
-    async (scenario) => {
-      const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-      const state = createResolvedState(timestamp, {
-        featureSlug: "feature_invalid_payload",
-        streamId: `stream_invalid_${scenario.aggregationMethod}`,
-        meterConfig: {
-          eventId: `meter_invalid_${scenario.aggregationMethod}`,
-          eventSlug: "tokens_used",
-          aggregationMethod: scenario.aggregationMethod,
-          aggregationField: scenario.aggregationField,
-        },
-      })
-      const { consumer, mocks } = createServiceHarness({
-        grants: [
-          createUsageGrant({
-            featureSlug: "feature_invalid_payload",
-          }),
-        ],
-        resolvedStates: [state],
-        resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
-      })
-      const message = createBatchMessage({
-        id: `evt_invalid_${scenario.aggregationMethod}`,
-        idempotencyKey: `idem_invalid_${scenario.aggregationMethod}`,
-        timestamp,
-        properties: scenario.properties,
-      })
-
-      await consumer.consumeBatch({
-        messages: [message.message],
-      } as unknown as IngestionQueueBatch)
-
-      expect(message.ack).toHaveBeenCalledTimes(1)
-      expect(message.retry).not.toHaveBeenCalled()
-      expect(mocks.apply).not.toHaveBeenCalled()
-      expect(mocks.commit).toHaveBeenCalledWith([
-        expect.objectContaining({
-          status: "rejected",
-          rejectionReason: "INVALID_AGGREGATION_PROPERTIES",
-        }),
-      ])
-    }
-  )
-
-  it.each([
-    {
-      aggregationMethod: "sum" as const,
-      aggregationField: "amount",
-      events: [
-        { id: "evt_sum_1", offsetMs: 2_000, properties: { amount: 2 } },
-        { id: "evt_sum_2", offsetMs: 0, properties: { amount: 3 } },
-        { id: "evt_sum_3", offsetMs: 1_000, properties: { amount: 1 } },
-      ],
-      expectedUsage: 6,
-    },
-    {
-      aggregationMethod: "count" as const,
-      aggregationField: undefined,
-      events: [
-        { id: "evt_count_1", offsetMs: 2_000, properties: {} },
-        { id: "evt_count_2", offsetMs: 0, properties: {} },
-        { id: "evt_count_3", offsetMs: 1_000, properties: {} },
-      ],
-      expectedUsage: 3,
-    },
-    {
-      aggregationMethod: "max" as const,
-      aggregationField: "peak",
-      events: [
-        { id: "evt_max_1", offsetMs: 2_000, properties: { peak: 3 } },
-        { id: "evt_max_2", offsetMs: 0, properties: { peak: 9 } },
-        { id: "evt_max_3", offsetMs: 1_000, properties: { peak: 4 } },
-      ],
-      expectedUsage: 9,
-    },
-    {
-      aggregationMethod: "latest" as const,
-      aggregationField: "current",
-      events: [
-        { id: "evt_latest_1", offsetMs: 2_000, properties: { current: 5 } },
-        { id: "evt_latest_2", offsetMs: 0, properties: { current: 2 } },
-        { id: "evt_latest_3", offsetMs: 1_000, properties: { current: 7 } },
-      ],
-      expectedUsage: 5,
-    },
-  ])(
-    "keeps verify usage consistent with ingested async stream for $aggregationMethod",
-    async (scenario) => {
-      const baseTimestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
-      const state = createResolvedState(baseTimestamp, {
-        featureSlug: `feature_consistency_${scenario.aggregationMethod}`,
-        streamId: `stream_consistency_${scenario.aggregationMethod}`,
-        meterConfig: {
-          eventId: `meter_consistency_${scenario.aggregationMethod}`,
-          eventSlug: "tokens_used",
-          aggregationMethod: scenario.aggregationMethod,
-          ...(scenario.aggregationField ? { aggregationField: scenario.aggregationField } : {}),
-        },
-      })
-      const { consumer, service, mocks } = createServiceHarness({
-        grants: [
-          createUsageGrant({
-            featureSlug: `feature_consistency_${scenario.aggregationMethod}`,
-          }),
-        ],
-        resolvedStates: [state],
-        resolvedFeatureStatesBySlug: mapFeatureStatesBySlug([state]),
-      })
-      const batchMessages = scenario.events.map(
-        (event, index) =>
-          createBatchMessage({
-            id: event.id,
-            idempotencyKey: `idem_consistency_${scenario.aggregationMethod}_${index}`,
-            timestamp: baseTimestamp + event.offsetMs,
-            properties: event.properties,
-          }).message
-      )
-
-      await consumer.consumeBatch({
-        messages: batchMessages,
-      } as unknown as IngestionQueueBatch)
-
-      const verifyResult = await service.verifyFeatureStatus({
-        customerId: "cus_123",
-        featureSlug: `feature_consistency_${scenario.aggregationMethod}`,
-        projectId: "proj_123",
-        timestamp: baseTimestamp + 2_000,
-      })
-
-      expect(mocks.commit).toHaveBeenCalled()
-      expect(verifyResult).toEqual(
-        expect.objectContaining({
-          status: "usage",
-          usage: scenario.expectedUsage,
-        })
-      )
-    }
-  )
-
-  it("builds the same payload hash when property order changes", async () => {
-    const message = createBatchMessage({
-      id: "evt_hash_order_a",
-      properties: {
-        b: 2,
-        nested: {
-          y: 2,
-          x: 1,
-        },
-        a: 1,
-      },
-    }).message.body
-    const reorderedMessage = createBatchMessage({
-      id: "evt_hash_order_b",
-      properties: {
-        a: 1,
-        nested: {
-          x: 1,
-          y: 2,
-        },
-        b: 2,
-      },
-    }).message.body
-
-    const [leftHash, rightHash] = await Promise.all([
-      computePayloadHash(message),
-      computePayloadHash(reorderedMessage),
-    ])
-
-    expect(leftHash).toBe(rightHash)
-  })
-
-  it("ignores generated event id differences when hashing the same event payload", async () => {
-    const baseMessage = createBatchMessage({
-      id: "evt_generated_a",
-      properties: {
-        amount: 5,
-      },
-    }).message.body
-    const retriedMessage = createBatchMessage({
-      id: "evt_generated_b",
-      properties: {
-        amount: 5,
-      },
-    }).message.body
-
-    const [leftHash, rightHash] = await Promise.all([
-      computePayloadHash(baseMessage),
-      computePayloadHash(retriedMessage),
-    ])
-
-    expect(leftHash).toBe(rightHash)
-  })
-
-  it("changes the payload hash when business payload changes", async () => {
-    const original = createBatchMessage({
-      properties: {
-        amount: 5,
-      },
-    }).message.body
-    const changed = createBatchMessage({
-      properties: {
-        amount: 6,
-      },
-    }).message.body
-
-    const [leftHash, rightHash] = await Promise.all([
-      computePayloadHash(original),
-      computePayloadHash(changed),
-    ])
-
-    expect(leftHash).not.toBe(rightHash)
   })
 })
 
-function findIdempotencyKeysForSameAuditShard(): [string, string] {
-  const keysByShard = new Map<number, string>()
-
-  for (let index = 0; index < 1_000; index++) {
-    const candidate = `idem_same_shard_${index}`
-    const shardIndex = selectIngestionAuditShardIndex(candidate)
-    const existing = keysByShard.get(shardIndex)
-
-    if (existing) {
-      return [existing, candidate]
-    }
-
-    keysByShard.set(shardIndex, candidate)
+function createEntitlement(): IngestionEntitlement {
+  return {
+    creditLinePolicy: "capped",
+    customerEntitlementId: "ce_123",
+    customerId: "cus_123",
+    effectiveAt: Date.UTC(2026, 2, 1),
+    expiresAt: null,
+    featureConfig: {
+      usageMode: "unit",
+      price: {
+        dinero: {
+          amount: 0,
+          currency: { code: "USD", base: 10, exponent: 2 },
+          scale: 2,
+        },
+        displayAmount: "0.00",
+      },
+    },
+    featurePlanVersionId: "fpv_123",
+    featureSlug: "api_calls",
+    featureType: "usage",
+    grants: [],
+    meterConfig: {
+      eventId: "evt_type",
+      eventSlug: "usage.recorded",
+      aggregationMethod: "sum",
+      aggregationField: "amount",
+    },
+    overageStrategy: "none",
+    projectId: "proj_123",
+    resetConfig: null,
   }
+}
 
-  throw new Error("Unable to find two idempotency keys on the same audit shard")
+function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
+  return {
+    id: entitlement.customerEntitlementId,
+    projectId: entitlement.projectId,
+    customerId: entitlement.customerId,
+    featurePlanVersionId: entitlement.featurePlanVersionId,
+    subscriptionId: null,
+    subscriptionPhaseId: null,
+    subscriptionItemId: null,
+    effectiveAt: entitlement.effectiveAt,
+    expiresAt: entitlement.expiresAt,
+    overageStrategy: entitlement.overageStrategy,
+    metadata: null,
+    createdAtM: 0,
+    updatedAtM: 0,
+    subscriptionPhase: {
+      creditLinePolicy: entitlement.creditLinePolicy,
+    },
+    grants: [
+      {
+        id: `${entitlement.customerEntitlementId}_grant`,
+        projectId: entitlement.projectId,
+        customerEntitlementId: entitlement.customerEntitlementId,
+        type: "subscription",
+        priority: 10,
+        allowanceUnits: 100,
+        effectiveAt: entitlement.effectiveAt,
+        expiresAt: entitlement.expiresAt,
+        metadata: null,
+        createdAtM: 0,
+        updatedAtM: 0,
+      },
+    ],
+    featurePlanVersion: {
+      id: entitlement.featurePlanVersionId,
+      projectId: entitlement.projectId,
+      planVersionId: "version_123",
+      type: "feature",
+      featureId: "feature_123",
+      featureType: "usage",
+      unitOfMeasure: "units",
+      config: entitlement.featureConfig,
+      billingConfig: {
+        name: "monthly",
+        billingInterval: "month",
+        billingIntervalCount: 1,
+        billingAnchor: "dayOfCreation",
+        planType: "recurring",
+      },
+      resetConfig: null,
+      metadata: null,
+      order: 1,
+      defaultQuantity: 1,
+      limit: 100,
+      meterConfig: entitlement.meterConfig,
+      createdAtM: 0,
+      updatedAtM: 0,
+      feature: {
+        id: "feature_123",
+        projectId: entitlement.projectId,
+        slug: entitlement.featureSlug,
+        type: "usage",
+        title: "API calls",
+        description: null,
+        metadata: null,
+        createdAtM: 0,
+        updatedAtM: 0,
+      },
+    },
+  }
+}
+
+function createCache() {
+  return {
+    ingestionPreparedGrantContext: {
+      swr: async (_key: string, loader: () => Promise<unknown>) => ({ val: await loader() }),
+    },
+  } as never
+}
+
+function createLogger() {
+  return {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    set: vi.fn(),
+    warn: vi.fn(),
+  }
 }
