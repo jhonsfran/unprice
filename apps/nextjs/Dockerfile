@@ -1,6 +1,6 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.23
 
-ARG NODE_VERSION=20.19.1-slim
+ARG NODE_VERSION=20.20.2-slim
 
 FROM node:${NODE_VERSION} AS base
 
