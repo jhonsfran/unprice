@@ -173,9 +173,35 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
 - `/v1/events/ingest/sync` must not rely on `waitUntil` as the only durability boundary for
   canonical ingestion audit rows. Await a strict `IngestionAuditDO.commit` after the
   `EntitlementWindowDO.apply` result so the audit DO owns publishing through its outbox.
+- Strict audit payload conflicts are expected idempotency failures, not platform failures. Throw a
+  typed ingestion error and map it to API `409 CONFLICT` with guidance to retry the exact original
+  event or use a new `idempotencyKey`.
+- Keep `/v1/events/ingest/sync` on the low-latency auth path like entitlement verification:
+  bypass the API-key rate-limit binding and use `Server-Timing` spans around the service call so
+  auth, routing, entitlement apply, and audit commit latency can be separated in traces.
+- `IngestionAuditDO` has a single static SQLite schema; initialize it with direct
+  `CREATE ... IF NOT EXISTS` statements instead of Drizzle's migration runner to reduce cold-start
+  work on the strict sync audit commit path.
 - When a wallet final flush is pending, persist that it is final before external wallet I/O.
   Recovery must replay a pending final flush as `final: true`; replaying it as a mid-period refill
   can strand a locally open reservation after the wallet reservation has already reconciled.
+
+## 2026-05-09: Markdown Plan Validation
+
+- Biome does not process Markdown plan files by default. For docs-only plan edits under
+  `docs/plans/**`, use
+  `pnpm biome check --no-errors-on-unmatched docs/plans/<file>.md` plus `git diff --check` instead
+  of the plain targeted Biome command, which exits with "No files were processed."
+
+## 2026-05-09: Service Workflow Billing Test Priorities
+
+- When testing capped usage that should still produce a period-end invoice, use `pay_in_arrear`
+  with capped `creditLinePolicy`/`creditLineAmount`. Do not model it as `wallet_only`;
+  `wallet_only` skips BILL and SETTLE in the subscription machine because the wallet is the point
+  of charge.
+- Test `wallet_only` as its own service workflow: assert wallet accounts/grants/reservations,
+  final flush/renewal behavior, balanced wallet ledger entries, and absence of invoice rows or
+  payment-provider invoice calls.
 
 ## 2026-05-07: Payment Method Setup UX Cache Refresh
 

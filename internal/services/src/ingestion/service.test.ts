@@ -1,6 +1,7 @@
 import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
+import type { UnPriceIngestionError } from "./errors"
 import { type IngestionEntitlement, IngestionService } from "./service"
 
 const SERVICE_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
@@ -246,6 +247,69 @@ describe("IngestionService entitlement routing", () => {
 
     expect(apply).toHaveBeenCalledTimes(1)
     expect(commit).toHaveBeenCalledTimes(1)
+    expect(waitUntil).not.toHaveBeenCalled()
+  })
+
+  it("throws a typed ingestion error when strict audit detects a payload conflict", async () => {
+    const entitlement = createEntitlement()
+    const logger = createLogger()
+    const waitUntil = vi.fn()
+    const commit = vi.fn().mockResolvedValue({ inserted: 0, duplicates: 0, conflicts: 1 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: {
+        getEntitlementWindowStub: vi.fn().mockReturnValue({
+          apply: vi.fn().mockResolvedValue({ allowed: true }),
+          getEnforcementState: vi.fn(),
+        }),
+      },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil,
+    })
+
+    await expect(
+      service.ingestFeatureSync({
+        featureSlug: entitlement.featureSlug,
+        message: {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { amount: 1 },
+        },
+      })
+    ).rejects.toMatchObject({
+      code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
+      message:
+        "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+    } satisfies Partial<UnPriceIngestionError>)
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "audit payload conflicts detected",
+      expect.objectContaining({
+        conflicts: 1,
+        idempotencyKeys: ["idem_123"],
+      })
+    )
+    expect(logger.error).not.toHaveBeenCalled()
     expect(waitUntil).not.toHaveBeenCalled()
   })
 

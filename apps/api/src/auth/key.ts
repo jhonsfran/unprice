@@ -7,7 +7,10 @@ import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
 // verify is sensitive to latency
-const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set(["/v1/entitlements/verify"])
+const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set([
+  "/v1/entitlements/verify",
+  "/v1/events/ingest/sync",
+])
 
 /**
  * keyAuth takes the bearer token from the request and verifies the key

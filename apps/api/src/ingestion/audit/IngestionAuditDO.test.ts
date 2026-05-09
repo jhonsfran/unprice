@@ -53,12 +53,14 @@ const testState = {
     warn: vi.fn(),
   },
   migrate: vi.fn(),
+  schemaExecs: [] as string[],
 }
 
 describe("IngestionAuditDO", () => {
   beforeEach(() => {
     for (const fn of Object.values(testState.logger)) fn.mockReset()
     testState.migrate.mockReset()
+    testState.schemaExecs = []
     vi.spyOn(Date, "now").mockReturnValue(BASE_NOW)
   })
 
@@ -69,7 +71,7 @@ describe("IngestionAuditDO", () => {
     testState.db = null
   })
 
-  it("runs drizzle migrations during initialization", async () => {
+  it("initializes the SQLite schema during construction", async () => {
     const IngestionAuditDO = await loadIngestionAuditDO()
     const state = createDurableObjectState()
     testState.db = createFakeDbState()
@@ -83,7 +85,15 @@ describe("IngestionAuditDO", () => {
 
     await durableObject.commit([])
 
-    expect(testState.migrate).toHaveBeenCalledTimes(1)
+    expect(testState.schemaExecs).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("CREATE TABLE IF NOT EXISTS ingestion_audit"),
+        expect.stringContaining(
+          "CREATE UNIQUE INDEX IF NOT EXISTS ingestion_audit_canonical_audit_id_unique"
+        ),
+        expect.stringContaining("CREATE INDEX IF NOT EXISTS idx_ingestion_audit_unpublished"),
+      ])
+    )
   })
 
   it("inserts a fresh row and schedules alarm", async () => {
@@ -664,6 +674,15 @@ function execSqlCleanup(
   }
 
   const normalizedQuery = query.replace(/\s+/g, " ").trim()
+  if (normalizedQuery.startsWith("CREATE ")) {
+    testState.schemaExecs.push(normalizedQuery)
+    return {
+      toArray() {
+        return []
+      },
+    } as { toArray: <T>() => T[] }
+  }
+
   if (!normalizedQuery.startsWith("DELETE FROM ingestion_audit")) {
     throw new Error(`Unsupported SQL in test: ${normalizedQuery}`)
   }

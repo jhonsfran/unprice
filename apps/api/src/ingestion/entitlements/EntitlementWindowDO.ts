@@ -329,6 +329,7 @@ export class EntitlementWindowDO extends DurableObject {
   // Lazily constructed on the first flush+refill call so a DO that never
   // opens a reservation never opens a Postgres connection.
   private walletService: WalletService | null = null
+  private nextAlarmAt: number | null = null
   // In-memory single-flight for lazy reservation bootstrap. It only dedupes
   // external wallet I/O while this DO instance is alive; the reservation row
   // remains the durable source of truth.
@@ -956,6 +957,7 @@ export class EntitlementWindowDO extends DurableObject {
 
   async alarm(): Promise<void> {
     await this.ready
+    this.nextAlarmAt = null
 
     return runDoOperation(
       {
@@ -2874,9 +2876,18 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private async scheduleAlarm(target: number): Promise<void> {
+    const now = Date.now()
+    if (this.nextAlarmAt !== null && this.nextAlarmAt > now && this.nextAlarmAt <= target) {
+      return
+    }
+
     const existing = await this.ctx.storage.getAlarm()
-    if (existing !== null && existing > Date.now() && existing <= target) return
+    if (existing !== null && existing > now && existing <= target) {
+      this.nextAlarmAt = existing
+      return
+    }
     await this.ctx.storage.setAlarm(target)
+    this.nextAlarmAt = target
   }
 }
 

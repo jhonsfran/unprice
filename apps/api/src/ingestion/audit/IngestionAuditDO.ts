@@ -5,10 +5,8 @@ import type { AppLogger } from "@unprice/observability"
 import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
 import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
-import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { createDoLogger, runDoOperation } from "~/observability"
 import { ingestionAuditTable, schema } from "./db/schema"
-import migrations from "./drizzle/migrations"
 
 const TABLE_NAME = "ingestion_audit"
 
@@ -42,6 +40,7 @@ export class IngestionAuditDO extends DurableObject {
   private readonly localPipelineUrl?: string
   private readonly pipelineEvents?: Pipeline<PipelineRecord>
   private readonly logger: AppLogger
+  private alarmScheduled = false
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env)
@@ -63,7 +62,7 @@ export class IngestionAuditDO extends DurableObject {
     })
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
-      await migrate(this.db, migrations)
+      this.ensureSchema()
     })
   }
 
@@ -155,6 +154,7 @@ export class IngestionAuditDO extends DurableObject {
 
   async alarm(): Promise<void> {
     await this.ready
+    this.alarmScheduled = false
 
     return runDoOperation(
       {
@@ -308,9 +308,39 @@ export class IngestionAuditDO extends DurableObject {
   }
 
   private async ensureAlarm(): Promise<void> {
+    if (this.alarmScheduled) {
+      return
+    }
+
     const current = await this.ctx.storage.getAlarm()
     if (current === null) {
       await this.ctx.storage.setAlarm(Date.now() + 1000)
     }
+    this.alarmScheduled = true
+  }
+
+  private ensureSchema(): void {
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS ingestion_audit (
+        idempotency_key text PRIMARY KEY NOT NULL,
+        canonical_audit_id text NOT NULL,
+        payload_hash text NOT NULL,
+        status text NOT NULL,
+        rejection_reason text,
+        result_json text,
+        audit_payload_json text NOT NULL,
+        first_seen_at integer NOT NULL,
+        published_at integer
+      )
+    `)
+    this.ctx.storage.sql.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ingestion_audit_canonical_audit_id_unique
+        ON ingestion_audit (canonical_audit_id)
+    `)
+    this.ctx.storage.sql.exec(`
+      CREATE INDEX IF NOT EXISTS idx_ingestion_audit_unpublished
+        ON ingestion_audit (first_seen_at)
+        WHERE published_at IS NULL
+    `)
   }
 }

@@ -4,13 +4,15 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
-import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
+import { INGESTION_REJECTION_REASONS, UnPriceIngestionError } from "@unprice/services/ingestion"
+import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
-import { UnpriceApiError } from "~/errors"
+import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import type { ServiceContext } from "~/hono/env"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import {
   buildIngestionQueueMessage,
@@ -130,13 +132,42 @@ export const registerIngestEventsSyncV1 = (app: App) =>
       timestamp,
     })
 
-    const result = await ingestion.ingestFeatureSync({
+    startTime(c, "ingestFeatureSync")
+    const result = await ingestFeatureSync({
       featureSlug: body.featureSlug,
+      ingestion,
       message,
-    })
+    }).finally(() => endTime(c, "ingestFeatureSync"))
 
     return c.json(result, HttpStatusCodes.OK)
   })
 
 export type IngestEventsSyncRequest = z.infer<typeof syncEventSchema>
 export type IngestEventsSyncResponse = z.infer<typeof syncIngestionResultSchema>
+
+async function ingestFeatureSync(params: {
+  featureSlug: string
+  ingestion: ServiceContext["ingestion"]
+  message: ReturnType<typeof buildIngestionQueueMessage>
+}): Promise<IngestEventsSyncResponse> {
+  const { featureSlug, ingestion, message } = params
+
+  try {
+    return await ingestion.ingestFeatureSync({
+      featureSlug,
+      message,
+    })
+  } catch (error) {
+    if (
+      error instanceof UnPriceIngestionError &&
+      error.code === "INGESTION_AUDIT_PAYLOAD_CONFLICT"
+    ) {
+      throw new UnpriceApiError({
+        code: "CONFLICT",
+        message: error.message,
+      })
+    }
+
+    throw toUnpriceApiError(error)
+  }
+}

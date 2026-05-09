@@ -1,6 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { AppLogger } from "@unprice/observability"
 import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
+import { UnPriceIngestionError } from "@unprice/services/ingestion"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -218,6 +219,33 @@ describe("ingestEventsSyncV1 route", () => {
       })
     )
   })
+
+  it("maps audit payload conflicts to 409 conflict", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+    ingestFeatureSync.mockRejectedValueOnce(
+      new UnPriceIngestionError({
+        code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
+        message:
+          "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+        context: {
+          idempotencyKeys: ["idem_123"],
+          shardIndex: 20,
+        },
+      })
+    )
+
+    const response = await app.fetch(buildRequest(), env, executionCtx)
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      code: "CONFLICT",
+      message:
+        "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+    })
+  })
 })
 
 function createTestApp() {
@@ -232,8 +260,7 @@ function createTestApp() {
 
   app.onError((error, c) => {
     if (error instanceof UnpriceApiError) {
-      const status = error.code === "RATE_LIMITED" ? 429 : 400
-      return c.json({ code: error.code, message: error.message }, status)
+      return c.json({ code: error.code, message: error.message }, error.status)
     }
 
     throw error

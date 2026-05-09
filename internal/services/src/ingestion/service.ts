@@ -17,11 +17,13 @@ import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import {
   type IngestionAuditClient,
+  type IngestionAuditCommitResult,
   type IngestionAuditEntry,
   computeCanonicalAuditId,
   computePayloadHash,
   selectIngestionAuditShardIndex,
 } from "./audit"
+import { UnPriceIngestionError } from "./errors"
 import {
   EVENTS_SCHEMA_VERSION,
   type EntitlementWindowState,
@@ -683,27 +685,16 @@ export class IngestionService {
     options: CommitAuditOptions = {}
   ): Promise<void> {
     const commitPromises = [...auditEntriesByShard.entries()].map(async ([shardIndex, entries]) => {
+      let result: IngestionAuditCommitResult
+
       try {
-        const result = await this.auditClient
+        result = await this.auditClient
           .getAuditStub({
             projectId,
             customerId,
             shardIndex,
           })
           .commit(entries)
-
-        if (result.conflicts > 0) {
-          this.logger.warn("audit payload conflicts detected", {
-            projectId,
-            customerId,
-            conflicts: result.conflicts,
-            shardIndex,
-          })
-
-          if (options.strict) {
-            throw new Error(`audit payload conflict on shard ${shardIndex}`)
-          }
-        }
       } catch (error) {
         this.logger.error("audit commit failed", {
           projectId,
@@ -714,6 +705,33 @@ export class IngestionService {
 
         if (options.strict) {
           throw error
+        }
+
+        return
+      }
+
+      if (result.conflicts > 0) {
+        this.logger.warn("audit payload conflicts detected", {
+          projectId,
+          customerId,
+          conflicts: result.conflicts,
+          idempotencyKeys: entries.map((entry) => entry.idempotencyKey),
+          shardIndex,
+        })
+
+        if (options.strict) {
+          throw new UnPriceIngestionError({
+            code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
+            message:
+              "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+            context: {
+              customerId,
+              projectId,
+              conflicts: result.conflicts,
+              idempotencyKeys: entries.map((entry) => entry.idempotencyKey),
+              shardIndex,
+            },
+          })
         }
       }
     })
