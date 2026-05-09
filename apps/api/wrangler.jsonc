@@ -117,10 +117,6 @@
         {
           "tag": "v4",
           "new_sqlite_classes": ["IngestionAuditDO"]
-        },
-        {
-          "tag": "v5",
-          "deleted_classes": ["IngestionIdempotencyDO"]
         }
       ]
     },
