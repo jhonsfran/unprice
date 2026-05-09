@@ -168,6 +168,15 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
   Cloudflare/Axiom JSON serialization can turn them into `{}` and hide the message. Serialize to
   `{ type, message, stack }` first, as in `apps/api/src/errors/log.ts`.
 
+## 2026-05-09: Sync Ingestion Durability
+
+- `/v1/events/ingest/sync` must not rely on `waitUntil` as the only durability boundary for
+  canonical ingestion audit rows. Await a strict `IngestionAuditDO.commit` after the
+  `EntitlementWindowDO.apply` result so the audit DO owns publishing through its outbox.
+- When a wallet final flush is pending, persist that it is final before external wallet I/O.
+  Recovery must replay a pending final flush as `final: true`; replaying it as a mid-period refill
+  can strand a locally open reservation after the wallet reservation has already reconciled.
+
 ## 2026-05-07: Payment Method Setup UX Cache Refresh
 
 - After returning from a provider payment-method setup flow, the dashboard must bypass the

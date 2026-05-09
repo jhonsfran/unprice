@@ -53,6 +53,7 @@ type MeterWindowRow = {
   refillInFlight?: boolean
   flushSeq?: number
   pendingFlushSeq?: number | null
+  pendingFlushFinal?: boolean
   // Alarm trigger columns.
   lastEventAt?: number | null
   lastFlushedAt?: number | null
@@ -116,6 +117,7 @@ const METER_WINDOW_KEYS = new Set<string>([
   "refillInFlight",
   "flushSeq",
   "pendingFlushSeq",
+  "pendingFlushFinal",
   "lastEventAt",
   "lastFlushedAt",
   "deletionRequested",
@@ -2164,6 +2166,65 @@ describe("EntitlementWindowDO", () => {
     })
   })
 
+  it("recovers a pending final flush that already reconciled in the wallet", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.flushReservation.mockResolvedValue({
+      err: { message: "WALLET_RESERVATION_ALREADY_RECONCILED" },
+      val: null,
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_abc",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 2 * 100_000_000,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: true,
+      flushSeq: 3,
+      pendingFlushSeq: 4,
+      pendingFlushFinal: true,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.getEnforcementState()
+    await Promise.all(state.waitUntilPromises)
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "res_abc",
+        flushSeq: 4,
+        flushAmount: 2 * 100_000_000,
+        refillChunkAmount: 0,
+        final: true,
+      })
+    )
+
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
+      reservationId: null,
+      flushedAmount: 2 * 100_000_000,
+      flushSeq: 4,
+      pendingFlushSeq: null,
+      pendingFlushFinal: false,
+      refillInFlight: false,
+      recoveryRequired: false,
+    })
+  })
+
   it("does not auto-recover pending flushes marked recoveryRequired", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -3806,6 +3867,7 @@ function buildFakeDrizzle(state: FakeDbState) {
                   refillInFlight: existing?.refillInFlight ?? false,
                   flushSeq: existing?.flushSeq ?? 0,
                   pendingFlushSeq: existing?.pendingFlushSeq ?? null,
+                  pendingFlushFinal: existing?.pendingFlushFinal ?? false,
                   lastEventAt: existing?.lastEventAt ?? null,
                   lastFlushedAt: existing?.lastFlushedAt ?? null,
                   deletionRequested: existing?.deletionRequested ?? false,

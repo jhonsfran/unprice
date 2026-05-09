@@ -89,6 +89,7 @@ export const walletReservationTable = sqliteTable("wallet_reservation", {
   refillInFlight: integer("refill_in_flight", { mode: "boolean" }).notNull().default(false),
   flushSeq: integer("flush_seq").notNull().default(0),
   pendingFlushSeq: integer("pending_flush_seq"),
+  pendingFlushFinal: integer("pending_flush_final", { mode: "boolean" }).notNull().default(false),
   lastEventAt: integer("last_event_at"),
   deletionRequested: integer("deletion_requested", { mode: "boolean" }).notNull().default(false),
   recoveryRequired: integer("recovery_required", { mode: "boolean" }).notNull().default(false),

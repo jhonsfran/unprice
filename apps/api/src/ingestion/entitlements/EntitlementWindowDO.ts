@@ -269,7 +269,7 @@ type PricedFact = {
 type FinalFlushResult =
   | {
       ok: true
-      outcome: "deferred" | "no_reservation" | "success"
+      outcome: "already_reconciled" | "deferred" | "no_reservation" | "success"
       reason?: "deletion_requested" | "pending_wallet_flush" | "recovery_required"
     }
   | {
@@ -280,6 +280,7 @@ type FinalFlushResult =
 
 type FinalFlushOptions = {
   allowDeletionRequested?: boolean
+  recoverPendingFinal?: boolean
 }
 
 const FLUSH_BATCH_SIZE = 500
@@ -381,13 +382,17 @@ export class EntitlementWindowDO extends DurableObject {
         window.pendingFlushSeq > window.flushSeq
       ) {
         const flushAmount = Math.max(0, window.consumedAmount - window.flushedAmount)
-        this.ctx.waitUntil(
-          this.requestFlushAndRefill({
-            flushSeq: window.pendingFlushSeq,
-            flushAmount,
-            refillChunkAmount: window.refillChunkAmount,
-          })
-        )
+        if (window.pendingFlushFinal) {
+          this.ctx.waitUntil(this.finalFlush({ recoverPendingFinal: true }))
+        } else {
+          this.ctx.waitUntil(
+            this.requestFlushAndRefill({
+              flushSeq: window.pendingFlushSeq,
+              flushAmount,
+              refillChunkAmount: window.refillChunkAmount,
+            })
+          )
+        }
       }
     })
   }
@@ -676,7 +681,11 @@ export class EntitlementWindowDO extends DurableObject {
                 const nextSeq = window.flushSeq + 1
 
                 tx.update(walletReservationTable)
-                  .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
+                  .set({
+                    refillInFlight: true,
+                    pendingFlushSeq: nextSeq,
+                    pendingFlushFinal: false,
+                  })
                   .run()
 
                 refillTrigger = {
@@ -1055,7 +1064,8 @@ export class EntitlementWindowDO extends DurableObject {
               ? "period_end"
               : "inactivity"
           const hasPendingWalletFlush = this.hasPendingWalletFlush(window)
-          if (hasPendingWalletFlush) {
+          const isPendingFinalFlush = hasPendingWalletFlush && window.pendingFlushFinal
+          if (hasPendingWalletFlush && !isPendingFinalFlush) {
             wideEvent.final_flush_deferred = true
             wideEvent.pending_flush_seq = window.pendingFlushSeq
             wideEvent.refill_in_flight = window.refillInFlight
@@ -1073,9 +1083,10 @@ export class EntitlementWindowDO extends DurableObject {
             }
           }
 
-          if (!hasPendingWalletFlush) {
+          if (!hasPendingWalletFlush || isPendingFinalFlush) {
             const finalFlushResult = await this.finalFlush({
               allowDeletionRequested: isDeletionPending,
+              recoverPendingFinal: isPendingFinalFlush,
             })
             wideEvent.final_flush_ok = finalFlushResult.ok
             wideEvent.final_flush_outcome = finalFlushResult.outcome
@@ -1172,7 +1183,11 @@ export class EntitlementWindowDO extends DurableObject {
           wideEvent.time_flush_amount = unflushed
           this.db
             .update(walletReservationTable)
-            .set({ refillInFlight: true, pendingFlushSeq: nextSeq })
+            .set({
+              refillInFlight: true,
+              pendingFlushSeq: nextSeq,
+              pendingFlushFinal: false,
+            })
             .run()
           await this.requestFlushAndRefill({
             flushSeq: nextSeq,
@@ -1371,7 +1386,14 @@ export class EntitlementWindowDO extends DurableObject {
         return { ok: true, outcome: "deferred", reason: "deletion_requested" }
       }
 
-      if (this.hasPendingWalletFlush(window)) {
+      const isRecoveringPendingFinal =
+        Boolean(options.recoverPendingFinal) &&
+        window.pendingFlushFinal &&
+        window.pendingFlushSeq !== null &&
+        window.pendingFlushSeq !== undefined &&
+        window.pendingFlushSeq > window.flushSeq
+
+      if (this.hasPendingWalletFlush(window) && !isRecoveringPendingFinal) {
         wideEvent.outcome = "deferred"
         wideEvent.reason = "pending_wallet_flush"
         wideEvent.pending_flush_seq = window.pendingFlushSeq
@@ -1380,13 +1402,14 @@ export class EntitlementWindowDO extends DurableObject {
       }
 
       const unflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
-      const nextSeq = window.flushSeq + 1
+      const nextSeq = isRecoveringPendingFinal ? window.pendingFlushSeq! : window.flushSeq + 1
       wideEvent.flush_seq = nextSeq
       wideEvent.flush_amount = unflushed
+      wideEvent.recovering_pending_final = isRecoveringPendingFinal
 
       this.db
         .update(walletReservationTable)
-        .set({ pendingFlushSeq: nextSeq, refillInFlight: true })
+        .set({ pendingFlushSeq: nextSeq, pendingFlushFinal: true, refillInFlight: true })
         .run()
 
       const walletService = this.getWalletService()
@@ -1410,6 +1433,29 @@ export class EntitlementWindowDO extends DurableObject {
       })
 
       if (result.err) {
+        if (
+          isRecoveringPendingFinal &&
+          result.err.message === "WALLET_RESERVATION_ALREADY_RECONCILED"
+        ) {
+          this.db
+            .update(walletReservationTable)
+            .set({
+              reservationId: null,
+              flushedAmount: Math.max(window.flushedAmount, window.consumedAmount),
+              flushSeq: nextSeq,
+              pendingFlushSeq: null,
+              pendingFlushFinal: false,
+              refillInFlight: false,
+              lastFlushedAt: Date.now(),
+            })
+            .run()
+
+          wideEvent.flushed_amount = Math.max(0, window.consumedAmount - window.flushedAmount)
+          wideEvent.flushed_after = Math.max(window.flushedAmount, window.consumedAmount)
+          wideEvent.outcome = "already_reconciled"
+          return { ok: true, outcome: "already_reconciled" }
+        }
+
         this.logger.error(result.err, {
           context: "final flush failed",
           flushSeq: nextSeq,
@@ -1443,6 +1489,7 @@ export class EntitlementWindowDO extends DurableObject {
           flushedAmount: window.flushedAmount + result.val.flushedAmount,
           flushSeq: nextSeq,
           pendingFlushSeq: null,
+          pendingFlushFinal: false,
           refillInFlight: false,
           lastFlushedAt: Date.now(),
         })
@@ -2134,6 +2181,7 @@ export class EntitlementWindowDO extends DurableObject {
     refillInFlight: boolean
     flushSeq: number
     pendingFlushSeq: number | null
+    pendingFlushFinal: boolean
     lastEventAt: number | null
     lastFlushedAt: number | null
     deletionRequested: boolean
@@ -2154,6 +2202,7 @@ export class EntitlementWindowDO extends DurableObject {
         refillInFlight: walletReservationTable.refillInFlight,
         flushSeq: walletReservationTable.flushSeq,
         pendingFlushSeq: walletReservationTable.pendingFlushSeq,
+        pendingFlushFinal: walletReservationTable.pendingFlushFinal,
         lastEventAt: walletReservationTable.lastEventAt,
         lastFlushedAt: walletReservationTable.lastFlushedAt,
         deletionRequested: walletReservationTable.deletionRequested,
@@ -2178,6 +2227,7 @@ export class EntitlementWindowDO extends DurableObject {
       refillInFlight: Boolean(row.refillInFlight),
       flushSeq: Number(row.flushSeq ?? 0),
       pendingFlushSeq: row.pendingFlushSeq ?? null,
+      pendingFlushFinal: Boolean(row.pendingFlushFinal),
       lastEventAt: row.lastEventAt ?? null,
       lastFlushedAt: row.lastFlushedAt ?? null,
       deletionRequested: Boolean(row.deletionRequested),
@@ -2262,7 +2312,11 @@ export class EntitlementWindowDO extends DurableObject {
 
     this.db
       .update(walletReservationTable)
-      .set({ refillInFlight: true, pendingFlushSeq: flushSeq })
+      .set({
+        refillInFlight: true,
+        pendingFlushSeq: flushSeq,
+        pendingFlushFinal: false,
+      })
       .run()
 
     await this.requestFlushAndRefill(trigger)
@@ -2369,6 +2423,7 @@ export class EntitlementWindowDO extends DurableObject {
           flushedAmount: window.flushedAmount + result.val.flushedAmount,
           flushSeq: trigger.flushSeq,
           pendingFlushSeq: null,
+          pendingFlushFinal: false,
           refillInFlight: false,
           lastFlushedAt: Date.now(),
         })
@@ -2552,6 +2607,7 @@ export class EntitlementWindowDO extends DurableObject {
             flushedAmount: 0,
             flushSeq: 0,
             pendingFlushSeq: null,
+            pendingFlushFinal: false,
             refillThresholdBps: sizing.refillThresholdBps,
             refillChunkAmount: sizing.refillChunkAmount,
             refillInFlight: false,

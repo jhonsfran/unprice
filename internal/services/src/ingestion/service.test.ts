@@ -196,6 +196,59 @@ describe("IngestionService entitlement routing", () => {
     expect(apply).toHaveBeenCalledTimes(1)
   })
 
+  it("fails sync ingestion when the strict audit commit fails", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({ allowed: true })
+    const waitUntil = vi.fn()
+    const commit = vi.fn().mockRejectedValue(new Error("audit unavailable"))
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: {
+        getEntitlementWindowStub: vi.fn().mockReturnValue({
+          apply,
+          getEnforcementState: vi.fn(),
+        }),
+      },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil,
+    })
+
+    await expect(
+      service.ingestFeatureSync({
+        featureSlug: entitlement.featureSlug,
+        message: {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { amount: 1 },
+        },
+      })
+    ).rejects.toThrow("audit unavailable")
+
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(waitUntil).not.toHaveBeenCalled()
+  })
+
   it("rejects duplicate active entitlements for the same customer feature", async () => {
     const entitlement = createEntitlement()
     const apply = vi.fn().mockResolvedValue({ allowed: true })

@@ -143,6 +143,10 @@ type ShardedAuditEntry = {
   shardIndex: number
 }
 
+type CommitAuditOptions = {
+  strict?: boolean
+}
+
 const GRANT_CONTEXT_CACHE_BUCKET_MS = 300_000
 
 export class IngestionService {
@@ -257,7 +261,14 @@ export class IngestionService {
     }
 
     const outcome: IngestionOutcome = { state: "processed" }
-    this.commitToAuditAsync(message, outcome)
+    await this.commitOutcomesToAudit(
+      message.projectId,
+      message.customerId,
+      [{ message, outcome }],
+      {
+        strict: true,
+      }
+    )
 
     return this.toSyncResult({
       allowed: true,
@@ -599,11 +610,12 @@ export class IngestionService {
   private async commitOutcomesToAudit(
     projectId: string,
     customerId: string,
-    outcomes: MessageOutcome[]
+    outcomes: MessageOutcome[],
+    options: CommitAuditOptions = {}
   ): Promise<void> {
     const auditEntries = await this.buildAuditEntries(projectId, customerId, outcomes)
     const auditEntriesByShard = this.bucketAuditEntriesByShard(auditEntries)
-    await this.flushAuditEntries(projectId, customerId, auditEntriesByShard)
+    await this.flushAuditEntries(projectId, customerId, auditEntriesByShard, options)
   }
 
   private async buildAuditEntries(
@@ -667,35 +679,44 @@ export class IngestionService {
   private async flushAuditEntries(
     projectId: string,
     customerId: string,
-    auditEntriesByShard: Map<number, IngestionAuditEntry[]>
+    auditEntriesByShard: Map<number, IngestionAuditEntry[]>,
+    options: CommitAuditOptions = {}
   ): Promise<void> {
-    const commitPromises = [...auditEntriesByShard.entries()].map(([shardIndex, entries]) =>
-      this.auditClient
-        .getAuditStub({
-          projectId,
-          customerId,
-          shardIndex,
-        })
-        .commit(entries)
-        .then((result) => {
-          if (result.conflicts > 0) {
-            this.logger.warn("audit payload conflicts detected", {
-              projectId,
-              customerId,
-              conflicts: result.conflicts,
-              shardIndex,
-            })
-          }
-        })
-        .catch((error) => {
-          this.logger.error("audit commit failed", {
+    const commitPromises = [...auditEntriesByShard.entries()].map(async ([shardIndex, entries]) => {
+      try {
+        const result = await this.auditClient
+          .getAuditStub({
             projectId,
             customerId,
             shardIndex,
-            error,
           })
+          .commit(entries)
+
+        if (result.conflicts > 0) {
+          this.logger.warn("audit payload conflicts detected", {
+            projectId,
+            customerId,
+            conflicts: result.conflicts,
+            shardIndex,
+          })
+
+          if (options.strict) {
+            throw new Error(`audit payload conflict on shard ${shardIndex}`)
+          }
+        }
+      } catch (error) {
+        this.logger.error("audit commit failed", {
+          projectId,
+          customerId,
+          shardIndex,
+          error: formatUnknownError(error),
         })
-    )
+
+        if (options.strict) {
+          throw error
+        }
+      }
+    })
 
     await Promise.all(commitPromises)
   }
@@ -1095,7 +1116,14 @@ export class IngestionService {
       projectId,
       rejectionReason: outcome.rejectionReason,
     })
-    this.commitToAuditAsync(message, outcome)
+    await this.commitOutcomesToAudit(
+      message.projectId,
+      message.customerId,
+      [{ message, outcome }],
+      {
+        strict: true,
+      }
+    )
 
     return this.toSyncResult({
       allowed: false,
@@ -1148,6 +1176,18 @@ function buildAuditPayload(
 
 function toEventDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10)
+}
+
+function formatUnknownError(error: unknown): Record<string, unknown> | string {
+  if (error instanceof Error) {
+    return {
+      type: error.name,
+      message: error.message,
+      stack: error.stack,
+    }
+  }
+
+  return String(error ?? "unknown")
 }
 
 function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueueMessage): number {
