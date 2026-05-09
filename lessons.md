@@ -162,6 +162,12 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
 - Keep payment method endpoints under `/v1/payments/methods/*` and provider callback/webhook
   endpoints under `/v1/payments/providers/*`; both live in `apps/api/src/routes/payments`.
 
+## 2026-05-09: Worker Environment Error Logging
+
+- Do not put native `Error` instances directly inside plain `evlog.log.error({...})` payloads.
+  Cloudflare/Axiom JSON serialization can turn them into `{}` and hide the message. Serialize to
+  `{ type, message, stack }` first, as in `apps/api/src/errors/log.ts`.
+
 ## 2026-05-07: Payment Method Setup UX Cache Refresh
 
 - After returning from a provider payment-method setup flow, the dashboard must bypass the

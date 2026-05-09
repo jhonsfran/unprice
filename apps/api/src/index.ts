@@ -35,9 +35,10 @@ import { env } from "cloudflare:workers"
 import type { IngestionQueueMessage } from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
+import { serializeError } from "~/errors/log"
 import { consumeIngestionBatch } from "~/ingestion/service"
 import { obs } from "~/middleware/obs"
-import { apiEvlog } from "~/observability"
+import { apiEvlog, flushApiDrainWithDiagnostics } from "~/observability"
 import { registerGetInvoiceV1 } from "./routes/invoices/getInvoiceV1"
 import { registerGetWalletV1 } from "./routes/wallet/getWalletV1"
 
@@ -179,15 +180,21 @@ const handler = {
 
       return app.fetch(req, parsedEnv, executionCtx)
     } catch (error) {
+      const serializedError = serializeError(error)
+
       log.error({
         code: "BAD_ENVIRONMENT",
-        error: error instanceof Error ? error : new Error(String(error ?? "Unknown error")),
+        message: "Invalid API environment",
+        error: serializedError,
+        error_message: serializedError.message,
       })
+      executionCtx.waitUntil(flushApiDrainWithDiagnostics("bad_environment_fetch"))
+
       return Response.json(
         {
           code: "BAD_ENVIRONMENT",
           message: "Some environment variables are missing or are invalid",
-          errors: error instanceof Error ? error.message : "Unknown error",
+          errors: serializedError.message,
         },
         { status: 500 }
       )
@@ -198,8 +205,22 @@ const handler = {
     env: Env,
     executionCtx: ExecutionContext
   ) => {
-    const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
-    await consumeIngestionBatch(batch, parsedEnv, executionCtx)
+    try {
+      const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
+      await consumeIngestionBatch(batch, parsedEnv, executionCtx)
+    } catch (error) {
+      const serializedError = serializeError(error)
+
+      log.error({
+        code: "BAD_ENVIRONMENT",
+        message: "Invalid API queue environment",
+        error: serializedError,
+        error_message: serializedError.message,
+      })
+      executionCtx.waitUntil(flushApiDrainWithDiagnostics("bad_environment_queue"))
+
+      throw error
+    }
   },
 } satisfies ExportedHandler<Env, IngestionQueueMessage>
 

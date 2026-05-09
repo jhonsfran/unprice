@@ -38,6 +38,21 @@ initObservability({
 
 export const apiEvlog = evlog()
 
+function formatFlushError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? "unknown")
+}
+
+export async function flushApiDrainWithDiagnostics(context: string): Promise<void> {
+  try {
+    await apiDrain?.flush?.()
+  } catch (error) {
+    console.error("Failed to flush API logs to Axiom", {
+      context,
+      error: formatFlushError(error),
+    })
+  }
+}
+
 export function createApiLogger(requestLogger: WideEventLogger, requestId?: string): AppLogger {
   return createAppLogger(requestLogger, {
     flush: apiDrain?.flush,
