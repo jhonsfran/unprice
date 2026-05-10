@@ -55,7 +55,7 @@ jobs:
           op: decode
           in: ${{ secrets.DATABASE_URL_ENCRYPTED }}
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@v1.0.16
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
@@ -71,6 +71,14 @@ jobs:
       - name: Version
         run: echo "VERSION=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
+      # wrangler-action runs `wrangler secret bulk` *before* `wrangler deploy` when using `secrets:`.
+      # That order can fail with Cloudflare API 10214. We deploy first, then `secret bulk` in postCommands.
+      - name: Write Wrangler CI secrets file
+        working-directory: apps/api
+        env:
+          DATABASE_URL: ${{ steps.db-url.outputs.out || env.DATABASE_URL }}
+        run: node scripts/ci-write-worker-secrets-file.mjs
+
       - name: Install Wrangler
         shell: bash
         run: |
@@ -78,7 +86,7 @@ jobs:
           wrangler --version
 
       - name: Deploy with Wrangler
-        uses: cloudflare/wrangler-action@v3.14.1
+        uses: cloudflare/wrangler-action@v3.15.0
         with:
           apiToken: ${{ env.CLOUDFLARE_API_TOKEN }}
           wranglerVersion: "4.67.0"
@@ -86,28 +94,9 @@ jobs:
           packageManager: "pnpm"
           workingDirectory: "apps/api"
           accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
-          # Pass secrets to Worker
-          secrets: |
-            TINYBIRD_TOKEN
-            TINYBIRD_URL
-            AUTH_SECRET
-            CLOUDFLARE_ZONE_ID
-            CLOUDFLARE_CACHE_DOMAIN
-            CLOUDFLARE_API_TOKEN
-            CLOUDFLARE_ACCOUNT_ID
-            LAKEHOUSE_API_TOKEN
-            DATABASE_URL
-            DATABASE_READ1_URL
-            DATABASE_READ2_URL
-            ENCRYPTION_KEY
-            AXIOM_API_TOKEN
-            AXIOM_DATASET
-            UPSTASH_REDIS_REST_URL
-            UPSTASH_REDIS_REST_TOKEN
-            STRIPE_API_KEY
-            STRIPE_CONNECT_WEBHOOK_SECRET
-            UNPRICE_API_KEY
-            UNPRICE_API_URL
+          postCommands: |
+            pnpm exec wrangler secret bulk --env ${{ inputs.env }} < .ci-worker-secrets.json
+            rm -f .ci-worker-secrets.json
           vars: |
             VERSION
             NODE_ENV

@@ -104,3 +104,6 @@ internal/lakehouse/lakenv/*
 .claude/worktrees
 tmp/
 docs/plans/**
+
+# CI ephemeral Wrangler secrets bundle (apps/api/scripts/ci-write-worker-secrets-file.mjs)
+apps/api/.ci-worker-secrets.json
