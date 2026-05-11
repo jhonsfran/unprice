@@ -29,4 +29,5 @@ export { checkPaymentProviderAvailability } from "./payment-provider/availabilit
 export { completeProviderSignUp } from "./payment-provider/complete-provider-sign-up"
 export { completeProviderSetup } from "./payment-provider/complete-provider-setup"
 export { processWebhookEvent } from "./payment-provider/process-webhook-event"
+export { expireWalletCredits } from "./wallet/expire-wallet-credits"
 export { initiateTopup } from "./wallet/initiate-topup"

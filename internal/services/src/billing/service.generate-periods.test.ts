@@ -36,6 +36,17 @@ vi.mock("./repository.drizzle", () => ({
 const NOW = new Date("2026-03-15T00:00:00Z").getTime()
 const PHASE_START = new Date("2026-03-01T00:00:00Z").getTime()
 const PHASE_END = new Date("2026-04-01T00:00:00Z").getTime()
+const GENERATION_ANCHOR_START = new Date("2026-03-01T00:00:01Z").getTime()
+const GENERATION_NOW = new Date("2026-03-01T02:30:01Z").getTime()
+
+type TestBillingInterval = "month" | "year" | "week" | "day" | "minute" | "onetime"
+type TestBillingConfig = {
+  name: string
+  billingInterval: TestBillingInterval
+  billingIntervalCount: number
+  planType: "recurring" | "onetime"
+}
+type TestFeatureType = "flat" | "package" | "tier" | "usage"
 
 type GenerateBillingPeriodsPayload = {
   subscriptionId: string
@@ -68,17 +79,31 @@ function generateBillingPeriods(billing: BillingService, payload: GenerateBillin
   return (billing as unknown as BillingServiceGenerateAccess)._generateBillingPeriods(payload)
 }
 
-function makeItem(id = "item_1") {
+function makeBillingConfig(
+  billingInterval: TestBillingInterval,
+  name: string = billingInterval,
+  billingIntervalCount = 1
+): TestBillingConfig {
+  return {
+    name,
+    billingInterval,
+    billingIntervalCount,
+    planType: "recurring",
+  }
+}
+
+function makeItem(
+  id = "item_1",
+  opts: {
+    billingConfig?: TestBillingConfig
+    featureType?: TestFeatureType
+  } = {}
+) {
   return {
     id,
     featurePlanVersion: {
-      featureType: "flat",
-      billingConfig: {
-        name: "monthly",
-        billingInterval: "month",
-        billingIntervalCount: 1,
-        planType: "recurring",
-      },
+      featureType: opts.featureType ?? "flat",
+      billingConfig: opts.billingConfig ?? makeBillingConfig("month", "monthly"),
     },
   }
 }
@@ -174,6 +199,21 @@ function makeBillingService(opts: { phases?: unknown[]; walletService?: WalletSe
   })
 
   return { billing, db, logger, walletService, ledgerService }
+}
+
+function createdPeriods() {
+  return createPeriodsBatchMock.mock.calls.flatMap(([input]) => {
+    const typed = input as {
+      periods: Array<{
+        cycleEndAt: number
+        cycleStartAt: number
+        invoiceAt: number
+        statementKey: string
+        subscriptionItemId: string
+      }>
+    }
+    return typed.periods
+  })
 }
 
 // --- Tests ---
@@ -328,6 +368,137 @@ describe("BillingService._generateBillingPeriods", () => {
       subscriptionPhaseId: "phase_1",
       subscriptionItemId: "item_1",
     })
+  })
+
+  it("materializes mixed annual, monthly, daily, and hourly cadence periods with interval-specific anchor semantics", async () => {
+    const phase = makePhase({
+      startAt: GENERATION_ANCHOR_START,
+      billingAnchor: 1,
+      planVersion: {
+        whenToBill: "pay_in_arrear",
+        currency: "USD",
+        collectionMethod: "charge_automatically",
+        billingConfig: makeBillingConfig("month", "monthly"),
+      },
+      items: [
+        makeItem("item_annual", { billingConfig: makeBillingConfig("year", "annual") }),
+        makeItem("item_monthly", { billingConfig: makeBillingConfig("month", "monthly") }),
+        makeItem("item_daily", { billingConfig: makeBillingConfig("day", "daily") }),
+        makeItem("item_hourly", {
+          billingConfig: makeBillingConfig("minute", "hourly", 60),
+          featureType: "usage",
+        }),
+      ],
+    })
+    const { billing } = makeBillingService({ phases: [phase] })
+
+    const result = await generateBillingPeriods(billing, {
+      subscriptionId: "sub_1",
+      projectId: "proj_1",
+      now: GENERATION_NOW,
+    })
+
+    expect(result.err).toBeUndefined()
+
+    const byItem = new Map<string, ReturnType<typeof createdPeriods>>()
+    for (const period of createdPeriods()) {
+      byItem.set(period.subscriptionItemId, [
+        ...(byItem.get(period.subscriptionItemId) ?? []),
+        period,
+      ])
+    }
+
+    expect(byItem.get("item_annual")?.[0]).toEqual(
+      expect.objectContaining({
+        cycleStartAt: new Date("2026-03-01T00:00:00Z").getTime(),
+        cycleEndAt: new Date("2027-03-01T00:00:00Z").getTime(),
+        invoiceAt: new Date("2027-03-01T00:00:00Z").getTime(),
+      })
+    )
+    expect(byItem.get("item_monthly")?.[0]).toEqual(
+      expect.objectContaining({
+        cycleStartAt: new Date("2026-03-01T00:00:00Z").getTime(),
+        cycleEndAt: new Date("2026-04-01T00:00:00Z").getTime(),
+        invoiceAt: new Date("2026-04-01T00:00:00Z").getTime(),
+      })
+    )
+    expect(byItem.get("item_daily")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cycleStartAt: new Date("2026-03-01T00:00:00Z").getTime(),
+          cycleEndAt: new Date("2026-03-01T01:00:00Z").getTime(),
+        }),
+        expect.objectContaining({
+          cycleStartAt: new Date("2026-03-01T01:00:00Z").getTime(),
+          cycleEndAt: new Date("2026-03-02T01:00:00Z").getTime(),
+        }),
+      ])
+    )
+    expect(byItem.get("item_hourly")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          cycleStartAt: new Date("2026-03-01T00:00:01Z").getTime(),
+          cycleEndAt: new Date("2026-03-01T01:00:01Z").getTime(),
+        }),
+        expect.objectContaining({
+          cycleStartAt: new Date("2026-03-01T01:00:01Z").getTime(),
+          cycleEndAt: new Date("2026-03-01T02:00:01Z").getTime(),
+        }),
+      ])
+    )
+  })
+
+  it("generates different statement keys for the same invoice time when currency, provider, or collection method differs", async () => {
+    const basePlanVersion = {
+      whenToBill: "pay_in_advance",
+      currency: "USD",
+      collectionMethod: "charge_automatically",
+      billingConfig: makeBillingConfig("month", "monthly"),
+    }
+    const phases = [
+      makePhase({
+        id: "phase_usd_stripe_auto",
+        paymentProvider: "stripe",
+        planVersion: basePlanVersion,
+        items: [makeItem("item_usd_stripe_auto")],
+      }),
+      makePhase({
+        id: "phase_eur_stripe_auto",
+        paymentProvider: "stripe",
+        planVersion: {
+          ...basePlanVersion,
+          currency: "EUR",
+        },
+        items: [makeItem("item_eur_stripe_auto")],
+      }),
+      makePhase({
+        id: "phase_usd_sandbox_auto",
+        paymentProvider: "sandbox",
+        planVersion: basePlanVersion,
+        items: [makeItem("item_usd_sandbox_auto")],
+      }),
+      makePhase({
+        id: "phase_usd_stripe_send",
+        paymentProvider: "stripe",
+        planVersion: {
+          ...basePlanVersion,
+          collectionMethod: "send_invoice",
+        },
+        items: [makeItem("item_usd_stripe_send")],
+      }),
+    ]
+    const { billing } = makeBillingService({ phases })
+
+    const result = await generateBillingPeriods(billing, {
+      subscriptionId: "sub_1",
+      projectId: "proj_1",
+      now: PHASE_START,
+    })
+
+    expect(result.err).toBeUndefined()
+    const firstPeriods = createdPeriods().filter((period) => period.invoiceAt === PHASE_START)
+    expect(firstPeriods).toHaveLength(4)
+    expect(new Set(firstPeriods.map((period) => period.statementKey)).size).toBe(4)
   })
 
   it("returns Err with billing error when transaction throws", async () => {

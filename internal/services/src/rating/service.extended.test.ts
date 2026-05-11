@@ -9,6 +9,7 @@ import type {
 } from "@unprice/db/validators"
 import { toDecimal } from "dinero.js"
 import { describe, expect, it, vi } from "vitest"
+import { computeGrantPeriodBucket } from "../entitlements/grant-consumption"
 import { RatingService } from "./service"
 
 /**
@@ -16,6 +17,7 @@ import { RatingService } from "./service"
  */
 function makeGrant(overrides: {
   id?: string
+  customerEntitlementId?: string
   type?: GrantType
   priority?: number
   allowanceUnits?: number | null
@@ -29,6 +31,7 @@ function makeGrant(overrides: {
 }) {
   const {
     id = "grnt_1",
+    customerEntitlementId = "ce_1",
     type = "subscription",
     priority = 10,
     allowanceUnits = null,
@@ -58,7 +61,7 @@ function makeGrant(overrides: {
   return {
     id,
     projectId: "proj_1",
-    customerEntitlementId: "ce_1",
+    customerEntitlementId,
     type,
     priority,
     allowanceUnits,
@@ -68,13 +71,13 @@ function makeGrant(overrides: {
     createdAtM: effectiveAt,
     updatedAtM: effectiveAt,
     customerEntitlement: {
-      id: "ce_1",
+      id: customerEntitlementId,
       projectId: "proj_1",
       customerId: "cus_1",
-      featurePlanVersionId: "fv_1",
+      featurePlanVersionId: `fv_${customerEntitlementId}`,
       subscriptionId: "sub_1",
       subscriptionPhaseId: "sp_1",
-      subscriptionItemId: "si_1",
+      subscriptionItemId: `si_${customerEntitlementId}`,
       effectiveAt,
       expiresAt,
       overageStrategy: "none" as const,
@@ -82,11 +85,11 @@ function makeGrant(overrides: {
       createdAtM: effectiveAt,
       updatedAtM: effectiveAt,
       featurePlanVersion: {
-        id: "fv_1",
+        id: `fv_${customerEntitlementId}`,
         projectId: "proj_1",
         planVersionId: "pv_1",
         type: "feature" as const,
-        featureId: "feat_1",
+        featureId: `feat_${customerEntitlementId}`,
         featureType,
         unitOfMeasure: featureSlug,
         config,
@@ -100,7 +103,7 @@ function makeGrant(overrides: {
         createdAtM: effectiveAt,
         updatedAtM: effectiveAt,
         feature: {
-          id: "feat_1",
+          id: `feat_${customerEntitlementId}`,
           projectId: "proj_1",
           slug: featureSlug,
           code: 1,
@@ -453,5 +456,175 @@ describe("RatingService - extended", () => {
       0
     )
     expect(total).toBeCloseTo(12.5, 1)
+  })
+
+  it("filters rating to subscription entitlements so extra promotional and trial grants do not change invoice price", async () => {
+    const service = makeService()
+    const effectiveAt = CYCLE_START
+    const paidConfig = {
+      price: {
+        dinero: dinero({ amount: 100, currency: currencies.USD }).toJSON(),
+        displayAmount: "1.00",
+      },
+      usageMode: "unit" as const,
+      units: 1,
+    }
+
+    const result = await service.rateBillingPeriod({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      customerEntitlementIds: ["ce_subscription"],
+      featureSlug: "events",
+      startAt: CYCLE_START,
+      endAt: CYCLE_END,
+      usageData: [{ featureSlug: "events", usage: 25 }],
+      grants: [
+        makeGrant({
+          id: "grant_trial_extra",
+          customerEntitlementId: "ce_trial_extra",
+          type: "trial",
+          priority: 100,
+          allowanceUnits: 25,
+          effectiveAt,
+          config: {
+            ...paidConfig,
+            price: {
+              dinero: dinero({ amount: 0, currency: currencies.USD }).toJSON(),
+              displayAmount: "0.00",
+            },
+          },
+        }),
+        makeGrant({
+          id: "grant_promo_extra",
+          customerEntitlementId: "ce_promo_extra",
+          type: "promotion",
+          priority: 90,
+          allowanceUnits: 25,
+          effectiveAt,
+          config: {
+            ...paidConfig,
+            price: {
+              dinero: dinero({ amount: 10, currency: currencies.USD }).toJSON(),
+              displayAmount: "0.10",
+            },
+          },
+        }),
+        makeGrant({
+          id: "grant_subscription",
+          customerEntitlementId: "ce_subscription",
+          type: "subscription",
+          priority: 10,
+          allowanceUnits: null,
+          effectiveAt,
+          config: paidConfig,
+        }),
+      ],
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toHaveLength(1)
+    expect(result.val![0]).toMatchObject({
+      grantId: "grant_subscription",
+      usage: 25,
+      isTrial: false,
+    })
+    expect(toDecimal(result.val![0]!.price.totalPrice.dinero)).toBe("25.00")
+  })
+
+  it("uses each grant reset cadence when fetching usage for one monthly billing statement", async () => {
+    const periodKeysSeen: string[][] = []
+    const getUsageBillingFeatures = vi.fn().mockImplementation(async (input) => {
+      periodKeysSeen.push(input.periodKeys)
+      return {
+        val: [{ featureSlug: "events", usage: 10 }],
+      }
+    })
+    const service = new RatingService({
+      analytics: { getUsageBillingFeatures } as never,
+      grantsManager: {} as never,
+      logger: { warn: vi.fn(), error: vi.fn() } as never,
+    })
+    const effectiveAt = Date.UTC(2026, 0, 1, 0, 0, 0)
+    const dailyReset: ResetConfig = {
+      name: "daily meter reset",
+      resetInterval: "day",
+      resetIntervalCount: 1,
+      resetAnchor: "dayOfCreation",
+      planType: "recurring",
+    }
+    const weeklyReset: ResetConfig = {
+      name: "weekly meter reset",
+      resetInterval: "week",
+      resetIntervalCount: 1,
+      resetAnchor: "dayOfCreation",
+      planType: "recurring",
+    }
+    const config = {
+      price: {
+        dinero: dinero({ amount: 100, currency: currencies.USD }).toJSON(),
+        displayAmount: "1.00",
+      },
+      usageMode: "unit" as const,
+      units: 1,
+    }
+    const grants = [
+      makeGrant({
+        id: "grant_daily",
+        customerEntitlementId: "ce_daily",
+        effectiveAt,
+        allowanceUnits: 5,
+        resetConfig: dailyReset,
+        config,
+      }),
+      makeGrant({
+        id: "grant_weekly",
+        customerEntitlementId: "ce_weekly",
+        effectiveAt,
+        allowanceUnits: 20,
+        resetConfig: weeklyReset,
+        config,
+      }),
+    ]
+
+    const result = await service.rateBillingPeriod({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      featureSlug: "events",
+      startAt: CYCLE_START,
+      endAt: CYCLE_END,
+      grants,
+    })
+
+    expect(result.err).toBeUndefined()
+    const expectedDaily = computeGrantPeriodBucket(
+      {
+        cadenceEffectiveAt: effectiveAt,
+        cadenceExpiresAt: null,
+        effectiveAt,
+        expiresAt: null,
+        grantId: "grant_daily",
+        resetConfig: dailyReset,
+      },
+      CYCLE_START
+    )?.periodKey
+    const expectedWeekly = computeGrantPeriodBucket(
+      {
+        cadenceEffectiveAt: effectiveAt,
+        cadenceExpiresAt: null,
+        effectiveAt,
+        expiresAt: null,
+        grantId: "grant_weekly",
+        resetConfig: weeklyReset,
+      },
+      CYCLE_START
+    )?.periodKey
+
+    expect(getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+    expect(periodKeysSeen[0]).toEqual(expect.arrayContaining([expectedDaily, expectedWeekly]))
+    expect(getUsageBillingFeatures).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customerEntitlementIds: ["ce_daily", "ce_weekly"],
+      })
+    )
   })
 })

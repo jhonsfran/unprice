@@ -520,6 +520,100 @@ describe("EntitlementWindowDO", () => {
     expect(state.alarmAt).toBeNull()
   })
 
+  it("allows the last call that crosses a hard limit, then denies the next call", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.grantWindowRows.set(`grant_123:onetime:${BASE_NOW - 60_000}`, {
+      bucketKey: `grant_123:onetime:${BASE_NOW - 60_000}`,
+      grantId: "grant_123",
+      periodKey: `onetime:${BASE_NOW - 60_000}`,
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 8,
+      exhaustedAt: null,
+    })
+    testState.engineApply
+      .mockImplementationOnce((_event: unknown, options?: PersistOptions) => {
+        const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 13 }]
+        options?.beforePersist?.(facts)
+        return facts
+      })
+      .mockImplementationOnce((_event: unknown, options?: PersistOptions) => {
+        const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 14 }]
+        options?.beforePersist?.(facts)
+        return facts
+      })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const crossing = await durableObject.apply(
+      createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        limit: 10,
+        overageStrategy: "last-call",
+      })
+    )
+    const afterLimit = await durableObject.apply(
+      createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        idempotencyKey: "idem_after_limit",
+        event: { ...createApplyInput().event, id: "evt_after_limit" },
+        limit: 10,
+        overageStrategy: "last-call",
+      })
+    )
+
+    expect(crossing).toEqual({ allowed: true })
+    expect(afterLimit).toEqual({
+      allowed: false,
+      deniedReason: "LIMIT_EXCEEDED",
+      message: expect.stringContaining(DEFAULT_METER_KEY),
+    })
+    expect(db.outboxRows).toHaveLength(2)
+    expect(db.grantWindowRows.get(`grant_123:onetime:${BASE_NOW - 60_000}`)).toMatchObject({
+      consumedInCurrentWindow: 13,
+      exhaustedAt: BASE_NOW,
+    })
+  })
+
+  it("treats always overage as a soft limit during apply", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.grantWindowRows.set(`grant_123:onetime:${BASE_NOW - 60_000}`, {
+      bucketKey: `grant_123:onetime:${BASE_NOW - 60_000}`,
+      grantId: "grant_123",
+      periodKey: `onetime:${BASE_NOW - 60_000}`,
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 10,
+      exhaustedAt: BASE_NOW - 1,
+    })
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 15 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        limit: 10,
+        overageStrategy: "always",
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(db.outboxRows).toHaveLength(1)
+    expect(db.idempotencyRows.get("idem_123")).toMatchObject({ allowed: true })
+  })
+
   it("closes an active reservation asynchronously when ingestion rejects on limit", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()

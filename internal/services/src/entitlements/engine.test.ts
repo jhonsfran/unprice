@@ -340,6 +340,73 @@ describe("AsyncMeterAggregationEngine", () => {
     ])
   })
 
+  it("aggregates one event into multiple meters with different fields and methods", async () => {
+    const storage = new InMemoryStorageAdapter()
+    const meterConfigs: MeterConfig[] = [
+      {
+        eventId: "meter_billable_amount",
+        eventSlug: "checkout.completed",
+        aggregationMethod: "sum",
+        aggregationField: "amount",
+      },
+      {
+        eventId: "meter_purchase_count",
+        eventSlug: "checkout.completed",
+        aggregationMethod: "count",
+      },
+      {
+        eventId: "meter_peak_duration",
+        eventSlug: "checkout.completed",
+        aggregationMethod: "max",
+        aggregationField: "durationMs",
+      },
+      {
+        eventId: "meter_latest_seats",
+        eventSlug: "checkout.completed",
+        aggregationMethod: "latest",
+        aggregationField: "seatCount",
+      },
+    ]
+    const engine = new AsyncMeterAggregationEngine(meterConfigs, storage, Date.now())
+    const event: RawEvent = {
+      id: "evt_multi_meter",
+      slug: "checkout.completed",
+      timestamp: Date.now(),
+      properties: {
+        amount: "12.5",
+        durationMs: 321,
+        seatCount: 7,
+      },
+    }
+
+    expect(await engine.applyEvent(event)).toEqual<Fact[]>([
+      {
+        eventId: "evt_multi_meter",
+        meterKey: deriveMeterKey(meterConfigs[0]!),
+        delta: 12.5,
+        valueAfter: 12.5,
+      },
+      {
+        eventId: "evt_multi_meter",
+        meterKey: deriveMeterKey(meterConfigs[1]!),
+        delta: 1,
+        valueAfter: 1,
+      },
+      {
+        eventId: "evt_multi_meter",
+        meterKey: deriveMeterKey(meterConfigs[2]!),
+        delta: 321,
+        valueAfter: 321,
+      },
+      {
+        eventId: "evt_multi_meter",
+        meterKey: deriveMeterKey(meterConfigs[3]!),
+        delta: 7,
+        valueAfter: 7,
+      },
+    ])
+  })
+
   it("throws when the numeric aggregation field is missing", async () => {
     const storage = new InMemoryStorageAdapter()
     const engine = new AsyncMeterAggregationEngine(

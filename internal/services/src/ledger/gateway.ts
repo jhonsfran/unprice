@@ -313,7 +313,7 @@ export class LedgerGateway {
     metadata?: Record<string, unknown>
   }): Promise<Result<LedgerAccount, UnPriceLedgerError>> {
     try {
-      const account = await this.ensureAccount(opts, this.db)
+      const account = await this.db.transaction((tx) => this.ensureAccount(opts, tx))
       return Ok(account)
     } catch (error) {
       this.logger.error(error, {
@@ -815,6 +815,10 @@ export class LedgerGateway {
     },
     executor: DbExecutor
   ): Promise<LedgerAccount> {
+    await executor.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`ledger_account:${opts.name}`}))`
+    )
+
     const existing = await this.fetchAccountByName(opts.name, executor)
     if (existing) return existing
 

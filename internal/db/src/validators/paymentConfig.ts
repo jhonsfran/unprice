@@ -17,12 +17,42 @@ export const paymentProviderConnectionStatusSchema = z.enum([
   "disabled",
 ])
 
+const stripeRequirementFieldsSchema = z.array(z.string()).nullable().optional()
+
+export const stripeAccountRequirementErrorSchema = z
+  .object({
+    code: z.string().optional(),
+    reason: z.string().optional(),
+    requirement: z.string().optional(),
+  })
+  .catchall(z.unknown())
+
+export const stripeAccountRequirementAlternativeSchema = z
+  .object({
+    alternative_fields_due: stripeRequirementFieldsSchema,
+    original_fields_due: stripeRequirementFieldsSchema,
+  })
+  .catchall(z.unknown())
+
+export const stripeAccountRequirementsSchema = z
+  .object({
+    alternatives: z.array(stripeAccountRequirementAlternativeSchema).nullable().optional(),
+    current_deadline: z.number().nullable().optional(),
+    currently_due: stripeRequirementFieldsSchema,
+    disabled_reason: z.string().nullable().optional(),
+    errors: z.array(stripeAccountRequirementErrorSchema).nullable().optional(),
+    eventually_due: stripeRequirementFieldsSchema,
+    past_due: stripeRequirementFieldsSchema,
+    pending_verification: stripeRequirementFieldsSchema,
+  })
+  .catchall(z.unknown())
+
 export const paymentProviderConnectionDataSchema = z
   .object({
     chargesEnabled: z.boolean().optional(),
     payoutsEnabled: z.boolean().optional(),
     detailsSubmitted: z.boolean().optional(),
-    requirements: z.unknown().optional(),
+    requirements: stripeAccountRequirementsSchema.nullable().optional(),
     capabilities: z.record(z.string(), z.unknown()).optional(),
     disabledReason: z.string().nullable().optional(),
     dashboardUrl: z.string().url().optional(),

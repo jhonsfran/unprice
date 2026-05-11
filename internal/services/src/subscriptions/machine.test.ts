@@ -1043,4 +1043,32 @@ describe("SubscriptionMachine - comprehensive", () => {
     expect(res.err!.message).toContain("Cannot end trial, dates are not due yet")
     await m.shutdown()
   })
+
+  it("active renew before the cycle boundary is rejected without invoicing", async () => {
+    const { sub, now } = buildMockSubscription({
+      status: "active",
+      autoRenew: true,
+      trialEnded: true,
+      whenToBill: "pay_in_advance",
+    })
+    const futureRenewAt = now + 24 * 60 * 60 * 1000
+    sub.renewAt = futureRenewAt
+    setupDbMocks(sub)
+
+    const { err, val } = await createMachine({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+    })
+    expect(err).toBeUndefined()
+    if (err) return
+    const m = val
+    expect(m.getState()).toBe("active")
+
+    const result = await m.renew()
+
+    expect(result.err?.message).toContain("Cannot renew subscription")
+    expect(m.getState()).toBe("error")
+    expect(dbMockData.find((entry) => entry.table === "invoices")).toBeUndefined()
+    await m.shutdown()
+  })
 })

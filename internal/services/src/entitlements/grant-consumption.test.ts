@@ -140,6 +140,47 @@ describe("consumeGrantsByPriority", () => {
     ])
   })
 
+  it("attributes usage across multiple expiring grants and closes only exhausted windows", () => {
+    const result = consumeGrantsByPriority({
+      timestamp: now,
+      units: 12,
+      grants: [
+        grant({
+          grantId: "subscription",
+          allowanceUnits: 20,
+          expiresAt: null,
+          priority: 10,
+        }),
+        grant({
+          grantId: "promo_soon",
+          allowanceUnits: 5,
+          expiresAt: now + 60_000,
+          priority: 20,
+        }),
+        grant({
+          grantId: "promo_later",
+          allowanceUnits: 4,
+          expiresAt: now + 120_000,
+          priority: 20,
+        }),
+      ],
+      states: [],
+    })
+
+    expect(result.remaining).toBe(0)
+    expect(result.allocations.map((allocation) => allocation.grant.grantId)).toEqual([
+      "promo_soon",
+      "promo_later",
+      "subscription",
+    ])
+    expect(result.allocations.map((allocation) => allocation.units)).toEqual([5, 4, 3])
+    expect(result.allocations.map((allocation) => allocation.nextState.exhaustedAt)).toEqual([
+      now,
+      now,
+      null,
+    ])
+  })
+
   it("ignores future and expired grants", () => {
     const result = consumeGrantsByPriority({
       timestamp: now,

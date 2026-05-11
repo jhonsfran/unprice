@@ -294,6 +294,161 @@ describe("StripePaymentProvider contract fixtures", () => {
     )
   })
 
+  it("creates Stripe wallet top-up checkout sessions with Connect routing and scale conversion", async () => {
+    const provider = new StripePaymentProvider({
+      token: "sk_test_contract",
+      connectedAccountId: "acct_contract",
+      logger: createMockLogger(),
+    })
+    const client = createStripeClientStub()
+    client.checkout.sessions.create.mockResolvedValue({
+      id: "cs_wallet_topup_contract",
+      url: "https://checkout.stripe.com/cs_wallet_topup_contract",
+    })
+    setStripeClient(provider, client)
+
+    const session = await provider.createSession({
+      amount: 2_555_555_555,
+      cancelUrl: "https://app.example.com/wallet/cancel",
+      currency: "EUR",
+      customerId: "cus_internal",
+      description: "Add wallet balance",
+      email: "customer@example.com",
+      kind: "wallet_topup",
+      metadata: {
+        currency: "EUR",
+        customer_id: "cus_internal",
+        project_id: "proj_internal",
+        requested_amount: "2555555555",
+        topup_id: "wtup_contract",
+      },
+      projectId: "proj_internal",
+      successUrl: "https://app.example.com/wallet/success",
+    })
+
+    expect(session.err).toBeUndefined()
+    expect(session.val).toEqual({
+      customerId: "cus_internal",
+      sessionId: "cs_wallet_topup_contract",
+      success: true,
+      url: "https://checkout.stripe.com/cs_wallet_topup_contract",
+    })
+    expect(client.checkout.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "payment",
+        client_reference_id: "cus_internal",
+        customer_email: "customer@example.com",
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: "eur",
+              unit_amount: 2556,
+              product_data: { name: "Add wallet balance" },
+            },
+          },
+        ],
+        metadata: expect.objectContaining({
+          kind: "wallet_topup",
+          customerId: "cus_internal",
+          projectId: "proj_internal",
+          customer_id: "cus_internal",
+          project_id: "proj_internal",
+          requested_amount: "2555555555",
+          topup_id: "wtup_contract",
+        }),
+        payment_intent_data: {
+          metadata: expect.objectContaining({
+            kind: "wallet_topup",
+            customerId: "cus_internal",
+            projectId: "proj_internal",
+            topup_id: "wtup_contract",
+          }),
+        },
+      }),
+      { stripeAccount: "acct_contract" }
+    )
+  })
+
+  it("verifies and normalizes a signed Stripe wallet top-up checkout webhook", async () => {
+    const webhookSecret = "whsec_wallet_topup_contract"
+    const stripe = new Stripe("sk_test_contract", { apiVersion: "2023-10-16" })
+    const eventCreated = Math.floor(Date.now() / 1000)
+    const provider = new StripePaymentProvider({
+      token: "sk_test_contract",
+      webhookSecret,
+      logger: createMockLogger(),
+    })
+    const payload = JSON.stringify({
+      id: "evt_wallet_topup_contract",
+      object: "event",
+      api_version: "2023-10-16",
+      created: eventCreated,
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          id: "cs_wallet_topup_contract",
+          object: "checkout.session",
+          amount_total: 2500,
+          customer: "cus_stripe_contract",
+          payment_status: "paid",
+          metadata: {
+            kind: "wallet_topup",
+            topup_id: "wtup_contract",
+            customer_id: "cus_internal",
+            project_id: "proj_internal",
+            currency: "EUR",
+            requested_amount: "2500000000",
+            ignored_number: 123,
+            ignored_object: { nested: true },
+          },
+        },
+      },
+    })
+    const signature = stripe.webhooks.generateTestHeaderString({
+      payload,
+      secret: webhookSecret,
+      timestamp: eventCreated,
+    })
+
+    const verified = await provider.verifyWebhook({
+      rawBody: payload,
+      headers: { "stripe-signature": signature },
+    })
+    expect(verified.err).toBeUndefined()
+    expect(verified.val).toMatchObject({
+      eventId: "evt_wallet_topup_contract",
+      eventType: "checkout.session.completed",
+      occurredAt: eventCreated * 1000,
+    })
+
+    if (!verified.val) {
+      throw new Error("Expected verified wallet top-up webhook")
+    }
+
+    const normalized = provider.normalizeWebhook(verified.val)
+    expect(normalized.err).toBeUndefined()
+    expect(normalized.val).toMatchObject({
+      provider: "stripe",
+      eventId: "evt_wallet_topup_contract",
+      eventType: "payment.succeeded",
+      providerEventType: "checkout.session.completed",
+      customerId: "cus_stripe_contract",
+      providerSessionId: "cs_wallet_topup_contract",
+      amountPaid: 2_500_000_000,
+      metadata: {
+        kind: "wallet_topup",
+        topup_id: "wtup_contract",
+        customer_id: "cus_internal",
+        project_id: "proj_internal",
+        currency: "EUR",
+        requested_amount: "2500000000",
+      },
+    })
+    expect(normalized.val?.metadata).not.toHaveProperty("ignored_number")
+    expect(normalized.val?.metadata).not.toHaveProperty("ignored_object")
+  })
+
   it("maps Stripe invoice fixtures to provider invoice and item shapes", async () => {
     const provider = new StripePaymentProvider({
       token: "sk_test_contract",

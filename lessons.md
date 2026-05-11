@@ -129,6 +129,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 - 2026-05-07: Use Stripe `invoice.paid` as the canonical success signal; do not process both
   `invoice.payment_succeeded` and `invoice.paid`.
+- 2026-05-11: Stripe Connect readiness UI should read `connectionData.requirements.errors` and
+  due fields; `disabledReason` alone is too generic for failed verification.
 - 2026-05-07: Stripe Connect webhooks should reject unsupported event types after signature
   verification and before account lookup/persistence.
 - 2026-05-07: For Connect Standard accounts, pass owner email on create but do not update
@@ -149,6 +151,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   credits drain through reservation/flush, and manual credits use `WalletService.adjust`.
 - 2026-05-11: Wallet top-up webhooks settle only after provider normalization maps the checkout
   completion to `payment.succeeded` with `metadata.kind = "wallet_topup"`.
+- 2026-05-11: Ledger account seeding must lock per account name before pgledger create; account
+  names are not database-unique, so first-use wallet operations need DB-backed concurrency tests.
+- 2026-05-11: Wallet credit expiration belongs in the services use-case layer; the Trigger
+  schedule should call that seam, and the sweep must stamp fully drained expired credits without
+  posting a zero-amount ledger transfer.
 
 ## UI And Dashboard
 
@@ -197,3 +204,16 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-05-11: `getInvoiceStatementLines` orders ledger-backed lines before synthetic zero lines.
 - 2026-05-11: Raw SQL bigint millisecond columns can return strings; normalize with `Number(...)`
   before timestamp assertions.
+- 2026-05-11: Subscription phase entitlements/grants preserve exact phase timestamps, but billing
+  period materialization can normalize sub-day starts to the UTC day boundary; assert those
+  invariants separately.
+- 2026-05-11: Future subscription phases should not receive entitlements/grants until the phase is
+  activated/synced at its start boundary.
+- 2026-05-11: DB-backed integration files that install or initialize pgledger should run through the
+  serialized integration script; launching them concurrently can race Postgres extension setup.
+- 2026-05-11: Prefer Drizzle table inserts/updates for DB-backed test fixtures; use raw SQL only
+  for DB-native behavior or pgledger views so schema drift fails at typecheck.
+- 2026-05-11: The billing schema has no `hour` interval; model hourly cadence as
+  `billingInterval: "minute"` with `billingIntervalCount: 60`.
+- 2026-05-11: Deterministic DB fixture ids must stay within the shared cuid column length
+  (`varchar(36)`); Drizzle catches shape drift, but length constraints still fail at runtime.

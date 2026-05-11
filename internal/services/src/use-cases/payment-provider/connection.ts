@@ -1,7 +1,11 @@
 import { type Database, and, eq } from "@unprice/db"
 import { paymentProviderConfig } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import type { PaymentProvider, PaymentProviderConfig } from "@unprice/db/validators"
+import {
+  type PaymentProvider,
+  type PaymentProviderConfig,
+  stripeAccountRequirementsSchema,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { Stripe } from "@unprice/stripe"
@@ -64,11 +68,15 @@ function mapStripeAccountStatus(account: Stripe.Account): PaymentProviderConfig[
 function stripeAccountConnectionData(
   account: Stripe.Account
 ): PaymentProviderConfig["connectionData"] {
+  const requirements = account.requirements
+    ? stripeAccountRequirementsSchema.parse(account.requirements)
+    : undefined
+
   return {
     chargesEnabled: account.charges_enabled,
     payoutsEnabled: account.payouts_enabled,
     detailsSubmitted: account.details_submitted,
-    requirements: account.requirements ?? undefined,
+    requirements,
     capabilities: account.capabilities
       ? (account.capabilities as unknown as Record<string, unknown>)
       : undefined,

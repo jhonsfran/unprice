@@ -9,6 +9,7 @@ import { Separator } from "@unprice/ui/separator"
 import { cn } from "@unprice/ui/utils"
 
 import { PricingCard } from "~/components/forms/pricing-card"
+import { getStatusTone, statusToneClasses } from "~/lib/status-tones"
 import { PlanVersionDialog } from "../../_components/plan-version-dialog"
 
 export function PlanWorkspaceRail({
@@ -19,6 +20,7 @@ export function PlanWorkspaceRail({
   if (!planVersion) return null
 
   const status = planVersion.status ?? "draft"
+  const displayStatus = planVersion.active === false ? "deactivated" : status
   const trialUnit = getTrialUnitLabel({
     billingInterval: planVersion.billingConfig.billingInterval,
     units: planVersion.trialUnits,
@@ -27,7 +29,7 @@ export function PlanWorkspaceRail({
     planVersion.trialUnits === 0 ? "no trial" : `${planVersion.trialUnits} ${trialUnit}`
 
   const items: Array<[string, React.ReactNode]> = [
-    ["Status", <StatusDot key="status" status={status} />],
+    ["Status", <StatusDot key="status" status={displayStatus} />],
     ["Currency", planVersion.currency],
     ["Billing", planVersion.billingConfig.name],
     ["Trial", trialLabel],
@@ -87,20 +89,11 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 function StatusDot({ status }: { status: string }) {
-  const isPublished = status === "published"
+  const toneClass = statusToneClasses[getStatusTone(status)]
+
   return (
-    <span
-      className={cn("inline-flex items-center gap-1.5 font-mono text-xs", {
-        "text-success": isPublished,
-        "text-info": !isPublished,
-      })}
-    >
-      <span
-        className={cn("h-1.5 w-1.5 rounded-full", {
-          "bg-success-solid": isPublished,
-          "bg-info": !isPublished,
-        })}
-      />
+    <span className={cn("inline-flex items-center gap-1.5 font-mono text-xs", toneClass.text)}>
+      <span className={cn("size-1.5 rounded-full", toneClass.dot)} />
       {status}
     </span>
   )
