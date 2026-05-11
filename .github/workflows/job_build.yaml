@@ -7,6 +7,20 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15.6
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -43,5 +57,12 @@ jobs:
           DATABASE_URL: postgresql://postgresql:postgresql@localhost:5432/unprice
           NODE_ENV: test
 
+      - name: Run services integration tests
+        run: pnpm --filter @unprice/services test:integration
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/unprice_test
+          NODE_ENV: test
+          APP_ENV: test
+          SKIP_ENV_VALIDATION: "true"
 
 

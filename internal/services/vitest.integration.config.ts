@@ -3,16 +3,20 @@ import { defineConfig } from "vitest/config"
 export default defineConfig({
   test: {
     reporters: ["default"],
-    include: ["src/**/*.test.ts", "src/*.test.ts"],
-    exclude: ["src/**/*.integration.test.ts"],
+    include: ["src/**/*.integration.test.ts"],
+    fileParallelism: false,
+    maxWorkers: 1,
+    minWorkers: 1,
+    maxConcurrency: 1,
+    testTimeout: 10000,
     alias: {
       "@/": "./src/",
     },
+    globalSetup: ["./src/test-fixtures/global-setup.ts"],
     env: {
       SKIP_ENV_VALIDATION: "true",
       NODE_ENV: "test",
-      // Provide a dummy value just in case validation isn't fully skipped for some reason,
-      // or if some other part of the code blindly tries to use it.
+      APP_ENV: "test",
       DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/unprice_test",
       UNPRICE_API_KEY: "test_key",
     },

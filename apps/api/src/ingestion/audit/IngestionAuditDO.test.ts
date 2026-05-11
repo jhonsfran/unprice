@@ -151,6 +151,44 @@ describe("IngestionAuditDO", () => {
     expect(db.rows.size).toBe(1)
   })
 
+  it("classifies a concurrent commit for the same idempotency key as a duplicate", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const getAlarmStarted = createDeferred<void>()
+    const getAlarmResult = createDeferred<number | null>()
+    state.storage.getAlarm = async () => {
+      getAlarmStarted.resolve()
+      return await getAlarmResult.promise
+    }
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: { send: vi.fn() },
+      } as never
+    )
+
+    const entry = createLedgerEntry({
+      idempotencyKey: "idem_concurrent",
+      payloadHash: "hash_concurrent",
+    })
+    const first = durableObject.commit([entry])
+
+    await getAlarmStarted.promise
+    const second = durableObject.commit([entry])
+    getAlarmResult.resolve(null)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { inserted: 1, duplicates: 0, conflicts: 0 },
+      { inserted: 0, duplicates: 1, conflicts: 0 },
+    ])
+    expect(db.rows.size).toBe(1)
+    expect(state.alarmAt).toBe(BASE_NOW + 1000)
+  })
+
   it("marks unpublished rows as published after successful pipeline flush", async () => {
     const IngestionAuditDO = await loadIngestionAuditDO()
     const state = createDurableObjectState()
@@ -462,6 +500,17 @@ function createFakeDbState(): FakeDbState {
   return {
     rows: new Map(),
   }
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = innerReject
+  })
+
+  return { promise, reject, resolve }
 }
 
 function getColumnName(column: unknown): string {

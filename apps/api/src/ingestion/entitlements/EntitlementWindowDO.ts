@@ -86,6 +86,7 @@ class EntitlementWindowWalletEmptyError extends Error {
       reservationId: string
       cost: number
       remaining: number
+      eventTimestamp: number
     }
   ) {
     super(`Wallet empty for meter ${params.meterSlug} (reservation ${params.reservationId})`)
@@ -106,6 +107,7 @@ class EntitlementWindowReservationUnderfundedError extends Error {
       reservationId: string
       cost: number
       remaining: number
+      eventTimestamp: number
     }
   ) {
     super(`Reservation underfunded for meter ${params.meterSlug}`)
@@ -131,6 +133,7 @@ type RefillTrigger = {
   flushSeq: number
   flushAmount: number
   refillChunkAmount: number
+  effectiveAt: number
 }
 
 type ReservationGrowthResult =
@@ -391,6 +394,7 @@ export class EntitlementWindowDO extends DurableObject {
               flushSeq: window.pendingFlushSeq,
               flushAmount,
               refillChunkAmount: window.refillChunkAmount,
+              effectiveAt: Date.now(),
             })
           )
         }
@@ -668,6 +672,7 @@ export class EntitlementWindowDO extends DurableObject {
                   reservationId: window.reservationId,
                   cost: totalCost,
                   remaining: window.allocationAmount - window.consumedAmount,
+                  eventTimestamp: input.event.timestamp,
                 })
               }
 
@@ -695,6 +700,7 @@ export class EntitlementWindowDO extends DurableObject {
                   // first refill means `flushReservation` skips the recognize leg.
                   flushAmount: walletResult.newState.consumedAmount - window.flushedAmount,
                   refillChunkAmount: walletResult.refillRequestAmount,
+                  effectiveAt: input.event.timestamp,
                 }
               }
             }
@@ -1198,6 +1204,7 @@ export class EntitlementWindowDO extends DurableObject {
             // top up allocation here. The DO's own refill trigger handles
             // that when the threshold is actually crossed.
             refillChunkAmount: 0,
+            effectiveAt: Date.now(),
           })
         }
       }
@@ -1426,6 +1433,7 @@ export class EntitlementWindowDO extends DurableObject {
         refillChunkAmount: 0,
         statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
         final: true,
+        effectiveAt: new Date(window.reservationEndAt ?? Date.now()),
         metadata: {
           requestedBy: "durable_object",
           requestedById: durableObjectId,
@@ -2310,6 +2318,7 @@ export class EntitlementWindowDO extends DurableObject {
       flushSeq,
       flushAmount: Math.max(0, window.consumedAmount - window.flushedAmount),
       refillChunkAmount,
+      effectiveAt: params.eventTimestamp,
     }
 
     this.db
@@ -2395,6 +2404,7 @@ export class EntitlementWindowDO extends DurableObject {
         refillChunkAmount: trigger.refillChunkAmount,
         statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
         final: false,
+        effectiveAt: new Date(trigger.effectiveAt),
         metadata: {
           requestedBy: "durable_object",
           requestedById: durableObjectId,
@@ -2550,6 +2560,7 @@ export class EntitlementWindowDO extends DurableObject {
       refillChunkAmount: sizing.refillChunkAmount,
       periodStartAt: new Date(reservationBucket.start),
       periodEndAt: new Date(reservationBucket.end),
+      effectiveAt: new Date(input.event.timestamp),
       metadata: {
         requestedBy: "durable_object",
         requestedById: durableObjectId,

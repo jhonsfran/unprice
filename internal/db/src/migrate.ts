@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { pathToFileURL } from "node:url"
 import { eq, sql } from "drizzle-orm"
 import type { Database } from "."
 import { createConnection } from "./createConnection"
@@ -8,14 +9,20 @@ import { hashStringSHA256, newId } from "./utils"
 
 import { FEATURE_SLUGS } from "@unprice/config"
 import { migrate } from "drizzle-orm/neon-serverless/migrator"
-import { env } from "../env"
 
 const PGLEDGER_DIR = join(process.cwd(), "src/migrations/pgledger")
 
-async function installPgledger(db: Database) {
-  const ulidSql = readFileSync(join(PGLEDGER_DIR, "ulid.sql"), "utf8")
-  const pgledgerSql = readFileSync(join(PGLEDGER_DIR, "pgledger.sql"), "utf8")
-  const version = readFileSync(join(PGLEDGER_DIR, "VERSION"), "utf8").trim()
+export async function installPgledger(
+  db: Database,
+  {
+    pgledgerDir = PGLEDGER_DIR,
+  }: {
+    pgledgerDir?: string
+  } = {}
+) {
+  const ulidSql = readFileSync(join(pgledgerDir, "ulid.sql"), "utf8")
+  const pgledgerSql = readFileSync(join(pgledgerDir, "pgledger.sql"), "utf8")
+  const version = readFileSync(join(pgledgerDir, "VERSION"), "utf8").trim()
 
   // Multi-statement files with $$-quoted bodies are run via the simple query
   // protocol — sql.raw passes the text through unparameterised, which is what
@@ -52,7 +59,19 @@ async function installPgledger(db: Database) {
   }
 }
 
+export async function runDrizzleMigrations(
+  db: Database,
+  {
+    migrationsFolder = "src/migrations",
+  }: {
+    migrationsFolder?: string
+  } = {}
+) {
+  await migrate(db, { migrationsFolder })
+}
+
 async function main() {
+  const { env } = await import("../env")
   const start = Date.now()
   console.info("⏳ Running migrations for environment:", env.APP_ENV)
 
@@ -65,7 +84,7 @@ async function main() {
     singleton: false,
   })
 
-  await migrate(db, { migrationsFolder: "src/migrations" })
+  await runDrizzleMigrations(db)
   await installPgledger(db)
 
   let userExists = await db.query.users
@@ -298,8 +317,12 @@ async function main() {
   process.exit(0)
 }
 
-main().catch((e) => {
-  console.error("Migration failed")
-  console.error(e)
-  process.exit(1)
-})
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (isDirectRun) {
+  main().catch((e) => {
+    console.error("Migration failed")
+    console.error(e)
+    process.exit(1)
+  })
+}

@@ -9,6 +9,7 @@
     "./schema": "./src/schema.ts",
     "./queries": "./src/queries.ts",
     "./utils": "./src/utils.ts",
+    "./migrate": "./src/migrate.ts",
     "./env": "./env.ts"
   },
   "typesVersions": {

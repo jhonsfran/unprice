@@ -1771,7 +1771,7 @@ export class SubscriptionService {
     now: number
     lock?: boolean
     ttlMs?: number
-    run: (m: SubscriptionMachine) => Promise<T>
+    run: (m: SubscriptionMachine, assertLockHeld: () => void) => Promise<T>
   }): Promise<T> {
     try {
       return await withLockedMachine({

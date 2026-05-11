@@ -65,6 +65,8 @@ export interface CreateReservationInput {
   periodEndAt: Date
   metadata?: Record<string, unknown>
   idempotencyKey: string
+  /** Time used to decide which wallet credits are drainable. Defaults to now. */
+  effectiveAt?: Date
 }
 
 export interface CreateReservationOutput {
@@ -91,6 +93,8 @@ export interface FlushReservationInput {
   final: boolean
   metadata?: Record<string, unknown>
   sourceId?: string
+  /** Time used to decide which wallet credits are drainable for refills. Defaults to now. */
+  effectiveAt?: Date
 }
 
 export interface FlushReservationOutput {
@@ -332,7 +336,8 @@ export class WalletService {
         tx as Transaction,
         input.customerId,
         input.projectId,
-        input.requestedAmount
+        input.requestedAmount,
+        input.effectiveAt ?? new Date()
       )
 
       const stillNeeded = input.requestedAmount - grantedDrained
@@ -547,7 +552,8 @@ export class WalletService {
             tx,
             input.customerId,
             input.projectId,
-            input.refillChunkAmount
+            input.refillChunkAmount,
+            input.effectiveAt ?? new Date()
           )
 
           const stillNeeded = input.refillChunkAmount - grantedDrained
@@ -1107,7 +1113,8 @@ export class WalletService {
       tx,
       input.customerId,
       input.projectId,
-      amount
+      amount,
+      new Date()
     )
     const remainder = amount - drained
 
@@ -1151,9 +1158,9 @@ export class WalletService {
     tx: Transaction,
     customerId: string,
     projectId: string,
-    requestedAmount: number
+    requestedAmount: number,
+    effectiveAt: Date
   ): Promise<{ drained: number; legs: DrainLeg[] }> {
-    const now = new Date()
     const activeGrants = await tx.query.walletCredits.findMany({
       where: and(
         eq(walletCredits.customerId, customerId),
@@ -1163,7 +1170,7 @@ export class WalletService {
         gt(walletCredits.remainingAmount, 0),
         // Belt-and-suspenders: skip grants whose expiry has passed even if
         // the nightly cron hasn't marked them yet
-        or(isNull(walletCredits.expiresAt), gt(walletCredits.expiresAt, now))
+        or(isNull(walletCredits.expiresAt), gt(walletCredits.expiresAt, effectiveAt))
       ),
       orderBy: [
         // soonest-expiring first; never-expiring last

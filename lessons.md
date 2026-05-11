@@ -201,6 +201,84 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
   `docs/plans/**`, use
   `pnpm biome check --no-errors-on-unmatched docs/plans/<file>.md` plus `git diff --check` instead
   of the plain targeted Biome command, which exits with "No files were processed."
+- `docs/plans/**` is gitignored. Normal `git status` and `git diff` will not show changes to those
+  plan files unless they are force-added or inspected with `git status --ignored`; mention this when
+  reporting plan-only work.
+- For service DB integration tests, do not import `internal/db/src/migrate.ts` as a script. Use the
+  exported helpers from `@unprice/db/migrate` so tests can run Drizzle migrations and pgledger
+  installation without also executing the dev admin/project seed path.
+- Keep `*.integration.test.ts` excluded from `internal/services/vitest.config.ts`. The normal
+  `pnpm --filter @unprice/services test` command must stay fake/unit only; use
+  `pnpm --filter @unprice/services test:integration` for Docker/Postgres-backed tests.
+- Keep `internal/services/vitest.integration.config.ts` file-level parallelism disabled while
+  integration tests share one `unprice_test` database and truncate/re-seed in `beforeEach`. Also
+  force one worker and `maxConcurrency: 1`; otherwise separate scenario files can overlap and erase
+  another file's fixture state mid-run. Keep the same serialization flags on the
+  `test:integration` script, because config-only settings did not prevent overlap in Vitest 2.1.9.
+- Use one of the focused integration scripts when a DB-backed billing workflow needs to leave
+  rows behind for psql inspection. Each focused script runs a single integration file. The full
+  integration suite's final test determines the remaining database state.
+- Wallet reservation callers should pass `effectiveAt` when draining or refilling wallet credits.
+  The service defaults to the current clock only for callers that do not have event time. This keeps
+  deterministic billing fixtures from becoming undrainable just because the test window is now in
+  the past relative to the real database clock.
+
+## 2026-05-10: Billing Property Tests
+
+- Keep fast-check billing properties seedable through `UNPRICE_PROPERTY_SEED` and configurable
+  through `UNPRICE_PROPERTY_RUNS`; this makes minimized failures replayable without slowing normal
+  PR runs.
+- Keep DB-backed property tests separate from pure/reference and fake-service properties. Real
+  Postgres plus pgledger cases need lower iteration counts and explicit fixture reset.
+- Service property fixtures should satisfy the full validator shape even when a test uses only one
+  part of the object. For rating grants, include a real `billingConfig`; casting partial grant
+  objects hides schema drift that `tsc` can catch.
+
+## 2026-05-11: DB-Backed Billing Properties
+
+- Do not infer fixture pricing from one golden usage value. The monthly arrears P0 fixture uses
+  volume tiers (`1..1000` events: `1 EUR + 0.001 EUR/event`; `1001+`: `0.10 EUR/event`), so
+  generated DB properties should encode the seeded tier contract explicitly.
+- For capped wallet DB properties, reserve and flush the generated actual usage cost, not the full
+  credit line. Then assert both the consumed bucket and remaining `unprice_wallet_credits` balance;
+  this proves partial credit-line drains as well as the full-drain boundary.
+- For `pay_in_advance` DB properties, always assert the two statement keys separately. Fixed
+  charges belong to the period-start statement; usage actuals belong to the period-end statement,
+  even when both use the same cycle window and plan version.
+
+## 2026-05-11: BILL Failure And Concurrency Tests
+
+- `billPeriod` returns `phasesProcessed` from pre-lock pending statement groups. In concurrency
+  tests, multiple workers can report work even when only the first worker posts ledger entries.
+  Assert persisted state instead: invoice count, period statuses, ledger idempotency, and
+  `pgledger_entries_view`.
+- For BILL rollback tests, fail the second `LedgerGateway.createTransfer` call. That proves the
+  first successful transfer attempt was still inside the transaction and rolls back with the
+  injected failure.
+- In invoice finalization, a stamped `invoicePaymentProviderId` does not mean provider finalization
+  completed. Retries must reload the provider invoice and complete draft item/finalize work before
+  flipping the local invoice out of `draft`.
+- Draft invoice finalization must reread the invoice while holding the subscription lock. Locking
+  after a preflight read is not enough; a second worker can otherwise act on stale `draft` state
+  after the first worker has finalized the invoice.
+- If invoice finalization completes provider work but fails the local status update, retry from the
+  stamped `invoicePaymentProviderId`. The retry must poll/reuse the provider invoice and only flip
+  local state; it must not create duplicate provider invoices or provider items.
+- Do not mock unique lock owner tokens as a substitute for real DB lock tests. `randomId()` once
+  encoded a zero-filled buffer and returned a constant token; fake lock tests with mocked tokens
+  missed that stale owners could release a lock after another worker took it over. Keep this token
+  edge-safe and non-crypto; it is an ownership nonce, not a secret.
+- For usage-ingestion concurrency, test the Durable Object owners, not just the service adapter.
+  `EntitlementWindowDO` owns billable usage writes and must collapse concurrent same-key applies to
+  one engine application/outbox fact; `IngestionAuditDO` owns audit idempotency and must classify a
+  concurrent same-key commit as a duplicate while keeping one row.
+- Subscription machine locks should use operational wall-clock time, not billing-window
+  `context.now`. Long-running machine work needs a heartbeat `extend()` loop so a slow provider or
+  billing call does not let another worker take over after the original TTL.
+- Stateful reference-model tests should apply generated commands one at a time and assert
+  invariants after every step, not just at the end. That gives fast-check a useful shrink target and
+  makes `UNPRICE_MODEL_SEED=<seed> pnpm --filter @unprice/services test:billing-stateful` a real
+  replay path.
 
 ## 2026-05-09: Service Workflow Billing Test Priorities
 
@@ -249,3 +327,26 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
   but do not update `account.email` on reused accounts. Stripe can reject platform updates with
   "not authorized to edit the parameter 'email'" because the connected account owner controls that
   field through onboarding.
+
+## 2026-05-11: Lock Loss, Provider Resilience, And Test Fakes
+
+- When editing a method signature in the middle of a method definition, take care not to delete
+  the closing brace of the type, the `: Promise<T> {` return type, or the `try {` / `return await`
+  preamble. The `withSubscriptionMachine` method in `subscriptions/service.ts` was broken by a
+  signature edit that accidentally removed the method body opener.
+- Fake DB implementations for `SubscriptionLock` must track the acquired `ownerToken` from the
+  initial `insert` and verify it against `row.ownerToken` in the extend path. Without this check,
+  the extend path always succeeds even after an external takeover, and lock-loss heartbeat tests
+  pass spuriously. The real SQL uses `WHERE ownerToken = this.token`.
+- When a stamped `providerInvoiceId` returns a 404 or error from `getInvoice`, clear the id and
+  fall through to the create path. Propagating the error as `Err` leaves the invoice in a retry
+  limbo where every attempt hits the same missing provider invoice.
+- Provider invoice item orphan detection should use a `Map.delete` during reconciliation and warn
+  about remaining entries after the loop. Since the payment provider interface has no
+  `deleteInvoiceItem` method, orphans cannot be removed automatically — only warned about.
+- `withLockedMachine` test mocks must pass `assertLockHeld` as the second argument to `run`. The
+  production code at `billing/service.ts` calls `assertLockHeld()` before the critical local
+  status flip, and a mock that omits it will crash with a runtime error.
+- The reference billing model (`test-fixtures/reference-model.ts`) has no grant expiry support.
+  `WalletGrant` has no `expiresAt` field and all drain/reserve methods are time-unaware. Adding
+  grant expiry mid-period golden cases requires extending the reference model first.

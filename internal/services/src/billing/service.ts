@@ -20,6 +20,7 @@ import type { CustomerService } from "../customers/service"
 import type { GrantsManager } from "../entitlements"
 import type { InvoiceLine, LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
+import type { AddInvoiceItemOpts, PaymentProviderInvoice } from "../payment-provider/interface"
 import {
   type InvoiceSubscriptionOutcome,
   providerStatusToInvoiceEvent,
@@ -29,7 +30,7 @@ import type { RatingService } from "../rating/service"
 import type { RatedCharge, RatingInput } from "../rating/types"
 import type { SubscriptionMachine } from "../subscriptions/machine"
 import { DrizzleSubscriptionRepository } from "../subscriptions/repository.drizzle"
-import { withLockedMachine } from "../subscriptions/withLockedMachine"
+import { LockLostError, withLockedMachine } from "../subscriptions/withLockedMachine"
 import { settlePrepaidInvoiceToWallet } from "../use-cases/billing/settle-invoice"
 import type { WalletService } from "../wallet"
 import { UnPriceBillingError } from "./errors"
@@ -67,12 +68,83 @@ type BillingPeriodStatementRow = {
   }
 }
 
+type ProviderInvoiceItem = PaymentProviderInvoice["items"][number]
+
 function normalizeProviderTimestamp(timestamp: number | undefined, fallback: number): number {
   if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
     return fallback
   }
 
   return timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp
+}
+
+function providerInvoiceItemMetadata(line: InvoiceLine): Record<string, string> {
+  const meta = (line.metadata as Record<string, unknown> | null) ?? {}
+
+  return {
+    billing_period_id: String(meta.billing_period_id ?? ""),
+    subscription_id: String(meta.subscription_id ?? ""),
+    subscription_item_id: String(meta.subscription_item_id ?? ""),
+    kind: line.kind,
+  }
+}
+
+function providerInvoiceItemKey(metadata: Record<string, unknown> | undefined): string | null {
+  const billingPeriodId = metadata?.billing_period_id
+  const subscriptionId = metadata?.subscription_id
+  const subscriptionItemId = metadata?.subscription_item_id
+  const kind = metadata?.kind
+
+  if (
+    typeof billingPeriodId !== "string" ||
+    typeof subscriptionId !== "string" ||
+    typeof subscriptionItemId !== "string" ||
+    typeof kind !== "string" ||
+    billingPeriodId.length === 0 ||
+    subscriptionId.length === 0 ||
+    subscriptionItemId.length === 0 ||
+    kind.length === 0
+  ) {
+    return null
+  }
+
+  return `${billingPeriodId}:${subscriptionId}:${subscriptionItemId}:${kind}`
+}
+
+function buildProviderInvoiceItemInput(
+  providerInvoiceId: string,
+  line: InvoiceLine
+): AddInvoiceItemOpts {
+  const meta = (line.metadata as Record<string, unknown> | null) ?? {}
+  const totalMinor = formatAmountForProvider(line.amount).amount
+  const cycleStart = meta.cycle_start_at as number | undefined
+  const cycleEnd = meta.cycle_end_at as number | undefined
+  const prorationFactor = meta.proration_factor as number | undefined
+
+  return {
+    invoiceId: providerInvoiceId,
+    name: line.description ?? "Subscription charge",
+    description: line.description ?? undefined,
+    isProrated: typeof prorationFactor === "number" && prorationFactor !== 1,
+    totalAmount: totalMinor,
+    quantity: line.quantity ?? 1,
+    currency: line.currency,
+    period:
+      typeof cycleStart === "number" && typeof cycleEnd === "number"
+        ? { start: cycleStart, end: cycleEnd }
+        : undefined,
+    metadata: providerInvoiceItemMetadata(line),
+  }
+}
+
+function providerItemMatchesLine(item: ProviderInvoiceItem, line: InvoiceLine): boolean {
+  const totalMinor = formatAmountForProvider(line.amount).amount
+
+  return (
+    item.amount === totalMinor &&
+    item.currency === line.currency &&
+    item.quantity === (line.quantity ?? 1)
+  )
 }
 
 export class BillingService {
@@ -147,7 +219,7 @@ export class BillingService {
     ttlMs?: number
     db?: Database
     dryRun?: boolean
-    run: (m: SubscriptionMachine) => Promise<T>
+    run: (m: SubscriptionMachine, assertLockHeld: () => void) => Promise<T>
   }): Promise<T> {
     const trx = args.db ?? this.db
 
@@ -168,6 +240,9 @@ export class BillingService {
     } catch (e) {
       if (e instanceof Error && e.message === "SUBSCRIPTION_BUSY") {
         throw new UnPriceBillingError({ message: "SUBSCRIPTION_BUSY" })
+      }
+      if (e instanceof LockLostError) {
+        throw new UnPriceBillingError({ message: e.message })
       }
       throw e
     }
@@ -927,49 +1002,74 @@ export class BillingService {
         return Err(openInvoiceDataErr)
       }
 
+      // Finalized invoices are immutable for this path. Return before taking
+      // the subscription lock, but reread draft invoices under the lock below
+      // so concurrent finalizers cannot act on stale draft data.
+      if (openInvoiceData.status !== "draft") {
+        return Ok({
+          providerInvoiceId: openInvoiceData.invoicePaymentProviderId,
+          providerInvoiceUrl: openInvoiceData.invoicePaymentProviderUrl,
+          invoiceId: openInvoiceData.id,
+          status: openInvoiceData.status,
+        })
+      }
+
       const res = await this.withSubscriptionMachine({
         subscriptionId,
         projectId,
         now,
-        lock: false, // no need to lock it here
-        run: async (machine) => {
+        lock: true,
+        run: async (machine, assertLockHeld) => {
+          const { err: lockedInvoiceErr, val: lockedInvoiceData } = await this.getOpenInvoiceData({
+            subscriptionId,
+            projectId,
+            now,
+            invoiceId,
+          })
+
+          if (lockedInvoiceErr) {
+            throw lockedInvoiceErr
+          }
+
           // Already past draft (and provider id stamped if non-zero) → no-op.
           // The dedup check on `status !== "draft"` is the source of truth;
           // a draft row is the *only* state where finalize work is allowed.
-          if (openInvoiceData.status !== "draft") {
+          if (lockedInvoiceData.status !== "draft") {
             return {
-              providerInvoiceId: openInvoiceData.invoicePaymentProviderId,
-              providerInvoiceUrl: openInvoiceData.invoicePaymentProviderUrl,
-              invoiceId: openInvoiceData.id,
-              status: openInvoiceData.status,
+              providerInvoiceId: lockedInvoiceData.invoicePaymentProviderId,
+              providerInvoiceUrl: lockedInvoiceData.invoicePaymentProviderUrl,
+              invoiceId: lockedInvoiceData.id,
+              status: lockedInvoiceData.status,
             }
           }
 
           // For non-zero invoices we push to the payment provider FIRST and
           // then flip local status, so a partial failure (provider error) leaves
           // the row in `draft` and the existing `finilizingSchedule` cron picks
-          // it up on the next tick. If the provider id is already stamped (a
-          // previous attempt succeeded at create+finalize but crashed before
-          // the local status flip), we skip the provider work and proceed
-          // straight to the status flip — `paymentProviderService.createInvoice`
-          // is not idempotent on Stripe, so we must not call it twice.
-          let providerInvoiceId = openInvoiceData.invoicePaymentProviderId
-          let providerInvoiceUrl = openInvoiceData.invoicePaymentProviderUrl
-          const skipProvider = openInvoiceData.totalAmount === 0
+          // it up on the next tick. If the provider id is already stamped, the
+          // provider resume path reuses that draft invoice, reconciles missing
+          // line items by metadata, and finalizes it before the local status
+          // flip. We must not treat a stamped provider id alone as proof that
+          // provider finalization completed.
+          let providerInvoiceId = lockedInvoiceData.invoicePaymentProviderId
+          let providerInvoiceUrl = lockedInvoiceData.invoicePaymentProviderUrl
+          const skipProvider = lockedInvoiceData.totalAmount === 0
 
-          if (!skipProvider && !providerInvoiceId) {
+          if (!skipProvider) {
             const upserted = await this._upsertPaymentProviderInvoice({
-              invoice: openInvoiceData,
+              invoice: lockedInvoiceData,
               now,
+              providerInvoiceId,
+              providerInvoiceUrl,
             })
 
             if (upserted.err) {
               await this._bumpFinalizeAttempt({
-                invoice: openInvoiceData,
+                invoice: lockedInvoiceData,
                 lastError: upserted.err.message,
               })
               await machine.reportInvoiceFailure({
-                invoiceId: openInvoiceData.id,
+                invoiceId: lockedInvoiceData.id,
                 error: upserted.err.message,
               })
               throw upserted.err
@@ -979,8 +1079,13 @@ export class BillingService {
             providerInvoiceUrl = upserted.val.providerInvoiceUrl ?? null
           }
 
+          // Assert we still own the subscription lock before committing
+          // the local status flip. If the lock was lost to another worker
+          // during the slow provider call, abort to avoid racing.
+          assertLockHeld()
+
           const fin = await this._finalizeInvoice({
-            invoice: openInvoiceData,
+            invoice: lockedInvoiceData,
             providerInvoiceId,
             providerInvoiceUrl,
             now,
@@ -1148,22 +1253,26 @@ export class BillingService {
    *
    * Idempotency contract:
    *   - This method is only called when the local row is in `draft` AND
-   *     `invoicePaymentProviderId` is empty. The caller filters those.
+   *     `invoicePaymentProviderId` is either empty or still points to a draft
+   *     provider invoice. The caller filters those.
    *   - On error, the caller bumps `metadata.finalizeAttempts` and leaves
    *     the row in `draft`. The next `finilizingSchedule` cron tick retries.
    *   - We persist the provider id immediately after `createInvoice`
    *     succeeds, *before* `addInvoiceItem`/`finalizeInvoice`, so that a
-   *     mid-flight crash doesn't orphan a Stripe invoice. A retry sees the
-   *     id stamped and skips this method entirely (the public wrapper just
-   *     does the local status flip; the invoice reconciler polls the provider
-   *     afterward if webhook delivery never arrives).
+   *     mid-flight crash doesn't orphan a Stripe invoice. A retry sees the id
+   *     stamped, reloads the provider invoice, reconciles missing draft items,
+   *     and finalizes the provider invoice before updating local status.
    */
   private async _upsertPaymentProviderInvoice({
     invoice,
     now,
+    providerInvoiceId: existingProviderInvoiceId,
+    providerInvoiceUrl: existingProviderInvoiceUrl,
   }: {
     invoice: SubscriptionInvoice & { customer: Customer }
     now: number
+    providerInvoiceId?: string | null
+    providerInvoiceUrl?: string | null
   }): Promise<
     Result<
       { providerInvoiceId: string; providerInvoiceUrl: string },
@@ -1182,6 +1291,10 @@ export class BillingService {
     if (paymentProviderErr) {
       return Err(new UnPriceBillingError({ message: paymentProviderErr.message }))
     }
+
+    let providerInvoiceId = existingProviderInvoiceId ?? null
+    let providerInvoiceUrl = existingProviderInvoiceUrl ?? ""
+    let existingProviderInvoice: PaymentProviderInvoice | null = null
 
     // Project the ledger lines that will become provider invoice items. Same
     // primitive the read-side API uses (`getInvoiceV1`, `getInvoiceById`), so
@@ -1210,68 +1323,132 @@ export class BillingService {
       )
     }
 
-    // 1) Create the provider invoice header.
-    const created = await paymentProviderService.createInvoice({
-      currency: invoice.currency,
-      customerName: invoice.customer.name ?? invoice.customer.email,
-      email: invoice.customer.email,
-      collectionMethod: invoice.collectionMethod,
-      description: `Statement ${invoice.statementDateString}`,
-      dueDate: invoice.dueAt,
-    })
+    if (providerInvoiceId) {
+      const providerInvoice = await paymentProviderService.getInvoice({
+        invoiceId: providerInvoiceId,
+      })
 
-    if (created.err) {
-      return Err(created.err)
+      if (providerInvoice.err) {
+        // If the provider invoice cannot be retrieved (e.g. deleted externally,
+        // 404, or transient failure), clear the stamped id and fall through to
+        // recreate a fresh provider invoice. This avoids retry limbo when the
+        // provider invoice no longer exists.
+        this.logger.warn("stamped provider invoice could not be retrieved; recreating", {
+          invoiceId: invoice.id,
+          providerInvoiceId,
+          error: providerInvoice.err.message,
+        })
+        providerInvoiceId = null
+        providerInvoiceUrl = ""
+      } else {
+        existingProviderInvoice = providerInvoice.val
+        providerInvoiceUrl = providerInvoice.val.invoiceUrl || providerInvoiceUrl
+
+        if (providerInvoice.val.status && providerInvoice.val.status !== "draft") {
+          return Ok({ providerInvoiceId, providerInvoiceUrl })
+        }
+      }
     }
 
-    const providerInvoiceId = created.val.invoiceId
-    const providerInvoiceUrl = created.val.invoiceUrl
+    if (!providerInvoiceId) {
+      // 1) Create the provider invoice header.
+      const created = await paymentProviderService.createInvoice({
+        currency: invoice.currency,
+        customerName: invoice.customer.name ?? invoice.customer.email,
+        email: invoice.customer.email,
+        collectionMethod: invoice.collectionMethod,
+        description: `Statement ${invoice.statementDateString}`,
+        dueDate: invoice.dueAt,
+      })
 
-    // Persist the provider id immediately so a crash in the next steps
-    // doesn't orphan the Stripe invoice from this row.
-    await billingRepo.updateInvoice({
-      invoiceId: invoice.id,
-      projectId: invoice.projectId,
-      data: {
-        invoicePaymentProviderId: providerInvoiceId,
-        invoicePaymentProviderUrl: providerInvoiceUrl,
-        updatedAtM: now,
-      },
-    })
+      if (created.err) {
+        return Err(created.err)
+      }
+
+      providerInvoiceId = created.val.invoiceId
+      providerInvoiceUrl = created.val.invoiceUrl
+
+      // Persist the provider id immediately so a crash in the next steps
+      // doesn't orphan the Stripe invoice from this row.
+      await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId: invoice.projectId,
+        data: {
+          invoicePaymentProviderId: providerInvoiceId,
+          invoicePaymentProviderUrl: providerInvoiceUrl,
+          updatedAtM: now,
+        },
+      })
+    }
+
+    if (!providerInvoiceId) {
+      return Err(new UnPriceBillingError({ message: "Provider invoice id was not resolved" }))
+    }
 
     // 2) Push one item per ledger line. Ledger amounts are at `LEDGER_SCALE = 8`;
     //    `formatAmountForProvider` quantizes to currency minor units (cents)
     //    — the only shape Stripe accepts.
-    for (const line of lines) {
-      const meta = (line.metadata as Record<string, unknown> | null) ?? {}
-      const totalMinor = formatAmountForProvider(line.amount).amount
-      const cycleStart = meta.cycle_start_at as number | undefined
-      const cycleEnd = meta.cycle_end_at as number | undefined
-      const prorationFactor = meta.proration_factor as number | undefined
+    const existingItems = new Map<string, ProviderInvoiceItem>()
 
-      const itemResult = await paymentProviderService.addInvoiceItem({
-        invoiceId: providerInvoiceId,
-        name: line.description ?? "Subscription charge",
-        description: line.description ?? undefined,
-        isProrated: typeof prorationFactor === "number" && prorationFactor !== 1,
-        totalAmount: totalMinor,
-        quantity: line.quantity ?? 1,
-        currency: line.currency,
-        period:
-          typeof cycleStart === "number" && typeof cycleEnd === "number"
-            ? { start: cycleStart, end: cycleEnd }
-            : undefined,
-        metadata: {
-          billing_period_id: String(meta.billing_period_id ?? ""),
-          subscription_id: String(meta.subscription_id ?? ""),
-          subscription_item_id: String(meta.subscription_item_id ?? ""),
-          kind: line.kind,
-        },
-      })
+    for (const item of existingProviderInvoice?.items ?? []) {
+      const key = providerInvoiceItemKey(item.metadata)
+      if (key) {
+        existingItems.set(key, item)
+      }
+    }
+
+    for (const line of lines) {
+      const desiredItem = buildProviderInvoiceItemInput(providerInvoiceId, line)
+      const existingItemKey = providerInvoiceItemKey(desiredItem.metadata)
+      const existingItem = existingItemKey ? existingItems.get(existingItemKey) : undefined
+
+      if (existingItem) {
+        // Mark as reconciled so we can detect orphans below
+        if (existingItemKey) {
+          existingItems.delete(existingItemKey)
+        }
+
+        if (providerItemMatchesLine(existingItem, line)) {
+          continue
+        }
+
+        const updateResult = await paymentProviderService.updateInvoiceItem({
+          invoiceItemId: existingItem.id,
+          totalAmount: desiredItem.totalAmount,
+          name: desiredItem.name,
+          isProrated: desiredItem.isProrated,
+          quantity: desiredItem.quantity,
+          metadata: desiredItem.metadata,
+          description: desiredItem.description,
+          period: desiredItem.period,
+        })
+
+        if (updateResult.err) {
+          return Err(updateResult.err)
+        }
+
+        continue
+      }
+
+      const itemResult = await paymentProviderService.addInvoiceItem(desiredItem)
 
       if (itemResult.err) {
         return Err(itemResult.err)
       }
+    }
+
+    // Warn about orphaned provider items that have no matching ledger line.
+    // The payment provider interface does not expose a `deleteInvoiceItem`
+    // method, so we cannot remove them automatically. Log a warning so
+    // operators can investigate; the provider invoice total may be higher
+    // than the local ledger total.
+    if (existingItems.size > 0) {
+      this.logger.warn("provider invoice has orphaned items with no matching ledger line", {
+        invoiceId: invoice.id,
+        providerInvoiceId,
+        orphanedItemCount: existingItems.size,
+        orphanedItemIds: [...existingItems.values()].map((item) => item.id),
+      })
     }
 
     // 3) Finalize so the invoice is visible/collectible. Sandbox treats this

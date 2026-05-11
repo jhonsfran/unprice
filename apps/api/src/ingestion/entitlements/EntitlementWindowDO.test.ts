@@ -323,6 +323,61 @@ describe("EntitlementWindowDO", () => {
     expect(payload.feature_plan_version_id).toBe("fpv_123")
   })
 
+  it("deduplicates concurrent apply calls by idempotency key during wallet bootstrap", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const reservationStarted = createDeferred<void>()
+    const reservationResult = createDeferred<{
+      err: null
+      val: {
+        allocationAmount: number
+        drainLegs: []
+        reservationId: string
+      }
+    }>()
+    testState.createReservation.mockImplementation(async () => {
+      reservationStarted.resolve()
+      return await reservationResult.promise
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const input = createApplyInput()
+    const first = durableObject.apply(input)
+
+    await reservationStarted.promise
+    const second = durableObject.apply(input)
+    await Promise.resolve()
+
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+
+    reservationResult.resolve({
+      err: null,
+      val: {
+        reservationId: "res_concurrent_bootstrap",
+        allocationAmount: 1_000_000_000,
+        drainLegs: [],
+      },
+    })
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { allowed: true },
+      { allowed: true },
+    ])
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(db.idempotencyRows.size).toBe(1)
+    expect(db.outboxRows).toHaveLength(1)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(300_000_000)
+  })
+
   it("rejects events for a closed period after the late-event grace window", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -1893,6 +1948,7 @@ describe("EntitlementWindowDO", () => {
       flushSeq: 8,
       flushAmount: 5 * 100_000_000,
       refillChunkAmount: 4 * 100_000_000,
+      effectiveAt: new Date(BASE_NOW),
       statementKey: `res_abc:${BASE_NOW + 60_000}`,
       final: false,
       metadata: {
@@ -3971,6 +4027,17 @@ function createEnv() {
     TINYBIRD_TOKEN: "token",
     TINYBIRD_URL: "https://example.com",
   }
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = innerReject
+  })
+
+  return { promise, reject, resolve }
 }
 
 function createGrantSnapshot(overrides: Record<string, unknown> = {}) {
