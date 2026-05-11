@@ -108,6 +108,25 @@ must prove real persistence, pgledger rows, wallet credits, or idempotency rows.
 Keep generated ranges small enough that failures shrink quickly. Always include
 at least one explicit `examples` case for a boundary you care about.
 
+## Add A Payment Provider
+
+Add the adapter to the reusable contract suite before relying on service-level
+billing tests:
+
+1. Implement `PaymentProviderInterface` for the provider.
+2. Add the provider to `ACTIVE_PAYMENT_PROVIDERS`.
+3. Add a matching entry to `paymentProviderContractSuites` with deterministic
+   session, invoice, payment-method, and webhook fixtures. TypeScript enforces
+   that every active provider has a contract suite.
+4. Keep provider-specific event names inside `verifyWebhook` and
+   `normalizeWebhook`; service tests should assert the canonical
+   `NormalizedProviderWebhook` shape.
+5. Add provider-specific tests only for behavior the shared contract cannot
+   express, such as managed-account routing or SDK request options.
+
+The contract suite proves the adapter boundary. The billing integration suite
+then proves the provider-independent money path.
+
 ## Add A Stateful Command
 
 Use `reference-model.commands.test.ts` when command order matters. Add:

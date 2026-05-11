@@ -292,7 +292,10 @@ export class IngestionService {
       endAt: timestamp,
     })
 
-    if (preparedContext.rejectionReason) {
+    if (
+      preparedContext.rejectionReason &&
+      preparedContext.rejectionReason !== "NO_MATCHING_ENTITLEMENT"
+    ) {
       return {
         allowed: false,
         featureSlug,
@@ -330,6 +333,14 @@ export class IngestionService {
         allowed: false,
         featureSlug,
         rejectionReason: "NO_MATCHING_ENTITLEMENT",
+      }
+    }
+
+    if (isStaticQuantityEntitlement(entitlement)) {
+      return {
+        allowed: true,
+        featureSlug,
+        limit: resolveStaticQuantityLimit(entitlement.grants, timestamp),
       }
     }
 
@@ -1214,6 +1225,23 @@ function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueu
 
 function isUsageEntitlement(entitlement: IngestionEntitlement): boolean {
   return entitlement.featureType === "usage" && Boolean(entitlement.meterConfig)
+}
+
+function isStaticQuantityEntitlement(entitlement: IngestionEntitlement): boolean {
+  return entitlement.featureType === "tier" || entitlement.featureType === "package"
+}
+
+function resolveStaticQuantityLimit(grants: IngestionGrant[], timestamp: number): number | null {
+  const activeGrants = grants.filter(
+    (grant) =>
+      grant.effectiveAt <= timestamp && (grant.expiresAt === null || timestamp < grant.expiresAt)
+  )
+
+  if (activeGrants.length === 0 || activeGrants.some((grant) => grant.allowanceUnits === null)) {
+    return null
+  }
+
+  return activeGrants.reduce((total, grant) => total + (grant.allowanceUnits ?? 0), 0)
 }
 
 function formatVerificationSpending(spending: EntitlementWindowState["spending"]) {

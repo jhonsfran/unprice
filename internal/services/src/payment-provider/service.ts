@@ -25,6 +25,9 @@ import type {
 import { SandboxPaymentProvider } from "./sandbox"
 import { StripePaymentProvider } from "./stripe"
 
+export const ACTIVE_PAYMENT_PROVIDERS = ["stripe", "sandbox"] as const
+export type ActivePaymentProvider = (typeof ACTIVE_PAYMENT_PROVIDERS)[number]
+
 const PROVIDER_CAPABILITIES: Record<PaymentProvider, PaymentProviderCapabilities> = {
   stripe: {
     billingPortal: true,
@@ -53,6 +56,35 @@ export function getPaymentProviderCapabilities(
   provider: PaymentProvider
 ): PaymentProviderCapabilities {
   return PROVIDER_CAPABILITIES[provider]
+}
+
+type AdapterFactoryOpts = {
+  token: string
+  providerCustomerId?: string
+  logger: Logger
+  webhookSecret?: string
+  connectedAccountId?: string
+}
+
+const ACTIVE_PROVIDER_ADAPTERS = {
+  stripe: (opts: AdapterFactoryOpts) =>
+    new StripePaymentProvider({
+      token: opts.token,
+      providerCustomerId: opts.providerCustomerId,
+      logger: opts.logger,
+      webhookSecret: opts.webhookSecret,
+      connectedAccountId: opts.connectedAccountId,
+    }),
+  sandbox: (opts: AdapterFactoryOpts) =>
+    new SandboxPaymentProvider({
+      logger: opts.logger,
+      providerCustomerId: opts.providerCustomerId,
+      webhookSecret: opts.webhookSecret,
+    }),
+} satisfies Record<ActivePaymentProvider, (opts: AdapterFactoryOpts) => PaymentProviderInterface>
+
+function isActivePaymentProvider(provider: PaymentProvider): provider is ActivePaymentProvider {
+  return ACTIVE_PAYMENT_PROVIDERS.includes(provider as ActivePaymentProvider)
 }
 
 export class PaymentProviderService implements PaymentProviderInterface {
@@ -92,24 +124,11 @@ export class PaymentProviderService implements PaymentProviderInterface {
     webhookSecret?: string
     connectedAccountId?: string
   }): PaymentProviderInterface {
-    switch (opts.paymentProvider) {
-      case "stripe":
-        return new StripePaymentProvider({
-          token: opts.token,
-          providerCustomerId: opts.providerCustomerId,
-          logger: opts.logger,
-          webhookSecret: opts.webhookSecret,
-          connectedAccountId: opts.connectedAccountId,
-        })
-      case "sandbox":
-        return new SandboxPaymentProvider({
-          logger: opts.logger,
-          providerCustomerId: opts.providerCustomerId,
-          webhookSecret: opts.webhookSecret,
-        })
-      default:
-        throw new Error("Payment provider not supported")
+    if (!isActivePaymentProvider(opts.paymentProvider)) {
+      throw new Error("Payment provider not supported")
     }
+
+    return ACTIVE_PROVIDER_ADAPTERS[opts.paymentProvider](opts)
   }
 
   public getCustomerId(): string | undefined {

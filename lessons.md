@@ -42,6 +42,8 @@ patterns. Keep it cheap to load and useful.
   the service adapter.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
+- 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do
+  not add meters for them unless the product explicitly needs separate snapshot usage.
 
 ## Billing, Wallets, And Invoices
 
@@ -127,6 +129,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Payment Providers And Stripe
 
+- 2026-05-11: New payment provider adapters must pass the reusable provider contract suite before
+  relying on service billing integration tests.
 - 2026-05-07: Use Stripe `invoice.paid` as the canonical success signal; do not process both
   `invoice.payment_succeeded` and `invoice.paid`.
 - 2026-05-11: Stripe Connect readiness UI should read `connectionData.requirements.errors` and

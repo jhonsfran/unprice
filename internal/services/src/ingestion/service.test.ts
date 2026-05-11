@@ -445,6 +445,60 @@ describe("IngestionService entitlement routing", () => {
     })
   })
 
+  it("returns static quantity limits for tier and package feature verification", async () => {
+    for (const featureType of ["tier", "package"] as const) {
+      const entitlement = createEntitlement({
+        customerEntitlementId: `ce_${featureType}`,
+        featureSlug: `${featureType}_seats`,
+        featureType,
+        grants: [
+          {
+            allowanceUnits: 7,
+            effectiveAt: Date.UTC(2026, 2, 1),
+            expiresAt: null,
+            grantId: `grant_${featureType}`,
+            priority: 10,
+          },
+        ],
+        meterConfig: null,
+      })
+      const getEntitlementWindowStub = vi.fn()
+
+      const service = new IngestionService({
+        cache: createCache(),
+        entitlementService: {
+          getCustomerEntitlementsForCustomer: vi
+            .fn()
+            .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+        } as never,
+        entitlementWindowClient: { getEntitlementWindowStub },
+        auditClient: {
+          getAuditStub: vi.fn().mockReturnValue({
+            commit: vi.fn(),
+            exists: vi.fn(),
+          }),
+        },
+        logger: createLogger() as never,
+        now: () => SERVICE_NOW,
+        waitUntil: vi.fn(),
+      })
+
+      await expect(
+        service.verifyFeatureStatus({
+          customerId: entitlement.customerId,
+          featureSlug: entitlement.featureSlug,
+          projectId: entitlement.projectId,
+          timestamp: SERVICE_NOW,
+        })
+      ).resolves.toEqual({
+        allowed: true,
+        featureSlug: entitlement.featureSlug,
+        limit: 7,
+      })
+      expect(getEntitlementWindowStub).not.toHaveBeenCalled()
+    }
+  })
+
   it("returns compact usage verification state with current spend", async () => {
     const entitlement = createEntitlement()
     const getEnforcementState = vi.fn().mockResolvedValue({
@@ -692,7 +746,7 @@ describe("IngestionService entitlement routing", () => {
   })
 })
 
-function createEntitlement(): IngestionEntitlement {
+function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
     creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
@@ -723,6 +777,7 @@ function createEntitlement(): IngestionEntitlement {
     overageStrategy: "none",
     projectId: "proj_123",
     resetConfig: null,
+    ...overrides,
   }
 }
 
@@ -744,28 +799,14 @@ function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
     subscriptionPhase: {
       creditLinePolicy: entitlement.creditLinePolicy,
     },
-    grants: [
-      {
-        id: `${entitlement.customerEntitlementId}_grant`,
-        projectId: entitlement.projectId,
-        customerEntitlementId: entitlement.customerEntitlementId,
-        type: "subscription",
-        priority: 10,
-        allowanceUnits: 100,
-        effectiveAt: entitlement.effectiveAt,
-        expiresAt: entitlement.expiresAt,
-        metadata: null,
-        createdAtM: 0,
-        updatedAtM: 0,
-      },
-    ],
+    grants: toGrantRecords(entitlement),
     featurePlanVersion: {
       id: entitlement.featurePlanVersionId,
       projectId: entitlement.projectId,
       planVersionId: "version_123",
       type: "feature",
       featureId: "feature_123",
-      featureType: "usage",
+      featureType: entitlement.featureType,
       unitOfMeasure: "units",
       config: entitlement.featureConfig,
       billingConfig: {
@@ -787,7 +828,7 @@ function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
         id: "feature_123",
         projectId: entitlement.projectId,
         slug: entitlement.featureSlug,
-        type: "usage",
+        type: entitlement.featureType,
         title: "API calls",
         description: null,
         metadata: null,
@@ -796,6 +837,35 @@ function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
       },
     },
   }
+}
+
+function toGrantRecords(entitlement: IngestionEntitlement) {
+  const grants =
+    entitlement.grants.length > 0
+      ? entitlement.grants
+      : [
+          {
+            allowanceUnits: 100,
+            effectiveAt: entitlement.effectiveAt,
+            expiresAt: entitlement.expiresAt,
+            grantId: `${entitlement.customerEntitlementId}_grant`,
+            priority: 10,
+          },
+        ]
+
+  return grants.map((grant) => ({
+    id: grant.grantId,
+    projectId: entitlement.projectId,
+    customerEntitlementId: entitlement.customerEntitlementId,
+    type: "subscription",
+    priority: grant.priority,
+    allowanceUnits: grant.allowanceUnits,
+    effectiveAt: grant.effectiveAt,
+    expiresAt: grant.expiresAt,
+    metadata: null,
+    createdAtM: 0,
+    updatedAtM: 0,
+  }))
 }
 
 function createCache() {
