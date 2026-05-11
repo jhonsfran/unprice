@@ -906,13 +906,6 @@ export function UnpriceEntitlementsRealtimeProvider({
           setLastSnapshotAt(normalizeEpochMilliseconds(readNumber(state, "asOf")) ?? Date.now())
         }
 
-        if (!nextMetrics) {
-          const legacyMetrics = payload.metrics
-          if (legacyMetrics && typeof legacyMetrics === "object") {
-            nextMetrics = legacyMetrics as RealtimeMetrics
-          }
-        }
-
         if (nextMetrics) {
           setMetrics(nextMetrics)
         }

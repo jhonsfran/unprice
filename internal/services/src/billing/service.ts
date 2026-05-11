@@ -1188,10 +1188,9 @@ export class BillingService {
 
   /**
    * Invoice lines are projected from the ledger (see `LedgerGateway.getInvoiceLines`),
-   * not assembled from an `invoice_items` table. Finalization here is a
-   * header-only transition: move the invoice from `draft` to `unpaid` (or
-   * `void` when `totalAmount === 0`) and stamp `issueDate`. Provider-side
-   * invoice creation runs separately in
+   * while this row is only the invoice header. Finalization here moves the
+   * invoice from `draft` to `unpaid` (or `void` when `totalAmount === 0`) and
+   * stamps `issueDate`. Provider-side invoice creation runs separately in
    * `_upsertPaymentProviderInvoice` (called *before* this method by the
    * public `finalizeInvoice` wrapper) so a provider failure leaves the row
    * in `draft` for the cron to retry.
@@ -1504,10 +1503,9 @@ export class BillingService {
 
   /**
    * Customer credits live in `wallet_credits` and drain through the
-   * reservation/flush pipeline. The legacy `credit_grants` +
-   * `invoice_credit_applications` path is deleted. Any credit application at
-   * invoice time should instead route through `WalletService.adjust` or drain
-   * naturally during reservation.
+   * reservation/flush pipeline. Invoice creation does not turn wallet balances
+   * into negative invoice lines; usage credits drain during reservation and
+   * manual adjustments route through `WalletService.adjust`.
    */
   private async _generateBillingPeriods({
     subscriptionId,

@@ -960,6 +960,15 @@ export class SubscriptionMachine {
         const currentState = snapshot.value as SusbriptionMachineStatus
         if (currentState === lastPersisted) return
 
+        // The restored state came from the DB row we just loaded. Writing it
+        // asynchronously can race with the first real transition and overwrite
+        // a newer status, so treat it as already persisted.
+        const restoredStatus = snapshot.context.subscription?.status
+        if (lastPersisted === null && currentState === restoredStatus) {
+          lastPersisted = currentState as SubscriptionStatus
+          return
+        }
+
         try {
           await this.repo.updateSubscription({
             subscriptionId: this.subscriptionId,

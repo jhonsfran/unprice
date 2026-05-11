@@ -1099,8 +1099,8 @@ export class SubscriptionService {
         //                    activation, including capped/uncapped usage
         //                    phases and free / no-payment-method plans.
         // versionData.whenToBill is non-null in the schema (default
-        // "pay_in_advance"), but some legacy/test fixtures omit it. Treat
-        // missing as "not advance billing" — same as the prior `===` check.
+        // "pay_in_advance"), but some test fixtures omit it. Treat missing as
+        // "not advance billing" to preserve the nullable fixture path.
         const versionStrategy = versionData.whenToBill
           ? billingStrategyFor(versionData.whenToBill)
           : null

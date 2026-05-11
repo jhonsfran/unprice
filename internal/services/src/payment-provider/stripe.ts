@@ -2,7 +2,7 @@ import {
   getPaymentProviderSetupCallbackPrefixUrl,
   getPaymentProviderSignUpCallbackPrefixUrl,
 } from "@unprice/config"
-import type { Currency } from "@unprice/db/validators"
+import { type Currency, currencySchema } from "@unprice/db/validators"
 import type { Result } from "@unprice/error"
 import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -28,6 +28,29 @@ import type {
   VerifiedProviderWebhook,
   VerifyWebhookOpts,
 } from "./interface"
+
+function normalizeStripeCurrency(currency: string): Currency {
+  const parsed = currencySchema.safeParse(currency.toUpperCase())
+
+  if (!parsed.success) {
+    throw new Error(`Unsupported Stripe currency: ${currency}`)
+  }
+
+  return parsed.data
+}
+
+function getStripeProductId(product: unknown): string {
+  if (typeof product === "string") {
+    return product
+  }
+
+  if (typeof product === "object" && product !== null && "id" in product) {
+    const id = (product as { id?: unknown }).id
+    return typeof id === "string" ? id : ""
+  }
+
+  return ""
+}
 
 export class StripePaymentProvider implements PaymentProviderInterface {
   public readonly provider = "stripe"
@@ -455,9 +478,9 @@ export class StripePaymentProvider implements PaymentProviderInterface {
             id: item.id,
             amount: item.amount,
             description: item.description ?? "",
-            currency: item.currency as Currency,
+            currency: normalizeStripeCurrency(item.currency),
             quantity: item.quantity ?? 0,
-            productId: (item.price?.product as string) ?? "",
+            productId: getStripeProductId(item.price?.product),
             metadata: item.metadata,
           })),
         })
@@ -675,9 +698,9 @@ export class StripePaymentProvider implements PaymentProviderInterface {
           id: item.id,
           amount: item.amount,
           description: item.description ?? "",
-          currency: item.currency as Currency,
+          currency: normalizeStripeCurrency(item.currency),
           quantity: item.quantity ?? 0,
-          productId: (item.price?.product as string) ?? "",
+          productId: getStripeProductId(item.price?.product),
           metadata: item.metadata,
         })),
       })
@@ -709,9 +732,9 @@ export class StripePaymentProvider implements PaymentProviderInterface {
           id: item.id,
           amount: item.amount,
           description: item.description ?? "",
-          currency: item.currency as Currency,
+          currency: normalizeStripeCurrency(item.currency),
           quantity: item.quantity ?? 0,
-          productId: (item.price?.product as string) ?? "",
+          productId: getStripeProductId(item.price?.product),
           metadata: item.metadata,
         })),
       })

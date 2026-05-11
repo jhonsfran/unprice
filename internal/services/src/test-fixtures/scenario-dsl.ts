@@ -17,7 +17,7 @@ import {
 } from "./reference-model"
 
 export const expectedInvoiceLineSchema = z.object({
-  kind: z.enum(["flat", "usage", "credit", "adjustment", "proration_credit", "proration_charge"]),
+  kind: z.enum(["flat", "usage", "adjustment", "proration_credit", "proration_charge"]),
   featureSlug: z.string().min(1).optional(),
   quantity: z.number().optional(),
   amountCents: z.number().int(),
@@ -166,26 +166,6 @@ export class ScenarioRuntime {
       oldAmountCents: input.oldAmountCents,
       newAmountCents: input.newAmountCents,
       featureSlug: input.featureSlug,
-    })
-  }
-
-  applyCreditToPeriod(input: {
-    id?: string
-    subscriptionId: string
-    customerId: string
-    currency: ReferenceCurrency
-    periodStart: string | number | Date
-    periodEnd: string | number | Date
-    amountCents: number
-  }) {
-    return this.model.applyCreditToPeriod({
-      id: input.id ?? this.id("credit"),
-      subscriptionId: input.subscriptionId,
-      customerId: input.customerId,
-      currency: input.currency,
-      periodStart: toEpochMs(input.periodStart),
-      periodEnd: toEpochMs(input.periodEnd),
-      amountCents: input.amountCents,
     })
   }
 

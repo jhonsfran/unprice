@@ -6,10 +6,8 @@ import { UnPriceLedgerError } from "./errors"
 /**
  * Pure validators that gate every charge / refund call into the gateway.
  *
- * The legacy ledger had `decideDebit`/`decideCredit`/`foldLedgerState` that
- * computed running balances in TypeScript — pgledger now owns that math at
- * the SQL boundary, so the only thing left here is amount + currency
- * sanity-checking.
+ * pgledger owns running balance math at the SQL boundary, so the service layer
+ * only keeps amount and currency sanity-checking.
  */
 
 /**

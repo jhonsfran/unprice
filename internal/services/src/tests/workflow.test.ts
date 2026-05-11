@@ -417,35 +417,9 @@ describe("Workflow - Billing and Subscriptions", () => {
     }
   }
 
-  const findMidCycleCreditInsert = (allInsertValues: unknown[]) => {
-    return (
-      allInsertValues.find(
-        (value): value is Record<string, unknown> =>
-          !Array.isArray(value) &&
-          typeof value === "object" &&
-          value !== null &&
-          (value as { reason?: unknown }).reason === "mid_cycle_change"
-      ) ||
-      allInsertValues
-        .flatMap((value) => (Array.isArray(value) ? value : [value]))
-        .find(
-          (value): value is Record<string, unknown> =>
-            typeof value === "object" &&
-            value !== null &&
-            (value as { reason?: unknown }).reason === "mid_cycle_change"
-        )
-    )
-  }
-
   const runProrationScenario = async ({
-    invoiceStatus = "paid",
-    featureType = "flat",
-    existingCredit,
     dryRun = false,
   }: {
-    invoiceStatus?: string
-    featureType?: "flat" | "usage"
-    existingCredit?: unknown
     dryRun?: boolean
   } = {}) => {
     const prepaidPlanVersion: PlanVersion = {
@@ -477,27 +451,6 @@ describe("Workflow - Billing and Subscriptions", () => {
     const cycleStart = initialNow
     const cycleEnd = initialNow + 30 * 24 * 60 * 60 * 1000
 
-    const invoiceItem = {
-      id: "ii_1",
-      invoiceId: "inv_1",
-      billingPeriodId: "bp_1",
-      amountTotal: 10000,
-      prorationFactor: 1,
-      subscriptionItem: {
-        featurePlanVersion: {
-          featureType,
-          unitOfMeasure: "units",
-          billingConfig: prepaidPlanVersion.billingConfig,
-        },
-        subscriptionPhase: {
-          planVersion: prepaidPlanVersion,
-        },
-      },
-      invoice: {
-        status: invoiceStatus,
-      },
-    }
-
     const invoicedPeriod = {
       id: "bp_1",
       subscriptionPhaseId: "phase_1",
@@ -513,15 +466,8 @@ describe("Workflow - Billing and Subscriptions", () => {
 
     // biome-ignore lint/suspicious/noExplicitAny: test setup
     vi.spyOn(mockDb.query.billingPeriods, "findMany").mockResolvedValue([invoicedPeriod] as any)
-    // invoice_items and credit_grants tables are deleted; the mid-cycle refund
-    // path that previously branched on them is gone.
-    // These spies are no-ops now — `invoiceItem` and `existingCredit`
-    // fixtures are retained for the rewrite that will route through
-    // WalletService.adjust.
-    void invoiceItem
-    void existingCredit
 
-    const { allInsertValues, insertSpy } = captureInsertValues()
+    const { insertSpy } = captureInsertValues()
     const updateSetCalls: Array<Record<string, unknown>> = []
     const updateSpy = vi.spyOn(mockDb, "update").mockImplementation(
       () =>
@@ -554,7 +500,7 @@ describe("Workflow - Billing and Subscriptions", () => {
               {
                 id: "si_1",
                 featurePlanVersion: {
-                  featureType,
+                  featureType: "flat",
                   unitOfMeasure: "units",
                   billingConfig: prepaidPlanVersion.billingConfig,
                 },
@@ -580,7 +526,6 @@ describe("Workflow - Billing and Subscriptions", () => {
 
     return {
       billingResult,
-      allInsertValues,
       updateSetCalls,
       downgradeTime,
       insertSpy,
@@ -718,62 +663,6 @@ describe("Workflow - Billing and Subscriptions", () => {
     expect(grantInsert).not.toHaveProperty("featurePlanVersionId")
   })
 
-  // The refund is live via `WalletService.adjust({source: "purchased"})` in
-  // BillingService._generateBillingPeriods — it credits
-  // `customer.*.available.purchased` from `platform.funding.manual`. The
-  // original assertion looked for a `credit_grants` insert (deleted table); the
-  // new contract writes no DB rows, only
-  // ledger transfers. A proper integration test needs a live pgledger
-  // or a richer ledger/wallet fake than this file currently wires.
-  it.skip("creates proration credit for prepaid downgrade when eligible", async () => {
-    const { billingResult, allInsertValues } = await runProrationScenario()
-    expect(billingResult.err).toBeUndefined()
-
-    const creditGrantInsert = findMidCycleCreditInsert(allInsertValues)
-    expect(creditGrantInsert).toBeDefined()
-    expect(creditGrantInsert).toMatchObject({
-      reason: "mid_cycle_change",
-      projectId,
-      customerId,
-      totalAmount: expect.any(Number),
-    })
-
-    const refundAmount = creditGrantInsert!.totalAmount as number
-    expect(refundAmount).toBeGreaterThan(0)
-    expect(refundAmount).toBeLessThan(10000)
-    expect(refundAmount).toBeCloseTo(5161, -2)
-  })
-
-  it("does not create duplicate mid-cycle credit when one already exists", async () => {
-    const { billingResult, allInsertValues } = await runProrationScenario({
-      existingCredit: { id: "credit_existing" },
-    })
-
-    expect(billingResult.err).toBeUndefined()
-    expect(findMidCycleCreditInsert(allInsertValues)).toBeUndefined()
-  })
-
-  it.each([
-    {
-      name: "invoice is not paid",
-      invoiceStatus: "open",
-      featureType: "flat" as const,
-    },
-    {
-      name: "feature type is usage",
-      invoiceStatus: "paid",
-      featureType: "usage" as const,
-    },
-  ])("does not create mid-cycle credit when $name", async ({ invoiceStatus, featureType }) => {
-    const { billingResult, allInsertValues } = await runProrationScenario({
-      invoiceStatus,
-      featureType,
-    })
-
-    expect(billingResult.err).toBeUndefined()
-    expect(findMidCycleCreditInsert(allInsertValues)).toBeUndefined()
-  })
-
   it("caps shortened invoiced periods to the phase end date", async () => {
     const { billingResult, updateSetCalls, downgradeTime } = await runProrationScenario()
     expect(billingResult.err).toBeUndefined()
@@ -879,7 +768,7 @@ describe("Workflow - Billing and Subscriptions", () => {
     }
   )
 
-  it("does not write billing periods or credits in dryRun mode", async () => {
+  it("does not write billing periods in dryRun mode", async () => {
     const { billingResult, insertSpy, updateSpy } = await runProrationScenario({
       dryRun: true,
     })

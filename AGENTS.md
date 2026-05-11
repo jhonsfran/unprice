@@ -9,7 +9,8 @@ contain compatible background; keep them aligned when changing architecture rule
 
 - Treat [`lessons.md`](lessons.md) as durable working memory. Read it before changing code, tests,
   docs, migrations, payment flows, billing flows, or architecture-sensitive paths. When you learn a
-  repeatable repo-specific lesson, add or update a dated entry before finishing the task.
+  repeatable repo-specific lesson, add or update a dated entry before finishing the task. Keep new
+  lessons tiny: 1-3 bullets, one concrete repo-specific rule per bullet.
 - Fix the problem at the owning architectural layer. Do not hide a domain bug in an API route,
   component, or test helper when the invariant belongs in a service, use case, schema, or database
   model.

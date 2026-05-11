@@ -48,10 +48,6 @@ type LifecycleCommand =
       effectiveAt: number
     }
   | {
-      type: "apply_credit"
-      amountCents: number
-    }
-  | {
       type: "wallet_reservation"
       consumeCents: number
       grantCents: number
@@ -82,10 +78,6 @@ const lifecycleCommandArbitrary: fc.Arbitrary<LifecycleCommand> = fc.oneof(
   fc.record({
     type: fc.constant("cancel" as const),
     effectiveAt: fc.integer({ min: jan1, max: feb1 }),
-  }),
-  fc.record({
-    type: fc.constant("apply_credit" as const),
-    amountCents: fc.integer({ min: 1, max: 10_000 }),
   }),
   fc
     .record({
@@ -200,26 +192,6 @@ function applyLifecycleCommand(runtime: LifecycleRuntime, command: LifecycleComm
     case "cancel":
       if (hasBilled(runtime)) return
       runtime.model.cancelSubscription({ subscriptionId, effectiveAt: command.effectiveAt })
-      return
-    case "apply_credit":
-      if (hasBilled(runtime)) return
-      runtime.creditSeq += 1
-      runtime.model.createCredit({
-        id: `wcr_credit_${runtime.creditSeq}`,
-        customerId,
-        currency,
-        amountCents: command.amountCents,
-        source: "promo",
-      })
-      runtime.model.applyCreditToPeriod({
-        id: `credit_${runtime.creditSeq}`,
-        subscriptionId,
-        customerId,
-        currency,
-        periodStart: jan1,
-        periodEnd: feb1,
-        amountCents: command.amountCents,
-      })
       return
     case "wallet_reservation": {
       runtime.creditSeq += 1
@@ -367,7 +339,12 @@ describe("ReferenceBillingModel stateful lifecycle commands", () => {
             [
               { type: "meter_usage", eventId: "evt_1", occurredAt: jan16, quantity: 1_200 },
               { type: "change_plan", targetPlanId: "plan_pro", effectiveAt: jan16 },
-              { type: "apply_credit", amountCents: 500 },
+              {
+                type: "wallet_reservation",
+                grantCents: 500,
+                reserveCents: 500,
+                consumeCents: 250,
+              },
               { type: "bill_period", finalize: false },
               { type: "bill_period", finalize: true },
             ],

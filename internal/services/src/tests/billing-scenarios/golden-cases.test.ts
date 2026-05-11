@@ -279,65 +279,6 @@ describe("billing golden cases against the reference model", () => {
       .runReferenceModel()
   })
 
-  goldenCase(
-    "credit balance reduces the invoice and is conserved",
-    ["pay_in_arrear capped wallet"],
-    () => {
-      scenario("credit balance")
-        .givenCustomer({ id: "cus_credit", currency: "EUR" })
-        .givenPlan({
-          id: "plan_credit",
-          currency: "EUR",
-          whenToBill: "pay_in_arrear",
-          features: [{ id: "feat_credit", slug: "seat", kind: "flat", amountCents: 5000 }],
-        })
-        .givenSubscription({
-          id: "sub_credit",
-          customerId: "cus_credit",
-          planId: "plan_credit",
-          startsAt: jan1,
-          periodStart: jan1,
-          periodEnd: feb1,
-        })
-        .step("grant and apply invoice credit", (runtime) => {
-          runtime.createCredit({
-            id: "wcr_invoice_credit",
-            customerId: "cus_credit",
-            currency: "EUR",
-            amountCents: 2000,
-            source: "promo",
-          })
-          runtime.applyCreditToPeriod({
-            id: "invoice_credit",
-            subscriptionId: "sub_credit",
-            customerId: "cus_credit",
-            currency: "EUR",
-            periodStart: jan1,
-            periodEnd: feb1,
-            amountCents: 2000,
-          })
-        })
-        .billPeriod(jan1, feb1, "sub_credit")
-        .expectInvoice({
-          currency: "EUR",
-          lines: [
-            { kind: "flat", featureSlug: "seat", quantity: 1, amountCents: 5000 },
-            { kind: "credit", amountCents: -2000 },
-          ],
-          totalCents: 3000,
-        })
-        .expectWallet({
-          customerId: "cus_credit",
-          currency: "EUR",
-          availableCents: 0,
-          reservedCents: 0,
-          consumedCents: 2000,
-        })
-        .expectLedger({ movementCount: 5 })
-        .runReferenceModel()
-    }
-  )
-
   goldenCase("late usage outside the statement is ignored", ["reference-only policy"], () => {
     scenario("late usage ignored")
       .givenCustomer({ id: "cus_late", currency: "EUR" })

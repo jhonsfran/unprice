@@ -66,7 +66,7 @@ export const referenceBillingPeriodSchema = z.object({
 
 export const referenceInvoiceLineSchema = z.object({
   id: z.string().min(1),
-  kind: z.enum(["flat", "usage", "credit", "adjustment", "proration_credit", "proration_charge"]),
+  kind: z.enum(["flat", "usage", "adjustment", "proration_credit", "proration_charge"]),
   featureSlug: z.string().min(1).optional(),
   quantity: z.number().optional(),
   amountCents: z.number().int(),
@@ -519,39 +519,6 @@ export class ReferenceBillingModel {
     return { proration, lines }
   }
 
-  applyCreditToPeriod(input: {
-    id: string
-    subscriptionId: string
-    customerId: string
-    currency: ReferenceCurrency
-    periodStart: number
-    periodEnd: number
-    amountCents: number
-  }) {
-    const reservation = this.reserveWallet({
-      id: `res_${input.id}`,
-      customerId: input.customerId,
-      currency: input.currency,
-      amountCents: input.amountCents,
-    })
-    if (reservation.status !== "reserved") {
-      throw new Error("Cannot apply credit without available wallet balance")
-    }
-    this.consumeWalletReservation({
-      reservationId: reservation.reservation.id,
-      amountCents: input.amountCents,
-    })
-
-    return this.addInvoiceLine({
-      id: `line_${input.id}`,
-      subscriptionId: input.subscriptionId,
-      periodStart: input.periodStart,
-      periodEnd: input.periodEnd,
-      kind: "credit",
-      amountCents: -input.amountCents,
-    })
-  }
-
   createCredit(input: {
     id: string
     customerId: string
@@ -564,7 +531,7 @@ export class ReferenceBillingModel {
       customerId: input.customerId,
       currency: input.currency,
       amountCents: input.amountCents,
-      source: input.source ?? "credit",
+      source: input.source ?? "promo",
     })
   }
 

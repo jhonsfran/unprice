@@ -57,6 +57,9 @@
     "test:integration:p0-advance-properties": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts src/tests/billing-scenarios/pay-in-advance-metered.properties.integration.test.ts",
     "test:integration:p0-advance-capped": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts src/tests/billing-scenarios/pay-in-advance-capped-wallet.integration.test.ts",
     "test:integration:p0-advance-capped-properties": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts src/tests/billing-scenarios/pay-in-advance-capped-wallet.properties.integration.test.ts",
+    "test:integration:golden-db": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts src/tests/billing-scenarios/golden-cases-db.integration.test.ts",
+    "test:integration:paid-invoice-lifecycle": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts src/tests/payment-scenarios/paid-invoice-lifecycle.integration.test.ts",
+    "test:integration:wallet-lifecycle": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts src/tests/wallet-scenarios/wallet-credits-topups.integration.test.ts",
     "test:integration:subscription-lock": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts src/subscriptions/subscriptionLock.integration.test.ts",
     "test:integration": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run --config vitest.integration.config.ts --no-file-parallelism --maxWorkers=1 --minWorkers=1 --maxConcurrency=1",
     "test:file": "NODE_ENV=test SKIP_ENV_VALIDATION=true APP_ENV=test vitest run \"$@\""
