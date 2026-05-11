@@ -778,14 +778,9 @@ describe("BillingService.finalizeInvoice", () => {
     expect(provider.finalizeInvoice).toHaveBeenCalledTimes(1)
 
     // Logger should have warned about the orphan item.
-    const { billing: _b, ...ctx } = makeBillingService({
-      invoice,
-      lines: [makeLine()],
-      paymentProvider: retryProvider,
-    })
     // Access the logger from the original billing service via the service bag.
-    const loggerWarn = (billing as unknown as { logger: { warn: ReturnType<typeof vi.fn> } })
-      .logger.warn
+    const loggerWarn = (billing as unknown as { logger: { warn: ReturnType<typeof vi.fn> } }).logger
+      .warn
     expect(loggerWarn).toHaveBeenCalledWith(
       "provider invoice has orphaned items with no matching ledger line",
       expect.objectContaining({
@@ -850,8 +845,8 @@ describe("BillingService.finalizeInvoice", () => {
     })
 
     // Logger should have warned about the stale stamped id.
-    const loggerWarn = (billing as unknown as { logger: { warn: ReturnType<typeof vi.fn> } })
-      .logger.warn
+    const loggerWarn = (billing as unknown as { logger: { warn: ReturnType<typeof vi.fn> } }).logger
+      .warn
     expect(loggerWarn).toHaveBeenCalledWith(
       "stamped provider invoice could not be retrieved; recreating",
       expect.objectContaining({

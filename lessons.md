@@ -350,3 +350,26 @@ Related: [ADR-0002: Wallet And Payment Provider Activation Guardrails](docs/adr/
 - The reference billing model (`test-fixtures/reference-model.ts`) has no grant expiry support.
   `WalletGrant` has no `expiresAt` field and all drain/reserve methods are time-unaware. Adding
   grant expiry mid-period golden cases requires extending the reference model first.
+
+## 2026-05-11: Proration And Statement Line Test Patterns
+
+- `computeProratedRefundAmount` uses `tx.query.invoices.findFirst(...)` (Drizzle relational query
+  on the transaction), not a repository method. Test mocks must shape `tx` with
+  `{ query: { invoices: { findFirst: vi.fn() } } }` — passing `{} as Database` will throw.
+- The same method requires `phaseStartAt`, `billingAnchor`, and `billingConfig` in its input;
+  tests that skip those fields only pass if the early-return branches fire first. Provide all
+  required fields for cases that exercise the proration math.
+- `calculateProration` is imported from `@unprice/db/validators` in `billing/service.ts`. Mock it
+  via `vi.mock("@unprice/db/validators", ...)` when you need deterministic proration factors.
+- `LedgerGateway.getInvoiceLines` returns `Result<InvoiceLine[], ...>`, where `.val` is a flat
+  array. Test mocks returning `Ok({ lines: [...] })` will fail because `.val.reduce` is called
+  directly on the array.
+- `InvoiceLine.amount` is a `Dinero<number>` object. The code accesses `.toJSON()` to extract
+  `.amount`. Test fakes must provide `{ toJSON: () => ({ amount: N }) }` not plain numbers.
+- `transitionInvoiceStatus` checks `currentStatus === transition.nextStatus` before
+  `allowedFromStatuses.includes(currentStatus)`. For `payment_reversed` (nextStatus `"failed"`),
+  a current status of `"failed"` returns `"already_applied"`, not `"disallowed"`. Tests that loop
+  over all non-paid statuses must handle `"failed"` separately.
+- `getInvoiceStatementLines` merges projected ledger lines (first) with synthetic zero-amount
+  lines (second) for billing periods that have no ledger entries. Tests should verify ordering:
+  ledger-backed lines precede zero lines in the output array.

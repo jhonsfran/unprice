@@ -126,7 +126,7 @@ describe("withLockedMachine", () => {
     const projectId = "proj_1"
     const subscriptionId = "sub_1"
     const db = createFakeDb(projectId, subscriptionId)
-    let lockNow = 1_000
+    const lockNow = 1_000
 
     const result = await withLockedMachine({
       ...createDeps(projectId, subscriptionId, db),
