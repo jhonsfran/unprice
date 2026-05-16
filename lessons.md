@@ -44,6 +44,9 @@ patterns. Keep it cheap to load and useful.
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do
   not add meters for them unless the product explicitly needs separate snapshot usage.
+- 2026-05-15: API load tests should use `tooling/k6/baseline.js` with one `PROJECT_ID`, one
+  `CUSTOMER_ID`, and `EVENTS=1000`; it discovers meters through `entitlements.get`, sends async
+  usage grouped by event slug, and verifies every entitlement without signup/payment flows.
 
 ## Billing, Wallets, And Invoices
 
