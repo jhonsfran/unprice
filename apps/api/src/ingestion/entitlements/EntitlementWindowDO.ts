@@ -302,7 +302,7 @@ const WALLET_RESERVATION_ROW_ID = "singleton"
 // Closing a reservation releases unused funds back to the customer's original
 // available buckets; grant expiration is owned by the period/expiry flow.
 const DEVELOPMENT_INACTIVITY_THRESHOLD_MS = 60 * 1000
-const DEFAULT_INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000
+const DEFAULT_INACTIVITY_THRESHOLD_MS = 60 * 60 * 1000
 
 // Maximum time the DO will let consumed-but-unflushed activity sit in
 // `customer.{cid}.reserved` without recognising it in the ledger. Cold
@@ -311,10 +311,10 @@ const DEFAULT_INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000
 // dashboards and reconcilers see a freshness floor instead.
 //
 // Tight in dev (30s) so the user sees movement quickly while debugging;
-// 5 min in deployed environments balances ledger freshness against the
+// 10 min in deployed environments balances ledger freshness against the
 // per-flush Postgres roundtrip cost on cold meters.
 function maxFlushIntervalMs(env: Env): number {
-  return env.NODE_ENV === "development" ? 30_000 : 5 * 60_000
+  return env.NODE_ENV === "development" ? 30_000 : 10 * 60_000
 }
 
 function inactivityThresholdMs(env: Env): number {
@@ -554,7 +554,14 @@ export class EntitlementWindowDO extends DurableObject {
       wideEvent.bootstrap_attempted = needsBootstrap
 
       if (needsBootstrap) {
-        const denial = await this.bootstrapReservationSingleFlight(input, activeGrants, meter)
+        let denial: ApplyResult | null
+        try {
+          denial = await this.bootstrapReservationSingleFlight(input, activeGrants, meter)
+        } catch (error) {
+          wideEvent.bootstrap_outcome = "error"
+          throw error
+        }
+
         if (denial) {
           wideEvent.bootstrap_outcome = "denied"
           // Persist the denial idempotently so retries return the same answer
@@ -965,6 +972,9 @@ export class EntitlementWindowDO extends DurableObject {
       if (result) {
         wideEvent.allowed = result.allowed
         wideEvent.denied_reason = result.deniedReason ?? null
+        if (!result.allowed) {
+          wideEvent.deny_message = result.message ?? null
+        }
         wideEvent.outcome = result.allowed ? "success" : "denied"
       } else if (thrown) {
         wideEvent.outcome = "error"
@@ -1048,10 +1058,6 @@ export class EntitlementWindowDO extends DurableObject {
 
     const isLimitReached =
       overageStrategy !== "always" && limit !== null && Number.isFinite(available) && available <= 0
-
-    if (isLimitReached) {
-      this.ctx.waitUntil(this.closeReservation({ closeReason: "limit_reached" }))
-    }
 
     return {
       usage,
@@ -2869,17 +2875,16 @@ export class EntitlementWindowDO extends DurableObject {
     })
 
     if (result.err) {
-      this.logger.error(this.errorMessage(result.err), {
+      this.logger.error(result.err, {
         context: "lazy reservation bootstrap failed",
-        customerId: input.customerId,
-        projectId: input.projectId,
-        customerEntitlementId: input.entitlement.customerEntitlementId,
+        customer_id: input.customerId,
+        project_id: input.projectId,
+        customer_entitlement_id: input.entitlement.customerEntitlementId,
+        reservation_idempotency_key: reservationIdempotencyKey,
+        requested_amount: sizing.requestedAmount,
+        projected_cost_minor: projectedCost,
       })
-      return {
-        allowed: false,
-        deniedReason: "WALLET_EMPTY",
-        message: result.err.message,
-      }
+      throw result.err
     }
 
     this.ensureMeterState(this.db, {
@@ -3174,13 +3179,6 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     return false
-  }
-
-  private errorMessage(error: unknown): string {
-    if (error instanceof Error) {
-      return error.message
-    }
-    return String(error ?? "unknown error")
   }
 
   private getOutboxCount(): number {

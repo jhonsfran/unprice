@@ -382,6 +382,7 @@ export class WalletService {
 
       const allocationAmount = grantedDrained + purchasedDrained
       const reservationId = newId("entitlement_reservation")
+      const reserveLedgerSourceId = `${input.idempotencyKey}:${reservationId}`
       const fundingAllocations: FundingAllocation[] = [
         ...grantAllocations,
         ...(purchasedDrained > 0
@@ -399,7 +400,7 @@ export class WalletService {
           amount: fromLedgerMinor(grantedDrained, input.currency),
           source: {
             type: "wallet_reserve_granted",
-            id: input.idempotencyKey,
+            id: reserveLedgerSourceId,
           },
           metadata: {
             ...(reservationMetadata ?? {}),
@@ -423,7 +424,7 @@ export class WalletService {
           amount: fromLedgerMinor(purchasedDrained, input.currency),
           source: {
             type: "wallet_reserve_purchased",
-            id: input.idempotencyKey,
+            id: reserveLedgerSourceId,
           },
           metadata: {
             ...(reservationMetadata ?? {}),

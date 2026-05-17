@@ -13,13 +13,18 @@ import type {
   WalletCreditSource,
   WalletTopup,
 } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
+import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromLedgerMinor, toLedgerMinor } from "@unprice/money"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { LedgerGateway, LedgerTransferRequest } from "../ledger"
-import { customerAccountKeys, platformAccountKey } from "../ledger"
+import {
+  type LedgerGateway,
+  type LedgerTransferRequest,
+  UnPriceLedgerError,
+  customerAccountKeys,
+  platformAccountKey,
+} from "../ledger"
 import { flushReservationForTest } from "../tests/wallet-scenarios/helpers"
 import { WalletService } from "./service"
 
@@ -258,7 +263,6 @@ function createDb(state: FakeState): Database {
 function createLedger(state: FakeState): LedgerGateway {
   let transferIdSeq = 0
   const nextId = () => `pgle_${++transferIdSeq}`
-  const idempotencyCache = new Map<string, ReturnType<typeof makeTransfer>>()
   const makeTransfer = (req: LedgerTransferRequest, id: string) => ({
     id,
     fromAccountId: `acct_from_${req.fromAccount}`,
@@ -269,6 +273,10 @@ function createLedger(state: FakeState): LedgerGateway {
     createdAt: new Date(),
     eventAt: req.eventAt ?? new Date(),
   })
+  const idempotencyCache = new Map<
+    string,
+    { request: LedgerTransferRequest; transfer: ReturnType<typeof makeTransfer> }
+  >()
 
   const apply = (req: LedgerTransferRequest) => {
     const minor = toLedgerMinor(req.amount)
@@ -279,15 +287,38 @@ function createLedger(state: FakeState): LedgerGateway {
   const idempotencyKey = (req: LedgerTransferRequest) =>
     `${req.projectId}|${req.source.type}|${req.source.id}`
 
+  const hasReplayConflict = (
+    request: LedgerTransferRequest,
+    existing: LedgerTransferRequest
+  ): boolean =>
+    request.fromAccount !== existing.fromAccount ||
+    request.toAccount !== existing.toAccount ||
+    toLedgerMinor(request.amount) !== toLedgerMinor(existing.amount) ||
+    (request.statementKey ?? null) !== (existing.statementKey ?? null)
+
+  const idempotencyConflict = (req: LedgerTransferRequest) =>
+    Err(
+      new UnPriceLedgerError({
+        message: "LEDGER_IDEMPOTENCY_CONFLICT",
+        context: {
+          sourceType: req.source.type,
+          sourceId: req.source.id,
+        },
+      })
+    )
+
   return {
     createTransfer: vi.fn(async (req: LedgerTransferRequest) => {
       const key = idempotencyKey(req)
       const existing = idempotencyCache.get(key)
-      if (existing) return Ok(existing)
+      if (existing) {
+        if (hasReplayConflict(req, existing.request)) return idempotencyConflict(req)
+        return Ok(existing.transfer)
+      }
       state.transfers.push(req)
       apply(req)
       const transfer = makeTransfer(req, nextId())
-      idempotencyCache.set(key, transfer)
+      idempotencyCache.set(key, { request: req, transfer })
       return Ok(transfer)
     }),
     createTransfers: vi.fn(async (reqs: LedgerTransferRequest[]) => {
@@ -297,13 +328,14 @@ function createLedger(state: FakeState): LedgerGateway {
         const key = idempotencyKey(req)
         const existing = idempotencyCache.get(key)
         if (existing) {
-          out.push(existing)
+          if (hasReplayConflict(req, existing.request)) return idempotencyConflict(req)
+          out.push(existing.transfer)
           continue
         }
         state.transfers.push(req)
         apply(req)
         const transfer = makeTransfer(req, nextId())
-        idempotencyCache.set(key, transfer)
+        idempotencyCache.set(key, { request: req, transfer })
         out.push(transfer)
       }
       return Ok(out)
@@ -644,6 +676,49 @@ describe("WalletService.createReservation", () => {
     expect(state.transfers[0]!.fromAccount).toBe(keys.granted)
     expect(toLedgerMinor(state.transfers[0]!.amount)).toBe(1 * DOLLAR)
     // zero drained from purchased → no purchased transfer leg emitted.
+  })
+
+  it("uses reservation-scoped ledger source ids when re-opening the same period", async () => {
+    const { state, wallet } = buildService()
+    const input = {
+      projectId,
+      customerId,
+      currency: "USD" as const,
+      entitlementId: "ent_1",
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-01-01"),
+      periodEndAt: new Date("2026-02-01"),
+      idempotencyKey: "reserve:same-period",
+    }
+
+    state.balances[keys.purchased] = 3 * DOLLAR
+    const first = await wallet.createReservation({
+      ...input,
+      requestedAmount: 3 * DOLLAR,
+    })
+
+    expect(first.err).toBeUndefined()
+
+    // Simulate the active-reservation lookup after a final close: the closed
+    // reservation remains in Postgres, but it is ignored by the partial active
+    // unique index/query, so a fresh reservation can be inserted for the period.
+    state.reservations = []
+    state.fundingLegs = []
+    state.balances[keys.purchased] = 5 * DOLLAR
+
+    const second = await wallet.createReservation({
+      ...input,
+      requestedAmount: 5 * DOLLAR,
+    })
+
+    expect(second.err).toBeUndefined()
+    expect(state.transfers).toHaveLength(2)
+    expect(state.transfers[0]?.source.id).toBe(`reserve:same-period:${first.val?.reservationId}`)
+    expect(state.transfers[1]?.source.id).toBe(`reserve:same-period:${second.val?.reservationId}`)
+    expect(state.transfers[0]?.source.id).not.toBe(state.transfers[1]?.source.id)
+    expect(toLedgerMinor(state.transfers[0]!.amount)).toBe(3 * DOLLAR)
+    expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(5 * DOLLAR)
   })
 
   it("decrements wallet_credits.remaining_amount for each drained grant", async () => {

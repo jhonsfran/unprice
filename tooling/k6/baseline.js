@@ -12,6 +12,7 @@ const PROJECT_ID = __ENV.PROJECT_ID || ""
 const CUSTOMER_ID = __ENV.CUSTOMER_ID || ""
 const EVENTS = positiveInteger(__ENV.EVENTS, 1000)
 const VUS = positiveInteger(__ENV.VUS, Math.min(10, EVENTS))
+const VERIFY_EVERY = nonNegativeInteger(__ENV.VERIFY_EVERY, 100)
 
 export const options = {
   scenarios: {
@@ -54,21 +55,24 @@ export default function (profile) {
       "POST /v1/events/ingest"
     )
   )
-  const verifyRequests = profile.featureSlugs.map((featureSlug) =>
-    postJsonRequest(
-      "/v1/entitlements/verify",
-      {
-        customerId: CUSTOMER_ID,
-        featureSlug,
-      },
-      "POST /v1/entitlements/verify"
-    )
-  )
+  const verifyRequests = shouldVerifyThisIteration()
+    ? buildVerifyRequests(profile.featureSlugs)
+    : []
 
   asyncUsageEventsSent.add(usageRequests.length)
   verifyRequestsSent.add(verifyRequests.length)
 
   for (const response of http.batch([...usageRequests, ...verifyRequests])) {
+    recordApiResponse(response)
+  }
+}
+
+export function teardown(profile) {
+  const verifyRequests = buildVerifyRequests(profile.featureSlugs)
+
+  verifyRequestsSent.add(verifyRequests.length)
+
+  for (const response of http.batch(verifyRequests)) {
     recordApiResponse(response)
   }
 }
@@ -151,6 +155,19 @@ function postJsonRequest(path, body, name) {
   return ["POST", `${BASE_URL}${path}`, JSON.stringify(body), requestParams(name)]
 }
 
+function buildVerifyRequests(featureSlugs) {
+  return featureSlugs.map((featureSlug) =>
+    postJsonRequest(
+      "/v1/entitlements/verify",
+      {
+        customerId: CUSTOMER_ID,
+        featureSlug,
+      },
+      "POST /v1/entitlements/verify"
+    )
+  )
+}
+
 function requestParams(name) {
   return {
     headers: {
@@ -185,6 +202,10 @@ function recordApiResponse(response) {
   check(response, {
     "request status is successful": (res) => res.status >= 200 && res.status < 300,
   })
+}
+
+function shouldVerifyThisIteration() {
+  return VERIFY_EVERY > 0 && __ITER % VERIFY_EVERY === 0
 }
 
 function buildProperties(propertyFields) {
@@ -245,6 +266,20 @@ function randomUsageValue() {
 
 function randomInteger(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+function nonNegativeInteger(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback
+  }
+
+  const parsed = Number(value)
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    fail(`Expected a non-negative integer, received: ${value}`)
+  }
+
+  return parsed
 }
 
 function trimString(value) {

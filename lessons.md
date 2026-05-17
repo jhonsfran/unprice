@@ -18,6 +18,8 @@ patterns. Keep it cheap to load and useful.
   `apps/api/wrangler.jsonc env.*` migration.
 - 2026-05-08: `entitlement/verify` stays compact: decision fields only, no internal
   entitlement metadata.
+- 2026-05-17: `entitlement/verify` is read-only for wallet reservations; use apply/alarm paths
+  for reservation close and release.
 - 2026-05-08: `/v1/usage/get` returns raw usage/spend from Tinybird; Hono formats display money.
 - 2026-05-08: Keep Tinybird response parsers tolerant during endpoint rollouts; old cloud
   shapes can lag local code.
@@ -48,7 +50,8 @@ patterns. Keep it cheap to load and useful.
   not add meters for them unless the product explicitly needs separate snapshot usage.
 - 2026-05-15: API load tests should use `tooling/k6/baseline.js` with one `PROJECT_ID`, one
   `CUSTOMER_ID`, and `EVENTS=1000`; it discovers meters through `entitlements.get`, sends async
-  usage grouped by event slug, and verifies every entitlement without signup/payment flows.
+  usage grouped by event slug, samples verification with `VERIFY_EVERY`, and runs one final
+  verification without signup/payment flows.
 - 2026-05-17: Async raw ingestion supports one event fanning out to multiple active usage
   entitlements with the same `eventSlug`; keep same-slug meter tests at the service layer so
   payload-compatible meters stay processed together.
@@ -90,8 +93,12 @@ patterns. Keep it cheap to load and useful.
   close helper.
 - 2026-05-08: Treat `WALLET_EMPTY` as possibly DO-local underfunding; flush+refill once before
   denying.
-- 2026-05-17: EntitlementWindowDO inactivity final-flush keeps production/test at 12h but uses
-  60s in `NODE_ENV=development` so local wallet reservations return quickly.
+- 2026-05-17: Lazy reservation bootstrap should return `WALLET_EMPTY` only from zero allocation;
+  wallet service errors stay retryable infrastructure failures.
+- 2026-05-17: Reserve ledger source ids must be reservation-scoped; keep period-scoped DO keys as
+  trace metadata only so same-period re-bootstrap cannot replay old reserve transfers.
+- 2026-05-17: EntitlementWindowDO inactivity final-flush uses 1h in production/test and 60s in
+  `NODE_ENV=development`; ledger freshness flushes use 10m in deployed envs.
 - 2026-05-17: Reservation release and grant expiration are separate financial events: release
   restores unused reserved funds to customer buckets; only grant expiration returns available
   grant balance to platform funding.

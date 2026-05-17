@@ -773,9 +773,9 @@ describe("EntitlementWindowDO", () => {
     ])
     expect(db.outboxRows).toHaveLength(0)
     // The default mocked apply opens a wallet reservation, so alarm() re-arms
-    // at the time-based flush deadline (5 min in non-dev) rather than the
+    // at the time-based flush deadline (10 min in non-dev) rather than the
     // distant self-destruct. The flush deadline wins because it's sooner.
-    expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
+    expect(state.alarmAt).toBe(BASE_NOW + 10 * 60_000)
   })
 
   it("cleans alarm outbox and idempotency rows in SQLite bind-safe chunks", async () => {
@@ -1310,7 +1310,7 @@ describe("EntitlementWindowDO", () => {
     })
   })
 
-  it("closes an active reservation asynchronously when enforcement state reaches the limit", async () => {
+  it("leaves an active reservation open when enforcement state reaches the limit", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1359,23 +1359,12 @@ describe("EntitlementWindowDO", () => {
     })
 
     expect(result).toMatchObject({ usage: 10, limit: 10, isLimitReached: true })
-    expect(state.waitUntilPromises).toHaveLength(1)
-
-    await Promise.all(state.waitUntilPromises)
-
-    expect(testState.flushReservation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reservationId: "res_verify_limit",
-        flushSeq: 5,
-        flushAmount: 2 * 100_000_000,
-        refillChunkAmount: 0,
-        final: true,
-      })
-    )
-    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
+    expect(state.waitUntilPromises).toHaveLength(0)
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBe("res_verify_limit")
   })
 
-  it("defers verify-path final flush when a wallet flush is already pending", async () => {
+  it("does not schedule verify-path final flush when a wallet flush is already pending", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1424,10 +1413,7 @@ describe("EntitlementWindowDO", () => {
     })
 
     expect(result).toMatchObject({ usage: 10, limit: 10, isLimitReached: true })
-    expect(state.waitUntilPromises).toHaveLength(1)
-
-    await Promise.all(state.waitUntilPromises)
-
+    expect(state.waitUntilPromises).toHaveLength(0)
     expect(testState.flushReservation).not.toHaveBeenCalled()
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
       reservationId: "res_verify_pending",
@@ -1495,9 +1481,9 @@ describe("EntitlementWindowDO", () => {
     await revived.alarm()
 
     // The revived DO sees a still-open reservation in SQLite and re-arms
-    // alarm() at the time-based flush deadline (5 min in non-dev) — the
+    // alarm() at the time-based flush deadline (10 min in non-dev) — the
     // soonest deadline among self-destruct and the freshness floor.
-    expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
+    expect(state.alarmAt).toBe(BASE_NOW + 10 * 60_000)
   })
 
   it("replays committed idempotency rows after eviction without applying twice", async () => {
@@ -1761,6 +1747,54 @@ describe("EntitlementWindowDO", () => {
       allowed: false,
       deniedReason: "WALLET_EMPTY",
     })
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply",
+      expect.objectContaining({
+        denied_reason: "WALLET_EMPTY",
+        deny_message: "Wallet has no available balance to back the reservation",
+      })
+    )
+  })
+
+  it("throws lazy bootstrap wallet errors without caching a WALLET_EMPTY denial", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const walletError = new Error("WALLET_LEDGER_FAILED")
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.createReservation.mockResolvedValue({
+      err: walletError,
+      val: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await expect(durableObject.apply(createApplyInput())).rejects.toThrow("WALLET_LEDGER_FAILED")
+    expect(db.idempotencyRows.has("idem_123")).toBe(false)
+    expect(db.outboxRows).toHaveLength(0)
+    expect(testState.logger.error).toHaveBeenCalledWith(
+      walletError,
+      expect.objectContaining({
+        context: "lazy reservation bootstrap failed",
+        customer_id: "cus_123",
+        project_id: "proj_123",
+        customer_entitlement_id: "ce_123",
+      })
+    )
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply",
+      expect.objectContaining({
+        bootstrap_attempted: true,
+        bootstrap_outcome: "error",
+        outcome: "error",
+        error_message: "WALLET_LEDGER_FAILED",
+      })
+    )
   })
 
   it("denies when a partial bootstrap grant cannot cover the current event", async () => {
@@ -2017,7 +2051,7 @@ describe("EntitlementWindowDO", () => {
     const db = createFakeDbState()
     testState.db = db
     testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
-      const facts = [{ delta: 12, meterKey: DEFAULT_METER_KEY, valueAfter: 12 }]
+      const facts = [{ delta: 32, meterKey: DEFAULT_METER_KEY, valueAfter: 32 }]
       options?.beforePersist?.(facts)
       return facts
     })
@@ -2059,7 +2093,7 @@ describe("EntitlementWindowDO", () => {
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(
-      createApplyInput({ event: { ...createApplyInput().event, properties: { amount: 12 } } })
+      createApplyInput({ event: { ...createApplyInput().event, properties: { amount: 32 } } })
     )
 
     expect(result).toMatchObject({
@@ -2071,7 +2105,7 @@ describe("EntitlementWindowDO", () => {
       expect.objectContaining({
         reservationId: "res_large_event",
         flushAmount: 0,
-        refillChunkAmount: 10 * 100_000_000,
+        refillChunkAmount: 30 * 100_000_000,
         final: false,
       })
     )
@@ -2189,15 +2223,15 @@ describe("EntitlementWindowDO", () => {
         reservationId: "res_fast_burn",
         flushSeq: 1,
         flushAmount: 2 * 100_000_000,
-        refillChunkAmount: 10 * 100_000_000,
+        refillChunkAmount: 30 * 100_000_000,
         final: false,
       })
     )
 
     await Promise.all(state.waitUntilPromises)
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
-    expect(row.spendEwmaAmount).toBe(600 * 100_000_000)
-    expect(row.targetReservationAmount).toBe(10 * 100_000_000)
+    expect(row.spendEwmaAmount).toBe(1200 * 100_000_000)
+    expect(row.targetReservationAmount).toBe(30 * 100_000_000)
   })
 
   it("does not re-trigger refill when one is already in flight", async () => {
@@ -2941,7 +2975,7 @@ describe("EntitlementWindowDO", () => {
     expect(state.deletedAll).toBe(false)
   })
 
-  it("alarm runs a final flush when the DO has been inactive for >12h", async () => {
+  it("alarm runs a final flush when the DO has been inactive for more than 1h", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2957,15 +2991,15 @@ describe("EntitlementWindowDO", () => {
     })
 
     const now = Date.now()
-    // Inactivity > 12h; period hasn't ended yet.
+    // Inactivity > 1h; period hasn't ended yet.
     db.meterWindowRows.set(DEFAULT_METER_KEY, {
       meterKey: DEFAULT_METER_KEY,
       currency: "USD",
       priceConfig: DEFAULT_PRICE_CONFIG,
-      periodEndAt: now + 60 * 60 * 1000,
+      periodEndAt: now + 2 * 60 * 60 * 1000,
       usage: 0,
       updatedAt: null,
-      createdAt: now - 24 * 60 * 60 * 1000,
+      createdAt: now - 2 * 60 * 60 * 1000,
       projectId: "proj_123",
       customerId: "cus_123",
       reservationId: "res_abc",
@@ -2977,7 +3011,7 @@ describe("EntitlementWindowDO", () => {
       refillInFlight: false,
       flushSeq: 0,
       pendingFlushSeq: null,
-      lastEventAt: now - 13 * 60 * 60 * 1000,
+      lastEventAt: now - 61 * 60 * 1000,
       deletionRequested: false,
       recoveryRequired: false,
     })
@@ -3044,7 +3078,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
   })
 
-  it("alarm keeps a live reservation open before the 12h inactivity threshold", async () => {
+  it("alarm keeps a live reservation open before the 1h inactivity threshold", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -3071,7 +3105,7 @@ describe("EntitlementWindowDO", () => {
       refillInFlight: false,
       flushSeq: 0,
       pendingFlushSeq: null,
-      lastEventAt: now - 11 * 60 * 60 * 1000,
+      lastEventAt: now - 59 * 60 * 1000,
       deletionRequested: false,
       recoveryRequired: false,
     })
@@ -3083,6 +3117,60 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBe("res_abc")
     expect(state.deletedAlarm).toBe(false)
     expect(state.deletedAll).toBe(false)
+  })
+
+  it("alarm runs a final flush after 1h of inactivity in deployed environments", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 0,
+        flushedAmount: 0,
+        refundedAmount: 5 * 100_000_000,
+      },
+    })
+
+    const now = Date.now()
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: now + 2 * 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: now - 2 * 60 * 60 * 1000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_prod_inactive",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      lastEventAt: now - 60 * 60 * 1000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        final: true,
+        flushAmount: 0,
+        reservationId: "res_prod_inactive",
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
   })
 
   it("alarm captures reservation then deletes storage when deletion cleanup completes", async () => {

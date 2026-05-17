@@ -18,6 +18,10 @@ function policy(overrides: Partial<ReservationPolicy> = {}): ReservationPolicy {
 }
 
 describe("computeInitialReservation", () => {
+  it("defaults to a 30 unit outstanding reservation cap", () => {
+    expect(DEFAULT_RESERVATION_POLICY.maxOutstandingAmount).toBe(30 * DOLLAR)
+  })
+
   it("does not force a $1 reservation for micro-priced events", () => {
     const result = computeInitialReservation({
       pricePerEventAmount: 2,
@@ -104,7 +108,7 @@ describe("updateSpendVelocity", () => {
       nowMs: 2_000,
     })
 
-    expect(result.spendEwmaAmount).toBe(30_000)
+    expect(result.spendEwmaAmount).toBe(60_000)
     expect(result.lastRateSampledAtMs).toBe(2_000)
   })
 
@@ -116,7 +120,7 @@ describe("updateSpendVelocity", () => {
       nowMs: 600_000,
     })
 
-    expect(result.spendEwmaAmount).toBe(5)
+    expect(result.spendEwmaAmount).toBe(10)
   })
 
   it("smooths an existing EWMA by alpha", () => {
@@ -151,7 +155,7 @@ describe("updateSpendVelocity", () => {
       nowMs: 300_000,
     })
 
-    expect(result.spendEwmaAmount).toBe(8_002)
+    expect(result.spendEwmaAmount).toBe(8_004)
     expect(result.lastRateSampledAtMs).toBe(300_000)
   })
 
@@ -259,7 +263,7 @@ describe("computeRefillDecision", () => {
       maxEventCostAmount: 0,
       currentEventCostAmount: 0,
       pricePerEventAmount: 0,
-      policy: policy({ refillLatencyBufferMs: 60_000 }),
+      policy: policy({ refillLatencyBufferMs: 60_000, targetRefillIntervalMs: 300_000 }),
     })
 
     expect(result.remainingAmount).toBe(70)

@@ -9,7 +9,7 @@
 const BPS_DENOMINATOR = 10_000 // bps stands for basis points and represents a percentage
 
 export const DEFAULT_MAX_COLD_START_AMOUNT = 100_000_000
-export const DEFAULT_MAX_OUTSTANDING_AMOUNT = 1_000_000_000
+export const DEFAULT_MAX_OUTSTANDING_AMOUNT = 3_000_000_000
 
 export type ReservationPolicy = {
   /**
@@ -36,7 +36,7 @@ export type ReservationPolicy = {
 }
 
 export const DEFAULT_RESERVATION_POLICY: ReservationPolicy = {
-  targetRefillIntervalMs: 5 * 60_000, // 5 minutes
+  targetRefillIntervalMs: 10 * 60_000, // 10 minutes
   coldStartEventsToCover: 25, // 25 events
   maxColdStartAmount: DEFAULT_MAX_COLD_START_AMOUNT,
   softFloorAmount: 0,
@@ -173,7 +173,7 @@ export function computeInitialReservation(
  *
  * Storing interval spend instead of a floating-point rate keeps money math in
  * integer minor units. A flush of 100 units over 1 second with the default
- * 5-minute target interval becomes an observed interval spend of 30_000 units.
+ * 10-minute target interval becomes an observed interval spend of 60_000 units.
  */
 export function updateSpendVelocity(input: SpendVelocityInput): SpendVelocityState {
   const policy = input.policy ?? DEFAULT_RESERVATION_POLICY
