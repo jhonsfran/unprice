@@ -11,6 +11,7 @@ import m0010 from "./0010_nifty_starjammers.sql"
 import m0011 from "./0011_redundant_leo.sql"
 import m0012 from "./0012_odd_madame_masque.sql"
 import m0013 from "./0013_handy_rage.sql"
+import m0014 from "./0014_sweet_mikhail_rasputin.sql"
 import journal from "./meta/_journal.json"
 
 export default {
@@ -29,5 +30,6 @@ export default {
     m0011,
     m0012,
     m0013,
+    m0014,
   },
 }

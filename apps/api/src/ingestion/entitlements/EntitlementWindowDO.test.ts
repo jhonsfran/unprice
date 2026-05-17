@@ -182,6 +182,11 @@ type FakeDbState = {
   deleteInArrayBatchSizes: number[]
   deleteIdempotencyCutoffs: number[]
   deleteOutboxRangeMaxIds: number[]
+  storageReadCounts: {
+    entitlementConfig: number
+    grants: number
+    grantWindows: number
+  }
   failNextMeterWindowUpdate?: {
     matchKey: string
     error: Error
@@ -753,12 +758,14 @@ describe("EntitlementWindowDO", () => {
       events: [
         {
           ...baseInput.event,
+          correlationKey: "batch_1",
           id: "evt_batch_1",
           idempotencyKey: "idem_batch_1",
           now: BASE_NOW,
         },
         {
           ...baseInput.event,
+          correlationKey: "batch_2",
           id: "evt_batch_2",
           idempotencyKey: "idem_batch_2",
           now: BASE_NOW + 1,
@@ -769,8 +776,16 @@ describe("EntitlementWindowDO", () => {
     })
 
     expect(result.results).toEqual([
-      expect.objectContaining({ allowed: true, idempotencyKey: "idem_batch_1" }),
-      expect.objectContaining({ allowed: true, idempotencyKey: "idem_batch_2" }),
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_1",
+        idempotencyKey: "idem_batch_1",
+      }),
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_2",
+        idempotencyKey: "idem_batch_2",
+      }),
     ])
     expect(testState.logger.info).not.toHaveBeenCalledWith("entitlement apply", expect.anything())
     expect(testState.logger.info).toHaveBeenCalledWith(
@@ -817,12 +832,14 @@ describe("EntitlementWindowDO", () => {
       events: [
         {
           ...baseInput.event,
+          correlationKey: "batch_1",
           id: "evt_batch_1",
           idempotencyKey: "idem_batch_1",
           now: BASE_NOW,
         },
         {
           ...baseInput.event,
+          correlationKey: "batch_2",
           id: "evt_batch_2",
           idempotencyKey: "idem_batch_2",
           now: BASE_NOW + 1,
@@ -840,8 +857,16 @@ describe("EntitlementWindowDO", () => {
     const retry = await durableObject.applyBatch(batchInput)
 
     expect(retry.results).toEqual([
-      expect.objectContaining({ allowed: true, idempotencyKey: "idem_batch_1" }),
-      expect.objectContaining({ allowed: true, idempotencyKey: "idem_batch_2" }),
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_1",
+        idempotencyKey: "idem_batch_1",
+      }),
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_2",
+        idempotencyKey: "idem_batch_2",
+      }),
     ])
     expect(testState.engineApply.mock.calls.map(([event]) => (event as { id: string }).id)).toEqual(
       ["evt_batch_1", "evt_batch_2", "evt_batch_2"]
@@ -946,8 +971,8 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(0)
     expect(db.deleteOutboxRangeMaxIds).toEqual([200])
     expect(db.idempotencyRows.size).toBe(0)
-    expect(db.deleteIdempotencyCutoffs).toEqual([BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS])
-    expect(db.deleteInArrayBatchSizes).toHaveLength(0)
+    expect(db.deleteIdempotencyCutoffs).toHaveLength(0)
+    expect(db.deleteInArrayBatchSizes).toEqual([200])
   })
 
   it("reschedules a fired alarm when a flush batch leaves facts in the outbox", async () => {
@@ -1027,6 +1052,37 @@ describe("EntitlementWindowDO", () => {
 
     expect(db.idempotencyRows.has("inside_retention_margin")).toBe(true)
     expect(db.idempotencyRows.has("beyond_do_ttl")).toBe(false)
+  })
+
+  it("throttles idempotency cleanup on warm alarm retries", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    db.idempotencyRows.set("stale_first", {
+      createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
+      allowed: true,
+      deniedReason: null,
+      denyMessage: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await durableObject.alarm()
+
+    db.idempotencyRows.set("stale_second", {
+      createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
+      allowed: true,
+      deniedReason: null,
+      denyMessage: null,
+    })
+
+    await durableObject.alarm()
+
+    expect(db.idempotencyRows.has("stale_first")).toBe(false)
+    expect(db.idempotencyRows.has("stale_second")).toBe(true)
+    expect(db.deleteInArrayBatchSizes).toEqual([1])
   })
 
   it("keeps rows in the outbox for retry when Tinybird flush fails", async () => {
@@ -1425,6 +1481,61 @@ describe("EntitlementWindowDO", () => {
         scale: 8,
       },
     })
+  })
+
+  it("caches enforcement state between verify calls and refreshes after apply commits", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    testState.engineApply.mockImplementationOnce((_event, options?: PersistOptions) => {
+      const facts = [{ delta: 4, meterKey: DEFAULT_METER_KEY, valueAfter: 4 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    await durableObject.apply(createApplyInput({ limit: 10 }))
+
+    db.storageReadCounts.entitlementConfig = 0
+    db.storageReadCounts.grants = 0
+    db.storageReadCounts.grantWindows = 0
+
+    expect(await durableObject.getEnforcementState()).toMatchObject({
+      usage: 4,
+      limit: 10,
+      isLimitReached: false,
+    })
+    const readsAfterFirstVerify = { ...db.storageReadCounts }
+
+    expect(await durableObject.getEnforcementState()).toMatchObject({
+      usage: 4,
+      limit: 10,
+      isLimitReached: false,
+    })
+    expect(db.storageReadCounts).toEqual(readsAfterFirstVerify)
+
+    testState.engineApply.mockImplementationOnce((_event, options?: PersistOptions) => {
+      const facts = [{ delta: 2, meterKey: DEFAULT_METER_KEY, valueAfter: 6 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    await durableObject.apply(
+      createApplyInput({
+        idempotencyKey: "idem_cache_refresh",
+        event: { id: "evt_cache_refresh" },
+        limit: 10,
+      })
+    )
+
+    const readsAfterApply = { ...db.storageReadCounts }
+    expect(await durableObject.getEnforcementState()).toMatchObject({
+      usage: 6,
+      limit: 10,
+      isLimitReached: false,
+    })
+    expect(db.storageReadCounts.grantWindows).toBeGreaterThan(readsAfterApply.grantWindows)
   })
 
   it("leaves an active reservation open when enforcement state reaches the limit", async () => {
@@ -4496,6 +4607,11 @@ function createFakeDbState(): FakeDbState {
     deleteInArrayBatchSizes: [],
     deleteIdempotencyCutoffs: [],
     deleteOutboxRangeMaxIds: [],
+    storageReadCounts: {
+      entitlementConfig: 0,
+      grants: 0,
+      grantWindows: 0,
+    },
   }
 }
 
@@ -4593,6 +4709,7 @@ function buildFakeDrizzle(state: FakeDbState) {
             return { count: state.outboxRows.length }
           }
           if (keys.every((k) => ENTITLEMENT_CONFIG_KEYS.has(k))) {
+            state.storageReadCounts.entitlementConfig++
             const source =
               cond?.value !== undefined
                 ? state.entitlementConfigRows.get(String(cond.value))
@@ -4645,6 +4762,13 @@ function buildFakeDrizzle(state: FakeDbState) {
               .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
               .map((row) => ({ id: row.id, payload: row.payload }))
           }
+          if (keys.length === 1 && keys.includes("id")) {
+            return [...state.outboxRows]
+              .filter((row) => matchOutboxCondition(row, cond))
+              .sort((a, b) => a.id - b.id)
+              .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
+              .map((row) => ({ id: row.id }))
+          }
           if (keys.length === 1 && keys.includes("eventId")) {
             return [...Array.from(state.idempotencyRows.entries())]
               .filter(([, r]) => r.createdAt < Number(cond?.value))
@@ -4652,6 +4776,7 @@ function buildFakeDrizzle(state: FakeDbState) {
               .map(([eventId]) => ({ eventId }))
           }
           if (keys.every((k) => GRANT_WINDOW_KEYS.has(k))) {
+            state.storageReadCounts.grantWindows++
             return [...state.grantWindowRows.values()]
               .sort((a, b) => a.grantId.localeCompare(b.grantId))
               .map((source) => {
@@ -4661,6 +4786,7 @@ function buildFakeDrizzle(state: FakeDbState) {
               })
           }
           if (keys.every((k) => GRANT_KEYS.has(k))) {
+            state.storageReadCounts.grants++
             return [...state.grantRows.values()]
               .sort((a, b) => a.grantId.localeCompare(b.grantId))
               .map((source) => {

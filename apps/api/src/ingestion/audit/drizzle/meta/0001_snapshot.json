@@ -1,0 +1,109 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "9610b89a-446e-4c28-ae94-4a99ed140bcb",
+  "prevId": "ee5de390-ec7e-4b9b-99f3-805c4dd9e1c1",
+  "tables": {
+    "ingestion_audit": {
+      "name": "ingestion_audit",
+      "columns": {
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "canonical_audit_id": {
+          "name": "canonical_audit_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload_hash": {
+          "name": "payload_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "rejection_reason": {
+          "name": "rejection_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "result_json": {
+          "name": "result_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "audit_payload_json": {
+          "name": "audit_payload_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "ingestion_audit_canonical_audit_id_unique": {
+          "name": "ingestion_audit_canonical_audit_id_unique",
+          "columns": ["canonical_audit_id"],
+          "isUnique": true
+        },
+        "idx_ingestion_audit_unpublished": {
+          "name": "idx_ingestion_audit_unpublished",
+          "columns": ["first_seen_at"],
+          "isUnique": false,
+          "where": "\"ingestion_audit\".\"published_at\" IS NULL"
+        },
+        "idx_ingestion_audit_published_retention": {
+          "name": "idx_ingestion_audit_published_retention",
+          "columns": ["first_seen_at"],
+          "isUnique": false,
+          "where": "\"ingestion_audit\".\"published_at\" IS NOT NULL"
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

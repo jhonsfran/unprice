@@ -56,8 +56,10 @@ patterns. Keep it cheap to load and useful.
   entitlements with the same `eventSlug`; keep same-slug meter tests at the service layer so
   payload-compatible meters stay processed together.
 - 2026-05-17: Async ingestion should batch entitlement-window RPCs by customer entitlement in
-  chunks of 100; DO analytics outbox cleanup uses monotonic id ranges, while idempotency cleanup
-  uses the DO TTL cutoff timestamp.
+  chunks of 100; DO alarm cleanup should use indexed bounded probes/deletes, not `count(*)` scans
+  over outbox, audit, or idempotency tables.
+- 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
+  `idempotencyKey` only for audit/dedupe identity.
 
 ## Billing, Wallets, And Invoices
 

@@ -3,7 +3,7 @@ import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import type { AppLogger } from "@unprice/observability"
 import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
-import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
+import { and, asc, eq, inArray, isNull, lt } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { createDoLogger, runDoOperation } from "~/observability"
@@ -174,13 +174,7 @@ export class IngestionAuditDO extends DurableObject {
     this.cleanupExpiredRows()
     this.checkStuckRows()
 
-    const hasUnpublished = this.db
-      .select({ cnt: sql<number>`count(*)` })
-      .from(ingestionAuditTable)
-      .where(isNull(ingestionAuditTable.publishedAt))
-      .get()
-
-    const remaining = hasUnpublished?.cnt ?? 0
+    const remaining = this.hasUnpublishedRows() ? 1 : 0
     this.logger.set({ published, unpublished_remaining: remaining })
 
     if (remaining > 0) {
@@ -282,9 +276,14 @@ export class IngestionAuditDO extends DurableObject {
     this.ctx.storage.sql.exec(
       `
         DELETE FROM ${TABLE_NAME}
-        WHERE published_at IS NOT NULL
-          AND first_seen_at < ?
-        LIMIT ?
+        WHERE idempotency_key IN (
+          SELECT idempotency_key
+          FROM ${TABLE_NAME}
+          WHERE published_at IS NOT NULL
+            AND first_seen_at < ?
+          ORDER BY first_seen_at
+          LIMIT ?
+        )
       `,
       cutoff,
       RETENTION_CLEANUP_BATCH_SIZE
@@ -295,18 +294,32 @@ export class IngestionAuditDO extends DurableObject {
     const threshold = Date.now() - STUCK_ROW_THRESHOLD_MS
 
     const stuck = this.db
-      .select({ cnt: sql<number>`count(*)` })
+      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
       .from(ingestionAuditTable)
       .where(
         and(isNull(ingestionAuditTable.publishedAt), lt(ingestionAuditTable.firstSeenAt, threshold))
       )
+      .orderBy(asc(ingestionAuditTable.firstSeenAt))
+      .limit(1)
       .get()
 
-    if (stuck && stuck.cnt > 0) {
+    if (stuck) {
       this.logger.warn("audit rows unpublished for > 10 minutes", {
-        count: stuck.cnt,
+        idempotency_key: stuck.idempotencyKey,
       })
     }
+  }
+
+  private hasUnpublishedRows(): boolean {
+    const row = this.db
+      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
+      .from(ingestionAuditTable)
+      .where(isNull(ingestionAuditTable.publishedAt))
+      .orderBy(asc(ingestionAuditTable.firstSeenAt))
+      .limit(1)
+      .get()
+
+    return Boolean(row)
   }
 
   private async ensureAlarm(): Promise<void> {

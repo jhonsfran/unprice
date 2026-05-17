@@ -47,7 +47,7 @@ import {
   computeSyncGrowRefillAmount,
   updateSpendVelocity,
 } from "@unprice/services/wallet/reservation-sizing"
-import { asc, eq, lt, lte, sql } from "drizzle-orm"
+import { asc, eq, inArray, lt, lte } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { z } from "zod"
@@ -242,6 +242,7 @@ const applyInputSchema = z.object({
 })
 
 const applyBatchEventSchema = rawEventSchema.extend({
+  correlationKey: z.string().min(1),
   idempotencyKey: z.string().min(1),
   now: z.number().finite(),
 })
@@ -310,9 +311,29 @@ type CloseReservationOptions = {
   recoverPendingFinal?: boolean
 }
 
+type EnforcementStateResult = {
+  isLimitReached: boolean
+  limit: number | null
+  spending: {
+    currency: string
+    ledgerAmount: number
+    scale: typeof LEDGER_SCALE
+  }
+  usage: number
+}
+
+type EnforcementStateCache = {
+  entitlement: EntitlementConfigInput | null
+  grants: ActiveGrantInput[]
+  inputSignature: string | null
+  states: GrantConsumptionState[]
+}
+
 const FLUSH_BATCH_SIZE = 1000
 const FLUSH_INTERVAL_MS = 30_000
 const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
+const IDEMPOTENCY_CLEANUP_BATCH_SIZE = 1000
+const IDEMPOTENCY_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
 const WALLET_RESERVATION_ROW_ID = "singleton"
 // Inactivity closes out a live reservation even if the period hasn't ended.
 // Closing a reservation releases unused funds back to the customer's original
@@ -355,6 +376,8 @@ export class EntitlementWindowDO extends DurableObject {
   // opens a reservation never opens a Postgres connection.
   private walletService: WalletService | null = null
   private nextAlarmAt: number | null = null
+  private lastIdempotencyCleanupAt: number | null = null
+  private enforcementStateCache: EnforcementStateCache | null = null
   // In-memory single-flight for lazy reservation bootstrap. It only dedupes
   // external wallet I/O while this DO instance is alive; the reservation row
   // remains the durable source of truth.
@@ -445,7 +468,7 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   public async applyBatch(rawInput: ApplyBatchInput): Promise<{
-    results: Array<ApplyResult & { idempotencyKey: string }>
+    results: Array<ApplyResult & { correlationKey: string; idempotencyKey: string }>
   }> {
     await this.ready
 
@@ -459,12 +482,12 @@ export class EntitlementWindowDO extends DurableObject {
       async () => {
         const startTime = Date.now()
         const input = applyBatchInputSchema.parse(rawInput)
-        const results: Array<ApplyResult & { idempotencyKey: string }> = []
+        const results: Array<ApplyResult & { correlationKey: string; idempotencyKey: string }> = []
         let thrown: unknown
 
         try {
           for (const event of input.events) {
-            const { idempotencyKey, now, ...rawEvent } = event
+            const { correlationKey, idempotencyKey, now, ...rawEvent } = event
             const result = await this.applyInner(
               {
                 ...input,
@@ -474,7 +497,7 @@ export class EntitlementWindowDO extends DurableObject {
               },
               { emitLog: false }
             )
-            results.push({ ...result, idempotencyKey })
+            results.push({ ...result, correlationKey, idempotencyKey })
           }
 
           return { results }
@@ -1066,37 +1089,16 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  public async getEnforcementState(rawInput?: EnforcementStateInput): Promise<{
-    isLimitReached: boolean
-    limit: number | null
-    spending: {
-      currency: string
-      ledgerAmount: number
-      scale: typeof LEDGER_SCALE
-    }
-    usage: number
-  }> {
+  public async getEnforcementState(
+    rawInput?: EnforcementStateInput
+  ): Promise<EnforcementStateResult> {
     await this.ready
 
     const input = rawInput ? enforcementStateInputSchema.parse(rawInput) : null
     const timestamp = input?.now ?? Date.now()
-    const syncedAt = Date.now()
-    const activeGrants = this.db.transaction((tx) => {
-      if (input) {
-        this.syncEntitlementConfig(tx, {
-          entitlement: input.entitlement,
-          createdAt: syncedAt,
-        })
-        this.syncGrants(tx, {
-          customerEntitlementId: input.entitlement.customerEntitlementId,
-          grants: input.grants,
-          createdAt: syncedAt,
-        })
-      }
-
-      return resolveActiveGrants(this.readGrants(tx), timestamp)
-    })
-    const entitlement = this.readEntitlementConfig(this.db)
+    const snapshot = this.readEnforcementStateSnapshot(input)
+    const { entitlement, states } = snapshot
+    const activeGrants = resolveActiveGrants(snapshot.grants, timestamp)
 
     if (!entitlement || activeGrants.length === 0) {
       return {
@@ -1111,7 +1113,6 @@ export class EntitlementWindowDO extends DurableObject {
       }
     }
 
-    const states = this.readGrantStates(this.db)
     const usage = resolveConsumedGrantUnits({
       grants: activeGrants,
       states,
@@ -1210,22 +1211,17 @@ export class EntitlementWindowDO extends DurableObject {
 
       // Keep idempotency keys beyond the public ingestion cap so delayed
       // cleanup cannot erase the replay seal for an event we would accept.
-      const staleIdempotencyCutoff = Date.now() - DO_IDEMPOTENCY_TTL_MS
-      const staleIdempotencyRow = this.db
-        .select({ count: sql<number>`count(*)` })
-        .from(idempotencyKeysTable)
-        .where(lt(idempotencyKeysTable.createdAt, staleIdempotencyCutoff))
-        .get()
-      const staleIdempotencyCount = Number(staleIdempotencyRow?.count ?? 0)
+      let staleIdempotencyCount = 0
+      const runIdempotencyCleanup = this.shouldRunIdempotencyCleanup(now)
+      wideEvent.idempotency_cleanup_ran = runIdempotencyCleanup
+
+      if (runIdempotencyCleanup) {
+        staleIdempotencyCount = this.cleanupStaleIdempotencyKeys(now)
+        this.lastIdempotencyCleanupAt = now
+        wideEvent.idempotency_next_cleanup_at = now + IDEMPOTENCY_CLEANUP_INTERVAL_MS
+      }
 
       wideEvent.idempotency_cleaned = staleIdempotencyCount
-
-      if (staleIdempotencyCount > 0) {
-        this.db
-          .delete(idempotencyKeysTable)
-          .where(lt(idempotencyKeysTable.createdAt, staleIdempotencyCutoff))
-          .run()
-      }
 
       const remainingOutboxCount = this.getOutboxCount()
       wideEvent.outbox_remaining = remainingOutboxCount
@@ -2014,6 +2010,7 @@ export class EntitlementWindowDO extends DurableObject {
             )
           )
           .run()
+        this.invalidateEnforcementStateCache()
       }
       return
     }
@@ -2024,6 +2021,7 @@ export class EntitlementWindowDO extends DurableObject {
         addedAt: params.createdAt,
       })
       .run()
+    this.invalidateEnforcementStateCache()
   }
 
   private assertImmutableEntitlementConfig(
@@ -2137,6 +2135,7 @@ export class EntitlementWindowDO extends DurableObject {
             .set({ expiresAt: nextExpiresAt })
             .where(eq(grantsTable.grantId, grant.grantId))
             .run()
+          this.invalidateEnforcementStateCache()
         }
       } else {
         tx.insert(grantsTable)
@@ -2150,6 +2149,7 @@ export class EntitlementWindowDO extends DurableObject {
             addedAt: params.createdAt,
           })
           .run()
+        this.invalidateEnforcementStateCache()
       }
     }
   }
@@ -2196,6 +2196,53 @@ export class EntitlementWindowDO extends DurableObject {
       })
       .from(grantWindowsTable)
       .all()
+  }
+
+  private readEnforcementStateSnapshot(input: EnforcementStateInput | null): EnforcementStateCache {
+    const inputSignature = input ? this.enforcementStateInputSignature(input) : null
+
+    if (
+      this.enforcementStateCache &&
+      (input === null || this.enforcementStateCache.inputSignature === inputSignature)
+    ) {
+      return this.enforcementStateCache
+    }
+
+    const syncedAt = Date.now()
+    const snapshot = this.db.transaction((tx) => {
+      if (input) {
+        this.syncEntitlementConfig(tx, {
+          entitlement: input.entitlement,
+          createdAt: syncedAt,
+        })
+        this.syncGrants(tx, {
+          customerEntitlementId: input.entitlement.customerEntitlementId,
+          grants: input.grants,
+          createdAt: syncedAt,
+        })
+      }
+
+      return {
+        entitlement: this.readEntitlementConfig(tx),
+        grants: this.readGrants(tx),
+        inputSignature,
+        states: this.readGrantStates(tx),
+      }
+    })
+
+    this.enforcementStateCache = snapshot
+    return snapshot
+  }
+
+  private enforcementStateInputSignature(input: EnforcementStateInput): string {
+    return JSON.stringify({
+      entitlement: input.entitlement,
+      grants: input.grants,
+    })
+  }
+
+  private invalidateEnforcementStateCache(): void {
+    this.enforcementStateCache = null
   }
 
   private buildOutboxFactPayload(params: {
@@ -2364,6 +2411,7 @@ export class EntitlementWindowDO extends DurableObject {
         })
         .where(eq(grantWindowsTable.bucketKey, state.bucketKey))
         .run()
+      this.invalidateEnforcementStateCache()
       return
     }
 
@@ -2378,6 +2426,7 @@ export class EntitlementWindowDO extends DurableObject {
         exhaustedAt: state.exhaustedAt,
       })
       .run()
+    this.invalidateEnforcementStateCache()
   }
 
   private firstGrantByDrainOrder(grants: ActiveGrantInput[]): ActiveGrantInput {
@@ -3253,9 +3302,47 @@ export class EntitlementWindowDO extends DurableObject {
     return false
   }
 
+  private shouldRunIdempotencyCleanup(now: number): boolean {
+    return (
+      this.lastIdempotencyCleanupAt === null ||
+      now - this.lastIdempotencyCleanupAt >= IDEMPOTENCY_CLEANUP_INTERVAL_MS
+    )
+  }
+
+  private cleanupStaleIdempotencyKeys(now: number): number {
+    const staleIdempotencyCutoff = now - DO_IDEMPOTENCY_TTL_MS
+    const staleRows = this.db
+      .select({ eventId: idempotencyKeysTable.eventId })
+      .from(idempotencyKeysTable)
+      .where(lt(idempotencyKeysTable.createdAt, staleIdempotencyCutoff))
+      .orderBy(asc(idempotencyKeysTable.createdAt))
+      .limit(IDEMPOTENCY_CLEANUP_BATCH_SIZE)
+      .all()
+
+    if (staleRows.length === 0) {
+      return 0
+    }
+
+    this.db
+      .delete(idempotencyKeysTable)
+      .where(
+        inArray(
+          idempotencyKeysTable.eventId,
+          staleRows.map((row) => row.eventId)
+        )
+      )
+      .run()
+
+    return staleRows.length
+  }
+
   private getOutboxCount(): number {
-    const row = this.db.select({ count: sql<number>`count(*)` }).from(meterFactsOutboxTable).get()
-    return Number(row?.count ?? 0)
+    return this.db
+      .select({ id: meterFactsOutboxTable.id })
+      .from(meterFactsOutboxTable)
+      .orderBy(asc(meterFactsOutboxTable.id))
+      .limit(OUTBOX_DEPTH_ALERT_THRESHOLD + 1)
+      .all().length
   }
 
   private async scheduleAlarm(target: number): Promise<void> {

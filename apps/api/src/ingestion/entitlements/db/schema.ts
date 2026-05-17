@@ -4,7 +4,7 @@ import type {
   OverageStrategy,
   ResetConfig,
 } from "@unprice/db/validators"
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
 export const meterFactsOutboxTable = sqliteTable("meter_facts_outbox", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -12,13 +12,19 @@ export const meterFactsOutboxTable = sqliteTable("meter_facts_outbox", {
   currency: text("currency").notNull(),
 })
 
-export const idempotencyKeysTable = sqliteTable("idempotency_keys", {
-  eventId: text("event_id").primaryKey(),
-  createdAt: integer("created_at").notNull(),
-  allowed: integer("allowed", { mode: "boolean" }).notNull(),
-  deniedReason: text("denied_reason"),
-  denyMessage: text("deny_message"),
-})
+export const idempotencyKeysTable = sqliteTable(
+  "idempotency_keys",
+  {
+    eventId: text("event_id").primaryKey(),
+    createdAt: integer("created_at").notNull(),
+    allowed: integer("allowed", { mode: "boolean" }).notNull(),
+    deniedReason: text("denied_reason"),
+    denyMessage: text("deny_message"),
+  },
+  (table) => ({
+    createdAtIdx: index("idx_idempotency_keys_created_at").on(table.createdAt),
+  })
+)
 
 export const entitlementConfigTable = sqliteTable("entitlement_config", {
   customerEntitlementId: text("customer_entitlement_id").primaryKey(),

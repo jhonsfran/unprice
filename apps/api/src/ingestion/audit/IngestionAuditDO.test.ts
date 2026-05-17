@@ -563,6 +563,17 @@ function buildFakeDrizzle(state: FakeDbState) {
             return { cnt }
           }
 
+          if (keys.length === 1 && keys.includes("idempotencyKey")) {
+            const row = [...state.rows.values()]
+              .filter((candidate) => matchesCondition(candidate, condition))
+              .sort((a, b) => a.first_seen_at - b.first_seen_at)
+              .at(0)
+            if (!row) {
+              return undefined
+            }
+            return { idempotencyKey: row.idempotency_key }
+          }
+
           throw new Error(`Unsupported select().get() keys: ${keys.join(",")}`)
         },
         all() {

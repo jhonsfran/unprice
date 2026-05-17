@@ -6,6 +6,14 @@ import { type IngestionEntitlement, IngestionService } from "./service"
 
 const SERVICE_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 
+type AuditEntryFixture = {
+  auditPayloadJson: string
+  idempotencyKey: string
+  rejectionReason?: string
+  resultJson: string
+  status: string
+}
+
 describe("IngestionService entitlement routing", () => {
   it("loads customer entitlements and routes by customerEntitlementId", async () => {
     const entitlement = createEntitlement()
@@ -318,13 +326,15 @@ describe("IngestionService entitlement routing", () => {
     const apply = vi.fn()
     const applyBatch = vi
       .fn()
-      .mockImplementation((input: { events: { idempotencyKey: string }[] }) =>
-        Promise.resolve({
-          results: input.events.map((event) => ({
-            allowed: true,
-            idempotencyKey: event.idempotencyKey,
-          })),
-        })
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: true,
+              correlationKey: event.correlationKey,
+              idempotencyKey: event.idempotencyKey,
+            })),
+          })
       )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
       apply,
@@ -416,13 +426,15 @@ describe("IngestionService entitlement routing", () => {
     const apply = vi.fn()
     const applyBatch = vi
       .fn()
-      .mockImplementation((input: { events: { idempotencyKey: string }[] }) =>
-        Promise.resolve({
-          results: input.events.map((event) => ({
-            allowed: true,
-            idempotencyKey: event.idempotencyKey,
-          })),
-        })
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: true,
+              correlationKey: event.correlationKey,
+              idempotencyKey: event.idempotencyKey,
+            })),
+          })
       )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
       apply,
@@ -495,13 +507,14 @@ describe("IngestionService entitlement routing", () => {
     )
     expect(commit).toHaveBeenCalledTimes(1)
 
-    const [entries] = commit.mock.calls[0]!
-    expect(entries[0]).toMatchObject({
+    const [entries] = commit.mock.calls[0]! as [AuditEntryFixture[]]
+    const entry = entries[0]!
+    expect(entry).toMatchObject({
       idempotencyKey: "idem_123",
       rejectionReason: undefined,
       status: "processed",
     })
-    expect(JSON.parse(entries[0].resultJson)).toEqual({ state: "processed" })
+    expect(JSON.parse(entry.resultJson)).toEqual({ state: "processed" })
     expect(logger.error).not.toHaveBeenCalled()
   })
 
@@ -528,25 +541,28 @@ describe("IngestionService entitlement routing", () => {
         aggregationField: "keys",
       },
     })
-    const applyBatch = vi
-      .fn()
-      .mockImplementation(
-        (input: { entitlement: IngestionEntitlement; events: { idempotencyKey: string }[] }) =>
-          Promise.resolve({
-            results: input.events.map((event) =>
-              input.entitlement.customerEntitlementId === "ce_keys"
-                ? {
-                    allowed: false,
-                    deniedReason: "LATE_EVENT_CLOSED_PERIOD",
-                    idempotencyKey: event.idempotencyKey,
-                  }
-                : {
-                    allowed: true,
-                    idempotencyKey: event.idempotencyKey,
-                  }
-            ),
-          })
-      )
+    const applyBatch = vi.fn().mockImplementation(
+      (input: {
+        entitlement: IngestionEntitlement
+        events: { correlationKey: string; idempotencyKey: string }[]
+      }) =>
+        Promise.resolve({
+          results: input.events.map((event) =>
+            input.entitlement.customerEntitlementId === "ce_keys"
+              ? {
+                  allowed: false,
+                  correlationKey: event.correlationKey,
+                  deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+                  idempotencyKey: event.idempotencyKey,
+                }
+              : {
+                  allowed: true,
+                  correlationKey: event.correlationKey,
+                  idempotencyKey: event.idempotencyKey,
+                }
+          ),
+        })
+    )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
       apply: vi.fn(),
       applyBatch,
@@ -600,13 +616,195 @@ describe("IngestionService entitlement routing", () => {
     expect(result).toHaveLength(1)
     expect(result[0]?.disposition.action).toBe("ack")
 
-    const [entries] = commit.mock.calls[0]!
-    expect(entries[0]).toMatchObject({
+    const [entries] = commit.mock.calls[0]! as [AuditEntryFixture[]]
+    const entry = entries[0]!
+    expect(entry).toMatchObject({
       idempotencyKey: "idem_123",
       rejectionReason: undefined,
       status: "processed",
     })
-    expect(JSON.parse(entries[0].resultJson)).toEqual({ state: "processed" })
+    expect(JSON.parse(entry.resultJson)).toEqual({ state: "processed" })
+  })
+
+  it("rejects async queue outcomes when no entitlement apply is allowed", async () => {
+    const entitlement = createEntitlement()
+    const applyBatch = vi
+      .fn()
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: false,
+              correlationKey: event.correlationKey,
+              deniedReason: "WALLET_EMPTY",
+              idempotencyKey: event.idempotencyKey,
+            })),
+          })
+      )
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply: vi.fn(),
+      applyBatch,
+      getEnforcementState: vi.fn(),
+    })
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const logger = createLogger()
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { amount: 1 },
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.disposition.action).toBe("ack")
+
+    const [entries] = commit.mock.calls[0]! as [AuditEntryFixture[]]
+    const entry = entries[0]!
+    expect(entry).toMatchObject({
+      idempotencyKey: "idem_123",
+      rejectionReason: "WALLET_EMPTY",
+      status: "rejected",
+    })
+    expect(JSON.parse(entry.resultJson)).toEqual({
+      state: "rejected",
+      rejectionReason: "WALLET_EMPTY",
+    })
+    expect(logger.warn).toHaveBeenCalledWith(
+      "raw ingestion message rejected",
+      expect.objectContaining({
+        idempotencyKey: "idem_123",
+        rejectionReason: "WALLET_EMPTY",
+      })
+    )
+  })
+
+  it("correlates async batch outcomes when messages share an idempotency key", async () => {
+    const entitlement = createEntitlement()
+    const applyBatch = vi.fn().mockImplementation(
+      (input: {
+        events: { correlationKey: string; id: string; idempotencyKey: string }[]
+      }) =>
+        Promise.resolve({
+          results: [...input.events].reverse().map((event) =>
+            event.id === "evt_first"
+              ? {
+                  allowed: true,
+                  correlationKey: event.correlationKey,
+                  idempotencyKey: event.idempotencyKey,
+                }
+              : {
+                  allowed: false,
+                  correlationKey: event.correlationKey,
+                  deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+                  idempotencyKey: event.idempotencyKey,
+                }
+          ),
+        })
+    )
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply: vi.fn(),
+      applyBatch,
+      getEnforcementState: vi.fn(),
+    })
+    const commit = vi.fn().mockResolvedValue({ inserted: 2, duplicates: 0, conflicts: 0 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_first",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_shared",
+          id: "evt_first",
+          slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { amount: 1 },
+        },
+        {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_second",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_shared",
+          id: "evt_second",
+          slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
+          timestamp: Date.UTC(2026, 2, 19) + 1,
+          properties: { amount: 2 },
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(2)
+    expect(result.every((item) => item.disposition.action === "ack")).toBe(true)
+
+    const [entries] = commit.mock.calls[0]! as [AuditEntryFixture[]]
+    const entriesByEventId = new Map(
+      entries.map((entry) => [JSON.parse(entry.auditPayloadJson).id, entry])
+    )
+    expect(entriesByEventId.get("evt_first")).toMatchObject({
+      status: "processed",
+      rejectionReason: undefined,
+    })
+    expect(entriesByEventId.get("evt_second")).toMatchObject({
+      status: "rejected",
+      rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
   })
 
   it("chunks async entitlement window batch applies at 100 messages", async () => {
@@ -614,13 +812,15 @@ describe("IngestionService entitlement routing", () => {
     const apply = vi.fn()
     const applyBatch = vi
       .fn()
-      .mockImplementation((input: { events: { idempotencyKey: string }[] }) =>
-        Promise.resolve({
-          results: input.events.map((event) => ({
-            allowed: true,
-            idempotencyKey: event.idempotencyKey,
-          })),
-        })
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: true,
+              correlationKey: event.correlationKey,
+              idempotencyKey: event.idempotencyKey,
+            })),
+          })
       )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
       apply,
