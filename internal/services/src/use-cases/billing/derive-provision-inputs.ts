@@ -7,17 +7,6 @@ import {
 import { toLedgerMinor } from "@unprice/money"
 import type { ActivationGrant } from "./provision-period"
 
-// Re-exports for callers that already import sizing constants from this
-// module. The canonical home is `wallet/reservation-sizing` so the DO can
-// import it without pulling the use-cases barrel (which transitively
-// imports drizzle relations and breaks the DO test stack).
-export {
-  MINIMUM_FLOOR_AMOUNT,
-  CEILING_AMOUNT,
-  DEFAULT_REFILL_THRESHOLD_BPS,
-  sizeReservation,
-} from "../../wallet/reservation-sizing"
-
 type SubscriptionRow = {
   id: string
   projectId: string

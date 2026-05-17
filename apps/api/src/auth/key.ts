@@ -9,7 +9,7 @@ import type { HonoEnv } from "~/hono/env"
 // verify is sensitive to latency
 const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set([
   "/v1/entitlements/verify",
-  "/v1/events/ingest/sync",
+  "/v1/events/ingest/sync", // TODO: remove this once we have a proper rate limit for sync events
 ])
 
 /**

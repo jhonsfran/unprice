@@ -192,6 +192,12 @@ describe("LedgerGateway", () => {
             ],
           }
         }
+        if (sql.includes("pgledger_accounts_view")) {
+          if (sql.includes(fromName)) {
+            return { rows: [makeAccountRow({ id: "acc-from", name: fromName })] }
+          }
+          return { rows: [makeAccountRow({ id: "acc-to", name: toName })] }
+        }
         return { rows: [] }
       })
 
@@ -207,6 +213,54 @@ describe("LedgerGateway", () => {
 
       expect(result.err).toBeUndefined()
       expect(result.val!.id).toBe("txn-existing")
+    })
+
+    it("idempotent replay with a different amount returns a conflict", async () => {
+      const fromName = platformAccountKey("topup", projectId)
+      const toName = customerAccountKeys(customerId).purchased
+
+      db = createMockDb((sql) => {
+        if (sql.includes("unprice_ledger_idempotency") && sql.includes("INSERT")) {
+          return { rows: [] }
+        }
+        if (sql.includes("unprice_ledger_idempotency") && sql.includes("SELECT")) {
+          return { rows: [{ transfer_id: "txn-existing", statement_key: "stmt-1" }] }
+        }
+        if (sql.includes("pgledger_transfers_view")) {
+          return {
+            rows: [
+              makeTransferRow({
+                id: "txn-existing",
+                from_account_id: "acc-from",
+                to_account_id: "acc-to",
+                amount: "10.00000000",
+              }),
+            ],
+          }
+        }
+        if (sql.includes("pgledger_accounts_view")) {
+          if (sql.includes(fromName)) {
+            return { rows: [makeAccountRow({ id: "acc-from", name: fromName })] }
+          }
+          return { rows: [makeAccountRow({ id: "acc-to", name: toName })] }
+        }
+        return { rows: [] }
+      })
+
+      gateway = new LedgerGateway({ db: db as unknown as Database, logger })
+
+      const result = await gateway.createTransfer({
+        projectId,
+        fromAccount: fromName,
+        toAccount: toName,
+        amount: usd(11),
+        source: { type: "topup", id: "topup-1" },
+        statementKey: "stmt-1",
+      })
+
+      expect(result.err).toBeDefined()
+      expect(result.err).toBeInstanceOf(UnPriceLedgerError)
+      expect(result.err!.message).toBe("LEDGER_IDEMPOTENCY_CONFLICT")
     })
 
     it("currency mismatch — returns error", async () => {

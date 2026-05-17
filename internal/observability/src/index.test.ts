@@ -93,6 +93,38 @@ describe("@unprice/observability", () => {
     })
   })
 
+  it("normalizes camelCase log aliases before they enter the wide event", () => {
+    const { logger, requestLogger } = createStandaloneRequestLogger({
+      requestId: "req_wallet",
+    })
+
+    logger.error(new Error("WALLET_LEDGER_FAILED"), {
+      context: "flush+refill failed",
+      flushSeq: 2,
+      projectId: "proj_123",
+      reservationId: "eres_123",
+    })
+    logger.info("entitlement flush_refill", {
+      duration_ms: 1200,
+      flush_seq: 2,
+      project_id: "proj_123",
+      reservation_id: "eres_123",
+    })
+
+    const event = emitWideEvent(requestLogger)
+
+    expect(event).toMatchObject({
+      context: "flush+refill failed",
+      duration_ms: 1200,
+      flush_seq: 2,
+      project_id: "proj_123",
+      reservation_id: "eres_123",
+    })
+    expect(event).not.toHaveProperty("flushSeq")
+    expect(event).not.toHaveProperty("projectId")
+    expect(event).not.toHaveProperty("reservationId")
+  })
+
   it("does not create a drain when token and dataset are missing", () => {
     const drain = createDrain({
       environment: "production",
@@ -111,6 +143,49 @@ describe("@unprice/observability", () => {
 
     expect(drain).toBeTypeOf("function")
     expect(typeof drain?.flush).toBe("function")
+  })
+
+  it("normalizes Axiom payload aliases and drops formatted duration when duration_ms exists", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 200 }))
+    const drain = createDrain({
+      environment: "production",
+      token: "xaat_test",
+      dataset: "unprice-tests",
+    })
+
+    drain?.({
+      event: {
+        timestamp: "2026-05-17T00:00:00.000Z",
+        level: "error",
+        service: "api",
+        environment: "test",
+        duration: "1.20s",
+        duration_ms: 1200,
+        flushSeq: 2,
+        flush_seq: 2,
+        projectId: "proj_123",
+        project_id: "proj_123",
+        reservationId: "eres_123",
+        reservation_id: "eres_123",
+      },
+    })
+    await drain?.flush?.()
+
+    const requestInit = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined
+    const payload = JSON.parse(String(requestInit?.body)) as Array<Record<string, unknown>>
+
+    expect(payload[0]).toMatchObject({
+      duration_ms: 1200,
+      flush_seq: 2,
+      project_id: "proj_123",
+      reservation_id: "eres_123",
+    })
+    expect(payload[0]).not.toHaveProperty("duration")
+    expect(payload[0]).not.toHaveProperty("flushSeq")
+    expect(payload[0]).not.toHaveProperty("projectId")
+    expect(payload[0]).not.toHaveProperty("reservationId")
   })
 
   it("warns once and skips drain for partial axiom config", () => {

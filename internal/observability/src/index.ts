@@ -56,6 +56,26 @@ const AXIOM_PARTIAL_CONFIG_WARNING =
   "[observability] Axiom drain disabled: both AXIOM_API_TOKEN and AXIOM_DATASET are required."
 let hasWarnedPartialAxiomConfig = false
 
+const LOG_FIELD_ALIASES: Readonly<Record<string, string>> = {
+  customerId: "customer_id",
+  durableObjectId: "durable_object_id",
+  eventId: "event_id",
+  eventSlug: "event_slug",
+  eventTimestamp: "event_timestamp",
+  featureSlug: "feature_slug",
+  flushAmount: "flush_amount",
+  flushSeq: "flush_seq",
+  idempotencyKey: "idempotency_key",
+  meterKey: "meter_key",
+  projectId: "project_id",
+  refillAmount: "refill_amount",
+  refillChunkAmount: "refill_chunk_amount",
+  reservationId: "reservation_id",
+  statementKey: "statement_key",
+  subscriptionId: "subscription_id",
+  workspaceId: "workspace_id",
+}
+
 export function initObservability(config?: LoggerConfig): void {
   initLogger(config)
 }
@@ -76,6 +96,34 @@ function warnPartialAxiomConfigOnce(environment?: string): void {
 
   hasWarnedPartialAxiomConfig = true
   console.warn(AXIOM_PARTIAL_CONFIG_WARNING)
+}
+
+function normalizeLogFieldAliases(fields: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...fields }
+
+  for (const [alias, canonical] of Object.entries(LOG_FIELD_ALIASES)) {
+    if (!(alias in normalized)) {
+      continue
+    }
+
+    if (normalized[canonical] === undefined || normalized[canonical] === null) {
+      normalized[canonical] = normalized[alias]
+    }
+
+    delete normalized[alias]
+  }
+
+  return normalized
+}
+
+function prepareAxiomEvent(event: DrainContext["event"]): DrainContext["event"] {
+  const normalized = normalizeLogFieldAliases(event) as DrainContext["event"]
+
+  if (typeof normalized.duration_ms === "number") {
+    delete normalized.duration
+  }
+
+  return normalized
 }
 
 export function createDrain(options: {
@@ -137,7 +185,7 @@ function createAxiomDrain(options: AxiomDrainOptions): (batch: DrainContext[]) =
       const response = await fetch(resolveAxiomIngestUrl(options), {
         method: "POST",
         headers: createAxiomHeaders(options),
-        body: JSON.stringify(batch.map((ctx) => ctx.event)),
+        body: JSON.stringify(batch.map((ctx) => prepareAxiomEvent(ctx.event))),
         signal: controller?.signal,
       })
 
@@ -264,7 +312,7 @@ function sanitizeLogFields(fields?: LogMetadata): LogFields | undefined {
 
   delete nextFields.tag
 
-  return nextFields as LogFields
+  return normalizeLogFieldAliases(nextFields) as LogFields
 }
 
 function normalizeHttpSummaryFields(fields: LogFields): LogFields {

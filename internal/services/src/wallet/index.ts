@@ -1,11 +1,28 @@
 export { UnPriceWalletError, type WalletErrorCode } from "./errors"
 export {
-  LocalReservation,
+  DEFAULT_MAX_COLD_START_AMOUNT,
+  DEFAULT_MAX_OUTSTANDING_AMOUNT,
+  DEFAULT_RESERVATION_POLICY,
+  ceilMulDiv,
+  computeEffectiveWalletCost,
+  computeInitialReservation,
+  computeRefillDecision,
+  computeSyncGrowRefillAmount,
+  computeTopUpRefillAmount,
   thresholdFromBps,
-  type CaptureMath,
-  type ReservationState,
-  type UsageResult,
-} from "./local-reservation"
+  updateSpendVelocity,
+  type EffectiveWalletCost,
+  type EffectiveWalletCostInput,
+  type InitialReservationDecision,
+  type InitialReservationInput,
+  type RefillDecision,
+  type RefillDecisionInput,
+  type ReservationPolicy,
+  type SpendVelocityInput,
+  type SpendVelocityState,
+  type SyncGrowRefillInput,
+  type TopUpRefillInput,
+} from "./reservation-sizing"
 export {
   WalletService,
   WALLET_SOURCE_TYPES,

@@ -37,6 +37,8 @@ patterns. Keep it cheap to load and useful.
   final flushes as final.
 - 2026-05-09: Serialize native `Error` objects before `evlog.log.error`; Cloudflare/Axiom can
   otherwise store `{}`.
+- 2026-05-17: Axiom-bound logs should normalize known camelCase aliases in
+  `@unprice/observability`; keep business fields snake_case to avoid duplicate columns.
 - 2026-05-08: Test DO eviction/recovery with a new DO instance over the same fake storage.
 - 2026-05-11: For usage concurrency, test `EntitlementWindowDO` and `IngestionAuditDO`, not only
   the service adapter.
@@ -186,6 +188,12 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-05-09: Focused integration scripts are useful when DB state must remain for `psql`
   inspection.
 - 2026-05-09: Wallet reservation callers with event time should pass `effectiveAt`.
+- 2026-05-17: EntitlementWindowDO non-final flush retries must reuse persisted
+  `pending_refill_amount`; do not recompute adaptive refill size for an existing
+  `pending_flush_seq`.
+- 2026-05-17: EntitlementWindowDO wallet retries must persist the whole ledger intent
+  (`pending_flush_seq`, `pending_flush_amount`, refill/final flags); one ledger idempotency
+  key must never replay with a recomputed financial payload.
 - 2026-05-10: Billing properties stay replayable with `UNPRICE_PROPERTY_SEED` and tunable with
   `UNPRICE_PROPERTY_RUNS`.
 - 2026-05-10: Keep DB-backed properties separate from pure/fake-service properties.

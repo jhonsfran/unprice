@@ -38,10 +38,15 @@ import {
 import type { IngestionRejectionReason } from "@unprice/services/ingestion"
 import { LedgerGateway } from "@unprice/services/ledger"
 import { WalletService } from "@unprice/services/wallet"
-import { LocalReservation, thresholdFromBps } from "@unprice/services/wallet/local-reservation"
-// Pure helper — direct path avoids the use-cases barrel and the
-// drizzle relations import chain it transitively pulls in.
-import { sizeReservation } from "@unprice/services/wallet/reservation-sizing"
+import {
+  DEFAULT_RESERVATION_POLICY,
+  type ReservationPolicy,
+  computeEffectiveWalletCost,
+  computeInitialReservation,
+  computeRefillDecision,
+  computeSyncGrowRefillAmount,
+  updateSpendVelocity,
+} from "@unprice/services/wallet/reservation-sizing"
 import { asc, eq, inArray, lt, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
@@ -132,7 +137,7 @@ type ApplyResult = {
 type RefillTrigger = {
   flushSeq: number
   flushAmount: number
-  refillChunkAmount: number
+  refillAmount: number
   effectiveAt: number
 }
 
@@ -372,10 +377,10 @@ export class EntitlementWindowDO extends DurableObject {
       // carries `pending_flush_seq > flush_seq`. Re-issue the flush with the
       // same seq — WalletService dedupes via the ledger
       // idempotency key `flush:{reservationId}:{flushSeq}`, so a duplicate
-      // call after a successful commit is a no-op. `flushAmount` is
-      // re-derived from `consumed - flushed` because we don't persist the
-      // pending flush amount separately; any events accepted after the
-      // failed flush are folded into the retry, which is correct.
+      // call after a successful commit is a no-op. Newer events accepted
+      // after the pending seq was created must wait for the next seq, so
+      // replays use the persisted pending amount. NULL means a pre-migration
+      // row did not have the field yet, so we fall back to the old derivation.
       const window = this.readWalletReservation(this.db)
       if (
         window?.reservationId &&
@@ -385,15 +390,19 @@ export class EntitlementWindowDO extends DurableObject {
         window.pendingFlushSeq !== undefined &&
         window.pendingFlushSeq > window.flushSeq
       ) {
-        const flushAmount = Math.max(0, window.consumedAmount - window.flushedAmount)
+        const flushAmount =
+          window.pendingFlushAmount ?? Math.max(0, window.consumedAmount - window.flushedAmount)
         if (window.pendingFlushFinal) {
           this.ctx.waitUntil(this.finalFlush({ recoverPendingFinal: true }))
         } else {
+          // Retry the same refill amount recorded when pendingFlushSeq was
+          // created. Recomputing adaptive policy here could change the refill
+          // leg behind the same wallet idempotency key.
           this.ctx.waitUntil(
             this.requestFlushAndRefill({
               flushSeq: window.pendingFlushSeq,
               flushAmount,
-              refillChunkAmount: window.refillChunkAmount,
+              refillAmount: window.pendingRefillAmount,
               effectiveAt: Date.now(),
             })
           )
@@ -651,46 +660,132 @@ export class EntitlementWindowDO extends DurableObject {
               // ledger-scale integers. Mixed currencies are rejected at grant sync.
               totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
 
-              const local = new LocalReservation(
-                thresholdFromBps(window.allocationAmount, window.refillThresholdBps),
-                window.refillChunkAmount
-              )
+              const effectiveCost = computeEffectiveWalletCost({
+                requestedCostAmount: totalCost,
+                consumedAmount: window.consumedAmount,
+                flushedAmount: window.flushedAmount,
+              })
+              const currentRemaining = Math.max(0, window.allocationAmount - window.consumedAmount)
 
-              const walletResult = local.applyUsage(
-                {
-                  allocationAmount: window.allocationAmount,
-                  consumedAmount: window.consumedAmount,
-                },
-                totalCost
-              )
-
-              if (!walletResult.isAllowed) {
+              if (effectiveCost.effectiveCostAmount > currentRemaining) {
                 throw new EntitlementWindowReservationUnderfundedError({
                   eventId: input.event.id,
                   meterKey: meter.key,
                   meterSlug: meter.config.eventSlug,
                   reservationId: window.reservationId,
                   cost: totalCost,
-                  remaining: window.allocationAmount - window.consumedAmount,
+                  remaining: currentRemaining,
                   eventTimestamp: input.event.timestamp,
                 })
               }
+
+              const nextConsumedAmount = window.consumedAmount + effectiveCost.effectiveCostAmount
+              const currentEventCostAmount = Math.max(0, totalCost)
+              const pricePerEventAmount = Math.max(
+                currentEventCostAmount,
+                computeMaxMarginalPriceMinor(entitlement.featureConfig)
+              )
+              const flushAmount = Math.max(0, nextConsumedAmount - window.flushedAmount)
+              const hasPendingNonFinalFlush =
+                !window.pendingFlushFinal &&
+                window.pendingFlushSeq !== null &&
+                window.pendingFlushSeq !== undefined &&
+                window.pendingFlushSeq > window.flushSeq
+              let spendVelocity = {
+                spendEwmaAmount: window.spendEwmaAmount,
+                lastRateSampledAtMs: window.lastRateSampledAtMs,
+              }
+              let refillDecision = computeRefillDecision({
+                allocationAmount: window.allocationAmount,
+                consumedAmount: nextConsumedAmount,
+                flushedAmount: window.flushedAmount,
+                targetReservationAmount: window.targetReservationAmount,
+                spendEwmaAmount: spendVelocity.spendEwmaAmount,
+                lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
+                maxEventCostAmount: window.maxEventCostAmount,
+                currentEventCostAmount,
+                pricePerEventAmount,
+                policy: this.reservationPolicy(),
+              })
+
+              if (
+                refillDecision.needsRefill &&
+                !window.refillInFlight &&
+                !hasPendingNonFinalFlush &&
+                flushAmount > 0
+              ) {
+                // Only sample velocity for a new refill decision. If a prior
+                // flush seq is pending, retry the persisted refill amount
+                // instead of changing the ledger request for that seq.
+                spendVelocity = updateSpendVelocity({
+                  previousSpendEwmaAmount: window.spendEwmaAmount,
+                  previousLastRateSampledAtMs: window.lastRateSampledAtMs,
+                  flushAmount,
+                  nowMs: createdAt,
+                  policy: this.reservationPolicy(),
+                })
+                refillDecision = computeRefillDecision({
+                  allocationAmount: window.allocationAmount,
+                  consumedAmount: nextConsumedAmount,
+                  flushedAmount: window.flushedAmount,
+                  targetReservationAmount: window.targetReservationAmount,
+                  spendEwmaAmount: spendVelocity.spendEwmaAmount,
+                  lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
+                  maxEventCostAmount: window.maxEventCostAmount,
+                  currentEventCostAmount,
+                  pricePerEventAmount,
+                  policy: this.reservationPolicy(),
+                })
+              }
+
+              wideEvent.wallet_raw_cost_minor = totalCost
+              wideEvent.wallet_effective_cost_minor = effectiveCost.effectiveCostAmount
+              wideEvent.wallet_clamped_negative_minor = effectiveCost.clampedNegativeAmount
+              wideEvent.reservation_remaining_amount = refillDecision.remainingAmount
+              wideEvent.reservation_target_amount = refillDecision.targetReservationAmount
+              wideEvent.reservation_threshold_amount = refillDecision.watermarkAmount
+              wideEvent.reservation_refill_requested_amount = refillDecision.refillAmount
 
               // Synchronous SQLite write before any post-commit action. On
               // replay the idempotency row short-circuits above, so this only
               // runs on the first-success path.
               tx.update(walletReservationTable)
-                .set({ consumedAmount: walletResult.newState.consumedAmount })
+                .set({
+                  consumedAmount: nextConsumedAmount,
+                  targetReservationAmount: refillDecision.targetReservationAmount,
+                  spendEwmaAmount: spendVelocity.spendEwmaAmount,
+                  lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
+                  maxEventCostAmount: refillDecision.maxEventCostAmount,
+                })
                 .run()
 
-              if (walletResult.needsRefill && !window.refillInFlight) {
-                const nextSeq = window.flushSeq + 1
+              const shouldScheduleRefill =
+                !window.refillInFlight &&
+                (hasPendingNonFinalFlush ||
+                  (refillDecision.needsRefill && refillDecision.refillAmount > 0))
 
+              if (shouldScheduleRefill) {
+                const nextSeq = hasPendingNonFinalFlush
+                  ? window.pendingFlushSeq!
+                  : window.flushSeq + 1
+                const pendingFlushAmount = hasPendingNonFinalFlush
+                  ? (window.pendingFlushAmount ?? flushAmount)
+                  : flushAmount
+                const refillAmount = hasPendingNonFinalFlush
+                  ? window.pendingRefillAmount
+                  : refillDecision.refillAmount
+
+                // pendingRefillAmount is part of the idempotency envelope for
+                // flush:{reservationId}:{flushSeq}. Crash recovery may fold in
+                // newer unflushed consumption, but the refill leg for an
+                // existing seq must stay stable.
                 tx.update(walletReservationTable)
                   .set({
                     refillInFlight: true,
                     pendingFlushSeq: nextSeq,
                     pendingFlushFinal: false,
+                    pendingFlushAmount,
+                    pendingRefillAmount: refillAmount,
                   })
                   .run()
 
@@ -698,8 +793,8 @@ export class EntitlementWindowDO extends DurableObject {
                   flushSeq: nextSeq,
                   // Flush leg = cumulative consumed - already flushed. Zero on the
                   // first refill means `flushReservation` skips the recognize leg.
-                  flushAmount: walletResult.newState.consumedAmount - window.flushedAmount,
-                  refillChunkAmount: walletResult.refillRequestAmount,
+                  flushAmount: pendingFlushAmount,
+                  refillAmount,
                   effectiveAt: input.event.timestamp,
                 }
               }
@@ -769,7 +864,7 @@ export class EntitlementWindowDO extends DurableObject {
                 if (growth.kind === "refilled") {
                   wideEvent.sync_refill_seq = growth.trigger.flushSeq
                   wideEvent.sync_refill_flush_amount = growth.trigger.flushAmount
-                  wideEvent.sync_refill_chunk_amount = growth.trigger.refillChunkAmount
+                  wideEvent.sync_refill_requested_amount = growth.trigger.refillAmount
                 }
                 continue
               }
@@ -853,7 +948,7 @@ export class EntitlementWindowDO extends DurableObject {
       wideEvent.refill_triggered = trigger !== null
       if (trigger) {
         wideEvent.refill_seq = trigger.flushSeq
-        wideEvent.refill_chunk_amount = trigger.refillChunkAmount
+        wideEvent.reservation_refill_requested_amount = trigger.refillAmount
         wideEvent.refill_flush_amount = trigger.flushAmount
       }
       wideEvent.duration_ms = Date.now() - startTime
@@ -1187,6 +1282,13 @@ export class EntitlementWindowDO extends DurableObject {
         if (unflushed > 0 && elapsedSinceLastFlush >= flushIntervalMs) {
           timeFlushTriggered = true
           const nextSeq = postFlushWindow.flushSeq + 1
+          const spendVelocity = updateSpendVelocity({
+            previousSpendEwmaAmount: postFlushWindow.spendEwmaAmount,
+            previousLastRateSampledAtMs: postFlushWindow.lastRateSampledAtMs,
+            flushAmount: unflushed,
+            nowMs: now,
+            policy: this.reservationPolicy(),
+          })
           wideEvent.time_flush_seq = nextSeq
           wideEvent.time_flush_amount = unflushed
           this.db
@@ -1195,6 +1297,10 @@ export class EntitlementWindowDO extends DurableObject {
               refillInFlight: true,
               pendingFlushSeq: nextSeq,
               pendingFlushFinal: false,
+              pendingFlushAmount: unflushed,
+              pendingRefillAmount: 0,
+              spendEwmaAmount: spendVelocity.spendEwmaAmount,
+              lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
             })
             .run()
           await this.requestFlushAndRefill({
@@ -1203,7 +1309,7 @@ export class EntitlementWindowDO extends DurableObject {
             // Time-driven flush is purely about ledger freshness — don't
             // top up allocation here. The DO's own refill trigger handles
             // that when the threshold is actually crossed.
-            refillChunkAmount: 0,
+            refillAmount: 0,
             effectiveAt: Date.now(),
           })
         }
@@ -1410,7 +1516,10 @@ export class EntitlementWindowDO extends DurableObject {
         return { ok: true, outcome: "deferred", reason: "pending_wallet_flush" }
       }
 
-      const unflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
+      const derivedUnflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
+      const unflushed = isRecoveringPendingFinal
+        ? (window.pendingFlushAmount ?? derivedUnflushed)
+        : derivedUnflushed
       const nextSeq = isRecoveringPendingFinal ? window.pendingFlushSeq! : window.flushSeq + 1
       wideEvent.flush_seq = nextSeq
       wideEvent.flush_amount = unflushed
@@ -1418,7 +1527,13 @@ export class EntitlementWindowDO extends DurableObject {
 
       this.db
         .update(walletReservationTable)
-        .set({ pendingFlushSeq: nextSeq, pendingFlushFinal: true, refillInFlight: true })
+        .set({
+          pendingFlushSeq: nextSeq,
+          pendingFlushFinal: true,
+          pendingFlushAmount: unflushed,
+          pendingRefillAmount: 0,
+          refillInFlight: true,
+        })
         .run()
 
       const walletService = this.getWalletService()
@@ -1455,6 +1570,8 @@ export class EntitlementWindowDO extends DurableObject {
               flushSeq: nextSeq,
               pendingFlushSeq: null,
               pendingFlushFinal: false,
+              pendingFlushAmount: null,
+              pendingRefillAmount: 0,
               refillInFlight: false,
               lastFlushedAt: Date.now(),
             })
@@ -1500,6 +1617,8 @@ export class EntitlementWindowDO extends DurableObject {
           flushSeq: nextSeq,
           pendingFlushSeq: null,
           pendingFlushFinal: false,
+          pendingFlushAmount: null,
+          pendingRefillAmount: 0,
           refillInFlight: false,
           lastFlushedAt: Date.now(),
         })
@@ -2188,6 +2307,12 @@ export class EntitlementWindowDO extends DurableObject {
     flushedAmount: number
     refillThresholdBps: number
     refillChunkAmount: number
+    targetReservationAmount: number
+    spendEwmaAmount: number
+    lastRateSampledAtMs: number | null
+    maxEventCostAmount: number
+    pendingRefillAmount: number
+    pendingFlushAmount: number | null
     refillInFlight: boolean
     flushSeq: number
     pendingFlushSeq: number | null
@@ -2209,6 +2334,12 @@ export class EntitlementWindowDO extends DurableObject {
         flushedAmount: walletReservationTable.flushedAmount,
         refillThresholdBps: walletReservationTable.refillThresholdBps,
         refillChunkAmount: walletReservationTable.refillChunkAmount,
+        targetReservationAmount: walletReservationTable.targetReservationAmount,
+        spendEwmaAmount: walletReservationTable.spendEwmaAmount,
+        lastRateSampledAtMs: walletReservationTable.lastRateSampledAtMs,
+        maxEventCostAmount: walletReservationTable.maxEventCostAmount,
+        pendingRefillAmount: walletReservationTable.pendingRefillAmount,
+        pendingFlushAmount: walletReservationTable.pendingFlushAmount,
         refillInFlight: walletReservationTable.refillInFlight,
         flushSeq: walletReservationTable.flushSeq,
         pendingFlushSeq: walletReservationTable.pendingFlushSeq,
@@ -2234,6 +2365,15 @@ export class EntitlementWindowDO extends DurableObject {
       flushedAmount: Number(row.flushedAmount ?? 0),
       refillThresholdBps: Number(row.refillThresholdBps ?? 0),
       refillChunkAmount: Number(row.refillChunkAmount ?? 0),
+      targetReservationAmount: Number(row.targetReservationAmount ?? 0),
+      spendEwmaAmount: Number(row.spendEwmaAmount ?? 0),
+      lastRateSampledAtMs: row.lastRateSampledAtMs ?? null,
+      maxEventCostAmount: Number(row.maxEventCostAmount ?? 0),
+      pendingRefillAmount: Number(row.pendingRefillAmount ?? 0),
+      pendingFlushAmount:
+        row.pendingFlushAmount === null || row.pendingFlushAmount === undefined
+          ? null
+          : Number(row.pendingFlushAmount),
       refillInFlight: Boolean(row.refillInFlight),
       flushSeq: Number(row.flushSeq ?? 0),
       pendingFlushSeq: row.pendingFlushSeq ?? null,
@@ -2275,6 +2415,10 @@ export class EntitlementWindowDO extends DurableObject {
     })
   }
 
+  private reservationPolicy(): ReservationPolicy {
+    return DEFAULT_RESERVATION_POLICY
+  }
+
   private async growReservationForCurrentEvent(
     params: EntitlementWindowReservationUnderfundedError["params"]
   ): Promise<ReservationGrowthResult | null> {
@@ -2304,20 +2448,55 @@ export class EntitlementWindowDO extends DurableObject {
       return null
     }
 
-    const flushSeq = hasPendingFlush ? window.pendingFlushSeq! : window.flushSeq + 1
-    const shortage = Math.max(0, params.cost - currentRemaining)
-    const refillChunkAmount = hasPendingFlush
-      ? window.refillChunkAmount
-      : Math.max(window.refillChunkAmount, shortage)
+    if (hasPendingFlush) {
+      // A pending seq already has a persisted refill amount. Let normal
+      // recovery/retry own it rather than starting a competing sync grow.
+      return null
+    }
 
-    if (refillChunkAmount <= 0) {
+    const flushSeq = window.flushSeq + 1
+    const flushAmount = Math.max(0, window.consumedAmount - window.flushedAmount)
+    const spendVelocity =
+      flushAmount > 0
+        ? updateSpendVelocity({
+            previousSpendEwmaAmount: window.spendEwmaAmount,
+            previousLastRateSampledAtMs: window.lastRateSampledAtMs,
+            flushAmount,
+            nowMs: Date.now(),
+            policy: this.reservationPolicy(),
+          })
+        : {
+            spendEwmaAmount: window.spendEwmaAmount,
+            lastRateSampledAtMs: window.lastRateSampledAtMs,
+          }
+    const currentEventCostAmount = Math.max(0, params.cost)
+    const refillDecision = computeRefillDecision({
+      allocationAmount: window.allocationAmount,
+      consumedAmount: window.consumedAmount,
+      flushedAmount: window.flushedAmount,
+      targetReservationAmount: window.targetReservationAmount,
+      spendEwmaAmount: spendVelocity.spendEwmaAmount,
+      lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
+      maxEventCostAmount: window.maxEventCostAmount,
+      currentEventCostAmount,
+      pricePerEventAmount: currentEventCostAmount,
+      policy: this.reservationPolicy(),
+    })
+    const refillAmount = computeSyncGrowRefillAmount({
+      remainingAmount: currentRemaining,
+      currentEventCostAmount,
+      targetReservationAmount: refillDecision.targetReservationAmount,
+      maxOutstandingAmount: this.reservationPolicy().maxOutstandingAmount,
+    })
+
+    if (refillAmount <= 0) {
       return null
     }
 
     const trigger: RefillTrigger = {
       flushSeq,
-      flushAmount: Math.max(0, window.consumedAmount - window.flushedAmount),
-      refillChunkAmount,
+      flushAmount,
+      refillAmount,
       effectiveAt: params.eventTimestamp,
     }
 
@@ -2327,6 +2506,12 @@ export class EntitlementWindowDO extends DurableObject {
         refillInFlight: true,
         pendingFlushSeq: flushSeq,
         pendingFlushFinal: false,
+        pendingFlushAmount: flushAmount,
+        pendingRefillAmount: refillAmount,
+        targetReservationAmount: refillDecision.targetReservationAmount,
+        spendEwmaAmount: spendVelocity.spendEwmaAmount,
+        lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
+        maxEventCostAmount: refillDecision.maxEventCostAmount,
       })
       .run()
 
@@ -2343,8 +2528,8 @@ export class EntitlementWindowDO extends DurableObject {
   // the same outcome. On error we only clear `refillInFlight` — the
   // `pendingFlushSeq` stays set so crash recovery (or the next apply()
   // that observes `pendingFlushSeq > flushSeq`) can retry with the same
-  // seq. Crucially we do not advance `flushedAmount` on failure: the next
-  // retry re-derives `flushAmount` from `consumedAmount - flushedAmount`.
+  // seq and the same persisted amount. Newer local usage waits for the next
+  // flush seq instead of changing the payload behind the same idempotency key.
   private async requestFlushAndRefill(trigger: RefillTrigger): Promise<void> {
     return runDoOperation(
       {
@@ -2355,7 +2540,7 @@ export class EntitlementWindowDO extends DurableObject {
         baseFields: {
           flush_seq: trigger.flushSeq,
           flush_amount: trigger.flushAmount,
-          refill_chunk_amount: trigger.refillChunkAmount,
+          reservation_refill_requested_amount: trigger.refillAmount,
         },
       },
       async () => this.requestFlushAndRefillInner(trigger)
@@ -2370,7 +2555,7 @@ export class EntitlementWindowDO extends DurableObject {
       operation: "flush_refill",
       flush_seq: trigger.flushSeq,
       flush_amount: trigger.flushAmount,
-      refill_chunk_amount: trigger.refillChunkAmount,
+      reservation_refill_requested_amount: trigger.refillAmount,
       reservation_id: window?.reservationId ?? null,
       project_id: window?.projectId ?? null,
       customer_id: window?.customerId ?? null,
@@ -2385,7 +2570,7 @@ export class EntitlementWindowDO extends DurableObject {
         this.logger.error("flush+refill requested without a reservation", {
           flushSeq: trigger.flushSeq,
           flushAmount: trigger.flushAmount,
-          refillChunkAmount: trigger.refillChunkAmount,
+          refillAmount: trigger.refillAmount,
         })
         this.db.update(walletReservationTable).set({ refillInFlight: false }).run()
         wideEvent.outcome = "no_reservation"
@@ -2401,7 +2586,7 @@ export class EntitlementWindowDO extends DurableObject {
         reservationId: window.reservationId,
         flushSeq: trigger.flushSeq,
         flushAmount: trigger.flushAmount,
-        refillChunkAmount: trigger.refillChunkAmount,
+        refillChunkAmount: trigger.refillAmount,
         statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
         final: false,
         effectiveAt: new Date(trigger.effectiveAt),
@@ -2436,11 +2621,16 @@ export class EntitlementWindowDO extends DurableObject {
           flushSeq: trigger.flushSeq,
           pendingFlushSeq: null,
           pendingFlushFinal: false,
+          pendingFlushAmount: null,
+          pendingRefillAmount: 0,
           refillInFlight: false,
           lastFlushedAt: Date.now(),
         })
         .run()
 
+      wideEvent.reservation_refill_granted_amount = result.val.grantedAmount
+      wideEvent.reservation_refill_partial =
+        trigger.refillAmount > 0 && result.val.grantedAmount < trigger.refillAmount
       wideEvent.granted_amount = result.val.grantedAmount
       wideEvent.flushed_amount = result.val.flushedAmount
       wideEvent.allocation_after = window.allocationAmount + result.val.grantedAmount
@@ -2514,10 +2704,9 @@ export class EntitlementWindowDO extends DurableObject {
   // feature is free, in which case no reservation is needed).
   //
   // The reservation row is durable: even an allocation of 0 is persisted so
-  // subsequent events on this DO short-circuit through the in-tx
-  // LocalReservation check (which denies because allocation==0). The DO
-  // doesn't re-attempt to grow allocation mid-period — that's what the
-  // refill flush path is for, and refill only triggers from positive usage.
+  // subsequent events on this DO short-circuit through the in-tx reservation
+  // policy check. The DO may attempt one synchronous grow before returning
+  // WALLET_EMPTY when local runway is the only thing short of funding.
   // Customers who want service after running the wallet to 0 must wait for
   // the next period or top up (which clears `purchased` and the next
   // bootstrap on the next period picks it up).
@@ -2538,11 +2727,19 @@ export class EntitlementWindowDO extends DurableObject {
       projectedCost,
       computeMaxMarginalPriceMinor(input.entitlement.featureConfig)
     )
-    const sizing = sizeReservation(pricePerEvent)
+    const policy = this.reservationPolicy()
+    const sizing = computeInitialReservation({
+      pricePerEventAmount: pricePerEvent,
+      currentEventCostAmount: projectedCost,
+      policy,
+    })
+    if (sizing.requestedAmount <= 0) return null
+
     const walletService = this.getWalletService()
     const reservationGrant = this.firstGrantByDrainOrder(activeGrants)
     const reservationBucket = computeGrantPeriodBucket(reservationGrant, input.event.timestamp)
     const durableObjectId = this.ctx.id.toString()
+    const sampledAtMs = Date.now()
 
     if (!reservationBucket) {
       throw new Error("Unable to resolve grant bucket for reservation bootstrap")
@@ -2556,8 +2753,8 @@ export class EntitlementWindowDO extends DurableObject {
       currency: meter.currency as Currency,
       entitlementId: input.entitlement.customerEntitlementId,
       requestedAmount: sizing.requestedAmount,
-      refillThresholdBps: sizing.refillThresholdBps,
-      refillChunkAmount: sizing.refillChunkAmount,
+      refillThresholdBps: policy.refillThresholdBps,
+      refillChunkAmount: 0,
       periodStartAt: new Date(reservationBucket.start),
       periodEndAt: new Date(reservationBucket.end),
       effectiveAt: new Date(input.event.timestamp),
@@ -2610,8 +2807,12 @@ export class EntitlementWindowDO extends DurableObject {
         ? {
             reservationId: result.val.reservationId,
             allocationAmount: result.val.allocationAmount,
-            refillThresholdBps: sizing.refillThresholdBps,
-            refillChunkAmount: sizing.refillChunkAmount,
+            refillThresholdBps: policy.refillThresholdBps,
+            refillChunkAmount: 0,
+            targetReservationAmount: sizing.targetReservationAmount,
+            spendEwmaAmount: 0,
+            lastRateSampledAtMs: sampledAtMs,
+            maxEventCostAmount: projectedCost,
           }
         : {
             reservationId: result.val.reservationId,
@@ -2621,8 +2822,14 @@ export class EntitlementWindowDO extends DurableObject {
             flushSeq: 0,
             pendingFlushSeq: null,
             pendingFlushFinal: false,
-            refillThresholdBps: sizing.refillThresholdBps,
-            refillChunkAmount: sizing.refillChunkAmount,
+            pendingFlushAmount: null,
+            pendingRefillAmount: 0,
+            refillThresholdBps: policy.refillThresholdBps,
+            refillChunkAmount: 0,
+            targetReservationAmount: sizing.targetReservationAmount,
+            spendEwmaAmount: 0,
+            lastRateSampledAtMs: sampledAtMs,
+            maxEventCostAmount: projectedCost,
             refillInFlight: false,
           }
 

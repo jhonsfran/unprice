@@ -395,7 +395,10 @@ export class LedgerGateway {
 
         if (claim.existingTransferId) {
           const existing = await this.fetchTransfer(claim.existingTransferId, tx)
-          if (existing) return existing
+          if (existing) {
+            await this.assertIdempotentReplayMatches(request, existing, claim.statementKey, tx)
+            return existing
+          }
           throw new UnPriceLedgerError({
             message: "LEDGER_TRANSFER_FAILED",
             context: { reason: "idempotency_row_without_transfer", ...claim },
@@ -464,6 +467,7 @@ export class LedgerGateway {
                 context: { reason: "idempotency_row_without_transfer", ...claim },
               })
             }
+            await this.assertIdempotentReplayMatches(request, existing, claim.statementKey, tx)
             results[i] = existing
           } else {
             toCreate.push({ index: i, request })
@@ -628,7 +632,7 @@ export class LedgerGateway {
       statementKey: string | null
     },
     tx: DbExecutor
-  ): Promise<{ existingTransferId: string | null }> {
+  ): Promise<{ existingTransferId: string | null; statementKey: string | null }> {
     if (!opts.sourceType || !opts.sourceId) {
       throw new UnPriceLedgerError({ message: "LEDGER_SOURCE_IDENTITY_REQUIRED" })
     }
@@ -643,12 +647,12 @@ export class LedgerGateway {
     )
 
     if (inserted.rows.length > 0) {
-      return { existingTransferId: null }
+      return { existingTransferId: null, statementKey: opts.statementKey }
     }
 
-    const existing = await tx.execute<{ transfer_id: string | null }>(
+    const existing = await tx.execute<{ transfer_id: string | null; statement_key: string | null }>(
       sql`
-        SELECT transfer_id FROM unprice_ledger_idempotency
+        SELECT transfer_id, statement_key FROM unprice_ledger_idempotency
         WHERE project_id = ${opts.projectId}
           AND source_type = ${opts.sourceType}
           AND source_id = ${opts.sourceId}
@@ -656,7 +660,55 @@ export class LedgerGateway {
     )
 
     const existingId = existing.rows[0]?.transfer_id ?? null
-    return { existingTransferId: existingId }
+    const statementKey = existing.rows[0]?.statement_key ?? null
+    return { existingTransferId: existingId, statementKey }
+  }
+
+  private async assertIdempotentReplayMatches(
+    request: LedgerTransferRequest,
+    existing: LedgerTransfer,
+    existingStatementKey: string | null,
+    tx: DbExecutor
+  ): Promise<void> {
+    const amountCurrency = asCurrency(toSnapshot(request.amount).currency.code)
+    const fromAccount = await this.resolveTransferAccount(
+      request.fromAccount,
+      amountCurrency,
+      request.projectId,
+      tx
+    )
+    const toAccount = await this.resolveTransferAccount(
+      request.toAccount,
+      amountCurrency,
+      request.projectId,
+      tx
+    )
+    const requestedAmount = toLedgerAmount(request.amount)
+    const existingAmount = toLedgerAmount(existing.amount)
+    const requestedStatementKey = request.statementKey ?? null
+
+    const mismatches: string[] = []
+    if (existing.fromAccountId !== fromAccount.id) mismatches.push("from_account")
+    if (existing.toAccountId !== toAccount.id) mismatches.push("to_account")
+    if (existingAmount !== requestedAmount) mismatches.push("amount")
+    if (existing.currency !== amountCurrency) mismatches.push("currency")
+    if (existingStatementKey !== requestedStatementKey) mismatches.push("statement_key")
+
+    if (mismatches.length === 0) return
+
+    throw new UnPriceLedgerError({
+      message: "LEDGER_IDEMPOTENCY_CONFLICT",
+      context: {
+        mismatches,
+        sourceType: request.source.type,
+        sourceId: request.source.id,
+        existingTransferId: existing.id,
+        requestedAmount,
+        existingAmount,
+        requestedStatementKey,
+        existingStatementKey,
+      },
+    })
   }
 
   private async runTransfer(
