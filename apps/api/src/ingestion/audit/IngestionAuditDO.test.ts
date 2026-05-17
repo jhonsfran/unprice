@@ -6,9 +6,10 @@ const TEST_DO_IDEMPOTENCY_TTL_MS = TEST_INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60
 const TEST_AUDIT_RETENTION_MS = TEST_DO_IDEMPOTENCY_TTL_MS
 
 type DrizzleCondition = {
-  kind: "and" | "eq" | "isNull" | "lt"
+  kind: "and" | "eq" | "inArray" | "isNull" | "lt"
   column?: string
   value?: unknown
+  values?: unknown[]
   conditions?: DrizzleCondition[]
 }
 
@@ -447,6 +448,11 @@ async function loadIngestionAuditDO() {
         column: getColumnName(column),
         value,
       }),
+      inArray: (column: unknown, values: unknown[]): DrizzleCondition => ({
+        kind: "inArray",
+        column: getColumnName(column),
+        values,
+      }),
       isNull: (column: unknown): DrizzleCondition => ({
         kind: "isNull",
         column: getColumnName(column),
@@ -577,6 +583,23 @@ function buildFakeDrizzle(state: FakeDbState) {
           throw new Error(`Unsupported select().get() keys: ${keys.join(",")}`)
         },
         all() {
+          if (keys.includes("idempotencyKey") && keys.includes("payloadHash")) {
+            return [...state.rows.values()]
+              .filter((candidate) => matchesCondition(candidate, condition))
+              .map((row) => ({
+                idempotencyKey: row.idempotency_key,
+                payloadHash: row.payload_hash,
+              }))
+          }
+
+          if (keys.length === 1 && keys.includes("idempotencyKey")) {
+            return [...state.rows.values()]
+              .filter((candidate) => matchesCondition(candidate, condition))
+              .map((row) => ({
+                idempotencyKey: row.idempotency_key,
+              }))
+          }
+
           if (
             keys.includes("idempotencyKey") &&
             keys.includes("canonicalAuditId") &&
@@ -603,41 +626,39 @@ function buildFakeDrizzle(state: FakeDbState) {
     },
 
     insert() {
-      let row: Record<string, unknown> | null = null
+      let rows: Record<string, unknown>[] = []
 
       const runInsert = () => {
-        if (!row) {
-          return
-        }
+        for (const row of rows) {
+          const idempotencyKey = String(row.idempotencyKey)
+          if (state.rows.has(idempotencyKey)) {
+            continue
+          }
 
-        const idempotencyKey = String(row.idempotencyKey)
-        if (state.rows.has(idempotencyKey)) {
-          return
+          state.rows.set(idempotencyKey, {
+            idempotency_key: idempotencyKey,
+            canonical_audit_id: String(row.canonicalAuditId),
+            payload_hash: String(row.payloadHash),
+            status: row.status as "processed" | "rejected",
+            rejection_reason:
+              row.rejectionReason === null || row.rejectionReason === undefined
+                ? null
+                : String(row.rejectionReason),
+            result_json:
+              row.resultJson === null || row.resultJson === undefined ? "" : String(row.resultJson),
+            audit_payload_json: String(row.auditPayloadJson),
+            first_seen_at: Number(row.firstSeenAt),
+            published_at:
+              row.publishedAt === null || row.publishedAt === undefined
+                ? null
+                : Number(row.publishedAt),
+          })
         }
-
-        state.rows.set(idempotencyKey, {
-          idempotency_key: idempotencyKey,
-          canonical_audit_id: String(row.canonicalAuditId),
-          payload_hash: String(row.payloadHash),
-          status: row.status as "processed" | "rejected",
-          rejection_reason:
-            row.rejectionReason === null || row.rejectionReason === undefined
-              ? null
-              : String(row.rejectionReason),
-          result_json:
-            row.resultJson === null || row.resultJson === undefined ? "" : String(row.resultJson),
-          audit_payload_json: String(row.auditPayloadJson),
-          first_seen_at: Number(row.firstSeenAt),
-          published_at:
-            row.publishedAt === null || row.publishedAt === undefined
-              ? null
-              : Number(row.publishedAt),
-        })
       }
 
       return {
-        values(value: Record<string, unknown>) {
-          row = value
+        values(value: Record<string, unknown> | Record<string, unknown>[]) {
+          rows = Array.isArray(value) ? value : [value]
           return this
         },
         onConflictDoNothing() {
@@ -694,6 +715,10 @@ function matchesCondition(row: FakeAuditRow, condition: DrizzleCondition | undef
 
   if (condition.kind === "eq") {
     return value === condition.value
+  }
+
+  if (condition.kind === "inArray") {
+    return (condition.values ?? []).includes(value)
   }
 
   if (condition.kind === "isNull") {

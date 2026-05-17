@@ -1,6 +1,7 @@
 import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
+import { selectIngestionAuditShardIndex } from "./audit"
 import type { UnPriceIngestionError } from "./errors"
 import { type IngestionEntitlement, IngestionService } from "./service"
 
@@ -872,7 +873,10 @@ describe("IngestionService entitlement routing", () => {
     expect(apply).not.toHaveBeenCalled()
     expect(applyBatch).toHaveBeenCalledTimes(2)
     expect(applyBatch.mock.calls.map(([input]) => input.events.length)).toEqual([100, 1])
-    expect(commit).toHaveBeenCalledTimes(1)
+    expect(commit).toHaveBeenCalledTimes(
+      new Set(messages.map((message) => selectIngestionAuditShardIndex(message.idempotencyKey)))
+        .size
+    )
   })
 
   it("returns CUSTOMER_NOT_FOUND when verifying a missing customer", async () => {

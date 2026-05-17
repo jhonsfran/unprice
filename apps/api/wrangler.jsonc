@@ -127,8 +127,14 @@
     "preview": {
       "workers_dev": false,
       "observability": {
-        "enabled": true,
-        "head_sampling_rate": 1 // 100% of requests
+        "logs": {
+          "enabled": false,
+          "invocation_logs": true,
+          "persist": false
+        },
+        "traces": {
+          "enabled": false
+        }
       },
       "route": {
         "pattern": "preview-api.unprice.dev",

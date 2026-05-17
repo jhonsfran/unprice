@@ -58,6 +58,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-17: Async ingestion should batch entitlement-window RPCs by customer entitlement in
   chunks of 100; DO alarm cleanup should use indexed bounded probes/deletes, not `count(*)` scans
   over outbox, audit, or idempotency tables.
+- 2026-05-17: EntitlementWindowDO apply/verify hot paths should read only active
+  `grant_windows` bucket keys; full-table grant-window scans multiply storage rows read under
+  load.
+- 2026-05-17: IngestionAuditDO commit/publish paths should batch indexed key lookups and
+  published-at updates; per-entry SQL loops inflate DO wall time under queue batches.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
 

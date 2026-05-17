@@ -3,7 +3,7 @@ import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import type { AppLogger } from "@unprice/observability"
 import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
-import { and, asc, eq, inArray, isNull, lt } from "drizzle-orm"
+import { and, asc, inArray, isNull, lt } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { createDoLogger, runDoOperation } from "~/observability"
@@ -108,15 +108,29 @@ export class IngestionAuditDO extends DurableObject {
     let duplicates = 0
     let conflicts = 0
 
-    for (const entry of entries) {
-      const existing = this.db
-        .select({ payloadHash: ingestionAuditTable.payloadHash })
+    const payloadHashesByKey = new Map(
+      this.db
+        .select({
+          idempotencyKey: ingestionAuditTable.idempotencyKey,
+          payloadHash: ingestionAuditTable.payloadHash,
+        })
         .from(ingestionAuditTable)
-        .where(eq(ingestionAuditTable.idempotencyKey, entry.idempotencyKey))
-        .get()
+        .where(
+          inArray(
+            ingestionAuditTable.idempotencyKey,
+            unique(entries.map((entry) => entry.idempotencyKey))
+          )
+        )
+        .all()
+        .map((row) => [row.idempotencyKey, row.payloadHash])
+    )
+    const rowsToInsert: Array<typeof ingestionAuditTable.$inferInsert> = []
 
-      if (existing) {
-        if (existing.payloadHash === entry.payloadHash) {
+    for (const entry of entries) {
+      const existingPayloadHash = payloadHashesByKey.get(entry.idempotencyKey)
+
+      if (existingPayloadHash !== undefined) {
+        if (existingPayloadHash === entry.payloadHash) {
           duplicates++
         } else {
           conflicts++
@@ -124,25 +138,29 @@ export class IngestionAuditDO extends DurableObject {
         continue
       }
 
+      rowsToInsert.push({
+        idempotencyKey: entry.idempotencyKey,
+        canonicalAuditId: entry.canonicalAuditId,
+        payloadHash: entry.payloadHash,
+        status: entry.status,
+        rejectionReason: entry.rejectionReason ?? null,
+        resultJson: entry.resultJson,
+        auditPayloadJson: entry.auditPayloadJson,
+        firstSeenAt: entry.firstSeenAt,
+        publishedAt: null,
+      })
+      payloadHashesByKey.set(entry.idempotencyKey, entry.payloadHash)
+      inserted++
+    }
+
+    if (rowsToInsert.length > 0) {
       this.db
         .insert(ingestionAuditTable)
-        .values({
-          idempotencyKey: entry.idempotencyKey,
-          canonicalAuditId: entry.canonicalAuditId,
-          payloadHash: entry.payloadHash,
-          status: entry.status,
-          rejectionReason: entry.rejectionReason ?? null,
-          resultJson: entry.resultJson,
-          auditPayloadJson: entry.auditPayloadJson,
-          firstSeenAt: entry.firstSeenAt,
-          publishedAt: null,
-        })
+        .values(rowsToInsert)
         .onConflictDoNothing({
           target: ingestionAuditTable.idempotencyKey,
         })
         .run()
-
-      inserted++
     }
 
     if (inserted > 0) {
@@ -215,13 +233,14 @@ export class IngestionAuditDO extends DurableObject {
       await this.publishEvents(events)
 
       const now = Date.now()
-      for (const row of rows) {
+      const idempotencyKeys = rows.map((row) => row.idempotencyKey)
+      if (idempotencyKeys.length > 0) {
         this.db
           .update(ingestionAuditTable)
           .set({
             publishedAt: now,
           })
-          .where(eq(ingestionAuditTable.idempotencyKey, row.idempotencyKey))
+          .where(inArray(ingestionAuditTable.idempotencyKey, idempotencyKeys))
           .run()
       }
 
@@ -333,4 +352,8 @@ export class IngestionAuditDO extends DurableObject {
     }
     this.alarmScheduled = true
   }
+}
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)]
 }

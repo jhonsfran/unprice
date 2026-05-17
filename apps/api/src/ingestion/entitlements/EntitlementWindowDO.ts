@@ -739,20 +739,20 @@ export class EntitlementWindowDO extends DurableObject {
                   activeGrants,
                   facts: pendingFacts,
                   overageStrategy,
-                  states: this.readGrantStates(tx),
+                  states: this.readGrantStatesForActiveGrants(
+                    tx,
+                    activeGrants,
+                    input.event.timestamp
+                  ),
                   entitlement,
                   timestamp: input.event.timestamp,
                 })
 
                 if (exceeded) {
                   throw new EntitlementWindowLimitExceededError({
-                    available: resolveAvailableGrantUnits({
-                      grants: activeGrants,
-                      states: this.readGrantStates(tx),
-                      timestamp: input.event.timestamp,
-                    }),
+                    available: exceeded.available,
                     eventId: input.event.id,
-                    meterKey: exceeded.meterKey,
+                    meterKey: exceeded.fact.meterKey,
                   })
                 }
               },
@@ -1096,7 +1096,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     const input = rawInput ? enforcementStateInputSchema.parse(rawInput) : null
     const timestamp = input?.now ?? Date.now()
-    const snapshot = this.readEnforcementStateSnapshot(input)
+    const snapshot = this.readEnforcementStateSnapshot(input, timestamp)
     const { entitlement, states } = snapshot
     const activeGrants = resolveActiveGrants(snapshot.grants, timestamp)
 
@@ -1915,7 +1915,7 @@ export class EntitlementWindowDO extends DurableObject {
     overageStrategy: OverageStrategy
     states: GrantConsumptionState[]
     timestamp: number
-  }): Fact | null {
+  }): { available: number; fact: Fact } | null {
     if (params.overageStrategy === "always") {
       return null
     }
@@ -1936,13 +1936,13 @@ export class EntitlementWindowDO extends DurableObject {
       }
 
       if (params.overageStrategy === "last-call") {
-        if (available <= 0) return fact
+        if (available <= 0) return { available, fact }
         available = Math.max(0, available - fact.delta)
         continue
       }
 
       if (fact.delta > available) {
-        return fact
+        return { available, fact }
       }
 
       available -= fact.delta
@@ -2198,8 +2198,43 @@ export class EntitlementWindowDO extends DurableObject {
       .all()
   }
 
-  private readEnforcementStateSnapshot(input: EnforcementStateInput | null): EnforcementStateCache {
-    const inputSignature = input ? this.enforcementStateInputSignature(input) : null
+  private readGrantStatesForActiveGrants(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    grants: ActiveGrantInput[],
+    timestamp: number
+  ): GrantConsumptionState[] {
+    const bucketKeys = [
+      ...new Set(
+        grants
+          .map((grant) => computeGrantPeriodBucket(grant, timestamp)?.bucketKey)
+          .filter((key): key is string => typeof key === "string" && key.length > 0)
+      ),
+    ]
+
+    if (bucketKeys.length === 0) {
+      return []
+    }
+
+    return tx
+      .select({
+        bucketKey: grantWindowsTable.bucketKey,
+        grantId: grantWindowsTable.grantId,
+        periodKey: grantWindowsTable.periodKey,
+        periodStartAt: grantWindowsTable.periodStartAt,
+        periodEndAt: grantWindowsTable.periodEndAt,
+        consumedInCurrentWindow: grantWindowsTable.consumedInCurrentWindow,
+        exhaustedAt: grantWindowsTable.exhaustedAt,
+      })
+      .from(grantWindowsTable)
+      .where(inArray(grantWindowsTable.bucketKey, bucketKeys))
+      .all()
+  }
+
+  private readEnforcementStateSnapshot(
+    input: EnforcementStateInput | null,
+    timestamp: number
+  ): EnforcementStateCache {
+    const inputSignature = input ? this.enforcementStateInputSignature(input, timestamp) : null
 
     if (
       this.enforcementStateCache &&
@@ -2222,11 +2257,15 @@ export class EntitlementWindowDO extends DurableObject {
         })
       }
 
+      const entitlement = this.readEntitlementConfig(tx)
+      const grants = this.readGrants(tx)
+      const activeGrants = resolveActiveGrants(grants, timestamp)
+
       return {
-        entitlement: this.readEntitlementConfig(tx),
-        grants: this.readGrants(tx),
+        entitlement,
+        grants,
         inputSignature,
-        states: this.readGrantStates(tx),
+        states: this.readGrantStatesForActiveGrants(tx, activeGrants, timestamp),
       }
     })
 
@@ -2234,10 +2273,30 @@ export class EntitlementWindowDO extends DurableObject {
     return snapshot
   }
 
-  private enforcementStateInputSignature(input: EnforcementStateInput): string {
+  private enforcementStateInputSignature(input: EnforcementStateInput, timestamp: number): string {
+    const bucketKeys = [
+      ...new Set(
+        input.grants
+          .map(
+            (grant) =>
+              computeGrantPeriodBucket(
+                {
+                  ...grant,
+                  cadenceEffectiveAt: input.entitlement.effectiveAt,
+                  cadenceExpiresAt: input.entitlement.expiresAt,
+                  resetConfig: input.entitlement.resetConfig ?? null,
+                },
+                timestamp
+              )?.bucketKey
+          )
+          .filter((key): key is string => typeof key === "string" && key.length > 0)
+      ),
+    ].sort()
+
     return JSON.stringify({
       entitlement: input.entitlement,
       grants: input.grants,
+      bucketKeys,
     })
   }
 
@@ -2288,6 +2347,9 @@ export class EntitlementWindowDO extends DurableObject {
   ): PricedFact[] {
     const pricedFacts: PricedFact[] = []
     const priceGrant = this.firstGrantByDrainOrder(params.activeGrants)
+    const grantStates = params.facts.some((fact) => fact.delta > 0)
+      ? this.readGrantStatesForActiveGrants(tx, params.activeGrants, params.eventTimestamp)
+      : []
 
     for (const fact of params.facts) {
       if (fact.delta <= 0) {
@@ -2304,7 +2366,7 @@ export class EntitlementWindowDO extends DurableObject {
 
       const consumed = consumeGrantsByPriority({
         grants: params.activeGrants,
-        states: this.readGrantStates(tx),
+        states: grantStates,
         timestamp: params.eventTimestamp,
         units: fact.delta,
       })
@@ -2336,6 +2398,7 @@ export class EntitlementWindowDO extends DurableObject {
         })
 
         this.writeGrantConsumption(tx, allocation.nextState)
+        this.replaceGrantConsumptionState(grantStates, allocation.nextState)
       }
 
       if (consumed.remaining > 0) {
@@ -2427,6 +2490,19 @@ export class EntitlementWindowDO extends DurableObject {
       })
       .run()
     this.invalidateEnforcementStateCache()
+  }
+
+  private replaceGrantConsumptionState(
+    states: GrantConsumptionState[],
+    state: GrantConsumptionState
+  ): void {
+    const index = states.findIndex((candidate) => candidate.bucketKey === state.bucketKey)
+    if (index >= 0) {
+      states[index] = state
+      return
+    }
+
+    states.push(state)
   }
 
   private firstGrantByDrainOrder(grants: ActiveGrantInput[]): ActiveGrantInput {
@@ -3176,7 +3252,11 @@ export class EntitlementWindowDO extends DurableObject {
 
     const consumed = consumeGrantsByPriority({
       grants: params.activeGrants,
-      states: this.readGrantStates(this.db),
+      states: this.readGrantStatesForActiveGrants(
+        this.db,
+        params.activeGrants,
+        params.eventTimestamp
+      ),
       timestamp: params.eventTimestamp,
       units: fact.delta,
     })

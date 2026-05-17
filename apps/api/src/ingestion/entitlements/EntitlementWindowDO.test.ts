@@ -495,6 +495,57 @@ describe("EntitlementWindowDO", () => {
     expect(total).toBe(EVENT_COUNT * 300)
   })
 
+  it("limits hot-path grant window reads to the active bucket", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const activeBucketKey = `grant_123:onetime:${BASE_NOW - 60_000}`
+    db.grantWindowRows.set(activeBucketKey, {
+      bucketKey: activeBucketKey,
+      grantId: "grant_123",
+      periodKey: `onetime:${BASE_NOW - 60_000}`,
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 2,
+      exhaustedAt: null,
+    })
+
+    for (let i = 0; i < 250; i++) {
+      const bucketKey = `grant_historical_${i}:onetime:${BASE_NOW - (i + 2) * 60_000}`
+      db.grantWindowRows.set(bucketKey, {
+        bucketKey,
+        grantId: `grant_historical_${i}`,
+        periodKey: `onetime:${BASE_NOW - (i + 2) * 60_000}`,
+        periodStartAt: BASE_NOW - (i + 2) * 60_000,
+        periodEndAt: BASE_NOW - (i + 1) * 60_000,
+        consumedInCurrentWindow: 100,
+        exhaustedAt: BASE_NOW - (i + 1) * 60_000,
+      })
+    }
+
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    db.storageReadCounts.grantWindows = 0
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        limit: 10,
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(db.storageReadCounts.grantWindows).toBe(2)
+    expect(db.grantWindowRows.get(activeBucketKey)?.consumedInCurrentWindow).toBe(5)
+  })
+
   it("stores denied results and reuses them when a retry hits the same limit", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -4638,6 +4689,25 @@ function buildFakeDrizzle(state: FakeDbState) {
     }
   }
 
+  const matchGrantWindowCondition = (
+    row: GrantWindowRow,
+    condition?: DrizzleCondition
+  ): boolean => {
+    if (!condition) return true
+    switch (condition.kind) {
+      case "and":
+        return (condition.conditions ?? []).every((nested) =>
+          matchGrantWindowCondition(row, nested)
+        )
+      case "eq":
+        return row.bucketKey === String(condition.value)
+      case "inArray":
+        return (condition.values ?? []).map(String).includes(row.bucketKey)
+      default:
+        return true
+    }
+  }
+
   const db = {
     transaction<T>(callback: (tx: typeof db) => T): T {
       const idempotencySnapshot = new Map(state.idempotencyRows)
@@ -4776,14 +4846,15 @@ function buildFakeDrizzle(state: FakeDbState) {
               .map(([eventId]) => ({ eventId }))
           }
           if (keys.every((k) => GRANT_WINDOW_KEYS.has(k))) {
-            state.storageReadCounts.grantWindows++
-            return [...state.grantWindowRows.values()]
+            const rows = [...state.grantWindowRows.values()]
+              .filter((row) => matchGrantWindowCondition(row, cond))
               .sort((a, b) => a.grantId.localeCompare(b.grantId))
-              .map((source) => {
-                const row: Record<string, unknown> = {}
-                for (const key of keys) row[key] = (source as Record<string, unknown>)[key]
-                return row
-              })
+            state.storageReadCounts.grantWindows += rows.length
+            return rows.map((source) => {
+              const row: Record<string, unknown> = {}
+              for (const key of keys) row[key] = (source as Record<string, unknown>)[key]
+              return row
+            })
           }
           if (keys.every((k) => GRANT_KEYS.has(k))) {
             state.storageReadCounts.grants++
