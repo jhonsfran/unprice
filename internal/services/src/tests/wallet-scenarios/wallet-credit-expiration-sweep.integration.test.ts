@@ -11,6 +11,7 @@ import {
 import { seedTestDb } from "../../test-fixtures/seed-db"
 import { expireWalletCredits } from "../../use-cases/wallet/expire-wallet-credits"
 import { UnPriceWalletError, WalletService } from "../../wallet"
+import { flushReservationForTest } from "./helpers"
 
 const db = createTestDatabaseConnection()
 
@@ -132,19 +133,23 @@ describe("wallet credit expiration sweep DB lifecycle", () => {
       requestedAmount: 2 * euro,
     })
     expect(reservation.err).toBeUndefined()
-    expect(reservation.val?.drainLegs).toEqual([
-      expect.objectContaining({
-        amount: 2 * euro,
-        grantId: drained.val?.grantId,
-        source: "granted",
-      }),
-    ])
+    await expectReservationFundingLegs({
+      expected: [
+        {
+          allocatedAmount: 2 * euro,
+          grantSource: "promo",
+          source: "granted",
+          walletCreditId: drained.val?.grantId,
+        },
+      ],
+      reservationId: reservation.val?.reservationId,
+    })
 
     const reservationId = reservation.val?.reservationId
     expect(reservationId).toBeDefined()
     if (!reservationId) return
 
-    const flush = await wallet.flushReservation({
+    const flush = await flushReservationForTest(wallet, {
       currency,
       customerId,
       final: true,
@@ -193,8 +198,8 @@ describe("wallet credit expiration sweep DB lifecycle", () => {
     })
     await expectLedgerSourceCounts([
       { count: 3, source_type: "wallet_adjust" },
+      { count: 1, source_type: "wallet_capture_usage" },
       { count: 1, source_type: "wallet_expire_grant" },
-      { count: 1, source_type: "wallet_flush_consume" },
       { count: 1, source_type: "wallet_reserve_granted" },
     ])
 
@@ -209,8 +214,124 @@ describe("wallet credit expiration sweep DB lifecycle", () => {
     expect(replay).toEqual({ expiredCount: 0, skippedCount: 0 })
     await expectLedgerSourceCounts([
       { count: 3, source_type: "wallet_adjust" },
+      { count: 1, source_type: "wallet_capture_usage" },
       { count: 1, source_type: "wallet_expire_grant" },
-      { count: 1, source_type: "wallet_flush_consume" },
+      { count: 1, source_type: "wallet_reserve_granted" },
+    ])
+  })
+
+  it("skips grants with active reserved funding, then expires after reservation release", async () => {
+    const { logger, wallet } = createWallet()
+
+    const expiring = await wallet.adjust({
+      actorId: "system:sweep-test",
+      currency,
+      customerId,
+      expiresAt: jan15,
+      idempotencyKey: "wallet-sweep:active-reservation",
+      projectId,
+      reason: "active reservation expiration guard",
+      signedAmount: 5 * euro,
+      source: "promo",
+    })
+    expect(expiring.err).toBeUndefined()
+
+    const reservation = await wallet.createReservation({
+      currency,
+      customerId,
+      effectiveAt: jan5,
+      entitlementId: "ent_wallet_active_reservation_sweep",
+      idempotencyKey: "wallet-sweep:active-reservation:reserve",
+      periodEndAt: feb1,
+      periodStartAt: jan1,
+      projectId,
+      refillChunkAmount: 0,
+      refillThresholdBps: 2000,
+      requestedAmount: 3 * euro,
+    })
+    expect(reservation.err).toBeUndefined()
+
+    const reservationId = reservation.val?.reservationId
+    expect(reservationId).toBeDefined()
+    if (!reservationId) return
+
+    const skipped = await expireWalletCredits(
+      {
+        db,
+        logger,
+        services: { wallet },
+      },
+      { now: feb1 }
+    )
+    expect(skipped).toEqual({ expiredCount: 0, skippedCount: 1 })
+    expect(logger.warn).toHaveBeenCalledWith(
+      "wallet.expire_grant.skipped_active_reservation",
+      expect.objectContaining({
+        grantId: expiring.val?.grantId,
+        reservationId,
+        stillReservedAmount: 3 * euro,
+      })
+    )
+    await expectCreditRows([
+      {
+        expired: false,
+        id: expiring.val?.grantId,
+        remainingAmount: 2 * euro,
+      },
+    ])
+    await expectWalletState(wallet, {
+      consumed: 0,
+      creditIds: [expiring.val?.grantId],
+      granted: 2 * euro,
+      purchased: 0,
+      reserved: 3 * euro,
+    })
+    await expectLedgerSourceCounts([
+      { count: 1, source_type: "wallet_adjust" },
+      { count: 1, source_type: "wallet_reserve_granted" },
+    ])
+
+    const release = await flushReservationForTest(wallet, {
+      currency,
+      customerId,
+      final: true,
+      flushAmount: 0,
+      flushSeq: 1,
+      projectId,
+      refillChunkAmount: 0,
+      reservationId,
+      closeReason: "period_close",
+      statementKey: "stmt_wallet_active_reservation_release",
+    })
+    expect(release.err).toBeUndefined()
+
+    const expired = await expireWalletCredits(
+      {
+        db,
+        logger,
+        services: { wallet },
+      },
+      { now: feb1 }
+    )
+    expect(expired).toEqual({ expiredCount: 1, skippedCount: 0 })
+    await expectCreditRows([
+      {
+        expired: true,
+        id: expiring.val?.grantId,
+        remainingAmount: 0,
+      },
+    ])
+    await expectWalletState(wallet, {
+      consumed: 0,
+      creditIds: [],
+      granted: 0,
+      purchased: 0,
+      reserved: 0,
+    })
+    await expectLedgerSourceCounts([
+      { count: 1, source_type: "wallet_adjust" },
+      { count: 1, source_type: "wallet_expire_grant" },
+      { count: 1, source_type: "wallet_release_reservation" },
       { count: 1, source_type: "wallet_reserve_granted" },
     ])
   })
@@ -316,6 +437,41 @@ async function expectWalletState(
     reserved: expected.reserved,
   })
   expect(state.val?.credits.map((credit) => credit.id)).toEqual(expected.creditIds)
+}
+
+async function expectReservationFundingLegs(input: {
+  expected: Array<{
+    allocatedAmount: number
+    grantSource: string | null
+    source: "granted" | "purchased"
+    walletCreditId: string | null | undefined
+  }>
+  reservationId: string | undefined
+}) {
+  expect(input.reservationId).toBeDefined()
+  if (!input.reservationId) return
+
+  const fundingLegs = await db.execute<{
+    allocated_amount: number | string
+    grant_source: string | null
+    source: "granted" | "purchased"
+    wallet_credit_id: string | null
+  }>(sql`
+    SELECT source, wallet_credit_id, grant_source, allocated_amount
+    FROM unprice_entitlement_reservation_funding_legs
+    WHERE project_id = ${projectId}
+      AND reservation_id = ${input.reservationId}
+    ORDER BY sequence ASC
+  `)
+
+  expect(
+    fundingLegs.rows.map((row) => ({
+      allocatedAmount: Number(row.allocated_amount),
+      grantSource: row.grant_source,
+      source: row.source,
+      walletCreditId: row.wallet_credit_id,
+    }))
+  ).toEqual(input.expected)
 }
 
 async function expectLedgerSourceCounts(expected: Array<{ count: number; source_type: string }>) {

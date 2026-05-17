@@ -84,14 +84,15 @@ patterns. Keep it cheap to load and useful.
   `tooling/tiny-tools/plan-wallet.ts`.
 - 2026-05-08: `allocation_amount` is reservation runway, not consumed usage; keep DO id metadata
   for traceability.
-- 2026-05-08: On finite limit reached, close active wallet reservations through the final-flush
-  helper.
+- 2026-05-08: On finite limit reached, close active wallet reservations through the reservation
+  close helper.
 - 2026-05-08: Treat `WALLET_EMPTY` as possibly DO-local underfunding; flush+refill once before
   denying.
 - 2026-05-17: EntitlementWindowDO inactivity final-flush keeps production/test at 12h but uses
   60s in `NODE_ENV=development` so local wallet reservations return quickly.
-- 2026-05-17: When wallet credit appears missing, include `wallet_release_granted` ledger rows;
-  final flush releases unused granted reservations back to platform funding, not `available.granted`.
+- 2026-05-17: Reservation release and grant expiration are separate financial events: release
+  restores unused reserved funds to customer buckets; only grant expiration returns available
+  grant balance to platform funding.
 - 2026-05-08: Prefer `/v1/wallet/balance`; keep `/v1/wallet` as compatibility and credit balance
   reads under `/v1/wallet/credits/{walletId}/balance`.
 - 2026-05-08: Saved subscription phase `creditLinePolicy` and `creditLineAmount` are immutable.

@@ -37,7 +37,7 @@ import {
 } from "@unprice/services/entitlements"
 import type { IngestionRejectionReason } from "@unprice/services/ingestion"
 import { LedgerGateway } from "@unprice/services/ledger"
-import { WalletService } from "@unprice/services/wallet"
+import { type ReservationCloseReason, WalletService } from "@unprice/services/wallet"
 import {
   DEFAULT_RESERVATION_POLICY,
   type ReservationPolicy,
@@ -274,7 +274,7 @@ type PricedFact = {
   units: number
 }
 
-type FinalFlushResult =
+type CloseReservationResult =
   | {
       ok: true
       outcome: "already_reconciled" | "deferred" | "no_reservation" | "success"
@@ -286,8 +286,9 @@ type FinalFlushResult =
       outcome: "exception" | "wallet_error"
     }
 
-type FinalFlushOptions = {
+type CloseReservationOptions = {
   allowDeletionRequested?: boolean
+  closeReason: ReservationCloseReason
   recoverPendingFinal?: boolean
 }
 
@@ -298,9 +299,8 @@ const SQLITE_BIND_PARAMETER_CHUNK_SIZE = 90
 const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
 const WALLET_RESERVATION_ROW_ID = "singleton"
 // Inactivity closes out a live reservation even if the period hasn't ended.
-// The final flush returns remaining reserved funds to `available.purchased`;
-// a future apply() on this DO runs without a reservation until lazy bootstrap
-// opens a new one.
+// Closing a reservation releases unused funds back to the customer's original
+// available buckets; grant expiration is owned by the period/expiry flow.
 const DEVELOPMENT_INACTIVITY_THRESHOLD_MS = 60 * 1000
 const DEFAULT_INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000
 
@@ -400,7 +400,9 @@ export class EntitlementWindowDO extends DurableObject {
         const flushAmount =
           window.pendingFlushAmount ?? Math.max(0, window.consumedAmount - window.flushedAmount)
         if (window.pendingFlushFinal) {
-          this.ctx.waitUntil(this.finalFlush({ recoverPendingFinal: true }))
+          this.ctx.waitUntil(
+            this.closeReservation({ closeReason: "manual", recoverPendingFinal: true })
+          )
         } else {
           // Retry the same refill amount recorded when pendingFlushSeq was
           // created. Recomputing adaptive policy here could change the refill
@@ -799,7 +801,7 @@ export class EntitlementWindowDO extends DurableObject {
                 refillTrigger = {
                   flushSeq: nextSeq,
                   // Flush leg = cumulative consumed - already flushed. Zero on the
-                  // first refill means `flushReservation` skips the recognize leg.
+                  // first refill means capture skips the recognize leg.
                   flushAmount: pendingFlushAmount,
                   refillAmount,
                   effectiveAt: input.event.timestamp,
@@ -899,7 +901,7 @@ export class EntitlementWindowDO extends DurableObject {
               })
               .run()
 
-            this.ctx.waitUntil(this.finalFlush())
+            this.ctx.waitUntil(this.closeReservation({ closeReason: "limit_reached" }))
             result = deniedResult
             return deniedResult
           }
@@ -925,7 +927,7 @@ export class EntitlementWindowDO extends DurableObject {
               })
               .run()
 
-            this.ctx.waitUntil(this.finalFlush())
+            this.ctx.waitUntil(this.closeReservation({ closeReason: "wallet_empty" }))
 
             result = deniedResult
             return deniedResult
@@ -1048,7 +1050,7 @@ export class EntitlementWindowDO extends DurableObject {
       overageStrategy !== "always" && limit !== null && Number.isFinite(available) && available <= 0
 
     if (isLimitReached) {
-      this.ctx.waitUntil(this.finalFlush())
+      this.ctx.waitUntil(this.closeReservation({ closeReason: "limit_reached" }))
     }
 
     return {
@@ -1164,20 +1166,20 @@ export class EntitlementWindowDO extends DurableObject {
 
       if (window?.reservationId && !window.recoveryRequired) {
         const isPeriodEnd = window.reservationEndAt !== null && now >= window.reservationEndAt
-        const isInactive =
-          window.lastEventAt !== null && now - window.lastEventAt >= inactivityMs
+        const isInactive = window.lastEventAt !== null && now - window.lastEventAt >= inactivityMs
         const isDeletionPending = window.deletionRequested
 
         if (isPeriodEnd || isInactive || isDeletionPending) {
-          wideEvent.final_flush_reason = isDeletionPending
-            ? "deletion"
+          const closeReason: ReservationCloseReason = isDeletionPending
+            ? "deletion_requested"
             : isPeriodEnd
-              ? "period_end"
+              ? "period_close"
               : "inactivity"
+          wideEvent.close_reservation_reason = closeReason
           const hasPendingWalletFlush = this.hasPendingWalletFlush(window)
           const isPendingFinalFlush = hasPendingWalletFlush && window.pendingFlushFinal
           if (hasPendingWalletFlush && !isPendingFinalFlush) {
-            wideEvent.final_flush_deferred = true
+            wideEvent.close_reservation_deferred = true
             wideEvent.pending_flush_seq = window.pendingFlushSeq
             wideEvent.refill_in_flight = window.refillInFlight
 
@@ -1195,19 +1197,20 @@ export class EntitlementWindowDO extends DurableObject {
           }
 
           if (!hasPendingWalletFlush || isPendingFinalFlush) {
-            const finalFlushResult = await this.finalFlush({
+            const closeResult = await this.closeReservation({
               allowDeletionRequested: isDeletionPending,
+              closeReason,
               recoverPendingFinal: isPendingFinalFlush,
             })
-            wideEvent.final_flush_ok = finalFlushResult.ok
-            wideEvent.final_flush_outcome = finalFlushResult.outcome
-            if (!finalFlushResult.ok) {
-              wideEvent.final_flush_error_message = finalFlushResult.errorMessage ?? null
+            wideEvent.close_reservation_ok = closeResult.ok
+            wideEvent.close_reservation_outcome = closeResult.outcome
+            if (!closeResult.ok) {
+              wideEvent.close_reservation_error_message = closeResult.errorMessage ?? null
               wideEvent.operator_action_required = true
               wideEvent.outcome = "operator_required"
-              this.logOperatorActionRequired("entitlement wallet final flush failed", {
-                error_message: finalFlushResult.errorMessage ?? null,
-                final_flush_outcome: finalFlushResult.outcome,
+              this.logOperatorActionRequired("entitlement wallet reservation close failed", {
+                error_message: closeResult.errorMessage ?? null,
+                close_reservation_outcome: closeResult.outcome,
                 reservation_id: window.reservationId,
               })
               await this.ctx.storage.deleteAlarm()
@@ -1266,7 +1269,7 @@ export class EntitlementWindowDO extends DurableObject {
       // surface their consumption on a predictable cadence rather than
       // waiting for the refill threshold or reservation end.
       //
-      // Re-read the window because finalFlush above may have closed it.
+      // Re-read the window because closeReservation above may have closed it.
       // `refillInFlight` guards against a concurrent apply()-triggered refill
       // (single-threaded per DO, but the apply path's `ctx.waitUntil` can
       // outlive the request and we don't want the alarm to race it).
@@ -1438,7 +1441,7 @@ export class EntitlementWindowDO extends DurableObject {
   // delete immediately because there may be a live reservation holding
   // funds in `customer.{cid}.reserved` that must be captured + refunded
   // first. The alarm loop picks up `deletionRequested` on its next wake,
-  // runs finalFlush when needed, logs the retained state, and leaves any
+  // closes the reservation when needed, logs the retained state, and leaves any
   // pending cleanup to an operator.
   public async requestDeletion(): Promise<void> {
     await this.ready
@@ -1448,32 +1451,31 @@ export class EntitlementWindowDO extends DurableObject {
     await this.scheduleAlarm(Date.now())
   }
 
-  // Slice 7.7 final flush: recognize the unflushed tail of consumed and
-  // return any reserved remainder back to `available.purchased`. Callers can
-  // schedule this path without pre-reading the reservation; the helper owns
-  // the recovery/deletion/pending-flush guards. We bump `flushSeq`, park
-  // `pendingFlushSeq`, and set `refillInFlight` before external wallet I/O
-  // so other alarm work does not race the closeout.
-  // WalletService treats `flushAmount == 0` as "skip the recognize leg", so a
-  // no-activity period end or a deletion without any events is cheap — only
-  // the refund leg fires.
-  private async finalFlush(options: FinalFlushOptions = {}): Promise<FinalFlushResult> {
+  // Close a live reservation: capture the unflushed consumed tail, then
+  // release unused reserved funds back to the customer's original buckets.
+  // Grant expiration is deliberately outside the DO.
+  private async closeReservation(
+    options: CloseReservationOptions
+  ): Promise<CloseReservationResult> {
     return runDoOperation(
       {
         requestId: this.ctx.id.toString(),
         service: "entitlementwindow",
-        operation: "final_flush",
+        operation: "close_reservation",
         waitUntil: (p) => this.ctx.waitUntil(p),
       },
-      async () => this.finalFlushInner(options)
+      async () => this.closeReservationInner(options)
     )
   }
 
-  private async finalFlushInner(options: FinalFlushOptions): Promise<FinalFlushResult> {
+  private async closeReservationInner(
+    options: CloseReservationOptions
+  ): Promise<CloseReservationResult> {
     const startTime = Date.now()
     const window = this.readWalletReservation(this.db)
     const wideEvent: Record<string, unknown> = {
-      operation: "final_flush",
+      operation: "close_reservation",
+      close_reason: options.closeReason,
       reservation_id: window?.reservationId ?? null,
       project_id: window?.projectId ?? null,
       customer_id: window?.customerId ?? null,
@@ -1488,7 +1490,7 @@ export class EntitlementWindowDO extends DurableObject {
       }
 
       if (!window.projectId || !window.customerId) {
-        this.logger.error("final flush requested without reservation identifiers", {
+        this.logger.error("reservation close requested without reservation identifiers", {
           reservationId: window.reservationId,
           projectId: window.projectId,
           customerId: window.customerId,
@@ -1546,17 +1548,14 @@ export class EntitlementWindowDO extends DurableObject {
 
       const walletService = this.getWalletService()
       const durableObjectId = this.ctx.id.toString()
-      const result = await walletService.flushReservation({
+      const captureResult = await walletService.captureReservationUsage({
         projectId: window.projectId,
         customerId: window.customerId,
         currency: window.currency as Currency,
         reservationId: window.reservationId,
         flushSeq: nextSeq,
-        flushAmount: unflushed,
-        refillChunkAmount: 0,
+        amount: unflushed,
         statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
-        final: true,
-        effectiveAt: new Date(window.reservationEndAt ?? Date.now()),
         metadata: {
           requestedBy: "durable_object",
           requestedById: durableObjectId,
@@ -1565,10 +1564,10 @@ export class EntitlementWindowDO extends DurableObject {
         sourceId: durableObjectId,
       })
 
-      if (result.err) {
+      if (captureResult.err) {
         if (
           isRecoveringPendingFinal &&
-          result.err.message === "WALLET_RESERVATION_ALREADY_RECONCILED"
+          captureResult.err.message === "WALLET_RESERVATION_ALREADY_RECONCILED"
         ) {
           this.db
             .update(walletReservationTable)
@@ -1591,8 +1590,8 @@ export class EntitlementWindowDO extends DurableObject {
           return { ok: true, outcome: "already_reconciled" }
         }
 
-        this.logger.error(result.err, {
-          context: "final flush failed",
+        this.logger.error(captureResult.err, {
+          context: "reservation close capture failed",
           flushSeq: nextSeq,
           reservationId: window.reservationId,
         })
@@ -1604,9 +1603,68 @@ export class EntitlementWindowDO extends DurableObject {
           .set({ recoveryRequired: true, refillInFlight: false })
           .run()
         wideEvent.outcome = "wallet_error"
-        wideEvent.error_message = result.err.message
+        wideEvent.error_message = captureResult.err.message
         return {
-          errorMessage: result.err.message,
+          errorMessage: captureResult.err.message,
+          ok: false,
+          outcome: "wallet_error",
+        }
+      }
+
+      const releaseResult = await walletService.releaseReservation({
+        projectId: window.projectId,
+        customerId: window.customerId,
+        currency: window.currency as Currency,
+        reservationId: window.reservationId,
+        closeReason: options.closeReason,
+        idempotencyKey: `release:${window.reservationId}:${options.closeReason}`,
+        metadata: {
+          requestedBy: "durable_object",
+          requestedById: durableObjectId,
+          durableObjectId,
+        },
+        sourceId: durableObjectId,
+      })
+
+      if (releaseResult.err) {
+        if (
+          isRecoveringPendingFinal &&
+          releaseResult.err.message === "WALLET_RESERVATION_ALREADY_RECONCILED"
+        ) {
+          this.db
+            .update(walletReservationTable)
+            .set({
+              reservationId: null,
+              flushedAmount: Math.max(window.flushedAmount, window.consumedAmount),
+              flushSeq: nextSeq,
+              pendingFlushSeq: null,
+              pendingFlushFinal: false,
+              pendingFlushAmount: null,
+              pendingRefillAmount: 0,
+              refillInFlight: false,
+              lastFlushedAt: Date.now(),
+            })
+            .run()
+
+          wideEvent.flushed_amount = Math.max(0, window.consumedAmount - window.flushedAmount)
+          wideEvent.flushed_after = Math.max(window.flushedAmount, window.consumedAmount)
+          wideEvent.outcome = "already_reconciled"
+          return { ok: true, outcome: "already_reconciled" }
+        }
+
+        this.logger.error(releaseResult.err, {
+          context: "reservation close release failed",
+          flushSeq: nextSeq,
+          reservationId: window.reservationId,
+        })
+        this.db
+          .update(walletReservationTable)
+          .set({ recoveryRequired: true, refillInFlight: false })
+          .run()
+        wideEvent.outcome = "wallet_error"
+        wideEvent.error_message = releaseResult.err.message
+        return {
+          errorMessage: releaseResult.err.message,
           ok: false,
           outcome: "wallet_error",
         }
@@ -1621,7 +1679,7 @@ export class EntitlementWindowDO extends DurableObject {
         .update(walletReservationTable)
         .set({
           reservationId: null,
-          flushedAmount: window.flushedAmount + result.val.flushedAmount,
+          flushedAmount: window.flushedAmount + captureResult.val.capturedAmount,
           flushSeq: nextSeq,
           pendingFlushSeq: null,
           pendingFlushFinal: false,
@@ -1632,13 +1690,16 @@ export class EntitlementWindowDO extends DurableObject {
         })
         .run()
 
-      wideEvent.flushed_amount = result.val.flushedAmount
-      wideEvent.flushed_after = window.flushedAmount + result.val.flushedAmount
+      wideEvent.flushed_amount = captureResult.val.capturedAmount
+      wideEvent.flushed_after = window.flushedAmount + captureResult.val.capturedAmount
+      wideEvent.released_amount = releaseResult.val.releasedAmount
+      wideEvent.restored_granted_amount = releaseResult.val.restoredGrantedAmount
+      wideEvent.refunded_purchased_amount = releaseResult.val.refundedPurchasedAmount
       wideEvent.outcome = "success"
       return { ok: true, outcome: "success" }
     } catch (error) {
       this.logger.error(error, {
-        context: "final flush threw unexpectedly",
+        context: "reservation close threw unexpectedly",
         flushSeq: window ? window.flushSeq + 1 : null,
         reservationId: window?.reservationId ?? null,
       })
@@ -1656,7 +1717,7 @@ export class EntitlementWindowDO extends DurableObject {
       }
     } finally {
       wideEvent.duration_ms = Date.now() - startTime
-      this.logger.info("entitlement final_flush", wideEvent)
+      this.logger.info("entitlement close_reservation", wideEvent)
     }
   }
 
@@ -2528,12 +2589,12 @@ export class EntitlementWindowDO extends DurableObject {
     return { kind: "refilled", trigger }
   }
 
-  // Slice 7.5. Calls WalletService.flushReservation in-process and folds the returned
-  // allocation/flush delta back into the DO's SQLite state.
+  // Slice 7.5. Captures consumed reserved funds, then extends reservation
+  // runway, and folds the deltas back into the DO's SQLite state.
   //
   // `flushSeq` is the idempotency seal: the ledger dedupes on
-  // `flush:{reservationId}:{flushSeq}`, so replays after a crash produce
-  // the same outcome. On error we only clear `refillInFlight` — the
+  // `capture:{reservationId}:{flushSeq}` / `extend:{reservationId}:{flushSeq}`,
+  // so replays after a crash produce the same outcome. On error we only clear `refillInFlight` — the
   // `pendingFlushSeq` stays set so crash recovery (or the next apply()
   // that observes `pendingFlushSeq > flushSeq`) can retry with the same
   // seq and the same persisted amount. Newer local usage waits for the next
@@ -2587,16 +2648,45 @@ export class EntitlementWindowDO extends DurableObject {
 
       const walletService = this.getWalletService()
       const durableObjectId = this.ctx.id.toString()
-      const result = await walletService.flushReservation({
+      const captureResult = await walletService.captureReservationUsage({
         projectId: window.projectId,
         customerId: window.customerId,
         currency: window.currency as Currency,
         reservationId: window.reservationId,
         flushSeq: trigger.flushSeq,
-        flushAmount: trigger.flushAmount,
-        refillChunkAmount: trigger.refillAmount,
+        amount: trigger.flushAmount,
         statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
-        final: false,
+        metadata: {
+          requestedBy: "durable_object",
+          requestedById: durableObjectId,
+          durableObjectId,
+        },
+        sourceId: durableObjectId,
+      })
+
+      if (captureResult.err) {
+        this.logger.error(captureResult.err, {
+          context: "flush+refill capture failed",
+          flushSeq: trigger.flushSeq,
+          reservationId: window.reservationId,
+        })
+        // Clear the single-flight flag so apply() can re-trigger on the
+        // next event; leave pendingFlushSeq set so crash recovery picks up
+        // the same seq after an eviction.
+        this.db.update(walletReservationTable).set({ refillInFlight: false }).run()
+        wideEvent.outcome = "wallet_error"
+        wideEvent.error_message = captureResult.err.message
+        return
+      }
+
+      const extendResult = await walletService.extendReservation({
+        projectId: window.projectId,
+        customerId: window.customerId,
+        currency: window.currency as Currency,
+        reservationId: window.reservationId,
+        flushSeq: trigger.flushSeq,
+        requestedAmount: trigger.refillAmount,
+        statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
         effectiveAt: new Date(trigger.effectiveAt),
         metadata: {
           requestedBy: "durable_object",
@@ -2606,26 +2696,23 @@ export class EntitlementWindowDO extends DurableObject {
         sourceId: durableObjectId,
       })
 
-      if (result.err) {
-        this.logger.error(result.err, {
-          context: "flush+refill failed",
+      if (extendResult.err) {
+        this.logger.error(extendResult.err, {
+          context: "flush+refill extend failed",
           flushSeq: trigger.flushSeq,
           reservationId: window.reservationId,
         })
-        // Clear the single-flight flag so apply() can re-trigger on the
-        // next event; leave pendingFlushSeq set so crash recovery picks up
-        // the same seq after an eviction.
         this.db.update(walletReservationTable).set({ refillInFlight: false }).run()
         wideEvent.outcome = "wallet_error"
-        wideEvent.error_message = result.err.message
+        wideEvent.error_message = extendResult.err.message
         return
       }
 
       this.db
         .update(walletReservationTable)
         .set({
-          allocationAmount: window.allocationAmount + result.val.grantedAmount,
-          flushedAmount: window.flushedAmount + result.val.flushedAmount,
+          allocationAmount: window.allocationAmount + extendResult.val.grantedAmount,
+          flushedAmount: window.flushedAmount + captureResult.val.capturedAmount,
           flushSeq: trigger.flushSeq,
           pendingFlushSeq: null,
           pendingFlushFinal: false,
@@ -2636,13 +2723,13 @@ export class EntitlementWindowDO extends DurableObject {
         })
         .run()
 
-      wideEvent.reservation_refill_granted_amount = result.val.grantedAmount
+      wideEvent.reservation_refill_granted_amount = extendResult.val.grantedAmount
       wideEvent.reservation_refill_partial =
-        trigger.refillAmount > 0 && result.val.grantedAmount < trigger.refillAmount
-      wideEvent.granted_amount = result.val.grantedAmount
-      wideEvent.flushed_amount = result.val.flushedAmount
-      wideEvent.allocation_after = window.allocationAmount + result.val.grantedAmount
-      wideEvent.flushed_after = window.flushedAmount + result.val.flushedAmount
+        trigger.refillAmount > 0 && extendResult.val.grantedAmount < trigger.refillAmount
+      wideEvent.granted_amount = extendResult.val.grantedAmount
+      wideEvent.flushed_amount = captureResult.val.capturedAmount
+      wideEvent.allocation_after = window.allocationAmount + extendResult.val.grantedAmount
+      wideEvent.flushed_after = window.flushedAmount + captureResult.val.capturedAmount
       wideEvent.outcome = "success"
     } catch (error) {
       this.logger.error(error, {

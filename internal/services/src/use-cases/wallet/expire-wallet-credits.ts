@@ -97,10 +97,23 @@ export async function expireWalletCredits(
           grantId: current.id,
           amount: current.remainingAmount,
           source: current.source,
-          idempotencyKey: `expire:${current.id}`,
+          idempotencyKey: `expire_grant:${current.id}:${
+            current.expiresAt?.toISOString() ?? input.now.toISOString()
+          }`,
         })
 
         if (result.err) {
+          if (result.err.message === "WALLET_GRANT_HAS_ACTIVE_RESERVATION") {
+            deps.logger.warn("wallet.expire_grant.skipped_active_reservation", {
+              grantId: current.id,
+              customerId: current.customerId,
+              projectId: current.projectId,
+              remainingAmount: current.remainingAmount,
+              ...(result.err.context ?? {}),
+            })
+            skippedCount += 1
+            return
+          }
           throw result.err
         }
 

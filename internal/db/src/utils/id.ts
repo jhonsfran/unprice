@@ -40,6 +40,7 @@ export const prefixes = {
   ledger_settlement: "lset",
   ledger_settlement_line: "lsl",
   entitlement_reservation: "eres",
+  entitlement_reservation_funding_leg: "erfl",
   wallet_topup: "wtup",
   wallet_credit: "wcr",
 } as const

@@ -6,6 +6,7 @@ import {
   integer,
   json,
   primaryKey,
+  text,
   timestamp,
   uniqueIndex,
 } from "drizzle-orm/pg-core"
@@ -14,7 +15,9 @@ import { pgTableProject } from "../utils/_table"
 import { cuid } from "../utils/fields"
 import { projectID } from "../utils/sql"
 import { customers } from "./customers"
+import { walletCreditSourceEnum } from "./enums"
 import { projects } from "./projects"
+import { walletCredits } from "./walletCredits"
 
 /**
  * Reservation state machine. One row per active DO reservation
@@ -26,19 +29,10 @@ import { projects } from "./projects"
  * Lifecycle:
  *   - INSERT on subscription activation (via `walletService.createReservation`).
  *   - `allocation_amount` monotonically grows as the DO refills.
- *   - `consumed_amount` syncs at each flush to mirror DO SQLite.
- *   - `drain_legs` preserves coarse source attribution for safe final
- *     release; purchased returns to purchased, granted returns to platform
- *     funding instead of becoming cash.
- *   - `reconciled_at` set by the final flush; NULL = active.
+ *   - `consumed_amount` syncs at each capture to mirror DO SQLite.
+ *   - Funding attribution lives in entitlement_reservation_funding_legs.
+ *   - `reconciled_at` set when the reservation is released; NULL = active.
  */
-export type EntitlementReservationDrainLeg = {
-  source: "granted" | "purchased"
-  amount: number
-  grantId?: string
-  grantSource?: string
-}
-
 export type EntitlementReservationMetadata = Record<string, unknown>
 
 export const entitlementReservations = pgTableProject(
@@ -52,8 +46,6 @@ export const entitlementReservations = pgTableProject(
     allocationAmount: bigint("allocation_amount", { mode: "number" }).notNull(),
     // Mirror of DO-side consumed counter, synced on each flush.
     consumedAmount: bigint("consumed_amount", { mode: "number" }).notNull().default(0),
-    // Cumulative source attribution for funds moved into reserved.
-    drainLegs: json("drain_legs").$type<EntitlementReservationDrainLeg[]>().notNull().default([]),
     // Operational trace context for the reservation owner (for example the DO id).
     metadata: json("metadata").$type<EntitlementReservationMetadata>(),
     // Refill trigger threshold in basis points of allocation (2000 = 20%).
@@ -63,7 +55,7 @@ export const entitlementReservations = pgTableProject(
     periodStartAt: timestamp("period_start_at", { withTimezone: true }).notNull(),
     periodEndAt: timestamp("period_end_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
-    // Set by the final flush. NULL = active reservation.
+    // Set when the reservation is released. NULL = active reservation.
     reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
   },
   (table) => ({
@@ -99,13 +91,86 @@ export const entitlementReservations = pgTableProject(
   })
 )
 
-export const entitlementReservationsRelations = relations(entitlementReservations, ({ one }) => ({
-  project: one(projects, {
-    fields: [entitlementReservations.projectId],
-    references: [projects.id],
-  }),
-  customer: one(customers, {
-    fields: [entitlementReservations.customerId, entitlementReservations.projectId],
-    references: [customers.id, customers.projectId],
-  }),
-}))
+export const entitlementReservationFundingLegs = pgTableProject(
+  "entitlement_reservation_funding_legs",
+  {
+    ...projectID,
+    reservationId: cuid("reservation_id").notNull(),
+    source: text("source").$type<"granted" | "purchased">().notNull(),
+    walletCreditId: cuid("wallet_credit_id"),
+    grantSource: walletCreditSourceEnum("grant_source"),
+    allocatedAmount: bigint("allocated_amount", { mode: "number" }).notNull(),
+    capturedAmount: bigint("captured_amount", { mode: "number" }).notNull().default(0),
+    releasedAmount: bigint("released_amount", { mode: "number" }).notNull().default(0),
+    sequence: integer("sequence").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(sql`now()`),
+  },
+  (table) => ({
+    primary: primaryKey({
+      columns: [table.id, table.projectId],
+      name: "entitlement_reservation_funding_legs_pkey",
+    }),
+    reservationSequence: uniqueIndex("entitlement_reservation_funding_legs_res_seq_idx").on(
+      table.projectId,
+      table.reservationId,
+      table.sequence
+    ),
+    reservation: index("entitlement_reservation_funding_legs_reservation_idx").on(
+      table.projectId,
+      table.reservationId
+    ),
+    walletCredit: index("entitlement_reservation_funding_legs_wallet_credit_idx").on(
+      table.projectId,
+      table.walletCreditId
+    ),
+    reservationfk: foreignKey({
+      columns: [table.reservationId, table.projectId],
+      foreignColumns: [entitlementReservations.id, entitlementReservations.projectId],
+      name: "entitlement_reservation_funding_legs_reservation_id_fkey",
+    }).onDelete("cascade"),
+    walletCreditfk: foreignKey({
+      columns: [table.walletCreditId, table.projectId],
+      foreignColumns: [walletCredits.id, walletCredits.projectId],
+      name: "entitlement_reservation_funding_legs_wallet_credit_id_fkey",
+    }).onDelete("restrict"),
+  })
+)
+
+export const entitlementReservationsRelations = relations(
+  entitlementReservations,
+  ({ many, one }) => ({
+    project: one(projects, {
+      fields: [entitlementReservations.projectId],
+      references: [projects.id],
+    }),
+    customer: one(customers, {
+      fields: [entitlementReservations.customerId, entitlementReservations.projectId],
+      references: [customers.id, customers.projectId],
+    }),
+    fundingLegs: many(entitlementReservationFundingLegs),
+  })
+)
+
+export const entitlementReservationFundingLegsRelations = relations(
+  entitlementReservationFundingLegs,
+  ({ one }) => ({
+    project: one(projects, {
+      fields: [entitlementReservationFundingLegs.projectId],
+      references: [projects.id],
+    }),
+    reservation: one(entitlementReservations, {
+      fields: [
+        entitlementReservationFundingLegs.reservationId,
+        entitlementReservationFundingLegs.projectId,
+      ],
+      references: [entitlementReservations.id, entitlementReservations.projectId],
+    }),
+    walletCredit: one(walletCredits, {
+      fields: [
+        entitlementReservationFundingLegs.walletCreditId,
+        entitlementReservationFundingLegs.projectId,
+      ],
+      references: [walletCredits.id, walletCredits.projectId],
+    }),
+  })
+)

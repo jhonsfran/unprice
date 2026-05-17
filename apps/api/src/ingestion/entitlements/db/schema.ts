@@ -69,7 +69,7 @@ export const meterStateTable = sqliteTable("meter_state", {
 })
 
 // Singleton reservation state for this DO. This mirrors the allocation that
-// WalletService.createReservation / flushReservation have moved into
+// WalletService.createReservation plus capture/extend/release have moved into
 // customer.{cid}.reserved so the hot path can answer "can this event be
 // funded?" without touching the ledger per event. All amounts are pgledger
 // scale-8 minor units ($1 = 100_000_000).

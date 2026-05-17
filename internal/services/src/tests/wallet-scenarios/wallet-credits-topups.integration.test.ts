@@ -19,6 +19,7 @@ import { seedTestDb } from "../../test-fixtures/seed-db"
 import { processWebhookEvent } from "../../use-cases/payment-provider/process-webhook-event"
 import { initiateTopup } from "../../use-cases/wallet/initiate-topup"
 import { UnPriceWalletError, WalletService } from "../../wallet"
+import { flushReservationForTest } from "./helpers"
 
 const db = createTestDatabaseConnection()
 
@@ -256,20 +257,23 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     expect(reservation.err).toBeUndefined()
     expect(reservation.val).toMatchObject({
       allocationAmount: 6 * euro,
-      drainLegs: [
+    })
+    await expectReservationFundingLegs({
+      expected: [
         {
-          amount: 5 * euro,
-          grantId: creditLine.val?.grantId,
+          allocatedAmount: 5 * euro,
           grantSource: "credit_line",
           source: "granted",
+          walletCreditId: creditLine.val?.grantId,
         },
         {
-          amount: 1 * euro,
-          grantId: promo.val?.grantId,
+          allocatedAmount: 1 * euro,
           grantSource: "promo",
           source: "granted",
+          walletCreditId: promo.val?.grantId,
         },
       ],
+      reservationId: reservation.val?.reservationId,
     })
 
     await expectWalletState(wallet, {
@@ -306,7 +310,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     expect(reservationId).toBeDefined()
     if (!reservationId) return
 
-    const flush = await wallet.flushReservation({
+    const flush = await flushReservationForTest(wallet, {
       currency,
       customerId,
       final: true,
@@ -328,8 +332,8 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
 
     await expectWalletState(wallet, {
       consumed: 250_000_000,
-      creditIds: [promo.val?.grantId],
-      granted: 2 * euro,
+      creditIds: [creditLine.val?.grantId, promo.val?.grantId],
+      granted: 550_000_000,
       purchased: 0,
       reserved: 0,
     })
@@ -340,8 +344,8 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     })
     await expectLedgerSourceCounts([
       { count: 2, source_type: "wallet_adjust" },
-      { count: 1, source_type: "wallet_flush_consume" },
-      { count: 2, source_type: "wallet_release_granted" },
+      { count: 1, source_type: "wallet_capture_usage" },
+      { count: 2, source_type: "wallet_release_reservation" },
       { count: 1, source_type: "wallet_reserve_granted" },
     ])
   })
@@ -606,15 +610,23 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     expect(reservation.err).toBeUndefined()
     expect(reservation.val).toMatchObject({
       allocationAmount: 8 * euro,
-      drainLegs: [
+    })
+    await expectReservationFundingLegs({
+      expected: [
         {
-          amount: 4 * euro,
-          grantId: credit.val?.grantId,
+          allocatedAmount: 4 * euro,
           grantSource: "promo",
           source: "granted",
+          walletCreditId: credit.val?.grantId,
         },
-        { amount: 4 * euro, source: "purchased" },
+        {
+          allocatedAmount: 4 * euro,
+          grantSource: null,
+          source: "purchased",
+          walletCreditId: null,
+        },
       ],
+      reservationId: reservation.val?.reservationId,
     })
     await expectWalletState(wallet, {
       consumed: 0,
@@ -628,7 +640,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     expect(reservationId).toBeDefined()
     if (!reservationId) return
 
-    const flush = await wallet.flushReservation({
+    const flush = await flushReservationForTest(wallet, {
       currency,
       customerId,
       final: true,
@@ -648,16 +660,15 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     })
     await expectWalletState(wallet, {
       consumed: 3 * euro,
-      creditIds: [],
-      granted: 0,
+      creditIds: [credit.val?.grantId],
+      granted: 1 * euro,
       purchased: 6 * euro,
       reserved: 0,
     })
     await expectLedgerSourceCounts([
       { count: 1, source_type: "wallet_adjust" },
-      { count: 1, source_type: "wallet_capture_refund" },
-      { count: 1, source_type: "wallet_flush_consume" },
-      { count: 1, source_type: "wallet_release_granted" },
+      { count: 1, source_type: "wallet_capture_usage" },
+      { count: 2, source_type: "wallet_release_reservation" },
       { count: 1, source_type: "wallet_reserve_granted" },
       { count: 1, source_type: "wallet_reserve_purchased" },
       { count: 1, source_type: "wallet_topup" },
@@ -700,7 +711,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
     expect(reservationId).toBeDefined()
     if (!reservationId) return
 
-    const finalFlush = await wallet.flushReservation({
+    const finalFlush = await flushReservationForTest(wallet, {
       currency,
       customerId,
       final: true,
@@ -719,7 +730,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       refundedAmount: 0,
     })
 
-    const replay = await wallet.flushReservation({
+    const replay = await flushReservationForTest(wallet, {
       currency,
       customerId,
       final: true,
@@ -731,12 +742,12 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       reservationId,
       statementKey: "stmt_wallet_final_recovery",
     })
-    expect(replay.err?.message).toBe("WALLET_RESERVATION_ALREADY_RECONCILED")
+    expect(replay.err).toBeUndefined()
 
     await expectWalletState(wallet, {
       consumed: 2 * euro,
       creditIds: [credit.val?.grantId],
-      granted: 4 * euro,
+      granted: 8 * euro,
       purchased: 0,
       reserved: 0,
     })
@@ -744,20 +755,163 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       {
         id: credit.val?.grantId,
         issued_amount: 10 * euro,
-        remaining_amount: 4 * euro,
+        remaining_amount: 8 * euro,
         source: "credit_line",
       },
     ])
     await expectReservationClosed({
       allocationAmount: 6 * euro,
       consumedAmount: 2 * euro,
-      drainLegCount: 1,
+      fundingLegCount: 1,
       reservationId,
     })
     await expectLedgerSourceCounts([
       { count: 1, source_type: "wallet_adjust" },
-      { count: 1, source_type: "wallet_flush_consume" },
-      { count: 1, source_type: "wallet_release_granted" },
+      { count: 1, source_type: "wallet_capture_usage" },
+      { count: 1, source_type: "wallet_release_reservation" },
+      { count: 1, source_type: "wallet_reserve_granted" },
+    ])
+  })
+
+  it("keeps capture and extend commands idempotent and rejects same-key payload drift", async () => {
+    const { wallet } = createServices()
+
+    const credit = await wallet.adjust({
+      actorId: "system:command-idempotency",
+      currency,
+      customerId,
+      expiresAt: feb1,
+      idempotencyKey: "wallet-command-idempotency:credit",
+      projectId,
+      reason: "command idempotency credit",
+      signedAmount: 10 * euro,
+      source: "credit_line",
+    })
+    expect(credit.err).toBeUndefined()
+
+    const reservation = await wallet.createReservation({
+      currency,
+      customerId,
+      effectiveAt: jan1,
+      entitlementId: "ent_wallet_command_idempotency",
+      idempotencyKey: "wallet-command-idempotency:reserve",
+      periodEndAt: feb1,
+      periodStartAt: jan1,
+      projectId,
+      refillChunkAmount: 0,
+      refillThresholdBps: 2000,
+      requestedAmount: 4 * euro,
+    })
+    expect(reservation.err).toBeUndefined()
+
+    const reservationId = reservation.val?.reservationId
+    expect(reservationId).toBeDefined()
+    if (!reservationId) return
+
+    const capture = await wallet.captureReservationUsage({
+      currency,
+      customerId,
+      flushSeq: 1,
+      amount: 1 * euro,
+      projectId,
+      reservationId,
+      statementKey: "stmt_wallet_command_idempotency_capture",
+    })
+    expect(capture.err).toBeUndefined()
+
+    const captureReplay = await wallet.captureReservationUsage({
+      currency,
+      customerId,
+      flushSeq: 1,
+      amount: 1 * euro,
+      projectId,
+      reservationId,
+      statementKey: "stmt_wallet_command_idempotency_capture",
+    })
+    expect(captureReplay.err).toBeUndefined()
+
+    const captureConflict = await wallet.captureReservationUsage({
+      currency,
+      customerId,
+      flushSeq: 1,
+      amount: 2 * euro,
+      projectId,
+      reservationId,
+      statementKey: "stmt_wallet_command_idempotency_capture",
+    })
+    expect(captureConflict.err?.message).toBe("WALLET_IDEMPOTENCY_CONFLICT")
+
+    const extend = await wallet.extendReservation({
+      currency,
+      customerId,
+      effectiveAt: jan1,
+      flushSeq: 2,
+      projectId,
+      requestedAmount: 2 * euro,
+      reservationId,
+      statementKey: "stmt_wallet_command_idempotency_extend",
+    })
+    expect(extend.err).toBeUndefined()
+
+    const extendReplay = await wallet.extendReservation({
+      currency,
+      customerId,
+      effectiveAt: jan1,
+      flushSeq: 2,
+      projectId,
+      requestedAmount: 2 * euro,
+      reservationId,
+      statementKey: "stmt_wallet_command_idempotency_extend",
+    })
+    expect(extendReplay.err).toBeUndefined()
+
+    const extendConflict = await wallet.extendReservation({
+      currency,
+      customerId,
+      effectiveAt: jan1,
+      flushSeq: 2,
+      projectId,
+      requestedAmount: 1 * euro,
+      reservationId,
+      statementKey: "stmt_wallet_command_idempotency_extend",
+    })
+    expect(extendConflict.err?.message).toBe("WALLET_IDEMPOTENCY_CONFLICT")
+
+    await expectWalletState(wallet, {
+      consumed: 1 * euro,
+      creditIds: [credit.val?.grantId],
+      granted: 4 * euro,
+      purchased: 0,
+      reserved: 5 * euro,
+    })
+    await expectReservationOpen({
+      allocationAmount: 6 * euro,
+      consumedAmount: 1 * euro,
+      reservationId,
+    })
+    await expectReservationFundingAccounting({
+      expected: [
+        {
+          allocatedAmount: 4 * euro,
+          capturedAmount: 1 * euro,
+          releasedAmount: 0,
+          source: "granted",
+          walletCreditId: credit.val?.grantId,
+        },
+        {
+          allocatedAmount: 2 * euro,
+          capturedAmount: 0,
+          releasedAmount: 0,
+          source: "granted",
+          walletCreditId: credit.val?.grantId,
+        },
+      ],
+      reservationId,
+    })
+    await expectLedgerSourceCounts([
+      { count: 1, source_type: "wallet_adjust" },
+      { count: 1, source_type: "wallet_capture_usage" },
+      { count: 1, source_type: "wallet_extend_granted" },
       { count: 1, source_type: "wallet_reserve_granted" },
     ])
   })
@@ -1123,16 +1277,54 @@ async function expectWalletCreditRows(
 async function expectReservationClosed(input: {
   allocationAmount: number
   consumedAmount: number
-  drainLegCount?: number
+  fundingLegCount?: number
   reservationId: string
 }) {
   const reservations = await db.execute<{
     allocation_amount: number | string
     consumed_amount: number | string
-    drain_legs: unknown
     reconciled_at: Date | null
   }>(sql`
-    SELECT allocation_amount, consumed_amount, drain_legs, reconciled_at
+    SELECT allocation_amount, consumed_amount, reconciled_at
+    FROM unprice_entitlement_reservations
+    WHERE project_id = ${projectId}
+      AND id = ${input.reservationId}
+  `)
+  const fundingLegs = await db.execute<{ count: number | string }>(sql`
+    SELECT count(*) AS count
+    FROM unprice_entitlement_reservation_funding_legs
+    WHERE project_id = ${projectId}
+      AND reservation_id = ${input.reservationId}
+  `)
+
+  expect(
+    reservations.rows.map((row) => ({
+      allocationAmount: Number(row.allocation_amount),
+      consumedAmount: Number(row.consumed_amount),
+      fundingLegCount: Number(fundingLegs.rows[0]?.count ?? 0),
+      reconciled: row.reconciled_at !== null,
+    }))
+  ).toEqual([
+    {
+      allocationAmount: input.allocationAmount,
+      consumedAmount: input.consumedAmount,
+      fundingLegCount: input.fundingLegCount ?? 2,
+      reconciled: true,
+    },
+  ])
+}
+
+async function expectReservationOpen(input: {
+  allocationAmount: number
+  consumedAmount: number
+  reservationId: string
+}) {
+  const reservations = await db.execute<{
+    allocation_amount: number | string
+    consumed_amount: number | string
+    reconciled_at: Date | null
+  }>(sql`
+    SELECT allocation_amount, consumed_amount, reconciled_at
     FROM unprice_entitlement_reservations
     WHERE project_id = ${projectId}
       AND id = ${input.reservationId}
@@ -1142,17 +1334,85 @@ async function expectReservationClosed(input: {
     reservations.rows.map((row) => ({
       allocationAmount: Number(row.allocation_amount),
       consumedAmount: Number(row.consumed_amount),
-      drainLegCount: Array.isArray(row.drain_legs) ? row.drain_legs.length : 0,
       reconciled: row.reconciled_at !== null,
     }))
   ).toEqual([
     {
       allocationAmount: input.allocationAmount,
       consumedAmount: input.consumedAmount,
-      drainLegCount: input.drainLegCount ?? 2,
-      reconciled: true,
+      reconciled: false,
     },
   ])
+}
+
+async function expectReservationFundingLegs(input: {
+  expected: Array<{
+    allocatedAmount: number
+    grantSource: string | null
+    source: "granted" | "purchased"
+    walletCreditId: string | null | undefined
+  }>
+  reservationId: string | undefined
+}) {
+  expect(input.reservationId).toBeDefined()
+  if (!input.reservationId) return
+
+  const fundingLegs = await db.execute<{
+    allocated_amount: number | string
+    grant_source: string | null
+    source: "granted" | "purchased"
+    wallet_credit_id: string | null
+  }>(sql`
+    SELECT source, wallet_credit_id, grant_source, allocated_amount
+    FROM unprice_entitlement_reservation_funding_legs
+    WHERE project_id = ${projectId}
+      AND reservation_id = ${input.reservationId}
+    ORDER BY sequence ASC
+  `)
+
+  expect(
+    fundingLegs.rows.map((row) => ({
+      allocatedAmount: Number(row.allocated_amount),
+      grantSource: row.grant_source,
+      source: row.source,
+      walletCreditId: row.wallet_credit_id,
+    }))
+  ).toEqual(input.expected)
+}
+
+async function expectReservationFundingAccounting(input: {
+  expected: Array<{
+    allocatedAmount: number
+    capturedAmount: number
+    releasedAmount: number
+    source: "granted" | "purchased"
+    walletCreditId: string | null | undefined
+  }>
+  reservationId: string
+}) {
+  const fundingLegs = await db.execute<{
+    allocated_amount: number | string
+    captured_amount: number | string
+    released_amount: number | string
+    source: "granted" | "purchased"
+    wallet_credit_id: string | null
+  }>(sql`
+    SELECT source, wallet_credit_id, allocated_amount, captured_amount, released_amount
+    FROM unprice_entitlement_reservation_funding_legs
+    WHERE project_id = ${projectId}
+      AND reservation_id = ${input.reservationId}
+    ORDER BY sequence ASC
+  `)
+
+  expect(
+    fundingLegs.rows.map((row) => ({
+      allocatedAmount: Number(row.allocated_amount),
+      capturedAmount: Number(row.captured_amount),
+      releasedAmount: Number(row.released_amount),
+      source: row.source,
+      walletCreditId: row.wallet_credit_id,
+    }))
+  ).toEqual(input.expected)
 }
 
 async function expectTopupRow(expected: {

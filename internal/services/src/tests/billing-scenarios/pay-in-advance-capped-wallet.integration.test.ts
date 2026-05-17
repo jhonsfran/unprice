@@ -21,6 +21,7 @@ import { billPeriod } from "../../use-cases/billing/bill-period"
 import { deriveActivationInputsFromPlan } from "../../use-cases/billing/derive-provision-inputs"
 import { activateSubscription } from "../../use-cases/billing/provision-period"
 import { WalletService } from "../../wallet"
+import { flushReservationForTest } from "../wallet-scenarios/helpers"
 
 const db = createTestDatabaseConnection()
 
@@ -195,20 +196,13 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     expect(reservation.err).toBeUndefined()
     expect(reservation.val).toMatchObject({
       allocationAmount: usageAmount,
-      drainLegs: [
-        expect.objectContaining({
-          amount: usageAmount,
-          grantSource: "credit_line",
-          source: "granted",
-        }),
-      ],
     })
 
     const reservationId = reservation.val?.reservationId
     expect(reservationId).toBeDefined()
     if (!reservationId) return
 
-    const flush = await wallet.flushReservation({
+    const flush = await flushReservationForTest(wallet, {
       projectId,
       customerId,
       currency: "EUR",
@@ -347,7 +341,7 @@ async function expectLedgerSources() {
   expect(sources.rows).toEqual([
     { count: 2, source_type: "subscription_billing_period_charge_v1" },
     { count: 1, source_type: "wallet_adjust" },
-    { count: 1, source_type: "wallet_flush_consume" },
+    { count: 1, source_type: "wallet_capture_usage" },
     { count: 1, source_type: "wallet_reserve_granted" },
   ])
 }

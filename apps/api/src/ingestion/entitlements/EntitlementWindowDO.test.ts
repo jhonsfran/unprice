@@ -268,7 +268,7 @@ describe("EntitlementWindowDO", () => {
     // opt into the wallet path stay identical to their pre-7.5 shape.
     testState.flushReservation.mockResolvedValue({
       err: null,
-      val: { grantedAmount: 0, flushedAmount: 0, refundedAmount: 0, drainLegs: [] },
+      val: { grantedAmount: 0, flushedAmount: 0, refundedAmount: 0 },
     })
     // Default: lazy bootstrap returns a healthy reservation. Tests that need
     // the WALLET_EMPTY surface (allocationAmount: 0) or wallet-error paths
@@ -278,7 +278,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_lazy_default",
         allocationAmount: 1_000_000_000, // $10, the sizing ceiling
-        drainLegs: [],
       },
     })
     // Default: unit pricing — amount = quantity * $1.00. We return fake Dinero
@@ -351,7 +350,6 @@ describe("EntitlementWindowDO", () => {
       err: null
       val: {
         allocationAmount: number
-        drainLegs: []
         reservationId: string
       }
     }>()
@@ -375,7 +373,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_concurrent_bootstrap",
         allocationAmount: 1_000_000_000,
-        drainLegs: [],
       },
     })
 
@@ -1233,7 +1230,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_enforcement_state",
         allocationAmount: 100 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -1570,7 +1566,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_lazy",
         allocationAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -1622,7 +1617,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_micro",
         allocationAmount: 150,
-        drainLegs: [],
       },
     })
 
@@ -1661,7 +1655,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_high_price",
         allocationAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -1693,7 +1686,6 @@ describe("EntitlementWindowDO", () => {
         val: {
           reservationId: "res_lazy",
           allocationAmount: 5 * 100_000_000,
-          drainLegs: [],
         },
       })
       .mockResolvedValueOnce({
@@ -1701,7 +1693,6 @@ describe("EntitlementWindowDO", () => {
         val: {
           reservationId: "res_lazy",
           allocationAmount: 5 * 100_000_000,
-          drainLegs: [],
           reused: "active",
         },
       })
@@ -1754,7 +1745,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_empty",
         allocationAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -1788,7 +1778,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_partial_bootstrap",
         allocationAmount: 100_000_000,
-        drainLegs: [],
       },
     })
     testState.flushReservation.mockImplementation(
@@ -1798,7 +1787,6 @@ describe("EntitlementWindowDO", () => {
           grantedAmount: 0,
           flushedAmount: input.flushAmount,
           refundedAmount: input.final ? 100_000_000 : 0,
-          drainLegs: [],
         },
       })
     )
@@ -1855,7 +1843,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_empty",
         allocationAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -1885,7 +1872,6 @@ describe("EntitlementWindowDO", () => {
           grantedAmount: input.refillChunkAmount,
           flushedAmount: input.flushAmount,
           refundedAmount: 0,
-          drainLegs: [],
         },
       })
     )
@@ -1954,7 +1940,6 @@ describe("EntitlementWindowDO", () => {
           grantedAmount: 0,
           flushedAmount: input.flushAmount,
           refundedAmount: input.final ? 10 : 0,
-          drainLegs: [],
         },
       })
     )
@@ -2043,7 +2028,6 @@ describe("EntitlementWindowDO", () => {
           grantedAmount: input.final ? 0 : input.refillChunkAmount,
           flushedAmount: input.flushAmount,
           refundedAmount: input.final ? input.refillChunkAmount : 0,
-          drainLegs: [],
         },
       })
     )
@@ -2316,7 +2300,7 @@ describe("EntitlementWindowDO", () => {
 
   // ---------------------------------------------------------------------
   // In-process flush+refill. These exercise the real requestFlushAndRefill
-  // path: the DO calls WalletService.flushReservation
+  // path: the DO calls wallet capture/extend/release commands
   // (mocked), then folds the returned allocation/flush deltas back into
   // SQLite. We assert both the happy path (grantedAmount extends runway,
   // flushSeq advances, pendingFlushSeq clears) and the failure modes
@@ -2324,7 +2308,7 @@ describe("EntitlementWindowDO", () => {
   // pendingFlushSeq so crash recovery / the next apply can retry).
   // ---------------------------------------------------------------------
 
-  it("folds flushReservation results into SQLite on a successful flush+refill", async () => {
+  it("folds wallet reservation command results into SQLite on a successful flush+refill", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2341,7 +2325,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 4 * 100_000_000,
         flushedAmount: 5 * 100_000_000,
         refundedAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -2411,7 +2394,7 @@ describe("EntitlementWindowDO", () => {
     )
   })
 
-  it("clears refillInFlight but preserves pendingFlushSeq when flushReservation returns an error", async () => {
+  it("clears refillInFlight but preserves pendingFlushSeq when wallet commands return an error", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2463,7 +2446,7 @@ describe("EntitlementWindowDO", () => {
     expect(after.refillInFlight).toBe(false)
   })
 
-  it("clears refillInFlight when flushReservation throws unexpectedly", async () => {
+  it("clears refillInFlight when wallet commands throw unexpectedly", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2519,7 +2502,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 2 * 100_000_000,
         flushedAmount: 100_000_000,
         refundedAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -2596,7 +2578,6 @@ describe("EntitlementWindowDO", () => {
           grantedAmount: input.refillChunkAmount,
           flushedAmount: input.flushAmount,
           refundedAmount: 0,
-          drainLegs: [],
         },
       })
     )
@@ -2676,7 +2657,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 4 * 100_000_000,
         flushedAmount: 5 * 100_000_000,
         refundedAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -2854,7 +2834,7 @@ describe("EntitlementWindowDO", () => {
   })
 
   it("persists projectId and customerId into meter_window on first apply", async () => {
-    // Identity fields are what flushReservation needs to call the ledger
+    // Identity fields are what wallet commands need to call the ledger
     // without re-threading apply's input — guard that ensureMeterWindow
     // actually seeds them on the first insert.
     const EntitlementWindowDO = await loadEntitlementWindowDO()
@@ -2910,7 +2890,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 2 * 100_000_000,
         refundedAmount: 3 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -2974,7 +2953,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 0,
         refundedAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -3028,7 +3006,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 0,
         refundedAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -3120,7 +3097,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 1 * 100_000_000,
         refundedAmount: 4 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -3172,7 +3148,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 1 * 100_000_000,
         refundedAmount: 4 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -3663,7 +3638,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_lazy",
         allocationAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -3725,7 +3699,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_lazy",
         allocationAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -3831,8 +3804,108 @@ async function loadEntitlementWindowDO() {
 
   vi.doMock("@unprice/services/wallet", () => ({
     WalletService: class {
-      public flushReservation = testState.flushReservation
       public createReservation = testState.createReservation
+
+      private lastCapture: {
+        amount: number
+        flushSeq: number
+        statementKey: string
+        metadata?: Record<string, unknown>
+        sourceId?: string
+      } | null = null
+
+      public captureReservationUsage = vi.fn(
+        async (input: {
+          amount: number
+          flushSeq: number
+          statementKey: string
+          metadata?: Record<string, unknown>
+          sourceId?: string
+        }) => {
+          this.lastCapture = {
+            amount: input.amount,
+            flushSeq: input.flushSeq,
+            statementKey: input.statementKey,
+            metadata: input.metadata,
+            sourceId: input.sourceId,
+          }
+          return { err: null, val: { capturedAmount: input.amount } }
+        }
+      )
+
+      public extendReservation = vi.fn(
+        async (input: {
+          projectId: string
+          customerId: string
+          currency: string
+          reservationId: string
+          flushSeq: number
+          requestedAmount: number
+          statementKey: string
+          effectiveAt?: Date
+          metadata?: Record<string, unknown>
+          sourceId?: string
+        }) => {
+          const capture = this.lastCapture
+          const result = await testState.flushReservation({
+            projectId: input.projectId,
+            customerId: input.customerId,
+            currency: input.currency,
+            reservationId: input.reservationId,
+            flushSeq: input.flushSeq,
+            flushAmount: capture?.amount ?? 0,
+            refillChunkAmount: input.requestedAmount,
+            effectiveAt: input.effectiveAt,
+            statementKey: input.statementKey,
+            final: false,
+            metadata: input.metadata,
+            sourceId: input.sourceId,
+          })
+          if (result.err) return result
+          return {
+            err: null,
+            val: {
+              grantedAmount: result.val.grantedAmount,
+            },
+          }
+        }
+      )
+
+      public releaseReservation = vi.fn(
+        async (input: {
+          projectId: string
+          customerId: string
+          currency: string
+          reservationId: string
+          closeReason: string
+          metadata?: Record<string, unknown>
+          sourceId?: string
+        }) => {
+          const capture = this.lastCapture
+          const result = await testState.flushReservation({
+            projectId: input.projectId,
+            customerId: input.customerId,
+            currency: input.currency,
+            reservationId: input.reservationId,
+            flushSeq: capture?.flushSeq ?? 0,
+            flushAmount: capture?.amount ?? 0,
+            refillChunkAmount: 0,
+            statementKey: capture?.statementKey ?? "",
+            final: true,
+            metadata: input.metadata,
+            sourceId: input.sourceId,
+          })
+          if (result.err) return result
+          return {
+            err: null,
+            val: {
+              releasedAmount: result.val.refundedAmount,
+              restoredGrantedAmount: 0,
+              refundedPurchasedAmount: result.val.refundedAmount,
+            },
+          }
+        }
+      )
     },
   }))
 
