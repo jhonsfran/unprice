@@ -55,6 +55,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-17: Async raw ingestion supports one event fanning out to multiple active usage
   entitlements with the same `eventSlug`; keep same-slug meter tests at the service layer so
   payload-compatible meters stay processed together.
+- 2026-05-17: Async ingestion should batch entitlement-window RPCs by customer entitlement in
+  chunks of 100; DO analytics outbox cleanup uses monotonic id ranges, while idempotency cleanup
+  uses the DO TTL cutoff timestamp.
 
 ## Billing, Wallets, And Invoices
 

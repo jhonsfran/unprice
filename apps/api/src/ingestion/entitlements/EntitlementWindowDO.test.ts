@@ -180,6 +180,8 @@ type FakeDbState = {
   grantRows: Map<string, GrantRow>
   grantWindowRows: Map<string, GrantWindowRow>
   deleteInArrayBatchSizes: number[]
+  deleteIdempotencyCutoffs: number[]
+  deleteOutboxRangeMaxIds: number[]
   failNextMeterWindowUpdate?: {
     matchKey: string
     error: Error
@@ -731,6 +733,121 @@ describe("EntitlementWindowDO", () => {
     }
   })
 
+  it("logs one summary for applyBatch instead of one apply log per event", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: baseInput.enforceLimit,
+      events: [
+        {
+          ...baseInput.event,
+          id: "evt_batch_1",
+          idempotencyKey: "idem_batch_1",
+          now: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          id: "evt_batch_2",
+          idempotencyKey: "idem_batch_2",
+          now: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({ allowed: true, idempotencyKey: "idem_batch_1" }),
+      expect.objectContaining({ allowed: true, idempotencyKey: "idem_batch_2" }),
+    ])
+    expect(testState.logger.info).not.toHaveBeenCalledWith("entitlement apply", expect.anything())
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        event_count: 2,
+        processed_count: 2,
+        allowed_count: 2,
+        denied_count: 0,
+        outcome: "success",
+      })
+    )
+  })
+
+  it("retries applyBatch after a partial failure without reapplying committed events", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    let failSecondEvent = true
+    testState.db = db
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const eventId = (event as { id: string }).id
+      if (eventId === "evt_batch_2" && failSecondEvent) {
+        throw new Error("ENGINE_DOWN")
+      }
+
+      const facts = [
+        {
+          delta: 1,
+          meterKey: DEFAULT_METER_KEY,
+          valueAfter: eventId === "evt_batch_1" ? 1 : 2,
+        },
+      ]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const batchInput = {
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: baseInput.enforceLimit,
+      events: [
+        {
+          ...baseInput.event,
+          id: "evt_batch_1",
+          idempotencyKey: "idem_batch_1",
+          now: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          id: "evt_batch_2",
+          idempotencyKey: "idem_batch_2",
+          now: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    }
+
+    await expect(durableObject.applyBatch(batchInput)).rejects.toThrow("ENGINE_DOWN")
+    expect(db.idempotencyRows.get("idem_batch_1")).toMatchObject({ allowed: true })
+    expect(db.idempotencyRows.has("idem_batch_2")).toBe(false)
+
+    failSecondEvent = false
+    const retry = await durableObject.applyBatch(batchInput)
+
+    expect(retry.results).toEqual([
+      expect.objectContaining({ allowed: true, idempotencyKey: "idem_batch_1" }),
+      expect.objectContaining({ allowed: true, idempotencyKey: "idem_batch_2" }),
+    ])
+    expect(testState.engineApply.mock.calls.map(([event]) => (event as { id: string }).id)).toEqual(
+      ["evt_batch_1", "evt_batch_2", "evt_batch_2"]
+    )
+  })
+
   it("flushes queued facts during alarm and schedules self-destruct when the outbox is empty", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -778,11 +895,10 @@ describe("EntitlementWindowDO", () => {
     expect(state.alarmAt).toBe(BASE_NOW + 10 * 60_000)
   })
 
-  it("cleans alarm outbox and idempotency rows in SQLite bind-safe chunks", async () => {
+  it("cleans alarm outbox by id range and idempotency rows by TTL cutoff", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
-    db.maxDeleteInArrayValues = 90
     testState.db = db
     testState.analyticsIngest.mockResolvedValue({
       quarantined_rows: 0,
@@ -828,9 +944,10 @@ describe("EntitlementWindowDO", () => {
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
     expect(db.outboxRows).toHaveLength(0)
+    expect(db.deleteOutboxRangeMaxIds).toEqual([200])
     expect(db.idempotencyRows.size).toBe(0)
-    expect(db.deleteInArrayBatchSizes.length).toBeGreaterThan(2)
-    expect(db.deleteInArrayBatchSizes.every((size) => size <= 90)).toBe(true)
+    expect(db.deleteIdempotencyCutoffs).toEqual([BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS])
+    expect(db.deleteInArrayBatchSizes).toHaveLength(0)
   })
 
   it("reschedules a fired alarm when a flush batch leaves facts in the outbox", async () => {
@@ -881,7 +998,7 @@ describe("EntitlementWindowDO", () => {
     await durableObject.alarm()
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(db.outboxRows).toHaveLength(700)
+    expect(db.outboxRows).toHaveLength(200)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
@@ -4006,6 +4123,7 @@ async function loadEntitlementWindowDO() {
     isNull: (): DrizzleCondition => ({ kind: "isNull" }),
     isNotNull: (): DrizzleCondition => ({ kind: "isNotNull" }),
     lt: (_col: unknown, value: unknown): DrizzleCondition => ({ kind: "lt", value }),
+    lte: (_col: unknown, value: unknown): DrizzleCondition => ({ kind: "lte", value }),
     sql: () => ({ kind: "sql" }),
   }))
 
@@ -4376,6 +4494,8 @@ function createFakeDbState(): FakeDbState {
     grantRows: new Map(),
     grantWindowRows: new Map(),
     deleteInArrayBatchSizes: [],
+    deleteIdempotencyCutoffs: [],
+    deleteOutboxRangeMaxIds: [],
   }
 }
 
@@ -4395,6 +4515,8 @@ function buildFakeDrizzle(state: FakeDbState) {
         return row.id === Number(condition.value)
       case "inArray":
         return (condition.values ?? []).includes(row.id)
+      case "lte":
+        return row.id <= Number(condition.value)
       default:
         return true
     }
@@ -4460,7 +4582,16 @@ function buildFakeDrizzle(state: FakeDbState) {
               denyMessage: row.denyMessage,
             }
           }
-          if (keys.includes("count")) return { count: state.outboxRows.length }
+          if (keys.includes("count")) {
+            if (cond?.kind === "lt") {
+              return {
+                count: [...state.idempotencyRows.values()].filter(
+                  (row) => row.createdAt < Number(cond?.value)
+                ).length,
+              }
+            }
+            return { count: state.outboxRows.length }
+          }
           if (keys.every((k) => ENTITLEMENT_CONFIG_KEYS.has(k))) {
             const source =
               cond?.value !== undefined
@@ -4732,6 +4863,23 @@ function buildFakeDrizzle(state: FakeDbState) {
         where(cond: DrizzleCondition) {
           return {
             run() {
+              if (cond.kind === "lte") {
+                const maxId = Number(cond.value)
+                state.deleteOutboxRangeMaxIds.push(maxId)
+                const remaining = state.outboxRows.filter((row) => row.id > maxId)
+                state.outboxRows.splice(0, state.outboxRows.length, ...remaining)
+                return
+              }
+
+              if (cond.kind === "lt") {
+                const cutoff = Number(cond.value)
+                state.deleteIdempotencyCutoffs.push(cutoff)
+                for (const [eventId, row] of state.idempotencyRows.entries()) {
+                  if (row.createdAt < cutoff) state.idempotencyRows.delete(eventId)
+                }
+                return
+              }
+
               if (cond.kind !== "inArray") throw new Error("Unsupported delete condition")
               const deleteValueCount = cond.values?.length ?? 0
               state.deleteInArrayBatchSizes.push(deleteValueCount)

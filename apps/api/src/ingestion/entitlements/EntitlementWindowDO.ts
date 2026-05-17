@@ -47,7 +47,7 @@ import {
   computeSyncGrowRefillAmount,
   updateSpendVelocity,
 } from "@unprice/services/wallet/reservation-sizing"
-import { asc, eq, inArray, lt, sql } from "drizzle-orm"
+import { asc, eq, lt, lte, sql } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { z } from "zod"
@@ -131,6 +131,10 @@ type ApplyResult = {
   message?: string
 }
 
+type ApplyInnerOptions = {
+  emitLog?: boolean
+}
+
 // Internal: bubbled out of the apply() transaction so the post-commit
 // scheduler can fire `ctx.waitUntil(requestFlushAndRefill(...))` without
 // holding the tx open. Amounts are pgledger scale-8 minor units.
@@ -191,6 +195,8 @@ const rawEventSchema = z.object({
   properties: z.record(z.unknown()),
 })
 
+const APPLY_BATCH_SIZE_LIMIT = 100
+
 const overageStrategySchema = z.enum(["none", "last-call", "always"] satisfies readonly [
   OverageStrategy,
   ...OverageStrategy[],
@@ -235,6 +241,17 @@ const applyInputSchema = z.object({
   now: z.number().finite(),
 })
 
+const applyBatchEventSchema = rawEventSchema.extend({
+  idempotencyKey: z.string().min(1),
+  now: z.number().finite(),
+})
+
+const applyBatchInputSchema = applyInputSchema
+  .omit({ event: true, idempotencyKey: true, now: true })
+  .extend({
+    events: z.array(applyBatchEventSchema).min(1).max(APPLY_BATCH_SIZE_LIMIT),
+  })
+
 const enforcementStateInputSchema = z.object({
   entitlement: entitlementConfigSchema,
   grants: z.array(activeGrantSchema),
@@ -242,6 +259,7 @@ const enforcementStateInputSchema = z.object({
 })
 
 type ApplyInput = z.infer<typeof applyInputSchema>
+type ApplyBatchInput = z.infer<typeof applyBatchInputSchema>
 type ApplyGrantInput = z.infer<typeof activeGrantSchema>
 type EnforcementStateInput = z.infer<typeof enforcementStateInputSchema>
 type ActiveGrantInput = ApplyGrantInput & {
@@ -292,10 +310,8 @@ type CloseReservationOptions = {
   recoverPendingFinal?: boolean
 }
 
-const FLUSH_BATCH_SIZE = 500
+const FLUSH_BATCH_SIZE = 1000
 const FLUSH_INTERVAL_MS = 30_000
-const IDEMPOTENCY_CLEANUP_BATCH_SIZE = 5000
-const SQLITE_BIND_PARAMETER_CHUNK_SIZE = 90
 const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
 const WALLET_RESERVATION_ROW_ID = "singleton"
 // Inactivity closes out a live reservation even if the period hasn't ended.
@@ -321,12 +337,6 @@ function inactivityThresholdMs(env: Env): number {
   return env.NODE_ENV === "development"
     ? DEVELOPMENT_INACTIVITY_THRESHOLD_MS
     : DEFAULT_INACTIVITY_THRESHOLD_MS
-}
-
-function forEachSqliteBindChunk<T>(values: readonly T[], callback: (chunk: T[]) => void): void {
-  for (let index = 0; index < values.length; index += SQLITE_BIND_PARAMETER_CHUNK_SIZE) {
-    callback(values.slice(index, index + SQLITE_BIND_PARAMETER_CHUNK_SIZE))
-  }
 }
 
 function minNullableExpiry(left: number | null, right: number | null): number | null {
@@ -434,7 +444,75 @@ export class EntitlementWindowDO extends DurableObject {
     )
   }
 
-  private async applyInner(rawInput: ApplyInput): Promise<ApplyResult> {
+  public async applyBatch(rawInput: ApplyBatchInput): Promise<{
+    results: Array<ApplyResult & { idempotencyKey: string }>
+  }> {
+    await this.ready
+
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "entitlementwindow",
+        operation: "apply_batch",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+      },
+      async () => {
+        const startTime = Date.now()
+        const input = applyBatchInputSchema.parse(rawInput)
+        const results: Array<ApplyResult & { idempotencyKey: string }> = []
+        let thrown: unknown
+
+        try {
+          for (const event of input.events) {
+            const { idempotencyKey, now, ...rawEvent } = event
+            const result = await this.applyInner(
+              {
+                ...input,
+                event: rawEvent,
+                idempotencyKey,
+                now,
+              },
+              { emitLog: false }
+            )
+            results.push({ ...result, idempotencyKey })
+          }
+
+          return { results }
+        } catch (error) {
+          thrown = error
+          throw error
+        } finally {
+          const deniedByReason = results.reduce<Record<string, number>>((acc, result) => {
+            if (!result.allowed && result.deniedReason) {
+              acc[result.deniedReason] = (acc[result.deniedReason] ?? 0) + 1
+            }
+            return acc
+          }, {})
+
+          this.logger.info("entitlement apply_batch", {
+            operation: "apply_batch",
+            project_id: input.projectId,
+            customer_id: input.customerId,
+            customer_entitlement_id: input.entitlement.customerEntitlementId,
+            event_count: input.events.length,
+            processed_count: results.length,
+            allowed_count: results.filter((result) => result.allowed).length,
+            denied_count: results.filter((result) => !result.allowed).length,
+            denied_by_reason: deniedByReason,
+            duration_ms: Date.now() - startTime,
+            outcome: thrown ? "error" : "success",
+            error_type: thrown instanceof Error ? thrown.name : undefined,
+            error_message: thrown instanceof Error ? thrown.message : undefined,
+          })
+        }
+      }
+    )
+  }
+
+  private async applyInner(
+    rawInput: ApplyInput,
+    options: ApplyInnerOptions = {}
+  ): Promise<ApplyResult> {
     const startTime = Date.now()
     const input = applyInputSchema.parse(rawInput)
     const idempotencyKey = input.idempotencyKey
@@ -982,7 +1060,9 @@ export class EntitlementWindowDO extends DurableObject {
         wideEvent.error_message = thrown instanceof Error ? thrown.message : String(thrown)
       }
 
-      this.logger.info("entitlement apply", wideEvent)
+      if (options.emitLog ?? true) {
+        this.logger.info("entitlement apply", wideEvent)
+      }
     }
   }
 
@@ -1115,15 +1195,13 @@ export class EntitlementWindowDO extends DurableObject {
         outboxFlushed = await this.flushToTinybird(batch)
 
         if (outboxFlushed) {
-          forEachSqliteBindChunk(
-            batch.map((row) => row.id),
-            (ids) => {
-              this.db
-                .delete(meterFactsOutboxTable)
-                .where(inArray(meterFactsOutboxTable.id, ids))
-                .run()
-            }
-          )
+          const maxFlushedOutboxId = batch.at(-1)?.id
+          if (maxFlushedOutboxId !== undefined) {
+            this.db
+              .delete(meterFactsOutboxTable)
+              .where(lte(meterFactsOutboxTable.id, maxFlushedOutboxId))
+              .run()
+          }
         }
       }
       wideEvent.outbox_flushed = outboxFlushed
@@ -1132,27 +1210,21 @@ export class EntitlementWindowDO extends DurableObject {
 
       // Keep idempotency keys beyond the public ingestion cap so delayed
       // cleanup cannot erase the replay seal for an event we would accept.
-      // to avoid long synchronous SQLite write locks during large backlogs.
-      const staleIdempotencyRows = this.db
-        .select({ eventId: idempotencyKeysTable.eventId })
+      const staleIdempotencyCutoff = Date.now() - DO_IDEMPOTENCY_TTL_MS
+      const staleIdempotencyRow = this.db
+        .select({ count: sql<number>`count(*)` })
         .from(idempotencyKeysTable)
-        .where(lt(idempotencyKeysTable.createdAt, Date.now() - DO_IDEMPOTENCY_TTL_MS))
-        .orderBy(asc(idempotencyKeysTable.createdAt))
-        .limit(IDEMPOTENCY_CLEANUP_BATCH_SIZE)
-        .all()
+        .where(lt(idempotencyKeysTable.createdAt, staleIdempotencyCutoff))
+        .get()
+      const staleIdempotencyCount = Number(staleIdempotencyRow?.count ?? 0)
 
-      wideEvent.idempotency_cleaned = staleIdempotencyRows.length
+      wideEvent.idempotency_cleaned = staleIdempotencyCount
 
-      if (staleIdempotencyRows.length > 0) {
-        forEachSqliteBindChunk(
-          staleIdempotencyRows.map((row) => row.eventId),
-          (eventIds) => {
-            this.db
-              .delete(idempotencyKeysTable)
-              .where(inArray(idempotencyKeysTable.eventId, eventIds))
-              .run()
-          }
-        )
+      if (staleIdempotencyCount > 0) {
+        this.db
+          .delete(idempotencyKeysTable)
+          .where(lt(idempotencyKeysTable.createdAt, staleIdempotencyCutoff))
+          .run()
       }
 
       const remainingOutboxCount = this.getOutboxCount()

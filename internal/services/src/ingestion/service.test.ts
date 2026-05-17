@@ -315,9 +315,20 @@ describe("IngestionService entitlement routing", () => {
 
   it("rejects duplicate active entitlements for the same customer feature", async () => {
     const entitlement = createEntitlement()
-    const apply = vi.fn().mockResolvedValue({ allowed: true })
+    const apply = vi.fn()
+    const applyBatch = vi
+      .fn()
+      .mockImplementation((input: { events: { idempotencyKey: string }[] }) =>
+        Promise.resolve({
+          results: input.events.map((event) => ({
+            allowed: true,
+            idempotencyKey: event.idempotencyKey,
+          })),
+        })
+      )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
       apply,
+      applyBatch,
       getEnforcementState: vi.fn(),
     })
     const logger = createLogger()
@@ -402,9 +413,20 @@ describe("IngestionService entitlement routing", () => {
         aggregationField: "keys",
       },
     })
-    const apply = vi.fn().mockResolvedValue({ allowed: true })
+    const apply = vi.fn()
+    const applyBatch = vi
+      .fn()
+      .mockImplementation((input: { events: { idempotencyKey: string }[] }) =>
+        Promise.resolve({
+          results: input.events.map((event) => ({
+            allowed: true,
+            idempotencyKey: event.idempotencyKey,
+          })),
+        })
+      )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
       apply,
+      applyBatch,
       getEnforcementState: vi.fn(),
     })
     const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
@@ -466,11 +488,11 @@ describe("IngestionService entitlement routing", () => {
       customerId: eventsEntitlement.customerId,
       projectId: eventsEntitlement.projectId,
     })
-    expect(apply).toHaveBeenCalledTimes(2)
-    expect(apply.mock.calls.map(([input]) => input.entitlement.customerEntitlementId)).toEqual([
-      "ce_events",
-      "ce_keys",
-    ])
+    expect(apply).not.toHaveBeenCalled()
+    expect(applyBatch).toHaveBeenCalledTimes(2)
+    expect(applyBatch.mock.calls.map(([input]) => input.entitlement.customerEntitlementId)).toEqual(
+      ["ce_events", "ce_keys"]
+    )
     expect(commit).toHaveBeenCalledTimes(1)
 
     const [entries] = commit.mock.calls[0]!
@@ -481,6 +503,176 @@ describe("IngestionService entitlement routing", () => {
     })
     expect(JSON.parse(entries[0].resultJson)).toEqual({ state: "processed" })
     expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  it("keeps async fanout processed when one meter applies before another denies late", async () => {
+    const eventsEntitlement = createEntitlement({
+      customerEntitlementId: "ce_events",
+      featurePlanVersionId: "fpv_events",
+      featureSlug: "events",
+      meterConfig: {
+        eventId: "evt_completions",
+        eventSlug: "completions",
+        aggregationMethod: "sum",
+        aggregationField: "events",
+      },
+    })
+    const keysEntitlement = createEntitlement({
+      customerEntitlementId: "ce_keys",
+      featurePlanVersionId: "fpv_keys",
+      featureSlug: "apikeys",
+      meterConfig: {
+        eventId: "evt_completions",
+        eventSlug: "completions",
+        aggregationMethod: "sum",
+        aggregationField: "keys",
+      },
+    })
+    const applyBatch = vi
+      .fn()
+      .mockImplementation(
+        (input: { entitlement: IngestionEntitlement; events: { idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) =>
+              input.entitlement.customerEntitlementId === "ce_keys"
+                ? {
+                    allowed: false,
+                    deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+                    idempotencyKey: event.idempotencyKey,
+                  }
+                : {
+                    allowed: true,
+                    idempotencyKey: event.idempotencyKey,
+                  }
+            ),
+          })
+      )
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply: vi.fn(),
+      applyBatch,
+      getEnforcementState: vi.fn(),
+    })
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(
+            Ok([
+              createCustomerEntitlementRecord(eventsEntitlement),
+              createCustomerEntitlementRecord(keysEntitlement),
+            ] as never)
+          ),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: eventsEntitlement.customerId,
+      projectId: eventsEntitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: eventsEntitlement.projectId,
+          customerId: eventsEntitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "completions",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { events: 2, keys: 3 },
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.disposition.action).toBe("ack")
+
+    const [entries] = commit.mock.calls[0]!
+    expect(entries[0]).toMatchObject({
+      idempotencyKey: "idem_123",
+      rejectionReason: undefined,
+      status: "processed",
+    })
+    expect(JSON.parse(entries[0].resultJson)).toEqual({ state: "processed" })
+  })
+
+  it("chunks async entitlement window batch applies at 100 messages", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn()
+    const applyBatch = vi
+      .fn()
+      .mockImplementation((input: { events: { idempotencyKey: string }[] }) =>
+        Promise.resolve({
+          results: input.events.map((event) => ({
+            allowed: true,
+            idempotencyKey: event.idempotencyKey,
+          })),
+        })
+      )
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply,
+      applyBatch,
+      getEnforcementState: vi.fn(),
+    })
+    const commit = vi.fn().mockResolvedValue({ inserted: 101, duplicates: 0, conflicts: 0 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const messages = Array.from({ length: 101 }, (_, index) => ({
+      version: 1 as const,
+      projectId: entitlement.projectId,
+      customerId: entitlement.customerId,
+      requestId: `req_${index}`,
+      receivedAt: SERVICE_NOW,
+      idempotencyKey: `idem_${index.toString().padStart(3, "0")}`,
+      id: `evt_${index}`,
+      slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
+      timestamp: Date.UTC(2026, 2, 19) + index,
+      properties: { amount: 1 },
+    }))
+
+    const result = await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages,
+    })
+
+    expect(result).toHaveLength(101)
+    expect(result.every((item) => item.disposition.action === "ack")).toBe(true)
+    expect(apply).not.toHaveBeenCalled()
+    expect(applyBatch).toHaveBeenCalledTimes(2)
+    expect(applyBatch.mock.calls.map(([input]) => input.events.length)).toEqual([100, 1])
+    expect(commit).toHaveBeenCalledTimes(1)
   })
 
   it("returns CUSTOMER_NOT_FOUND when verifying a missing customer", async () => {
