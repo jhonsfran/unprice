@@ -178,7 +178,9 @@ Default behavior:
   limits
 - unlimited paid usage requires an explicit allowance or purchased balance
 
-For a 100 EUR allowance, configure `10_000_000_000`, not `100`.
+Public signup accepts this amount in the currency's smallest unit. For a 100 EUR
+allowance, pass `10_000`; the backend stores `10_000_000_000` on the
+subscription phase.
 
 ### 7) Reserve Only Positive Cost
 

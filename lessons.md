@@ -74,6 +74,8 @@ patterns. Keep it cheap to load and useful.
   history.
 - 2026-05-06: Wallet bigint amounts are ledger-scale minor units; pgledger views are decimals.
 - 2026-05-06: `creditLineAmount` is period usage allowance, not plan fee or creditworthiness.
+- 2026-05-17: Public signup `creditLineAmount` is currency minor units; convert to
+  ledger-scale before saving subscription phases or customer sessions.
 - 2026-05-06: Arrears plans can derive allowance from finite priced usage limits; unlimited paid
   usage needs explicit allowance or balance.
 - 2026-05-06: Reserve wallet funds only for positive projected cost; zero-cost usage bypasses

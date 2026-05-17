@@ -7,8 +7,10 @@ import {
   diffLedgerMinor,
   formatAmountForProvider,
   formatMoney,
+  fromCurrencyMinor,
   fromLedgerAmount,
   fromLedgerMinor,
+  toDecimal,
   toLedgerAmount,
   toLedgerMinor,
 } from "./index"
@@ -126,6 +128,18 @@ describe("money", () => {
       const minor = toLedgerMinor(original)
       const reconstructed = fromLedgerMinor(minor, "USD")
       expect(equal(reconstructed, original)).toBe(true)
+    })
+  })
+
+  describe("fromCurrencyMinor", () => {
+    it("interprets USD cents before ledger scaling", () => {
+      const amount = fromCurrencyMinor(1234, "USD")
+      expect(toDecimal(amount)).toBe("12.34")
+      expect(toLedgerMinor(amount)).toBe(1_234_000_000)
+    })
+
+    it("rejects unsafe integer inputs", () => {
+      expect(() => fromCurrencyMinor(Number.MAX_SAFE_INTEGER + 1, "USD")).toThrow(/safe integer/)
     })
   })
 

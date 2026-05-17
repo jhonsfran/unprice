@@ -98,10 +98,10 @@ export const customerSignUpSchema = z
         "Usage credit policy for the initial subscription phase. Uncapped allows postpaid usage without wallet reservation; capped uses a finite credit amount or derives one from finite usage limits.",
       example: "uncapped",
     }),
-    creditLineAmount: z.coerce.number().int().min(0).nullable().optional().openapi({
+    creditLineAmount: z.coerce.number().int().min(0).safe().nullable().optional().openapi({
       description:
-        "Optional capped usage credit amount as a ledger-scale minor-unit integer. Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.",
-      example: 10_000_000_000,
+        "Optional capped usage credit amount in the currency's smallest unit (for example, cents for USD/EUR). Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.",
+      example: 10_000,
     }),
     externalId: z.string().optional().openapi({
       description:

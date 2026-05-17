@@ -44,6 +44,13 @@ CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx ONLY=ingestion pnpm --filter @unprice/tiny
 CUSTOMER_ID=cus_xxx UNPRICE_TOKEN=xxx ONLY=sync,idempotency pnpm --filter @unprice/tiny-tools e2e:local
 ```
 
+### Plan tests
+
+```bash
+UNPRICE_TOKEN=unprice_dev_1234567890 CREDIT_LINE_POLICY=capped CREDIT_LINE_AMOUNT=10000 pnpm --filter @unprice/tiny-tools e2e:signup:local
+UNPRICE_TOKEN=unprice_dev_1234567890 pnpm --filter @unprice/tiny-tools e2e:signup:local
+```
+
 ## Test coverage
 
 Tests run sequentially. Later tests reuse state discovered in earlier ones (e.g. the usage-based feature found during verification is reused for all ingestion tests).

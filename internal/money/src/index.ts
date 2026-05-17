@@ -114,6 +114,22 @@ export function fromLedgerMinor(minor: number, currency: string): Dinero<number>
 }
 
 /**
+ * Rebuild a `Dinero<number>` from a normal currency minor-unit integer, such
+ * as USD/EUR cents. This is the right input shape for public APIs and payment
+ * providers; call `toLedgerMinor` afterwards when persisting internally.
+ */
+export function fromCurrencyMinor(minor: number, currency: string): Dinero<number> {
+  if (!Number.isSafeInteger(minor)) {
+    throw new Error(`Currency minor amount must be a safe integer: ${minor}`)
+  }
+
+  return dinero({
+    amount: minor,
+    currency: resolveCurrency(currency),
+  })
+}
+
+/**
  * Precise subtraction at `LEDGER_SCALE`, returning a signed number of minor
  * units. This is the correct primitive for "price delta of this event" —
  * compute `price(usageAfter) - price(usageBefore)` without prematurely
