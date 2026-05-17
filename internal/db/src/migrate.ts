@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
-import { pathToFileURL } from "node:url"
+import { dirname, join } from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { eq, sql } from "drizzle-orm"
 import type { Database } from "."
 import { createConnection } from "./createConnection"
@@ -10,7 +10,26 @@ import { hashStringSHA256, newId } from "./utils"
 import { FEATURE_SLUGS } from "@unprice/config"
 import { migrate } from "drizzle-orm/neon-serverless/migrator"
 
-const PGLEDGER_DIR = join(process.cwd(), "src/migrations/pgledger")
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url))
+const MIGRATIONS_DIR = join(MODULE_DIR, "migrations")
+const PGLEDGER_DIR = join(MIGRATIONS_DIR, "pgledger")
+
+function compareDotVersions(left: string, right: string) {
+  const leftParts = left.split(".").map((part) => Number.parseInt(part, 10))
+  const rightParts = right.split(".").map((part) => Number.parseInt(part, 10))
+  const length = Math.max(leftParts.length, rightParts.length)
+
+  for (let index = 0; index < length; index += 1) {
+    const rawLeftPart = leftParts[index]
+    const rawRightPart = rightParts[index]
+    const leftPart = rawLeftPart === undefined || Number.isNaN(rawLeftPart) ? 0 : rawLeftPart
+    const rightPart = rawRightPart === undefined || Number.isNaN(rawRightPart) ? 0 : rawRightPart
+    const delta = leftPart - rightPart
+    if (delta !== 0) return delta
+  }
+
+  return 0
+}
 
 export async function installPgledger(
   db: Database,
@@ -47,7 +66,7 @@ export async function installPgledger(
     await db.execute(sql`INSERT INTO pgledger_install_version (version) VALUES (${version})`)
     console.info(`✅ pgledger ${version} installed`)
   } else if (previous !== version) {
-    if (previous > version) {
+    if (compareDotVersions(previous, version) > 0) {
       throw new Error(
         `pgledger downgrade refused: installed=${previous}, requested=${version}. Restore an older VERSION file or run a forward migration.`
       )
@@ -62,7 +81,7 @@ export async function installPgledger(
 export async function runDrizzleMigrations(
   db: Database,
   {
-    migrationsFolder = "src/migrations",
+    migrationsFolder = MIGRATIONS_DIR,
   }: {
     migrationsFolder?: string
   } = {}

@@ -713,7 +713,7 @@ describe("BillingService.finalizeInvoice", () => {
     expect(provider.createInvoice).not.toHaveBeenCalled()
   })
 
-  it("orphaned provider items with no matching ledger line trigger a warning", async () => {
+  it("orphaned provider items with no matching ledger line abort finalization", async () => {
     // Simulate a retry where the provider invoice already has items from a
     // previous partial attempt. One item matches a current ledger line (and
     // gets reconciled), but the other has no counterpart in the ledger.
@@ -765,17 +765,14 @@ describe("BillingService.finalizeInvoice", () => {
       now: 5_000,
     })
 
-    // Finalization still succeeds — orphans are warned about, not fatal.
-    expect(result.err).toBeUndefined()
-    expect(result.val).toMatchObject({
-      providerInvoiceId: "stripe_existing",
-      status: "unpaid",
-    })
+    expect(result.err?.message).toBe(
+      "Provider invoice stripe_existing has orphaned items and cannot be finalized safely"
+    )
 
     // The matched item should not be re-added or updated (already reconciled).
     expect(provider.addInvoiceItem).not.toHaveBeenCalled()
     expect(provider.updateInvoiceItem).not.toHaveBeenCalled()
-    expect(provider.finalizeInvoice).toHaveBeenCalledTimes(1)
+    expect(provider.finalizeInvoice).not.toHaveBeenCalled()
 
     // Logger should have warned about the orphan item.
     // Access the logger from the original billing service via the service bag.
@@ -801,11 +798,20 @@ describe("BillingService.finalizeInvoice", () => {
     })
     const provider404 = {
       ...makeProviderService(),
-      getInvoice: vi
-        .fn()
-        .mockResolvedValue(
-          Err(new FetchError({ message: "No such invoice: stripe_deleted", retry: false }))
-        ),
+      getInvoice: vi.fn().mockResolvedValue(
+        Err(
+          new FetchError({
+            message: "No such invoice: stripe_deleted",
+            retry: false,
+            context: {
+              method: "GET",
+              url: "stripe.invoices/stripe_deleted",
+              statusCode: 404,
+              code: "resource_missing",
+            },
+          })
+        )
+      ),
     } as unknown as PaymentProviderService
     const { billing, provider } = makeBillingService({
       invoice,
@@ -848,11 +854,55 @@ describe("BillingService.finalizeInvoice", () => {
     const loggerWarn = (billing as unknown as { logger: { warn: ReturnType<typeof vi.fn> } }).logger
       .warn
     expect(loggerWarn).toHaveBeenCalledWith(
-      "stamped provider invoice could not be retrieved; recreating",
+      "stamped provider invoice was not found; recreating",
       expect.objectContaining({
         invoiceId: "inv_1",
         providerInvoiceId: "stripe_deleted",
       })
     )
+  })
+
+  it("transient stamped provider invoice fetch failure does not recreate provider invoice", async () => {
+    const invoice = makeInvoice({
+      invoicePaymentProviderId: "stripe_existing",
+      invoicePaymentProviderUrl: "https://stripe.example/invoices/existing",
+    })
+    const providerFailure = {
+      ...makeProviderService(),
+      getInvoice: vi.fn().mockResolvedValue(
+        Err(
+          new FetchError({
+            message: "Stripe request timed out",
+            retry: true,
+            context: {
+              method: "GET",
+              url: "stripe.invoices/stripe_existing",
+              statusCode: 500,
+              code: "api_error",
+            },
+          })
+        )
+      ),
+    } as unknown as PaymentProviderService
+    const { billing, provider } = makeBillingService({
+      invoice,
+      lines: [makeLine()],
+      paymentProvider: providerFailure,
+    })
+
+    const result = await billing.finalizeInvoice({
+      projectId: "proj_1",
+      subscriptionId: "sub_1",
+      invoiceId: "inv_1",
+      now: 5_000,
+    })
+
+    expect(result.err?.message).toBe(
+      "Unable to finalize invoice. Please try again or contact support."
+    )
+    expect(provider.getInvoice).toHaveBeenCalledWith({ invoiceId: "stripe_existing" })
+    expect(provider.createInvoice).not.toHaveBeenCalled()
+    expect(provider.addInvoiceItem).not.toHaveBeenCalled()
+    expect(provider.finalizeInvoice).not.toHaveBeenCalled()
   })
 })

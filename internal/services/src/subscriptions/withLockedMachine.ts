@@ -176,7 +176,11 @@ function startLockHeartbeat(args: {
   ttlMs: number
   onLockLost: () => void
 }): () => void {
-  const intervalMs = Math.max(1, args.heartbeatIntervalMs ?? Math.floor(args.ttlMs / 2))
+  const requestedIntervalMs = args.heartbeatIntervalMs ?? Math.floor(args.ttlMs / 2)
+  if (requestedIntervalMs >= args.ttlMs) {
+    throw new Error("lockHeartbeatIntervalMs must be smaller than ttlMs")
+  }
+  const intervalMs = Math.max(1, requestedIntervalMs)
   let stopped = false
   let extending = false
   const timer = setInterval(() => {

@@ -142,6 +142,21 @@ describe("withLockedMachine", () => {
 
     expect(result).toBe("ok")
   })
+
+  it("rejects heartbeat intervals that outlive the lease", async () => {
+    const projectId = "proj_1"
+    const subscriptionId = "sub_1"
+    const db = createFakeDb(projectId, subscriptionId)
+
+    await expect(
+      withLockedMachine({
+        ...createDeps(projectId, subscriptionId, db),
+        lockHeartbeatIntervalMs: 10,
+        ttlMs: 10,
+        run: async () => "ok",
+      })
+    ).rejects.toThrow("lockHeartbeatIntervalMs must be smaller than ttlMs")
+  })
 })
 
 function createDeps(projectId: string, subscriptionId: string, db: Database) {
@@ -254,7 +269,10 @@ function createFakeDb(projectId: string, subscriptionId: string): FakeDb {
     }),
     delete: () => ({
       where: async () => {
-        rows.delete(key)
+        const row = rows.get(key)
+        if (row && acquiredToken !== null && row.ownerToken === acquiredToken) {
+          rows.delete(key)
+        }
       },
     }),
     __debug: { rows },

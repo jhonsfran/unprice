@@ -122,10 +122,11 @@ export function fromCurrencyMinor(minor: number, currency: string): Dinero<numbe
   if (!Number.isSafeInteger(minor)) {
     throw new Error(`Currency minor amount must be a safe integer: ${minor}`)
   }
+  const normalizedCurrency = currency.trim().toUpperCase()
 
   return dinero({
     amount: minor,
-    currency: resolveCurrency(currency),
+    currency: resolveCurrency(normalizedCurrency),
   })
 }
 

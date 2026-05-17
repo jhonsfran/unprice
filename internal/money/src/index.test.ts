@@ -138,6 +138,11 @@ describe("money", () => {
       expect(toLedgerMinor(amount)).toBe(1_234_000_000)
     })
 
+    it("normalizes provider lowercase currency codes", () => {
+      const amount = fromCurrencyMinor(1234, "usd")
+      expect(toDecimal(amount)).toBe("12.34")
+    })
+
     it("rejects unsafe integer inputs", () => {
       expect(() => fromCurrencyMinor(Number.MAX_SAFE_INTEGER + 1, "USD")).toThrow(/safe integer/)
     })

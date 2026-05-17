@@ -58,20 +58,20 @@ export const walletCreditExpirationSchedule = schedules.task({
       metrics: new NoopMetrics(),
     })
 
-    const result = await expireWalletCredits(
-      {
-        db,
-        logger: log,
-        services: { wallet: services.wallet },
-      },
-      {
-        now,
-        limit: 500,
-      }
-    )
-
-    await log.flush()
-
-    return result
+    try {
+      return await expireWalletCredits(
+        {
+          db,
+          logger: log,
+          services: { wallet: services.wallet },
+        },
+        {
+          now,
+          limit: 500,
+        }
+      )
+    } finally {
+      await log.flush()
+    }
   },
 })

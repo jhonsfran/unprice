@@ -147,6 +147,23 @@ function providerItemMatchesLine(item: ProviderInvoiceItem, line: InvoiceLine): 
   )
 }
 
+function isProviderInvoiceNotFound(error: { message: string; context?: Record<string, unknown> }) {
+  const statusCode = error.context?.statusCode
+  if (statusCode === 404 || statusCode === "404") {
+    return true
+  }
+
+  const code = error.context?.code
+  if (
+    typeof code === "string" &&
+    ["invoice_not_found", "not_found", "resource_missing"].includes(code)
+  ) {
+    return true
+  }
+
+  return /^No such invoice\b/i.test(error.message)
+}
+
 export class BillingService {
   private readonly db: Database
   private readonly logger: Logger
@@ -1328,11 +1345,14 @@ export class BillingService {
       })
 
       if (providerInvoice.err) {
-        // If the provider invoice cannot be retrieved (e.g. deleted externally,
-        // 404, or transient failure), clear the stamped id and fall through to
-        // recreate a fresh provider invoice. This avoids retry limbo when the
-        // provider invoice no longer exists.
-        this.logger.warn("stamped provider invoice could not be retrieved; recreating", {
+        if (!isProviderInvoiceNotFound(providerInvoice.err)) {
+          return Err(providerInvoice.err)
+        }
+
+        // A definite provider not-found means the stamped draft was deleted
+        // externally; transient provider failures must retry without creating a
+        // second invoice.
+        this.logger.warn("stamped provider invoice was not found; recreating", {
           invoiceId: invoice.id,
           providerInvoiceId,
           error: providerInvoice.err.message,
@@ -1438,9 +1458,7 @@ export class BillingService {
 
     // Warn about orphaned provider items that have no matching ledger line.
     // The payment provider interface does not expose a `deleteInvoiceItem`
-    // method, so we cannot remove them automatically. Log a warning so
-    // operators can investigate; the provider invoice total may be higher
-    // than the local ledger total.
+    // method, so abort finalization until an operator reconciles the draft.
     if (existingItems.size > 0) {
       this.logger.warn("provider invoice has orphaned items with no matching ledger line", {
         invoiceId: invoice.id,
@@ -1448,6 +1466,12 @@ export class BillingService {
         orphanedItemCount: existingItems.size,
         orphanedItemIds: [...existingItems.values()].map((item) => item.id),
       })
+
+      return Err(
+        new UnPriceBillingError({
+          message: `Provider invoice ${providerInvoiceId} has orphaned items and cannot be finalized safely`,
+        })
+      )
     }
 
     // 3) Finalize so the invoice is visible/collectible. Sandbox treats this

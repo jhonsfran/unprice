@@ -1,10 +1,6 @@
-import type { Analytics } from "@unprice/analytics"
 import { sql } from "@unprice/db"
-import type { Customer, Subscription } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
-import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterAll, beforeEach, describe, expect, it } from "vitest"
 import type { Cache } from "../../cache"
 import { createServiceContext } from "../../context"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
@@ -13,7 +9,11 @@ import { LedgerGateway } from "../../ledger"
 import type { Metrics } from "../../metrics"
 import { RatingService } from "../../rating/service"
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
-import type { SubscriptionContext } from "../../subscriptions/types"
+import {
+  createBillingAnalytics as createAnalytics,
+  createBillingLogger as createLogger,
+  loadBillingSubscriptionContext,
+} from "../../test-fixtures/billing-context"
 import {
   closeTestDatabaseConnection,
   createTestDatabaseConnection,
@@ -44,38 +44,6 @@ const billableNow = feb1 + 60 * 60 * 1000
 const invoiceTotal = 21_900_000_000
 const annualStatementKey = "stmt_test_arrear_2026_annual"
 
-function createLogger(errors: unknown[] = []): Logger {
-  return {
-    set: vi.fn(),
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn((error: unknown) => {
-      errors.push(error)
-    }),
-    flush: vi.fn(),
-  } as unknown as Logger
-}
-
-function createAnalytics(usageByFeature: Record<string, number>): Analytics {
-  return {
-    getUsageBillingFeatures: vi.fn(
-      async ({
-        features,
-      }: {
-        features: Array<{ featureSlug: string }>
-      }) =>
-        Ok(
-          features.map((feature) => ({
-            featureSlug: feature.featureSlug,
-            usage: usageByFeature[feature.featureSlug] ?? 0,
-          }))
-        )
-    ),
-    ingestEvents: vi.fn(),
-  } as unknown as Analytics
-}
-
 async function cancelAtRenewalBoundary() {
   await db.execute(sql`
     UPDATE unprice_subscriptions
@@ -96,30 +64,14 @@ async function cancelAtRenewalBoundary() {
   `)
 }
 
-async function loadSubscriptionContext(now = billableNow): Promise<SubscriptionContext> {
-  const subscription = (await db.query.subscriptions.findFirst({
-    where: (table, ops) =>
-      ops.and(ops.eq(table.projectId, projectId), ops.eq(table.id, subscriptionId)),
-  })) as Subscription | undefined
-  const customer = (await db.query.customers.findFirst({
-    where: (table, ops) =>
-      ops.and(ops.eq(table.projectId, projectId), ops.eq(table.id, customerId)),
-  })) as Customer | undefined
-
-  if (!subscription || !customer) {
-    throw new Error("Seeded subscription context was not restored")
-  }
-
-  return {
+async function loadSubscriptionContext(now = billableNow) {
+  return loadBillingSubscriptionContext({
+    db,
     now,
     subscriptionId,
     projectId,
-    subscription,
-    customer,
-    paymentMethodId: null,
-    requiredPaymentMethod: false,
-    currentPhase: null,
-  }
+    customerId,
+  })
 }
 
 async function makeArrearSubscriptionAnnual() {

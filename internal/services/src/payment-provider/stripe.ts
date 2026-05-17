@@ -747,6 +747,12 @@ export class StripePaymentProvider implements PaymentProviderInterface {
         new FetchError({
           message: e.message,
           retry: false,
+          context: {
+            method: "GET",
+            url: `stripe.invoices/${opts.invoiceId}`,
+            statusCode: e.statusCode,
+            code: e.code,
+          },
         })
       )
     }

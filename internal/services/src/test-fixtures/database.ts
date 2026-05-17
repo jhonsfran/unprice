@@ -127,15 +127,20 @@ export async function migrateTestDatabase({
   await ensureTestDatabase(databaseUrl)
 
   const db = createTestDatabaseConnection(databaseUrl)
-  await runDrizzleMigrations(db, {
-    migrationsFolder: resolve(dbPackageRoot, "src/migrations"),
-  })
-  await installPgledger(db, {
-    pgledgerDir: resolve(dbPackageRoot, "src/migrations/pgledger"),
-  })
+  try {
+    await runDrizzleMigrations(db, {
+      migrationsFolder: resolve(dbPackageRoot, "src/migrations"),
+    })
+    await installPgledger(db, {
+      pgledgerDir: resolve(dbPackageRoot, "src/migrations/pgledger"),
+    })
 
-  if (fixtures.length > 0) {
-    await seedTestDb({ db, fixtures, seedDir })
+    if (fixtures.length > 0) {
+      await seedTestDb({ db, fixtures, seedDir })
+    }
+  } catch (error) {
+    await closeTestDatabaseConnection(db)
+    throw error
   }
 
   return db

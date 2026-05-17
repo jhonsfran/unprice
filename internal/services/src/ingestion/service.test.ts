@@ -413,12 +413,14 @@ describe("IngestionService entitlement routing", () => {
     const service = new IngestionService({
       cache: createCache(),
       entitlementService: {
-        getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue(
-          Ok([
-            createCustomerEntitlementRecord(eventsEntitlement),
-            createCustomerEntitlementRecord(keysEntitlement),
-          ] as never)
-        ),
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(
+            Ok([
+              createCustomerEntitlementRecord(eventsEntitlement),
+              createCustomerEntitlementRecord(keysEntitlement),
+            ] as never)
+          ),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
       auditClient: {

@@ -376,7 +376,7 @@ describe("RatingService - extended", () => {
     expect(result.err).toBeUndefined()
     // With zero usage, total price should be zero
     for (const charge of result.val!) {
-      expect(toDecimal(charge.price.totalPrice.dinero)).toBe("0")
+      expect(toDecimal(charge.price.totalPrice.dinero)).toBe("0.00")
     }
   })
 

@@ -105,5 +105,5 @@ funding legs.
 
 ## Related Documents
 
-- [ADR-0001: Canonical Backend Architecture Boundaries](/Users/jhonsfran/repos/unprice/docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md)
-- [ADR-0002: Wallet Payment Provider Activation Guardrails](/Users/jhonsfran/repos/unprice/docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md)
+- [ADR-0001: Canonical Backend Architecture Boundaries](./ADR-0001-canonical-backend-architecture-boundaries.md)
+- [ADR-0002: Wallet Payment Provider Activation Guardrails](./ADR-0002-wallet-payment-provider-activation-guardrails.md)

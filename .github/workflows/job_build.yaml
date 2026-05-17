@@ -59,7 +59,7 @@ jobs:
       db:
         image: postgres:15.6
         env:
-          POSTGRES_DB: postgres
+          POSTGRES_DB: unprice_test
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:

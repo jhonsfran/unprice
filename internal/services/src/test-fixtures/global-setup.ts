@@ -15,9 +15,12 @@ export default async function globalSetup() {
   })
 
   return async () => {
-    if (process.env.TEST_DB_TEARDOWN === "truncate") {
-      await truncateTestDatabase(db)
+    try {
+      if (process.env.TEST_DB_TEARDOWN === "truncate") {
+        await truncateTestDatabase(db)
+      }
+    } finally {
+      await closeTestDatabaseConnection(db)
     }
-    await closeTestDatabaseConnection(db)
   }
 }

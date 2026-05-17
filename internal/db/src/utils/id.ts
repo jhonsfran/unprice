@@ -61,7 +61,6 @@ const BIGINT_24 = BigInt(24)
 const BIGINT_16 = BigInt(16)
 const BIGINT_8 = BigInt(8)
 const BYTE_MASK = 0xff
-const UINT32_SIZE = 0x1_00_00_00_00
 
 let randomCounter = 0
 
@@ -122,9 +121,6 @@ export function newId<TPrefix extends keyof typeof prefixes>(
 export function randomId(): string {
   const buf = new Uint8Array(16)
 
-  // This token is used as an ownership nonce, not as a secret. Keep it free of
-  // Node/Web Crypto requirements so lock ownership works in every runtime that
-  // can execute the database package.
   let timestamp = Date.now()
   for (let offset = 5; offset >= 0; offset--) {
     buf[offset] = timestamp & BYTE_MASK
@@ -135,13 +131,7 @@ export function randomId(): string {
   buf[6] = (randomCounter >> 8) & BYTE_MASK
   buf[7] = randomCounter & BYTE_MASK
 
-  for (let offset = 8; offset < buf.length; offset += 4) {
-    const chunk = Math.floor(Math.random() * UINT32_SIZE)
-    buf[offset] = (chunk >> 24) & BYTE_MASK
-    buf[offset + 1] = (chunk >> 16) & BYTE_MASK
-    buf[offset + 2] = (chunk >> 8) & BYTE_MASK
-    buf[offset + 3] = chunk & BYTE_MASK
-  }
+  crypto.getRandomValues(buf.subarray(8))
 
   return b58.encode(buf).padStart(22, ALPHABET[0])
 }

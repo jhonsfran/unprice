@@ -747,8 +747,41 @@ export class ReferenceBillingModel {
   }
 
   assertLedgerConservation() {
+    const accountBalances = new Map<
+      string,
+      { customerId: string; currency: ReferenceCurrency; amountCents: number }
+    >()
+
+    const addBalance = (
+      movement: ReferenceLedgerMovement,
+      account: string,
+      amountCents: number
+    ) => {
+      const key = `${movement.customerId}:${movement.currency}:${account}`
+      const current = accountBalances.get(key)
+      accountBalances.set(key, {
+        customerId: movement.customerId,
+        currency: movement.currency,
+        amountCents: (current?.amountCents ?? 0) + amountCents,
+      })
+    }
+
     for (const movement of this.ledgerMovements) {
-      referenceLedgerMovementSchema.parse(movement)
+      const parsedMovement = referenceLedgerMovementSchema.parse(movement)
+      addBalance(parsedMovement, parsedMovement.debitAccount, -parsedMovement.amountCents)
+      addBalance(parsedMovement, parsedMovement.creditAccount, parsedMovement.amountCents)
+    }
+
+    const totals = new Map<string, number>()
+    for (const balance of accountBalances.values()) {
+      const key = `${balance.customerId}:${balance.currency}`
+      totals.set(key, (totals.get(key) ?? 0) + balance.amountCents)
+    }
+
+    for (const [key, amountCents] of totals) {
+      if (amountCents !== 0) {
+        throw new Error(`Ledger conservation violated for ${key}: net ${amountCents}`)
+      }
     }
   }
 
