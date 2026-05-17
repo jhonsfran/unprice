@@ -297,11 +297,12 @@ const IDEMPOTENCY_CLEANUP_BATCH_SIZE = 5000
 const SQLITE_BIND_PARAMETER_CHUNK_SIZE = 90
 const OUTBOX_DEPTH_ALERT_THRESHOLD = 1000
 const WALLET_RESERVATION_ROW_ID = "singleton"
-// 12h of radio silence closes out a live reservation even if the period
-// hasn't ended. The final flush returns remaining reserved funds to
-// `available.purchased`; a future apply() on this DO runs without a
-// reservation until activateEntitlement opens a new one.
-const INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000
+// Inactivity closes out a live reservation even if the period hasn't ended.
+// The final flush returns remaining reserved funds to `available.purchased`;
+// a future apply() on this DO runs without a reservation until lazy bootstrap
+// opens a new one.
+const DEVELOPMENT_INACTIVITY_THRESHOLD_MS = 60 * 1000
+const DEFAULT_INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000
 
 // Maximum time the DO will let consumed-but-unflushed activity sit in
 // `customer.{cid}.reserved` without recognising it in the ledger. Cold
@@ -314,6 +315,12 @@ const INACTIVITY_THRESHOLD_MS = 12 * 60 * 60 * 1000
 // per-flush Postgres roundtrip cost on cold meters.
 function maxFlushIntervalMs(env: Env): number {
   return env.NODE_ENV === "development" ? 30_000 : 5 * 60_000
+}
+
+function inactivityThresholdMs(env: Env): number {
+  return env.NODE_ENV === "development"
+    ? DEVELOPMENT_INACTIVITY_THRESHOLD_MS
+    : DEFAULT_INACTIVITY_THRESHOLD_MS
 }
 
 function forEachSqliteBindChunk<T>(values: readonly T[], callback: (chunk: T[]) => void): void {
@@ -1145,11 +1152,12 @@ export class EntitlementWindowDO extends DurableObject {
       wideEvent.outbox_alert = remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD
 
       // Final-flush detection. Any of three triggers converges on the same
-      // flush path: period end, 12h inactivity, or an explicit deletion
+      // flush path: period end, inactivity, or an explicit deletion
       // request. A DO without a reservation (or one marked
       // `recoveryRequired`) skips the flush — there's nothing to close out
       // or the last attempt failed terminally and an operator has to look.
       const window = this.readWalletReservation(this.db)
+      const inactivityMs = inactivityThresholdMs(this.runtimeEnv)
 
       wideEvent.reservation_id = window?.reservationId ?? null
       wideEvent.recovery_required = window?.recoveryRequired ?? false
@@ -1157,7 +1165,7 @@ export class EntitlementWindowDO extends DurableObject {
       if (window?.reservationId && !window.recoveryRequired) {
         const isPeriodEnd = window.reservationEndAt !== null && now >= window.reservationEndAt
         const isInactive =
-          window.lastEventAt !== null && now - window.lastEventAt > INACTIVITY_THRESHOLD_MS
+          window.lastEventAt !== null && now - window.lastEventAt >= inactivityMs
         const isDeletionPending = window.deletionRequested
 
         if (isPeriodEnd || isInactive || isDeletionPending) {

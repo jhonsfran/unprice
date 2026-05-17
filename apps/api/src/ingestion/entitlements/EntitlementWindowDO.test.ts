@@ -3016,6 +3016,57 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
   })
 
+  it("alarm runs a final flush after 60s of inactivity in development", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 0,
+        flushedAmount: 0,
+        refundedAmount: 5 * 100_000_000,
+        drainLegs: [],
+      },
+    })
+
+    const now = Date.now()
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: now + 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: now - 5 * 60_000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_dev",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      lastEventAt: now - 60_000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv({ NODE_ENV: "development" }))
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ final: true, flushAmount: 0, reservationId: "res_dev" })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
+  })
+
   it("alarm keeps a live reservation open before the 12h inactivity threshold", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -4546,15 +4597,17 @@ function buildFakeDrizzle(state: FakeDbState) {
   return db
 }
 
-function createEnv() {
+function createEnv(overrides: Record<string, unknown> = {}) {
   return {
     APP_ENV: "test",
+    NODE_ENV: "test",
     DATABASE_URL: "postgres://user:pass@localhost:5432/unprice",
     DATABASE_READ1_URL: "postgres://user:pass@localhost:5432/unprice",
     DATABASE_READ2_URL: "postgres://user:pass@localhost:5432/unprice",
     DRIZZLE_LOG: false,
     TINYBIRD_TOKEN: "token",
     TINYBIRD_URL: "https://example.com",
+    ...overrides,
   }
 }
 

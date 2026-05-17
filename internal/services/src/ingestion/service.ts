@@ -1015,6 +1015,7 @@ export class IngestionService {
     }
 
     return this.filterProcessableEntitlements({
+      allowMultipleMatches: false,
       message: params.message,
       entitlements,
     })
@@ -1024,12 +1025,14 @@ export class IngestionService {
     context: IngestionContext
   ): Result<IngestionEntitlement[], IngestionRejectionReason> {
     return this.filterProcessableEntitlements({
+      allowMultipleMatches: true,
       message: context.message,
       entitlements: context.candidateEntitlements,
     })
   }
 
   private filterProcessableEntitlements(params: {
+    allowMultipleMatches: boolean
     message: IngestionQueueMessage
     entitlements: IngestionEntitlement[]
   }): Result<IngestionEntitlement[], IngestionRejectionReason> {
@@ -1044,7 +1047,7 @@ export class IngestionService {
       return { err: "UNROUTABLE_EVENT" }
     }
 
-    if (matchingEntitlements.length > 1) {
+    if (!params.allowMultipleMatches && matchingEntitlements.length > 1) {
       this.logger.error("multiple active entitlements matched ingestion event", {
         projectId: params.message.projectId,
         customerId: params.message.customerId,

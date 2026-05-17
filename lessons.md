@@ -49,6 +49,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-15: API load tests should use `tooling/k6/baseline.js` with one `PROJECT_ID`, one
   `CUSTOMER_ID`, and `EVENTS=1000`; it discovers meters through `entitlements.get`, sends async
   usage grouped by event slug, and verifies every entitlement without signup/payment flows.
+- 2026-05-17: Async raw ingestion supports one event fanning out to multiple active usage
+  entitlements with the same `eventSlug`; keep same-slug meter tests at the service layer so
+  payload-compatible meters stay processed together.
 
 ## Billing, Wallets, And Invoices
 
@@ -85,6 +88,10 @@ patterns. Keep it cheap to load and useful.
   helper.
 - 2026-05-08: Treat `WALLET_EMPTY` as possibly DO-local underfunding; flush+refill once before
   denying.
+- 2026-05-17: EntitlementWindowDO inactivity final-flush keeps production/test at 12h but uses
+  60s in `NODE_ENV=development` so local wallet reservations return quickly.
+- 2026-05-17: When wallet credit appears missing, include `wallet_release_granted` ledger rows;
+  final flush releases unused granted reservations back to platform funding, not `available.granted`.
 - 2026-05-08: Prefer `/v1/wallet/balance`; keep `/v1/wallet` as compatibility and credit balance
   reads under `/v1/wallet/credits/{walletId}/balance`.
 - 2026-05-08: Saved subscription phase `creditLinePolicy` and `creditLineAmount` are immutable.

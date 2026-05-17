@@ -379,6 +379,108 @@ describe("IngestionService entitlement routing", () => {
     )
   })
 
+  it("fans async events out to multiple payload-compatible meters with the same event slug", async () => {
+    const eventsEntitlement = createEntitlement({
+      customerEntitlementId: "ce_events",
+      featurePlanVersionId: "fpv_events",
+      featureSlug: "events",
+      meterConfig: {
+        eventId: "evt_completions",
+        eventSlug: "completions",
+        aggregationMethod: "sum",
+        aggregationField: "events",
+      },
+    })
+    const keysEntitlement = createEntitlement({
+      customerEntitlementId: "ce_keys",
+      featurePlanVersionId: "fpv_keys",
+      featureSlug: "apikeys",
+      meterConfig: {
+        eventId: "evt_completions",
+        eventSlug: "completions",
+        aggregationMethod: "sum",
+        aggregationField: "keys",
+      },
+    })
+    const apply = vi.fn().mockResolvedValue({ allowed: true })
+    const getEntitlementWindowStub = vi.fn().mockReturnValue({
+      apply,
+      getEnforcementState: vi.fn(),
+    })
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const logger = createLogger()
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi.fn().mockResolvedValue(
+          Ok([
+            createCustomerEntitlementRecord(eventsEntitlement),
+            createCustomerEntitlementRecord(keysEntitlement),
+          ] as never)
+        ),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: eventsEntitlement.customerId,
+      projectId: eventsEntitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: eventsEntitlement.projectId,
+          customerId: eventsEntitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "completions",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { events: 2, keys: 3 },
+        },
+      ],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.disposition.action).toBe("ack")
+    expect(getEntitlementWindowStub).toHaveBeenCalledTimes(2)
+    expect(getEntitlementWindowStub).toHaveBeenNthCalledWith(1, {
+      customerEntitlementId: "ce_events",
+      customerId: eventsEntitlement.customerId,
+      projectId: eventsEntitlement.projectId,
+    })
+    expect(getEntitlementWindowStub).toHaveBeenNthCalledWith(2, {
+      customerEntitlementId: "ce_keys",
+      customerId: eventsEntitlement.customerId,
+      projectId: eventsEntitlement.projectId,
+    })
+    expect(apply).toHaveBeenCalledTimes(2)
+    expect(apply.mock.calls.map(([input]) => input.entitlement.customerEntitlementId)).toEqual([
+      "ce_events",
+      "ce_keys",
+    ])
+    expect(commit).toHaveBeenCalledTimes(1)
+
+    const [entries] = commit.mock.calls[0]!
+    expect(entries[0]).toMatchObject({
+      idempotencyKey: "idem_123",
+      rejectionReason: undefined,
+      status: "processed",
+    })
+    expect(JSON.parse(entries[0].resultJson)).toEqual({ state: "processed" })
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
   it("returns CUSTOMER_NOT_FOUND when verifying a missing customer", async () => {
     const service = new IngestionService({
       cache: createCache(),
