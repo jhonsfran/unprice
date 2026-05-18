@@ -9,7 +9,7 @@ import { createServiceContext } from "@unprice/services/context"
 import { LogdrainMetrics, NoopMetrics } from "@unprice/services/metrics"
 import type { MiddlewareHandler } from "hono"
 import type { HonoEnv } from "~/hono/env"
-import { createApiLogger } from "~/observability"
+import { apiMetricsLogger, createApiLogger } from "~/observability"
 
 import { createIngestionService } from "~/ingestion/service"
 
@@ -98,7 +98,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       ? new LogdrainMetrics({
           requestId,
           environment: c.env.APP_ENV,
-          logger,
+          logger: apiMetricsLogger,
           service: "api",
           colo: stats.colo,
           country: stats.country,
@@ -207,11 +207,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       plans: svcCtx.plans,
       ledger: svcCtx.ledger,
       wallet: svcCtx.wallet,
-    })
-
-    metrics.emit({
-      metric: "metric.init",
-      duration: Date.now() - performanceStart,
     })
 
     await next()

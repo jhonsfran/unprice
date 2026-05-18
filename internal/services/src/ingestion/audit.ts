@@ -31,7 +31,7 @@ export interface IngestionAuditClient {
 }
 
 const RECORD_SEPARATOR = "\x1f"
-export const INGESTION_AUDIT_SHARD_COUNT = 1
+export const INGESTION_AUDIT_SHARD_COUNT = 4
 
 export function selectIngestionAuditShardIndex(
   idempotencyKey: string,

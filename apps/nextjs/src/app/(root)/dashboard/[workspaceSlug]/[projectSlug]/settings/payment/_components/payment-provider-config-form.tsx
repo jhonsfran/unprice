@@ -6,13 +6,19 @@ import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Switch } from "@unprice/ui/switch"
 import { cn } from "@unprice/ui/utils"
-import { CreditCard, ExternalLink, RefreshCw, TestTube2 } from "lucide-react"
+import { CreditCard, ExternalLink, RefreshCw, TestTube2, TriangleAlert } from "lucide-react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
-type ProviderUiStatus = "ready" | "needs_onboarding" | "restricted" | "sandbox"
+type ProviderUiStatus = "ready" | "needs_onboarding" | "restricted" | "disabled" | "sandbox"
+
+type StripeConnectionIssue = {
+  title: string
+  description: string
+  fields: string[]
+}
 
 const STATUS_META: Record<
   ProviderUiStatus,
@@ -24,7 +30,88 @@ const STATUS_META: Record<
   ready: { label: "Ready", variant: "success" },
   needs_onboarding: { label: "Needs onboarding", variant: "warning" },
   restricted: { label: "Needs action", variant: "warning" },
+  disabled: { label: "Disabled", variant: "destructive" },
   sandbox: { label: "Sandbox", variant: "info" },
+}
+
+const STRIPE_REQUIREMENT_LABELS: Record<string, string> = {
+  "individual.address.city": "Legal address",
+  "individual.address.line1": "Legal address",
+  "individual.address.postal_code": "Legal address",
+  "individual.dob.day": "Date of birth",
+  "individual.dob.month": "Date of birth",
+  "individual.dob.year": "Date of birth",
+  "individual.first_name": "Legal first name",
+  "individual.last_name": "Legal last name",
+  "individual.phone": "Phone number",
+  "individual.verification.additional_document": "Additional identity document",
+  "individual.verification.document": "Identity document",
+  "individual.verification.proof_of_liveness": "Proof of liveness",
+}
+
+function formatStripeRequirement(requirement: string): string {
+  const knownLabel = STRIPE_REQUIREMENT_LABELS[requirement]
+
+  if (knownLabel) {
+    return knownLabel
+  }
+
+  return requirement
+    .split(".")
+    .filter(Boolean)
+    .map((part) => part.replaceAll("_", " "))
+    .join(" ")
+    .replace(/^\w/, (letter) => letter.toUpperCase())
+}
+
+function formatStripeDisabledReason(disabledReason?: string | null): string | null {
+  if (!disabledReason) {
+    return null
+  }
+
+  if (disabledReason === "requirements.past_due") {
+    return "Stripe disabled this account because required verification details are past due."
+  }
+
+  return `Stripe disabled this account: ${formatStripeRequirement(disabledReason)}.`
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))]
+}
+
+function getStripeConnectionIssue(provider?: PaymentProviderConfig): StripeConnectionIssue | null {
+  const connectionData = provider?.connectionData
+  const requirements = connectionData?.requirements
+  const requirementErrors = requirements?.errors ?? []
+  const disabledReason = connectionData?.disabledReason ?? requirements?.disabled_reason ?? null
+  const failedReasons = uniqueStrings(
+    requirementErrors
+      .map((error) => error.reason)
+      .filter((reason): reason is string => Boolean(reason))
+  )
+  const requiredFields = uniqueStrings(
+    [
+      ...requirementErrors
+        .map((error) => error.requirement)
+        .filter((requirement): requirement is string => Boolean(requirement)),
+      ...(requirements?.past_due ?? []),
+      ...(requirements?.currently_due ?? []),
+    ].map(formatStripeRequirement)
+  )
+
+  if (!disabledReason && failedReasons.length === 0 && requiredFields.length === 0) {
+    return null
+  }
+
+  return {
+    title: failedReasons.length > 0 ? "Stripe verification failed" : "Stripe needs more details",
+    description:
+      failedReasons[0] ??
+      formatStripeDisabledReason(disabledReason) ??
+      "Complete the required Stripe account information before enabling payments.",
+    fields: requiredFields,
+  }
 }
 
 function deriveStripeStatus({
@@ -41,8 +128,9 @@ function deriveStripeStatus({
   switch (provider?.status) {
     case "active":
       return "ready"
-    case "restricted":
     case "disabled":
+      return "disabled"
+    case "restricted":
       return "restricted"
     default:
       return "needs_onboarding"
@@ -165,6 +253,7 @@ export function PaymentProviderConfigForm({
       : undefined
     : deriveStripeStatus({ provider, enabled })
   const status = rowStatus ? STATUS_META[rowStatus] : null
+  const stripeConnectionIssue = isStripe ? getStripeConnectionIssue(provider) : null
   const toggleDisabled =
     setEnabled.isPending ||
     (isStripe && !enabled && !hasStripeAccount) ||
@@ -232,6 +321,27 @@ export function PaymentProviderConfigForm({
               >
                 Skip
               </Button>
+            </div>
+          )}
+
+          {stripeConnectionIssue && (
+            <div className="warning flex gap-3 rounded-md p-3">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+              <div className="min-w-0 space-y-2">
+                <div className="space-y-1">
+                  <p className="font-medium text-sm">{stripeConnectionIssue.title}</p>
+                  <p className="text-xs leading-5">{stripeConnectionIssue.description}</p>
+                </div>
+                {stripeConnectionIssue.fields.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {stripeConnectionIssue.fields.map((field) => (
+                      <Badge key={field} variant="outline" className="bg-background/60">
+                        {field}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

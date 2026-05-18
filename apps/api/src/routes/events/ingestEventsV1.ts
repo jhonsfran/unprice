@@ -1,5 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
-import type { AppLogger } from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
 import {
   EventTimestampTooFarInFutureError,
   EventTimestampTooOldError,
@@ -203,7 +203,7 @@ export function selectQueueShardIndex(customerId: string, shardCount = 2): numbe
 }
 
 export async function safeSendToQueue(params: {
-  logger: AppLogger
+  logger: Logger
   queue: Queue<IngestionQueueMessage>
   message: IngestionQueueMessage
 }): Promise<void> {
@@ -284,7 +284,7 @@ export function logEventTooOldRejection(params: {
   eventSlug: string
   eventTimestamp: number
   idempotencyKey: string
-  logger: Pick<AppLogger, "warn">
+  logger: Pick<Logger, "warn">
   maxEventAgeMs?: number | undefined
   now: number
   projectId: string

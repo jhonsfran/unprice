@@ -1,22 +1,31 @@
 import type { Database } from "@unprice/db"
 import {
+  entitlementReservationFundingLegs as entitlementReservationFundingLegsTable,
   entitlementReservations as entitlementReservationsTable,
+  walletCommandIdempotency as walletCommandIdempotencyTable,
   walletCredits as walletCreditsTable,
   walletTopups as walletTopupsTable,
 } from "@unprice/db/schema"
 import type {
   EntitlementReservation,
+  EntitlementReservationFundingLeg,
   WalletCredit,
   WalletCreditSource,
   WalletTopup,
 } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
+import { Err, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromLedgerMinor, toLedgerMinor } from "@unprice/money"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import type { LedgerGateway, LedgerTransferRequest } from "../ledger"
-import { customerAccountKeys, platformAccountKey } from "../ledger"
+import {
+  type LedgerGateway,
+  type LedgerTransferRequest,
+  UnPriceLedgerError,
+  customerAccountKeys,
+  platformAccountKey,
+} from "../ledger"
+import { flushReservationForTest } from "../tests/wallet-scenarios/helpers"
 import { WalletService } from "./service"
 
 // ---------------------------------------------------------------------------
@@ -34,11 +43,26 @@ import { WalletService } from "./service"
 type FakeGrant = WalletCredit
 type FakeTopup = WalletTopup
 type FakeReservation = EntitlementReservation
+type FakeFundingLeg = EntitlementReservationFundingLeg
+type SeedFundingAllocation = {
+  source: "granted" | "purchased"
+  amount: number
+  walletCreditId?: string
+  grantSource?: WalletCreditSource
+}
 
 interface FakeState {
   grants: FakeGrant[]
   topups: FakeTopup[]
   reservations: FakeReservation[]
+  fundingLegs: FakeFundingLeg[]
+  walletCommands: Array<{
+    projectId: string
+    idempotencyKey: string
+    command: string
+    payloadHash: string
+    result: Record<string, unknown>
+  }>
   balances: Record<string, number> // account name → minor units (scale 8)
   transfers: LedgerTransferRequest[] // every ledger call, in order
   transferBatches: number // count of `createTransfers` calls
@@ -51,6 +75,8 @@ function createState(): FakeState {
     grants: [],
     topups: [],
     reservations: [],
+    fundingLegs: [],
+    walletCommands: [],
     balances: {},
     transfers: [],
     transferBatches: 0,
@@ -63,6 +89,8 @@ function tableName(table: unknown): string {
   if (table === walletCreditsTable) return "walletCredits"
   if (table === walletTopupsTable) return "walletTopups"
   if (table === entitlementReservationsTable) return "entitlementReservations"
+  if (table === entitlementReservationFundingLegsTable) return "entitlementReservationFundingLegs"
+  if (table === walletCommandIdempotencyTable) return "walletCommandIdempotency"
   return "unknown"
 }
 
@@ -92,30 +120,70 @@ function createDb(state: FakeState): Database {
       entitlementReservations: {
         findFirst: vi.fn(async () => state.reservations[0] ?? null),
       },
+      entitlementReservationFundingLegs: {
+        findMany: vi.fn(async () =>
+          state.fundingLegs.slice().sort((a, b) => a.sequence - b.sequence)
+        ),
+      },
+      walletCommandIdempotency: {
+        findFirst: vi.fn(async () => null),
+      },
     },
     execute: vi.fn(async () => ({ rows: [] })),
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({
+        innerJoin: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn(async () => []),
+          })),
+        })),
+      })),
+    })),
     insert(table: unknown) {
       const name = tableName(table)
       return {
-        values: vi.fn((values: Record<string, unknown>) => {
+        values: vi.fn((values: Record<string, unknown> | Array<Record<string, unknown>>) => {
+          const rows = Array.isArray(values) ? values : [values]
           const record = () => {
-            state.inserts.push({ table: name, values })
-            if (name === "walletCredits") {
-              const grant = { ...(values as unknown as FakeGrant) }
-              const dup = state.grants.find(
-                (g) =>
-                  g.customerId === grant.customerId && g.ledgerTransferId === grant.ledgerTransferId
-              )
-              if (dup) return { inserted: false, row: dup }
-              state.grants.push(grant)
-              return { inserted: true, row: grant }
+            let row: FakeGrant | FakeReservation | FakeFundingLeg | Record<string, unknown> =
+              rows[0] ?? {}
+            let inserted = true
+            for (const value of rows) {
+              state.inserts.push({ table: name, values: value })
+              if (name === "walletCredits") {
+                const grant = { ...(value as unknown as FakeGrant) }
+                const dup = state.grants.find(
+                  (g) =>
+                    g.customerId === grant.customerId &&
+                    g.ledgerTransferId === grant.ledgerTransferId
+                )
+                if (dup) {
+                  inserted = false
+                  row = dup
+                  continue
+                }
+                state.grants.push(grant)
+                row = grant
+                continue
+              }
+              if (name === "entitlementReservations") {
+                const reservation = { ...(value as unknown as FakeReservation) }
+                state.reservations.push(reservation)
+                row = reservation
+                continue
+              }
+              if (name === "entitlementReservationFundingLegs") {
+                const leg = { ...(value as unknown as FakeFundingLeg) }
+                state.fundingLegs.push(leg)
+                row = leg
+                continue
+              }
+              if (name === "walletCommandIdempotency") {
+                state.walletCommands.push(value as unknown as FakeState["walletCommands"][number])
+                row = value
+              }
             }
-            if (name === "entitlementReservations") {
-              state.reservations.push({
-                ...(values as unknown as FakeReservation),
-              })
-            }
-            return { inserted: true, row: values as unknown as FakeGrant }
+            return { inserted, row }
           }
 
           // Drizzle's insert query builder is itself a PromiseLike: callers
@@ -123,7 +191,7 @@ function createDb(state: FakeState): Database {
           // `.onConflictDoNothing().returning()`. The mock supports both, and
           // `record()` is invoked exactly once on whichever terminal path the
           // caller takes (we do not eagerly resolve).
-          type FakeInsertOutcome = { inserted: boolean; row: FakeGrant | FakeReservation }
+          type FakeInsertOutcome = { inserted: boolean; row: unknown }
           type FakeInsertChain = {
             onConflictDoNothing: () => { returning: () => Promise<{ id: string }[]> }
             then: (
@@ -158,6 +226,28 @@ function createDb(state: FakeState): Database {
           return {
             where: vi.fn(async () => {
               state.updates.push({ table: name, set: setSpec })
+              if (name === "entitlementReservations" && state.reservations[0]) {
+                Object.assign(state.reservations[0], setSpec)
+              }
+              if (name === "entitlementReservationFundingLegs") {
+                const leg = state.fundingLegs.find((candidate) => {
+                  if (typeof setSpec.capturedAmount === "number") {
+                    return (
+                      candidate.capturedAmount < setSpec.capturedAmount &&
+                      candidate.allocatedAmount >= setSpec.capturedAmount
+                    )
+                  }
+                  if (typeof setSpec.releasedAmount === "number") {
+                    const stillReserved =
+                      candidate.allocatedAmount -
+                      candidate.capturedAmount -
+                      candidate.releasedAmount
+                    return candidate.releasedAmount < setSpec.releasedAmount && stillReserved > 0
+                  }
+                  return false
+                })
+                if (leg) Object.assign(leg, setSpec)
+              }
             }),
           }
         },
@@ -173,7 +263,6 @@ function createDb(state: FakeState): Database {
 function createLedger(state: FakeState): LedgerGateway {
   let transferIdSeq = 0
   const nextId = () => `pgle_${++transferIdSeq}`
-  const idempotencyCache = new Map<string, ReturnType<typeof makeTransfer>>()
   const makeTransfer = (req: LedgerTransferRequest, id: string) => ({
     id,
     fromAccountId: `acct_from_${req.fromAccount}`,
@@ -184,6 +273,10 @@ function createLedger(state: FakeState): LedgerGateway {
     createdAt: new Date(),
     eventAt: req.eventAt ?? new Date(),
   })
+  const idempotencyCache = new Map<
+    string,
+    { request: LedgerTransferRequest; transfer: ReturnType<typeof makeTransfer> }
+  >()
 
   const apply = (req: LedgerTransferRequest) => {
     const minor = toLedgerMinor(req.amount)
@@ -194,15 +287,38 @@ function createLedger(state: FakeState): LedgerGateway {
   const idempotencyKey = (req: LedgerTransferRequest) =>
     `${req.projectId}|${req.source.type}|${req.source.id}`
 
+  const hasReplayConflict = (
+    request: LedgerTransferRequest,
+    existing: LedgerTransferRequest
+  ): boolean =>
+    request.fromAccount !== existing.fromAccount ||
+    request.toAccount !== existing.toAccount ||
+    toLedgerMinor(request.amount) !== toLedgerMinor(existing.amount) ||
+    (request.statementKey ?? null) !== (existing.statementKey ?? null)
+
+  const idempotencyConflict = (req: LedgerTransferRequest) =>
+    Err(
+      new UnPriceLedgerError({
+        message: "LEDGER_IDEMPOTENCY_CONFLICT",
+        context: {
+          sourceType: req.source.type,
+          sourceId: req.source.id,
+        },
+      })
+    )
+
   return {
     createTransfer: vi.fn(async (req: LedgerTransferRequest) => {
       const key = idempotencyKey(req)
       const existing = idempotencyCache.get(key)
-      if (existing) return Ok(existing)
+      if (existing) {
+        if (hasReplayConflict(req, existing.request)) return idempotencyConflict(req)
+        return Ok(existing.transfer)
+      }
       state.transfers.push(req)
       apply(req)
       const transfer = makeTransfer(req, nextId())
-      idempotencyCache.set(key, transfer)
+      idempotencyCache.set(key, { request: req, transfer })
       return Ok(transfer)
     }),
     createTransfers: vi.fn(async (reqs: LedgerTransferRequest[]) => {
@@ -212,13 +328,14 @@ function createLedger(state: FakeState): LedgerGateway {
         const key = idempotencyKey(req)
         const existing = idempotencyCache.get(key)
         if (existing) {
-          out.push(existing)
+          if (hasReplayConflict(req, existing.request)) return idempotencyConflict(req)
+          out.push(existing.transfer)
           continue
         }
         state.transfers.push(req)
         apply(req)
         const transfer = makeTransfer(req, nextId())
-        idempotencyCache.set(key, transfer)
+        idempotencyCache.set(key, { request: req, transfer })
         out.push(transfer)
       }
       return Ok(out)
@@ -282,21 +399,46 @@ function seedReservation(
     customerId: string
     projectId: string
     entitlementId: string
+    fundingAllocations?: SeedFundingAllocation[]
   }
 ): FakeReservation {
+  const { fundingAllocations, ...reservationOverrides } = overrides
   const reservation: FakeReservation = {
     allocationAmount: 0,
     consumedAmount: 0,
-    drainLegs: [],
     refillThresholdBps: 2000,
     refillChunkAmount: 0,
     periodStartAt: new Date("2026-01-01T00:00:00Z"),
     periodEndAt: new Date("2026-02-01T00:00:00Z"),
     reconciledAt: null,
     createdAt: new Date("2026-01-01T00:00:00Z"),
-    ...overrides,
+    ...reservationOverrides,
   } as FakeReservation
   state.reservations.push(reservation)
+  const allocations =
+    fundingAllocations ??
+    (reservation.allocationAmount > 0
+      ? ([{ source: "purchased", amount: reservation.allocationAmount }] as const)
+      : [])
+
+  let remainingCaptured = reservation.consumedAmount
+  for (const [index, allocation] of allocations.entries()) {
+    const capturedAmount = Math.min(allocation.amount, Math.max(0, remainingCaptured))
+    remainingCaptured -= capturedAmount
+    state.fundingLegs.push({
+      id: `erfl_seed_${state.fundingLegs.length + 1}`,
+      projectId: reservation.projectId,
+      reservationId: reservation.id,
+      source: allocation.source,
+      walletCreditId: allocation.source === "granted" ? (allocation.walletCreditId ?? null) : null,
+      grantSource: allocation.source === "granted" ? (allocation.grantSource ?? null) : null,
+      allocatedAmount: allocation.amount,
+      capturedAmount,
+      releasedAmount: 0,
+      sequence: index + 1,
+      createdAt: reservation.createdAt,
+    } as FakeFundingLeg)
+  }
   return reservation
 }
 
@@ -382,7 +524,7 @@ describe("WalletService.createReservation", () => {
 
     // Two ledger legs: one combined granted (summed across drained grants),
     // one purchased covering the remainder. Per-grant attribution lives in
-    // `drainLegs`, not in separate transfers.
+    // first-class funding legs, not in separate transfers.
     expect(state.transfers).toHaveLength(2)
     expect(state.transfers[0]).toMatchObject({
       fromAccount: keys.granted,
@@ -395,11 +537,18 @@ describe("WalletService.createReservation", () => {
     })
     expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(2 * DOLLAR)
 
-    // drainLegs attribution: granted before purchased, preserving grant ids.
-    expect(val?.drainLegs).toEqual([
-      { source: "granted", amount: 3 * DOLLAR, grantId: "wcr_old", grantSource: "promo" },
-      { source: "granted", amount: 2 * DOLLAR, grantId: "wcr_new", grantSource: "promo" },
-      { source: "purchased", amount: 2 * DOLLAR },
+    // Funding legs preserve source attribution and grant ids.
+    expect(
+      state.fundingLegs.map((leg) => ({
+        amount: leg.allocatedAmount,
+        grantSource: leg.grantSource,
+        source: leg.source,
+        walletCreditId: leg.walletCreditId,
+      }))
+    ).toEqual([
+      { source: "granted", amount: 3 * DOLLAR, walletCreditId: "wcr_old", grantSource: "promo" },
+      { source: "granted", amount: 2 * DOLLAR, walletCreditId: "wcr_new", grantSource: "promo" },
+      { source: "purchased", amount: 2 * DOLLAR, walletCreditId: null, grantSource: null },
     ])
   })
 
@@ -425,7 +574,7 @@ describe("WalletService.createReservation", () => {
       createdAt: new Date("2026-01-10"),
     })
 
-    const { val } = await wallet.createReservation({
+    await wallet.createReservation({
       projectId,
       customerId,
       currency: "USD",
@@ -438,7 +587,9 @@ describe("WalletService.createReservation", () => {
       idempotencyKey: "reserve:fifo",
     })
 
-    expect(val?.drainLegs.map((l) => l.grantId)).toEqual(["wcr_soon", "wcr_far"])
+    expect(
+      state.fundingLegs.filter((leg) => leg.source === "granted").map((leg) => leg.walletCreditId)
+    ).toEqual(["wcr_soon", "wcr_far"])
   })
 
   it("stores reservation metadata and forwards it to reserve ledger transfers", async () => {
@@ -527,6 +678,49 @@ describe("WalletService.createReservation", () => {
     // zero drained from purchased → no purchased transfer leg emitted.
   })
 
+  it("uses reservation-scoped ledger source ids when re-opening the same period", async () => {
+    const { state, wallet } = buildService()
+    const input = {
+      projectId,
+      customerId,
+      currency: "USD" as const,
+      entitlementId: "ent_1",
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-01-01"),
+      periodEndAt: new Date("2026-02-01"),
+      idempotencyKey: "reserve:same-period",
+    }
+
+    state.balances[keys.purchased] = 3 * DOLLAR
+    const first = await wallet.createReservation({
+      ...input,
+      requestedAmount: 3 * DOLLAR,
+    })
+
+    expect(first.err).toBeUndefined()
+
+    // Simulate the active-reservation lookup after a final close: the closed
+    // reservation remains in Postgres, but it is ignored by the partial active
+    // unique index/query, so a fresh reservation can be inserted for the period.
+    state.reservations = []
+    state.fundingLegs = []
+    state.balances[keys.purchased] = 5 * DOLLAR
+
+    const second = await wallet.createReservation({
+      ...input,
+      requestedAmount: 5 * DOLLAR,
+    })
+
+    expect(second.err).toBeUndefined()
+    expect(state.transfers).toHaveLength(2)
+    expect(state.transfers[0]?.source.id).toBe(`reserve:same-period:${first.val?.reservationId}`)
+    expect(state.transfers[1]?.source.id).toBe(`reserve:same-period:${second.val?.reservationId}`)
+    expect(state.transfers[0]?.source.id).not.toBe(state.transfers[1]?.source.id)
+    expect(toLedgerMinor(state.transfers[0]!.amount)).toBe(3 * DOLLAR)
+    expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(5 * DOLLAR)
+  })
+
   it("decrements wallet_credits.remaining_amount for each drained grant", async () => {
     const { state, wallet } = buildService()
     seedGrant(state, {
@@ -569,7 +763,7 @@ describe("WalletService.createReservation", () => {
   })
 })
 
-describe("WalletService.flushReservation", () => {
+describe("WalletService reservation capture, extend, and release", () => {
   const customerId = "cus_abc"
   const projectId = "prj_abc"
   const keys = customerAccountKeys(customerId)
@@ -595,7 +789,7 @@ describe("WalletService.flushReservation", () => {
       expiresAt: new Date("2026-06-01"),
     })
 
-    const { val, err } = await wallet.flushReservation({
+    const { val, err } = await flushReservationForTest(wallet, {
       projectId,
       customerId,
       currency: "USD",
@@ -633,7 +827,7 @@ describe("WalletService.flushReservation", () => {
     expect(state.transfers[1]?.metadata).toMatchObject({
       requestedBy: "durable_object",
       requestedById: "do_123",
-      flow: "refill",
+      flow: "extend",
     })
     expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(1 * DOLLAR)
     expect(state.transfers[2]).toMatchObject({
@@ -643,16 +837,94 @@ describe("WalletService.flushReservation", () => {
     expect(toLedgerMinor(state.transfers[2]!.amount)).toBe(2 * DOLLAR)
 
     // Reservation row reflects both flush and refill.
-    const resUpdate = state.updates.find((u) => u.table === "entitlementReservations")
-    expect(resUpdate?.set).toMatchObject({
-      consumedAmount: 2 * DOLLAR,
-      allocationAmount: 5 * DOLLAR + 3 * DOLLAR,
-    })
-    expect(resUpdate?.set).not.toHaveProperty("reconciledAt")
+    const consumedUpdate = state.updates.find(
+      (u) => u.table === "entitlementReservations" && "consumedAmount" in u.set
+    )
+    const allocationUpdate = state.updates.find(
+      (u) => u.table === "entitlementReservations" && "allocationAmount" in u.set
+    )
+    expect(consumedUpdate?.set).toMatchObject({ consumedAmount: 2 * DOLLAR })
+    expect(allocationUpdate?.set).toMatchObject({ allocationAmount: 5 * DOLLAR + 3 * DOLLAR })
+    expect(allocationUpdate?.set).not.toHaveProperty("reconciledAt")
   })
 
-  it("final flush: flushes consumed, refunds purchased, and releases unused credits", async () => {
+  it("captures usage across funding legs in allocation order", async () => {
     const { state, wallet } = buildService()
+    seedReservation(state, {
+      id: "res_capture_order",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 5 * DOLLAR,
+      consumedAmount: 0,
+      fundingAllocations: [
+        { source: "granted", amount: 3 * DOLLAR, grantSource: "promo", walletCreditId: "wcr_a" },
+        { source: "purchased", amount: 2 * DOLLAR },
+      ],
+    })
+    state.balances[keys.reserved] = 5 * DOLLAR
+
+    const { val, err } = await wallet.captureReservationUsage({
+      projectId,
+      customerId,
+      currency: "USD",
+      reservationId: "res_capture_order",
+      flushSeq: 1,
+      amount: 4 * DOLLAR,
+      statementKey: "stmt_capture_order",
+    })
+
+    expect(err).toBeUndefined()
+    expect(val?.capturedAmount).toBe(4 * DOLLAR)
+    expect(state.transfers).toHaveLength(1)
+    expect(state.transfers[0]).toMatchObject({
+      fromAccount: keys.reserved,
+      toAccount: keys.consumed,
+    })
+    expect(toLedgerMinor(state.transfers[0]!.amount)).toBe(4 * DOLLAR)
+    expect(state.fundingLegs.map((leg) => leg.capturedAmount)).toEqual([3 * DOLLAR, 1 * DOLLAR])
+    expect(state.reservations[0]?.consumedAmount).toBe(4 * DOLLAR)
+  })
+
+  it("rejects captures that exceed still-reserved funding legs", async () => {
+    const { state, wallet } = buildService()
+    seedReservation(state, {
+      id: "res_over_capture",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 2 * DOLLAR,
+      consumedAmount: 0,
+      fundingAllocations: [{ source: "purchased", amount: 2 * DOLLAR }],
+    })
+    state.balances[keys.reserved] = 2 * DOLLAR
+
+    const { err } = await wallet.captureReservationUsage({
+      projectId,
+      customerId,
+      currency: "USD",
+      reservationId: "res_over_capture",
+      flushSeq: 1,
+      amount: 3 * DOLLAR,
+      statementKey: "stmt_over_capture",
+    })
+
+    expect(err?.message).toBe("WALLET_INSUFFICIENT_FUNDS")
+    expect(state.transfers).toHaveLength(0)
+    expect(state.fundingLegs.map((leg) => leg.capturedAmount)).toEqual([0])
+    expect(state.reservations[0]?.consumedAmount).toBe(0)
+  })
+
+  it("release: captures consumed and restores unused funds to customer buckets", async () => {
+    const { state, wallet } = buildService()
+    seedGrant(state, {
+      id: "wcr_1",
+      customerId,
+      projectId,
+      issuedAmount: 4 * DOLLAR,
+      remainingAmount: 0,
+      source: "promo",
+    })
     seedReservation(state, {
       id: "res_2",
       customerId,
@@ -660,14 +932,14 @@ describe("WalletService.flushReservation", () => {
       entitlementId: "ent_1",
       allocationAmount: 10 * DOLLAR,
       consumedAmount: 2 * DOLLAR,
-      drainLegs: [
-        { source: "granted", amount: 4 * DOLLAR, grantSource: "promo", grantId: "wcr_1" },
+      fundingAllocations: [
+        { source: "granted", amount: 4 * DOLLAR, grantSource: "promo", walletCreditId: "wcr_1" },
         { source: "purchased", amount: 6 * DOLLAR },
       ],
     })
     state.balances[keys.reserved] = 10 * DOLLAR
 
-    const { val, err } = await wallet.flushReservation({
+    const { val, err } = await flushReservationForTest(wallet, {
       projectId,
       customerId,
       currency: "USD",
@@ -686,7 +958,7 @@ describe("WalletService.flushReservation", () => {
       refundedAmount: 6 * DOLLAR,
     })
 
-    // Flush leg + purchased refund + granted release, one batch.
+    // Capture leg + release batch (purchased and granted restore).
     expect(state.transferBatches).toBe(1)
     expect(state.transfers).toHaveLength(3)
     expect(state.transfers[0]).toMatchObject({
@@ -700,13 +972,84 @@ describe("WalletService.flushReservation", () => {
     expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(6 * DOLLAR)
     expect(state.transfers[2]).toMatchObject({
       fromAccount: keys.reserved,
-      toAccount: platformAccountKey("promo", projectId),
+      toAccount: keys.granted,
     })
     expect(toLedgerMinor(state.transfers[2]!.amount)).toBe(1 * DOLLAR)
 
-    // reconciledAt is stamped on the final flush.
-    const resUpdate = state.updates.find((u) => u.table === "entitlementReservations")
+    // reconciledAt is stamped on release.
+    const resUpdate = state.updates.find(
+      (u) => u.table === "entitlementReservations" && "reconciledAt" in u.set
+    )
     expect(resUpdate?.set).toHaveProperty("reconciledAt")
+  })
+
+  it("release restores partially unused granted funding to the original grant row", async () => {
+    const { state, wallet } = buildService()
+    seedGrant(state, {
+      id: "wcr_a",
+      customerId,
+      projectId,
+      issuedAmount: 3 * DOLLAR,
+      remainingAmount: 0,
+      source: "promo",
+    })
+    seedGrant(state, {
+      id: "wcr_b",
+      customerId,
+      projectId,
+      issuedAmount: 2 * DOLLAR,
+      remainingAmount: 0,
+      source: "promo",
+    })
+    seedReservation(state, {
+      id: "res_release_attribution",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 10 * DOLLAR,
+      consumedAmount: 4 * DOLLAR,
+      fundingAllocations: [
+        { source: "granted", amount: 3 * DOLLAR, grantSource: "promo", walletCreditId: "wcr_a" },
+        { source: "granted", amount: 2 * DOLLAR, grantSource: "promo", walletCreditId: "wcr_b" },
+        { source: "purchased", amount: 5 * DOLLAR },
+      ],
+    })
+    state.balances[keys.reserved] = 6 * DOLLAR
+
+    const { val, err } = await wallet.releaseReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      reservationId: "res_release_attribution",
+      closeReason: "period_close",
+      idempotencyKey: "release:res_release_attribution:period_close",
+    })
+
+    expect(err).toBeUndefined()
+    expect(val).toMatchObject({
+      releasedAmount: 6 * DOLLAR,
+      restoredGrantedAmount: 1 * DOLLAR,
+      refundedPurchasedAmount: 5 * DOLLAR,
+    })
+    expect(state.transfers).toHaveLength(2)
+    expect(state.transfers[0]).toMatchObject({
+      fromAccount: keys.reserved,
+      toAccount: keys.purchased,
+    })
+    expect(toLedgerMinor(state.transfers[0]!.amount)).toBe(5 * DOLLAR)
+    expect(state.transfers[1]).toMatchObject({
+      fromAccount: keys.reserved,
+      toAccount: keys.granted,
+    })
+    expect(state.transfers[1]?.metadata).toMatchObject({
+      grant_id: "wcr_b",
+      source: "granted",
+    })
+    expect(toLedgerMinor(state.transfers[1]!.amount)).toBe(1 * DOLLAR)
+    expect(
+      state.updates.filter((update) => update.table === "walletCredits").map((update) => update.set)
+    ).toEqual([{ remainingAmount: 1 * DOLLAR }])
+    expect(state.fundingLegs.map((leg) => leg.releasedAmount)).toEqual([0, 1 * DOLLAR, 5 * DOLLAR])
   })
 
   it("rejects flushing an already-reconciled reservation", async () => {
@@ -721,7 +1064,7 @@ describe("WalletService.flushReservation", () => {
       reconciledAt: new Date("2026-02-01"),
     })
 
-    const { err } = await wallet.flushReservation({
+    const { err } = await flushReservationForTest(wallet, {
       projectId,
       customerId,
       currency: "USD",
@@ -957,10 +1300,9 @@ describe("WalletService.expireGrant", () => {
   const keys = customerAccountKeys(customerId)
 
   it("claws back remaining from available.granted to the matching platform source", async () => {
-    const { state, wallet } = buildService()
-    const tx = { execute: vi.fn(async () => ({ rows: [] })) }
+    const { db, state, wallet } = buildService()
 
-    const { err } = await wallet.expireGrant(tx as never, {
+    const { err } = await wallet.expireGrant(db as never, {
       projectId,
       customerId,
       currency: "USD",
@@ -985,10 +1327,9 @@ describe("WalletService.expireGrant", () => {
   })
 
   it("plan_included grant clawback returns to platform.funding.plan_credit", async () => {
-    const { state, wallet } = buildService()
-    const tx = { execute: vi.fn(async () => ({ rows: [] })) }
+    const { db, state, wallet } = buildService()
 
-    await wallet.expireGrant(tx as never, {
+    await wallet.expireGrant(db as never, {
       projectId,
       customerId,
       currency: "USD",

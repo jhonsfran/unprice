@@ -1,9 +1,9 @@
 import type { Pipeline, PipelineRecord } from "cloudflare:pipelines"
 import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
-import type { AppLogger } from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
 import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
-import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm"
+import { and, asc, inArray, isNull, lt } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { createDoLogger, runDoOperation } from "~/observability"
@@ -13,6 +13,13 @@ import migrations from "./drizzle/migrations"
 const TABLE_NAME = "ingestion_audit"
 
 const AUDIT_RETENTION_MS = DO_IDEMPOTENCY_TTL_MS
+const SQLITE_BOUND_PARAMETER_LIMIT = 100
+const AUDIT_INSERT_BOUND_PARAMETER_COUNT = 9
+const SQL_IN_QUERY_BATCH_SIZE = SQLITE_BOUND_PARAMETER_LIMIT
+const AUDIT_PUBLISH_UPDATE_BATCH_SIZE = SQLITE_BOUND_PARAMETER_LIMIT - 1 // published_at uses one bind
+const AUDIT_INSERT_BATCH_SIZE = Math.floor(
+  SQLITE_BOUND_PARAMETER_LIMIT / AUDIT_INSERT_BOUND_PARAMETER_COUNT
+)
 const OUTBOX_BATCH_SIZE = 500 // 500 rows
 const RETENTION_CLEANUP_BATCH_SIZE = 5000 // 5000 rows
 const ALARM_RETRY_DELAY_MS = 30_000 // 30 seconds
@@ -41,7 +48,7 @@ export class IngestionAuditDO extends DurableObject {
   private readonly appEnv?: string
   private readonly localPipelineUrl?: string
   private readonly pipelineEvents?: Pipeline<PipelineRecord>
-  private readonly logger: AppLogger
+  private readonly logger: Logger
   private alarmScheduled = false
 
   constructor(state: DurableObjectState, env: Env) {
@@ -75,13 +82,21 @@ export class IngestionAuditDO extends DurableObject {
       return []
     }
 
-    const rows = this.db
-      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
-      .from(ingestionAuditTable)
-      .where(inArray(ingestionAuditTable.idempotencyKey, idempotencyKeys))
-      .all()
+    const uniqueKeys = unique(idempotencyKeys)
+    const result: string[] = []
+    for (let i = 0; i < uniqueKeys.length; i += SQL_IN_QUERY_BATCH_SIZE) {
+      const batch = uniqueKeys.slice(i, i + SQL_IN_QUERY_BATCH_SIZE)
+      const rows = this.db
+        .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
+        .from(ingestionAuditTable)
+        .where(inArray(ingestionAuditTable.idempotencyKey, batch))
+        .all()
+      for (const r of rows) {
+        result.push(r.idempotencyKey)
+      }
+    }
 
-    return rows.map((r) => r.idempotencyKey)
+    return result
   }
 
   public async commit(entries: LedgerEntry[]): Promise<CommitResult> {
@@ -108,15 +123,32 @@ export class IngestionAuditDO extends DurableObject {
     let duplicates = 0
     let conflicts = 0
 
-    for (const entry of entries) {
-      const existing = this.db
-        .select({ payloadHash: ingestionAuditTable.payloadHash })
-        .from(ingestionAuditTable)
-        .where(eq(ingestionAuditTable.idempotencyKey, entry.idempotencyKey))
-        .get()
+    // SQLite-backed Durable Objects allow at most 100 bound parameters per query.
+    const uniqueKeys = unique(entries.map((entry) => entry.idempotencyKey))
+    const payloadHashesByKey = new Map<string, string>()
 
-      if (existing) {
-        if (existing.payloadHash === entry.payloadHash) {
+    for (let i = 0; i < uniqueKeys.length; i += SQL_IN_QUERY_BATCH_SIZE) {
+      const batch = uniqueKeys.slice(i, i + SQL_IN_QUERY_BATCH_SIZE)
+      const rows = this.db
+        .select({
+          idempotencyKey: ingestionAuditTable.idempotencyKey,
+          payloadHash: ingestionAuditTable.payloadHash,
+        })
+        .from(ingestionAuditTable)
+        .where(inArray(ingestionAuditTable.idempotencyKey, batch))
+        .all()
+
+      for (const row of rows) {
+        payloadHashesByKey.set(row.idempotencyKey, row.payloadHash)
+      }
+    }
+    const rowsToInsert: Array<typeof ingestionAuditTable.$inferInsert> = []
+
+    for (const entry of entries) {
+      const existingPayloadHash = payloadHashesByKey.get(entry.idempotencyKey)
+
+      if (existingPayloadHash !== undefined) {
+        if (existingPayloadHash === entry.payloadHash) {
           duplicates++
         } else {
           conflicts++
@@ -124,25 +156,30 @@ export class IngestionAuditDO extends DurableObject {
         continue
       }
 
+      rowsToInsert.push({
+        idempotencyKey: entry.idempotencyKey,
+        canonicalAuditId: entry.canonicalAuditId,
+        payloadHash: entry.payloadHash,
+        status: entry.status,
+        rejectionReason: entry.rejectionReason ?? null,
+        resultJson: entry.resultJson,
+        auditPayloadJson: entry.auditPayloadJson,
+        firstSeenAt: entry.firstSeenAt,
+        publishedAt: null,
+      })
+      payloadHashesByKey.set(entry.idempotencyKey, entry.payloadHash)
+      inserted++
+    }
+
+    for (let i = 0; i < rowsToInsert.length; i += AUDIT_INSERT_BATCH_SIZE) {
+      const batch = rowsToInsert.slice(i, i + AUDIT_INSERT_BATCH_SIZE)
       this.db
         .insert(ingestionAuditTable)
-        .values({
-          idempotencyKey: entry.idempotencyKey,
-          canonicalAuditId: entry.canonicalAuditId,
-          payloadHash: entry.payloadHash,
-          status: entry.status,
-          rejectionReason: entry.rejectionReason ?? null,
-          resultJson: entry.resultJson,
-          auditPayloadJson: entry.auditPayloadJson,
-          firstSeenAt: entry.firstSeenAt,
-          publishedAt: null,
-        })
+        .values(batch)
         .onConflictDoNothing({
           target: ingestionAuditTable.idempotencyKey,
         })
         .run()
-
-      inserted++
     }
 
     if (inserted > 0) {
@@ -174,13 +211,7 @@ export class IngestionAuditDO extends DurableObject {
     this.cleanupExpiredRows()
     this.checkStuckRows()
 
-    const hasUnpublished = this.db
-      .select({ cnt: sql<number>`count(*)` })
-      .from(ingestionAuditTable)
-      .where(isNull(ingestionAuditTable.publishedAt))
-      .get()
-
-    const remaining = hasUnpublished?.cnt ?? 0
+    const remaining = this.hasUnpublishedRows() ? 1 : 0
     this.logger.set({ published, unpublished_remaining: remaining })
 
     if (remaining > 0) {
@@ -221,14 +252,18 @@ export class IngestionAuditDO extends DurableObject {
       await this.publishEvents(events)
 
       const now = Date.now()
-      for (const row of rows) {
-        this.db
-          .update(ingestionAuditTable)
-          .set({
-            publishedAt: now,
-          })
-          .where(eq(ingestionAuditTable.idempotencyKey, row.idempotencyKey))
-          .run()
+      const idempotencyKeys = rows.map((row) => row.idempotencyKey)
+      if (idempotencyKeys.length > 0) {
+        for (let i = 0; i < idempotencyKeys.length; i += AUDIT_PUBLISH_UPDATE_BATCH_SIZE) {
+          const batch = idempotencyKeys.slice(i, i + AUDIT_PUBLISH_UPDATE_BATCH_SIZE)
+          this.db
+            .update(ingestionAuditTable)
+            .set({
+              publishedAt: now,
+            })
+            .where(inArray(ingestionAuditTable.idempotencyKey, batch))
+            .run()
+        }
       }
 
       return true
@@ -282,9 +317,14 @@ export class IngestionAuditDO extends DurableObject {
     this.ctx.storage.sql.exec(
       `
         DELETE FROM ${TABLE_NAME}
-        WHERE published_at IS NOT NULL
-          AND first_seen_at < ?
-        LIMIT ?
+        WHERE idempotency_key IN (
+          SELECT idempotency_key
+          FROM ${TABLE_NAME}
+          WHERE published_at IS NOT NULL
+            AND first_seen_at < ?
+          ORDER BY first_seen_at
+          LIMIT ?
+        )
       `,
       cutoff,
       RETENTION_CLEANUP_BATCH_SIZE
@@ -295,18 +335,32 @@ export class IngestionAuditDO extends DurableObject {
     const threshold = Date.now() - STUCK_ROW_THRESHOLD_MS
 
     const stuck = this.db
-      .select({ cnt: sql<number>`count(*)` })
+      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
       .from(ingestionAuditTable)
       .where(
         and(isNull(ingestionAuditTable.publishedAt), lt(ingestionAuditTable.firstSeenAt, threshold))
       )
+      .orderBy(asc(ingestionAuditTable.firstSeenAt))
+      .limit(1)
       .get()
 
-    if (stuck && stuck.cnt > 0) {
+    if (stuck) {
       this.logger.warn("audit rows unpublished for > 10 minutes", {
-        count: stuck.cnt,
+        idempotency_key: stuck.idempotencyKey,
       })
     }
+  }
+
+  private hasUnpublishedRows(): boolean {
+    const row = this.db
+      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
+      .from(ingestionAuditTable)
+      .where(isNull(ingestionAuditTable.publishedAt))
+      .orderBy(asc(ingestionAuditTable.firstSeenAt))
+      .limit(1)
+      .get()
+
+    return Boolean(row)
   }
 
   private async ensureAlarm(): Promise<void> {
@@ -320,4 +374,8 @@ export class IngestionAuditDO extends DurableObject {
     }
     this.alarmScheduled = true
   }
+}
+
+function unique<T>(values: T[]): T[] {
+  return [...new Set(values)]
 }

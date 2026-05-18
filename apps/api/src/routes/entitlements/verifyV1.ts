@@ -32,11 +32,12 @@ const verifyFeatureStatusSchema = z.object({
     example: "LIMIT_EXCEEDED",
   }),
   usage: z.number().optional().openapi({
-    description: "Current usage in the active meter window",
+    description: "Current usage in the active meter window. Present for usage features.",
     example: 42,
   }),
   limit: z.number().nullable().optional().openapi({
-    description: "Configured limit for the active meter window",
+    description:
+      "Configured limit. For usage features this is the active meter-window limit; for tier/package features this is the subscribed quantity limit.",
     example: 100,
   }),
   spending: z
@@ -73,7 +74,7 @@ export const route = createRoute({
   operationId: "entitlements.verify",
   summary: "get current feature status",
   description:
-    "Resolve whether a feature is usable for a customer and, for usage features, return current usage, limit, and priced spend.",
+    "Resolve whether a feature is usable for a customer. Usage features return current usage, limit, and priced spend; tier/package features return the subscribed quantity limit.",
   method: "post",
   tags,
   request: {

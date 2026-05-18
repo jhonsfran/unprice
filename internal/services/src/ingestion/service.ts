@@ -84,11 +84,6 @@ type IngestionContext = {
   projectId: string
 }
 
-type HandleMessageParams = {
-  context: IngestionContext
-  rejectionReason?: IngestionRejectionReason
-}
-
 type EntitlementWindowApplyResult = {
   allowed: boolean
   deniedReason?: Extract<
@@ -96,6 +91,21 @@ type EntitlementWindowApplyResult = {
     "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
   >
   message?: string
+}
+
+type EntitlementWindowApplyBatchEvent = {
+  correlationKey: string
+  id: string
+  idempotencyKey: string
+  now: number
+  properties: Record<string, unknown>
+  slug: string
+  timestamp: number
+}
+
+type EntitlementWindowApplyBatchResult = EntitlementWindowApplyResult & {
+  correlationKey: string
+  idempotencyKey: string
 }
 
 export type EntitlementWindowStateInput = {
@@ -122,6 +132,14 @@ export type EntitlementWindowApplyInput = {
 
 export type EntitlementWindowController = {
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
+  applyBatch?: (input: {
+    customerId: string
+    enforceLimit: boolean
+    entitlement: IngestionEntitlement & { meterConfig: MeterConfig }
+    events: EntitlementWindowApplyBatchEvent[]
+    grants: IngestionGrant[]
+    projectId: string
+  }) => Promise<{ results: EntitlementWindowApplyBatchResult[] }>
   getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
 }
 
@@ -150,6 +168,7 @@ type CommitAuditOptions = {
 }
 
 const GRANT_CONTEXT_CACHE_BUCKET_MS = 300_000
+const ENTITLEMENT_APPLY_BATCH_SIZE = 100
 
 export class IngestionService {
   private readonly entitlementService: EntitlementService
@@ -292,7 +311,10 @@ export class IngestionService {
       endAt: timestamp,
     })
 
-    if (preparedContext.rejectionReason) {
+    if (
+      preparedContext.rejectionReason &&
+      preparedContext.rejectionReason !== "NO_MATCHING_ENTITLEMENT"
+    ) {
       return {
         allowed: false,
         featureSlug,
@@ -330,6 +352,14 @@ export class IngestionService {
         allowed: false,
         featureSlug,
         rejectionReason: "NO_MATCHING_ENTITLEMENT",
+      }
+    }
+
+    if (isStaticQuantityEntitlement(entitlement)) {
+      return {
+        allowed: true,
+        featureSlug,
+        limit: resolveStaticQuantityLimit(entitlement.grants, timestamp),
       }
     }
 
@@ -516,37 +546,6 @@ export class IngestionService {
     return { state: "rejected", rejectionReason: "EVENT_TOO_OLD" }
   }
 
-  private async handleMessage(params: HandleMessageParams): Promise<IngestionOutcome> {
-    const { context, rejectionReason } = params
-    const { customerId, message, projectId } = context
-
-    if (rejectionReason) {
-      return { state: "rejected", rejectionReason }
-    }
-
-    const processableEntitlementsResult = this.resolveProcessableEntitlements(context)
-
-    if (processableEntitlementsResult.err) {
-      return { state: "rejected", rejectionReason: processableEntitlementsResult.err }
-    }
-
-    for (const entitlement of processableEntitlementsResult.val) {
-      const applyResult = await this.applyEntitlement({
-        customerId,
-        enforceLimit: false,
-        entitlement,
-        message,
-        projectId,
-      })
-
-      if (!applyResult.allowed && applyResult.deniedReason === "LATE_EVENT_CLOSED_PERIOD") {
-        return { state: "rejected", rejectionReason: applyResult.deniedReason }
-      }
-    }
-
-    return { state: "processed" }
-  }
-
   private buildCustomerNotFoundOutcomes(
     messages: IngestionQueueMessage[],
     params: {
@@ -581,19 +580,126 @@ export class IngestionService {
       rejectionReason?: IngestionRejectionReason
     }
   ): Promise<MessageOutcome[]> {
-    const outcomes: MessageOutcome[] = []
+    const messagesByKey = new Map<string, IngestionQueueMessage>()
+    const outcomesByKey = new Map<string, IngestionOutcome>()
+    const messageOutcomeKeys = this.buildMessageOutcomeKeys(messages)
+    const allowedApplyCountsByKey = new Map<string, number>()
+    const plannedApplyCountsByKey = new Map<string, number>()
+    const lateClosedApplyCountsByKey = new Map<string, number>()
+    const deniedReasonsByKey = new Map<string, IngestionRejectionReason>()
+    const applyGroups = new Map<
+      string,
+      {
+        entitlement: IngestionEntitlement
+        messages: IngestionQueueMessage[]
+      }
+    >()
 
     for (const message of messages) {
-      const outcome = await this.handleMessage({
-        context: {
-          candidateEntitlements: params.candidateEntitlements,
-          customerId: params.customerId,
-          message,
-          projectId: params.projectId,
-        },
-        rejectionReason: params.rejectionReason,
+      const messageKey = this.getMessageOutcomeKey(message, messageOutcomeKeys)
+      messagesByKey.set(messageKey, message)
+
+      if (params.rejectionReason) {
+        outcomesByKey.set(messageKey, {
+          state: "rejected",
+          rejectionReason: params.rejectionReason,
+        })
+        continue
+      }
+
+      const processableEntitlementsResult = this.resolveProcessableEntitlements({
+        candidateEntitlements: params.candidateEntitlements,
+        customerId: params.customerId,
+        message,
+        projectId: params.projectId,
       })
 
+      if (processableEntitlementsResult.err) {
+        outcomesByKey.set(messageKey, {
+          state: "rejected",
+          rejectionReason: processableEntitlementsResult.err,
+        })
+        continue
+      }
+
+      outcomesByKey.set(messageKey, { state: "processed" })
+      allowedApplyCountsByKey.set(messageKey, 0)
+      plannedApplyCountsByKey.set(messageKey, processableEntitlementsResult.val.length)
+      lateClosedApplyCountsByKey.set(messageKey, 0)
+
+      for (const entitlement of processableEntitlementsResult.val) {
+        const groupKey = entitlement.customerEntitlementId
+        const group = applyGroups.get(groupKey)
+
+        if (group) {
+          group.messages.push(message)
+          continue
+        }
+
+        applyGroups.set(groupKey, {
+          entitlement,
+          messages: [message],
+        })
+      }
+    }
+
+    for (const group of applyGroups.values()) {
+      for (const chunk of chunkArray(group.messages, ENTITLEMENT_APPLY_BATCH_SIZE)) {
+        const batchResults = await this.applyEntitlementBatch({
+          customerId: params.customerId,
+          enforceLimit: false,
+          entitlement: group.entitlement,
+          messageOutcomeKeys,
+          messages: chunk,
+          projectId: params.projectId,
+        })
+
+        for (const applyResult of batchResults) {
+          const message = messagesByKey.get(applyResult.correlationKey)
+          if (!message) {
+            continue
+          }
+
+          const messageKey = this.getMessageOutcomeKey(message, messageOutcomeKeys)
+          if (applyResult.allowed) {
+            allowedApplyCountsByKey.set(
+              messageKey,
+              (allowedApplyCountsByKey.get(messageKey) ?? 0) + 1
+            )
+          } else if (applyResult.deniedReason === "LATE_EVENT_CLOSED_PERIOD") {
+            lateClosedApplyCountsByKey.set(
+              messageKey,
+              (lateClosedApplyCountsByKey.get(messageKey) ?? 0) + 1
+            )
+          } else if (applyResult.deniedReason) {
+            deniedReasonsByKey.set(messageKey, applyResult.deniedReason)
+          }
+        }
+      }
+    }
+
+    for (const [messageKey, plannedApplyCount] of plannedApplyCountsByKey.entries()) {
+      const allowedCount = allowedApplyCountsByKey.get(messageKey) ?? 0
+      const lateClosedCount = lateClosedApplyCountsByKey.get(messageKey) ?? 0
+
+      if (plannedApplyCount > 0 && allowedCount === 0) {
+        outcomesByKey.set(messageKey, {
+          state: "rejected",
+          rejectionReason:
+            deniedReasonsByKey.get(messageKey) ??
+            (lateClosedCount === plannedApplyCount ? "LATE_EVENT_CLOSED_PERIOD" : "LIMIT_EXCEEDED"),
+        })
+      }
+    }
+
+    const outcomes = messages.map((message) => ({
+      message,
+      outcome: outcomesByKey.get(this.getMessageOutcomeKey(message, messageOutcomeKeys)) ?? {
+        state: "processed",
+      },
+    }))
+
+    for (const { message, outcome } of outcomes) {
       if (outcome.state === "rejected") {
         this.logRejectedMessage({
           customerId: params.customerId,
@@ -602,8 +708,6 @@ export class IngestionService {
           rejectionReason: outcome.rejectionReason,
         })
       }
-
-      outcomes.push({ message, outcome })
     }
 
     return outcomes
@@ -990,6 +1094,32 @@ export class IngestionService {
     }
   }
 
+  private buildMessageOutcomeKey(message: IngestionQueueMessage): string {
+    return `${message.idempotencyKey}:${message.id}`
+  }
+
+  private buildMessageOutcomeKeys(
+    messages: IngestionQueueMessage[]
+  ): Map<IngestionQueueMessage, string> {
+    return new Map(
+      messages.map((message, index) => [
+        message,
+        `${this.buildMessageOutcomeKey(message)}:${index}`,
+      ])
+    )
+  }
+
+  private getMessageOutcomeKey(
+    message: IngestionQueueMessage,
+    keys: ReadonlyMap<IngestionQueueMessage, string>
+  ): string {
+    const key = keys.get(message)
+    if (!key) {
+      throw new Error(`missing ingestion message outcome key: ${message.idempotencyKey}`)
+    }
+    return key
+  }
+
   private resolveSyncFeatureEntitlements(params: {
     candidateEntitlements: IngestionCandidateEntitlements
     featureSlug: string
@@ -1004,6 +1134,7 @@ export class IngestionService {
     }
 
     return this.filterProcessableEntitlements({
+      allowMultipleMatches: false,
       message: params.message,
       entitlements,
     })
@@ -1013,12 +1144,14 @@ export class IngestionService {
     context: IngestionContext
   ): Result<IngestionEntitlement[], IngestionRejectionReason> {
     return this.filterProcessableEntitlements({
+      allowMultipleMatches: true,
       message: context.message,
       entitlements: context.candidateEntitlements,
     })
   }
 
   private filterProcessableEntitlements(params: {
+    allowMultipleMatches: boolean
     message: IngestionQueueMessage
     entitlements: IngestionEntitlement[]
   }): Result<IngestionEntitlement[], IngestionRejectionReason> {
@@ -1033,7 +1166,7 @@ export class IngestionService {
       return { err: "UNROUTABLE_EVENT" }
     }
 
-    if (matchingEntitlements.length > 1) {
+    if (!params.allowMultipleMatches && matchingEntitlements.length > 1) {
       this.logger.error("multiple active entitlements matched ingestion event", {
         projectId: params.message.projectId,
         customerId: params.message.customerId,
@@ -1057,6 +1190,99 @@ export class IngestionService {
     }
 
     return { val: processableEntitlements }
+  }
+
+  private async applyEntitlementBatch(params: {
+    customerId: string
+    enforceLimit: boolean
+    entitlement: IngestionEntitlement
+    messageOutcomeKeys: ReadonlyMap<IngestionQueueMessage, string>
+    messages: IngestionQueueMessage[]
+    projectId: string
+  }): Promise<EntitlementWindowApplyBatchResult[]> {
+    const { customerId, enforceLimit, entitlement, messageOutcomeKeys, messages, projectId } =
+      params
+    if (!entitlement.meterConfig) {
+      return messages.map((message) => ({
+        allowed: false,
+        correlationKey: this.getMessageOutcomeKey(message, messageOutcomeKeys),
+        deniedReason: "LIMIT_EXCEEDED",
+        idempotencyKey: message.idempotencyKey,
+        message: "Usage entitlement is missing meter configuration",
+      }))
+    }
+
+    const stub = this.entitlementWindowClient.getEntitlementWindowStub({
+      customerEntitlementId: entitlement.customerEntitlementId,
+      customerId,
+      projectId,
+    })
+    const applyEntitlement = {
+      ...entitlement,
+      meterConfig: entitlement.meterConfig,
+    }
+
+    if (!stub.applyBatch) {
+      const results: EntitlementWindowApplyBatchResult[] = []
+      for (const message of messages) {
+        const result = await stub.apply({
+          event: {
+            id: message.id,
+            slug: message.slug,
+            timestamp: message.timestamp,
+            properties: message.properties,
+          },
+          entitlement: applyEntitlement,
+          idempotencyKey: message.idempotencyKey,
+          projectId,
+          customerId,
+          grants: entitlement.grants,
+          enforceLimit,
+          now: message.receivedAt,
+        })
+        results.push({
+          ...result,
+          correlationKey: this.getMessageOutcomeKey(message, messageOutcomeKeys),
+          idempotencyKey: message.idempotencyKey,
+        })
+      }
+      return results
+    }
+
+    const batchResult = await stub.applyBatch({
+      events: messages.map((message) => ({
+        correlationKey: this.getMessageOutcomeKey(message, messageOutcomeKeys),
+        id: message.id,
+        slug: message.slug,
+        timestamp: message.timestamp,
+        properties: message.properties,
+        idempotencyKey: message.idempotencyKey,
+        now: message.receivedAt,
+      })),
+      entitlement: applyEntitlement,
+      projectId,
+      customerId,
+      grants: entitlement.grants,
+      enforceLimit,
+    })
+
+    const resultsByKey = new Map(
+      batchResult.results.map((result) => [result.correlationKey, result])
+    )
+
+    return messages.map((message) => {
+      const correlationKey = this.getMessageOutcomeKey(message, messageOutcomeKeys)
+      const result = resultsByKey.get(correlationKey)
+      if (!result) {
+        throw new Error(
+          `entitlement window batch result missing message outcome: ${correlationKey}`
+        )
+      }
+      if (result.idempotencyKey !== message.idempotencyKey) {
+        throw new Error(`entitlement window batch result idempotency mismatch: ${correlationKey}`)
+      }
+      return { ...result, idempotencyKey: message.idempotencyKey, correlationKey }
+    })
   }
 
   private async applyEntitlement(params: {
@@ -1212,8 +1438,33 @@ function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueu
   return left.timestamp - right.timestamp || left.idempotencyKey.localeCompare(right.idempotencyKey)
 }
 
+function chunkArray<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size))
+  }
+  return chunks
+}
+
 function isUsageEntitlement(entitlement: IngestionEntitlement): boolean {
   return entitlement.featureType === "usage" && Boolean(entitlement.meterConfig)
+}
+
+function isStaticQuantityEntitlement(entitlement: IngestionEntitlement): boolean {
+  return entitlement.featureType === "tier" || entitlement.featureType === "package"
+}
+
+function resolveStaticQuantityLimit(grants: IngestionGrant[], timestamp: number): number | null {
+  const activeGrants = grants.filter(
+    (grant) =>
+      grant.effectiveAt <= timestamp && (grant.expiresAt === null || timestamp < grant.expiresAt)
+  )
+
+  if (activeGrants.length === 0 || activeGrants.some((grant) => grant.allowanceUnits === null)) {
+    return null
+  }
+
+  return activeGrants.reduce((total, grant) => total + (grant.allowanceUnits ?? 0), 0)
 }
 
 function formatVerificationSpending(spending: EntitlementWindowState["spending"]) {

@@ -27,7 +27,7 @@ const handler = withEvlog(
       req.headers.get("x-request-id") ||
       req.headers.get("x-vercel-id") ||
       "unknown"
-    const { logger, requestLogger } = getRequestLoggers(requestId)
+    const { logger } = getRequestLoggers(requestId)
 
     const response = await fetchRequestHandler({
       endpoint: endpoint,
@@ -39,7 +39,6 @@ const handler = withEvlog(
           session: req.auth,
           req,
           logger,
-          requestLogger,
           opts: {
             continent: geo.countryRegion || "Unknown",
             country: geo.country || "Unknown",

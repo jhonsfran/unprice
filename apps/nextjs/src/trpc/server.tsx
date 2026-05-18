@@ -11,34 +11,40 @@ import { createCallerFactory, createTRPCContext } from "@unprice/trpc"
 import { appRouter } from "@unprice/trpc/routes"
 import { cookies, headers } from "next/headers"
 import { cache } from "react"
-import { getRequestLoggers, withEvlog } from "~/lib/observability"
 import { createQueryClient } from "./shared"
 
 /**
  * This wraps the `createTRPCContext` helper and provides the required context for the tRPC API when
  * handling a tRPC call from a React Server Component.
  */
-const createContext = cache(
-  withEvlog(async () => {
-    const heads = new Headers(headers())
-    const activeWorkspaceSlug = cookies().get(COOKIES_APP.WORKSPACE)?.value ?? ""
-    const activeProjectSlug = cookies().get(COOKIES_APP.PROJECT)?.value ?? ""
-    const requestId = newId("request")
-    const { logger, requestLogger } = getRequestLoggers(requestId)
+const createContext = cache(async () => {
+  const heads = new Headers(headers())
+  const activeWorkspaceSlug = cookies().get(COOKIES_APP.WORKSPACE)?.value ?? ""
+  const activeProjectSlug = cookies().get(COOKIES_APP.PROJECT)?.value ?? ""
+  const requestId = newId("request")
+  const ip = heads.get("x-real-ip") || heads.get("x-forwarded-for") || "unknown"
 
-    heads.set("unprice-request-source", "rsc")
-    heads.set(COOKIES_APP.WORKSPACE, activeWorkspaceSlug)
-    heads.set(COOKIES_APP.PROJECT, activeProjectSlug)
-    heads.set("unprice-request-id", requestId)
+  heads.set("unprice-request-source", "rsc")
+  heads.set(COOKIES_APP.WORKSPACE, activeWorkspaceSlug)
+  heads.set(COOKIES_APP.PROJECT, activeProjectSlug)
+  heads.set("unprice-request-id", requestId)
 
-    return createTRPCContext({
-      session: await getSession(),
-      headers: heads,
-      logger,
-      requestLogger,
-    })
+  return createTRPCContext({
+    session: await getSession(),
+    headers: heads,
+    opts: {
+      continent: heads.get("x-vercel-ip-continent") || "unknown",
+      country: heads.get("x-vercel-ip-country") || "unknown",
+      region: heads.get("x-vercel-id") || "unknown",
+      city: heads.get("x-vercel-ip-city") || "unknown",
+      ip,
+      userAgent: heads.get("user-agent") || "unknown",
+      source: "rsc",
+      pathname: "/rsc",
+      method: "GET",
+    },
   })
-)
+})
 
 /**
  * Create a stable getter for the query client that

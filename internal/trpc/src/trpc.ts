@@ -10,13 +10,8 @@ import { auth } from "@unprice/auth/server"
 import { COOKIES_APP } from "@unprice/config"
 import type { Database } from "@unprice/db"
 import { newId } from "@unprice/db/utils"
-import {
-  type AppLogger,
-  type WideEventLogger,
-  createDrain,
-  createStandaloneRequestLogger,
-  emitWideEvent,
-} from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
+import { createStandaloneRequestLogger } from "@unprice/observability"
 import { shouldEmitMetrics } from "@unprice/observability/env"
 import type { CacheNamespaces } from "@unprice/services/cache"
 import { CacheService, createRedis } from "@unprice/services/cache"
@@ -34,20 +29,69 @@ import { workspaceGuard } from "./utils/workspace-guard"
 
 // this is a cache between request executions
 const hashCache = new Map()
-const drain = createDrain({
-  environment: env.APP_ENV,
-  token: env.AXIOM_API_TOKEN,
-  dataset: env.AXIOM_DATASET,
-})
+
+type TrpcProcedureLog = {
+  duration_ms: number
+  error_code?: string
+  ok: boolean
+  path: string
+  route: string
+  status: number
+}
+
+type TrpcRequestSummary = {
+  failed_count: number
+  max_duration_ms: number
+  procedure_count: number
+  procedures: TrpcProcedureLog[]
+  status: number
+  total_duration_ms: number
+}
+
+function roundDurationMs(duration: number): number {
+  return Math.round(duration * 100) / 100
+}
+
+function createTrpcProcedureLog(
+  path: string,
+  duration: number,
+  status: number,
+  errorCode?: string
+): TrpcProcedureLog {
+  const procedure: TrpcProcedureLog = {
+    duration_ms: roundDurationMs(duration),
+    ok: status < 400,
+    path,
+    route: `/trpc/${path}`,
+    status,
+  }
+
+  if (errorCode) {
+    procedure.error_code = errorCode
+  }
+
+  return procedure
+}
+
+function summarizeTrpcProcedures(procedures: TrpcProcedureLog[]): TrpcRequestSummary {
+  const failedCount = procedures.filter((procedure) => !procedure.ok).length
+  const durations = procedures.map((procedure) => procedure.duration_ms)
+  const statuses = procedures.map((procedure) => procedure.status)
+
+  return {
+    failed_count: failedCount,
+    max_duration_ms: Math.max(...durations),
+    procedure_count: procedures.length,
+    procedures,
+    status: Math.max(...statuses),
+    total_duration_ms: roundDurationMs(durations.reduce((total, duration) => total + duration, 0)),
+  }
+}
 
 /**
  * 1. CONTEXT
  *
  * This section defines the "contexts" that are available in the backend API
- *
- * These allow you to access things like the database, the session, etc, when
- * processing a request
- *
  */
 export interface CreateContextOptions {
   headers: Headers
@@ -56,7 +100,7 @@ export interface CreateContextOptions {
   activeWorkspaceSlug: string
   activeProjectSlug: string
   requestId: string
-  logger: AppLogger
+  logger: Logger
   metrics: Metrics
   cache: C<CacheNamespaces>
   // pass this in the context so we can migrate easily to other providers
@@ -69,7 +113,8 @@ export interface CreateContextOptions {
     city: string
     ip: string
   }
-  requestLogger: WideEventLogger
+  // accumulated procedure logs for enriching the parent wide event
+  _procedures: TrpcProcedureLog[]
 }
 
 /**
@@ -115,8 +160,7 @@ export const createTRPCContext = async (opts: {
   headers: Headers
   session: Session | null
   req?: NextAuthRequest
-  logger?: AppLogger
-  requestLogger?: WideEventLogger
+  logger?: Logger
   opts?: {
     continent: string
     country: string
@@ -166,18 +210,13 @@ export const createTRPCContext = async (opts: {
     protocolHeader === "http" || protocolHeader === "https" ? protocolHeader : undefined
 
   const emitMetrics = shouldEmitMetrics(env)
-  const fallbackLogger = createStandaloneRequestLogger(
-    {
-      method,
-      path: pathname,
-      requestId,
-    },
-    {
-      flush: drain?.flush,
-    }
+
+  // Use the logger passed in from Next.js (evlog/next) or create a standalone one
+  const fallback = createStandaloneRequestLogger(
+    { method, path: pathname, requestId },
+    { flush: () => Promise.resolve() }
   )
-  const requestLogger = opts.requestLogger ?? fallbackLogger.requestLogger
-  const logger = opts.logger ?? fallbackLogger.logger
+  const logger = opts.logger ?? fallback.logger
 
   const metrics: Metrics = emitMetrics
     ? new LogdrainMetrics({
@@ -186,20 +225,10 @@ export const createTRPCContext = async (opts: {
         environment: env.NODE_ENV,
         service: "trpc",
         colo: region,
-        sampleRate: 1,
       })
     : new NoopMetrics()
 
-  // INFO: we have this problem that the store cache for TRPC
-  // is different than the one in the API, if we need to invalidate
-  // caches from trpc to API we need to expose workers cache API!
-  const cacheService = new CacheService(
-    {
-      waitUntil,
-    },
-    metrics,
-    emitMetrics
-  )
+  const cacheService = new CacheService({ waitUntil }, metrics, emitMetrics)
 
   const upstashCacheStore =
     env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN
@@ -216,7 +245,6 @@ export const createTRPCContext = async (opts: {
 
   const cache = cacheService.getCache()
 
-  // this comes from the cookiesxa or headers of the request
   const activeWorkspaceSlug =
     opts.req?.cookies.get(COOKIES_APP.WORKSPACE)?.value ??
     opts.headers.get(COOKIES_APP.WORKSPACE) ??
@@ -265,8 +293,7 @@ export const createTRPCContext = async (opts: {
     logger,
     metrics,
     cache,
-    requestLogger,
-    waitUntil, // abstracted to allow migration to other providers
+    waitUntil,
     hashCache,
     geolocation: {
       continent,
@@ -275,6 +302,7 @@ export const createTRPCContext = async (opts: {
       city,
       ip,
     },
+    _procedures: [],
   })
 }
 
@@ -287,11 +315,6 @@ export const createTRPCContext = async (opts: {
 export const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer,
   errorFormatter({ shape, error, ctx }) {
-    // Note: Error details (including stack) are already captured in the middleware catch block
-    // before this formatter runs. This ensures the error stack is included in the wideEvent
-    // before it's flushed in the finally block.
-    // The errorFormatter runs AFTER the middleware's finally block, so we can't add error details here.
-    // don't show stack trace in production
     if (env.NODE_ENV === "production") {
       delete error.stack
       delete shape.data.stack
@@ -325,47 +348,26 @@ export const createCallerFactory = t.createCallerFactory
 
 /**
  * 3. ROUTER & PROCEDURE (THE IMPORTANT BIT)
- *
- * These are the pieces you use to build your tRPC API. You should import these
- * a lot in the /src/server/api/routers folder
- */
-
-/**
- * This is how you create new routers and subrouters in your tRPC API
- * @see https://trpc.io/docs/router
  */
 export const createTRPCRouter = t.router
 export const mergeRouters = t.mergeRouters
 
 /**
- * Public procedure
- *
- * This is the base piece you use to build new queries and mutations on your
- * tRPC API. It does not guarantee that a user querying is authorized, but you
- * can still access user session data if they are logged in
+ * Public procedure - enriches the parent wide event with tRPC procedure summary
  */
 export const publicProcedure = t.procedure.use(async ({ ctx, next, path }) => {
   const start = performance.now()
   let status = 200
-
-  ctx.logger.set({
-    business: {
-      operation: path,
-    },
-    request: {
-      route: `/trpc/${path}`,
-    },
-  })
+  let errorCode: string | undefined
 
   try {
     const result = await next()
 
     if (!result.ok) {
       status = getHttpStatus(result.error.code)
+      errorCode = result.error.code
       ctx.logger.set({
-        error: {
-          trpc_code: result.error.code,
-        },
+        error: { trpc_code: result.error.code },
       })
       ctx.logger.error(result.error)
     }
@@ -374,46 +376,31 @@ export const publicProcedure = t.procedure.use(async ({ ctx, next, path }) => {
   } catch (err) {
     if (err instanceof TRPCError) {
       status = getHttpStatus(err.code)
+      errorCode = err.code
       ctx.logger.set({
-        error: {
-          trpc_code: err.code,
-        },
+        error: { trpc_code: err.code },
       })
       ctx.logger.error(err)
     } else {
       status = 500
+      errorCode = "INTERNAL_SERVER_ERROR"
       ctx.logger.error(err instanceof Error ? err : String(err))
     }
     throw err
   } finally {
     const duration = performance.now() - start
-    ctx.logger.set({
-      request: {
-        duration,
-        route: `/trpc/${path}`,
-        status,
-      },
-      duration,
-      status,
-    })
+    const procedure = createTrpcProcedureLog(path, duration, status, errorCode)
+    ctx._procedures.push(procedure)
 
-    ctx.waitUntil(
-      Promise.all([
-        Promise.resolve(
-          emitWideEvent(ctx.requestLogger, {
-            request: {
-              duration,
-              route: `/trpc/${path}`,
-              status,
-            },
-            duration,
-            status,
-          })
-        ),
-        ctx.metrics.flush(),
-        ctx.logger.flush(),
-      ])
-    )
+    const summary = summarizeTrpcProcedures(ctx._procedures)
+
+    // Enrich the parent wide event with the tRPC summary
+    ctx.logger.set({
+      business: {
+        operation: summary.procedure_count === 1 ? path : "trpc.batch",
+      },
+      trpc: summary,
+    })
   }
 })
 
@@ -431,25 +418,17 @@ export const protectedProcedure = publicProcedure.use(({ ctx, next }) => {
   }
 
   ctx.logger.set({
-    business: {
-      user_id: ctx.session.user.id,
-    },
+    business: { user_id: ctx.session.user.id },
   })
 
   return next({
     ctx: {
       userId: ctx.session?.user.id,
-      session: {
-        ...ctx.session,
-      },
+      session: { ...ctx.session },
     },
   })
 })
 
-// this is a procedure that requires a user to be logged in and have an active workspace
-// it also sets the active workspace in the context
-// the active workspace is passed in the headers or cookies of the request
-// if the workspaceSlug is in the input, use it, otherwise use the active workspace slug in the cookie
 export const protectedWorkspaceProcedure = protectedProcedure.use(
   async ({ ctx, next, getRawInput }) => {
     const input = (await getRawInput()) as { workspaceSlug?: string }
@@ -461,18 +440,11 @@ export const protectedWorkspaceProcedure = protectedProcedure.use(
     })
 
     ctx.logger.set({
-      business: {
-        workspace_id: data.workspace.id,
-      },
+      business: { workspace_id: data.workspace.id },
     })
 
     return next({
-      ctx: {
-        ...data,
-        session: {
-          ...ctx.session,
-        },
-      },
+      ctx: { ...data, session: { ...ctx.session } },
     })
   }
 )
@@ -482,7 +454,6 @@ export const protectedProjectProcedure = protectedProcedure.use(
     const input = (await getRawInput()) as { projectSlug?: string }
     const activeProjectSlug = input?.projectSlug ?? ctx.activeProjectSlug ?? undefined
 
-    // if projectSlug is present, use it if not use the active project slug
     const data = await projectWorkspaceGuard({
       projectSlug: activeProjectSlug,
       ctx,
@@ -499,12 +470,7 @@ export const protectedProjectProcedure = protectedProcedure.use(
     })
 
     return next({
-      ctx: {
-        ...data,
-        session: {
-          ...ctx.session,
-        },
-      },
+      ctx: { ...data, session: { ...ctx.session } },
     })
   }
 )

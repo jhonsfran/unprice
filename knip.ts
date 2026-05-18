@@ -26,7 +26,7 @@ const config: KnipConfig = {
       entry: ["trigger.config.ts"],
     },
     "tooling/k6": {
-      entry: ["lifecycle.js"],
+      entry: ["baseline.js", "lifecycle.js"],
     },
   },
 }

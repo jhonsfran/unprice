@@ -94,4 +94,61 @@ describe("ingestion entitlement message helpers", () => {
       }).map((candidate) => candidate.customerEntitlementId)
     ).toEqual(["ce_count"])
   })
+
+  it("keeps multiple meters from one event when each aggregation key is present", () => {
+    const candidates = [
+      entitlement({
+        customerEntitlementId: "ce_count",
+        featureSlug: "requests",
+        meterConfig: {
+          eventId: "evt_usage",
+          eventSlug: "usage.recorded",
+          aggregationMethod: "count",
+        },
+      }),
+      entitlement({
+        customerEntitlementId: "ce_sum",
+        featureSlug: "tokens",
+        meterConfig: {
+          eventId: "evt_usage",
+          eventSlug: "usage.recorded",
+          aggregationMethod: "sum",
+          aggregationField: "tokens",
+        },
+      }),
+      entitlement({
+        customerEntitlementId: "ce_max",
+        featureSlug: "peak-memory",
+        meterConfig: {
+          eventId: "evt_usage",
+          eventSlug: "usage.recorded",
+          aggregationMethod: "max",
+          aggregationField: "memoryMb",
+        },
+      }),
+      entitlement({
+        customerEntitlementId: "ce_latest",
+        featureSlug: "seat-count",
+        meterConfig: {
+          eventId: "evt_usage",
+          eventSlug: "usage.recorded",
+          aggregationMethod: "latest",
+          aggregationField: "seats",
+        },
+      }),
+    ]
+
+    expect(
+      filterIngestionEntitlementsWithValidAggregationPayload({
+        event: {
+          properties: {
+            memoryMb: 512,
+            seats: "7",
+            tokens: "42.5",
+          },
+        },
+        entitlements: candidates,
+      }).map((candidate) => candidate.customerEntitlementId)
+    ).toEqual(["ce_count", "ce_sum", "ce_max", "ce_latest"])
+  })
 })

@@ -182,7 +182,7 @@ export async function billPeriod({
           subscription_item_id: period.subscriptionItemId,
           billing_period_id: period.id,
           feature_plan_version_id: period.subscriptionItem.featurePlanVersion.id,
-          invoice_item_kind: (period.type === "trial" ? "trial" : "period") as "trial" | "period",
+          line_kind: (period.type === "trial" ? "trial" : "period") as "trial" | "period",
           cycle_start_at: period.cycleStartAt,
           cycle_end_at: period.cycleEndAt,
           quantity,
@@ -362,12 +362,11 @@ export async function billPeriod({
         )
       }
 
-      // No `invoice_items` table. The invoice total is the sum of credit-leg
-      // ledger transfers landing on `customer.*.consumed` under this
-      // statement_key — same projection the API uses on read. We sum the line
-      // Dineros (which are at `LEDGER_SCALE = 8`) and store the invoice total
-      // at ledger scale. Provider calls quantize to currency minor units
-      // separately at the provider boundary.
+      // The invoice total is the sum of credit-leg ledger transfers landing on
+      // `customer.*.consumed` under this statement_key, matching the API read
+      // projection. We sum the line Dineros (at `LEDGER_SCALE = 8`) and store
+      // the invoice total at ledger scale. Provider calls quantize to currency
+      // minor units separately at the provider boundary.
       const totalDinero = linesToInvoice.reduce<Dinero<number> | null>(
         (sum, line) => (sum === null ? line.amount : add(sum, line.amount)),
         null

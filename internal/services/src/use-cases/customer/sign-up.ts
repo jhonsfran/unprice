@@ -5,6 +5,7 @@ import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { getPaymentProviderCapabilities } from "../../payment-provider/service"
@@ -39,15 +40,22 @@ type SignUpContext = {
   cancelUrl: string
 }
 
-function normalizePhaseCreditLine(input: {
-  creditLinePolicy?: CustomerSignUp["creditLinePolicy"]
-  creditLineAmount?: CustomerSignUp["creditLineAmount"]
-}) {
+function normalizePhaseCreditLine(
+  input: {
+    creditLinePolicy?: CustomerSignUp["creditLinePolicy"]
+    creditLineAmount?: CustomerSignUp["creditLineAmount"]
+  },
+  currency: string
+) {
   const creditLinePolicy = input.creditLinePolicy ?? "uncapped"
+  const creditLineAmount =
+    input.creditLineAmount === null || input.creditLineAmount === undefined
+      ? null
+      : toLedgerMinor(fromCurrencyMinor(input.creditLineAmount, currency))
 
   return {
     creditLinePolicy,
-    creditLineAmount: creditLinePolicy === "uncapped" ? null : (input.creditLineAmount ?? null),
+    creditLineAmount: creditLinePolicy === "uncapped" ? null : creditLineAmount,
   }
 }
 
@@ -304,7 +312,7 @@ async function handlePaymentRequiredFlow(
   const paymentProvider = planVersion.paymentProvider
   const paymentRequired = planVersion.paymentMethodRequired
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
-  const phaseCreditLine = normalizePhaseCreditLine(input)
+  const phaseCreditLine = normalizePhaseCreditLine(input, currency)
 
   const { err: paymentProviderErr, val: paymentProviderService } =
     await deps.services.customers.getPaymentProvider({
@@ -421,9 +429,9 @@ async function handleDirectProvisioningFlow(
   const { input, projectId, planVersion, customerId, pageId, successUrl, cancelUrl } = context
   const { email, name, config, timezone, metadata, externalId } = input
   const paymentProvider = planVersion.paymentProvider
-  const phaseCreditLine = normalizePhaseCreditLine(input)
 
   const currency = input.defaultCurrency ?? planVersion.project.defaultCurrency
+  const phaseCreditLine = normalizePhaseCreditLine(input, currency)
   const customerMetadata = externalId ? { ...metadata, externalId } : metadata
 
   try {

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
-  createDrain,
+  createLogger,
   createStandaloneRequestLogger,
-  emitWideEvent,
+  createUnpriceDrain,
   initObservability,
+  sharedSamplingConfig,
 } from "./index"
 
 describe("@unprice/observability", () => {
@@ -20,12 +21,7 @@ describe("@unprice/observability", () => {
       pretty: false,
       stringify: false,
       sampling: {
-        rates: {
-          debug: 100,
-          info: 100,
-          warn: 100,
-          error: 100,
-        },
+        rates: { debug: 100, info: 100, warn: 100, error: 100 },
       },
     })
   })
@@ -34,76 +30,13 @@ describe("@unprice/observability", () => {
     vi.restoreAllMocks()
   })
 
-  it("promotes nested request metadata into evlog summary fields", () => {
-    const { logger, requestLogger } = createStandaloneRequestLogger({
-      method: "UNKNOWN",
-      path: "/",
-      requestId: "req_test",
-    })
-
-    logger.set({
-      request: {
-        method: "GET",
-        path: "unknown",
-        route: "/trpc/analytics.getRealtimeTicket",
-        status: 200,
-      },
-    })
-
-    const event = emitWideEvent(requestLogger)
-
-    expect(event).toMatchObject({
-      method: "GET",
-      path: "/trpc/analytics.getRealtimeTicket",
-      route: "/trpc/analytics.getRealtimeTicket",
-      requestId: "req_test",
-      status: 200,
-      request: {
-        id: "req_test",
-        method: "GET",
-        path: "unknown",
-        route: "/trpc/analytics.getRealtimeTicket",
-        status: 200,
-      },
-    })
-  })
-
-  it("keeps the transport method while replacing the summary path with the logical route", () => {
-    const { logger, requestLogger } = createStandaloneRequestLogger({
-      method: "POST",
-      path: "/api/trpc/lambda",
-      requestId: "req_transport",
-    })
-
-    logger.set({
-      request: {
-        method: "POST",
-        path: "/api/trpc/lambda",
-        route: "/trpc/analytics.getRealtimeTicket",
-      },
-    })
-
-    const event = emitWideEvent(requestLogger)
-
-    expect(event).toMatchObject({
-      method: "POST",
-      path: "/trpc/analytics.getRealtimeTicket",
-      route: "/trpc/analytics.getRealtimeTicket",
-      requestId: "req_transport",
-    })
-  })
-
   it("does not create a drain when token and dataset are missing", () => {
-    const drain = createDrain({
-      environment: "production",
-    })
-
+    const drain = createUnpriceDrain({ environment: "production" })
     expect(drain).toBeUndefined()
-    expect(console.warn).not.toHaveBeenCalled()
   })
 
   it("creates a drain when token and dataset are present outside development", () => {
-    const drain = createDrain({
+    const drain = createUnpriceDrain({
       environment: "production",
       token: "xaat_test",
       dataset: "unprice-tests",
@@ -113,26 +46,34 @@ describe("@unprice/observability", () => {
     expect(typeof drain?.flush).toBe("function")
   })
 
-  it("warns once and skips drain for partial axiom config", () => {
-    const firstAttempt = createDrain({
-      environment: "production",
+  it("does not create a drain in development", () => {
+    const drain = createUnpriceDrain({
+      environment: "development",
       token: "xaat_test",
-    })
-
-    const secondAttempt = createDrain({
-      environment: "production",
       dataset: "unprice-tests",
     })
 
-    expect(firstAttempt).toBeUndefined()
-    expect(secondAttempt).toBeUndefined()
-    expect(console.warn).toHaveBeenCalledTimes(1)
-    expect(console.warn).toHaveBeenCalledWith(
-      "[observability] Axiom drain disabled: both AXIOM_API_TOKEN and AXIOM_DATASET are required."
-    )
+    expect(drain).toBeUndefined()
   })
 
-  it("keeps logger.flush as a no-op when no drain adapter is provided", async () => {
+  it("createStandaloneRequestLogger produces a working logger", () => {
+    const { logger, requestLogger } = createStandaloneRequestLogger({
+      method: "GET",
+      path: "/health",
+      requestId: "req_test",
+    })
+
+    expect(logger).toHaveProperty("set")
+    expect(logger).toHaveProperty("info")
+    expect(logger).toHaveProperty("warn")
+    expect(logger).toHaveProperty("error")
+    expect(logger).toHaveProperty("debug")
+    expect(logger).toHaveProperty("flush")
+    expect(requestLogger).toHaveProperty("set")
+    expect(requestLogger).toHaveProperty("emit")
+  })
+
+  it("logger.flush resolves when no drain is provided", async () => {
     const { logger } = createStandaloneRequestLogger({
       method: "GET",
       path: "/health",
@@ -140,5 +81,41 @@ describe("@unprice/observability", () => {
     })
 
     await expect(logger.flush()).resolves.toBeUndefined()
+  })
+
+  it("sharedSamplingConfig returns correct config for development", () => {
+    const config = sharedSamplingConfig("development")
+    expect(config.rates?.info).toBe(100)
+    expect(config.rates?.debug).toBe(100)
+  })
+
+  it("sharedSamplingConfig returns correct config for production", () => {
+    const config = sharedSamplingConfig("production")
+    expect(config.rates?.info).toBe(10)
+    expect(config.rates?.debug).toBe(0)
+    expect(config.rates?.error).toBe(100)
+  })
+
+  it("createLogger wraps a request logger into the Logger interface", () => {
+    const { requestLogger } = createStandaloneRequestLogger({
+      requestId: "req_wrap",
+    })
+
+    const logger = createLogger(requestLogger)
+
+    expect(logger.set).toBeTypeOf("function")
+    expect(logger.info).toBeTypeOf("function")
+    expect(logger.warn).toBeTypeOf("function")
+    expect(logger.error).toBeTypeOf("function")
+    expect(logger.debug).toBeTypeOf("function")
+    expect(logger.flush).toBeTypeOf("function")
+
+    // Should not throw
+    logger.set({ business: { operation: "test" } })
+    logger.info("test message", { key: "value" })
+    logger.warn("warning")
+    logger.error(new Error("test error"))
+    logger.error("string error")
+    logger.error({ message: "object error" })
   })
 })

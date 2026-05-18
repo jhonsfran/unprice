@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { eq, sql } from "drizzle-orm"
 import type { Database } from "."
 import { createConnection } from "./createConnection"
@@ -8,14 +9,39 @@ import { hashStringSHA256, newId } from "./utils"
 
 import { FEATURE_SLUGS } from "@unprice/config"
 import { migrate } from "drizzle-orm/neon-serverless/migrator"
-import { env } from "../env"
 
-const PGLEDGER_DIR = join(process.cwd(), "src/migrations/pgledger")
+const MODULE_DIR = dirname(fileURLToPath(import.meta.url))
+const MIGRATIONS_DIR = join(MODULE_DIR, "migrations")
+const PGLEDGER_DIR = join(MIGRATIONS_DIR, "pgledger")
 
-async function installPgledger(db: Database) {
-  const ulidSql = readFileSync(join(PGLEDGER_DIR, "ulid.sql"), "utf8")
-  const pgledgerSql = readFileSync(join(PGLEDGER_DIR, "pgledger.sql"), "utf8")
-  const version = readFileSync(join(PGLEDGER_DIR, "VERSION"), "utf8").trim()
+function compareDotVersions(left: string, right: string) {
+  const leftParts = left.split(".").map((part) => Number.parseInt(part, 10))
+  const rightParts = right.split(".").map((part) => Number.parseInt(part, 10))
+  const length = Math.max(leftParts.length, rightParts.length)
+
+  for (let index = 0; index < length; index += 1) {
+    const rawLeftPart = leftParts[index]
+    const rawRightPart = rightParts[index]
+    const leftPart = rawLeftPart === undefined || Number.isNaN(rawLeftPart) ? 0 : rawLeftPart
+    const rightPart = rawRightPart === undefined || Number.isNaN(rawRightPart) ? 0 : rawRightPart
+    const delta = leftPart - rightPart
+    if (delta !== 0) return delta
+  }
+
+  return 0
+}
+
+export async function installPgledger(
+  db: Database,
+  {
+    pgledgerDir = PGLEDGER_DIR,
+  }: {
+    pgledgerDir?: string
+  } = {}
+) {
+  const ulidSql = readFileSync(join(pgledgerDir, "ulid.sql"), "utf8")
+  const pgledgerSql = readFileSync(join(pgledgerDir, "pgledger.sql"), "utf8")
+  const version = readFileSync(join(pgledgerDir, "VERSION"), "utf8").trim()
 
   // Multi-statement files with $$-quoted bodies are run via the simple query
   // protocol — sql.raw passes the text through unparameterised, which is what
@@ -40,7 +66,7 @@ async function installPgledger(db: Database) {
     await db.execute(sql`INSERT INTO pgledger_install_version (version) VALUES (${version})`)
     console.info(`✅ pgledger ${version} installed`)
   } else if (previous !== version) {
-    if (previous > version) {
+    if (compareDotVersions(previous, version) > 0) {
       throw new Error(
         `pgledger downgrade refused: installed=${previous}, requested=${version}. Restore an older VERSION file or run a forward migration.`
       )
@@ -52,7 +78,19 @@ async function installPgledger(db: Database) {
   }
 }
 
+export async function runDrizzleMigrations(
+  db: Database,
+  {
+    migrationsFolder = MIGRATIONS_DIR,
+  }: {
+    migrationsFolder?: string
+  } = {}
+) {
+  await migrate(db, { migrationsFolder })
+}
+
 async function main() {
+  const { env } = await import("../env")
   const start = Date.now()
   console.info("⏳ Running migrations for environment:", env.APP_ENV)
 
@@ -65,7 +103,7 @@ async function main() {
     singleton: false,
   })
 
-  await migrate(db, { migrationsFolder: "src/migrations" })
+  await runDrizzleMigrations(db)
   await installPgledger(db)
 
   let userExists = await db.query.users
@@ -298,8 +336,12 @@ async function main() {
   process.exit(0)
 }
 
-main().catch((e) => {
-  console.error("Migration failed")
-  console.error(e)
-  process.exit(1)
-})
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href
+
+if (isDirectRun) {
+  main().catch((e) => {
+    console.error("Migration failed")
+    console.error(e)
+    process.exit(1)
+  })
+}

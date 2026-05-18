@@ -18,6 +18,9 @@ export const ingestionAuditTable = sqliteTable(
     unpublishedIdx: index("idx_ingestion_audit_unpublished")
       .on(table.firstSeenAt)
       .where(sql`${table.publishedAt} IS NULL`),
+    publishedRetentionIdx: index("idx_ingestion_audit_published_retention")
+      .on(table.firstSeenAt)
+      .where(sql`${table.publishedAt} IS NOT NULL`),
   })
 )
 

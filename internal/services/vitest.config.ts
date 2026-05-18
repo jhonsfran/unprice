@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     reporters: ["default"],
     include: ["src/**/*.test.ts", "src/*.test.ts"],
+    exclude: ["src/**/*.integration.test.ts"],
     alias: {
       "@/": "./src/",
     },

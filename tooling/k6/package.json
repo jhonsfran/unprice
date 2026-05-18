@@ -4,7 +4,9 @@
   "description": "",
   "main": "can.js",
   "scripts": {
+    "build:baseline": "esbuild baseline.js --bundle --platform=browser --format=esm --external:k6 --external:k6/* --outfile=dist/baseline.js",
     "build:lifecycle": "esbuild lifecycle.js --bundle --platform=browser --format=esm --external:k6 --external:k6/* --outfile=dist/lifecycle.js",
+    "baseline": "pnpm build:baseline && sh ./scripts/run-baseline.sh dist/baseline.js",
     "lifecycle": "pnpm build:lifecycle && docker run --env-file .env --rm --network=host -i grafana/k6 run - < dist/lifecycle.js"
   },
   "keywords": [],

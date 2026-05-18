@@ -1,4 +1,4 @@
-import type { AppLogger } from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
 import type { EntitlementService } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
@@ -29,7 +29,7 @@ describe("createIngestionService", () => {
         warn: vi.fn(),
         error: vi.fn(),
         debug: vi.fn(),
-      } as unknown as AppLogger,
+      } as unknown as Logger,
       env,
       waitUntil: (_promise: Promise<unknown>): void => {
         throw new Error("Function not implemented.")

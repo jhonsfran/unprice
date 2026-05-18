@@ -3,17 +3,10 @@ import type { Metric } from "@unprice/metrics"
 import type { Metrics } from "./interface"
 
 type LogdrainEnvironment = "development" | "test" | "production" | "preview"
-type LogdrainLogger = Logger & {
-  emit(
-    level: "debug" | "info" | "warn" | "error",
-    message: string,
-    fields?: Record<string, unknown>
-  ): void
-}
 
 export class LogdrainMetrics implements Metrics {
   private requestId: string
-  private readonly logger: LogdrainLogger
+  private readonly logger: Logger
   private readonly environment: LogdrainEnvironment
   private readonly service: string
   private colo?: string
@@ -24,7 +17,7 @@ export class LogdrainMetrics implements Metrics {
 
   constructor(opts: {
     requestId: string
-    logger: LogdrainLogger
+    logger: Logger
     environment: LogdrainEnvironment
     service: string
     colo?: string
@@ -45,9 +38,12 @@ export class LogdrainMetrics implements Metrics {
   }
 
   public emit(metric: Metric): void {
-    const payload = {
+    if (!this.shouldEmit()) {
+      return
+    }
+
+    this.logger.info(metric.metric, {
       requestId: this.requestId,
-      type: "metric",
       time: Date.now(),
       metric,
       environment: this.environment,
@@ -56,10 +52,19 @@ export class LogdrainMetrics implements Metrics {
       country: this.country,
       continent: this.continent,
       durableObjectId: this.durableObjectId,
-      "log.type": "metric",
-    } as Record<string, unknown>
+    })
+  }
 
-    this.logger.emit("info", metric.metric, payload)
+  private shouldEmit(): boolean {
+    if (this.sampleRate <= 0) {
+      return false
+    }
+
+    if (this.sampleRate >= 1) {
+      return true
+    }
+
+    return Math.random() < this.sampleRate
   }
 
   public setColo(colo: string): void {

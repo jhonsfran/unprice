@@ -130,7 +130,6 @@ export class SubscriptionService {
   }
 
   private setLockContext(context: {
-    type?: "metric" | "normal" | "wide_event"
     resource?: string
     action?: string
     acquired?: boolean
@@ -1099,8 +1098,8 @@ export class SubscriptionService {
         //                    activation, including capped/uncapped usage
         //                    phases and free / no-payment-method plans.
         // versionData.whenToBill is non-null in the schema (default
-        // "pay_in_advance"), but some legacy/test fixtures omit it. Treat
-        // missing as "not advance billing" — same as the prior `===` check.
+        // "pay_in_advance"), but some test fixtures omit it. Treat missing as
+        // "not advance billing" to preserve the nullable fixture path.
         const versionStrategy = versionData.whenToBill
           ? billingStrategyFor(versionData.whenToBill)
           : null
@@ -1771,7 +1770,7 @@ export class SubscriptionService {
     now: number
     lock?: boolean
     ttlMs?: number
-    run: (m: SubscriptionMachine) => Promise<T>
+    run: (m: SubscriptionMachine, assertLockHeld: () => void) => Promise<T>
   }): Promise<T> {
     try {
       return await withLockedMachine({

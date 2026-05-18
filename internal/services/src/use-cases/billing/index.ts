@@ -13,7 +13,7 @@
  * | METER         | `ingestion/*` + `entitlements/EntitlementWindowDO`       |
  * |               | (event ingest + DO buffering — no use case)              |
  * | RATE          | `rating/service.ts ::rateBillingPeriod` (pure pricing)   |
- * | RESERVE/DRAW  | `wallet/service.ts ::createReservation, flushReservation`|
+ * | RESERVE/DRAW  | `wallet/service.ts ::createReservation, capture/extend/release` |
  * | BILL          | `bill-period.ts` (XState `invoicing` actor)              |
  * | SETTLE        | `settle-invoice.ts` (webhook + sync paths)               |
  * | RENEW         | `renew-period.ts` (XState `renewing` actor)              |

@@ -1,7 +1,7 @@
 import { CloudflareStore } from "@unkey/cache/stores"
 import { Analytics } from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
-import type { AppLogger } from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
 import { type Cache, CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
 import type { ServiceContext } from "@unprice/services/context"
@@ -11,7 +11,7 @@ import type { Env } from "~/env"
 export function createQueueServices(params: {
   env: Env
   executionCtx: ExecutionContext
-  logger: AppLogger
+  logger: Logger
 }): Pick<ServiceContext, "entitlements"> & {
   cache: Pick<Cache, "ingestionPreparedGrantContext">
 } {

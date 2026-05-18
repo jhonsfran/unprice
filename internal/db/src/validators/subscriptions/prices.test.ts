@@ -198,6 +198,135 @@ describe("pricing calculators", () => {
     // total: flat $10 + tier 2 * $5 = $20
     expect(toDecimal(val!.dinero)).toBe("20.00")
   })
+
+  it("calculateTotalPricePlan: sums flat, package, tier, usage unit, usage package, and usage volume-tier features", () => {
+    const zero = dinero({ amount: 0, currency: currencies.USD })
+    const features = [
+      {
+        id: "f-flat",
+        featureType: "flat" as const,
+        config: {
+          price: {
+            dinero: dinero({ amount: 2000, currency: currencies.USD }).toJSON(),
+            displayAmount: "20.00",
+          },
+        },
+      },
+      {
+        id: "f-package",
+        featureType: "package" as const,
+        config: {
+          price: {
+            dinero: dinero({ amount: 700, currency: currencies.USD }).toJSON(),
+            displayAmount: "7.00",
+          },
+          units: 10,
+        },
+      },
+      {
+        id: "f-tier",
+        featureType: "tier" as const,
+        config: {
+          tierMode: "graduated" as const,
+          tiers: [
+            {
+              firstUnit: 1,
+              lastUnit: 5,
+              unitPrice: {
+                dinero: dinero({ amount: 200, currency: currencies.USD }).toJSON(),
+                displayAmount: "2.00",
+              },
+              flatPrice: { dinero: zero.toJSON(), displayAmount: "0.00" },
+            },
+            {
+              firstUnit: 6,
+              lastUnit: null,
+              unitPrice: {
+                dinero: dinero({ amount: 100, currency: currencies.USD }).toJSON(),
+                displayAmount: "1.00",
+              },
+              flatPrice: {
+                dinero: dinero({ amount: 300, currency: currencies.USD }).toJSON(),
+                displayAmount: "3.00",
+              },
+            },
+          ],
+        },
+      },
+      {
+        id: "f-usage-unit",
+        featureType: "usage" as const,
+        config: {
+          usageMode: "unit" as const,
+          price: {
+            dinero: dinero({ amount: 25, currency: currencies.USD }).toJSON(),
+            displayAmount: "0.25",
+          },
+          units: 1,
+        },
+      },
+      {
+        id: "f-usage-package",
+        featureType: "usage" as const,
+        config: {
+          usageMode: "package" as const,
+          price: {
+            dinero: dinero({ amount: 400, currency: currencies.USD }).toJSON(),
+            displayAmount: "4.00",
+          },
+          units: 25,
+        },
+      },
+      {
+        id: "f-usage-volume-tier",
+        featureType: "usage" as const,
+        config: {
+          usageMode: "tier" as const,
+          tierMode: "volume" as const,
+          tiers: [
+            {
+              firstUnit: 1,
+              lastUnit: 100,
+              unitPrice: {
+                dinero: dinero({ amount: 10, currency: currencies.USD }).toJSON(),
+                displayAmount: "0.10",
+              },
+              flatPrice: { dinero: zero.toJSON(), displayAmount: "0.00" },
+            },
+            {
+              firstUnit: 101,
+              lastUnit: null,
+              unitPrice: {
+                dinero: dinero({ amount: 5, currency: currencies.USD }).toJSON(),
+                displayAmount: "0.05",
+              },
+              flatPrice: {
+                dinero: dinero({ amount: 200, currency: currencies.USD }).toJSON(),
+                displayAmount: "2.00",
+              },
+            },
+          ],
+        },
+      },
+    ]
+
+    const { val, err } = calculateTotalPricePlan({
+      features: features as unknown as PlanVersionFeature[],
+      quantities: {
+        "f-package": 21,
+        "f-tier": 8,
+        "f-usage-unit": 40,
+        "f-usage-package": 51,
+        "f-usage-volume-tier": 120,
+      },
+      currency: "USD",
+    })
+
+    expect(err).toBeUndefined()
+    // flat 20 + package ceil(21/10)*7 + graduated tier 16
+    // + usage unit 10 + usage package ceil(51/25)*4 + volume tier 8 = 87
+    expect(toDecimal(val!.dinero)).toBe("87.00")
+  })
 })
 
 describe("calculateFlatPricePlan", () => {

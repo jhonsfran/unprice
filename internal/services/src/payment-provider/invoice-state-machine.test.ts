@@ -66,4 +66,51 @@ describe("invoice payment state machine", () => {
       subscriptionOutcome: "failure",
     })
   })
+
+  it("reverses a paid invoice to failed on payment_reversed", () => {
+    expect(
+      transitionInvoiceStatus({
+        currentStatus: "paid",
+        event: "payment_reversed",
+      })
+    ).toMatchObject({
+      nextStatus: "failed",
+      settleWallet: false,
+      subscriptionOutcome: "failure",
+    })
+  })
+
+  it("resolves a dispute reversal from unpaid to paid", () => {
+    expect(
+      transitionInvoiceStatus({
+        currentStatus: "unpaid",
+        event: "payment_dispute_reversed",
+      })
+    ).toMatchObject({
+      nextStatus: "paid",
+      settleWallet: true,
+      subscriptionOutcome: "success",
+    })
+  })
+
+  it("treats payment_reversed from non-paid status as a noop", () => {
+    // Statuses not in allowedFromStatuses → "disallowed"
+    for (const currentStatus of ["draft", "waiting", "unpaid", "void"] as const) {
+      expect(
+        transitionInvoiceStatus({
+          currentStatus,
+          event: "payment_reversed",
+        })
+      ).toEqual({ event: "noop", reason: "disallowed" })
+    }
+
+    // "failed" equals the transition's nextStatus, so the machine
+    // considers it already applied rather than disallowed.
+    expect(
+      transitionInvoiceStatus({
+        currentStatus: "failed",
+        event: "payment_reversed",
+      })
+    ).toEqual({ event: "noop", reason: "already_applied" })
+  })
 })

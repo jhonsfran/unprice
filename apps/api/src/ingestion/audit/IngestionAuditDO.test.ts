@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
+const SQL_BOUND_PARAMETER_LIMIT = 100
+const AUDIT_INSERT_BOUND_PARAMETER_COUNT = 9
 const TEST_INGESTION_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const TEST_DO_IDEMPOTENCY_TTL_MS = TEST_INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000
 const TEST_AUDIT_RETENTION_MS = TEST_DO_IDEMPOTENCY_TTL_MS
 
 type DrizzleCondition = {
-  kind: "and" | "eq" | "isNull" | "lt"
+  kind: "and" | "eq" | "inArray" | "isNull" | "lt"
   column?: string
   value?: unknown
+  values?: unknown[]
   conditions?: DrizzleCondition[]
 }
 
@@ -149,6 +152,93 @@ describe("IngestionAuditDO", () => {
       conflicts: 1,
     })
     expect(db.rows.size).toBe(1)
+  })
+
+  it("commits large fresh batches within Durable Object SQL parameter limits", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: { send: vi.fn() },
+      } as never
+    )
+
+    const entries = createLedgerEntries(125)
+    const result = await durableObject.commit(entries)
+
+    expect(result).toEqual({
+      inserted: 125,
+      duplicates: 0,
+      conflicts: 0,
+    })
+    expect(db.rows.size).toBe(125)
+    expect(state.alarmAt).toBe(BASE_NOW + 1000)
+  })
+
+  it("classifies a concurrent commit for the same idempotency key as a duplicate", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const getAlarmStarted = createDeferred<void>()
+    const getAlarmResult = createDeferred<number | null>()
+    state.storage.getAlarm = async () => {
+      getAlarmStarted.resolve()
+      return await getAlarmResult.promise
+    }
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: { send: vi.fn() },
+      } as never
+    )
+
+    const entry = createLedgerEntry({
+      idempotencyKey: "idem_concurrent",
+      payloadHash: "hash_concurrent",
+    })
+    const first = durableObject.commit([entry])
+
+    await getAlarmStarted.promise
+    const second = durableObject.commit([entry])
+    getAlarmResult.resolve(null)
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { inserted: 1, duplicates: 0, conflicts: 0 },
+      { inserted: 0, duplicates: 1, conflicts: 0 },
+    ])
+    expect(db.rows.size).toBe(1)
+    expect(state.alarmAt).toBe(BASE_NOW + 1000)
+  })
+
+  it("publishes large outbox batches within Durable Object SQL parameter limits", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const pipelineEvents = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+    testState.db = db
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: pipelineEvents,
+      } as never
+    )
+
+    await durableObject.commit(createLedgerEntries(125))
+    await durableObject.alarm()
+
+    expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
+    expect(pipelineEvents.send.mock.calls[0]?.[0]).toHaveLength(125)
+    expect([...db.rows.values()].every((row) => row.published_at === BASE_NOW)).toBe(true)
   })
 
   it("marks unpublished rows as published after successful pipeline flush", async () => {
@@ -409,6 +499,14 @@ async function loadIngestionAuditDO() {
         column: getColumnName(column),
         value,
       }),
+      inArray: (column: unknown, values: unknown[]): DrizzleCondition => {
+        assertSqlBoundParameterCount(values.length)
+        return {
+          kind: "inArray",
+          column: getColumnName(column),
+          values,
+        }
+      },
       isNull: (column: unknown): DrizzleCondition => ({
         kind: "isNull",
         column: getColumnName(column),
@@ -464,6 +562,17 @@ function createFakeDbState(): FakeDbState {
   }
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = innerReject
+  })
+
+  return { promise, reject, resolve }
+}
+
 function getColumnName(column: unknown): string {
   if (column && typeof column === "object" && "name" in column) {
     const value = (column as { name?: unknown }).name
@@ -514,9 +623,37 @@ function buildFakeDrizzle(state: FakeDbState) {
             return { cnt }
           }
 
+          if (keys.length === 1 && keys.includes("idempotencyKey")) {
+            const row = [...state.rows.values()]
+              .filter((candidate) => matchesCondition(candidate, condition))
+              .sort((a, b) => a.first_seen_at - b.first_seen_at)
+              .at(0)
+            if (!row) {
+              return undefined
+            }
+            return { idempotencyKey: row.idempotency_key }
+          }
+
           throw new Error(`Unsupported select().get() keys: ${keys.join(",")}`)
         },
         all() {
+          if (keys.includes("idempotencyKey") && keys.includes("payloadHash")) {
+            return [...state.rows.values()]
+              .filter((candidate) => matchesCondition(candidate, condition))
+              .map((row) => ({
+                idempotencyKey: row.idempotency_key,
+                payloadHash: row.payload_hash,
+              }))
+          }
+
+          if (keys.length === 1 && keys.includes("idempotencyKey")) {
+            return [...state.rows.values()]
+              .filter((candidate) => matchesCondition(candidate, condition))
+              .map((row) => ({
+                idempotencyKey: row.idempotency_key,
+              }))
+          }
+
           if (
             keys.includes("idempotencyKey") &&
             keys.includes("canonicalAuditId") &&
@@ -543,41 +680,40 @@ function buildFakeDrizzle(state: FakeDbState) {
     },
 
     insert() {
-      let row: Record<string, unknown> | null = null
+      let rows: Record<string, unknown>[] = []
 
       const runInsert = () => {
-        if (!row) {
-          return
-        }
+        for (const row of rows) {
+          const idempotencyKey = String(row.idempotencyKey)
+          if (state.rows.has(idempotencyKey)) {
+            continue
+          }
 
-        const idempotencyKey = String(row.idempotencyKey)
-        if (state.rows.has(idempotencyKey)) {
-          return
+          state.rows.set(idempotencyKey, {
+            idempotency_key: idempotencyKey,
+            canonical_audit_id: String(row.canonicalAuditId),
+            payload_hash: String(row.payloadHash),
+            status: row.status as "processed" | "rejected",
+            rejection_reason:
+              row.rejectionReason === null || row.rejectionReason === undefined
+                ? null
+                : String(row.rejectionReason),
+            result_json:
+              row.resultJson === null || row.resultJson === undefined ? "" : String(row.resultJson),
+            audit_payload_json: String(row.auditPayloadJson),
+            first_seen_at: Number(row.firstSeenAt),
+            published_at:
+              row.publishedAt === null || row.publishedAt === undefined
+                ? null
+                : Number(row.publishedAt),
+          })
         }
-
-        state.rows.set(idempotencyKey, {
-          idempotency_key: idempotencyKey,
-          canonical_audit_id: String(row.canonicalAuditId),
-          payload_hash: String(row.payloadHash),
-          status: row.status as "processed" | "rejected",
-          rejection_reason:
-            row.rejectionReason === null || row.rejectionReason === undefined
-              ? null
-              : String(row.rejectionReason),
-          result_json:
-            row.resultJson === null || row.resultJson === undefined ? "" : String(row.resultJson),
-          audit_payload_json: String(row.auditPayloadJson),
-          first_seen_at: Number(row.firstSeenAt),
-          published_at:
-            row.publishedAt === null || row.publishedAt === undefined
-              ? null
-              : Number(row.publishedAt),
-        })
       }
 
       return {
-        values(value: Record<string, unknown>) {
-          row = value
+        values(value: Record<string, unknown> | Record<string, unknown>[]) {
+          rows = Array.isArray(value) ? value : [value]
+          assertSqlBoundParameterCount(rows.length * AUDIT_INSERT_BOUND_PARAMETER_COUNT)
           return this
         },
         onConflictDoNothing() {
@@ -600,6 +736,9 @@ function buildFakeDrizzle(state: FakeDbState) {
         where(condition: DrizzleCondition) {
           return {
             run() {
+              assertSqlBoundParameterCount(
+                Object.keys(values).length + countConditionBoundParameters(condition)
+              )
               for (const row of state.rows.values()) {
                 if (!matchesCondition(row, condition)) {
                   continue
@@ -636,6 +775,10 @@ function matchesCondition(row: FakeAuditRow, condition: DrizzleCondition | undef
     return value === condition.value
   }
 
+  if (condition.kind === "inArray") {
+    return (condition.values ?? []).includes(value)
+  }
+
   if (condition.kind === "isNull") {
     return value === null
   }
@@ -645,6 +788,35 @@ function matchesCondition(row: FakeAuditRow, condition: DrizzleCondition | undef
   }
 
   return false
+}
+
+function countConditionBoundParameters(condition: DrizzleCondition | undefined): number {
+  if (!condition) {
+    return 0
+  }
+
+  if (condition.kind === "and") {
+    return (condition.conditions ?? []).reduce(
+      (total, nested) => total + countConditionBoundParameters(nested),
+      0
+    )
+  }
+
+  if (condition.kind === "inArray") {
+    return condition.values?.length ?? 0
+  }
+
+  if (condition.kind === "eq" || condition.kind === "lt") {
+    return 1
+  }
+
+  return 0
+}
+
+function assertSqlBoundParameterCount(count: number): void {
+  if (count > SQL_BOUND_PARAMETER_LIMIT) {
+    throw new Error(`too many SQL variables: ${count}`)
+  }
 }
 
 function getRowValue(row: FakeAuditRow, column: string | undefined): unknown {
@@ -709,4 +881,13 @@ function createLedgerEntry(overrides: {
     resultJson: JSON.stringify({ state: "processed" }),
     status: "processed" as const,
   }
+}
+
+function createLedgerEntries(count: number) {
+  return Array.from({ length: count }, (_, index) =>
+    createLedgerEntry({
+      idempotencyKey: `idem_large_${index.toString().padStart(3, "0")}`,
+      payloadHash: `hash_large_${index.toString().padStart(3, "0")}`,
+    })
+  )
 }

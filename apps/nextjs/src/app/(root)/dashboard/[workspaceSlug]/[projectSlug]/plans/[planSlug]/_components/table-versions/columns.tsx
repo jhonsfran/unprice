@@ -12,6 +12,7 @@ import { usePathname } from "next/navigation"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
+import { getStatusTone, statusToneClasses } from "~/lib/status-tones"
 import { DataTableRowActions } from "./data-table-row-actions"
 
 export type PlanVersion = RouterOutputs["plans"]["getVersionsBySlug"]["plan"]["versions"][number]
@@ -52,18 +53,24 @@ export const columns: ColumnDef<PlanVersion>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Title" />,
     cell: ({ row }) => {
       const pathname = usePathname()
+      const latestToneClass = statusToneClasses[getStatusTone("latest")]
 
       return (
         <SuperLink href={`${pathname}/${row.original.id}`} prefetch={false}>
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-2">
             <Typography variant="h6" className="truncate">
               {row.original.title}
             </Typography>
 
             {row.original.latest && (
-              <div className={"inline-flex items-center font-medium text-info text-xs"}>
-                <span className={"flex h-2 w-2 rounded-full bg-info"} />
-                <span className="ml-1">latest</span>
+              <div
+                className={cn(
+                  "inline-flex items-center gap-1 font-medium text-xs",
+                  latestToneClass.text
+                )}
+              >
+                <span className={cn("size-1.5 rounded-full", latestToneClass.dot)} />
+                <span>latest</span>
               </div>
             )}
           </div>
@@ -126,31 +133,23 @@ export const columns: ColumnDef<PlanVersion>[] = [
     accessorKey: "active",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Active" />,
-    cell: ({ row }) => (
-      <Badge
-        className={cn({
-          info: row.original.active,
-          danger: !row.original.active,
-        })}
-      >
-        {row.original.active ? "active" : "inactive"}
-      </Badge>
-    ),
+    cell: ({ row }) => {
+      const status = row.original.active ? "active" : "inactive"
+      const toneClass = statusToneClasses[getStatusTone(status)]
+
+      return <Badge variant={toneClass.badgeVariant}>{status}</Badge>
+    },
     size: 20,
   },
   {
     accessorKey: "status",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
-    cell: ({ row }) => (
-      <Badge
-        className={cn({
-          success: row.original.status === "published",
-        })}
-      >
-        {row.original.status}
-      </Badge>
-    ),
+    cell: ({ row }) => {
+      const toneClass = statusToneClasses[getStatusTone(row.original.status)]
+
+      return <Badge variant={toneClass.badgeVariant}>{row.original.status}</Badge>
+    },
     filterFn: (row, id, value) => {
       return Array.isArray(value) && value.includes(row.getValue(id))
     },

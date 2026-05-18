@@ -66,7 +66,7 @@ describe("planVersionFeatureInsertBaseSchema", () => {
     expect(result.success).toBe(false)
   })
 
-  it("rejects legacy top-level aggregationMethod", () => {
+  it("rejects unsupported top-level aggregationMethod", () => {
     const result = planVersionFeatureInsertBaseSchema.safeParse({
       featureId: "feature_123",
       planVersionId: "plan_version_123",

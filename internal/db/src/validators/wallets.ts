@@ -33,6 +33,15 @@ export const entitlementReservationInsertSchema = createInsertSchema(
 )
 export type EntitlementReservation = typeof schema.entitlementReservations.$inferSelect
 
+export const entitlementReservationFundingLegSelectSchema = createSelectSchema(
+  schema.entitlementReservationFundingLegs
+)
+export const entitlementReservationFundingLegInsertSchema = createInsertSchema(
+  schema.entitlementReservationFundingLegs
+)
+export type EntitlementReservationFundingLeg =
+  typeof schema.entitlementReservationFundingLegs.$inferSelect
+
 export const walletTopupSelectSchema = createSelectSchema(schema.walletTopups)
 export const walletTopupInsertSchema = createInsertSchema(schema.walletTopups)
 export type WalletTopup = typeof schema.walletTopups.$inferSelect
@@ -44,3 +53,10 @@ export const walletCreditInsertSchema = createInsertSchema(schema.walletCredits,
   metadata: walletCreditMetadataSchema.nullable(),
 })
 export type WalletCredit = typeof schema.walletCredits.$inferSelect
+
+export const walletCommandIdempotencySelectSchema = createSelectSchema(
+  schema.walletCommandIdempotency
+)
+export const walletCommandIdempotencyInsertSchema = createInsertSchema(
+  schema.walletCommandIdempotency
+)

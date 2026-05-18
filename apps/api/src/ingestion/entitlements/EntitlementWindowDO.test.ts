@@ -50,6 +50,12 @@ type MeterWindowRow = {
   flushedAmount?: number
   refillThresholdBps?: number
   refillChunkAmount?: number
+  targetReservationAmount?: number
+  spendEwmaAmount?: number
+  lastRateSampledAtMs?: number | null
+  maxEventCostAmount?: number
+  pendingRefillAmount?: number
+  pendingFlushAmount?: number | null
   refillInFlight?: boolean
   flushSeq?: number
   pendingFlushSeq?: number | null
@@ -114,6 +120,12 @@ const METER_WINDOW_KEYS = new Set<string>([
   "flushedAmount",
   "refillThresholdBps",
   "refillChunkAmount",
+  "targetReservationAmount",
+  "spendEwmaAmount",
+  "lastRateSampledAtMs",
+  "maxEventCostAmount",
+  "pendingRefillAmount",
+  "pendingFlushAmount",
   "refillInFlight",
   "flushSeq",
   "pendingFlushSeq",
@@ -168,6 +180,13 @@ type FakeDbState = {
   grantRows: Map<string, GrantRow>
   grantWindowRows: Map<string, GrantWindowRow>
   deleteInArrayBatchSizes: number[]
+  deleteIdempotencyCutoffs: number[]
+  deleteOutboxRangeMaxIds: number[]
+  storageReadCounts: {
+    entitlementConfig: number
+    grants: number
+    grantWindows: number
+  }
   failNextMeterWindowUpdate?: {
     matchKey: string
     error: Error
@@ -256,7 +275,7 @@ describe("EntitlementWindowDO", () => {
     // opt into the wallet path stay identical to their pre-7.5 shape.
     testState.flushReservation.mockResolvedValue({
       err: null,
-      val: { grantedAmount: 0, flushedAmount: 0, refundedAmount: 0, drainLegs: [] },
+      val: { grantedAmount: 0, flushedAmount: 0, refundedAmount: 0 },
     })
     // Default: lazy bootstrap returns a healthy reservation. Tests that need
     // the WALLET_EMPTY surface (allocationAmount: 0) or wallet-error paths
@@ -266,7 +285,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_lazy_default",
         allocationAmount: 1_000_000_000, // $10, the sizing ceiling
-        drainLegs: [],
       },
     })
     // Default: unit pricing — amount = quantity * $1.00. We return fake Dinero
@@ -321,6 +339,59 @@ describe("EntitlementWindowDO", () => {
     expect(payload.currency).toBe("USD")
     expect(payload.priced_at).toBe(BASE_NOW)
     expect(payload.feature_plan_version_id).toBe("fpv_123")
+  })
+
+  it("deduplicates concurrent apply calls by idempotency key during wallet bootstrap", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const reservationStarted = createDeferred<void>()
+    const reservationResult = createDeferred<{
+      err: null
+      val: {
+        allocationAmount: number
+        reservationId: string
+      }
+    }>()
+    testState.createReservation.mockImplementation(async () => {
+      reservationStarted.resolve()
+      return await reservationResult.promise
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const input = createApplyInput()
+    const first = durableObject.apply(input)
+
+    await reservationStarted.promise
+    const second = durableObject.apply(input)
+    await Promise.resolve()
+
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+
+    reservationResult.resolve({
+      err: null,
+      val: {
+        reservationId: "res_concurrent_bootstrap",
+        allocationAmount: 1_000_000_000,
+      },
+    })
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { allowed: true },
+      { allowed: true },
+    ])
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(db.idempotencyRows.size).toBe(1)
+    expect(db.outboxRows).toHaveLength(1)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(300_000_000)
   })
 
   it("rejects events for a closed period after the late-event grace window", async () => {
@@ -424,6 +495,57 @@ describe("EntitlementWindowDO", () => {
     expect(total).toBe(EVENT_COUNT * 300)
   })
 
+  it("limits hot-path grant window reads to the active bucket", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const activeBucketKey = `grant_123:onetime:${BASE_NOW - 60_000}`
+    db.grantWindowRows.set(activeBucketKey, {
+      bucketKey: activeBucketKey,
+      grantId: "grant_123",
+      periodKey: `onetime:${BASE_NOW - 60_000}`,
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 2,
+      exhaustedAt: null,
+    })
+
+    for (let i = 0; i < 250; i++) {
+      const bucketKey = `grant_historical_${i}:onetime:${BASE_NOW - (i + 2) * 60_000}`
+      db.grantWindowRows.set(bucketKey, {
+        bucketKey,
+        grantId: `grant_historical_${i}`,
+        periodKey: `onetime:${BASE_NOW - (i + 2) * 60_000}`,
+        periodStartAt: BASE_NOW - (i + 2) * 60_000,
+        periodEndAt: BASE_NOW - (i + 1) * 60_000,
+        consumedInCurrentWindow: 100,
+        exhaustedAt: BASE_NOW - (i + 1) * 60_000,
+      })
+    }
+
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    db.storageReadCounts.grantWindows = 0
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        limit: 10,
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(db.storageReadCounts.grantWindows).toBe(2)
+    expect(db.grantWindowRows.get(activeBucketKey)?.consumedInCurrentWindow).toBe(5)
+  })
+
   it("stores denied results and reuses them when a retry hits the same limit", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -463,6 +585,100 @@ describe("EntitlementWindowDO", () => {
     expect(db.idempotencyRows.size).toBe(1)
     expect(db.outboxRows).toHaveLength(0)
     expect(state.alarmAt).toBeNull()
+  })
+
+  it("allows the last call that crosses a hard limit, then denies the next call", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.grantWindowRows.set(`grant_123:onetime:${BASE_NOW - 60_000}`, {
+      bucketKey: `grant_123:onetime:${BASE_NOW - 60_000}`,
+      grantId: "grant_123",
+      periodKey: `onetime:${BASE_NOW - 60_000}`,
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 8,
+      exhaustedAt: null,
+    })
+    testState.engineApply
+      .mockImplementationOnce((_event: unknown, options?: PersistOptions) => {
+        const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 13 }]
+        options?.beforePersist?.(facts)
+        return facts
+      })
+      .mockImplementationOnce((_event: unknown, options?: PersistOptions) => {
+        const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 14 }]
+        options?.beforePersist?.(facts)
+        return facts
+      })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const crossing = await durableObject.apply(
+      createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        limit: 10,
+        overageStrategy: "last-call",
+      })
+    )
+    const afterLimit = await durableObject.apply(
+      createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        idempotencyKey: "idem_after_limit",
+        event: { ...createApplyInput().event, id: "evt_after_limit" },
+        limit: 10,
+        overageStrategy: "last-call",
+      })
+    )
+
+    expect(crossing).toEqual({ allowed: true })
+    expect(afterLimit).toEqual({
+      allowed: false,
+      deniedReason: "LIMIT_EXCEEDED",
+      message: expect.stringContaining(DEFAULT_METER_KEY),
+    })
+    expect(db.outboxRows).toHaveLength(2)
+    expect(db.grantWindowRows.get(`grant_123:onetime:${BASE_NOW - 60_000}`)).toMatchObject({
+      consumedInCurrentWindow: 13,
+      exhaustedAt: BASE_NOW,
+    })
+  })
+
+  it("treats always overage as a soft limit during apply", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.grantWindowRows.set(`grant_123:onetime:${BASE_NOW - 60_000}`, {
+      bucketKey: `grant_123:onetime:${BASE_NOW - 60_000}`,
+      grantId: "grant_123",
+      periodKey: `onetime:${BASE_NOW - 60_000}`,
+      periodStartAt: BASE_NOW - 60_000,
+      periodEndAt: BASE_NOW + 60_000,
+      consumedInCurrentWindow: 10,
+      exhaustedAt: BASE_NOW - 1,
+    })
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 15 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({
+        creditLinePolicy: "uncapped",
+        enforceLimit: true,
+        limit: 10,
+        overageStrategy: "always",
+      })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(db.outboxRows).toHaveLength(1)
+    expect(db.idempotencyRows.get("idem_123")).toMatchObject({ allowed: true })
   })
 
   it("closes an active reservation asynchronously when ingestion rejects on limit", async () => {
@@ -573,6 +789,141 @@ describe("EntitlementWindowDO", () => {
     }
   })
 
+  it("logs one summary for applyBatch instead of one apply log per event", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: baseInput.enforceLimit,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "batch_1",
+          id: "evt_batch_1",
+          idempotencyKey: "idem_batch_1",
+          now: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "batch_2",
+          id: "evt_batch_2",
+          idempotencyKey: "idem_batch_2",
+          now: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_1",
+        idempotencyKey: "idem_batch_1",
+      }),
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_2",
+        idempotencyKey: "idem_batch_2",
+      }),
+    ])
+    expect(testState.logger.info).not.toHaveBeenCalledWith("entitlement apply", expect.anything())
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        event_count: 2,
+        processed_count: 2,
+        allowed_count: 2,
+        denied_count: 0,
+        outcome: "success",
+      })
+    )
+  })
+
+  it("retries applyBatch after a partial failure without reapplying committed events", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    let failSecondEvent = true
+    testState.db = db
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const eventId = (event as { id: string }).id
+      if (eventId === "evt_batch_2" && failSecondEvent) {
+        throw new Error("ENGINE_DOWN")
+      }
+
+      const facts = [
+        {
+          delta: 1,
+          meterKey: DEFAULT_METER_KEY,
+          valueAfter: eventId === "evt_batch_1" ? 1 : 2,
+        },
+      ]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const batchInput = {
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: baseInput.enforceLimit,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "batch_1",
+          id: "evt_batch_1",
+          idempotencyKey: "idem_batch_1",
+          now: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "batch_2",
+          id: "evt_batch_2",
+          idempotencyKey: "idem_batch_2",
+          now: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    }
+
+    await expect(durableObject.applyBatch(batchInput)).rejects.toThrow("ENGINE_DOWN")
+    expect(db.idempotencyRows.get("idem_batch_1")).toMatchObject({ allowed: true })
+    expect(db.idempotencyRows.has("idem_batch_2")).toBe(false)
+
+    failSecondEvent = false
+    const retry = await durableObject.applyBatch(batchInput)
+
+    expect(retry.results).toEqual([
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_1",
+        idempotencyKey: "idem_batch_1",
+      }),
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_2",
+        idempotencyKey: "idem_batch_2",
+      }),
+    ])
+    expect(testState.engineApply.mock.calls.map(([event]) => (event as { id: string }).id)).toEqual(
+      ["evt_batch_1", "evt_batch_2", "evt_batch_2"]
+    )
+  })
+
   it("flushes queued facts during alarm and schedules self-destruct when the outbox is empty", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -614,17 +965,16 @@ describe("EntitlementWindowDO", () => {
       }),
     ])
     expect(db.outboxRows).toHaveLength(0)
-    // The default mocked apply opens a wallet reservation, so alarm() re-arms
-    // at the time-based flush deadline (5 min in non-dev) rather than the
-    // distant self-destruct. The flush deadline wins because it's sooner.
-    expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
+    // The default mocked apply opens a wallet reservation. Once the outbox
+    // and reservation usage are flushed, the period-close deadline is the
+    // next real lifecycle wakeup.
+    expect(state.alarmAt).toBe(BASE_NOW + 60_000)
   })
 
-  it("cleans alarm outbox and idempotency rows in SQLite bind-safe chunks", async () => {
+  it("cleans alarm outbox by id range and idempotency rows by TTL cutoff", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
-    db.maxDeleteInArrayValues = 90
     testState.db = db
     testState.analyticsIngest.mockResolvedValue({
       quarantined_rows: 0,
@@ -670,9 +1020,10 @@ describe("EntitlementWindowDO", () => {
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
     expect(db.outboxRows).toHaveLength(0)
+    expect(db.deleteOutboxRangeMaxIds).toEqual([200])
     expect(db.idempotencyRows.size).toBe(0)
-    expect(db.deleteInArrayBatchSizes.length).toBeGreaterThan(2)
-    expect(db.deleteInArrayBatchSizes.every((size) => size <= 90)).toBe(true)
+    expect(db.deleteIdempotencyCutoffs).toHaveLength(0)
+    expect(db.deleteInArrayBatchSizes).toEqual([200])
   })
 
   it("reschedules a fired alarm when a flush batch leaves facts in the outbox", async () => {
@@ -723,7 +1074,7 @@ describe("EntitlementWindowDO", () => {
     await durableObject.alarm()
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(db.outboxRows).toHaveLength(700)
+    expect(db.outboxRows).toHaveLength(200)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
@@ -752,6 +1103,37 @@ describe("EntitlementWindowDO", () => {
 
     expect(db.idempotencyRows.has("inside_retention_margin")).toBe(true)
     expect(db.idempotencyRows.has("beyond_do_ttl")).toBe(false)
+  })
+
+  it("throttles idempotency cleanup on warm alarm retries", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    db.idempotencyRows.set("stale_first", {
+      createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
+      allowed: true,
+      deniedReason: null,
+      denyMessage: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await durableObject.alarm()
+
+    db.idempotencyRows.set("stale_second", {
+      createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
+      allowed: true,
+      deniedReason: null,
+      denyMessage: null,
+    })
+
+    await durableObject.alarm()
+
+    expect(db.idempotencyRows.has("stale_first")).toBe(false)
+    expect(db.idempotencyRows.has("stale_second")).toBe(true)
+    expect(db.deleteInArrayBatchSizes).toEqual([1])
   })
 
   it("keeps rows in the outbox for retry when Tinybird flush fails", async () => {
@@ -1072,7 +1454,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_enforcement_state",
         allocationAmount: 100 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -1153,7 +1534,62 @@ describe("EntitlementWindowDO", () => {
     })
   })
 
-  it("closes an active reservation asynchronously when enforcement state reaches the limit", async () => {
+  it("caches enforcement state between verify calls and refreshes after apply commits", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    testState.engineApply.mockImplementationOnce((_event, options?: PersistOptions) => {
+      const facts = [{ delta: 4, meterKey: DEFAULT_METER_KEY, valueAfter: 4 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    await durableObject.apply(createApplyInput({ limit: 10 }))
+
+    db.storageReadCounts.entitlementConfig = 0
+    db.storageReadCounts.grants = 0
+    db.storageReadCounts.grantWindows = 0
+
+    expect(await durableObject.getEnforcementState()).toMatchObject({
+      usage: 4,
+      limit: 10,
+      isLimitReached: false,
+    })
+    const readsAfterFirstVerify = { ...db.storageReadCounts }
+
+    expect(await durableObject.getEnforcementState()).toMatchObject({
+      usage: 4,
+      limit: 10,
+      isLimitReached: false,
+    })
+    expect(db.storageReadCounts).toEqual(readsAfterFirstVerify)
+
+    testState.engineApply.mockImplementationOnce((_event, options?: PersistOptions) => {
+      const facts = [{ delta: 2, meterKey: DEFAULT_METER_KEY, valueAfter: 6 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    await durableObject.apply(
+      createApplyInput({
+        idempotencyKey: "idem_cache_refresh",
+        event: { id: "evt_cache_refresh" },
+        limit: 10,
+      })
+    )
+
+    const readsAfterApply = { ...db.storageReadCounts }
+    expect(await durableObject.getEnforcementState()).toMatchObject({
+      usage: 6,
+      limit: 10,
+      isLimitReached: false,
+    })
+    expect(db.storageReadCounts.grantWindows).toBeGreaterThan(readsAfterApply.grantWindows)
+  })
+
+  it("leaves an active reservation open when enforcement state reaches the limit", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1202,23 +1638,12 @@ describe("EntitlementWindowDO", () => {
     })
 
     expect(result).toMatchObject({ usage: 10, limit: 10, isLimitReached: true })
-    expect(state.waitUntilPromises).toHaveLength(1)
-
-    await Promise.all(state.waitUntilPromises)
-
-    expect(testState.flushReservation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reservationId: "res_verify_limit",
-        flushSeq: 5,
-        flushAmount: 2 * 100_000_000,
-        refillChunkAmount: 0,
-        final: true,
-      })
-    )
-    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
+    expect(state.waitUntilPromises).toHaveLength(0)
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBe("res_verify_limit")
   })
 
-  it("defers verify-path final flush when a wallet flush is already pending", async () => {
+  it("does not schedule verify-path final flush when a wallet flush is already pending", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1267,10 +1692,7 @@ describe("EntitlementWindowDO", () => {
     })
 
     expect(result).toMatchObject({ usage: 10, limit: 10, isLimitReached: true })
-    expect(state.waitUntilPromises).toHaveLength(1)
-
-    await Promise.all(state.waitUntilPromises)
-
+    expect(state.waitUntilPromises).toHaveLength(0)
     expect(testState.flushReservation).not.toHaveBeenCalled()
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
       reservationId: "res_verify_pending",
@@ -1338,9 +1760,9 @@ describe("EntitlementWindowDO", () => {
     await revived.alarm()
 
     // The revived DO sees a still-open reservation in SQLite and re-arms
-    // alarm() at the time-based flush deadline (5 min in non-dev) — the
-    // soonest deadline among self-destruct and the freshness floor.
-    expect(state.alarmAt).toBe(BASE_NOW + 5 * 60_000)
+    // alarm() at the next lifecycle deadline after the outbox and reservation
+    // usage are flushed.
+    expect(state.alarmAt).toBe(BASE_NOW + 60_000)
   })
 
   it("replays committed idempotency rows after eviction without applying twice", async () => {
@@ -1409,7 +1831,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_lazy",
         allocationAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -1437,10 +1858,81 @@ describe("EntitlementWindowDO", () => {
       })
     )
     // The reservation is persisted onto the window so subsequent events use
-    // the in-tx LocalReservation check directly.
+    // the in-tx reservation policy check directly.
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)
     expect(row?.reservationId).toBe("res_lazy")
     expect(row?.allocationAmount).toBe(5 * 100_000_000)
+  })
+
+  it("does not request a $1 bootstrap reservation for micro-priced meters", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.pricePerFeature.mockImplementation(({ quantity }: { quantity: number }) => ({
+      val: { totalPrice: { dinero: fakeDinero(Math.max(0, quantity) * 2, 8) } },
+    }))
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_micro",
+        allocationAmount: 150,
+      },
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toEqual({ allowed: true })
+    expect(testState.createReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedAmount: 150 })
+    )
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)
+    expect(row?.allocationAmount).toBe(150)
+    expect(row?.consumedAmount).toBe(6)
+    expect(row?.targetReservationAmount).toBeLessThan(100_000_000)
+    expect(row?.spendEwmaAmount).toBe(0)
+    expect(row?.lastRateSampledAtMs).toBe(BASE_NOW)
+    expect(row?.maxEventCostAmount).toBe(6)
+  })
+
+  it("sizes a high-price single-event bootstrap from the current event cost", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.pricePerFeature.mockImplementation(({ quantity }: { quantity: number }) => ({
+      val: { totalPrice: { dinero: fakeDinero(Math.max(0, quantity) * 500, 2) } },
+    }))
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_high_price",
+        allocationAmount: 5 * 100_000_000,
+      },
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({ event: { ...createApplyInput().event, properties: { amount: 1 } } })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(testState.createReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedAmount: 5 * 100_000_000 })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(5 * 100_000_000)
   })
 
   it("replays lazy reservation bootstrap after eviction before local reservation commit", async () => {
@@ -1459,7 +1951,6 @@ describe("EntitlementWindowDO", () => {
         val: {
           reservationId: "res_lazy",
           allocationAmount: 5 * 100_000_000,
-          drainLegs: [],
         },
       })
       .mockResolvedValueOnce({
@@ -1467,7 +1958,6 @@ describe("EntitlementWindowDO", () => {
         val: {
           reservationId: "res_lazy",
           allocationAmount: 5 * 100_000_000,
-          drainLegs: [],
           reused: "active",
         },
       })
@@ -1520,7 +2010,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_empty",
         allocationAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -1537,6 +2026,119 @@ describe("EntitlementWindowDO", () => {
       allowed: false,
       deniedReason: "WALLET_EMPTY",
     })
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply",
+      expect.objectContaining({
+        denied_reason: "WALLET_EMPTY",
+        deny_message: "Wallet has no available balance to back the reservation",
+      })
+    )
+  })
+
+  it("throws lazy bootstrap wallet errors without caching a WALLET_EMPTY denial", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const walletError = new Error("WALLET_LEDGER_FAILED")
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.createReservation.mockResolvedValue({
+      err: walletError,
+      val: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await expect(durableObject.apply(createApplyInput())).rejects.toThrow("WALLET_LEDGER_FAILED")
+    expect(db.idempotencyRows.has("idem_123")).toBe(false)
+    expect(db.outboxRows).toHaveLength(0)
+    expect(testState.logger.error).toHaveBeenCalledWith(
+      walletError,
+      expect.objectContaining({
+        context: "lazy reservation bootstrap failed",
+        customer_id: "cus_123",
+        project_id: "proj_123",
+        customer_entitlement_id: "ce_123",
+      })
+    )
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply",
+      expect.objectContaining({
+        bootstrap_attempted: true,
+        bootstrap_outcome: "error",
+        outcome: "error",
+        error_message: "WALLET_LEDGER_FAILED",
+      })
+    )
+  })
+
+  it("denies when a partial bootstrap grant cannot cover the current event", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.createReservation.mockResolvedValue({
+      err: null,
+      val: {
+        reservationId: "res_partial_bootstrap",
+        allocationAmount: 100_000_000,
+      },
+    })
+    testState.flushReservation.mockImplementation(
+      async (input: { final: boolean; flushAmount: number }) => ({
+        err: null,
+        val: {
+          grantedAmount: 0,
+          flushedAmount: input.flushAmount,
+          refundedAmount: input.final ? 100_000_000 : 0,
+        },
+      })
+    )
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
+    expect(testState.createReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ requestedAmount: 3 * 100_000_000 })
+    )
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        reservationId: "res_partial_bootstrap",
+        flushAmount: 0,
+        refillChunkAmount: 5 * 100_000_000,
+        final: false,
+      })
+    )
+
+    await Promise.all(state.waitUntilPromises)
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        reservationId: "res_partial_bootstrap",
+        refillChunkAmount: 0,
+        final: true,
+      })
+    )
+    expect(db.idempotencyRows.get("idem_123")).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
+    expect(db.outboxRows).toHaveLength(0)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
   })
 
   it("allows uncapped priced usage without opening a wallet reservation", async () => {
@@ -1554,7 +2156,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_empty",
         allocationAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -1584,7 +2185,6 @@ describe("EntitlementWindowDO", () => {
           grantedAmount: input.refillChunkAmount,
           flushedAmount: input.flushAmount,
           refundedAmount: 0,
-          drainLegs: [],
         },
       })
     )
@@ -1620,7 +2220,7 @@ describe("EntitlementWindowDO", () => {
         reservationId: "res_abc",
         flushSeq: 1,
         flushAmount: 2 * 100_000_000,
-        refillChunkAmount: 3 * 100_000_000,
+        refillChunkAmount: 8 * 100_000_000,
         final: false,
       })
     )
@@ -1628,7 +2228,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.outboxRows).toHaveLength(1)
     expect(db.idempotencyRows.get("idem_123")).toMatchObject({ allowed: true })
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
-    expect(row.allocationAmount).toBe(5 * 100_000_000)
+    expect(row.allocationAmount).toBe(10 * 100_000_000)
     expect(row.consumedAmount).toBe(5 * 100_000_000)
     expect(row.flushedAmount).toBe(2 * 100_000_000)
     expect(row.flushSeq).toBe(1)
@@ -1653,7 +2253,6 @@ describe("EntitlementWindowDO", () => {
           grantedAmount: 0,
           flushedAmount: input.flushAmount,
           refundedAmount: input.final ? 10 : 0,
-          drainLegs: [],
         },
       })
     )
@@ -1702,7 +2301,7 @@ describe("EntitlementWindowDO", () => {
         reservationId: "res_abc",
         flushSeq: 1,
         flushAmount: 2 * 100_000_000 - 10,
-        refillChunkAmount: 3 * 100_000_000 - 10,
+        refillChunkAmount: 8 * 100_000_000 - 20,
         final: false,
       })
     )
@@ -1723,6 +2322,84 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.flushSeq).toBe(2)
     expect(state.waitUntilPromises).toHaveLength(1)
+  })
+
+  it("caps synchronous grow when the current event is larger than max outstanding", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 32, meterKey: DEFAULT_METER_KEY, valueAfter: 32 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.flushReservation.mockImplementation(
+      async (input: { final: boolean; flushAmount: number; refillChunkAmount: number }) => ({
+        err: null,
+        val: {
+          grantedAmount: input.final ? 0 : input.refillChunkAmount,
+          flushedAmount: input.flushAmount,
+          refundedAmount: input.final ? input.refillChunkAmount : 0,
+        },
+      })
+    )
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_large_event",
+      allocationAmount: 0,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      targetReservationAmount: 0,
+      spendEwmaAmount: 0,
+      lastRateSampledAtMs: BASE_NOW,
+      maxEventCostAmount: 0,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({ event: { ...createApplyInput().event, properties: { amount: 32 } } })
+    )
+
+    expect(result).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        reservationId: "res_large_event",
+        flushAmount: 0,
+        refillChunkAmount: 30 * 100_000_000,
+        final: false,
+      })
+    )
+
+    await Promise.all(state.waitUntilPromises)
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        reservationId: "res_large_event",
+        flushAmount: 0,
+        refillChunkAmount: 0,
+        final: true,
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
   })
 
   it("deducts consumedAmount and triggers flush+refill when remaining falls below threshold", async () => {
@@ -1777,6 +2454,65 @@ describe("EntitlementWindowDO", () => {
     expect(after.pendingFlushSeq).toBeNull()
   })
 
+  it("adapts the refill target upward after a sudden fast burn", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 2, meterKey: DEFAULT_METER_KEY, valueAfter: 2 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_fast_burn",
+      allocationAmount: 2 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      targetReservationAmount: 2 * 100_000_000,
+      spendEwmaAmount: 0,
+      lastRateSampledAtMs: BASE_NOW - 1_000,
+      maxEventCostAmount: 0,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({ event: { ...createApplyInput().event, properties: { amount: 2 } } })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    expect(state.waitUntilPromises).toHaveLength(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "res_fast_burn",
+        flushSeq: 1,
+        flushAmount: 2 * 100_000_000,
+        refillChunkAmount: 30 * 100_000_000,
+        final: false,
+      })
+    )
+
+    await Promise.all(state.waitUntilPromises)
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.spendEwmaAmount).toBe(1200 * 100_000_000)
+    expect(row.targetReservationAmount).toBe(30 * 100_000_000)
+  })
+
   it("does not re-trigger refill when one is already in flight", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -1824,9 +2560,60 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.flushSeq).toBe(4)
   })
 
+  it("clamps negative corrections so consumed never falls below flushed", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: -5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 10,
+      updatedAt: BASE_NOW - 1_000,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_negative_correction",
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 10 * 100_000_000,
+      flushedAmount: 8 * 100_000_000,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      targetReservationAmount: 10 * 100_000_000,
+      spendEwmaAmount: 0,
+      lastRateSampledAtMs: BASE_NOW,
+      maxEventCostAmount: 0,
+      refillInFlight: false,
+      flushSeq: 2,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(
+      createApplyInput({ event: { ...createApplyInput().event, properties: { amount: -5 } } })
+    )
+
+    expect(result).toEqual({ allowed: true })
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.consumedAmount).toBe(8 * 100_000_000)
+    expect(row.consumedAmount).toBeGreaterThanOrEqual(row.flushedAmount ?? 0)
+    expect(state.waitUntilPromises).toHaveLength(0)
+
+    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(payload.amount).toBe(-5 * 100_000_000)
+  })
+
   // ---------------------------------------------------------------------
   // In-process flush+refill. These exercise the real requestFlushAndRefill
-  // path: the DO calls WalletService.flushReservation
+  // path: the DO calls wallet capture/extend/release commands
   // (mocked), then folds the returned allocation/flush deltas back into
   // SQLite. We assert both the happy path (grantedAmount extends runway,
   // flushSeq advances, pendingFlushSeq clears) and the failure modes
@@ -1834,7 +2621,7 @@ describe("EntitlementWindowDO", () => {
   // pendingFlushSeq so crash recovery / the next apply can retry).
   // ---------------------------------------------------------------------
 
-  it("folds flushReservation results into SQLite on a successful flush+refill", async () => {
+  it("folds wallet reservation command results into SQLite on a successful flush+refill", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1851,7 +2638,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 4 * 100_000_000,
         flushedAmount: 5 * 100_000_000,
         refundedAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -1892,7 +2678,8 @@ describe("EntitlementWindowDO", () => {
       reservationId: "res_abc",
       flushSeq: 8,
       flushAmount: 5 * 100_000_000,
-      refillChunkAmount: 4 * 100_000_000,
+      refillChunkAmount: 10 * 100_000_000,
+      effectiveAt: new Date(BASE_NOW),
       statementKey: `res_abc:${BASE_NOW + 60_000}`,
       final: false,
       metadata: {
@@ -1910,9 +2697,17 @@ describe("EntitlementWindowDO", () => {
     expect(after.flushSeq).toBe(8)
     expect(after.pendingFlushSeq).toBeNull()
     expect(after.refillInFlight).toBe(false)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement flush_refill",
+      expect.objectContaining({
+        reservation_refill_requested_amount: 10 * 100_000_000,
+        reservation_refill_granted_amount: 4 * 100_000_000,
+        reservation_refill_partial: true,
+      })
+    )
   })
 
-  it("clears refillInFlight but preserves pendingFlushSeq when flushReservation returns an error", async () => {
+  it("clears refillInFlight but preserves pendingFlushSeq when wallet commands return an error", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1960,10 +2755,11 @@ describe("EntitlementWindowDO", () => {
     // pendingFlushSeq (set to 8 by apply()) is preserved so crash recovery
     // re-issues the same seq; refillInFlight clears so apply() can retry.
     expect(after.pendingFlushSeq).toBe(8)
+    expect(after.pendingFlushAmount).toBe(5 * 100_000_000)
     expect(after.refillInFlight).toBe(false)
   })
 
-  it("clears refillInFlight when flushReservation throws unexpectedly", async () => {
+  it("clears refillInFlight when wallet commands throw unexpectedly", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2004,6 +2800,7 @@ describe("EntitlementWindowDO", () => {
     expect(after.refillInFlight).toBe(false)
     // apply() already set pendingFlushSeq to 1; the thrown flush leaves it.
     expect(after.pendingFlushSeq).toBe(1)
+    expect(after.pendingFlushAmount).toBe(5 * 100_000_000)
     expect(after.flushSeq).toBe(0)
   })
 
@@ -2018,7 +2815,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 2 * 100_000_000,
         flushedAmount: 100_000_000,
         refundedAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -2044,6 +2840,8 @@ describe("EntitlementWindowDO", () => {
       refillInFlight: false,
       flushSeq: 4,
       pendingFlushSeq: 5,
+      pendingFlushAmount: 100_000_000,
+      pendingRefillAmount: 2 * 100_000_000,
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
@@ -2054,8 +2852,8 @@ describe("EntitlementWindowDO", () => {
     await Promise.all(state.waitUntilPromises)
 
     expect(testState.flushReservation).toHaveBeenCalledTimes(1)
-    // Retry replays the SAME seq (5), not a new one. flushAmount is
-    // re-derived from consumed - flushed = $1.
+    // Retry replays the SAME seq (5), not a new one, with the persisted
+    // pending flush amount.
     expect(testState.flushReservation).toHaveBeenCalledWith(
       expect.objectContaining({
         flushSeq: 5,
@@ -2068,10 +2866,92 @@ describe("EntitlementWindowDO", () => {
     const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
     expect(after.flushSeq).toBe(5)
     expect(after.pendingFlushSeq).toBeNull()
+    expect(after.pendingFlushAmount).toBeNull()
+    expect(after.pendingRefillAmount).toBe(0)
     expect(after.allocationAmount).toBe(5 * 100_000_000)
     expect(after.flushedAmount).toBe(100_000_000)
     // Lazy Neon connection was opened once for the flush call.
     expect(durableObject).toBeDefined()
+  })
+
+  it("reuses persisted pending flush and refill amounts when a new event grows the same pending seq", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.flushReservation.mockImplementation(
+      async (input: { flushAmount: number; refillChunkAmount: number }) => ({
+        err: null,
+        val: {
+          grantedAmount: input.refillChunkAmount,
+          flushedAmount: input.flushAmount,
+          refundedAmount: 0,
+        },
+      })
+    )
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_pending_refill",
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 5 * 100_000_000,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      targetReservationAmount: 10 * 100_000_000,
+      spendEwmaAmount: 123,
+      lastRateSampledAtMs: BASE_NOW - 60_000,
+      maxEventCostAmount: 0,
+      pendingFlushAmount: 5 * 100_000_000,
+      pendingRefillAmount: 2 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 7,
+      pendingFlushSeq: 8,
+      pendingFlushFinal: false,
+      recoveryRequired: true,
+    })
+
+    const result = await durableObject.apply(
+      createApplyInput({ event: { ...createApplyInput().event, properties: { amount: 1 } } })
+    )
+    await Promise.all(state.waitUntilPromises)
+
+    expect(result).toEqual({ allowed: true })
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "res_pending_refill",
+        flushSeq: 8,
+        flushAmount: 5 * 100_000_000,
+        refillChunkAmount: 2 * 100_000_000,
+        final: false,
+      })
+    )
+
+    const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(after.allocationAmount).toBe(12 * 100_000_000)
+    expect(after.consumedAmount).toBe(6 * 100_000_000)
+    expect(after.flushedAmount).toBe(5 * 100_000_000)
+    expect(after.flushSeq).toBe(8)
+    expect(after.pendingFlushSeq).toBeNull()
+    expect(after.pendingFlushAmount).toBeNull()
+    expect(after.pendingRefillAmount).toBe(0)
+    expect(after.spendEwmaAmount).toBe(123)
   })
 
   it("replays wallet flush with the same seq after eviction loses the local fold", async () => {
@@ -2090,7 +2970,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 4 * 100_000_000,
         flushedAmount: 5 * 100_000_000,
         refundedAmount: 0,
-        drainLegs: [],
       },
     })
 
@@ -2130,6 +3009,8 @@ describe("EntitlementWindowDO", () => {
       flushedAmount: 0,
       flushSeq: 7,
       pendingFlushSeq: 8,
+      pendingFlushAmount: 5 * 100_000_000,
+      pendingRefillAmount: 10 * 100_000_000,
       refillInFlight: false,
     })
 
@@ -2144,7 +3025,7 @@ describe("EntitlementWindowDO", () => {
         reservationId: "res_abc",
         flushSeq: 8,
         flushAmount: 5 * 100_000_000,
-        refillChunkAmount: 4 * 100_000_000,
+        refillChunkAmount: 10 * 100_000_000,
       })
     )
     expect(testState.flushReservation).toHaveBeenNthCalledWith(
@@ -2153,7 +3034,7 @@ describe("EntitlementWindowDO", () => {
         reservationId: "res_abc",
         flushSeq: 8,
         flushAmount: 5 * 100_000_000,
-        refillChunkAmount: 4 * 100_000_000,
+        refillChunkAmount: 10 * 100_000_000,
       })
     )
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
@@ -2162,6 +3043,8 @@ describe("EntitlementWindowDO", () => {
       flushedAmount: 5 * 100_000_000,
       flushSeq: 8,
       pendingFlushSeq: null,
+      pendingFlushAmount: null,
+      pendingRefillAmount: 0,
       refillInFlight: false,
     })
   })
@@ -2195,6 +3078,7 @@ describe("EntitlementWindowDO", () => {
       refillInFlight: true,
       flushSeq: 3,
       pendingFlushSeq: 4,
+      pendingFlushAmount: 2 * 100_000_000,
       pendingFlushFinal: true,
       recoveryRequired: false,
     })
@@ -2219,6 +3103,7 @@ describe("EntitlementWindowDO", () => {
       flushedAmount: 2 * 100_000_000,
       flushSeq: 4,
       pendingFlushSeq: null,
+      pendingFlushAmount: null,
       pendingFlushFinal: false,
       refillInFlight: false,
       recoveryRequired: false,
@@ -2262,7 +3147,7 @@ describe("EntitlementWindowDO", () => {
   })
 
   it("persists projectId and customerId into meter_window on first apply", async () => {
-    // Identity fields are what flushReservation needs to call the ledger
+    // Identity fields are what wallet commands need to call the ledger
     // without re-threading apply's input — guard that ensureMeterWindow
     // actually seeds them on the first insert.
     const EntitlementWindowDO = await loadEntitlementWindowDO()
@@ -2318,7 +3203,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 2 * 100_000_000,
         refundedAmount: 3 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -2370,7 +3254,7 @@ describe("EntitlementWindowDO", () => {
     expect(state.deletedAll).toBe(false)
   })
 
-  it("alarm runs a final flush when the DO has been inactive for >12h", async () => {
+  it("alarm runs a final flush when the DO has been inactive for more than 1h", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2382,20 +3266,19 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 0,
         refundedAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
     const now = Date.now()
-    // Inactivity > 12h; period hasn't ended yet.
+    // Inactivity > 1h; period hasn't ended yet.
     db.meterWindowRows.set(DEFAULT_METER_KEY, {
       meterKey: DEFAULT_METER_KEY,
       currency: "USD",
       priceConfig: DEFAULT_PRICE_CONFIG,
-      periodEndAt: now + 60 * 60 * 1000,
+      periodEndAt: now + 2 * 60 * 60 * 1000,
       usage: 0,
       updatedAt: null,
-      createdAt: now - 24 * 60 * 60 * 1000,
+      createdAt: now - 2 * 60 * 60 * 1000,
       projectId: "proj_123",
       customerId: "cus_123",
       reservationId: "res_abc",
@@ -2407,7 +3290,7 @@ describe("EntitlementWindowDO", () => {
       refillInFlight: false,
       flushSeq: 0,
       pendingFlushSeq: null,
-      lastEventAt: now - 13 * 60 * 60 * 1000,
+      lastEventAt: now - 61 * 60 * 1000,
       deletionRequested: false,
       recoveryRequired: false,
     })
@@ -2424,7 +3307,57 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
   })
 
-  it("alarm keeps a live reservation open before the 12h inactivity threshold", async () => {
+  it("alarm runs a final flush after 60s of inactivity in development", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 0,
+        flushedAmount: 0,
+        refundedAmount: 5 * 100_000_000,
+      },
+    })
+
+    const now = Date.now()
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: now + 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: now - 5 * 60_000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_dev",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      lastEventAt: now - 60_000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv({ NODE_ENV: "development" }))
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({ final: true, flushAmount: 0, reservationId: "res_dev" })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
+  })
+
+  it("alarm keeps a live reservation open before the 1h inactivity threshold", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2451,7 +3384,7 @@ describe("EntitlementWindowDO", () => {
       refillInFlight: false,
       flushSeq: 0,
       pendingFlushSeq: null,
-      lastEventAt: now - 11 * 60 * 60 * 1000,
+      lastEventAt: now - 59 * 60 * 1000,
       deletionRequested: false,
       recoveryRequired: false,
     })
@@ -2463,6 +3396,99 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBe("res_abc")
     expect(state.deletedAlarm).toBe(false)
     expect(state.deletedAll).toBe(false)
+  })
+
+  it("does not re-arm every second when a live reservation is already fully flushed", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 2 * 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW - 24 * 60 * 60 * 1000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_fully_flushed",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 2 * 100_000_000,
+      flushedAmount: 2 * 100_000_000,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 2,
+      pendingFlushSeq: null,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: BASE_NOW - 10 * 60_000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    expect(state.alarmAt).toBe(BASE_NOW + 60 * 60 * 1000)
+  })
+
+  it("alarm runs a final flush after 1h of inactivity in deployed environments", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 0,
+        flushedAmount: 0,
+        refundedAmount: 5 * 100_000_000,
+      },
+    })
+
+    const now = Date.now()
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: now + 2 * 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: now - 2 * 60 * 60 * 1000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_prod_inactive",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      lastEventAt: now - 60 * 60 * 1000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).toHaveBeenCalledTimes(1)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        final: true,
+        flushAmount: 0,
+        reservationId: "res_prod_inactive",
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBeNull()
   })
 
   it("alarm captures reservation then deletes storage when deletion cleanup completes", async () => {
@@ -2477,7 +3503,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 1 * 100_000_000,
         refundedAmount: 4 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -2529,7 +3554,6 @@ describe("EntitlementWindowDO", () => {
         grantedAmount: 0,
         flushedAmount: 1 * 100_000_000,
         refundedAmount: 4 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -2733,6 +3757,7 @@ describe("EntitlementWindowDO", () => {
     // Reservation stays open for an operator to inspect/replay the same seq.
     expect(row.reservationId).toBe("res_abc")
     expect(row.pendingFlushSeq).toBe(4)
+    expect(row.pendingFlushAmount).toBe(2 * 100_000_000)
     expect(row.flushSeq).toBe(3)
     expect(row.flushedAmount).toBe(0)
     expect(row.refillInFlight).toBe(false)
@@ -2870,7 +3895,7 @@ describe("EntitlementWindowDO", () => {
     expect(payload.value_after).toBe(31)
     expect(payload.delta).toBe(1)
 
-    // LocalReservation deducts the full €1.031 from the allocation,
+    // The wallet policy deducts the full €1.031 from the allocation,
     // proving the wallet path also sees the flat fee, not just the unit rate.
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
     expect(row.consumedAmount).toBe(103_100_000)
@@ -3019,7 +4044,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_lazy",
         allocationAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -3081,7 +4105,6 @@ describe("EntitlementWindowDO", () => {
       val: {
         reservationId: "res_lazy",
         allocationAmount: 5 * 100_000_000,
-        drainLegs: [],
       },
     })
 
@@ -3098,7 +4121,7 @@ describe("EntitlementWindowDO", () => {
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
 
     const call = testState.createReservation.mock.calls[0]?.[0] as { requestedAmount: number }
-    expect(call.requestedAmount).toBe(103_100_000_000)
+    expect(call.requestedAmount).toBe(103_100_000)
 
     expect(db.outboxRows).toHaveLength(1)
     const payload = JSON.parse(db.outboxRows[0]!.payload)
@@ -3187,23 +4210,109 @@ async function loadEntitlementWindowDO() {
 
   vi.doMock("@unprice/services/wallet", () => ({
     WalletService: class {
-      public flushReservation = testState.flushReservation
       public createReservation = testState.createReservation
-    },
-  }))
 
-  // sizeReservation lives in its own module specifically so the DO can
-  // import it without pulling the use-cases barrel and its drizzle
-  // relations chain. Mock with a tiny pure stub.
-  vi.doMock("@unprice/services/wallet/reservation-sizing", () => ({
-    sizeReservation: (price: number) => ({
-      requestedAmount: Math.max(price * 1000, 100_000_000),
-      refillThresholdBps: 2000,
-      refillChunkAmount: Math.max(1, Math.floor(Math.max(price * 1000, 100_000_000) / 4)),
-    }),
-    MINIMUM_FLOOR_AMOUNT: 100_000_000,
-    CEILING_AMOUNT: 1_000_000_000,
-    DEFAULT_REFILL_THRESHOLD_BPS: 2000,
+      private lastCapture: {
+        amount: number
+        flushSeq: number
+        statementKey: string
+        metadata?: Record<string, unknown>
+        sourceId?: string
+      } | null = null
+
+      public captureReservationUsage = vi.fn(
+        async (input: {
+          amount: number
+          flushSeq: number
+          statementKey: string
+          metadata?: Record<string, unknown>
+          sourceId?: string
+        }) => {
+          this.lastCapture = {
+            amount: input.amount,
+            flushSeq: input.flushSeq,
+            statementKey: input.statementKey,
+            metadata: input.metadata,
+            sourceId: input.sourceId,
+          }
+          return { err: null, val: { capturedAmount: input.amount } }
+        }
+      )
+
+      public extendReservation = vi.fn(
+        async (input: {
+          projectId: string
+          customerId: string
+          currency: string
+          reservationId: string
+          flushSeq: number
+          requestedAmount: number
+          statementKey: string
+          effectiveAt?: Date
+          metadata?: Record<string, unknown>
+          sourceId?: string
+        }) => {
+          const capture = this.lastCapture
+          const result = await testState.flushReservation({
+            projectId: input.projectId,
+            customerId: input.customerId,
+            currency: input.currency,
+            reservationId: input.reservationId,
+            flushSeq: input.flushSeq,
+            flushAmount: capture?.amount ?? 0,
+            refillChunkAmount: input.requestedAmount,
+            effectiveAt: input.effectiveAt,
+            statementKey: input.statementKey,
+            final: false,
+            metadata: input.metadata,
+            sourceId: input.sourceId,
+          })
+          if (result.err) return result
+          return {
+            err: null,
+            val: {
+              grantedAmount: result.val.grantedAmount,
+            },
+          }
+        }
+      )
+
+      public releaseReservation = vi.fn(
+        async (input: {
+          projectId: string
+          customerId: string
+          currency: string
+          reservationId: string
+          closeReason: string
+          metadata?: Record<string, unknown>
+          sourceId?: string
+        }) => {
+          const capture = this.lastCapture
+          const result = await testState.flushReservation({
+            projectId: input.projectId,
+            customerId: input.customerId,
+            currency: input.currency,
+            reservationId: input.reservationId,
+            flushSeq: capture?.flushSeq ?? 0,
+            flushAmount: capture?.amount ?? 0,
+            refillChunkAmount: 0,
+            statementKey: capture?.statementKey ?? "",
+            final: true,
+            metadata: input.metadata,
+            sourceId: input.sourceId,
+          })
+          if (result.err) return result
+          return {
+            err: null,
+            val: {
+              releasedAmount: result.val.refundedAmount,
+              restoredGrantedAmount: 0,
+              refundedPurchasedAmount: result.val.refundedAmount,
+            },
+          }
+        }
+      )
+    },
   }))
 
   vi.doMock("drizzle-orm", () => ({
@@ -3215,6 +4324,7 @@ async function loadEntitlementWindowDO() {
     isNull: (): DrizzleCondition => ({ kind: "isNull" }),
     isNotNull: (): DrizzleCondition => ({ kind: "isNotNull" }),
     lt: (_col: unknown, value: unknown): DrizzleCondition => ({ kind: "lt", value }),
+    lte: (_col: unknown, value: unknown): DrizzleCondition => ({ kind: "lte", value }),
     sql: () => ({ kind: "sql" }),
   }))
 
@@ -3585,6 +4695,13 @@ function createFakeDbState(): FakeDbState {
     grantRows: new Map(),
     grantWindowRows: new Map(),
     deleteInArrayBatchSizes: [],
+    deleteIdempotencyCutoffs: [],
+    deleteOutboxRangeMaxIds: [],
+    storageReadCounts: {
+      entitlementConfig: 0,
+      grants: 0,
+      grantWindows: 0,
+    },
   }
 }
 
@@ -3604,6 +4721,27 @@ function buildFakeDrizzle(state: FakeDbState) {
         return row.id === Number(condition.value)
       case "inArray":
         return (condition.values ?? []).includes(row.id)
+      case "lte":
+        return row.id <= Number(condition.value)
+      default:
+        return true
+    }
+  }
+
+  const matchGrantWindowCondition = (
+    row: GrantWindowRow,
+    condition?: DrizzleCondition
+  ): boolean => {
+    if (!condition) return true
+    switch (condition.kind) {
+      case "and":
+        return (condition.conditions ?? []).every((nested) =>
+          matchGrantWindowCondition(row, nested)
+        )
+      case "eq":
+        return row.bucketKey === String(condition.value)
+      case "inArray":
+        return (condition.values ?? []).map(String).includes(row.bucketKey)
       default:
         return true
     }
@@ -3669,8 +4807,18 @@ function buildFakeDrizzle(state: FakeDbState) {
               denyMessage: row.denyMessage,
             }
           }
-          if (keys.includes("count")) return { count: state.outboxRows.length }
+          if (keys.includes("count")) {
+            if (cond?.kind === "lt") {
+              return {
+                count: [...state.idempotencyRows.values()].filter(
+                  (row) => row.createdAt < Number(cond?.value)
+                ).length,
+              }
+            }
+            return { count: state.outboxRows.length }
+          }
           if (keys.every((k) => ENTITLEMENT_CONFIG_KEYS.has(k))) {
+            state.storageReadCounts.entitlementConfig++
             const source =
               cond?.value !== undefined
                 ? state.entitlementConfigRows.get(String(cond.value))
@@ -3723,6 +4871,13 @@ function buildFakeDrizzle(state: FakeDbState) {
               .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
               .map((row) => ({ id: row.id, payload: row.payload }))
           }
+          if (keys.length === 1 && keys.includes("id")) {
+            return [...state.outboxRows]
+              .filter((row) => matchOutboxCondition(row, cond))
+              .sort((a, b) => a.id - b.id)
+              .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
+              .map((row) => ({ id: row.id }))
+          }
           if (keys.length === 1 && keys.includes("eventId")) {
             return [...Array.from(state.idempotencyRows.entries())]
               .filter(([, r]) => r.createdAt < Number(cond?.value))
@@ -3730,15 +4885,18 @@ function buildFakeDrizzle(state: FakeDbState) {
               .map(([eventId]) => ({ eventId }))
           }
           if (keys.every((k) => GRANT_WINDOW_KEYS.has(k))) {
-            return [...state.grantWindowRows.values()]
+            const rows = [...state.grantWindowRows.values()]
+              .filter((row) => matchGrantWindowCondition(row, cond))
               .sort((a, b) => a.grantId.localeCompare(b.grantId))
-              .map((source) => {
-                const row: Record<string, unknown> = {}
-                for (const key of keys) row[key] = (source as Record<string, unknown>)[key]
-                return row
-              })
+            state.storageReadCounts.grantWindows += rows.length
+            return rows.map((source) => {
+              const row: Record<string, unknown> = {}
+              for (const key of keys) row[key] = (source as Record<string, unknown>)[key]
+              return row
+            })
           }
           if (keys.every((k) => GRANT_KEYS.has(k))) {
+            state.storageReadCounts.grants++
             return [...state.grantRows.values()]
               .sort((a, b) => a.grantId.localeCompare(b.grantId))
               .map((source) => {
@@ -3864,6 +5022,12 @@ function buildFakeDrizzle(state: FakeDbState) {
                   flushedAmount: existing?.flushedAmount ?? 0,
                   refillThresholdBps: existing?.refillThresholdBps ?? 2000,
                   refillChunkAmount: existing?.refillChunkAmount ?? 0,
+                  targetReservationAmount: existing?.targetReservationAmount ?? 0,
+                  spendEwmaAmount: existing?.spendEwmaAmount ?? 0,
+                  lastRateSampledAtMs: existing?.lastRateSampledAtMs ?? null,
+                  maxEventCostAmount: existing?.maxEventCostAmount ?? 0,
+                  pendingRefillAmount: existing?.pendingRefillAmount ?? 0,
+                  pendingFlushAmount: existing?.pendingFlushAmount ?? null,
                   refillInFlight: existing?.refillInFlight ?? false,
                   flushSeq: existing?.flushSeq ?? 0,
                   pendingFlushSeq: existing?.pendingFlushSeq ?? null,
@@ -3935,6 +5099,23 @@ function buildFakeDrizzle(state: FakeDbState) {
         where(cond: DrizzleCondition) {
           return {
             run() {
+              if (cond.kind === "lte") {
+                const maxId = Number(cond.value)
+                state.deleteOutboxRangeMaxIds.push(maxId)
+                const remaining = state.outboxRows.filter((row) => row.id > maxId)
+                state.outboxRows.splice(0, state.outboxRows.length, ...remaining)
+                return
+              }
+
+              if (cond.kind === "lt") {
+                const cutoff = Number(cond.value)
+                state.deleteIdempotencyCutoffs.push(cutoff)
+                for (const [eventId, row] of state.idempotencyRows.entries()) {
+                  if (row.createdAt < cutoff) state.idempotencyRows.delete(eventId)
+                }
+                return
+              }
+
               if (cond.kind !== "inArray") throw new Error("Unsupported delete condition")
               const deleteValueCount = cond.values?.length ?? 0
               state.deleteInArrayBatchSizes.push(deleteValueCount)
@@ -3961,16 +5142,29 @@ function buildFakeDrizzle(state: FakeDbState) {
   return db
 }
 
-function createEnv() {
+function createEnv(overrides: Record<string, unknown> = {}) {
   return {
     APP_ENV: "test",
+    NODE_ENV: "test",
     DATABASE_URL: "postgres://user:pass@localhost:5432/unprice",
     DATABASE_READ1_URL: "postgres://user:pass@localhost:5432/unprice",
     DATABASE_READ2_URL: "postgres://user:pass@localhost:5432/unprice",
     DRIZZLE_LOG: false,
     TINYBIRD_TOKEN: "token",
     TINYBIRD_URL: "https://example.com",
+    ...overrides,
   }
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve
+    reject = innerReject
+  })
+
+  return { promise, reject, resolve }
 }
 
 function createGrantSnapshot(overrides: Record<string, unknown> = {}) {

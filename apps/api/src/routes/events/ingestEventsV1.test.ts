@@ -20,7 +20,7 @@ vi.mock("~/auth/key", () => ({
   resolveContextProjectId: authMocks.resolveContextProjectId,
 }))
 
-import type { AppLogger } from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
 import type { ExecutionContext } from "hono"
 import {
   generateEventId,
@@ -80,7 +80,7 @@ describe("ingestEventsV1 helpers", () => {
     const queue: Pick<Queue<IngestionQueueMessage>, "send"> = {
       send: vi.fn().mockRejectedValue(new Error("queue down")),
     }
-    const logger: Pick<AppLogger, "error" | "warn"> = {
+    const logger: Pick<Logger, "error" | "warn"> = {
       error: vi.fn(),
       warn: vi.fn(),
     }
@@ -391,7 +391,7 @@ function createTestApp() {
   app.use("*", async (c, next) => {
     c.set("requestId", "req_123")
     c.set("requestStartedAt", Date.now())
-    c.set("logger", logger as AppLogger)
+    c.set("logger", logger as Logger)
     c.set("services", {
       logger,
     })
@@ -433,7 +433,7 @@ function buildRequest(body: Record<string, unknown> = requestBody) {
   })
 }
 
-function createRouteLogger(): Pick<AppLogger, "error" | "warn" | "set"> {
+function createRouteLogger(): Pick<Logger, "error" | "warn" | "set"> {
   return {
     error: vi.fn(),
     warn: vi.fn(),

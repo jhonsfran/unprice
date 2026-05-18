@@ -246,8 +246,13 @@ async function subscriptionCheck(): Promise<void> {
 
   if (CREDIT_LINE_AMOUNT !== null) {
     assert(
-      result.activePhase.creditLineAmount === CREDIT_LINE_AMOUNT,
-      `active phase creditLineAmount should be ${CREDIT_LINE_AMOUNT}, got ${result.activePhase.creditLineAmount}`
+      typeof result.activePhase.creditLineAmount === "number",
+      `active phase creditLineAmount should be a ledger amount, got ${result.activePhase.creditLineAmount}`
+    )
+
+    assert(
+      CREDIT_LINE_AMOUNT === 0 || result.activePhase.creditLineAmount > CREDIT_LINE_AMOUNT,
+      `active phase creditLineAmount should be backend-scaled, not the raw currency minor-unit input ${CREDIT_LINE_AMOUNT}`
     )
   }
 
@@ -298,7 +303,9 @@ async function main(): Promise<void> {
   if (BILLING_INTERVAL) console.info(`  billing interval: ${BILLING_INTERVAL}`)
   if (CURRENCY) console.info(`  currency: ${CURRENCY}`)
   console.info(`  expected credit line policy: ${EXPECTED_CREDIT_LINE_POLICY}`)
-  if (CREDIT_LINE_AMOUNT !== null) console.info(`  credit line amount: ${CREDIT_LINE_AMOUNT}`)
+  if (CREDIT_LINE_AMOUNT !== null) {
+    console.info(`  credit line amount: ${CREDIT_LINE_AMOUNT} currency minor units`)
+  }
   console.info("")
 
   await step("plan preflight: expected published plan exists", planPreflight)

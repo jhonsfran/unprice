@@ -12,8 +12,11 @@
     "prod": {
       "workers_dev": false,
       "observability": {
-        "enabled": true,
-        "head_sampling_rate": 1 // 100% of requests
+        "logs": {
+          "enabled": false,
+          "invocation_logs": true,
+          "persist": false
+        }
       },
       "route": {
         "pattern": "api.unprice.dev",
@@ -43,14 +46,14 @@
         "consumers": [
           {
             "queue": "unprice-api-ingestion-shard-0-prod",
-            "max_batch_size": 50,
+            "max_batch_size": 100,
             "max_batch_timeout": 5,
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
           },
           {
             "queue": "unprice-api-ingestion-shard-1-prod",
-            "max_batch_size": 50,
+            "max_batch_size": 100,
             "max_batch_timeout": 5,
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
@@ -123,8 +126,14 @@
     "preview": {
       "workers_dev": false,
       "observability": {
-        "enabled": true,
-        "head_sampling_rate": 1 // 100% of requests
+        "logs": {
+          "enabled": false,
+          "invocation_logs": true,
+          "persist": false
+        },
+        "traces": {
+          "enabled": false
+        }
       },
       "route": {
         "pattern": "preview-api.unprice.dev",
@@ -154,14 +163,14 @@
         "consumers": [
           {
             "queue": "unprice-api-ingestion-shard-0-preview",
-            "max_batch_size": 50,
+            "max_batch_size": 100,
             "max_batch_timeout": 5,
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
           },
           {
             "queue": "unprice-api-ingestion-shard-1-preview",
-            "max_batch_size": 50,
+            "max_batch_size": 100,
             "max_batch_timeout": 5,
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
@@ -259,14 +268,14 @@
         "consumers": [
           {
             "queue": "unprice-api-ingestion-shard-0-dev",
-            "max_batch_size": 50,
+            "max_batch_size": 100,
             "max_batch_timeout": 1, // to avoid wait in dev
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
           },
           {
             "queue": "unprice-api-ingestion-shard-1-dev",
-            "max_batch_size": 50,
+            "max_batch_size": 100,
             "max_batch_timeout": 1, // to avoid wait in dev
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-dev"

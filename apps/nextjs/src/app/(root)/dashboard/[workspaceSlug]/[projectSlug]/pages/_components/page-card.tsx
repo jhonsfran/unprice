@@ -1,6 +1,7 @@
 import { MoreHorizontal, PlusIcon, Settings } from "lucide-react"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
+import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@unprice/ui/card"
 import {
@@ -24,6 +25,7 @@ import { cn } from "@unprice/ui/utils"
 import { SITES_BASE_DOMAIN } from "@unprice/config"
 import { PropagationStopper } from "~/components/prevent-propagation"
 import { SuperLink } from "~/components/super-link"
+import { getStatusTone, statusToneClasses } from "~/lib/status-tones"
 import { PageForm } from "./page-form"
 
 export function PageCard(props: {
@@ -33,6 +35,7 @@ export function PageCard(props: {
 }) {
   const { page } = props
   const domain = page.customDomain ? page.customDomain : `${page.subdomain}.${SITES_BASE_DOMAIN}`
+  const publishedToneClass = statusToneClasses[getStatusTone("published")]
 
   return (
     <SuperLink href={`/${props.workspaceSlug}/${props.projectSlug}/pages/${page.id}`}>
@@ -43,10 +46,10 @@ export function PageCard(props: {
               <div className="flex items-center space-x-3">
                 <span>{page.name}</span>
                 {page.published && (
-                  <div className="inline-flex items-center font-semibold text-info text-xs">
-                    <span className="flex h-2 w-2 rounded-full bg-info" />
-                    <span className="ml-1">{"published"}</span>
-                  </div>
+                  <Badge variant={publishedToneClass.badgeVariant} className="gap-1.5">
+                    <span className={cn("size-1.5 rounded-full", publishedToneClass.dot)} />
+                    <span>{"published"}</span>
+                  </Badge>
                 )}
               </div>
             </CardTitle>

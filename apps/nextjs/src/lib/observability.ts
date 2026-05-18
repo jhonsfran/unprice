@@ -1,18 +1,31 @@
-import type { LogFields } from "@unprice/logs"
-import {
-  type AppLogger,
-  type WideEventLogger,
-  createAppLogger,
-  createDrain,
-} from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
+import { createLogger, createUnpriceDrain, sharedSamplingConfig } from "@unprice/observability"
+import { waitUntil } from "@vercel/functions"
+import type { DrainContext, RequestLogger } from "evlog"
 import { createEvlog } from "evlog/next"
 import { env } from "~/env"
 
-const drain = createDrain({
+// ============================================
+// Single drain for the Next.js runtime
+// ============================================
+
+const axiomDrain = createUnpriceDrain({
   environment: env.APP_ENV,
   token: env.AXIOM_API_TOKEN,
   dataset: env.AXIOM_DATASET,
 })
+
+// Wrap the drain to schedule flush via waitUntil after each event
+const drain =
+  axiomDrain &&
+  ((ctx: DrainContext) => {
+    axiomDrain(ctx)
+    waitUntil(axiomDrain.flush())
+  })
+
+// ============================================
+// evlog/next integration
+// ============================================
 
 export const { withEvlog, useLogger, log, createError, createEvlogError } = createEvlog({
   service: "nextjs",
@@ -21,30 +34,23 @@ export const { withEvlog, useLogger, log, createError, createEvlogError } = crea
     region: env.VERCEL_REGION,
     version: env.VERCEL_DEPLOYMENT_ID ?? "unknown",
   },
-  drain,
-  // pretty: false,
-  sampling: {
-    rates: {
-      info: env.APP_ENV === "production" ? 10 : 100,
-      warn: 100,
-      error: 100,
-      debug: env.APP_ENV === "production" ? 0 : 100,
-    },
-    keep: [{ status: 400 }, { duration: 1000 }],
-  },
+  ...(drain ? { drain } : {}),
+  sampling: sharedSamplingConfig(env.APP_ENV),
 })
 
-export function getRequestLoggers(requestId?: string): {
-  requestLogger: WideEventLogger
-  logger: AppLogger
-} {
-  const requestLogger = useLogger<LogFields>()
+// ============================================
+// Helper to get typed logger from evlog/next context
+// ============================================
 
+export function getRequestLoggers(_requestId?: string): {
+  requestLogger: RequestLogger<Record<string, unknown>>
+  logger: Logger
+} {
+  const requestLogger = useLogger<Record<string, unknown>>()
   return {
     requestLogger,
-    logger: createAppLogger(requestLogger, {
-      flush: drain?.flush,
-      requestId,
+    logger: createLogger(requestLogger, {
+      flush: axiomDrain?.flush,
     }),
   }
 }

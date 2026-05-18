@@ -1,6 +1,7 @@
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { signUp } from "./sign-up"
@@ -99,7 +100,8 @@ describe("customer signUp payment provider guard", () => {
     expect(result.err?.message).toMatch(/Stripe is disabled/)
   })
 
-  it("allows sandbox signup when sandbox is enabled without keys", async () => {
+  it("allows sandbox signup and stores capped credit line at ledger scale", async () => {
+    const expectedCreditLineAmount = toLedgerMinor(fromCurrencyMinor(1234, "USD"))
     let insertCount = 0
     const tx = {
       insert: vi.fn(() => {
@@ -177,6 +179,9 @@ describe("customer signUp payment provider guard", () => {
           planVersionId: "version_123",
           successUrl: "https://example.com/success/{CUSTOMER_ID}",
           cancelUrl: "https://example.com/cancel",
+          defaultCurrency: "USD",
+          creditLinePolicy: "capped",
+          creditLineAmount: 1234,
         } as never,
       }
     )
@@ -188,6 +193,8 @@ describe("customer signUp payment provider guard", () => {
       expect.objectContaining({
         input: expect.objectContaining({
           paymentProvider: "sandbox",
+          creditLinePolicy: "capped",
+          creditLineAmount: expectedCreditLineAmount,
         }),
       })
     )

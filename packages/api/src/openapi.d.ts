@@ -874,8 +874,8 @@ export interface operations {
            */
           creditLinePolicy: "capped" | "uncapped"
           /**
-           * @description Optional capped usage credit amount as a ledger-scale minor-unit integer. Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.
-           * @example 10000000000
+           * @description Optional capped usage credit amount in the currency's smallest unit (for example, cents for USD/EUR). Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.
+           * @example 10000
            */
           creditLineAmount?: number | null
           /**

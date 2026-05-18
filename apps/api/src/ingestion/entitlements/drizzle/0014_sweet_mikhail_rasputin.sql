@@ -1,0 +1,1 @@
+CREATE INDEX `idx_idempotency_keys_created_at` ON `idempotency_keys` (`created_at`);

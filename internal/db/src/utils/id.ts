@@ -17,7 +17,6 @@ export const prefixes = {
   apikey_key: "unprice_live",
   page: "page",
   customer: "cus",
-  customer_credit: "cc",
   customer_session: "cs",
   customer_provider: "cp",
   customer_entitlement: "ce",
@@ -34,8 +33,6 @@ export const prefixes = {
   isolate: "iso",
   session: "sess",
   subscription_lock: "slock",
-  invoice_item: "ii",
-  invoice_credit_application: "ica",
   entitlement: "ent",
   grant: "grnt",
   ledger: "ldg",
@@ -43,6 +40,7 @@ export const prefixes = {
   ledger_settlement: "lset",
   ledger_settlement_line: "lsl",
   entitlement_reservation: "eres",
+  entitlement_reservation_funding_leg: "erfl",
   wallet_topup: "wtup",
   wallet_credit: "wcr",
 } as const
@@ -62,6 +60,9 @@ const BIGINT_32 = BigInt(32)
 const BIGINT_24 = BigInt(24)
 const BIGINT_16 = BigInt(16)
 const BIGINT_8 = BigInt(8)
+const BYTE_MASK = 0xff
+
+let randomCounter = 0
 
 /**
  * Generates a unique, time-sortable ID with prefix
@@ -118,7 +119,21 @@ export function newId<TPrefix extends keyof typeof prefixes>(
 }
 
 export function randomId(): string {
-  return b58.encode(new Uint8Array(16)).padStart(22, ALPHABET[0])
+  const buf = new Uint8Array(16)
+
+  let timestamp = Date.now()
+  for (let offset = 5; offset >= 0; offset--) {
+    buf[offset] = timestamp & BYTE_MASK
+    timestamp = Math.floor(timestamp / 256)
+  }
+
+  randomCounter = (randomCounter + 1) & 0xffff
+  buf[6] = (randomCounter >> 8) & BYTE_MASK
+  buf[7] = randomCounter & BYTE_MASK
+
+  crypto.getRandomValues(buf.subarray(8))
+
+  return b58.encode(buf).padStart(22, ALPHABET[0])
 }
 
 /**

@@ -4,7 +4,7 @@ import type {
   OverageStrategy,
   ResetConfig,
 } from "@unprice/db/validators"
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
 export const meterFactsOutboxTable = sqliteTable("meter_facts_outbox", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -12,13 +12,19 @@ export const meterFactsOutboxTable = sqliteTable("meter_facts_outbox", {
   currency: text("currency").notNull(),
 })
 
-export const idempotencyKeysTable = sqliteTable("idempotency_keys", {
-  eventId: text("event_id").primaryKey(),
-  createdAt: integer("created_at").notNull(),
-  allowed: integer("allowed", { mode: "boolean" }).notNull(),
-  deniedReason: text("denied_reason"),
-  denyMessage: text("deny_message"),
-})
+export const idempotencyKeysTable = sqliteTable(
+  "idempotency_keys",
+  {
+    eventId: text("event_id").primaryKey(),
+    createdAt: integer("created_at").notNull(),
+    allowed: integer("allowed", { mode: "boolean" }).notNull(),
+    deniedReason: text("denied_reason"),
+    denyMessage: text("deny_message"),
+  },
+  (table) => ({
+    createdAtIdx: index("idx_idempotency_keys_created_at").on(table.createdAt),
+  })
+)
 
 export const entitlementConfigTable = sqliteTable("entitlement_config", {
   customerEntitlementId: text("customer_entitlement_id").primaryKey(),
@@ -69,7 +75,7 @@ export const meterStateTable = sqliteTable("meter_state", {
 })
 
 // Singleton reservation state for this DO. This mirrors the allocation that
-// WalletService.createReservation / flushReservation have moved into
+// WalletService.createReservation plus capture/extend/release have moved into
 // customer.{cid}.reserved so the hot path can answer "can this event be
 // funded?" without touching the ledger per event. All amounts are pgledger
 // scale-8 minor units ($1 = 100_000_000).
@@ -86,6 +92,12 @@ export const walletReservationTable = sqliteTable("wallet_reservation", {
   flushedAmount: integer("flushed_amount").notNull().default(0),
   refillThresholdBps: integer("refill_threshold_bps").notNull().default(2000),
   refillChunkAmount: integer("refill_chunk_amount").notNull().default(0),
+  targetReservationAmount: integer("target_reservation_amount").notNull().default(0),
+  spendEwmaAmount: integer("spend_ewma_amount").notNull().default(0),
+  lastRateSampledAtMs: integer("last_rate_sampled_at_ms"),
+  maxEventCostAmount: integer("max_event_cost_amount").notNull().default(0),
+  pendingRefillAmount: integer("pending_refill_amount").notNull().default(0),
+  pendingFlushAmount: integer("pending_flush_amount"),
   refillInFlight: integer("refill_in_flight", { mode: "boolean" }).notNull().default(false),
   flushSeq: integer("flush_seq").notNull().default(0),
   pendingFlushSeq: integer("pending_flush_seq"),

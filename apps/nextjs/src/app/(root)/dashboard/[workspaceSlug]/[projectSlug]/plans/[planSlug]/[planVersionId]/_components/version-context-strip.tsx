@@ -3,6 +3,7 @@ import { GitBranch } from "lucide-react"
 import { cn } from "@unprice/ui/utils"
 
 import { SuperLink } from "~/components/super-link"
+import { getStatusTone, statusToneClasses } from "~/lib/status-tones"
 
 type Version = {
   id: string
@@ -60,14 +61,8 @@ function VersionChip({
 }) {
   const status = v.status ?? "draft"
   const isInactive = v.active === false
-
-  const dotClass = isInactive
-    ? "bg-danger-solid"
-    : v.latest
-      ? "bg-success-solid"
-      : status === "published"
-        ? "bg-info-solid"
-        : "bg-gray-solid"
+  const statusTone = isInactive ? "inactive" : status
+  const dotClass = statusToneClasses[getStatusTone(statusTone)].dot
 
   const inner = (
     <span
@@ -81,7 +76,7 @@ function VersionChip({
       <span className={cn("size-1.5 shrink-0 rounded-full", dotClass)} aria-hidden="true" />
       <span>v{v.version}</span>
       {v.latest && (
-        <span className="font-normal font-sans text-[10px] text-success uppercase tracking-wide">
+        <span className="font-normal font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
           latest
         </span>
       )}

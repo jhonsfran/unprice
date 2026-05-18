@@ -14,6 +14,7 @@ This directory contains architecture decisions that are normative for the repo.
 
 - [ADR-0001: Canonical Backend Architecture Boundaries](/Users/jhonsfran/repos/unprice/docs/adr/ADR-0001-canonical-backend-architecture-boundaries.md) — `Accepted` (2026-04-05)
 - [ADR-0002: Wallet And Payment Provider Activation Guardrails](/Users/jhonsfran/repos/unprice/docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md) — `Accepted` (2026-05-06)
+- [ADR-0003: Wallet Reservation And Grant Lifecycle](/Users/jhonsfran/repos/unprice/docs/adr/ADR-0003-wallet-reservation-grant-lifecycle.md) — `Accepted` (2026-05-17)
 
 ## How To Use
 
