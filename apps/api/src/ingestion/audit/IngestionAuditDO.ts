@@ -75,13 +75,21 @@ export class IngestionAuditDO extends DurableObject {
       return []
     }
 
-    const rows = this.db
-      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
-      .from(ingestionAuditTable)
-      .where(inArray(ingestionAuditTable.idempotencyKey, idempotencyKeys))
-      .all()
+    const BATCH_SIZE = 500
+    const result: string[] = []
+    for (let i = 0; i < idempotencyKeys.length; i += BATCH_SIZE) {
+      const batch = idempotencyKeys.slice(i, i + BATCH_SIZE)
+      const rows = this.db
+        .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
+        .from(ingestionAuditTable)
+        .where(inArray(ingestionAuditTable.idempotencyKey, batch))
+        .all()
+      for (const r of rows) {
+        result.push(r.idempotencyKey)
+      }
+    }
 
-    return rows.map((r) => r.idempotencyKey)
+    return result
   }
 
   public async commit(entries: LedgerEntry[]): Promise<CommitResult> {
@@ -108,22 +116,26 @@ export class IngestionAuditDO extends DurableObject {
     let duplicates = 0
     let conflicts = 0
 
-    const payloadHashesByKey = new Map(
-      this.db
+    // SQLite has a limit of 999 bound parameters, so we batch the lookup
+    const uniqueKeys = unique(entries.map((entry) => entry.idempotencyKey))
+    const BATCH_SIZE = 500
+    const payloadHashesByKey = new Map<string, string>()
+
+    for (let i = 0; i < uniqueKeys.length; i += BATCH_SIZE) {
+      const batch = uniqueKeys.slice(i, i + BATCH_SIZE)
+      const rows = this.db
         .select({
           idempotencyKey: ingestionAuditTable.idempotencyKey,
           payloadHash: ingestionAuditTable.payloadHash,
         })
         .from(ingestionAuditTable)
-        .where(
-          inArray(
-            ingestionAuditTable.idempotencyKey,
-            unique(entries.map((entry) => entry.idempotencyKey))
-          )
-        )
+        .where(inArray(ingestionAuditTable.idempotencyKey, batch))
         .all()
-        .map((row) => [row.idempotencyKey, row.payloadHash])
-    )
+
+      for (const row of rows) {
+        payloadHashesByKey.set(row.idempotencyKey, row.payloadHash)
+      }
+    }
     const rowsToInsert: Array<typeof ingestionAuditTable.$inferInsert> = []
 
     for (const entry of entries) {
@@ -153,10 +165,13 @@ export class IngestionAuditDO extends DurableObject {
       inserted++
     }
 
-    if (rowsToInsert.length > 0) {
+    // SQLite has a limit of 999 bound parameters; batch inserts to stay under
+    const INSERT_BATCH_SIZE = 100 // 8 columns × 100 = 800 params, well under 999
+    for (let i = 0; i < rowsToInsert.length; i += INSERT_BATCH_SIZE) {
+      const batch = rowsToInsert.slice(i, i + INSERT_BATCH_SIZE)
       this.db
         .insert(ingestionAuditTable)
-        .values(rowsToInsert)
+        .values(batch)
         .onConflictDoNothing({
           target: ingestionAuditTable.idempotencyKey,
         })
@@ -235,13 +250,17 @@ export class IngestionAuditDO extends DurableObject {
       const now = Date.now()
       const idempotencyKeys = rows.map((row) => row.idempotencyKey)
       if (idempotencyKeys.length > 0) {
-        this.db
-          .update(ingestionAuditTable)
-          .set({
-            publishedAt: now,
-          })
-          .where(inArray(ingestionAuditTable.idempotencyKey, idempotencyKeys))
-          .run()
+        const UPDATE_BATCH_SIZE = 500
+        for (let i = 0; i < idempotencyKeys.length; i += UPDATE_BATCH_SIZE) {
+          const batch = idempotencyKeys.slice(i, i + UPDATE_BATCH_SIZE)
+          this.db
+            .update(ingestionAuditTable)
+            .set({
+              publishedAt: now,
+            })
+            .where(inArray(ingestionAuditTable.idempotencyKey, batch))
+            .run()
+        }
       }
 
       return true

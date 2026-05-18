@@ -218,7 +218,6 @@ export class BillingService {
   }
 
   private setLockContext(context: {
-    type?: "metric" | "log"
     resource?: string
     action?: string
     acquired?: boolean

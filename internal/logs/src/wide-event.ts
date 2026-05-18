@@ -63,7 +63,6 @@ export interface CloudFields {
 }
 
 export interface LockFields {
-  type?: "metric" | "log"
   resource?: string
   action?: string
   acquired?: boolean

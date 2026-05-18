@@ -44,7 +44,6 @@ export class LogdrainMetrics implements Metrics {
 
     this.logger.info(metric.metric, {
       requestId: this.requestId,
-      type: "metric",
       time: Date.now(),
       metric,
       environment: this.environment,

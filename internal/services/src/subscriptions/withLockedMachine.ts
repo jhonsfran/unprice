@@ -43,7 +43,6 @@ export async function withLockedMachine<T>(args: {
   ledgerService: LedgerGateway
   walletService?: WalletService
   setLockContext?: (context: {
-    type?: "metric" | "log"
     resource?: string
     action?: string
     acquired?: boolean
@@ -92,7 +91,6 @@ export async function withLockedMachine<T>(args: {
     })
 
     setLockContext?.({
-      type: "log",
       resource: "subscription",
       action: "acquire",
       acquired,
@@ -166,7 +164,6 @@ function startLockHeartbeat(args: {
   logger: Logger
   projectId: string
   setLockContext?: (context: {
-    type?: "metric" | "log"
     resource?: string
     action?: string
     acquired?: boolean
@@ -191,7 +188,6 @@ function startLockHeartbeat(args: {
       .extend({ ttlMs: args.ttlMs, now: args.lockNow() })
       .then((extended) => {
         args.setLockContext?.({
-          type: "log",
           resource: "subscription",
           action: "extend",
           acquired: extended,

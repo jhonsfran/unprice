@@ -130,7 +130,6 @@ export class SubscriptionService {
   }
 
   private setLockContext(context: {
-    type?: "metric" | "log"
     resource?: string
     action?: string
     acquired?: boolean
