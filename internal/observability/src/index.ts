@@ -6,6 +6,7 @@ import {
   type RequestLoggerOptions,
   createRequestLogger,
   log as evlogGlobal,
+  getEnvironment,
   initLogger,
 } from "evlog"
 import { createDrainPipeline } from "evlog/pipeline"
@@ -125,6 +126,72 @@ export function createUnpriceDrain(options: DrainOptions): UnpriceDrain | undefi
 
 export function initObservability(config?: LoggerConfig): void {
   initLogger(config)
+}
+
+// ============================================
+// Metrics logger: pushes directly to drain without requestLogs accumulation
+// ============================================
+
+/**
+ * Creates a lightweight logger for metrics emission.
+ *
+ * Unlike `createLogger` (which wraps a request-scoped evlog RequestLogger and
+ * accumulates every `.info()` call in `requestLogs` with O(n) array copies),
+ * this logger pushes each metric event directly to the drain pipeline.
+ *
+ * Use this for `LogdrainMetrics` so metric emissions don't bloat the
+ * request-scoped wide event or cause quadratic memory growth.
+ */
+export function createMetricsLogger(drain?: UnpriceDrain): Logger {
+  return {
+    set() {},
+    debug() {},
+    info(message, fields) {
+      if (!drain) return
+      const env = getEnvironment()
+      drain({
+        event: {
+          ...env,
+          timestamp: new Date().toISOString(),
+          level: "info" as const,
+          type: "metric",
+          message,
+          ...fields,
+        },
+      })
+    },
+    warn(message, fields) {
+      if (!drain) return
+      const env = getEnvironment()
+      drain({
+        event: {
+          ...env,
+          timestamp: new Date().toISOString(),
+          level: "warn" as const,
+          type: "metric",
+          message,
+          ...fields,
+        },
+      })
+    },
+    error(message, fields) {
+      if (!drain) return
+      const env = getEnvironment()
+      drain({
+        event: {
+          ...env,
+          timestamp: new Date().toISOString(),
+          level: "error" as const,
+          type: "metric",
+          message: message instanceof Error ? message.message : String(message),
+          ...fields,
+        },
+      })
+    },
+    flush() {
+      return drain?.flush() ?? Promise.resolve()
+    },
+  }
 }
 
 // ============================================

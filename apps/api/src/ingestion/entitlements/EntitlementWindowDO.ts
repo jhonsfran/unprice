@@ -1466,19 +1466,40 @@ export class EntitlementWindowDO extends DurableObject {
         return
       }
 
-      // Pick the soonest among: outbox drain, time-based flush deadline,
+      // Pick the soonest among: outbox drain, pending wallet recheck,
+      // time-based flush deadline, reservation close deadlines, and
       // self-destruct. Re-read the window because the time-flush above may
       // have just updated `lastFlushedAt`.
       const finalWindow = this.readWalletReservation(this.db)
       const candidates: number[] = []
+      const pushFutureCandidate = (timestamp: number | null) => {
+        if (timestamp !== null && Number.isFinite(timestamp) && timestamp > now) {
+          candidates.push(timestamp)
+        }
+      }
 
       if (remainingOutboxCount > 0) {
         candidates.push(now + FLUSH_INTERVAL_MS)
       }
 
       if (finalWindow?.reservationId && !finalWindow.recoveryRequired) {
-        const baseline = finalWindow.lastFlushedAt ?? now
-        candidates.push(baseline + flushIntervalMs)
+        const pendingWalletFlush = this.hasPendingWalletFlush(finalWindow)
+        const unflushed = Math.max(0, finalWindow.consumedAmount - finalWindow.flushedAmount)
+
+        if (pendingWalletFlush) {
+          candidates.push(now + FLUSH_INTERVAL_MS)
+        }
+
+        if (unflushed > 0 && !finalWindow.refillInFlight) {
+          const baseline = finalWindow.lastFlushedAt ?? now
+          const flushAt = baseline + flushIntervalMs
+          candidates.push(flushAt > now ? flushAt : now + FLUSH_INTERVAL_MS)
+        }
+
+        pushFutureCandidate(finalWindow.reservationEndAt)
+        pushFutureCandidate(
+          finalWindow.lastEventAt !== null ? finalWindow.lastEventAt + inactivityMs : null
+        )
       }
 
       if (candidates.length === 0) {

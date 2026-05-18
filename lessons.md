@@ -120,6 +120,9 @@ patterns. Keep it cheap to load and useful.
   trace metadata only so same-period re-bootstrap cannot replay old reserve transfers.
 - 2026-05-17: EntitlementWindowDO inactivity final-flush uses 1h in production/test and 60s in
   `NODE_ENV=development`; ledger freshness flushes use 10m in deployed envs.
+- 2026-05-18: EntitlementWindowDO alarm scheduling should use flush cadence only when
+  `consumedAmount > flushedAmount`; fully flushed live reservations should wake on lifecycle
+  deadlines, not stale `lastFlushedAt`.
 - 2026-05-17: Reservation release and grant expiration are separate financial events: release
   restores unused reserved funds to customer buckets; only grant expiration returns available
   grant balance to platform funding.

@@ -965,10 +965,10 @@ describe("EntitlementWindowDO", () => {
       }),
     ])
     expect(db.outboxRows).toHaveLength(0)
-    // The default mocked apply opens a wallet reservation, so alarm() re-arms
-    // at the time-based flush deadline (10 min in non-dev) rather than the
-    // distant self-destruct. The flush deadline wins because it's sooner.
-    expect(state.alarmAt).toBe(BASE_NOW + 10 * 60_000)
+    // The default mocked apply opens a wallet reservation. Once the outbox
+    // and reservation usage are flushed, the period-close deadline is the
+    // next real lifecycle wakeup.
+    expect(state.alarmAt).toBe(BASE_NOW + 60_000)
   })
 
   it("cleans alarm outbox by id range and idempotency rows by TTL cutoff", async () => {
@@ -1760,9 +1760,9 @@ describe("EntitlementWindowDO", () => {
     await revived.alarm()
 
     // The revived DO sees a still-open reservation in SQLite and re-arms
-    // alarm() at the time-based flush deadline (10 min in non-dev) — the
-    // soonest deadline among self-destruct and the freshness floor.
-    expect(state.alarmAt).toBe(BASE_NOW + 10 * 60_000)
+    // alarm() at the next lifecycle deadline after the outbox and reservation
+    // usage are flushed.
+    expect(state.alarmAt).toBe(BASE_NOW + 60_000)
   })
 
   it("replays committed idempotency rows after eviction without applying twice", async () => {
@@ -3396,6 +3396,45 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)!.reservationId).toBe("res_abc")
     expect(state.deletedAlarm).toBe(false)
     expect(state.deletedAll).toBe(false)
+  })
+
+  it("does not re-arm every second when a live reservation is already fully flushed", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 2 * 60 * 60 * 1000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW - 24 * 60 * 60 * 1000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_fully_flushed",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 2 * 100_000_000,
+      flushedAmount: 2 * 100_000_000,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 2,
+      pendingFlushSeq: null,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: BASE_NOW - 10 * 60_000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    expect(state.alarmAt).toBe(BASE_NOW + 60 * 60 * 1000)
   })
 
   it("alarm runs a final flush after 1h of inactivity in deployed environments", async () => {

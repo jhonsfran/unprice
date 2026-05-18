@@ -3,6 +3,7 @@ import type { Logger } from "@unprice/logs"
 import {
   runDoOperation as _runDoOperation,
   createLogger,
+  createMetricsLogger,
   createStandaloneRequestLogger,
   createUnpriceDrain,
   initObservability,
@@ -50,6 +51,12 @@ export function createApiLogger(
 ): Logger {
   return createLogger(requestLogger, { flush: apiDrain?.flush })
 }
+
+/**
+ * Metrics logger: pushes metric events directly to the drain pipeline
+ * without accumulating in the request-scoped requestLogs array.
+ */
+export const apiMetricsLogger: Logger = createMetricsLogger(apiDrain)
 
 export function createDoLogger(requestId: string): Logger {
   const { logger } = createStandaloneRequestLogger({ requestId }, { flush: apiDrain?.flush })
