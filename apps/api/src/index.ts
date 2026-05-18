@@ -38,7 +38,7 @@ import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
 import { consumeIngestionBatch } from "~/ingestion/service"
 import { obs } from "~/middleware/obs"
-import { apiEvlog, flushApiDrainWithDiagnostics } from "~/observability"
+import { apiDrain, apiEvlog } from "~/observability"
 import { registerGetInvoiceV1 } from "./routes/invoices/getInvoiceV1"
 import { registerGetWalletV1 } from "./routes/wallet/getWalletV1"
 
@@ -188,7 +188,9 @@ const handler = {
         error: serializedError,
         error_message: serializedError.message,
       })
-      executionCtx.waitUntil(flushApiDrainWithDiagnostics("bad_environment_fetch"))
+      if (apiDrain) {
+        executionCtx.waitUntil(apiDrain.flush())
+      }
 
       return Response.json(
         {
@@ -207,7 +209,7 @@ const handler = {
   ) => {
     try {
       const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
-      await consumeIngestionBatch(batch, parsedEnv, executionCtx)
+      await consumeIngestionBatch(batch, parsedEnv, executionCtx, apiDrain ?? undefined)
     } catch (error) {
       const serializedError = serializeError(error)
 
@@ -217,7 +219,9 @@ const handler = {
         error: serializedError,
         error_message: serializedError.message,
       })
-      executionCtx.waitUntil(flushApiDrainWithDiagnostics("bad_environment_queue"))
+      if (apiDrain) {
+        executionCtx.waitUntil(apiDrain.flush())
+      }
 
       throw error
     }

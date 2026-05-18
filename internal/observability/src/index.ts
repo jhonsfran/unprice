@@ -1,491 +1,161 @@
-import { AsyncLocalStorage } from "node:async_hooks"
-import type { LogContext, LogFields, LogMetadata, Logger } from "@unprice/logs"
+import type { Logger } from "@unprice/logs"
 import {
   type DrainContext,
-  type FieldContext,
   type LoggerConfig,
   type RequestLogger,
   type RequestLoggerOptions,
-  createRequestLogger as createEvlogRequestLogger,
-  log as evlog,
+  createRequestLogger,
+  log as evlogGlobal,
   initLogger,
 } from "evlog"
 import { createDrainPipeline } from "evlog/pipeline"
 
-export type WideEventLogger = RequestLogger<LogFields>
-export type AppLogger = Logger & {
-  emit(level: "debug" | "info" | "warn" | "error", message: string, fields?: LogMetadata): void
-  fatal(message: string, fields?: LogMetadata): void
+// ============================================
+// Re-exports
+// ============================================
+
+export type { Logger } from "@unprice/logs"
+export type { WideEventInput } from "@unprice/logs"
+export type { RequestLogger, DrainContext } from "evlog"
+
+// ============================================
+// Types
+// ============================================
+
+export type UnpriceDrain = ((ctx: DrainContext) => void) & {
+  flush: () => Promise<void>
+  pending: number
 }
 
-type FlushableDrain = ((ctx: DrainContext) => void | Promise<void>) & {
-  flush?: () => Promise<void>
-}
-
-type AxiomDrainOptions = {
-  baseUrl?: string
-  dataset: string
-  edgeUrl?: string
-  orgId?: string
-  timeoutMs?: number
-  token: string
-}
-
-type LoggerScope = {
-  requestId?: string
-  requestLogger: WideEventLogger
-}
-
-function createStorageAdapter<T>(): {
-  getStore: () => T | undefined
-  run: <R>(store: T, fn: () => R) => R
-} {
-  const storage = new AsyncLocalStorage<T>()
-
-  return {
-    getStore: () => storage.getStore(),
-    run: (store, fn) => storage.run(store, fn),
-  }
-}
-
-const loggerScopeStorage = createStorageAdapter<LoggerScope>()
-
-const DEFAULT_AXIOM_BASE_URL = "https://api.axiom.co"
-const DEFAULT_AXIOM_TIMEOUT_MS = 5000
-const AXIOM_PARTIAL_CONFIG_WARNING =
-  "[observability] Axiom drain disabled: both AXIOM_API_TOKEN and AXIOM_DATASET are required."
-let hasWarnedPartialAxiomConfig = false
-
-const LOG_FIELD_ALIASES: Readonly<Record<string, string>> = {
-  customerId: "customer_id",
-  durableObjectId: "durable_object_id",
-  eventId: "event_id",
-  eventSlug: "event_slug",
-  eventTimestamp: "event_timestamp",
-  featureSlug: "feature_slug",
-  flushAmount: "flush_amount",
-  flushSeq: "flush_seq",
-  idempotencyKey: "idempotency_key",
-  meterKey: "meter_key",
-  projectId: "project_id",
-  refillAmount: "refill_amount",
-  refillChunkAmount: "refill_chunk_amount",
-  reservationId: "reservation_id",
-  statementKey: "statement_key",
-  subscriptionId: "subscription_id",
-  workspaceId: "workspace_id",
-}
-
-export function initObservability(config?: LoggerConfig): void {
-  initLogger(config)
-}
-
-function normalizeAxiomConfigValue(value?: string): string | undefined {
-  if (typeof value !== "string") {
-    return undefined
-  }
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : undefined
-}
-
-function warnPartialAxiomConfigOnce(environment?: string): void {
-  if (environment === "development" || hasWarnedPartialAxiomConfig) {
-    return
-  }
-
-  hasWarnedPartialAxiomConfig = true
-  console.warn(AXIOM_PARTIAL_CONFIG_WARNING)
-}
-
-function normalizeLogFieldAliases(fields: Record<string, unknown>): Record<string, unknown> {
-  const normalized = { ...fields }
-
-  for (const [alias, canonical] of Object.entries(LOG_FIELD_ALIASES)) {
-    if (!(alias in normalized)) {
-      continue
-    }
-
-    if (normalized[canonical] === undefined || normalized[canonical] === null) {
-      normalized[canonical] = normalized[alias]
-    }
-
-    delete normalized[alias]
-  }
-
-  return normalized
-}
-
-function prepareAxiomEvent(event: DrainContext["event"]): DrainContext["event"] {
-  const normalized = normalizeLogFieldAliases(event) as DrainContext["event"]
-
-  if (typeof normalized.duration_ms === "number") {
-    delete normalized.duration
-  }
-
-  return normalized
-}
-
-export function createDrain(options: {
-  environment?: string
-  baseUrl?: string
+type DrainOptions = {
   token?: string
   dataset?: string
-  edgeUrl?: string
+  environment?: string
   orgId?: string
-  timeoutMs?: number
-}): FlushableDrain | undefined {
-  const token = normalizeAxiomConfigValue(options.token)
-  const dataset = normalizeAxiomConfigValue(options.dataset)
+}
 
-  if (Boolean(token) !== Boolean(dataset)) {
-    warnPartialAxiomConfigOnce(options.environment)
-    return undefined
+type SamplingConfig = NonNullable<LoggerConfig["sampling"]>
+
+// ============================================
+// Shared sampling config
+// ============================================
+
+export function sharedSamplingConfig(environment?: string): SamplingConfig {
+  const isDev = environment === "development"
+  return {
+    rates: {
+      info: isDev ? 100 : 10,
+      warn: 100,
+      error: 100,
+      debug: isDev ? 100 : 0,
+    },
+    keep: [{ status: 400 }, { duration: 1000 }],
   }
+}
+
+// ============================================
+// Axiom drain (fetch-based, works in all runtimes including Workers)
+// ============================================
+
+const AXIOM_INGEST_URL = "https://api.axiom.co/v1/datasets"
+const AXIOM_TIMEOUT_MS = 5_000
+
+function createAxiomFetchDrain(opts: {
+  dataset: string
+  token: string
+  orgId?: string
+}): (batch: DrainContext[]) => Promise<void> {
+  const url = `${AXIOM_INGEST_URL}/${encodeURIComponent(opts.dataset)}/ingest`
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${opts.token}`,
+    "Content-Type": "application/json",
+  }
+  if (opts.orgId) {
+    headers["X-Axiom-Org-Id"] = opts.orgId
+  }
+
+  return async (batch) => {
+    if (batch.length === 0) return
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), AXIOM_TIMEOUT_MS)
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(batch.map((ctx) => ctx.event)),
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "")
+        throw new Error(`Axiom ingest failed (${response.status}): ${body.slice(0, 200)}`)
+      }
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+// ============================================
+// Drain: fetch-based Axiom + evlog/pipeline batching
+// ============================================
+
+export function createUnpriceDrain(options: DrainOptions): UnpriceDrain | undefined {
+  const token = options.token?.trim()
+  const dataset = options.dataset?.trim()
 
   if (!token || !dataset || options.environment === "development") {
     return undefined
   }
 
   const pipeline = createDrainPipeline<DrainContext>({
-    batch: {
-      size: 50,
-      intervalMs: 5000,
-    },
-    retry: {
-      maxAttempts: 3,
-    },
+    batch: { size: 50, intervalMs: 5_000 },
+    retry: { maxAttempts: 3 },
   })
 
-  return pipeline(
-    createAxiomDrain({
-      baseUrl: options.baseUrl,
-      dataset,
-      edgeUrl: options.edgeUrl,
-      orgId: options.orgId,
-      timeoutMs: options.timeoutMs,
-      token,
-    })
-  )
+  const axiomDrain = createAxiomFetchDrain({ dataset, token, orgId: options.orgId })
+  return pipeline(axiomDrain) as UnpriceDrain
 }
 
-function createAxiomDrain(options: AxiomDrainOptions): (batch: DrainContext[]) => Promise<void> {
-  return async (batch) => {
-    if (batch.length === 0) {
-      return
-    }
+// ============================================
+// Init: thin wrapper over evlog's initLogger
+// ============================================
 
-    const controller = typeof AbortController === "undefined" ? undefined : new AbortController()
-    const timeoutId =
-      controller && options.timeoutMs !== 0
-        ? setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_AXIOM_TIMEOUT_MS)
-        : undefined
-
-    try {
-      const response = await fetch(resolveAxiomIngestUrl(options), {
-        method: "POST",
-        headers: createAxiomHeaders(options),
-        body: JSON.stringify(batch.map((ctx) => prepareAxiomEvent(ctx.event))),
-        signal: controller?.signal,
-      })
-
-      if (response.ok) {
-        return
-      }
-
-      const responseBody = await response.text().catch(() => "")
-      const suffix = responseBody ? `: ${responseBody.slice(0, 500)}` : ""
-
-      throw new Error(`Axiom drain failed (${response.status} ${response.statusText})${suffix}`)
-    } finally {
-      if (timeoutId !== undefined) {
-        clearTimeout(timeoutId)
-      }
-    }
-  }
+export function initObservability(config?: LoggerConfig): void {
+  initLogger(config)
 }
 
-function createAxiomHeaders(options: AxiomDrainOptions): HeadersInit {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${options.token}`,
-    "Content-Type": "application/json",
-  }
+// ============================================
+// Logger factory: wraps evlog RequestLogger into the Logger interface
+// ============================================
 
-  if (options.orgId) {
-    headers["X-Axiom-Org-Id"] = options.orgId
-  }
-
-  return headers
-}
-
-function resolveAxiomIngestUrl(options: AxiomDrainOptions): string {
-  const encodedDataset = encodeURIComponent(options.dataset)
-
-  if (!options.edgeUrl) {
-    return `${normalizeBaseUrl(options.baseUrl)}/v1/datasets/${encodedDataset}/ingest`
-  }
-
-  try {
-    const parsedUrl = new URL(options.edgeUrl)
-
-    if (parsedUrl.pathname === "" || parsedUrl.pathname === "/") {
-      parsedUrl.pathname = `/v1/ingest/${encodedDataset}`
-      return parsedUrl.toString()
-    }
-
-    parsedUrl.pathname = parsedUrl.pathname.replace(/\/+$/, "")
-    return parsedUrl.toString()
-  } catch {
-    return `${options.edgeUrl.replace(/\/+$/, "")}/v1/ingest/${encodedDataset}`
-  }
-}
-
-function normalizeBaseUrl(baseUrl?: string): string {
-  return (baseUrl ?? DEFAULT_AXIOM_BASE_URL).replace(/\/+$/, "")
-}
-
-function resolveLoggerScope(
-  fallbackRequestLogger: WideEventLogger,
-  fallbackRequestId?: string
-): LoggerScope {
-  return (
-    loggerScopeStorage.getStore() ?? {
-      requestId: fallbackRequestId,
-      requestLogger: fallbackRequestLogger,
-    }
-  )
-}
-
-export function runWithRequestLogger<T>(
-  requestLogger: WideEventLogger,
-  options: {
-    requestId?: string
-  },
-  fn: () => T
-): T {
-  return loggerScopeStorage.run(
-    {
-      requestId: options.requestId,
-      requestLogger,
-    },
-    fn
-  )
-}
-
-function createFieldsWithRequestId(
-  requestId: string | undefined,
-  fields?: LogMetadata
-): LogFields | undefined {
-  const sanitizedFields = sanitizeLogFields(fields)
-
-  if (!requestId) {
-    return sanitizedFields ? normalizeHttpSummaryFields(sanitizedFields) : undefined
-  }
-
-  const nextFields = { ...(sanitizedFields ?? {}) } as LogFields
-  const request =
-    nextFields.request && typeof nextFields.request === "object"
-      ? { ...(nextFields.request as Record<string, unknown>) }
-      : {}
-
-  if (request.id === undefined) {
-    request.id = requestId
-  }
-
-  return normalizeHttpSummaryFields({
-    ...nextFields,
-    request,
-    requestId,
-  })
-}
-
-function sanitizeLogFields(fields?: LogMetadata): LogFields | undefined {
-  if (!fields) {
-    return undefined
-  }
-
-  const nextFields = { ...fields } as Record<string, unknown>
-
-  if (typeof nextFields.service !== "string") {
-    delete nextFields.service
-  }
-
-  delete nextFields.tag
-
-  return normalizeLogFieldAliases(nextFields) as LogFields
-}
-
-function normalizeHttpSummaryFields(fields: LogFields): LogFields {
-  const request =
-    fields.request && typeof fields.request === "object"
-      ? { ...(fields.request as Record<string, unknown>) }
-      : undefined
-
-  if (!request) {
-    return fields
-  }
-
-  const nextFields = {
-    ...fields,
-    request,
-  } as Record<string, unknown>
-  const requestMethod = typeof request.method === "string" ? request.method : undefined
-  const requestPath = typeof request.path === "string" ? request.path : undefined
-  const requestRoute = typeof request.route === "string" ? request.route : undefined
-  const requestStatus = typeof request.status === "number" ? request.status : undefined
-  const requestDuration = typeof request.duration === "number" ? request.duration : undefined
-
-  if (requestMethod && shouldPromoteRequestMethod(nextFields.method)) {
-    nextFields.method = requestMethod
-  }
-
-  if (requestRoute) {
-    // Prefer the logical route over the transport path in evlog's summary line.
-    nextFields.path = requestRoute
-    nextFields.route = requestRoute
-  } else if (requestPath && shouldPromoteRequestPath(nextFields.path)) {
-    nextFields.path = requestPath
-  }
-
-  if (requestStatus !== undefined) {
-    nextFields.status = requestStatus
-  }
-
-  if (requestDuration !== undefined) {
-    nextFields.duration = requestDuration
-  }
-
-  return nextFields as LogFields
-}
-
-function shouldPromoteRequestMethod(value: unknown): boolean {
-  return typeof value !== "string" || value.length === 0 || value === "UNKNOWN"
-}
-
-function shouldPromoteRequestPath(value: unknown): boolean {
-  if (typeof value !== "string" || value.length === 0) {
-    return true
-  }
-
-  return value === "/" || value.toLowerCase() === "unknown"
-}
-
-function emitStructuredLog(
-  level: "debug" | "info" | "warn" | "error",
-  message: string,
-  fields?: LogMetadata
-) {
-  const event = {
-    ...(sanitizeLogFields(fields) ?? {}),
-    message,
-  }
-
-  if (level === "debug") {
-    evlog.debug(event)
-  } else if (level === "info") {
-    evlog.info(event)
-  } else if (level === "warn") {
-    evlog.warn(event)
-  } else {
-    evlog.error(event)
-  }
-}
-
-function normalizeErrorPayload(
-  input: unknown,
-  fields?: LogMetadata
-): {
-  error: string | Error
-  fields?: LogMetadata
-} {
-  if (input instanceof Error || typeof input === "string") {
-    return {
-      error: input,
-      fields,
-    }
-  }
-
-  if (input && typeof input === "object") {
-    const candidate = input as {
-      message?: unknown
-    }
-
-    return {
-      error:
-        typeof candidate.message === "string" && candidate.message.length > 0
-          ? new Error(candidate.message)
-          : new Error("Unknown error"),
-      fields: {
-        ...(fields ?? {}),
-        error_payload: input,
-      },
-    }
-  }
-
-  return {
-    error: new Error(String(input ?? "Unknown error")),
-    fields,
-  }
-}
-
-export function createAppLogger(
-  requestLogger: WideEventLogger,
-  options?: {
-    flush?: () => Promise<void>
-    requestId?: string
-  }
-): AppLogger {
-  const fallbackRequestId = options?.requestId
-  const fallbackRequestLogger = requestLogger
-
+export function createLogger(
+  requestLogger: RequestLogger<Record<string, unknown>>,
+  options?: { flush?: () => Promise<void> }
+): Logger {
   return {
     set(fields) {
-      const scope = resolveLoggerScope(fallbackRequestLogger, fallbackRequestId)
-      scope.requestLogger.set(
-        createFieldsWithRequestId(scope.requestId, fields as LogContext) as FieldContext<LogFields>
-      )
+      requestLogger.set(fields)
     },
     debug(message, fields) {
-      const scope = resolveLoggerScope(fallbackRequestLogger, fallbackRequestId)
-      const enrichedFields = createFieldsWithRequestId(scope.requestId, fields)
-
-      if (enrichedFields) {
-        scope.requestLogger.set(enrichedFields as FieldContext<LogFields>)
-      }
-
-      emitStructuredLog("debug", message, enrichedFields)
+      evlogGlobal.debug({ message, ...fields })
     },
     info(message, fields) {
-      const scope = resolveLoggerScope(fallbackRequestLogger, fallbackRequestId)
-      scope.requestLogger.info(
-        message,
-        createFieldsWithRequestId(scope.requestId, fields) as FieldContext<LogFields> | undefined
-      )
+      requestLogger.info(message, fields)
     },
     warn(message, fields) {
-      const scope = resolveLoggerScope(fallbackRequestLogger, fallbackRequestId)
-      scope.requestLogger.warn(
-        message,
-        createFieldsWithRequestId(scope.requestId, fields) as FieldContext<LogFields> | undefined
-      )
+      requestLogger.warn(message, fields)
     },
     error(message, fields) {
-      const scope = resolveLoggerScope(fallbackRequestLogger, fallbackRequestId)
-      const normalized = normalizeErrorPayload(message, fields)
-      scope.requestLogger.error(
-        normalized.error,
-        createFieldsWithRequestId(scope.requestId, normalized.fields) as
-          | FieldContext<LogFields>
-          | undefined
-      )
-    },
-    emit(level, message, fields) {
-      const scope = resolveLoggerScope(fallbackRequestLogger, fallbackRequestId)
-      emitStructuredLog(level, message, createFieldsWithRequestId(scope.requestId, fields))
-    },
-    fatal(message, fields) {
-      const scope = resolveLoggerScope(fallbackRequestLogger, fallbackRequestId)
-      emitStructuredLog("error", message, createFieldsWithRequestId(scope.requestId, fields))
+      if (message instanceof Error) {
+        requestLogger.error(message, fields)
+      } else if (typeof message === "string") {
+        requestLogger.error(message, fields)
+      } else {
+        requestLogger.error(new Error(String(message ?? "Unknown error")), fields)
+      }
     },
     flush() {
       return options?.flush?.() ?? Promise.resolve()
@@ -493,37 +163,112 @@ export function createAppLogger(
   }
 }
 
+// ============================================
+// Standalone request logger (for contexts without framework middleware)
+// ============================================
+
 export function createStandaloneRequestLogger(
   options?: RequestLoggerOptions,
-  adapterOptions?: {
-    flush?: () => Promise<void>
-  }
+  adapterOptions?: { flush?: () => Promise<void> }
 ): {
-  requestLogger: WideEventLogger
-  logger: AppLogger
+  requestLogger: RequestLogger<Record<string, unknown>>
+  logger: Logger
 } {
-  const requestLogger = createEvlogRequestLogger<LogFields>(options)
-
+  const requestLogger = createRequestLogger<Record<string, unknown>>(options)
   return {
     requestLogger,
-    logger: createAppLogger(requestLogger, {
-      flush: adapterOptions?.flush,
-      requestId: options?.requestId,
-    }),
+    logger: createLogger(requestLogger, adapterOptions),
   }
 }
 
-export function emitWideEvent(
-  requestLogger: WideEventLogger,
-  overrides?: LogFields & {
-    _forceKeep?: boolean
-    status?: number
-    duration?: number
-  }
-) {
-  return requestLogger.emit(
-    overrides as FieldContext<LogFields> & {
-      _forceKeep?: boolean
+// ============================================
+// DO operation wrapper
+// ============================================
+
+export async function runDoOperation<T>(
+  params: {
+    requestId: string
+    service: string
+    operation: string
+    baseFields?: Record<string, unknown>
+    waitUntil?: (promise: Promise<unknown>) => void
+    drain?: UnpriceDrain
+  },
+  fn: (logger: Logger) => Promise<T>
+): Promise<T> {
+  const startedAt = Date.now()
+  const requestLogger = createRequestLogger<Record<string, unknown>>({
+    requestId: params.requestId,
+  })
+
+  const logger = createLogger(requestLogger, { flush: params.drain?.flush })
+
+  logger.set({
+    service: params.service,
+    operation: params.operation,
+    request: {
+      id: params.requestId,
+      timestamp: new Date(startedAt).toISOString(),
+      path: `/durable-objects/${params.service}/${params.operation}`,
+    },
+    cloud: {
+      platform: "cloudflare",
+      durable_object_id: params.requestId,
+    },
+    business: extractBusinessFields(params.operation, params.baseFields),
+    ...(params.baseFields ?? {}),
+  })
+
+  let thrown: unknown
+  try {
+    return await fn(logger)
+  } catch (err) {
+    thrown = err
+    logger.error(err instanceof Error ? err : new Error(String(err)))
+    throw err
+  } finally {
+    const duration = Date.now() - startedAt
+    const status = thrown ? 500 : 200
+
+    requestLogger.set({ status, duration, request: { status, duration } })
+    requestLogger.emit({ status, duration, request: { status, duration } })
+
+    if (params.drain) {
+      params.waitUntil?.(params.drain.flush())
     }
-  )
+  }
+}
+
+function extractBusinessFields(
+  operation: string,
+  baseFields?: Record<string, unknown>
+): Record<string, unknown> {
+  const KEYS = [
+    "customer_id",
+    "feature_slug",
+    "is_internal",
+    "is_main",
+    "project_id",
+    "unprice_customer_id",
+    "workspace_id",
+  ] as const
+
+  const business: Record<string, unknown> = { operation }
+
+  for (const key of KEYS) {
+    const value = baseFields?.[key]
+    if (value !== undefined && value !== null) {
+      business[key] = value
+    }
+  }
+
+  return business
+}
+
+// ============================================
+// Env helpers (kept for backward compat)
+// ============================================
+
+export function shouldEmitMetrics(env: { APP_ENV?: string }): boolean {
+  return env.APP_ENV !== "development"
 }

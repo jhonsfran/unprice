@@ -1,12 +1,13 @@
-import { schedules } from "@trigger.dev/sdk/v3"
+import { logger, schedules } from "@trigger.dev/sdk/v3"
 import { Analytics } from "@unprice/analytics"
-import { createStandaloneRequestLogger } from "@unprice/observability"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
 import { NoopMetrics } from "@unprice/services/metrics"
 import { expireWalletCredits } from "@unprice/services/use-cases"
 import { env } from "../../env"
 import { db } from "../db"
+
+type WalletCreditExpirationLogger = Parameters<typeof expireWalletCredits>[0]["logger"]
 
 /**
  * Sweeps `wallet_credits` whose `expires_at` has passed and claws the
@@ -29,15 +30,7 @@ export const walletCreditExpirationSchedule = schedules.task({
   },
   run: async (payload) => {
     const now = payload.timestamp
-
-    const { logger: log } = createStandaloneRequestLogger(
-      {
-        method: "POST",
-        path: "/trigger/schedules/wallet.expire-grants",
-        requestId: `wallet-expire-${now.getTime()}`,
-      },
-      {}
-    )
+    const log = logger as unknown as WalletCreditExpirationLogger
 
     const cache = new CacheService({ waitUntil: () => {} }, new NoopMetrics(), false)
     cache.init([])
@@ -58,20 +51,20 @@ export const walletCreditExpirationSchedule = schedules.task({
       metrics: new NoopMetrics(),
     })
 
-    try {
-      return await expireWalletCredits(
-        {
-          db,
-          logger: log,
-          services: { wallet: services.wallet },
-        },
-        {
-          now,
-          limit: 500,
-        }
-      )
-    } finally {
-      await log.flush()
-    }
+    const result = await expireWalletCredits(
+      {
+        db,
+        logger: log,
+        services: { wallet: services.wallet },
+      },
+      {
+        now,
+        limit: 500,
+      }
+    )
+
+    logger.info("wallet.expire-grants.complete", { ...result })
+
+    return result
   },
 })

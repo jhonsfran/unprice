@@ -1,5 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
-import type { AppLogger } from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
 import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
 import { UnPriceIngestionError } from "@unprice/services/ingestion"
 import type { ExecutionContext } from "hono"
@@ -269,7 +269,7 @@ function createTestApp() {
   app.use("*", async (c, next) => {
     c.set("requestId", "req_123")
     c.set("requestStartedAt", Date.now())
-    c.set("logger", logger as AppLogger)
+    c.set("logger", logger as Logger)
     c.set("services", {
       ingestion: {
         ingestFeatureSync,
@@ -305,7 +305,7 @@ function buildRequest(body: Record<string, unknown> = requestBody) {
   })
 }
 
-function createRouteLogger(): Pick<AppLogger, "error" | "warn" | "set"> {
+function createRouteLogger(): Pick<Logger, "error" | "warn" | "set"> {
   return {
     error: vi.fn(),
     warn: vi.fn(),

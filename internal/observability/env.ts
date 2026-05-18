@@ -2,7 +2,7 @@ import { createEnv } from "@t3-oss/env-core"
 import * as z from "zod"
 
 export function shouldEmitMetrics(env: { APP_ENV?: string }): boolean {
-  return env.APP_ENV === "production"
+  return env.APP_ENV !== "development"
 }
 
 export function shouldDrainLogs(env: { APP_ENV?: string }): boolean {

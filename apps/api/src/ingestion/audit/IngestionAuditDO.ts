@@ -1,7 +1,7 @@
 import type { Pipeline, PipelineRecord } from "cloudflare:pipelines"
 import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
-import type { AppLogger } from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
 import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
 import { and, asc, inArray, isNull, lt } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
@@ -41,7 +41,7 @@ export class IngestionAuditDO extends DurableObject {
   private readonly appEnv?: string
   private readonly localPipelineUrl?: string
   private readonly pipelineEvents?: Pipeline<PipelineRecord>
-  private readonly logger: AppLogger
+  private readonly logger: Logger
   private alarmScheduled = false
 
   constructor(state: DurableObjectState, env: Env) {

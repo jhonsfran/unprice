@@ -1,4 +1,5 @@
-import { type AppLogger, createStandaloneRequestLogger } from "@unprice/observability"
+import type { Logger } from "@unprice/logs"
+import { createStandaloneRequestLogger } from "@unprice/observability"
 import type { Cache } from "@unprice/services/cache"
 import type { EntitlementService } from "@unprice/services/entitlements"
 import {
@@ -17,7 +18,7 @@ type CreateIngestionServiceParams = {
   cache: Pick<Cache, "ingestionPreparedGrantContext">
   env: Pick<Env, "APP_ENV" | "entitlementwindow" | "ingestionaudit">
   entitlementService: EntitlementService
-  logger: AppLogger
+  logger: Logger
   now?: () => number
   waitUntil: (promise: Promise<unknown>) => void
 }
@@ -37,24 +38,25 @@ export function createIngestionService(params: CreateIngestionServiceParams): In
 export async function consumeIngestionBatch(
   batch: MessageBatch<IngestionQueueMessage>,
   env: Env,
-  executionCtx: ExecutionContext
+  executionCtx: ExecutionContext,
+  drain?: { flush: () => Promise<void> }
 ): Promise<void> {
   const batchRequestId = `queue:${Date.now()}`
-  const { logger } = createStandaloneRequestLogger({
-    requestId: batchRequestId,
-  })
+  const startedAt = Date.now()
+  const { logger, requestLogger } = createStandaloneRequestLogger(
+    { requestId: batchRequestId },
+    { flush: drain?.flush }
+  )
 
   logger.set({
-    service: "api",
+    service: "ingestion_queue",
     request: {
       id: batchRequestId,
+      timestamp: new Date(startedAt).toISOString(),
+      path: "/queues/ingestion/consume",
     },
-    cloud: {
-      platform: "cloudflare",
-    },
-    business: {
-      operation: "raw_ingestion_queue_consume",
-    },
+    cloud: { platform: "cloudflare" },
+    business: { operation: "consume_batch" },
   })
 
   const services = createQueueServices({
@@ -76,11 +78,23 @@ export async function consumeIngestionBatch(
     processor: service,
   })
 
-  await consumer.consumeBatch(batch)
+  let thrown: unknown
 
-  await logger.flush().catch((error: Error) => {
-    logger.emit("error", "Failed to flush ingestion queue logger", {
-      error: error.message,
-    })
-  })
+  try {
+    await consumer.consumeBatch(batch)
+  } catch (error) {
+    thrown = error
+    logger.error(error instanceof Error ? error : new Error(String(error)))
+    throw error
+  } finally {
+    const duration = Math.max(0, Date.now() - startedAt)
+    const status = thrown ? 500 : 200
+
+    requestLogger.set({ status, duration, request: { status, duration } })
+    requestLogger.emit({ status, duration, request: { status, duration } })
+
+    if (drain) {
+      executionCtx.waitUntil(drain.flush())
+    }
+  }
 }

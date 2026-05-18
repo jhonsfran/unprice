@@ -2,7 +2,7 @@
   "name": "@unprice/observability",
   "private": true,
   "version": "1.0.0",
-  "description": "",
+  "description": "Thin observability wrapper: evlog + Axiom pipeline + Unprice conventions",
   "author": "Sebastian Franco",
   "type": "module",
   "scripts": {
@@ -22,13 +22,13 @@
   "devDependencies": {
     "@types/node": "20.11.24",
     "@unprice/tsconfig": "workspace:*",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.9"
   },
   "dependencies": {
     "@t3-oss/env-core": "^0.12.0",
     "@unprice/logs": "workspace:^",
     "evlog": "2.4.1",
-    "zod": "^3.24.2",
-    "vitest": "^2.1.9"
+    "zod": "^3.24.2"
   }
 }

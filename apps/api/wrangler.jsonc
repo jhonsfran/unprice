@@ -12,8 +12,11 @@
     "prod": {
       "workers_dev": false,
       "observability": {
-        "enabled": true,
-        "head_sampling_rate": 1 // 100% of requests
+        "logs": {
+          "enabled": false,
+          "invocation_logs": true,
+          "persist": false
+        }
       },
       "route": {
         "pattern": "api.unprice.dev",

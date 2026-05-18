@@ -736,10 +736,6 @@ importers:
         version: 2.1.9(@types/node@20.19.33)(terser@5.46.0)
 
   internal/logs:
-    dependencies:
-      zod:
-        specifier: ^3.24.2
-        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: 20.11.24
@@ -794,9 +790,6 @@ importers:
       evlog:
         specifier: 2.4.1
         version: 2.4.1(express@5.2.1)(h3@1.15.5)(hono@4.11.9)(next@14.2.35(@opentelemetry/api@1.9.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(nitropack@2.13.1(@upstash/redis@1.36.2)(drizzle-orm@0.44.7(@cloudflare/workers-types@4.20260217.0)(@neondatabase/serverless@0.10.4)(@opentelemetry/api@1.9.0)(@types/pg@8.11.6)(@upstash/redis@1.36.2)(gel@2.2.0))(encoding@0.1.13)(xml2js@0.6.2))(ofetch@1.5.1)(react@18.3.1)
-      vitest:
-        specifier: ^2.1.9
-        version: 2.1.9(@types/node@20.11.24)(terser@5.46.0)
       zod:
         specifier: ^3.24.2
         version: 3.25.76
@@ -810,6 +803,9 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@20.11.24)(terser@5.46.0)
 
   internal/services:
     dependencies:
@@ -932,6 +928,9 @@ importers:
       '@unprice/email':
         specifier: workspace:^
         version: link:../email
+      '@unprice/logs':
+        specifier: workspace:^
+        version: link:../logs
       '@unprice/money':
         specifier: workspace:^
         version: link:../money

@@ -15,8 +15,8 @@ import {
   creditLinePolicySchema,
   meterConfigSchema,
 } from "@unprice/db/validators"
+import type { Logger } from "@unprice/logs"
 import { LEDGER_SCALE } from "@unprice/money"
-import type { AppLogger } from "@unprice/observability"
 import {
   AsyncMeterAggregationEngine,
   DO_IDEMPOTENCY_TTL_MS,
@@ -369,7 +369,7 @@ function minNullableExpiry(left: number | null, right: number | null): number | 
 export class EntitlementWindowDO extends DurableObject {
   private readonly analytics: Analytics
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
-  private readonly logger: AppLogger
+  private readonly logger: Logger
   private readonly ready: Promise<void>
   private readonly runtimeEnv: Env
   // Lazily constructed on the first flush+refill call so a DO that never

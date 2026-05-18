@@ -1,9 +1,9 @@
 import { Analytics } from "@unprice/analytics"
 import {
-  createDrain,
   createStandaloneRequestLogger,
-  emitWideEvent,
+  createUnpriceDrain,
   initObservability,
+  sharedSamplingConfig,
 } from "@unprice/observability"
 import { CacheService } from "@unprice/services/cache"
 import { createServiceContext } from "@unprice/services/context"
@@ -11,7 +11,7 @@ import { NoopMetrics } from "@unprice/services/metrics"
 import { env } from "../../env"
 import { db } from "../db"
 
-const drain = createDrain({
+const drain = createUnpriceDrain({
   environment: env.APP_ENV,
   token: env.AXIOM_API_TOKEN,
   dataset: env.AXIOM_DATASET,
@@ -24,15 +24,7 @@ initObservability({
     version: "0.1.0",
   },
   drain,
-  sampling: {
-    rates: {
-      info: env.APP_ENV === "production" ? 10 : 100,
-      warn: 100,
-      error: 100,
-      debug: env.APP_ENV === "production" ? 0 : 100,
-    },
-    keep: [{ status: 400 }, { duration: 1000 }],
-  },
+  sampling: sharedSamplingConfig(env.APP_ENV),
 })
 
 export const createContext = async ({
@@ -51,27 +43,15 @@ export const createContext = async ({
   }
 }) => {
   // don't register any stores - only memory
-  const cache = new CacheService(
-    {
-      waitUntil: () => {},
-    },
-    new NoopMetrics(),
-    false
-  )
+  const cache = new CacheService({ waitUntil: () => {} }, new NoopMetrics(), false)
 
   cache.init([])
 
   const path = `/trigger/tasks/${defaultFields.api}`
   const startedAt = Date.now()
   const { logger, requestLogger } = createStandaloneRequestLogger(
-    {
-      method: "POST",
-      path,
-      requestId: taskId,
-    },
-    {
-      flush: drain?.flush,
-    }
+    { method: "POST", path, requestId: taskId },
+    { flush: drain?.flush }
   )
 
   logger.set({
@@ -83,6 +63,7 @@ export const createContext = async ({
       host: "trigger.dev",
       protocol: "https",
     },
+    cloud: { platform: "trigger.dev" },
     business: {
       project_id: projectId,
       operation: defaultFields.api,
@@ -127,23 +108,9 @@ export const createContext = async ({
     requestLogger,
     flushLogs: async (status = 200) => {
       const duration = Math.max(0, Date.now() - startedAt)
-      requestLogger.set({
-        status,
-        duration,
-        request: {
-          status,
-          duration,
-        },
-      })
 
-      emitWideEvent(requestLogger, {
-        status,
-        duration,
-        request: {
-          status,
-          duration,
-        },
-      })
+      requestLogger.set({ status, duration, request: { status, duration } })
+      requestLogger.emit({ status, duration, request: { status, duration } })
 
       await logger.flush()
     },

@@ -41,6 +41,17 @@ patterns. Keep it cheap to load and useful.
   otherwise store `{}`.
 - 2026-05-17: Axiom-bound logs should normalize known camelCase aliases in
   `@unprice/observability`; keep business fields snake_case to avoid duplicate columns.
+- 2026-05-18: Keep `request.*` and `business.*` as the canonical Axiom shape; evlog may use
+  top-level summary fields for sampling, but strip exact duplicates in the observability drain.
+- 2026-05-18: Axiom events should classify normal wide events with `type: log`; reserve
+  `type: metric` for `LogdrainMetrics` payloads.
+- 2026-05-18: In `APP_ENV=development`, do not attach a custom drain; let evlog's built-in
+  pretty development logger handle console output.
+- 2026-05-18: API Axiom drain flushes should be batched through scheduled `waitUntil`;
+  reserve immediate flushes for errors, thrown DO operations, and slow requests.
+- 2026-05-18: HTTP tRPC inside Next.js should enrich the enclosing Next wide event
+  instead of emitting a second event; only standalone/RSC tRPC contexts should emit
+  their own batched procedure event.
 - 2026-05-08: Test DO eviction/recovery with a new DO instance over the same fake storage.
 - 2026-05-11: For usage concurrency, test `EntitlementWindowDO` and `IngestionAuditDO`, not only
   the service adapter.

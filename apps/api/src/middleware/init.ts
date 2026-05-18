@@ -209,11 +209,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       wallet: svcCtx.wallet,
     })
 
-    metrics.emit({
-      metric: "metric.init",
-      duration: Date.now() - performanceStart,
-    })
-
     await next()
   }
 }

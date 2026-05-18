@@ -34,6 +34,7 @@
     "@unkey/cache": "^1.5.0",
     "@unprice/analytics": "workspace:^",
     "@unprice/api": "workspace:^",
+    "@unprice/logs": "workspace:^",
     "@unprice/auth": "workspace:^",
     "@unprice/config": "workspace:^",
     "@unprice/db": "workspace:^",
