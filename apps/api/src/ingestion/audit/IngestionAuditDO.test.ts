@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
+const SQL_BOUND_PARAMETER_LIMIT = 100
+const AUDIT_INSERT_BOUND_PARAMETER_COUNT = 9
 const TEST_INGESTION_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const TEST_DO_IDEMPOTENCY_TTL_MS = TEST_INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000
 const TEST_AUDIT_RETENTION_MS = TEST_DO_IDEMPOTENCY_TTL_MS
@@ -152,6 +154,31 @@ describe("IngestionAuditDO", () => {
     expect(db.rows.size).toBe(1)
   })
 
+  it("commits large fresh batches within Durable Object SQL parameter limits", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: { send: vi.fn() },
+      } as never
+    )
+
+    const entries = createLedgerEntries(125)
+    const result = await durableObject.commit(entries)
+
+    expect(result).toEqual({
+      inserted: 125,
+      duplicates: 0,
+      conflicts: 0,
+    })
+    expect(db.rows.size).toBe(125)
+    expect(state.alarmAt).toBe(BASE_NOW + 1000)
+  })
+
   it("classifies a concurrent commit for the same idempotency key as a duplicate", async () => {
     const IngestionAuditDO = await loadIngestionAuditDO()
     const state = createDurableObjectState()
@@ -188,6 +215,30 @@ describe("IngestionAuditDO", () => {
     ])
     expect(db.rows.size).toBe(1)
     expect(state.alarmAt).toBe(BASE_NOW + 1000)
+  })
+
+  it("publishes large outbox batches within Durable Object SQL parameter limits", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const pipelineEvents = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+    testState.db = db
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: pipelineEvents,
+      } as never
+    )
+
+    await durableObject.commit(createLedgerEntries(125))
+    await durableObject.alarm()
+
+    expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
+    expect(pipelineEvents.send.mock.calls[0]?.[0]).toHaveLength(125)
+    expect([...db.rows.values()].every((row) => row.published_at === BASE_NOW)).toBe(true)
   })
 
   it("marks unpublished rows as published after successful pipeline flush", async () => {
@@ -448,11 +499,14 @@ async function loadIngestionAuditDO() {
         column: getColumnName(column),
         value,
       }),
-      inArray: (column: unknown, values: unknown[]): DrizzleCondition => ({
-        kind: "inArray",
-        column: getColumnName(column),
-        values,
-      }),
+      inArray: (column: unknown, values: unknown[]): DrizzleCondition => {
+        assertSqlBoundParameterCount(values.length)
+        return {
+          kind: "inArray",
+          column: getColumnName(column),
+          values,
+        }
+      },
       isNull: (column: unknown): DrizzleCondition => ({
         kind: "isNull",
         column: getColumnName(column),
@@ -659,6 +713,7 @@ function buildFakeDrizzle(state: FakeDbState) {
       return {
         values(value: Record<string, unknown> | Record<string, unknown>[]) {
           rows = Array.isArray(value) ? value : [value]
+          assertSqlBoundParameterCount(rows.length * AUDIT_INSERT_BOUND_PARAMETER_COUNT)
           return this
         },
         onConflictDoNothing() {
@@ -681,6 +736,9 @@ function buildFakeDrizzle(state: FakeDbState) {
         where(condition: DrizzleCondition) {
           return {
             run() {
+              assertSqlBoundParameterCount(
+                Object.keys(values).length + countConditionBoundParameters(condition)
+              )
               for (const row of state.rows.values()) {
                 if (!matchesCondition(row, condition)) {
                   continue
@@ -730,6 +788,35 @@ function matchesCondition(row: FakeAuditRow, condition: DrizzleCondition | undef
   }
 
   return false
+}
+
+function countConditionBoundParameters(condition: DrizzleCondition | undefined): number {
+  if (!condition) {
+    return 0
+  }
+
+  if (condition.kind === "and") {
+    return (condition.conditions ?? []).reduce(
+      (total, nested) => total + countConditionBoundParameters(nested),
+      0
+    )
+  }
+
+  if (condition.kind === "inArray") {
+    return condition.values?.length ?? 0
+  }
+
+  if (condition.kind === "eq" || condition.kind === "lt") {
+    return 1
+  }
+
+  return 0
+}
+
+function assertSqlBoundParameterCount(count: number): void {
+  if (count > SQL_BOUND_PARAMETER_LIMIT) {
+    throw new Error(`too many SQL variables: ${count}`)
+  }
 }
 
 function getRowValue(row: FakeAuditRow, column: string | undefined): unknown {
@@ -794,4 +881,13 @@ function createLedgerEntry(overrides: {
     resultJson: JSON.stringify({ state: "processed" }),
     status: "processed" as const,
   }
+}
+
+function createLedgerEntries(count: number) {
+  return Array.from({ length: count }, (_, index) =>
+    createLedgerEntry({
+      idempotencyKey: `idem_large_${index.toString().padStart(3, "0")}`,
+      payloadHash: `hash_large_${index.toString().padStart(3, "0")}`,
+    })
+  )
 }

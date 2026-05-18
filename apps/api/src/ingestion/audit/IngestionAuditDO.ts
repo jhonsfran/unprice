@@ -13,6 +13,13 @@ import migrations from "./drizzle/migrations"
 const TABLE_NAME = "ingestion_audit"
 
 const AUDIT_RETENTION_MS = DO_IDEMPOTENCY_TTL_MS
+const SQLITE_BOUND_PARAMETER_LIMIT = 100
+const AUDIT_INSERT_BOUND_PARAMETER_COUNT = 9
+const SQL_IN_QUERY_BATCH_SIZE = SQLITE_BOUND_PARAMETER_LIMIT
+const AUDIT_PUBLISH_UPDATE_BATCH_SIZE = SQLITE_BOUND_PARAMETER_LIMIT - 1 // published_at uses one bind
+const AUDIT_INSERT_BATCH_SIZE = Math.floor(
+  SQLITE_BOUND_PARAMETER_LIMIT / AUDIT_INSERT_BOUND_PARAMETER_COUNT
+)
 const OUTBOX_BATCH_SIZE = 500 // 500 rows
 const RETENTION_CLEANUP_BATCH_SIZE = 5000 // 5000 rows
 const ALARM_RETRY_DELAY_MS = 30_000 // 30 seconds
@@ -75,10 +82,10 @@ export class IngestionAuditDO extends DurableObject {
       return []
     }
 
-    const BATCH_SIZE = 500
+    const uniqueKeys = unique(idempotencyKeys)
     const result: string[] = []
-    for (let i = 0; i < idempotencyKeys.length; i += BATCH_SIZE) {
-      const batch = idempotencyKeys.slice(i, i + BATCH_SIZE)
+    for (let i = 0; i < uniqueKeys.length; i += SQL_IN_QUERY_BATCH_SIZE) {
+      const batch = uniqueKeys.slice(i, i + SQL_IN_QUERY_BATCH_SIZE)
       const rows = this.db
         .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
         .from(ingestionAuditTable)
@@ -116,13 +123,12 @@ export class IngestionAuditDO extends DurableObject {
     let duplicates = 0
     let conflicts = 0
 
-    // SQLite has a limit of 999 bound parameters, so we batch the lookup
+    // SQLite-backed Durable Objects allow at most 100 bound parameters per query.
     const uniqueKeys = unique(entries.map((entry) => entry.idempotencyKey))
-    const BATCH_SIZE = 500
     const payloadHashesByKey = new Map<string, string>()
 
-    for (let i = 0; i < uniqueKeys.length; i += BATCH_SIZE) {
-      const batch = uniqueKeys.slice(i, i + BATCH_SIZE)
+    for (let i = 0; i < uniqueKeys.length; i += SQL_IN_QUERY_BATCH_SIZE) {
+      const batch = uniqueKeys.slice(i, i + SQL_IN_QUERY_BATCH_SIZE)
       const rows = this.db
         .select({
           idempotencyKey: ingestionAuditTable.idempotencyKey,
@@ -165,10 +171,8 @@ export class IngestionAuditDO extends DurableObject {
       inserted++
     }
 
-    // SQLite has a limit of 999 bound parameters; batch inserts to stay under
-    const INSERT_BATCH_SIZE = 100 // 8 columns × 100 = 800 params, well under 999
-    for (let i = 0; i < rowsToInsert.length; i += INSERT_BATCH_SIZE) {
-      const batch = rowsToInsert.slice(i, i + INSERT_BATCH_SIZE)
+    for (let i = 0; i < rowsToInsert.length; i += AUDIT_INSERT_BATCH_SIZE) {
+      const batch = rowsToInsert.slice(i, i + AUDIT_INSERT_BATCH_SIZE)
       this.db
         .insert(ingestionAuditTable)
         .values(batch)
@@ -250,9 +254,8 @@ export class IngestionAuditDO extends DurableObject {
       const now = Date.now()
       const idempotencyKeys = rows.map((row) => row.idempotencyKey)
       if (idempotencyKeys.length > 0) {
-        const UPDATE_BATCH_SIZE = 500
-        for (let i = 0; i < idempotencyKeys.length; i += UPDATE_BATCH_SIZE) {
-          const batch = idempotencyKeys.slice(i, i + UPDATE_BATCH_SIZE)
+        for (let i = 0; i < idempotencyKeys.length; i += AUDIT_PUBLISH_UPDATE_BATCH_SIZE) {
+          const batch = idempotencyKeys.slice(i, i + AUDIT_PUBLISH_UPDATE_BATCH_SIZE)
           this.db
             .update(ingestionAuditTable)
             .set({

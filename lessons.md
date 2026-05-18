@@ -74,6 +74,8 @@ patterns. Keep it cheap to load and useful.
   load.
 - 2026-05-17: IngestionAuditDO commit/publish paths should batch indexed key lookups and
   published-at updates; per-entry SQL loops inflate DO wall time under queue batches.
+- 2026-05-18: Cloudflare SQLite-backed DO queries allow only 100 bound parameters; batch
+  `IngestionAuditDO` inserts by column count and remember update `SET` values also consume binds.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
 
