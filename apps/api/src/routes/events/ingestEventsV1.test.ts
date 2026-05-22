@@ -115,7 +115,14 @@ describe("ingestEventsV1 route", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    const response = await app.fetch(buildRequest(), env, executionCtx)
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        timestamp: Date.now(),
+      }),
+      env,
+      executionCtx
+    )
     expect(response.status).toBe(202)
 
     const selectedQueue =
@@ -237,7 +244,14 @@ describe("ingestEventsV1 route", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    const response = await app.fetch(buildRequest(), env, executionCtx)
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        timestamp: Date.now(),
+      }),
+      env,
+      executionCtx
+    )
     expect(response.status).toBe(202)
 
     const selectedQueue =
@@ -364,7 +378,14 @@ describe("ingestEventsV1 route", () => {
     env.QUEUE_SHARD_0.send = vi.fn().mockRejectedValue(new Error("queue down"))
     env.QUEUE_SHARD_1.send = vi.fn().mockRejectedValue(new Error("queue down"))
 
-    const response = await app.fetch(buildRequest(), env, executionCtx)
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        timestamp: Date.now(),
+      }),
+      env,
+      executionCtx
+    )
 
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual(

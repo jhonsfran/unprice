@@ -270,11 +270,6 @@ export function buildIngestionQueueMessage(params: {
     timestamp,
     properties: body.properties,
   })
-
-  throw new UnpriceApiError({
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Failed to enqueue ingestion event",
-  })
 }
 
 export function resolveRequestCustomerId(params: {
@@ -306,11 +301,6 @@ export function logEventTooOldRejection(params: {
     eventAgeMs: params.now - params.eventTimestamp,
     maxEventAgeMs: params.maxEventAgeMs,
     rejectionReason: "EVENT_TOO_OLD",
-  })
-
-  throw new UnpriceApiError({
-    code: "INTERNAL_SERVER_ERROR",
-    message: "Failed to enqueue ingestion event",
   })
 }
 
