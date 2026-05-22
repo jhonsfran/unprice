@@ -262,6 +262,38 @@ const enforcementStateInputSchema = z.object({
 type ApplyInput = z.infer<typeof applyInputSchema>
 type ApplyBatchInput = z.infer<typeof applyBatchInputSchema>
 type ApplyGrantInput = z.infer<typeof activeGrantSchema>
+
+export const entitlementWindowStatusSchema = z.object({
+  durableObjectId: z.string(),
+  outboxCount: z.number().int(),
+  nextAlarmAt: z.number().nullable(),
+  lastIdempotencyCleanupAt: z.number().nullable(),
+  walletReservation: z
+    .object({
+      reservationId: z.string().nullable(),
+      projectId: z.string().nullable(),
+      customerId: z.string().nullable(),
+      currency: z.string().nullable(),
+      reservationEndAt: z.number().nullable(),
+      consumedAmount: z.number().int(),
+      flushedAmount: z.number().int(),
+      unflushedAmount: z.number().int(),
+      allocationAmount: z.number().int(),
+      refillInFlight: z.boolean(),
+      flushSeq: z.number().int(),
+      pendingFlushSeq: z.number().int().nullable(),
+      pendingFlushFinal: z.boolean(),
+      pendingFlushAmount: z.number().int().nullable(),
+      pendingRefillAmount: z.number().int(),
+      lastEventAt: z.number().nullable(),
+      lastFlushedAt: z.number().nullable(),
+      deletionRequested: z.boolean(),
+      recoveryRequired: z.boolean(),
+    })
+    .nullable(),
+})
+
+export type EntitlementWindowStatus = z.infer<typeof entitlementWindowStatusSchema>
 type EnforcementStateInput = z.infer<typeof enforcementStateInputSchema>
 type ActiveGrantInput = ApplyGrantInput & {
   cadenceEffectiveAt: number
@@ -1152,6 +1184,43 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
+
+
+  public async getStatus(): Promise<EntitlementWindowStatus> {
+    await this.ready
+
+    const window = this.readWalletReservation(this.db)
+
+    return {
+      durableObjectId: this.ctx.id.toString(),
+      outboxCount: this.getOutboxCount(),
+      nextAlarmAt: this.nextAlarmAt ?? (await this.ctx.storage.getAlarm()),
+      lastIdempotencyCleanupAt: this.lastIdempotencyCleanupAt,
+      walletReservation: window
+        ? {
+            reservationId: window.reservationId,
+            projectId: window.projectId,
+            customerId: window.customerId,
+            currency: window.currency,
+            reservationEndAt: window.reservationEndAt,
+            consumedAmount: window.consumedAmount,
+            flushedAmount: window.flushedAmount,
+            unflushedAmount: Math.max(0, window.consumedAmount - window.flushedAmount),
+            allocationAmount: window.allocationAmount,
+            refillInFlight: window.refillInFlight,
+            flushSeq: window.flushSeq,
+            pendingFlushSeq: window.pendingFlushSeq,
+            pendingFlushFinal: window.pendingFlushFinal,
+            pendingFlushAmount: window.pendingFlushAmount,
+            pendingRefillAmount: window.pendingRefillAmount,
+            lastEventAt: window.lastEventAt,
+            lastFlushedAt: window.lastFlushedAt,
+            deletionRequested: window.deletionRequested,
+            recoveryRequired: window.recoveryRequired,
+          }
+        : null,
+    }
+  }
   async alarm(): Promise<void> {
     await this.ready
     this.nextAlarmAt = null

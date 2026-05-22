@@ -1421,6 +1421,24 @@ describe("EntitlementWindowDO", () => {
     expect(payloads.map((payload) => payload.feature_slug)).toEqual(["api_calls", "api_calls"])
   })
 
+
+
+  it("getStatus returns operational metadata without mutating state", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    testState.db = createFakeDbState()
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.getStatus()
+
+    expect(result).toEqual({
+      durableObjectId: state.id.toString(),
+      outboxCount: 0,
+      nextAlarmAt: null,
+      lastIdempotencyCleanupAt: null,
+      walletReservation: null,
+    })
+  })
   it("getEnforcementState returns safe defaults on a fresh DO", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()

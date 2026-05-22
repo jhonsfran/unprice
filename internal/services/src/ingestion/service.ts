@@ -130,6 +130,34 @@ export type EntitlementWindowApplyInput = {
   projectId: string
 }
 
+export type EntitlementWindowStatus = {
+  durableObjectId: string
+  lastIdempotencyCleanupAt: number | null
+  nextAlarmAt: number | null
+  outboxCount: number
+  walletReservation: {
+    allocationAmount: number
+    consumedAmount: number
+    currency: string | null
+    customerId: string | null
+    deletionRequested: boolean
+    flushedAmount: number
+    flushSeq: number
+    lastEventAt: number | null
+    lastFlushedAt: number | null
+    pendingFlushAmount: number | null
+    pendingFlushFinal: boolean
+    pendingFlushSeq: number | null
+    pendingRefillAmount: number
+    projectId: string | null
+    recoveryRequired: boolean
+    refillInFlight: boolean
+    reservationEndAt: number | null
+    reservationId: string | null
+    unflushedAmount: number
+  } | null
+}
+
 export type EntitlementWindowController = {
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
   applyBatch?: (input: {
@@ -141,6 +169,7 @@ export type EntitlementWindowController = {
     projectId: string
   }) => Promise<{ results: EntitlementWindowApplyBatchResult[] }>
   getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
+  getStatus?: () => Promise<EntitlementWindowStatus>
 }
 
 export interface EntitlementWindowClient {
@@ -1487,3 +1516,4 @@ function toResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConf
     resetAnchor: "dayOfCreation",
   }
 }
+

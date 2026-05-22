@@ -76,7 +76,7 @@ describe("ingestEventsV1 helpers", () => {
     expect(generateEventId(requestBody.timestamp)).toBe("evt_01ARYZ6S41TSV4RRFFQ69G5FAV")
   })
 
-  it("retries queue send and logs an error when all attempts fail", async () => {
+  it("retries queue send and throws when all attempts fail", async () => {
     const queue: Pick<Queue<IngestionQueueMessage>, "send"> = {
       send: vi.fn().mockRejectedValue(new Error("queue down")),
     }
@@ -85,7 +85,7 @@ describe("ingestEventsV1 helpers", () => {
       warn: vi.fn(),
     }
 
-    await safeSendToQueue({
+    await expect(safeSendToQueue({
       logger,
       queue: queue as Queue<IngestionQueueMessage>,
       message: {
@@ -100,7 +100,7 @@ describe("ingestEventsV1 helpers", () => {
         timestamp: Date.now(),
         properties: {},
       },
-    })
+    })).rejects.toBeInstanceOf(UnpriceApiError)
 
     expect(queue.send).toHaveBeenCalledTimes(3)
     expect(logger.warn).toHaveBeenCalledTimes(3)
@@ -113,11 +113,9 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+    const { app, env, executionCtx } = createTestApp()
 
     const response = await app.fetch(buildRequest(), env, executionCtx)
-    await Promise.all(waitUntilPromises)
-
     expect(response.status).toBe(202)
 
     const selectedQueue =
@@ -140,7 +138,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+    const { app, env, executionCtx } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -150,8 +148,6 @@ describe("ingestEventsV1 route", () => {
       env,
       executionCtx
     )
-    await Promise.all(waitUntilPromises)
-
     expect(response.status).toBe(202)
 
     const selectedQueue =
@@ -239,11 +235,9 @@ describe("ingestEventsV1 route", () => {
     vi.setSystemTime(new Date(requestBody.timestamp))
     authMocks.resolveContextProjectId.mockResolvedValue("proj_resolved_456")
 
-    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+    const { app, env, executionCtx } = createTestApp()
 
     const response = await app.fetch(buildRequest(), env, executionCtx)
-    await Promise.all(waitUntilPromises)
-
     expect(response.status).toBe(202)
 
     const selectedQueue =
@@ -260,7 +254,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+    const { app, env, executionCtx } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -270,8 +264,6 @@ describe("ingestEventsV1 route", () => {
       env,
       executionCtx
     )
-    await Promise.all(waitUntilPromises)
-
     expect(response.status).toBe(202)
 
     const selectedQueue =
@@ -289,7 +281,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+    const { app, env, executionCtx } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -299,8 +291,6 @@ describe("ingestEventsV1 route", () => {
       env,
       executionCtx
     )
-    await Promise.all(waitUntilPromises)
-
     expect(response.status).toBe(202)
 
     const selectedQueue =
@@ -319,7 +309,7 @@ describe("ingestEventsV1 route", () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx, waitUntilPromises } = createTestApp()
+    const { app, env, executionCtx } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -329,8 +319,6 @@ describe("ingestEventsV1 route", () => {
       env,
       executionCtx
     )
-    await Promise.all(waitUntilPromises)
-
     expect(response.status).toBe(202)
 
     const selectedQueue =
@@ -370,6 +358,26 @@ describe("ingestEventsV1 route", () => {
       })
     )
   })
+
+  it("does not return 202 when queue send fails permanently after retries", async () => {
+    const { app, env, executionCtx } = createTestApp()
+    env.QUEUE_SHARD_0.send = vi.fn().mockRejectedValue(new Error("queue down"))
+    env.QUEUE_SHARD_1.send = vi.fn().mockRejectedValue(new Error("queue down"))
+
+    const response = await app.fetch(buildRequest(), env, executionCtx)
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "INTERNAL_SERVER_ERROR",
+      })
+    )
+
+    const selectedQueue =
+      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
+    expect(selectedQueue.send).toHaveBeenCalledTimes(3)
+  })
+
 })
 
 function createTestApp() {
