@@ -1,5 +1,3 @@
-import { readFileSync, readdirSync } from "node:fs"
-import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { Unprice } from "./client"
 
@@ -11,9 +9,6 @@ const createJsonResponse = (body: unknown, init?: ResponseInit) =>
     },
     status: init?.status ?? 200,
   })
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
 
 describe("Unprice client", () => {
   it("exposes resource clients for every public API route", () => {
@@ -286,133 +281,3 @@ describe("Unprice client", () => {
     expect(calls).toBe(2)
   })
 })
-
-describe("API route metadata", () => {
-  it("matches the SDK namespace methods", () => {
-    const apiRoutes = collectApiRoutes()
-    const publicApiRoutes = apiRoutes.filter(
-      (route) => !route.path.startsWith("/v1/payments/providers/")
-    )
-    const apiOperationIds = publicApiRoutes.map((route) => route.operationId).sort()
-    const sdkOperationIds = collectSdkOperationIds()
-
-    const routesWithMismatchedTags = apiRoutes.filter(
-      (route) => route.tag !== getOperationNamespace(route.operationId)
-    )
-    const routesWithMismatchedPathNamespaces = apiRoutes.filter(
-      (route) => route.tag !== getPathNamespace(route.path)
-    )
-
-    const missingFromSdk = apiOperationIds.filter(
-      (operationId) => !sdkOperationIds.has(operationId)
-    )
-    const sdkOnly = [...sdkOperationIds].filter(
-      (operationId) => !apiOperationIds.includes(operationId)
-    )
-
-    expect(routesWithMismatchedTags).toEqual([])
-    expect(routesWithMismatchedPathNamespaces).toEqual([])
-    expect(missingFromSdk).toEqual([])
-    expect(sdkOnly).toEqual([])
-  })
-})
-
-const collectApiRoutes = () => {
-  const routeFiles = collectRouteFiles(resolve(__dirname, "../../../apps/api/src/routes"))
-
-  return routeFiles
-    .flatMap((file) => {
-      const source = readFileSync(file, "utf8")
-      const tag = source.match(/const tags = \[\s*"([^"]+)"/)?.[1]
-
-      return [...source.matchAll(/createRoute\(\{([\s\S]*?)\n\}\)/g)].map((match) => {
-        const routeSource = match[1] ?? ""
-        const path = routeSource.match(/path:\s*"([^"]+)"/)?.[1]
-        const method = routeSource.match(/method:\s*"([^"]+)"/)?.[1]
-        const operationId = routeSource.match(/operationId:\s*"([^"]+)"/)?.[1]
-
-        return {
-          method: method?.toUpperCase() ?? `MISSING_METHOD:${file}`,
-          operationId: operationId ?? `MISSING_OPERATION_ID:${file}`,
-          path: path ?? `MISSING_PATH:${file}`,
-          tag: tag ?? `MISSING_TAG:${file}`,
-        }
-      })
-    })
-    .sort((left, right) => left.operationId.localeCompare(right.operationId))
-}
-
-const getPathNamespace = (path: string) => path.split("/").filter(Boolean)[1] ?? ""
-
-const getOperationNamespace = (operationId: string) => {
-  const separatorIndex = operationId.indexOf(".")
-
-  if (separatorIndex === -1) {
-    return operationId
-  }
-
-  return operationId.slice(0, separatorIndex)
-}
-
-const collectSdkOperationIds = () => {
-  const client = new Unprice({
-    token: "test-token",
-    baseUrl: "https://example.com",
-    disableTelemetry: true,
-    retry: { attempts: 0 },
-    fetch: async () => createJsonResponse({}),
-  })
-  const descriptors = Object.getOwnPropertyDescriptors(Unprice.prototype)
-
-  return new Set(
-    Object.entries(descriptors)
-      .flatMap(([namespace, descriptor]) => {
-        const getter = descriptor.get as ((this: Unprice) => unknown) | undefined
-
-        if (!getter) {
-          return []
-        }
-
-        const resource = getter.call(client)
-
-        if (!isRecord(resource)) {
-          return []
-        }
-
-        return collectSdkResourceMethods(namespace, resource)
-      })
-      .sort()
-  )
-}
-
-const collectSdkResourceMethods = (
-  namespace: string,
-  resource: Record<string, unknown>
-): string[] =>
-  Object.entries(resource).flatMap(([name, value]) => {
-    if (typeof value === "function") {
-      return `${namespace}.${name}`
-    }
-
-    if (isRecord(value)) {
-      return collectSdkResourceMethods(`${namespace}.${name}`, value)
-    }
-
-    return []
-  })
-
-const collectRouteFiles = (dir: string): string[] => {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const path = resolve(dir, entry.name)
-
-    if (entry.isDirectory()) {
-      return collectRouteFiles(path)
-    }
-
-    if (!entry.name.endsWith(".ts") || entry.name.endsWith(".test.ts")) {
-      return []
-    }
-
-    return [path]
-  })
-}

@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -11,16 +12,18 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 const tags = ["events"]
 
 const route = createRoute({
-  path: "/v1/events/entitlement-window/status",
+  path: "/v1/entitlements/status",
   operationId: "events.entitlementWindowStatus",
   summary: "inspect entitlement window operational status",
+  // this endpoint is not public
+  hide: env.NODE_ENV === "production",
   description:
     "Returns a non-mutating operational status snapshot for a specific entitlement window durable object.",
   method: "get",
   tags,
   request: {
     query: z.object({
-      customerEntitlementId: z.string().openapi({
+      entitlementId: z.string().openapi({
         description: "Customer entitlement id",
         example: "ce_123",
       }),
@@ -38,7 +41,7 @@ const route = createRoute({
 
 export const registerGetEntitlementWindowStatusV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerEntitlementId, customerId } = c.req.valid("query")
+    const { entitlementId, customerId } = c.req.valid("query")
     const key = await keyAuth(c)
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
@@ -48,7 +51,7 @@ export const registerGetEntitlementWindowStatusV1 = (app: App) =>
     })
 
     const stub = windowClient.getEntitlementWindowStub({
-      customerEntitlementId,
+      customerEntitlementId: entitlementId,
       customerId,
       projectId,
     })
