@@ -1516,4 +1516,3 @@ function toResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConf
     resetAnchor: "dayOfCreation",
   }
 }
-

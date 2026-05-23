@@ -85,22 +85,24 @@ describe("ingestEventsV1 helpers", () => {
       warn: vi.fn(),
     }
 
-    await expect(safeSendToQueue({
-      logger,
-      queue: queue as Queue<IngestionQueueMessage>,
-      message: {
-        version: 1,
-        projectId: "proj_123",
-        customerId: "cus_123",
-        requestId: "req_123",
-        receivedAt: Date.now(),
-        idempotencyKey: "idem_123",
-        id: "evt_123",
-        slug: "tokens_used",
-        timestamp: Date.now(),
-        properties: {},
-      },
-    })).rejects.toBeInstanceOf(UnpriceApiError)
+    await expect(
+      safeSendToQueue({
+        logger,
+        queue: queue as Queue<IngestionQueueMessage>,
+        message: {
+          version: 1,
+          projectId: "proj_123",
+          customerId: "cus_123",
+          requestId: "req_123",
+          receivedAt: Date.now(),
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "tokens_used",
+          timestamp: Date.now(),
+          properties: {},
+        },
+      })
+    ).rejects.toBeInstanceOf(UnpriceApiError)
 
     expect(queue.send).toHaveBeenCalledTimes(3)
     expect(logger.warn).toHaveBeenCalledTimes(3)
@@ -398,7 +400,6 @@ describe("ingestEventsV1 route", () => {
       selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
     expect(selectedQueue.send).toHaveBeenCalledTimes(3)
   })
-
 })
 
 function createTestApp() {

@@ -1421,8 +1421,6 @@ describe("EntitlementWindowDO", () => {
     expect(payloads.map((payload) => payload.feature_slug)).toEqual(["api_calls", "api_calls"])
   })
 
-
-
   it("getStatus returns operational metadata without mutating state", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
