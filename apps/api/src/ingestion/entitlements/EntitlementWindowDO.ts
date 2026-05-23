@@ -1184,8 +1184,6 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-
-
   public async getStatus(): Promise<EntitlementWindowStatus> {
     await this.ready
 

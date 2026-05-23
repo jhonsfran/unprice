@@ -4,8 +4,8 @@ import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { CloudflareEntitlementWindowClient } from "~/ingestion/entitlements/client"
 import { entitlementWindowStatusSchema } from "~/ingestion/entitlements/EntitlementWindowDO"
+import { CloudflareEntitlementWindowClient } from "~/ingestion/entitlements/client"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["events"]
