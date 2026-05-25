@@ -8,6 +8,20 @@ import type { HonoEnv } from "~/hono/env"
 
 // verify is sensitive to latency
 const API_KEY_RATE_LIMIT_BYPASS_PATHS = new Set(["/v1/entitlements/verify"])
+const LIVE_API_KEY_PATTERN = /^unprice_live_[1-9A-HJ-NP-Za-km-z]{22}$/
+const LOCAL_DEV_API_KEY_PATTERN = /^unprice_dev_[A-Za-z0-9_-]+$/
+
+function isLocalhostUrl(url: string): boolean {
+  const { hostname } = new URL(url)
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+}
+
+export function isValidApiKeyShape(value: string, opts: { allowDevKey?: boolean } = {}): boolean {
+  return (
+    LIVE_API_KEY_PATTERN.test(value) ||
+    (opts.allowDevKey === true && LOCAL_DEV_API_KEY_PATTERN.test(value))
+  )
+}
 
 /**
  * keyAuth takes the bearer token from the request and verifies the key
@@ -21,6 +35,13 @@ export async function keyAuth(c: Context<HonoEnv>) {
 
   if (!authorization) {
     throw new UnpriceApiError({ code: "UNAUTHORIZED", message: "key required" })
+  }
+
+  if (
+    c.env.APP_ENV === "production" &&
+    !isValidApiKeyShape(authorization, { allowDevKey: isLocalhostUrl(c.req.url) })
+  ) {
+    throw new UnpriceApiError({ code: "UNAUTHORIZED", message: "key not found" })
   }
 
   const { apikey } = c.get("services")

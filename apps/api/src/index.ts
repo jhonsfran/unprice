@@ -38,6 +38,7 @@ import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
 import { consumeIngestionBatch } from "~/ingestion/service"
+import { knownRoute } from "~/middleware/known-route"
 import { obs } from "~/middleware/obs"
 import { apiDrain, apiEvlog } from "~/observability"
 import { registerGetInvoiceV1 } from "./routes/invoices/getInvoiceV1"
@@ -46,6 +47,10 @@ import { registerGetWalletV1 } from "./routes/wallet/getWalletV1"
 const app = newApp()
 
 app.use(timing())
+app.use(
+  "*",
+  knownRoute(() => app.routes)
+)
 app.use(serveEmojiFavicon("◎"))
 app.use("*", cors())
 app.use("*", apiEvlog)

@@ -1,7 +1,7 @@
 import type { ApiKeyExtended } from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
 import { UnpriceApiError } from "~/errors"
-import { validateIsAllowedToAccessProject } from "./key"
+import { isValidApiKeyShape, validateIsAllowedToAccessProject } from "./key"
 
 const baseKey = {
   projectId: "proj_key",
@@ -58,5 +58,22 @@ describe("validateIsAllowedToAccessProject", () => {
     })
 
     expect(projectId).toBe("proj_other")
+  })
+})
+
+describe("isValidApiKeyShape", () => {
+  it("accepts generated live key shape", () => {
+    expect(isValidApiKeyShape("unprice_live_123456789ABCDEFGHJKLMN")).toBe(true)
+  })
+
+  it("accepts local dev keys only when explicitly allowed", () => {
+    expect(isValidApiKeyShape("unprice_dev_1234567890")).toBe(false)
+    expect(isValidApiKeyShape("unprice_dev_1234567890", { allowDevKey: true })).toBe(true)
+  })
+
+  it("rejects malformed and non-base58 keys", () => {
+    expect(isValidApiKeyShape("sk_test_123")).toBe(false)
+    expect(isValidApiKeyShape("unprice_live_123")).toBe(false)
+    expect(isValidApiKeyShape("unprice_live_123456789ABCDEFGH0OIlM")).toBe(false)
   })
 })
