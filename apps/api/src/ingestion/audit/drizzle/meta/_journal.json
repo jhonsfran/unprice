@@ -15,6 +15,20 @@
       "when": 1779050074203,
       "tag": "0001_crazy_marvel_zombies",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780062212738,
+      "tag": "0002_nebulous_skin",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1780067174336,
+      "tag": "0003_sharp_tombstone",
+      "breakpoints": true
     }
   ]
 }

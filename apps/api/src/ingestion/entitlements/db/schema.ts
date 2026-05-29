@@ -6,23 +6,22 @@ import type {
 } from "@unprice/db/validators"
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
-export const meterFactsOutboxTable = sqliteTable("meter_facts_outbox", {
+export const meterFactsOutboxBatchesTable = sqliteTable("meter_facts_outbox_batches", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  payload: text("payload").notNull(),
+  payloads: text("payloads").notNull(),
   currency: text("currency").notNull(),
+  createdAt: integer("created_at").notNull(),
 })
 
-export const idempotencyKeysTable = sqliteTable(
-  "idempotency_keys",
+export const idempotencyKeyBatchesTable = sqliteTable(
+  "idempotency_key_batches",
   {
-    eventId: text("event_id").primaryKey(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     createdAt: integer("created_at").notNull(),
-    allowed: integer("allowed", { mode: "boolean" }).notNull(),
-    deniedReason: text("denied_reason"),
-    denyMessage: text("deny_message"),
+    entries: text("entries").notNull(),
   },
   (table) => ({
-    createdAtIdx: index("idx_idempotency_keys_created_at").on(table.createdAt),
+    createdAtIdx: index("idx_idempotency_key_batches_created_at").on(table.createdAt),
   })
 )
 
@@ -109,8 +108,8 @@ export const walletReservationTable = sqliteTable("wallet_reservation", {
 })
 
 export const schema = {
-  meterFactsOutboxTable,
-  idempotencyKeysTable,
+  meterFactsOutboxBatchesTable,
+  idempotencyKeyBatchesTable,
   entitlementConfigTable,
   grantsTable,
   grantWindowsTable,

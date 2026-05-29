@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 const SQL_BOUND_PARAMETER_LIMIT = 100
-const AUDIT_INSERT_BOUND_PARAMETER_COUNT = 9
 const TEST_INGESTION_MAX_EVENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
 const TEST_DO_IDEMPOTENCY_TTL_MS = TEST_INGESTION_MAX_EVENT_AGE_MS + 7 * 24 * 60 * 60 * 1000
 const TEST_AUDIT_RETENTION_MS = TEST_DO_IDEMPOTENCY_TTL_MS
@@ -15,20 +14,16 @@ type DrizzleCondition = {
   conditions?: DrizzleCondition[]
 }
 
-type FakeAuditRow = {
-  audit_payload_json: string
-  canonical_audit_id: string
+type FakeAuditBatchRow = {
+  id: number
   first_seen_at: number
-  idempotency_key: string
-  payload_hash: string
+  created_at: number
+  entries_json: string
   published_at: number | null
-  rejection_reason: string | null
-  result_json: string
-  status: "processed" | "rejected"
 }
 
 type FakeDbState = {
-  rows: Map<string, FakeAuditRow>
+  batchRows: FakeAuditBatchRow[]
 }
 
 type FakeDurableObjectState = {
@@ -114,7 +109,8 @@ describe("IngestionAuditDO", () => {
       duplicates: 0,
       conflicts: 0,
     })
-    expect(db.rows.size).toBe(1)
+    expect(db.batchRows).toHaveLength(1)
+    expect(JSON.parse(db.batchRows[0]!.entries_json)).toHaveLength(1)
     expect(state.alarmAt).toBe(BASE_NOW + 1000)
   })
 
@@ -151,7 +147,8 @@ describe("IngestionAuditDO", () => {
       duplicates: 1,
       conflicts: 1,
     })
-    expect(db.rows.size).toBe(1)
+    expect(db.batchRows).toHaveLength(1)
+    expect(JSON.parse(db.batchRows[0]!.entries_json)).toHaveLength(1)
   })
 
   it("commits large fresh batches within Durable Object SQL parameter limits", async () => {
@@ -175,7 +172,8 @@ describe("IngestionAuditDO", () => {
       duplicates: 0,
       conflicts: 0,
     })
-    expect(db.rows.size).toBe(125)
+    expect(db.batchRows).toHaveLength(1)
+    expect(JSON.parse(db.batchRows[0]!.entries_json)).toHaveLength(125)
     expect(state.alarmAt).toBe(BASE_NOW + 1000)
   })
 
@@ -213,8 +211,48 @@ describe("IngestionAuditDO", () => {
       { inserted: 1, duplicates: 0, conflicts: 0 },
       { inserted: 0, duplicates: 1, conflicts: 0 },
     ])
-    expect(db.rows.size).toBe(1)
+    expect(db.batchRows).toHaveLength(1)
     expect(state.alarmAt).toBe(BASE_NOW + 1000)
+  })
+
+  it("recovers compact audit dedupe after Durable Object eviction", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const db = createFakeDbState()
+    testState.db = db
+
+    const firstObject = new IngestionAuditDO(
+      createDurableObjectState() as never,
+      {
+        PIPELINE_EVENTS: { send: vi.fn() },
+      } as never
+    )
+    const entry = createLedgerEntry({
+      idempotencyKey: "idem_recovered",
+      payloadHash: "hash_recovered",
+    })
+
+    await firstObject.commit([entry])
+
+    const recoveredObject = new IngestionAuditDO(
+      createDurableObjectState() as never,
+      {
+        PIPELINE_EVENTS: { send: vi.fn() },
+      } as never
+    )
+    const replay = await recoveredObject.commit([entry])
+
+    expect(replay).toEqual({ inserted: 0, duplicates: 1, conflicts: 0 })
+    expect(db.batchRows).toHaveLength(1)
+
+    const conflict = await recoveredObject.commit([
+      createLedgerEntry({
+        idempotencyKey: "idem_recovered",
+        payloadHash: "hash_conflict",
+      }),
+    ])
+
+    expect(conflict).toEqual({ inserted: 0, duplicates: 0, conflicts: 1 })
+    expect(db.batchRows).toHaveLength(1)
   })
 
   it("publishes large outbox batches within Durable Object SQL parameter limits", async () => {
@@ -238,7 +276,7 @@ describe("IngestionAuditDO", () => {
 
     expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
     expect(pipelineEvents.send.mock.calls[0]?.[0]).toHaveLength(125)
-    expect([...db.rows.values()].every((row) => row.published_at === BASE_NOW)).toBe(true)
+    expect(db.batchRows.every((row) => row.published_at === BASE_NOW)).toBe(true)
   })
 
   it("marks unpublished rows as published after successful pipeline flush", async () => {
@@ -267,7 +305,7 @@ describe("IngestionAuditDO", () => {
     await durableObject.alarm()
 
     expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
-    expect(db.rows.get("idem_publish")?.published_at).toBe(BASE_NOW)
+    expect(db.batchRows[0]?.published_at).toBe(BASE_NOW)
   })
 
   it("publishes to the local pipeline URL in development", async () => {
@@ -312,7 +350,7 @@ describe("IngestionAuditDO", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
     expect(JSON.parse(String(request?.body))).toEqual([{ idempotency_key: "idem_local" }])
     expect(pipelineEvents.send).not.toHaveBeenCalled()
-    expect(db.rows.get("idem_local")?.published_at).toBe(BASE_NOW)
+    expect(db.batchRows[0]?.published_at).toBe(BASE_NOW)
   })
 
   it("keeps rows unpublished and retries alarm when pipeline send fails", async () => {
@@ -340,7 +378,7 @@ describe("IngestionAuditDO", () => {
 
     await durableObject.alarm()
 
-    expect(db.rows.get("idem_retry")?.published_at).toBeNull()
+    expect(db.batchRows[0]?.published_at).toBeNull()
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
@@ -373,58 +411,42 @@ describe("IngestionAuditDO", () => {
     await durableObject.alarm()
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(db.rows.get("idem_local_retry")?.published_at).toBeNull()
+    expect(db.batchRows[0]?.published_at).toBeNull()
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
-  it("cleanup removes only old published rows", async () => {
+  it("cleanup removes only old published batch rows", async () => {
     const IngestionAuditDO = await loadIngestionAuditDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
 
-    db.rows.set("old_published", {
-      idempotency_key: "old_published",
-      canonical_audit_id: "canonical_old_published",
-      payload_hash: "hash_old_published",
-      status: "processed",
-      rejection_reason: null,
-      result_json: '{"state":"processed"}',
-      audit_payload_json: '{"idempotency_key":"old_published"}',
+    db.batchRows.push({
+      id: 1,
       first_seen_at: BASE_NOW - TEST_AUDIT_RETENTION_MS - 1,
+      created_at: BASE_NOW - TEST_AUDIT_RETENTION_MS - 1,
+      entries_json: "[]",
       published_at: BASE_NOW - 1,
     })
-    db.rows.set("old_unpublished", {
-      idempotency_key: "old_unpublished",
-      canonical_audit_id: "canonical_old_unpublished",
-      payload_hash: "hash_old_unpublished",
-      status: "processed",
-      rejection_reason: null,
-      result_json: '{"state":"processed"}',
-      audit_payload_json: '{"idempotency_key":"old_unpublished"}',
+    db.batchRows.push({
+      id: 2,
       first_seen_at: BASE_NOW - TEST_AUDIT_RETENTION_MS - 1,
+      created_at: BASE_NOW - TEST_AUDIT_RETENTION_MS - 1,
+      entries_json: "[]",
       published_at: null,
     })
-    db.rows.set("fresh_published", {
-      idempotency_key: "fresh_published",
-      canonical_audit_id: "canonical_fresh_published",
-      payload_hash: "hash_fresh_published",
-      status: "processed",
-      rejection_reason: null,
-      result_json: '{"state":"processed"}',
-      audit_payload_json: '{"idempotency_key":"fresh_published"}',
+    db.batchRows.push({
+      id: 3,
       first_seen_at: BASE_NOW - 1000,
+      created_at: BASE_NOW - 1000,
+      entries_json: "[]",
       published_at: BASE_NOW - 1,
     })
-    db.rows.set("within_retention_margin", {
-      idempotency_key: "within_retention_margin",
-      canonical_audit_id: "canonical_within_retention_margin",
-      payload_hash: "hash_within_retention_margin",
-      status: "processed",
-      rejection_reason: null,
-      result_json: '{"state":"processed"}',
-      audit_payload_json: '{"idempotency_key":"within_retention_margin"}',
+    db.batchRows.push({
+      id: 4,
       first_seen_at: BASE_NOW - TEST_INGESTION_MAX_EVENT_AGE_MS - 24 * 60 * 60 * 1000,
+      created_at: BASE_NOW - TEST_INGESTION_MAX_EVENT_AGE_MS - 24 * 60 * 60 * 1000,
+      entries_json: "[]",
       published_at: BASE_NOW - 1,
     })
 
@@ -439,10 +461,7 @@ describe("IngestionAuditDO", () => {
 
     await durableObject.alarm()
 
-    expect(db.rows.has("old_published")).toBe(false)
-    expect(db.rows.has("old_unpublished")).toBe(true)
-    expect(db.rows.has("fresh_published")).toBe(true)
-    expect(db.rows.has("within_retention_margin")).toBe(true)
+    expect(db.batchRows.map((row) => row.id)).toEqual([2, 3, 4])
   })
 })
 
@@ -558,7 +577,7 @@ function createDurableObjectState(): FakeDurableObjectState {
 
 function createFakeDbState(): FakeDbState {
   return {
-    rows: new Map(),
+    batchRows: [],
   }
 }
 
@@ -584,6 +603,8 @@ function getColumnName(column: unknown): string {
 }
 
 function buildFakeDrizzle(state: FakeDbState) {
+  let nextBatchId = 1
+
   const db = {
     select(fields: Record<string, unknown>) {
       const keys = Object.keys(fields)
@@ -606,72 +627,29 @@ function buildFakeDrizzle(state: FakeDbState) {
           return this
         },
         get() {
-          if (keys.includes("payloadHash")) {
-            const row = [...state.rows.values()].find((candidate) =>
-              matchesCondition(candidate, condition)
-            )
-            if (!row) {
-              return undefined
-            }
-            return { payloadHash: row.payload_hash }
-          }
-
-          if (keys.includes("cnt")) {
-            const cnt = [...state.rows.values()].filter((candidate) =>
-              matchesCondition(candidate, condition)
-            ).length
-            return { cnt }
-          }
-
-          if (keys.length === 1 && keys.includes("idempotencyKey")) {
-            const row = [...state.rows.values()]
-              .filter((candidate) => matchesCondition(candidate, condition))
+          if (keys.length === 1 && keys.includes("id")) {
+            const row = [...state.batchRows]
+              .filter((candidate) => matchesBatchCondition(candidate, condition))
               .sort((a, b) => a.first_seen_at - b.first_seen_at)
               .at(0)
             if (!row) {
               return undefined
             }
-            return { idempotencyKey: row.idempotency_key }
+            return { id: row.id }
           }
 
           throw new Error(`Unsupported select().get() keys: ${keys.join(",")}`)
         },
         all() {
-          if (keys.includes("idempotencyKey") && keys.includes("payloadHash")) {
-            return [...state.rows.values()]
-              .filter((candidate) => matchesCondition(candidate, condition))
-              .map((row) => ({
-                idempotencyKey: row.idempotency_key,
-                payloadHash: row.payload_hash,
-              }))
-          }
-
-          if (keys.length === 1 && keys.includes("idempotencyKey")) {
-            return [...state.rows.values()]
-              .filter((candidate) => matchesCondition(candidate, condition))
-              .map((row) => ({
-                idempotencyKey: row.idempotency_key,
-              }))
-          }
-
-          if (
-            keys.includes("idempotencyKey") &&
-            keys.includes("canonicalAuditId") &&
-            keys.includes("auditPayloadJson") &&
-            keys.includes("firstSeenAt")
-          ) {
-            const rows = [...state.rows.values()]
-              .filter((candidate) => matchesCondition(candidate, condition))
+          if (keys.includes("entriesJson")) {
+            return [...state.batchRows]
+              .filter((candidate) => matchesBatchCondition(candidate, condition))
               .sort((a, b) => a.first_seen_at - b.first_seen_at)
               .slice(0, limitCount)
               .map((row) => ({
-                idempotencyKey: row.idempotency_key,
-                canonicalAuditId: row.canonical_audit_id,
-                auditPayloadJson: row.audit_payload_json,
-                firstSeenAt: row.first_seen_at,
+                id: row.id,
+                entriesJson: row.entries_json,
               }))
-
-            return rows
           }
 
           throw new Error(`Unsupported select().all() keys: ${keys.join(",")}`)
@@ -684,36 +662,25 @@ function buildFakeDrizzle(state: FakeDbState) {
 
       const runInsert = () => {
         for (const row of rows) {
-          const idempotencyKey = String(row.idempotencyKey)
-          if (state.rows.has(idempotencyKey)) {
-            continue
+          if ("entriesJson" in row) {
+            state.batchRows.push({
+              id: nextBatchId++,
+              first_seen_at: Number(row.firstSeenAt),
+              created_at: Number(row.createdAt),
+              entries_json: String(row.entriesJson),
+              published_at:
+                row.publishedAt === null || row.publishedAt === undefined
+                  ? null
+                  : Number(row.publishedAt),
+            })
           }
-
-          state.rows.set(idempotencyKey, {
-            idempotency_key: idempotencyKey,
-            canonical_audit_id: String(row.canonicalAuditId),
-            payload_hash: String(row.payloadHash),
-            status: row.status as "processed" | "rejected",
-            rejection_reason:
-              row.rejectionReason === null || row.rejectionReason === undefined
-                ? null
-                : String(row.rejectionReason),
-            result_json:
-              row.resultJson === null || row.resultJson === undefined ? "" : String(row.resultJson),
-            audit_payload_json: String(row.auditPayloadJson),
-            first_seen_at: Number(row.firstSeenAt),
-            published_at:
-              row.publishedAt === null || row.publishedAt === undefined
-                ? null
-                : Number(row.publishedAt),
-          })
         }
       }
 
       return {
         values(value: Record<string, unknown> | Record<string, unknown>[]) {
           rows = Array.isArray(value) ? value : [value]
-          assertSqlBoundParameterCount(rows.length * AUDIT_INSERT_BOUND_PARAMETER_COUNT)
+          assertSqlBoundParameterCount(rows.length * 4)
           return this
         },
         onConflictDoNothing() {
@@ -739,16 +706,19 @@ function buildFakeDrizzle(state: FakeDbState) {
               assertSqlBoundParameterCount(
                 Object.keys(values).length + countConditionBoundParameters(condition)
               )
-              for (const row of state.rows.values()) {
-                if (!matchesCondition(row, condition)) {
-                  continue
-                }
+              if (condition.column === "id") {
+                for (const row of state.batchRows) {
+                  if (!matchesBatchCondition(row, condition)) {
+                    continue
+                  }
 
-                if ("publishedAt" in values) {
-                  const publishedAt = values.publishedAt
-                  row.published_at =
-                    publishedAt === null || publishedAt === undefined ? null : Number(publishedAt)
+                  if ("publishedAt" in values) {
+                    const publishedAt = values.publishedAt
+                    row.published_at =
+                      publishedAt === null || publishedAt === undefined ? null : Number(publishedAt)
+                  }
                 }
+                return
               }
             },
           }
@@ -760,16 +730,19 @@ function buildFakeDrizzle(state: FakeDbState) {
   return db
 }
 
-function matchesCondition(row: FakeAuditRow, condition: DrizzleCondition | undefined): boolean {
+function matchesBatchCondition(
+  row: FakeAuditBatchRow,
+  condition: DrizzleCondition | undefined
+): boolean {
   if (!condition) {
     return true
   }
 
   if (condition.kind === "and") {
-    return (condition.conditions ?? []).every((candidate) => matchesCondition(row, candidate))
+    return (condition.conditions ?? []).every((candidate) => matchesBatchCondition(row, candidate))
   }
 
-  const value = getRowValue(row, condition.column)
+  const value = getBatchRowValue(row, condition.column)
 
   if (condition.kind === "eq") {
     return value === condition.value
@@ -819,11 +792,11 @@ function assertSqlBoundParameterCount(count: number): void {
   }
 }
 
-function getRowValue(row: FakeAuditRow, column: string | undefined): unknown {
+function getBatchRowValue(row: FakeAuditBatchRow, column: string | undefined): unknown {
   if (!column) {
     return undefined
   }
-  return row[column as keyof FakeAuditRow]
+  return row[column as keyof FakeAuditBatchRow]
 }
 
 function execSqlCleanup(
@@ -836,7 +809,7 @@ function execSqlCleanup(
   }
 
   const normalizedQuery = query.replace(/\s+/g, " ").trim()
-  if (!normalizedQuery.startsWith("DELETE FROM ingestion_audit")) {
+  if (!normalizedQuery.startsWith("DELETE FROM ingestion_audit_batches")) {
     throw new Error(`Unsupported SQL in test: ${normalizedQuery}`)
   }
 
@@ -844,19 +817,15 @@ function execSqlCleanup(
   const limit = Number(params[1] ?? 0)
   let deleted = 0
 
-  for (const [idempotencyKey, row] of db.rows.entries()) {
-    if (deleted >= limit) {
-      break
-    }
-    if (row.published_at === null) {
+  const remaining: FakeAuditBatchRow[] = []
+  for (const row of db.batchRows) {
+    if (deleted < limit && row.published_at !== null && row.first_seen_at < cutoff) {
+      deleted++
       continue
     }
-    if (row.first_seen_at >= cutoff) {
-      continue
-    }
-    db.rows.delete(idempotencyKey)
-    deleted++
+    remaining.push(row)
   }
+  db.batchRows.splice(0, db.batchRows.length, ...remaining)
 
   return {
     toArray() {

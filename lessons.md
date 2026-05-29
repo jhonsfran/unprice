@@ -238,6 +238,12 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-05-17: EntitlementWindowDO non-final flush retries must reuse persisted
   `pending_refill_amount`; do not recompute adaptive refill size for an existing
   `pending_flush_seq`.
+- 2026-05-29: EntitlementWindowDO async compaction must commit idempotency results and
+  fact outbox intent in the same durable SQLite transaction; never advance replay seals
+  without recoverable priced facts.
+- 2026-05-29: Compact-only ingestion DOs use batch tables as the replay source:
+  `idempotency_key_batches`, `meter_facts_outbox_batches`, and `ingestion_audit_batches`.
+  Do not reintroduce per-event DO tables or a DB-backed meter storage adapter.
 - 2026-05-17: EntitlementWindowDO wallet retries must persist the whole ledger intent
   (`pending_flush_seq`, `pending_flush_amount`, refill/final flags); one ledger idempotency
   key must never replay with a recomputed financial payload.

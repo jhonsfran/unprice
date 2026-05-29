@@ -2,38 +2,26 @@ import type { Pipeline, PipelineRecord } from "cloudflare:pipelines"
 import { DurableObject } from "cloudflare:workers"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
-import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
 import { and, asc, inArray, isNull, lt } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { createDoLogger, runDoOperation } from "~/observability"
-import { ingestionAuditTable, schema } from "./db/schema"
+import {
+  ALARM_RETRY_DELAY_MS,
+  AUDIT_PUBLISH_UPDATE_BATCH_SIZE,
+  AUDIT_RETENTION_MS,
+  BATCH_TABLE_NAME,
+  OUTBOX_BATCH_SIZE,
+  RETENTION_CLEANUP_BATCH_SIZE,
+  STUCK_ROW_THRESHOLD_MS,
+} from "./constants"
+import { ingestionAuditBatchesTable, schema } from "./db/schema"
 import migrations from "./drizzle/migrations"
+import { type LedgerEntry, isLedgerEntry } from "./ledger-entry"
+import { unique } from "./utils"
 
-const TABLE_NAME = "ingestion_audit"
-
-const AUDIT_RETENTION_MS = DO_IDEMPOTENCY_TTL_MS
-const SQLITE_BOUND_PARAMETER_LIMIT = 100
-const AUDIT_INSERT_BOUND_PARAMETER_COUNT = 9
-const SQL_IN_QUERY_BATCH_SIZE = SQLITE_BOUND_PARAMETER_LIMIT
-const AUDIT_PUBLISH_UPDATE_BATCH_SIZE = SQLITE_BOUND_PARAMETER_LIMIT - 1 // published_at uses one bind
-const AUDIT_INSERT_BATCH_SIZE = Math.floor(
-  SQLITE_BOUND_PARAMETER_LIMIT / AUDIT_INSERT_BOUND_PARAMETER_COUNT
-)
-const OUTBOX_BATCH_SIZE = 500 // 500 rows
-const RETENTION_CLEANUP_BATCH_SIZE = 5000 // 5000 rows
-const ALARM_RETRY_DELAY_MS = 30_000 // 30 seconds
-const STUCK_ROW_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes
-
-type LedgerEntry = {
-  auditPayloadJson: string
-  canonicalAuditId: string
-  firstSeenAt: number
-  idempotencyKey: string
+type AuditEntryIndexValue = {
   payloadHash: string
-  rejectionReason?: string
-  resultJson: string
-  status: "processed" | "rejected"
 }
 
 type CommitResult = {
@@ -50,6 +38,7 @@ export class IngestionAuditDO extends DurableObject {
   private readonly pipelineEvents?: Pipeline<PipelineRecord>
   private readonly logger: Logger
   private alarmScheduled = false
+  private auditEntryIndex: Map<string, AuditEntryIndexValue> | null = null
 
   constructor(state: DurableObjectState, env: Env) {
     super(state, env)
@@ -72,6 +61,10 @@ export class IngestionAuditDO extends DurableObject {
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(this.db, migrations)
+      this.hydrateAuditEntryIndex()
+      if (this.hasUnpublishedRows()) {
+        await this.ensureAlarm()
+      }
     })
   }
 
@@ -83,18 +76,8 @@ export class IngestionAuditDO extends DurableObject {
     }
 
     const uniqueKeys = unique(idempotencyKeys)
-    const result: string[] = []
-    for (let i = 0; i < uniqueKeys.length; i += SQL_IN_QUERY_BATCH_SIZE) {
-      const batch = uniqueKeys.slice(i, i + SQL_IN_QUERY_BATCH_SIZE)
-      const rows = this.db
-        .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
-        .from(ingestionAuditTable)
-        .where(inArray(ingestionAuditTable.idempotencyKey, batch))
-        .all()
-      for (const r of rows) {
-        result.push(r.idempotencyKey)
-      }
-    }
+    const index = this.getAuditEntryIndex()
+    const result = uniqueKeys.filter((key) => index.has(key))
 
     return result
   }
@@ -123,29 +106,14 @@ export class IngestionAuditDO extends DurableObject {
     let duplicates = 0
     let conflicts = 0
 
-    // SQLite-backed Durable Objects allow at most 100 bound parameters per query.
-    const uniqueKeys = unique(entries.map((entry) => entry.idempotencyKey))
-    const payloadHashesByKey = new Map<string, string>()
-
-    for (let i = 0; i < uniqueKeys.length; i += SQL_IN_QUERY_BATCH_SIZE) {
-      const batch = uniqueKeys.slice(i, i + SQL_IN_QUERY_BATCH_SIZE)
-      const rows = this.db
-        .select({
-          idempotencyKey: ingestionAuditTable.idempotencyKey,
-          payloadHash: ingestionAuditTable.payloadHash,
-        })
-        .from(ingestionAuditTable)
-        .where(inArray(ingestionAuditTable.idempotencyKey, batch))
-        .all()
-
-      for (const row of rows) {
-        payloadHashesByKey.set(row.idempotencyKey, row.payloadHash)
-      }
-    }
-    const rowsToInsert: Array<typeof ingestionAuditTable.$inferInsert> = []
+    const index = this.getAuditEntryIndex()
+    const pendingPayloadHashesByKey = new Map<string, string>()
+    const entriesToInsert: LedgerEntry[] = []
 
     for (const entry of entries) {
-      const existingPayloadHash = payloadHashesByKey.get(entry.idempotencyKey)
+      const existingPayloadHash =
+        pendingPayloadHashesByKey.get(entry.idempotencyKey) ??
+        index.get(entry.idempotencyKey)?.payloadHash
 
       if (existingPayloadHash !== undefined) {
         if (existingPayloadHash === entry.payloadHash) {
@@ -156,30 +124,27 @@ export class IngestionAuditDO extends DurableObject {
         continue
       }
 
-      rowsToInsert.push({
-        idempotencyKey: entry.idempotencyKey,
-        canonicalAuditId: entry.canonicalAuditId,
-        payloadHash: entry.payloadHash,
-        status: entry.status,
-        rejectionReason: entry.rejectionReason ?? null,
-        resultJson: entry.resultJson,
-        auditPayloadJson: entry.auditPayloadJson,
-        firstSeenAt: entry.firstSeenAt,
-        publishedAt: null,
-      })
-      payloadHashesByKey.set(entry.idempotencyKey, entry.payloadHash)
+      entriesToInsert.push(entry)
+      pendingPayloadHashesByKey.set(entry.idempotencyKey, entry.payloadHash)
       inserted++
     }
 
-    for (let i = 0; i < rowsToInsert.length; i += AUDIT_INSERT_BATCH_SIZE) {
-      const batch = rowsToInsert.slice(i, i + AUDIT_INSERT_BATCH_SIZE)
+    if (entriesToInsert.length > 0) {
+      // One durable audit batch is both the dedupe record and the publish intent.
+      // Keep this write synchronous before scheduling the alarm.
       this.db
-        .insert(ingestionAuditTable)
-        .values(batch)
-        .onConflictDoNothing({
-          target: ingestionAuditTable.idempotencyKey,
+        .insert(ingestionAuditBatchesTable)
+        .values({
+          firstSeenAt: Math.min(...entriesToInsert.map((entry) => entry.firstSeenAt)),
+          createdAt: Date.now(),
+          entriesJson: JSON.stringify(entriesToInsert),
+          publishedAt: null,
         })
         .run()
+
+      for (const entry of entriesToInsert) {
+        index.set(entry.idempotencyKey, { payloadHash: entry.payloadHash })
+      }
     }
 
     if (inserted > 0) {
@@ -226,42 +191,42 @@ export class IngestionAuditDO extends DurableObject {
   }
 
   private async publishUnpublishedRows(): Promise<boolean> {
-    const rows = this.db
+    const batchRows = this.db
       .select({
-        idempotencyKey: ingestionAuditTable.idempotencyKey,
-        canonicalAuditId: ingestionAuditTable.canonicalAuditId,
-        auditPayloadJson: ingestionAuditTable.auditPayloadJson,
-        firstSeenAt: ingestionAuditTable.firstSeenAt,
+        id: ingestionAuditBatchesTable.id,
+        entriesJson: ingestionAuditBatchesTable.entriesJson,
       })
-      .from(ingestionAuditTable)
-      .where(isNull(ingestionAuditTable.publishedAt))
-      .orderBy(asc(ingestionAuditTable.firstSeenAt))
+      .from(ingestionAuditBatchesTable)
+      .where(isNull(ingestionAuditBatchesTable.publishedAt))
+      .orderBy(asc(ingestionAuditBatchesTable.firstSeenAt))
       .limit(OUTBOX_BATCH_SIZE)
       .all()
 
-    if (rows.length === 0) {
+    if (batchRows.length === 0) {
       return true
     }
 
     try {
-      const events = rows.map((row): PipelineRecord => {
-        const payload = JSON.parse(row.auditPayloadJson)
-        return parseLakehouseEvent("events", payload) as PipelineRecord
-      })
+      const events = batchRows.flatMap((row) =>
+        this.parseLedgerEntries(row.entriesJson, { strict: true }).map((entry): PipelineRecord => {
+          const payload = JSON.parse(entry.auditPayloadJson)
+          return parseLakehouseEvent("events", payload) as PipelineRecord
+        })
+      )
 
       await this.publishEvents(events)
 
       const now = Date.now()
-      const idempotencyKeys = rows.map((row) => row.idempotencyKey)
-      if (idempotencyKeys.length > 0) {
-        for (let i = 0; i < idempotencyKeys.length; i += AUDIT_PUBLISH_UPDATE_BATCH_SIZE) {
-          const batch = idempotencyKeys.slice(i, i + AUDIT_PUBLISH_UPDATE_BATCH_SIZE)
+      const ids = batchRows.map((row) => row.id)
+      if (ids.length > 0) {
+        for (let i = 0; i < ids.length; i += AUDIT_PUBLISH_UPDATE_BATCH_SIZE) {
+          const batch = ids.slice(i, i + AUDIT_PUBLISH_UPDATE_BATCH_SIZE)
           this.db
-            .update(ingestionAuditTable)
+            .update(ingestionAuditBatchesTable)
             .set({
               publishedAt: now,
             })
-            .where(inArray(ingestionAuditTable.idempotencyKey, batch))
+            .where(inArray(ingestionAuditBatchesTable.id, batch))
             .run()
         }
       }
@@ -316,10 +281,10 @@ export class IngestionAuditDO extends DurableObject {
     // Keep this as raw SQL to preserve the bounded cleanup behavior.
     this.ctx.storage.sql.exec(
       `
-        DELETE FROM ${TABLE_NAME}
-        WHERE idempotency_key IN (
-          SELECT idempotency_key
-          FROM ${TABLE_NAME}
+        DELETE FROM ${BATCH_TABLE_NAME}
+        WHERE id IN (
+          SELECT id
+          FROM ${BATCH_TABLE_NAME}
           WHERE published_at IS NOT NULL
             AND first_seen_at < ?
           ORDER BY first_seen_at
@@ -329,38 +294,42 @@ export class IngestionAuditDO extends DurableObject {
       cutoff,
       RETENTION_CLEANUP_BATCH_SIZE
     )
+    this.auditEntryIndex = null
   }
 
   private checkStuckRows(): void {
     const threshold = Date.now() - STUCK_ROW_THRESHOLD_MS
 
-    const stuck = this.db
-      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
-      .from(ingestionAuditTable)
+    const stuckBatch = this.db
+      .select({ id: ingestionAuditBatchesTable.id })
+      .from(ingestionAuditBatchesTable)
       .where(
-        and(isNull(ingestionAuditTable.publishedAt), lt(ingestionAuditTable.firstSeenAt, threshold))
+        and(
+          isNull(ingestionAuditBatchesTable.publishedAt),
+          lt(ingestionAuditBatchesTable.firstSeenAt, threshold)
+        )
       )
-      .orderBy(asc(ingestionAuditTable.firstSeenAt))
+      .orderBy(asc(ingestionAuditBatchesTable.firstSeenAt))
       .limit(1)
       .get()
 
-    if (stuck) {
-      this.logger.warn("audit rows unpublished for > 10 minutes", {
-        idempotency_key: stuck.idempotencyKey,
+    if (stuckBatch) {
+      this.logger.warn("audit batch rows unpublished for > 10 minutes", {
+        batch_id: stuckBatch.id,
       })
     }
   }
 
   private hasUnpublishedRows(): boolean {
-    const row = this.db
-      .select({ idempotencyKey: ingestionAuditTable.idempotencyKey })
-      .from(ingestionAuditTable)
-      .where(isNull(ingestionAuditTable.publishedAt))
-      .orderBy(asc(ingestionAuditTable.firstSeenAt))
+    const batchRow = this.db
+      .select({ id: ingestionAuditBatchesTable.id })
+      .from(ingestionAuditBatchesTable)
+      .where(isNull(ingestionAuditBatchesTable.publishedAt))
+      .orderBy(asc(ingestionAuditBatchesTable.firstSeenAt))
       .limit(1)
       .get()
 
-    return Boolean(row)
+    return Boolean(batchRow)
   }
 
   private async ensureAlarm(): Promise<void> {
@@ -374,8 +343,70 @@ export class IngestionAuditDO extends DurableObject {
     }
     this.alarmScheduled = true
   }
-}
 
-function unique<T>(values: T[]): T[] {
-  return [...new Set(values)]
+  private getAuditEntryIndex(): Map<string, AuditEntryIndexValue> {
+    if (!this.auditEntryIndex) {
+      this.hydrateAuditEntryIndex()
+    }
+
+    return this.auditEntryIndex!
+  }
+
+  private hydrateAuditEntryIndex(): void {
+    const index = new Map<string, AuditEntryIndexValue>()
+
+    const batchRows = this.db
+      .select({
+        entriesJson: ingestionAuditBatchesTable.entriesJson,
+      })
+      .from(ingestionAuditBatchesTable)
+      .all()
+
+    for (const row of batchRows) {
+      for (const entry of this.parseLedgerEntries(row.entriesJson)) {
+        index.set(entry.idempotencyKey, { payloadHash: entry.payloadHash })
+      }
+    }
+
+    this.auditEntryIndex = index
+  }
+
+  private parseLedgerEntries(
+    entriesJson: string,
+    options: { strict?: boolean } = {}
+  ): LedgerEntry[] {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(entriesJson)
+    } catch (error) {
+      if (options.strict) {
+        throw error
+      }
+      this.logger.warn("failed to parse ingestion audit batch entries", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return []
+    }
+
+    if (!Array.isArray(parsed)) {
+      if (options.strict) {
+        throw new Error("ingestion audit batch entries were not an array")
+      }
+      this.logger.warn("ingestion audit batch entries were not an array")
+      return []
+    }
+
+    const entries: LedgerEntry[] = []
+    for (const value of parsed) {
+      if (isLedgerEntry(value)) {
+        entries.push(value)
+      }
+    }
+
+    if (options.strict && entries.length !== parsed.length) {
+      throw new Error("ingestion audit batch entries contained malformed entries")
+    }
+
+    return entries
+  }
 }

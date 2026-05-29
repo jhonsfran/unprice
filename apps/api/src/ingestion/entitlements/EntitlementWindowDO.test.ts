@@ -174,13 +174,19 @@ const ENTITLEMENT_CONFIG_KEYS = new Set<string>([
 
 type FakeDbState = {
   entitlementConfigRows: Map<string, EntitlementConfigRow>
-  idempotencyRows: Map<string, IdempotencyRow>
-  outboxRows: { id: number; payload: string; currency: string }[]
+  idempotencyBatchRows: { id: number; createdAt: number; entries: string }[]
+  outboxBatchRows: { id: number; payloads: string; currency: string; createdAt: number }[]
   meterWindowRows: Map<string, MeterWindowRow>
   grantRows: Map<string, GrantRow>
   grantWindowRows: Map<string, GrantWindowRow>
+  writeCounts: {
+    idempotencyBatchRows: number
+    outboxBatchRows: number
+    grantWindowRows: number
+    meterStateRows: number
+    walletRows: number
+  }
   deleteInArrayBatchSizes: number[]
-  deleteIdempotencyCutoffs: number[]
   deleteOutboxRangeMaxIds: number[]
   storageReadCounts: {
     entitlementConfig: number
@@ -326,12 +332,12 @@ describe("EntitlementWindowDO", () => {
     expect(first).toEqual({ allowed: true })
     expect(second).toEqual({ allowed: true })
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
-    expect(db.idempotencyRows.size).toBe(1)
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readIdempotencyEntries(db).size).toBe(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
 
     // priced payload surfaces ledger-scale amount + priced_at
-    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    const payload = readOutboxPayloads(db)[0]!
     // 3 units @ $1.00 = $3.00 = 300_000_000 at LEDGER_SCALE (8)
     expect(payload.amount).toBe(300_000_000)
     expect(payload.amount_after).toBe(300_000_000)
@@ -389,8 +395,8 @@ describe("EntitlementWindowDO", () => {
     ])
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
-    expect(db.idempotencyRows.size).toBe(1)
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readIdempotencyEntries(db).size).toBe(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(300_000_000)
   })
 
@@ -421,8 +427,8 @@ describe("EntitlementWindowDO", () => {
     expect(result.deniedReason).toBe("LATE_EVENT_CLOSED_PERIOD")
     expect(testState.engineApply).not.toHaveBeenCalled()
     expect(testState.createReservation).not.toHaveBeenCalled()
-    expect(db.outboxRows).toHaveLength(0)
-    expect(db.idempotencyRows.get("idem_123")).toMatchObject({
+    expect(readOutboxPayloads(db)).toHaveLength(0)
+    expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({
       allowed: false,
       deniedReason: "LATE_EVENT_CLOSED_PERIOD",
     })
@@ -454,7 +460,7 @@ describe("EntitlementWindowDO", () => {
     expect(result).toEqual({ allowed: true })
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
   })
 
   it("preserves sub-cent pricing precisely across many events", async () => {
@@ -488,10 +494,7 @@ describe("EntitlementWindowDO", () => {
 
     // Per-event amount would round to 0 cents at scale 2, losing all revenue.
     // At LEDGER_SCALE=8 each $0.000003 delta = 300 minor units; sum is exact.
-    const total = db.outboxRows.reduce(
-      (acc, row) => acc + (JSON.parse(row.payload).amount as number),
-      0
-    )
+    const total = readOutboxPayloads(db).reduce((acc, payload) => acc + Number(payload.amount), 0)
     expect(total).toBe(EVENT_COUNT * 300)
   })
 
@@ -582,8 +585,8 @@ describe("EntitlementWindowDO", () => {
     })
     expect(second).toEqual(first)
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
-    expect(db.idempotencyRows.size).toBe(1)
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readIdempotencyEntries(db).size).toBe(1)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
     expect(state.alarmAt).toBeNull()
   })
 
@@ -639,7 +642,7 @@ describe("EntitlementWindowDO", () => {
       deniedReason: "LIMIT_EXCEEDED",
       message: expect.stringContaining(DEFAULT_METER_KEY),
     })
-    expect(db.outboxRows).toHaveLength(2)
+    expect(readOutboxPayloads(db)).toHaveLength(2)
     expect(db.grantWindowRows.get(`grant_123:onetime:${BASE_NOW - 60_000}`)).toMatchObject({
       consumedInCurrentWindow: 13,
       exhaustedAt: BASE_NOW,
@@ -677,8 +680,8 @@ describe("EntitlementWindowDO", () => {
     )
 
     expect(result).toEqual({ allowed: true })
-    expect(db.outboxRows).toHaveLength(1)
-    expect(db.idempotencyRows.get("idem_123")).toMatchObject({ allowed: true })
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({ allowed: true })
   })
 
   it("closes an active reservation asynchronously when ingestion rejects on limit", async () => {
@@ -781,8 +784,8 @@ describe("EntitlementWindowDO", () => {
 
       await expect(durableObject.apply(input)).rejects.toThrow()
       expect(testState.engineApply).not.toHaveBeenCalled()
-      expect(db.idempotencyRows.size).toBe(0)
-      expect(db.outboxRows).toHaveLength(0)
+      expect(readIdempotencyEntries(db).size).toBe(0)
+      expect(readOutboxPayloads(db)).toHaveLength(0)
       expect(state.alarmAt).toBeNull()
       vi.resetModules()
       testState.engineApply.mockReset()
@@ -801,7 +804,7 @@ describe("EntitlementWindowDO", () => {
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    const baseInput = createApplyInput()
+    const baseInput = createApplyInput({ creditLinePolicy: "uncapped" })
     const result = await durableObject.applyBatch({
       customerId: baseInput.customerId,
       entitlement: baseInput.entitlement,
@@ -838,11 +841,16 @@ describe("EntitlementWindowDO", () => {
         idempotencyKey: "idem_batch_2",
       }),
     ])
+    expect(db.idempotencyBatchRows).toHaveLength(1)
+    expect(JSON.parse(db.idempotencyBatchRows[0]!.entries)).toHaveLength(2)
+    expect(db.outboxBatchRows).toHaveLength(1)
+    expect(JSON.parse(db.outboxBatchRows[0]!.payloads)).toHaveLength(2)
     expect(testState.logger.info).not.toHaveBeenCalledWith("entitlement apply", expect.anything())
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
       expect.objectContaining({
         event_count: 2,
+        mode: "optimized",
         processed_count: 2,
         allowed_count: 2,
         denied_count: 0,
@@ -851,7 +859,7 @@ describe("EntitlementWindowDO", () => {
     )
   })
 
-  it("retries applyBatch after a partial failure without reapplying committed events", async () => {
+  it("retries applyBatch after a pre-commit failure without partial durable writes", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -875,7 +883,7 @@ describe("EntitlementWindowDO", () => {
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    const baseInput = createApplyInput()
+    const baseInput = createApplyInput({ creditLinePolicy: "uncapped" })
     const batchInput = {
       customerId: baseInput.customerId,
       entitlement: baseInput.entitlement,
@@ -901,8 +909,9 @@ describe("EntitlementWindowDO", () => {
     }
 
     await expect(durableObject.applyBatch(batchInput)).rejects.toThrow("ENGINE_DOWN")
-    expect(db.idempotencyRows.get("idem_batch_1")).toMatchObject({ allowed: true })
-    expect(db.idempotencyRows.has("idem_batch_2")).toBe(false)
+    expect(readIdempotencyEntry(db, "idem_batch_1")).toBeUndefined()
+    expect(db.idempotencyBatchRows).toHaveLength(0)
+    expect(readIdempotencyEntry(db, "idem_batch_2")).toBeUndefined()
 
     failSecondEvent = false
     const retry = await durableObject.applyBatch(batchInput)
@@ -920,8 +929,243 @@ describe("EntitlementWindowDO", () => {
       }),
     ])
     expect(testState.engineApply.mock.calls.map(([event]) => (event as { id: string }).id)).toEqual(
-      ["evt_batch_1", "evt_batch_2", "evt_batch_2"]
+      ["evt_batch_1", "evt_batch_2", "evt_batch_1", "evt_batch_2"]
     )
+    expect(db.idempotencyBatchRows).toHaveLength(1)
+  })
+
+  it("uses compact async batch rows for idempotency and fact outbox writes", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const index = Number(String((event as { id: string }).id).replace("evt_batch_", ""))
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: index + 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({ creditLinePolicy: "uncapped" })
+    const events = Array.from({ length: 100 }, (_, index) => ({
+      ...baseInput.event,
+      correlationKey: `batch_${index}`,
+      id: `evt_batch_${index}`,
+      idempotencyKey: `idem_batch_${index}`,
+      now: BASE_NOW + index,
+      timestamp: BASE_NOW + index,
+    }))
+
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events,
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toHaveLength(100)
+    expect(db.writeCounts.idempotencyBatchRows).toBe(1)
+    expect(db.writeCounts.outboxBatchRows).toBe(1)
+    // The test engine is mocked and returns facts directly, so it does not
+    // touch the meter-state adapter. The production path adds one insert and
+    // one final update when the meter row is new.
+    expect(db.writeCounts.meterStateRows).toBe(0)
+    expect(db.writeCounts.grantWindowRows).toBe(1)
+    expect(db.writeCounts.walletRows).toBe(0)
+    expect(JSON.parse(db.idempotencyBatchRows[0]!.entries)).toHaveLength(100)
+    expect(JSON.parse(db.outboxBatchRows[0]!.payloads)).toHaveLength(100)
+
+    const compactWrites =
+      db.writeCounts.idempotencyBatchRows +
+      db.writeCounts.outboxBatchRows +
+      db.writeCounts.meterStateRows +
+      db.writeCounts.grantWindowRows +
+      db.writeCounts.walletRows
+    const compactWriteSiteModel = compactWrites + 2
+    const perEventWriteModel = 100 * 4
+    expect(compactWrites).toBe(3)
+    expect(compactWriteSiteModel).toBe(5)
+    expect(compactWriteSiteModel).toBeLessThanOrEqual(perEventWriteModel / 10)
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+  })
+
+  it("preserves wallet consumption while compacting an already-funded async batch", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      reservationEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: BASE_NOW,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      reservationId: "res_batch",
+      allocationAmount: 20 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      targetReservationAmount: 20 * 100_000_000,
+      spendEwmaAmount: 0,
+      lastRateSampledAtMs: BASE_NOW,
+      maxEventCostAmount: 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+      pendingFlushFinal: false,
+      pendingFlushAmount: null,
+      pendingRefillAmount: 0,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: null,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const index = Number(String((event as { id: string }).id).replace("evt_wallet_", ""))
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: index + 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const events = Array.from({ length: 5 }, (_, index) => ({
+      ...baseInput.event,
+      correlationKey: `wallet_${index}`,
+      id: `evt_wallet_${index}`,
+      idempotencyKey: `idem_wallet_${index}`,
+      now: BASE_NOW + index,
+      timestamp: BASE_NOW + index,
+    }))
+
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events,
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toHaveLength(5)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(5 * 100_000_000)
+    expect(db.writeCounts.walletRows).toBe(1)
+    expect(db.writeCounts.idempotencyBatchRows).toBe(1)
+    expect(db.writeCounts.outboxBatchRows).toBe(1)
+  })
+
+  it("writes the same priced facts as sequential apply for representative async batches", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const index = Number(String((event as { id: string }).id).replace("evt_compare_", ""))
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: index + 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const baseInput = createApplyInput({ creditLinePolicy: "uncapped" })
+    const events = Array.from({ length: 3 }, (_, index) => ({
+      ...baseInput.event,
+      correlationKey: `compare_${index}`,
+      id: `evt_compare_${index}`,
+      idempotencyKey: `idem_compare_${index}`,
+      now: BASE_NOW + index,
+      timestamp: BASE_NOW + index,
+    }))
+
+    const optimizedDb = createFakeDbState()
+    testState.db = optimizedDb
+    const optimizedObject = new EntitlementWindowDO(createDurableObjectState(), createEnv())
+    await optimizedObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events,
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    const sequentialDb = createFakeDbState()
+    testState.db = sequentialDb
+    const sequentialObject = new EntitlementWindowDO(createDurableObjectState(), createEnv())
+    for (const event of events) {
+      await sequentialObject.apply({
+        ...baseInput,
+        event: {
+          id: event.id,
+          properties: event.properties,
+          slug: event.slug,
+          timestamp: event.timestamp,
+        },
+        idempotencyKey: event.idempotencyKey,
+        now: event.now,
+      })
+    }
+
+    const optimizedFacts = JSON.parse(optimizedDb.outboxBatchRows[0]!.payloads)
+    const sequentialFacts = readOutboxPayloads(sequentialDb)
+    expect(optimizedFacts).toEqual(sequentialFacts)
+  })
+
+  it("recovers compact async idempotency and fact outbox after Durable Object eviction", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const firstState = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const baseInput = createApplyInput({ creditLinePolicy: "uncapped" })
+    const batchInput = {
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "batch_1",
+          id: "evt_batch_1",
+          idempotencyKey: "idem_batch_1",
+          now: BASE_NOW,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    }
+
+    const firstObject = new EntitlementWindowDO(firstState, createEnv())
+    await firstObject.applyBatch(batchInput)
+
+    expect(db.idempotencyBatchRows).toHaveLength(1)
+    expect(db.outboxBatchRows).toHaveLength(1)
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+
+    const recoveredState = createDurableObjectState()
+    const recoveredObject = new EntitlementWindowDO(recoveredState, createEnv())
+    const replay = await recoveredObject.applyBatch(batchInput)
+
+    expect(replay.results).toEqual([
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "batch_1",
+        idempotencyKey: "idem_batch_1",
+      }),
+    ])
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(db.idempotencyBatchRows).toHaveLength(1)
+    expect(db.outboxBatchRows).toHaveLength(1)
   })
 
   it("flushes queued facts during alarm and schedules self-destruct when the outbox is empty", async () => {
@@ -964,14 +1208,14 @@ describe("EntitlementWindowDO", () => {
         currency: "USD",
       }),
     ])
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
     // The default mocked apply opens a wallet reservation. Once the outbox
     // and reservation usage are flushed, the period-close deadline is the
     // next real lifecycle wakeup.
     expect(state.alarmAt).toBe(BASE_NOW + 60_000)
   })
 
-  it("cleans alarm outbox by id range and idempotency rows by TTL cutoff", async () => {
+  it("cleans alarm outbox by id range and idempotency batches by TTL cutoff", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -982,35 +1226,10 @@ describe("EntitlementWindowDO", () => {
     })
 
     for (let index = 1; index <= 200; index++) {
-      db.outboxRows.push({
-        id: index,
-        currency: "USD",
-        payload: JSON.stringify({
-          event_id: `evt_${index}`,
-          idempotency_key: `idem_${index}`,
-          project_id: "proj_123",
-          customer_id: "cus_123",
-          currency: "USD",
-          customer_entitlement_id: "ce_123",
-          grant_id: "grant_123",
-          feature_slug: "api_calls",
-          period_key: "period_123",
-          event_slug: "tokens_used",
-          aggregation_method: "sum",
-          timestamp: BASE_NOW,
-          created_at: BASE_NOW,
-          delta: 1,
-          value_after: index,
-          amount: 100_000_000,
-          amount_scale: 8,
-          priced_at: BASE_NOW,
-        }),
-      })
-      db.idempotencyRows.set(`stale_evt_${index}`, {
+      pushOutboxBatchRow(db, index)
+      pushIdempotencyBatchRow(db, `stale_evt_${index}`, {
         createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
-        allowed: true,
-        deniedReason: null,
-        denyMessage: null,
+        id: index,
       })
     }
 
@@ -1019,10 +1238,9 @@ describe("EntitlementWindowDO", () => {
     await durableObject.alarm()
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
     expect(db.deleteOutboxRangeMaxIds).toEqual([200])
-    expect(db.idempotencyRows.size).toBe(0)
-    expect(db.deleteIdempotencyCutoffs).toHaveLength(0)
+    expect(readIdempotencyEntries(db).size).toBe(0)
     expect(db.deleteInArrayBatchSizes).toEqual([200])
   })
 
@@ -1043,30 +1261,7 @@ describe("EntitlementWindowDO", () => {
     state.alarmAt = BASE_NOW
 
     for (let index = 1; index <= 1200; index++) {
-      db.outboxRows.push({
-        id: index,
-        currency: "USD",
-        payload: JSON.stringify({
-          event_id: `evt_${index}`,
-          idempotency_key: `idem_${index}`,
-          project_id: "proj_123",
-          customer_id: "cus_123",
-          currency: "USD",
-          customer_entitlement_id: "ce_123",
-          grant_id: "grant_123",
-          feature_slug: "api_calls",
-          period_key: "period_123",
-          event_slug: "tokens_used",
-          aggregation_method: "sum",
-          timestamp: BASE_NOW,
-          created_at: BASE_NOW,
-          delta: 1,
-          value_after: index,
-          amount: 100_000_000,
-          amount_scale: 8,
-          priced_at: BASE_NOW,
-        }),
-      })
+      pushOutboxBatchRow(db, index)
     }
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
@@ -1074,35 +1269,31 @@ describe("EntitlementWindowDO", () => {
     await durableObject.alarm()
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(db.outboxRows).toHaveLength(200)
+    expect(readOutboxPayloads(db)).toHaveLength(200)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
-  it("retains idempotency rows past the ingestion age cap and cleans them at the DO TTL", async () => {
+  it("retains idempotency batches past the ingestion age cap and cleans them at the DO TTL", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
 
-    db.idempotencyRows.set("inside_retention_margin", {
+    pushIdempotencyBatchRow(db, "inside_retention_margin", {
       createdAt: BASE_NOW - TEST_INGESTION_MAX_EVENT_AGE_MS - 24 * 60 * 60 * 1000,
-      allowed: true,
-      deniedReason: null,
-      denyMessage: null,
+      id: 1,
     })
-    db.idempotencyRows.set("beyond_do_ttl", {
+    pushIdempotencyBatchRow(db, "beyond_do_ttl", {
       createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
-      allowed: true,
-      deniedReason: null,
-      denyMessage: null,
+      id: 2,
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
 
     await durableObject.alarm()
 
-    expect(db.idempotencyRows.has("inside_retention_margin")).toBe(true)
-    expect(db.idempotencyRows.has("beyond_do_ttl")).toBe(false)
+    expect(readIdempotencyEntry(db, "inside_retention_margin")).toBeDefined()
+    expect(readIdempotencyEntry(db, "beyond_do_ttl")).toBeUndefined()
   })
 
   it("throttles idempotency cleanup on warm alarm retries", async () => {
@@ -1111,28 +1302,24 @@ describe("EntitlementWindowDO", () => {
     const db = createFakeDbState()
     testState.db = db
 
-    db.idempotencyRows.set("stale_first", {
+    pushIdempotencyBatchRow(db, "stale_first", {
       createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
-      allowed: true,
-      deniedReason: null,
-      denyMessage: null,
+      id: 1,
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
 
     await durableObject.alarm()
 
-    db.idempotencyRows.set("stale_second", {
+    pushIdempotencyBatchRow(db, "stale_second", {
       createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
-      allowed: true,
-      deniedReason: null,
-      denyMessage: null,
+      id: 2,
     })
 
     await durableObject.alarm()
 
-    expect(db.idempotencyRows.has("stale_first")).toBe(false)
-    expect(db.idempotencyRows.has("stale_second")).toBe(true)
+    expect(readIdempotencyEntry(db, "stale_first")).toBeUndefined()
+    expect(readIdempotencyEntry(db, "stale_second")).toBeDefined()
     expect(db.deleteInArrayBatchSizes).toEqual([1])
   })
 
@@ -1156,7 +1343,7 @@ describe("EntitlementWindowDO", () => {
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
     // Failed flush leaves the row in the outbox
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
 
     // Next alarm retries successfully and drains the outbox
     testState.analyticsIngest.mockResolvedValueOnce({
@@ -1165,7 +1352,53 @@ describe("EntitlementWindowDO", () => {
     })
     await durableObject.alarm()
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
+  })
+
+  it("keeps compact batch outbox rows for retry when Tinybird flush fails", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const index = Number(String((event as { id: string }).id).replace("evt_batch_", ""))
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: index + 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+    testState.analyticsIngest.mockRejectedValueOnce(new Error("tinybird down"))
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({ creditLinePolicy: "uncapped" })
+    await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: Array.from({ length: 3 }, (_, index) => ({
+        ...baseInput.event,
+        correlationKey: `batch_${index}`,
+        id: `evt_batch_${index}`,
+        idempotencyKey: `idem_batch_${index}`,
+        now: BASE_NOW + index,
+        timestamp: BASE_NOW + index,
+      })),
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    await durableObject.alarm()
+
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(db.outboxBatchRows).toHaveLength(1)
+
+    testState.analyticsIngest.mockResolvedValueOnce({
+      quarantined_rows: 0,
+      successful_rows: 3,
+    })
+    await durableObject.alarm()
+
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
+    expect(db.outboxBatchRows).toHaveLength(0)
   })
 
   it("retries Tinybird outbox after eviction before the delete commit", async () => {
@@ -1185,7 +1418,7 @@ describe("EntitlementWindowDO", () => {
     await first.alarm()
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
 
     // Same storage, new object instance: the in-memory isolate disappeared
     // after Tinybird failed/before the outbox row could be deleted.
@@ -1198,7 +1431,7 @@ describe("EntitlementWindowDO", () => {
     await revived.alarm()
 
     expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
   })
 
   it("does not call ledger/rating services for free features (no lazy reservation needed)", async () => {
@@ -1285,8 +1518,8 @@ describe("EntitlementWindowDO", () => {
     )
 
     expect(db.meterWindowRows.size).toBe(1)
-    expect(db.outboxRows).toHaveLength(2)
-    const fpvs = db.outboxRows.map((row) => JSON.parse(row.payload).feature_plan_version_id)
+    expect(readOutboxPayloads(db)).toHaveLength(2)
+    const fpvs = readOutboxPayloads(db).map((payload) => payload.feature_plan_version_id)
     expect(fpvs).toEqual(["fpv_a", "fpv_a"])
 
     await expect(
@@ -1344,9 +1577,9 @@ describe("EntitlementWindowDO", () => {
     )
 
     expect(result).toEqual({ allowed: true })
-    expect(db.outboxRows).toHaveLength(2)
+    expect(readOutboxPayloads(db)).toHaveLength(2)
 
-    const payloads = db.outboxRows.map((row) => JSON.parse(row.payload))
+    const payloads = readOutboxPayloads(db)
     expect(payloads.map((payload) => payload.grant_id)).toEqual(["grant_a", "grant_b"])
     expect(payloads.map((payload) => payload.feature_plan_version_id)).toEqual([
       "fpv_entitlement",
@@ -1413,7 +1646,7 @@ describe("EntitlementWindowDO", () => {
       priority: 10,
     })
 
-    const payloads = db.outboxRows.map((row) => JSON.parse(row.payload))
+    const payloads = readOutboxPayloads(db)
     expect(payloads.map((payload) => payload.feature_plan_version_id)).toEqual([
       "fpv_original",
       "fpv_original",
@@ -1772,7 +2005,11 @@ describe("EntitlementWindowDO", () => {
     // Simulate eviction: Cloudflare clears the alarm and evicts the DO.
     state.alarmAt = null
     const revived = new EntitlementWindowDO(state, createEnv())
+    await revived.getStatus()
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
 
+    // Simulate the constructor-recovered flush alarm firing.
+    state.alarmAt = null
     await revived.alarm()
 
     // The revived DO sees a still-open reservation in SQLite and re-arms
@@ -1801,8 +2038,8 @@ describe("EntitlementWindowDO", () => {
 
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
-    expect(db.idempotencyRows.size).toBe(1)
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readIdempotencyEntries(db).size).toBe(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
   })
 
   it("scheduleAlarm does not downgrade an earlier pending alarm", async () => {
@@ -1987,8 +2224,8 @@ describe("EntitlementWindowDO", () => {
     await expect(first.apply(input)).rejects.toThrow("evicted after createReservation")
 
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
-    expect(db.idempotencyRows.size).toBe(0)
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readIdempotencyEntries(db).size).toBe(0)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
 
     const revived = new EntitlementWindowDO(state, createEnv())
@@ -2005,8 +2242,8 @@ describe("EntitlementWindowDO", () => {
       expect.objectContaining({ idempotencyKey: expectedIdempotencyKey })
     )
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
-    expect(db.idempotencyRows.get("idem_123")).toMatchObject({ allowed: true })
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({ allowed: true })
+    expect(readOutboxPayloads(db)).toHaveLength(1)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBe("res_lazy")
   })
 
@@ -2038,7 +2275,7 @@ describe("EntitlementWindowDO", () => {
     })
     // Denial is durable: subsequent retries hit the idempotency cache and
     // skip the wallet entirely.
-    expect(db.idempotencyRows.get("idem_123")).toMatchObject({
+    expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({
       allowed: false,
       deniedReason: "WALLET_EMPTY",
     })
@@ -2070,8 +2307,8 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
 
     await expect(durableObject.apply(createApplyInput())).rejects.toThrow("WALLET_LEDGER_FAILED")
-    expect(db.idempotencyRows.has("idem_123")).toBe(false)
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readIdempotencyEntries(db).has("idem_123")).toBe(false)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
     expect(testState.logger.error).toHaveBeenCalledWith(
       walletError,
       expect.objectContaining({
@@ -2149,11 +2386,11 @@ describe("EntitlementWindowDO", () => {
         final: true,
       })
     )
-    expect(db.idempotencyRows.get("idem_123")).toMatchObject({
+    expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({
       allowed: false,
       deniedReason: "WALLET_EMPTY",
     })
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
   })
 
@@ -2180,7 +2417,7 @@ describe("EntitlementWindowDO", () => {
 
     expect(result).toEqual({ allowed: true })
     expect(testState.createReservation).not.toHaveBeenCalled()
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeUndefined()
   })
 
@@ -2241,8 +2478,8 @@ describe("EntitlementWindowDO", () => {
       })
     )
     expect(testState.engineApply).toHaveBeenCalledTimes(2)
-    expect(db.outboxRows).toHaveLength(1)
-    expect(db.idempotencyRows.get("idem_123")).toMatchObject({ allowed: true })
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({ allowed: true })
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
     expect(row.allocationAmount).toBe(10 * 100_000_000)
     expect(row.consumedAmount).toBe(5 * 100_000_000)
@@ -2332,8 +2569,8 @@ describe("EntitlementWindowDO", () => {
         final: true,
       })
     )
-    expect(db.idempotencyRows.size).toBe(1)
-    expect(db.outboxRows).toHaveLength(0)
+    expect(readIdempotencyEntries(db).size).toBe(1)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(2 * 100_000_000 - 10)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.flushSeq).toBe(2)
@@ -2623,7 +2860,7 @@ describe("EntitlementWindowDO", () => {
     expect(row.consumedAmount).toBeGreaterThanOrEqual(row.flushedAmount ?? 0)
     expect(state.waitUntilPromises).toHaveLength(0)
 
-    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    const payload = readOutboxPayloads(db)[0]!
     expect(payload.amount).toBe(-5 * 100_000_000)
   })
 
@@ -3574,30 +3811,7 @@ describe("EntitlementWindowDO", () => {
     })
 
     const now = Date.now()
-    db.outboxRows.push({
-      id: 1,
-      currency: "USD",
-      payload: JSON.stringify({
-        event_id: "evt_123",
-        idempotency_key: "idem_123",
-        project_id: "proj_123",
-        customer_id: "cus_123",
-        currency: "USD",
-        customer_entitlement_id: "ce_123",
-        grant_id: "grant_123",
-        feature_slug: "api_calls",
-        period_key: "period_123",
-        event_slug: "tokens_used",
-        aggregation_method: "sum",
-        timestamp: now,
-        created_at: now,
-        delta: 1,
-        value_after: 1,
-        amount: 100_000_000,
-        amount_scale: 8,
-        priced_at: now,
-      }),
-    })
+    pushOutboxBatchRow(db, 1, now)
     db.meterWindowRows.set(DEFAULT_METER_KEY, {
       meterKey: DEFAULT_METER_KEY,
       currency: "USD",
@@ -3628,7 +3842,7 @@ describe("EntitlementWindowDO", () => {
     expect(testState.flushReservation).toHaveBeenCalledWith(
       expect.objectContaining({ final: true, flushAmount: 1 * 100_000_000 })
     )
-    expect(db.outboxRows).toHaveLength(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
     expect(state.deletedAlarm).toBe(true)
     expect(state.deletedAll).toBe(false)
     expect(testState.logger.warn).toHaveBeenCalledWith(
@@ -3902,8 +4116,8 @@ describe("EntitlementWindowDO", () => {
     // €1.031 = 1 × 10^8 + 31 × 10^5 = 103_100_000 minor units at LEDGER_SCALE=8.
     // This is what proves the flat fee is captured: a unit-price-only
     // calculation would emit only 31 × 10^5 = 3_100_000.
-    expect(db.outboxRows).toHaveLength(1)
-    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    const payload = readOutboxPayloads(db)[0]!
     expect(payload.amount).toBe(103_100_000)
     expect(payload.amount_after).toBe(103_100_000)
     expect(payload.amount_scale).toBe(8)
@@ -3975,8 +4189,8 @@ describe("EntitlementWindowDO", () => {
     // €0.001 = 100_000 minor units at scale-8. The flat fee is NOT charged
     // again — it accrued once at the 30→31 boundary. The diff approach
     // (price(after) − price(before)) is what makes this correct.
-    expect(db.outboxRows).toHaveLength(1)
-    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    const payload = readOutboxPayloads(db)[0]!
     expect(payload.amount).toBe(100_000)
     expect(payload.amount_after).toBe(103_200_000)
     expect(payload.value_after).toBe(32)
@@ -4033,8 +4247,8 @@ describe("EntitlementWindowDO", () => {
 
     // €1.05 = 50 × €0.001 + €1 flat = 1_050_000 × 100 = 105_000_000 minor
     // units at scale-8.
-    expect(db.outboxRows).toHaveLength(1)
-    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    const payload = readOutboxPayloads(db)[0]!
     expect(payload.amount).toBe(105_000_000)
     expect(payload.amount_after).toBe(105_000_000)
     expect(payload.delta).toBe(50)
@@ -4074,8 +4288,8 @@ describe("EntitlementWindowDO", () => {
     expect(result).toEqual({ allowed: true })
     expect(testState.createReservation).not.toHaveBeenCalled()
 
-    expect(db.outboxRows).toHaveLength(1)
-    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    const payload = readOutboxPayloads(db)[0]!
     expect(payload.amount).toBe(0)
     expect(payload.amount_after).toBe(0)
     expect(payload.value_after).toBe(1)
@@ -4139,8 +4353,8 @@ describe("EntitlementWindowDO", () => {
     const call = testState.createReservation.mock.calls[0]?.[0] as { requestedAmount: number }
     expect(call.requestedAmount).toBe(103_100_000)
 
-    expect(db.outboxRows).toHaveLength(1)
-    const payload = JSON.parse(db.outboxRows[0]!.payload)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    const payload = readOutboxPayloads(db)[0]!
     expect(payload.amount).toBe(103_100_000)
     expect(payload.amount_after).toBe(103_100_000)
     expect(payload.value_after).toBe(31)
@@ -4210,7 +4424,6 @@ async function loadEntitlementWindowDO() {
     migrate: vi.fn(async () => {}),
   }))
 
-  vi.doMock("./drizzle-adapter", () => ({ DrizzleStorageAdapter: class {} }))
   vi.doMock("./drizzle/migrations", () => ({ default: [] }))
 
   vi.doMock("@unprice/db", () => ({
@@ -4705,13 +4918,19 @@ function createDurableObjectState(): FakeDurableObjectState {
 function createFakeDbState(): FakeDbState {
   return {
     entitlementConfigRows: new Map(),
-    idempotencyRows: new Map(),
-    outboxRows: [],
+    idempotencyBatchRows: [],
+    outboxBatchRows: [],
     meterWindowRows: new Map(),
     grantRows: new Map(),
     grantWindowRows: new Map(),
+    writeCounts: {
+      idempotencyBatchRows: 0,
+      outboxBatchRows: 0,
+      grantWindowRows: 0,
+      meterStateRows: 0,
+      walletRows: 0,
+    },
     deleteInArrayBatchSizes: [],
-    deleteIdempotencyCutoffs: [],
     deleteOutboxRangeMaxIds: [],
     storageReadCounts: {
       entitlementConfig: 0,
@@ -4721,12 +4940,119 @@ function createFakeDbState(): FakeDbState {
   }
 }
 
+function buildOutboxFact(index: number, now = BASE_NOW): Record<string, unknown> {
+  return {
+    event_id: `evt_${index}`,
+    idempotency_key: `idem_${index}`,
+    project_id: "proj_123",
+    customer_id: "cus_123",
+    currency: "USD",
+    customer_entitlement_id: "ce_123",
+    grant_id: "grant_123",
+    feature_slug: "api_calls",
+    period_key: "period_123",
+    event_slug: "tokens_used",
+    aggregation_method: "sum",
+    timestamp: now,
+    created_at: now,
+    delta: 1,
+    value_after: index,
+    amount: 100_000_000,
+    amount_scale: 8,
+    priced_at: now,
+  }
+}
+
+function pushOutboxBatchRow(db: FakeDbState, index: number, now = BASE_NOW): void {
+  db.outboxBatchRows.push({
+    id: index,
+    payloads: JSON.stringify([buildOutboxFact(index, now)]),
+    currency: "USD",
+    createdAt: now,
+  })
+}
+
+function pushIdempotencyBatchRow(
+  db: FakeDbState,
+  eventId: string,
+  params: { createdAt: number; id: number }
+): void {
+  db.idempotencyBatchRows.push({
+    id: params.id,
+    createdAt: params.createdAt,
+    entries: JSON.stringify([
+      {
+        eventId,
+        createdAt: params.createdAt,
+        allowed: true,
+        deniedReason: null,
+        denyMessage: null,
+      },
+    ]),
+  })
+}
+
+function readOutboxPayloads(db: FakeDbState): Record<string, unknown>[] {
+  return [
+    ...db.outboxBatchRows.flatMap((row) => JSON.parse(row.payloads) as Record<string, unknown>[]),
+  ]
+}
+
+function readIdempotencyEntries(db: FakeDbState): Map<string, IdempotencyRow> {
+  const entries = new Map<string, IdempotencyRow>()
+
+  for (const row of db.idempotencyBatchRows) {
+    const batch = JSON.parse(row.entries) as Array<{
+      eventId: string
+      createdAt: number
+      allowed: boolean
+      deniedReason: string | null
+      denyMessage: string | null
+    }>
+
+    for (const entry of batch) {
+      entries.set(entry.eventId, {
+        createdAt: entry.createdAt,
+        allowed: entry.allowed,
+        deniedReason: entry.deniedReason,
+        denyMessage: entry.denyMessage,
+      })
+    }
+  }
+
+  return entries
+}
+
+function readIdempotencyEntry(db: FakeDbState, eventId: string): IdempotencyRow | undefined {
+  return readIdempotencyEntries(db).get(eventId)
+}
+
 /**
  * Builds a fake drizzle-compatible query builder backed by simple Maps/arrays.
  * Mirrors the subset of the drizzle API used by EntitlementWindowDO.
  */
 function buildFakeDrizzle(state: FakeDbState) {
-  let nextOutboxId = 1
+  let nextOutboxBatchId = 1
+  let nextIdempotencyBatchId = 1
+
+  const tableName = (table: unknown): string | null => {
+    if (typeof table !== "object" || table === null) return null
+    for (const symbol of Object.getOwnPropertySymbols(table)) {
+      const value = (table as Record<symbol, unknown>)[symbol]
+      if (typeof value === "string") {
+        if (
+          value === "meter_facts_outbox_batches" ||
+          value === "idempotency_key_batches" ||
+          value === "grant_windows" ||
+          value === "meter_state" ||
+          value === "wallet_reservation"
+        ) {
+          return value
+        }
+      }
+    }
+    return null
+  }
 
   const matchOutboxCondition = (row: { id: number }, condition?: DrizzleCondition): boolean => {
     if (!condition) return true
@@ -4765,23 +5091,26 @@ function buildFakeDrizzle(state: FakeDbState) {
 
   const db = {
     transaction<T>(callback: (tx: typeof db) => T): T {
-      const idempotencySnapshot = new Map(state.idempotencyRows)
+      const idempotencyBatchSnapshot = [...state.idempotencyBatchRows]
       const entitlementConfigSnapshot = new Map(state.entitlementConfigRows)
-      const outboxSnapshot = [...state.outboxRows]
+      const outboxBatchSnapshot = [...state.outboxBatchRows]
       const meterPricingSnapshot = new Map(state.meterWindowRows)
       const grantSnapshot = new Map(state.grantRows)
       const grantWindowSnapshot = new Map(state.grantWindowRows)
-      const outboxIdSnapshot = nextOutboxId
+      const outboxBatchIdSnapshot = nextOutboxBatchId
+      const idempotencyBatchIdSnapshot = nextIdempotencyBatchId
       try {
         return callback(db)
       } catch (error) {
-        state.idempotencyRows.clear()
-        for (const [k, v] of Array.from(idempotencySnapshot.entries()))
-          state.idempotencyRows.set(k, v)
+        state.idempotencyBatchRows.splice(
+          0,
+          state.idempotencyBatchRows.length,
+          ...idempotencyBatchSnapshot
+        )
         state.entitlementConfigRows.clear()
         for (const [k, v] of Array.from(entitlementConfigSnapshot.entries()))
           state.entitlementConfigRows.set(k, v)
-        state.outboxRows.splice(0, state.outboxRows.length, ...outboxSnapshot)
+        state.outboxBatchRows.splice(0, state.outboxBatchRows.length, ...outboxBatchSnapshot)
         state.meterWindowRows.clear()
         for (const [k, v] of Array.from(meterPricingSnapshot.entries()))
           state.meterWindowRows.set(k, v)
@@ -4790,7 +5119,8 @@ function buildFakeDrizzle(state: FakeDbState) {
         state.grantWindowRows.clear()
         for (const [k, v] of Array.from(grantWindowSnapshot.entries()))
           state.grantWindowRows.set(k, v)
-        nextOutboxId = outboxIdSnapshot
+        nextOutboxBatchId = outboxBatchIdSnapshot
+        nextIdempotencyBatchId = idempotencyBatchIdSnapshot
         throw error
       }
     },
@@ -4799,9 +5129,13 @@ function buildFakeDrizzle(state: FakeDbState) {
       const keys = Object.keys(fields)
       let cond: DrizzleCondition | undefined
       let limitCount: number | undefined
+      let sourceTable: string | null = null
 
       return {
-        from: () => db.select(fields),
+        from(table?: unknown) {
+          sourceTable = tableName(table)
+          return this
+        },
         where(c: DrizzleCondition) {
           cond = c
           return this
@@ -4814,24 +5148,8 @@ function buildFakeDrizzle(state: FakeDbState) {
           return this
         },
         get() {
-          if (keys.includes("allowed")) {
-            const row = state.idempotencyRows.get(String(cond?.value))
-            if (!row) return undefined
-            return {
-              allowed: row.allowed,
-              deniedReason: row.deniedReason,
-              denyMessage: row.denyMessage,
-            }
-          }
-          if (keys.includes("count")) {
-            if (cond?.kind === "lt") {
-              return {
-                count: [...state.idempotencyRows.values()].filter(
-                  (row) => row.createdAt < Number(cond?.value)
-                ).length,
-              }
-            }
-            return { count: state.outboxRows.length }
+          if (sourceTable === "idempotency_key_batches") {
+            return undefined
           }
           if (keys.every((k) => ENTITLEMENT_CONFIG_KEYS.has(k))) {
             state.storageReadCounts.entitlementConfig++
@@ -4880,25 +5198,34 @@ function buildFakeDrizzle(state: FakeDbState) {
           throw new Error(`Unsupported select().get(): ${keys}`)
         },
         all() {
-          if (keys.includes("id") && keys.includes("payload")) {
-            return [...state.outboxRows]
-              .filter((row) => matchOutboxCondition(row, cond))
-              .sort((a, b) => a.id - b.id)
-              .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
-              .map((row) => ({ id: row.id, payload: row.payload }))
+          if (sourceTable === "idempotency_key_batches") {
+            if (keys.includes("entries")) {
+              return state.idempotencyBatchRows
+                .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
+                .map((row) => ({ entries: row.entries }))
+            }
+            if (keys.includes("id")) {
+              return state.idempotencyBatchRows
+                .filter((row) => (cond?.kind === "lt" ? row.createdAt < Number(cond.value) : true))
+                .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
+                .map((row) => ({ id: row.id }))
+            }
           }
-          if (keys.length === 1 && keys.includes("id")) {
-            return [...state.outboxRows]
-              .filter((row) => matchOutboxCondition(row, cond))
-              .sort((a, b) => a.id - b.id)
-              .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
-              .map((row) => ({ id: row.id }))
-          }
-          if (keys.length === 1 && keys.includes("eventId")) {
-            return [...Array.from(state.idempotencyRows.entries())]
-              .filter(([, r]) => r.createdAt < Number(cond?.value))
-              .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
-              .map(([eventId]) => ({ eventId }))
+          if (sourceTable === "meter_facts_outbox_batches") {
+            if (keys.includes("payloads")) {
+              return [...state.outboxBatchRows]
+                .filter((row) => matchOutboxCondition(row, cond))
+                .sort((a, b) => a.id - b.id)
+                .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
+                .map((row) => ({ id: row.id, payloads: row.payloads }))
+            }
+            if (keys.length === 1 && keys.includes("id")) {
+              return [...state.outboxBatchRows]
+                .filter((row) => matchOutboxCondition(row, cond))
+                .sort((a, b) => a.id - b.id)
+                .slice(0, limitCount ?? Number.POSITIVE_INFINITY)
+                .map((row) => ({ id: row.id }))
+            }
           }
           if (keys.every((k) => GRANT_WINDOW_KEYS.has(k))) {
             const rows = [...state.grantWindowRows.values()]
@@ -4926,7 +5253,8 @@ function buildFakeDrizzle(state: FakeDbState) {
       }
     },
 
-    insert() {
+    insert(table?: unknown) {
+      const sourceTable = tableName(table)
       return {
         values(value: Record<string, unknown>) {
           const builder = {
@@ -4957,6 +5285,7 @@ function buildFakeDrizzle(state: FakeDbState) {
               if ("bucketKey" in value && "consumedInCurrentWindow" in value) {
                 const key = String(value.bucketKey)
                 if (state.grantWindowRows.has(key)) return
+                state.writeCounts.grantWindowRows++
                 state.grantWindowRows.set(key, {
                   bucketKey: key,
                   grantId: String(value.grantId),
@@ -4982,26 +5311,29 @@ function buildFakeDrizzle(state: FakeDbState) {
                 })
                 return
               }
-              if ("payload" in value && !("eventId" in value) && !("meterKey" in value)) {
-                state.outboxRows.push({
-                  id: nextOutboxId++,
-                  payload: String(value.payload),
+              if (sourceTable === "meter_facts_outbox_batches" && "payloads" in value) {
+                state.writeCounts.outboxBatchRows++
+                state.outboxBatchRows.push({
+                  id: nextOutboxBatchId++,
+                  payloads: String(value.payloads),
                   currency: String(value.currency),
+                  createdAt: Number(value.createdAt),
                 })
                 return
               }
-              if ("eventId" in value && "allowed" in value) {
-                state.idempotencyRows.set(String(value.eventId), {
+              if (sourceTable === "idempotency_key_batches" && "entries" in value) {
+                state.writeCounts.idempotencyBatchRows++
+                state.idempotencyBatchRows.push({
+                  id: nextIdempotencyBatchId++,
                   createdAt: Number(value.createdAt),
-                  allowed: Boolean(value.allowed),
-                  deniedReason: (value.deniedReason as string | null) ?? null,
-                  denyMessage: (value.denyMessage as string | null) ?? null,
+                  entries: String(value.entries),
                 })
                 return
               }
               if ("meterKey" in value) {
                 const key = String(value.meterKey)
                 if (state.meterWindowRows.has(key)) return
+                state.writeCounts.meterStateRows++
                 state.meterWindowRows.set(key, {
                   meterKey: key,
                   currency: value.currency != null ? String(value.currency) : "",
@@ -5018,6 +5350,7 @@ function buildFakeDrizzle(state: FakeDbState) {
                 return
               }
               if ("id" in value && "currency" in value && "reservationEndAt" in value) {
+                state.writeCounts.walletRows++
                 const key = DEFAULT_METER_KEY
                 const existing = state.meterWindowRows.get(key)
                 state.meterWindowRows.set(key, {
@@ -5063,7 +5396,8 @@ function buildFakeDrizzle(state: FakeDbState) {
       }
     },
 
-    update() {
+    update(table?: unknown) {
+      const sourceTable = tableName(table)
       // The DO's wallet path updates the singleton meter_window row with
       // reservation state; the engine adapter (mocked out elsewhere) used
       // to hit this too. We treat it as a merge over the single row —
@@ -5081,6 +5415,7 @@ function buildFakeDrizzle(state: FakeDbState) {
                 const bucketKey = String(cond?.value ?? "")
                 const row = state.grantWindowRows.get(bucketKey)
                 if (!row) return
+                state.writeCounts.grantWindowRows++
                 Object.assign(row, patch)
                 return
               }
@@ -5103,6 +5438,11 @@ function buildFakeDrizzle(state: FakeDbState) {
                 state.failNextMeterWindowUpdate = undefined
                 throw failure.error
               }
+              if (sourceTable === "meter_state") {
+                state.writeCounts.meterStateRows++
+              } else if (sourceTable === "wallet_reservation") {
+                state.writeCounts.walletRows++
+              }
               Object.assign(first, patch)
             },
           }
@@ -5110,7 +5450,8 @@ function buildFakeDrizzle(state: FakeDbState) {
       }
     },
 
-    delete() {
+    delete(table?: unknown) {
+      const sourceTable = tableName(table)
       return {
         where(cond: DrizzleCondition) {
           return {
@@ -5118,18 +5459,12 @@ function buildFakeDrizzle(state: FakeDbState) {
               if (cond.kind === "lte") {
                 const maxId = Number(cond.value)
                 state.deleteOutboxRangeMaxIds.push(maxId)
-                const remaining = state.outboxRows.filter((row) => row.id > maxId)
-                state.outboxRows.splice(0, state.outboxRows.length, ...remaining)
-                return
-              }
-
-              if (cond.kind === "lt") {
-                const cutoff = Number(cond.value)
-                state.deleteIdempotencyCutoffs.push(cutoff)
-                for (const [eventId, row] of state.idempotencyRows.entries()) {
-                  if (row.createdAt < cutoff) state.idempotencyRows.delete(eventId)
+                if (sourceTable === "meter_facts_outbox_batches") {
+                  const remaining = state.outboxBatchRows.filter((row) => row.id > maxId)
+                  state.outboxBatchRows.splice(0, state.outboxBatchRows.length, ...remaining)
+                  return
                 }
-                return
+                throw new Error(`Unsupported lte delete table: ${sourceTable}`)
               }
 
               if (cond.kind !== "inArray") throw new Error("Unsupported delete condition")
@@ -5143,11 +5478,18 @@ function buildFakeDrizzle(state: FakeDbState) {
               }
               if ((cond.values ?? []).every((v: unknown) => typeof v === "number")) {
                 const ids = new Set(cond.values as number[])
-                const remaining = state.outboxRows.filter((r) => !ids.has(r.id))
-                state.outboxRows.splice(0, state.outboxRows.length, ...remaining)
-              } else {
-                for (const v of cond.values ?? []) state.idempotencyRows.delete(String(v))
+                if (sourceTable === "idempotency_key_batches") {
+                  const remaining = state.idempotencyBatchRows.filter((r) => !ids.has(r.id))
+                  state.idempotencyBatchRows.splice(
+                    0,
+                    state.idempotencyBatchRows.length,
+                    ...remaining
+                  )
+                  return
+                }
+                throw new Error(`Unsupported numeric inArray delete table: ${sourceTable}`)
               }
+              throw new Error("Unsupported non-numeric inArray delete")
             },
           }
         },
