@@ -198,12 +198,14 @@ type CommitAuditOptions = {
 
 const GRANT_CONTEXT_CACHE_BUCKET_MS = 300_000
 const ENTITLEMENT_APPLY_BATCH_SIZE = 100
+const DEFAULT_FANOUT_WARNING_THRESHOLD = 5
 
 export class IngestionService {
   private readonly entitlementService: EntitlementService
   private readonly entitlementWindowClient: EntitlementWindowClient
   private readonly auditClient: IngestionAuditClient
   private readonly cache: Pick<Cache, "ingestionPreparedGrantContext">
+  private readonly fanoutWarningThreshold: number
   private readonly logger: Logger
   private readonly now: () => number
   private readonly waitUntil: (promise: Promise<unknown>) => void
@@ -212,6 +214,7 @@ export class IngestionService {
     cache: Pick<Cache, "ingestionPreparedGrantContext">
     entitlementService: EntitlementService
     entitlementWindowClient: EntitlementWindowClient
+    fanoutWarningThreshold?: number
     auditClient: IngestionAuditClient
     logger: Logger
     now?: () => number
@@ -221,6 +224,7 @@ export class IngestionService {
     this.entitlementWindowClient = opts.entitlementWindowClient
     this.auditClient = opts.auditClient
     this.cache = opts.cache
+    this.fanoutWarningThreshold = opts.fanoutWarningThreshold ?? DEFAULT_FANOUT_WARNING_THRESHOLD
     this.logger = opts.logger
     this.now = opts.now ?? (() => Date.now())
     this.waitUntil = opts.waitUntil
@@ -494,6 +498,16 @@ export class IngestionService {
 
       await this.commitOutcomesToAudit(projectId, customerId, freshOutcomes)
 
+      this.logger.info("raw ingestion customer group", {
+        projectId,
+        customerId,
+        raw_event_count: messages.length,
+        fresh_event_count: fresh.length,
+        too_old_event_count: tooOldOutcomes.length,
+        cross_period_duplicate_count: duplicateOutcomes.length,
+        audit_entry_count: freshOutcomes.length,
+      })
+
       return [
         ...this.mapOutcomesToAckResults(freshOutcomes),
         ...duplicateOutcomes.map(({ message }) => this.ackMessage(message)),
@@ -616,6 +630,8 @@ export class IngestionService {
     const plannedApplyCountsByKey = new Map<string, number>()
     const lateClosedApplyCountsByKey = new Map<string, number>()
     const deniedReasonsByKey = new Map<string, IngestionRejectionReason>()
+    let matchedEntitlementCount = 0
+    let matchedEntitlementsPerEventMax = 0
     const applyGroups = new Map<
       string,
       {
@@ -654,6 +670,11 @@ export class IngestionService {
       outcomesByKey.set(messageKey, { state: "processed" })
       allowedApplyCountsByKey.set(messageKey, 0)
       plannedApplyCountsByKey.set(messageKey, processableEntitlementsResult.val.length)
+      matchedEntitlementCount += processableEntitlementsResult.val.length
+      matchedEntitlementsPerEventMax = Math.max(
+        matchedEntitlementsPerEventMax,
+        processableEntitlementsResult.val.length
+      )
       lateClosedApplyCountsByKey.set(messageKey, 0)
 
       for (const entitlement of processableEntitlementsResult.val) {
@@ -671,6 +692,15 @@ export class IngestionService {
         })
       }
     }
+
+    this.logger.info("raw ingestion entitlement fanout", {
+      projectId: params.projectId,
+      customerId: params.customerId,
+      raw_event_count: messages.length,
+      matched_entitlement_count: matchedEntitlementCount,
+      matched_entitlements_per_event_max: matchedEntitlementsPerEventMax,
+      apply_group_count: applyGroups.size,
+    })
 
     for (const group of applyGroups.values()) {
       for (const chunk of chunkArray(group.messages, ENTITLEMENT_APPLY_BATCH_SIZE)) {
@@ -836,11 +866,7 @@ export class IngestionService {
           error: formatUnknownError(error),
         })
 
-        if (options.strict) {
-          throw error
-        }
-
-        return
+        throw error
       }
 
       if (result.conflicts > 0) {
@@ -1216,6 +1242,23 @@ export class IngestionService {
 
     if (processableEntitlements.length === 0) {
       return { err: "INVALID_AGGREGATION_PROPERTIES" }
+    }
+
+    if (
+      params.allowMultipleMatches &&
+      processableEntitlements.length > this.fanoutWarningThreshold
+    ) {
+      this.logger.warn("high ingestion entitlement fanout", {
+        projectId: params.message.projectId,
+        customerId: params.message.customerId,
+        eventId: params.message.id,
+        eventSlug: params.message.slug,
+        matched_entitlements_per_event: processableEntitlements.length,
+        fanout_warning_threshold: this.fanoutWarningThreshold,
+        customerEntitlementIds: processableEntitlements.map(
+          (entitlement) => entitlement.customerEntitlementId
+        ),
+      })
     }
 
     return { val: processableEntitlements }

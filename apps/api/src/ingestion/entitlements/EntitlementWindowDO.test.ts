@@ -990,6 +990,21 @@ describe("EntitlementWindowDO", () => {
     expect(compactWriteSiteModel).toBe(5)
     expect(compactWriteSiteModel).toBeLessThanOrEqual(perEventWriteModel / 10)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        duplicate_count: 0,
+        priced_fact_count: 100,
+        grant_allocation_count: 100,
+        meter_state_write_count: 0,
+        grant_window_write_count: 1,
+        wallet_reservation_write_count: 0,
+        outbox_insert_count: 1,
+        outbox_fact_count: 100,
+        idempotency_insert_count: 1,
+        idempotency_event_count: 100,
+      })
+    )
   })
 
   it("preserves wallet consumption while compacting an already-funded async batch", async () => {
@@ -997,37 +1012,13 @@ describe("EntitlementWindowDO", () => {
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
-    db.meterWindowRows.set(DEFAULT_METER_KEY, {
-      meterKey: DEFAULT_METER_KEY,
-      currency: "USD",
-      priceConfig: DEFAULT_PRICE_CONFIG,
-      periodEndAt: BASE_NOW + 60_000,
-      reservationEndAt: BASE_NOW + 60_000,
-      usage: 0,
-      updatedAt: BASE_NOW,
-      createdAt: BASE_NOW,
+    seedWalletReservation(db, {
       projectId: "proj_123",
       customerId: "cus_123",
       reservationId: "res_batch",
       allocationAmount: 20 * 100_000_000,
-      consumedAmount: 0,
-      flushedAmount: 0,
-      refillThresholdBps: 2000,
-      refillChunkAmount: 0,
       targetReservationAmount: 20 * 100_000_000,
-      spendEwmaAmount: 0,
-      lastRateSampledAtMs: BASE_NOW,
       maxEventCostAmount: 100_000_000,
-      refillInFlight: false,
-      flushSeq: 0,
-      pendingFlushSeq: null,
-      pendingFlushFinal: false,
-      pendingFlushAmount: null,
-      pendingRefillAmount: 0,
-      lastEventAt: BASE_NOW,
-      lastFlushedAt: null,
-      deletionRequested: false,
-      recoveryRequired: false,
     })
     testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
       const index = Number(String((event as { id: string }).id).replace("evt_wallet_", ""))
@@ -1061,6 +1052,247 @@ describe("EntitlementWindowDO", () => {
     expect(db.writeCounts.walletRows).toBe(1)
     expect(db.writeCounts.idempotencyBatchRows).toBe(1)
     expect(db.writeCounts.outboxBatchRows).toBe(1)
+  })
+
+  it("falls back to sequential batch replay when wallet bootstrap is needed after staged events", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.pricePerFeature.mockImplementation(({ quantity }: { quantity: number }) => ({
+      val: {
+        totalPrice: {
+          dinero: fakeDinero(Math.max(0, quantity - 1) * 100, 2),
+        },
+      },
+    }))
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const valueAfter = (event as { id: string }).id === "evt_paid" ? 2 : 1
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "free",
+          id: "evt_free",
+          idempotencyKey: "idem_free",
+          now: BASE_NOW,
+          properties: { amount: 1 },
+          timestamp: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "paid",
+          id: "evt_paid",
+          idempotencyKey: "idem_paid",
+          now: BASE_NOW + 1,
+          properties: { amount: 1 },
+          timestamp: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "free" }),
+      expect.objectContaining({ allowed: true, correlationKey: "paid" }),
+    ])
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(db.idempotencyBatchRows).toHaveLength(2)
+    expect(db.outboxBatchRows).toHaveLength(2)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch falling back to sequential per-event apply",
+      expect.objectContaining({
+        reason: "wallet bootstrap after staged batch mutations",
+      })
+    )
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        mode: "sequential",
+        processed_count: 2,
+        outcome: "success",
+      })
+    )
+  })
+
+  it("falls back to sequential batch replay before closing a reservation for a staged limit denial", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_limit_batch",
+      allocationAmount: 10 * 100_000_000,
+      targetReservationAmount: 10 * 100_000_000,
+    })
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const valueAfter = (event as { id: string }).id === "evt_limit_second" ? 2 : 1
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({ enforceLimit: true, limit: 1 })
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: true,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "first",
+          id: "evt_limit_first",
+          idempotencyKey: "idem_limit_first",
+          now: BASE_NOW,
+          properties: { amount: 1 },
+          timestamp: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "second",
+          id: "evt_limit_second",
+          idempotencyKey: "idem_limit_second",
+          now: BASE_NOW + 1,
+          properties: { amount: 1 },
+          timestamp: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+    await Promise.all(state.waitUntilPromises)
+
+    expect(result.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "first" }),
+      expect.objectContaining({
+        allowed: false,
+        correlationKey: "second",
+        deniedReason: "LIMIT_EXCEEDED",
+      }),
+    ])
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    expect(readIdempotencyEntries(db).size).toBe(2)
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        final: true,
+        reservationId: "res_limit_batch",
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch falling back to sequential per-event apply",
+      expect.objectContaining({
+        reason: "wallet reservation close after staged batch mutations",
+      })
+    )
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({ mode: "sequential", outcome: "success" })
+    )
+  })
+
+  it("falls back to sequential batch replay when staged wallet consumption is underfunded", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_underfunded_batch",
+      allocationAmount: 500_000_000,
+      targetReservationAmount: 500_000_000,
+      maxEventCostAmount: 100_000_000,
+    })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 2_000_000_000,
+        flushedAmount: 100_000_000,
+        refundedAmount: 0,
+      },
+    })
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const isSecond = (event as { id: string }).id === "evt_underfunded_second"
+      const facts = [
+        {
+          delta: isSecond ? 10 : 1,
+          meterKey: DEFAULT_METER_KEY,
+          valueAfter: isSecond ? 11 : 1,
+        },
+      ]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "first",
+          id: "evt_underfunded_first",
+          idempotencyKey: "idem_underfunded_first",
+          now: BASE_NOW,
+          properties: { amount: 1 },
+          timestamp: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "second",
+          id: "evt_underfunded_second",
+          idempotencyKey: "idem_underfunded_second",
+          now: BASE_NOW + 1,
+          properties: { amount: 10 },
+          timestamp: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "first" }),
+      expect.objectContaining({ allowed: true, correlationKey: "second" }),
+    ])
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        final: false,
+        flushAmount: 100_000_000,
+        reservationId: "res_underfunded_batch",
+      })
+    )
+    const wallet = db.meterWindowRows.get(DEFAULT_METER_KEY)
+    expect(wallet?.consumedAmount).toBe(1_100_000_000)
+    expect(wallet?.allocationAmount).toBeGreaterThanOrEqual(2_500_000_000)
+    expect(wallet?.flushedAmount).toBeGreaterThanOrEqual(100_000_000)
+    expect(wallet?.flushSeq).toBeGreaterThanOrEqual(1)
+    expect(db.idempotencyBatchRows).toHaveLength(2)
+    expect(db.outboxBatchRows).toHaveLength(2)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch falling back to sequential per-event apply",
+      expect.objectContaining({
+        reason: "wallet reservation underfunded",
+      })
+    )
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({ mode: "sequential", outcome: "success" })
+    )
   })
 
   it("writes the same priced facts as sequential apply for representative async batches", async () => {
@@ -1166,6 +1398,106 @@ describe("EntitlementWindowDO", () => {
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(db.idempotencyBatchRows).toHaveLength(1)
     expect(db.outboxBatchRows).toHaveLength(1)
+  })
+
+  it("re-arms compact outbox and replays idempotency after eviction before alarm scheduling", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    pushOutboxBatchRow(db, 1)
+    pushIdempotencyBatchRow(db, "idem_evicted_before_alarm", {
+      createdAt: BASE_NOW,
+      id: 1,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({
+      creditLinePolicy: "uncapped",
+      idempotencyKey: "idem_evicted_before_alarm",
+      event: { id: "evt_evicted_before_alarm" },
+    })
+    const replay = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "replay",
+          idempotencyKey: baseInput.idempotencyKey,
+          now: BASE_NOW,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(replay.results).toEqual([
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "replay",
+        idempotencyKey: "idem_evicted_before_alarm",
+      }),
+    ])
+    expect(testState.engineApply).not.toHaveBeenCalled()
+    expect(db.idempotencyBatchRows).toHaveLength(1)
+    expect(db.outboxBatchRows).toHaveLength(1)
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+  })
+
+  it("deduplicates repeated idempotency keys staged within the same compact batch", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({ creditLinePolicy: "uncapped" })
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "first",
+          id: "evt_duplicate_first",
+          idempotencyKey: "idem_duplicate_batch",
+          now: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "second",
+          id: "evt_duplicate_second",
+          idempotencyKey: "idem_duplicate_batch",
+          now: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "first",
+        idempotencyKey: "idem_duplicate_batch",
+      }),
+      expect.objectContaining({
+        allowed: true,
+        correlationKey: "second",
+        idempotencyKey: "idem_duplicate_batch",
+      }),
+    ])
+    expect(testState.engineApply).toHaveBeenCalledTimes(1)
+    expect(readOutboxPayloads(db)).toHaveLength(1)
+    expect(JSON.parse(db.idempotencyBatchRows[0]!.entries)).toHaveLength(1)
   })
 
   it("flushes queued facts during alarm and schedules self-destruct when the outbox is empty", async () => {
@@ -4938,6 +5270,42 @@ function createFakeDbState(): FakeDbState {
       grantWindows: 0,
     },
   }
+}
+
+function seedWalletReservation(db: FakeDbState, overrides: Partial<MeterWindowRow> = {}): void {
+  db.meterWindowRows.set(DEFAULT_METER_KEY, {
+    meterKey: DEFAULT_METER_KEY,
+    currency: "USD",
+    priceConfig: DEFAULT_PRICE_CONFIG,
+    periodEndAt: BASE_NOW + 60_000,
+    reservationEndAt: BASE_NOW + 60_000,
+    usage: 0,
+    updatedAt: BASE_NOW,
+    createdAt: BASE_NOW,
+    projectId: "proj_123",
+    customerId: "cus_123",
+    reservationId: "res_seeded",
+    allocationAmount: 1_000_000_000,
+    consumedAmount: 0,
+    flushedAmount: 0,
+    refillThresholdBps: 2000,
+    refillChunkAmount: 0,
+    targetReservationAmount: 1_000_000_000,
+    spendEwmaAmount: 0,
+    lastRateSampledAtMs: BASE_NOW,
+    maxEventCostAmount: 100_000_000,
+    pendingRefillAmount: 0,
+    pendingFlushAmount: null,
+    refillInFlight: false,
+    flushSeq: 0,
+    pendingFlushSeq: null,
+    pendingFlushFinal: false,
+    lastEventAt: BASE_NOW,
+    lastFlushedAt: null,
+    deletionRequested: false,
+    recoveryRequired: false,
+    ...overrides,
+  })
 }
 
 function buildOutboxFact(index: number, now = BASE_NOW): Record<string, unknown> {

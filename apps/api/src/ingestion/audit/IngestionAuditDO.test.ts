@@ -24,6 +24,7 @@ type FakeAuditBatchRow = {
 
 type FakeDbState = {
   batchRows: FakeAuditBatchRow[]
+  publishUpdateBatchSizes: number[]
 }
 
 type FakeDurableObjectState = {
@@ -255,6 +256,55 @@ describe("IngestionAuditDO", () => {
     expect(db.batchRows).toHaveLength(1)
   })
 
+  it("hydrates valid compact audit dedupe while poison rows remain retryable", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const validEntry = createLedgerEntry({
+      idempotencyKey: "idem_valid_after_poison",
+      payloadHash: "hash_valid_after_poison",
+    })
+    const pipelineEvents = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+    testState.db = db
+    db.batchRows.push({
+      id: 1,
+      first_seen_at: BASE_NOW - 1,
+      created_at: BASE_NOW - 1,
+      entries_json: "{not valid json",
+      published_at: null,
+    })
+    db.batchRows.push({
+      id: 2,
+      first_seen_at: BASE_NOW,
+      created_at: BASE_NOW,
+      entries_json: JSON.stringify([validEntry]),
+      published_at: null,
+    })
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: pipelineEvents,
+      } as never
+    )
+
+    const duplicate = await durableObject.commit([validEntry])
+    await durableObject.alarm()
+
+    expect(duplicate).toEqual({ inserted: 0, duplicates: 1, conflicts: 0 })
+    expect(pipelineEvents.send).not.toHaveBeenCalled()
+    expect(db.batchRows.map((row) => row.published_at)).toEqual([null, null])
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+    expect(testState.logger.warn).toHaveBeenCalledWith(
+      "failed to parse ingestion audit batch entries",
+      expect.objectContaining({
+        error: expect.any(String),
+      })
+    )
+  })
+
   it("publishes large outbox batches within Durable Object SQL parameter limits", async () => {
     const IngestionAuditDO = await loadIngestionAuditDO()
     const state = createDurableObjectState()
@@ -277,6 +327,40 @@ describe("IngestionAuditDO", () => {
     expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
     expect(pipelineEvents.send.mock.calls[0]?.[0]).toHaveLength(125)
     expect(db.batchRows.every((row) => row.published_at === BASE_NOW)).toBe(true)
+  })
+
+  it("updates published audit markers in chunks by compact batch row count", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const pipelineEvents = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+    testState.db = db
+
+    for (const [index, entry] of createLedgerEntries(125).entries()) {
+      db.batchRows.push({
+        id: index + 1,
+        first_seen_at: BASE_NOW + index,
+        created_at: BASE_NOW + index,
+        entries_json: JSON.stringify([entry]),
+        published_at: null,
+      })
+    }
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: pipelineEvents,
+      } as never
+    )
+
+    await durableObject.alarm()
+
+    expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
+    expect(pipelineEvents.send.mock.calls[0]?.[0]).toHaveLength(125)
+    expect(db.batchRows.every((row) => row.published_at === BASE_NOW)).toBe(true)
+    expect(db.publishUpdateBatchSizes).toEqual([99, 26])
   })
 
   it("marks unpublished rows as published after successful pipeline flush", async () => {
@@ -578,6 +662,7 @@ function createDurableObjectState(): FakeDurableObjectState {
 function createFakeDbState(): FakeDbState {
   return {
     batchRows: [],
+    publishUpdateBatchSizes: [],
   }
 }
 
@@ -707,6 +792,9 @@ function buildFakeDrizzle(state: FakeDbState) {
                 Object.keys(values).length + countConditionBoundParameters(condition)
               )
               if (condition.column === "id") {
+                if (condition.kind === "inArray") {
+                  state.publishUpdateBatchSizes.push(condition.values?.length ?? 0)
+                }
                 for (const row of state.batchRows) {
                   if (!matchesBatchCondition(row, condition)) {
                     continue

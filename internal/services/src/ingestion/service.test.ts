@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import { selectIngestionAuditShardIndex } from "./audit"
 import type { UnPriceIngestionError } from "./errors"
+import type { IngestionQueueMessage } from "./message"
 import { type IngestionEntitlement, IngestionService } from "./service"
 
 const SERVICE_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
@@ -259,6 +260,68 @@ describe("IngestionService entitlement routing", () => {
     expect(waitUntil).not.toHaveBeenCalled()
   })
 
+  it("retries a sync replay after audit fails without charging the same idempotency key twice", async () => {
+    const entitlement = createEntitlement()
+    const chargedKeys = new Set<string>()
+    let chargeCount = 0
+    const apply = vi.fn().mockImplementation((input: { idempotencyKey: string }) => {
+      if (!chargedKeys.has(input.idempotencyKey)) {
+        chargedKeys.add(input.idempotencyKey)
+        chargeCount++
+      }
+      return Promise.resolve({ allowed: true })
+    })
+    const commit = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("audit unavailable"))
+      .mockResolvedValueOnce({ inserted: 1, duplicates: 0, conflicts: 0 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: {
+        getEntitlementWindowStub: vi.fn().mockReturnValue({
+          apply,
+          getEnforcementState: vi.fn(),
+        }),
+      },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+    const message = createMessage(entitlement)
+
+    await expect(
+      service.ingestFeatureSync({
+        featureSlug: entitlement.featureSlug,
+        message,
+      })
+    ).rejects.toThrow("audit unavailable")
+
+    const retry = await service.ingestFeatureSync({
+      featureSlug: entitlement.featureSlug,
+      message,
+    })
+
+    expect(retry).toEqual({
+      allowed: true,
+      state: "processed",
+    })
+    expect(apply).toHaveBeenCalledTimes(2)
+    expect(commit).toHaveBeenCalledTimes(2)
+    expect(chargeCount).toBe(1)
+  })
+
   it("throws a typed ingestion error when strict audit detects a payload conflict", async () => {
     const entitlement = createEntitlement()
     const logger = createLogger()
@@ -320,6 +383,73 @@ describe("IngestionService entitlement routing", () => {
     )
     expect(logger.error).not.toHaveBeenCalled()
     expect(waitUntil).not.toHaveBeenCalled()
+  })
+
+  it("retries async queue outcomes when audit commit fails after entitlement apply", async () => {
+    const entitlement = createEntitlement()
+    const applyBatch = vi
+      .fn()
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: true,
+              correlationKey: event.correlationKey,
+              idempotencyKey: event.idempotencyKey,
+            })),
+          })
+      )
+    const commit = vi.fn().mockRejectedValue(new Error("audit unavailable"))
+    const logger = createLogger()
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
+      } as never,
+      entitlementWindowClient: {
+        getEntitlementWindowStub: vi.fn().mockReturnValue({
+          apply: vi.fn(),
+          applyBatch,
+          getEnforcementState: vi.fn(),
+        }),
+      },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const result = await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages: [createMessage(entitlement)],
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0]?.disposition.action).toBe("retry")
+    expect(applyBatch).toHaveBeenCalledTimes(1)
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(logger.error).toHaveBeenCalledWith(
+      "audit commit failed",
+      expect.objectContaining({
+        error: expect.objectContaining({ message: "audit unavailable" }),
+      })
+    )
+    expect(logger.error).toHaveBeenCalledWith(
+      "raw ingestion queue processing failed",
+      expect.objectContaining({
+        customerId: entitlement.customerId,
+        projectId: entitlement.projectId,
+      })
+    )
   })
 
   it("rejects duplicate active entitlements for the same customer feature", async () => {
@@ -516,7 +646,233 @@ describe("IngestionService entitlement routing", () => {
       status: "processed",
     })
     expect(JSON.parse(entry.resultJson)).toEqual({ state: "processed" })
+    expect(logger.info).toHaveBeenCalledWith(
+      "raw ingestion entitlement fanout",
+      expect.objectContaining({
+        raw_event_count: 1,
+        matched_entitlement_count: 2,
+        matched_entitlements_per_event_max: 2,
+        apply_group_count: 2,
+      })
+    )
+    expect(logger.info).toHaveBeenCalledWith(
+      "raw ingestion customer group",
+      expect.objectContaining({
+        raw_event_count: 1,
+        fresh_event_count: 1,
+        cross_period_duplicate_count: 0,
+        audit_entry_count: 1,
+      })
+    )
     expect(logger.error).not.toHaveBeenCalled()
+  })
+
+  it("warns when async fanout exceeds the configured threshold", async () => {
+    const entitlements = ["tokens", "requests", "images"].map((field) =>
+      createEntitlement({
+        customerEntitlementId: `ce_${field}`,
+        featurePlanVersionId: `fpv_${field}`,
+        featureSlug: field,
+        meterConfig: {
+          eventId: "evt_ai_usage",
+          eventSlug: "ai.usage",
+          aggregationMethod: "sum",
+          aggregationField: field,
+        },
+      })
+    )
+    const applyBatch = vi
+      .fn()
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: true,
+              correlationKey: event.correlationKey,
+              idempotencyKey: event.idempotencyKey,
+            })),
+          })
+      )
+    const logger = createLogger()
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(
+            Ok(
+              entitlements.map((entitlement) =>
+                createCustomerEntitlementRecord(entitlement)
+              ) as never
+            )
+          ),
+      } as never,
+      entitlementWindowClient: {
+        getEntitlementWindowStub: vi.fn().mockReturnValue({
+          apply: vi.fn(),
+          applyBatch,
+          getEnforcementState: vi.fn(),
+        }),
+      },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit: vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 }),
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      fanoutWarningThreshold: 2,
+      logger: logger as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+
+    const [entitlement] = entitlements
+    if (!entitlement) {
+      throw new Error("missing entitlement fixture")
+    }
+
+    await service.processCustomerGroup({
+      customerId: entitlement.customerId,
+      projectId: entitlement.projectId,
+      messages: [
+        {
+          version: 1,
+          projectId: entitlement.projectId,
+          customerId: entitlement.customerId,
+          requestId: "req_123",
+          receivedAt: SERVICE_NOW,
+          idempotencyKey: "idem_123",
+          id: "evt_123",
+          slug: "ai.usage",
+          timestamp: Date.UTC(2026, 2, 19),
+          properties: { tokens: 1, requests: 1, images: 1 },
+        },
+      ],
+    })
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "high ingestion entitlement fanout",
+      expect.objectContaining({
+        matched_entitlements_per_event: 3,
+        fanout_warning_threshold: 2,
+        customerEntitlementIds: ["ce_tokens", "ce_requests", "ce_images"],
+      })
+    )
+  })
+
+  it("retries a partially applied async fanout and relies on entitlement idempotency for replay", async () => {
+    const eventsEntitlement = createEntitlement({
+      customerEntitlementId: "ce_events",
+      featurePlanVersionId: "fpv_events",
+      featureSlug: "events",
+      meterConfig: {
+        eventId: "evt_completions",
+        eventSlug: "completions",
+        aggregationMethod: "sum",
+        aggregationField: "events",
+      },
+    })
+    const keysEntitlement = createEntitlement({
+      customerEntitlementId: "ce_keys",
+      featurePlanVersionId: "fpv_keys",
+      featureSlug: "apikeys",
+      meterConfig: {
+        eventId: "evt_completions",
+        eventSlug: "completions",
+        aggregationMethod: "sum",
+        aggregationField: "keys",
+      },
+    })
+    const chargedKeys = new Set<string>()
+    let eventsChargeCount = 0
+    const eventsApplyBatch = vi
+      .fn()
+      .mockImplementation(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) => {
+          for (const event of input.events) {
+            if (!chargedKeys.has(event.idempotencyKey)) {
+              chargedKeys.add(event.idempotencyKey)
+              eventsChargeCount++
+            }
+          }
+          return Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: true,
+              correlationKey: event.correlationKey,
+              idempotencyKey: event.idempotencyKey,
+            })),
+          })
+        }
+      )
+    const keysApplyBatch = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("keys window crashed"))
+      .mockImplementationOnce(
+        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
+          Promise.resolve({
+            results: input.events.map((event) => ({
+              allowed: true,
+              correlationKey: event.correlationKey,
+              idempotencyKey: event.idempotencyKey,
+            })),
+          })
+      )
+    const getEntitlementWindowStub = vi
+      .fn()
+      .mockImplementation((params: { customerEntitlementId: string }) => ({
+        apply: vi.fn(),
+        applyBatch:
+          params.customerEntitlementId === "ce_events" ? eventsApplyBatch : keysApplyBatch,
+        getEnforcementState: vi.fn(),
+      }))
+    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+
+    const service = new IngestionService({
+      cache: createCache(),
+      entitlementService: {
+        getCustomerEntitlementsForCustomer: vi
+          .fn()
+          .mockResolvedValue(
+            Ok([
+              createCustomerEntitlementRecord(eventsEntitlement),
+              createCustomerEntitlementRecord(keysEntitlement),
+            ] as never)
+          ),
+      } as never,
+      entitlementWindowClient: { getEntitlementWindowStub },
+      auditClient: {
+        getAuditStub: vi.fn().mockReturnValue({
+          commit,
+          exists: vi.fn().mockResolvedValue([]),
+        }),
+      },
+      logger: createLogger() as never,
+      now: () => SERVICE_NOW,
+      waitUntil: vi.fn(),
+    })
+    const group = {
+      customerId: eventsEntitlement.customerId,
+      projectId: eventsEntitlement.projectId,
+      messages: [
+        createMessage(eventsEntitlement, {
+          idempotencyKey: "idem_partial_fanout",
+          id: "evt_partial_fanout",
+          slug: "completions",
+          properties: { events: 2, keys: 3 },
+        }),
+      ],
+    }
+
+    const first = await service.processCustomerGroup(group)
+    const retry = await service.processCustomerGroup(group)
+
+    expect(first[0]?.disposition.action).toBe("retry")
+    expect(retry[0]?.disposition.action).toBe("ack")
+    expect(eventsApplyBatch).toHaveBeenCalledTimes(2)
+    expect(keysApplyBatch).toHaveBeenCalledTimes(2)
+    expect(eventsChargeCount).toBe(1)
+    expect(commit).toHaveBeenCalledTimes(1)
   })
 
   it("keeps async fanout processed when one meter applies before another denies late", async () => {
@@ -1366,6 +1722,25 @@ function toGrantRecords(entitlement: IngestionEntitlement) {
     createdAtM: 0,
     updatedAtM: 0,
   }))
+}
+
+function createMessage(
+  entitlement: IngestionEntitlement,
+  overrides: Partial<IngestionQueueMessage> = {}
+): IngestionQueueMessage {
+  return {
+    version: 1,
+    projectId: entitlement.projectId,
+    customerId: entitlement.customerId,
+    requestId: "req_123",
+    receivedAt: SERVICE_NOW,
+    idempotencyKey: "idem_123",
+    id: "evt_123",
+    slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
+    timestamp: Date.UTC(2026, 2, 19),
+    properties: { amount: 1 },
+    ...overrides,
+  }
 }
 
 function createCache() {

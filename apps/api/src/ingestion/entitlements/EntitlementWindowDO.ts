@@ -298,6 +298,38 @@ type BatchIdempotencyEntry = z.infer<typeof batchIdempotencyEntrySchema>
 type ApplyInput = z.infer<typeof applyInputSchema>
 type ApplyBatchInput = z.infer<typeof applyBatchInputSchema>
 type ApplyGrantInput = z.infer<typeof activeGrantSchema>
+type ApplyBatchResultRow = ApplyResult & { correlationKey: string; idempotencyKey: string }
+type ApplyBatchMetrics = {
+  duplicate_count: number
+  grant_allocation_count: number
+  grant_window_write_count: number
+  idempotency_event_count: number
+  idempotency_insert_count: number
+  meter_state_write_count: number
+  outbox_fact_count: number
+  outbox_insert_count: number
+  priced_fact_count: number
+  wallet_reservation_write_count: number
+}
+type ApplyBatchInternalResult = {
+  results: ApplyBatchResultRow[]
+  metrics: ApplyBatchMetrics
+}
+
+function createApplyBatchMetrics(): ApplyBatchMetrics {
+  return {
+    duplicate_count: 0,
+    grant_allocation_count: 0,
+    grant_window_write_count: 0,
+    idempotency_event_count: 0,
+    idempotency_insert_count: 0,
+    meter_state_write_count: 0,
+    outbox_fact_count: 0,
+    outbox_insert_count: 0,
+    priced_fact_count: 0,
+    wallet_reservation_write_count: 0,
+  }
+}
 
 export const entitlementWindowStatusSchema = z.object({
   durableObjectId: z.string(),
@@ -508,7 +540,7 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   public async applyBatch(rawInput: ApplyBatchInput): Promise<{
-    results: Array<ApplyResult & { correlationKey: string; idempotencyKey: string }>
+    results: ApplyBatchResultRow[]
   }> {
     await this.ready
 
@@ -522,7 +554,8 @@ export class EntitlementWindowDO extends DurableObject {
       async () => {
         const startTime = Date.now()
         const input = applyBatchInputSchema.parse(rawInput)
-        const results: Array<ApplyResult & { correlationKey: string; idempotencyKey: string }> = []
+        const results: ApplyBatchResultRow[] = []
+        let metrics = createApplyBatchMetrics()
         let mode: "optimized" | "sequential" = "optimized"
         let thrown: unknown
 
@@ -532,8 +565,9 @@ export class EntitlementWindowDO extends DurableObject {
           // outside a partially staged batch.
           try {
             const optimized = await this.applyBatchOptimized(input)
+            metrics = optimized.metrics
             results.push(...optimized.results)
-            return optimized
+            return { results: optimized.results }
           } catch (error) {
             if (!(error instanceof EntitlementWindowBatchSequentialReplayRequired)) {
               throw error
@@ -550,8 +584,9 @@ export class EntitlementWindowDO extends DurableObject {
             })
 
             const sequential = await this.applyBatchSequential(input)
+            metrics = sequential.metrics
             results.push(...sequential.results)
-            return sequential
+            return { results: sequential.results }
           }
         } catch (error) {
           thrown = error
@@ -574,6 +609,7 @@ export class EntitlementWindowDO extends DurableObject {
             processed_count: results.length,
             allowed_count: results.filter((result) => result.allowed).length,
             denied_count: results.filter((result) => !result.allowed).length,
+            ...metrics,
             denied_by_reason: deniedByReason,
             duration_ms: Date.now() - startTime,
             outcome: thrown ? "error" : "success",
@@ -585,10 +621,9 @@ export class EntitlementWindowDO extends DurableObject {
     )
   }
 
-  private async applyBatchSequential(input: ApplyBatchInput): Promise<{
-    results: Array<ApplyResult & { correlationKey: string; idempotencyKey: string }>
-  }> {
-    const results: Array<ApplyResult & { correlationKey: string; idempotencyKey: string }> = []
+  private async applyBatchSequential(input: ApplyBatchInput): Promise<ApplyBatchInternalResult> {
+    const results: ApplyBatchResultRow[] = []
+    const metrics = createApplyBatchMetrics()
 
     for (const event of input.events) {
       const { correlationKey, idempotencyKey, now, ...rawEvent } = event
@@ -604,12 +639,10 @@ export class EntitlementWindowDO extends DurableObject {
       results.push({ ...result, correlationKey, idempotencyKey })
     }
 
-    return { results }
+    return { results, metrics }
   }
 
-  private async applyBatchOptimized(input: ApplyBatchInput): Promise<{
-    results: Array<ApplyResult & { correlationKey: string; idempotencyKey: string }>
-  }> {
+  private async applyBatchOptimized(input: ApplyBatchInput): Promise<ApplyBatchInternalResult> {
     const createdAt = Date.now()
     const idempotencyKeys = unique(input.events.map((event) => event.idempotencyKey))
 
@@ -647,7 +680,8 @@ export class EntitlementWindowDO extends DurableObject {
       }
     })
 
-    const results: Array<ApplyResult & { correlationKey: string; idempotencyKey: string }> = []
+    const results: ApplyBatchResultRow[] = []
+    const metrics = createApplyBatchMetrics()
     const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
     const idempotencyEntries: BatchIdempotencyEntry[] = []
     const outboxFacts: OutboxFact[] = []
@@ -670,6 +704,7 @@ export class EntitlementWindowDO extends DurableObject {
         stagedResultsByKey.get(event.idempotencyKey) ??
         setup.cachedResults.get(event.idempotencyKey)
       if (cached) {
+        metrics.duplicate_count++
         results.push({
           allowed: cached.allowed,
           deniedReason: cached.deniedReason ?? undefined,
@@ -864,6 +899,8 @@ export class EntitlementWindowDO extends DurableObject {
         facts,
         grantStates,
       })
+      metrics.priced_fact_count += pricedFacts.length
+      metrics.grant_allocation_count += touchedStates.size
 
       for (const [bucketKey, state] of touchedStates.entries()) {
         touchedGrantStates.set(bucketKey, state)
@@ -1019,6 +1056,14 @@ export class EntitlementWindowDO extends DurableObject {
       idempotencyEntries.length > 0 ||
       walletDirty
     ) {
+      metrics.meter_state_write_count = meterState.dirty ? (meterState.exists ? 1 : 2) : 0
+      metrics.grant_window_write_count = touchedGrantStates.size
+      metrics.wallet_reservation_write_count = walletDirty && wallet ? 1 : 0
+      metrics.outbox_insert_count = outboxFacts.length > 0 ? 1 : 0
+      metrics.outbox_fact_count = outboxFacts.length
+      metrics.idempotency_insert_count = idempotencyEntries.length > 0 ? 1 : 0
+      metrics.idempotency_event_count = idempotencyEntries.length
+
       // Keep replay seals, priced fact publish intent, and local accounting in one
       // synchronous DO SQLite transaction. No await belongs inside this block.
       this.db.transaction((tx) => {
@@ -1090,7 +1135,7 @@ export class EntitlementWindowDO extends DurableObject {
       this.ctx.waitUntil(this.requestFlushAndRefill(refillTrigger))
     }
 
-    return { results }
+    return { results, metrics }
   }
 
   private async applyInner(
@@ -1153,7 +1198,16 @@ export class EntitlementWindowDO extends DurableObject {
 
     let result: ApplyResult | undefined
     let thrown: unknown
+    let duplicateCount = 0
     let insertedFactCount = 0
+    let pricedFactCount = 0
+    let grantAllocationCount = 0
+    let meterStateWriteCount = 0
+    let grantWindowWriteCount = 0
+    let walletReservationWriteCount = 0
+    let outboxInsertCount = 0
+    let outboxFactCount = 0
+    let idempotencyInsertCount = 0
     let refillTrigger: RefillTrigger | null = null
     let totalCost = 0
     let reservationEngaged = false
@@ -1163,6 +1217,7 @@ export class EntitlementWindowDO extends DurableObject {
       // cached result must not re-call wallet.createReservation.
       const cachedResult = this.lookupCachedIdempotencyResult(idempotencyKey)
       if (cachedResult) {
+        duplicateCount = 1
         wideEvent.idempotent_replay = true
         result = cachedResult
         return cachedResult
@@ -1189,6 +1244,7 @@ export class EntitlementWindowDO extends DurableObject {
           deniedReason: deniedResult.deniedReason ?? null,
           denyMessage: deniedResult.message ?? null,
         })
+        idempotencyInsertCount = 1
 
         wideEvent.late_event_rejected = true
         wideEvent.late_event_lag_ms = lateClosedPeriod.lagMs
@@ -1232,6 +1288,7 @@ export class EntitlementWindowDO extends DurableObject {
             deniedReason: denial.deniedReason ?? null,
             denyMessage: denial.message ?? null,
           })
+          idempotencyInsertCount = 1
           result = denial
           return denial
         }
@@ -1250,6 +1307,7 @@ export class EntitlementWindowDO extends DurableObject {
           const txResult = this.db.transaction((tx) => {
             const existingBatchEntry = this.getBatchIdempotencyResults().get(idempotencyKey)
             if (existingBatchEntry) {
+              duplicateCount = 1
               return {
                 idempotencyEntry: null,
                 result: {
@@ -1301,6 +1359,7 @@ export class EntitlementWindowDO extends DurableObject {
             insertedFactCount = facts.length
 
             if (meterState.dirty) {
+              meterStateWriteCount = meterState.exists ? 1 : 2
               this.ensureMeterState(tx, {
                 meterKey: meter.key,
                 createdAt: meterState.createdAt,
@@ -1314,17 +1373,22 @@ export class EntitlementWindowDO extends DurableObject {
                 .run()
             }
 
-            const pricedFacts = this.priceFactsFromGrantWindows(tx, {
+            const priced = this.priceFactsFromGrantWindows(tx, {
               activeGrants,
               entitlement,
               eventTimestamp: input.event.timestamp,
               facts,
             })
+            const pricedFacts = priced.pricedFacts
+            pricedFactCount = pricedFacts.length
+            grantAllocationCount = priced.touchedStateCount
+            grantWindowWriteCount = priced.touchedStateCount
 
             // Wallet check. Only engages when a reservation has been opened on
             // this window. Without a reservation the DO operates without local
             // allocation tracking or refill triggers.
             const window = this.readWalletReservation(tx)
+            let walletLastEventAtStamped = false
             if (usesWalletReservation && window?.reservationId && pricedFacts.length > 0) {
               reservationEngaged = true
               // Pricing has already run through Dinero and was normalized into
@@ -1427,8 +1491,11 @@ export class EntitlementWindowDO extends DurableObject {
                   spendEwmaAmount: spendVelocity.spendEwmaAmount,
                   lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
                   maxEventCostAmount: refillDecision.maxEventCostAmount,
+                  lastEventAt: createdAt,
                 })
                 .run()
+              walletReservationWriteCount++
+              walletLastEventAtStamped = true
 
               const shouldScheduleRefill =
                 !window.refillInFlight &&
@@ -1459,6 +1526,7 @@ export class EntitlementWindowDO extends DurableObject {
                     pendingRefillAmount: refillAmount,
                   })
                   .run()
+                walletReservationWriteCount++
 
                 refillTrigger = {
                   flushSeq: nextSeq,
@@ -1481,6 +1549,8 @@ export class EntitlementWindowDO extends DurableObject {
             )
 
             this.writeBatchOutboxFacts(tx, outboxFacts, meter.currency, createdAt)
+            outboxInsertCount = outboxFacts.length > 0 ? 1 : 0
+            outboxFactCount = outboxFacts.length
 
             const idempotencyEntry: BatchIdempotencyEntry = {
               eventId: idempotencyKey,
@@ -1490,11 +1560,15 @@ export class EntitlementWindowDO extends DurableObject {
               denyMessage: null,
             }
             this.writeBatchIdempotencyResults(tx, [idempotencyEntry])
+            idempotencyInsertCount = 1
 
             // Stamp the inactivity watermark on every successful commit. alarm()
             // uses `now - lastEventAt > INACTIVITY_THRESHOLD_MS` to decide when to
             // close out a dormant reservation without waiting for period end.
-            tx.update(walletReservationTable).set({ lastEventAt: createdAt }).run()
+            if (window?.reservationId && !walletLastEventAtStamped) {
+              tx.update(walletReservationTable).set({ lastEventAt: createdAt }).run()
+              walletReservationWriteCount++
+            }
 
             return {
               idempotencyEntry,
@@ -1560,6 +1634,7 @@ export class EntitlementWindowDO extends DurableObject {
               deniedReason: deniedResult.deniedReason ?? null,
               denyMessage: deniedResult.message ?? null,
             })
+            idempotencyInsertCount = 1
 
             this.ctx.waitUntil(this.closeReservation({ closeReason: "limit_reached" }))
             result = deniedResult
@@ -1583,6 +1658,7 @@ export class EntitlementWindowDO extends DurableObject {
               deniedReason: deniedResult.deniedReason ?? null,
               denyMessage: deniedResult.message ?? null,
             })
+            idempotencyInsertCount = 1
 
             this.ctx.waitUntil(this.closeReservation({ closeReason: "wallet_empty" }))
 
@@ -1604,7 +1680,18 @@ export class EntitlementWindowDO extends DurableObject {
       thrown = error
       throw error
     } finally {
+      wideEvent.event_count = 1
+      wideEvent.processed_count = result ? 1 : 0
+      wideEvent.duplicate_count = duplicateCount
       wideEvent.fact_count = insertedFactCount
+      wideEvent.priced_fact_count = pricedFactCount
+      wideEvent.grant_allocation_count = grantAllocationCount
+      wideEvent.meter_state_write_count = meterStateWriteCount
+      wideEvent.grant_window_write_count = grantWindowWriteCount
+      wideEvent.wallet_reservation_write_count = walletReservationWriteCount
+      wideEvent.outbox_insert_count = outboxInsertCount
+      wideEvent.outbox_fact_count = outboxFactCount
+      wideEvent.idempotency_insert_count = idempotencyInsertCount
       wideEvent.cost_minor = totalCost
       wideEvent.reservation_engaged = reservationEngaged
 
@@ -3027,7 +3114,7 @@ export class EntitlementWindowDO extends DurableObject {
       eventTimestamp: number
       facts: Fact[]
     }
-  ): PricedFact[] {
+  ): { pricedFacts: PricedFact[]; touchedStateCount: number } {
     const grantStates = params.facts.some((fact) => fact.delta > 0)
       ? this.readGrantStatesForActiveGrants(tx, params.activeGrants, params.eventTimestamp)
       : []
@@ -3040,7 +3127,7 @@ export class EntitlementWindowDO extends DurableObject {
       this.writeGrantConsumption(tx, state)
     }
 
-    return pricedFacts
+    return { pricedFacts, touchedStateCount: touchedStates.size }
   }
 
   private priceFactsFromGrantStates(params: {
