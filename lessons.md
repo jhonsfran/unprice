@@ -74,6 +74,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-17: EntitlementWindowDO apply/verify hot paths should read only active
   `grant_windows` bucket keys; full-table grant-window scans multiply storage rows read under
   load.
+- 2026-05-30: EntitlementWindowDO no longer uses a local fact outbox; post-apply commits must
+  still schedule lifecycle alarms so wallet final flush, idempotency cleanup, and retention wakeups
+  continue.
+- 2026-05-31: While `IngestionAuditDO` publishes facts returned by entitlement replay,
+  audit dedupe retention must not expire before entitlement idempotency retention.
 - 2026-05-17: IngestionAuditDO commit/publish paths should batch indexed key lookups and
   published-at updates; per-entry SQL loops inflate DO wall time under queue batches.
 - 2026-05-18: Cloudflare SQLite-backed DO queries allow only 100 bound parameters; batch

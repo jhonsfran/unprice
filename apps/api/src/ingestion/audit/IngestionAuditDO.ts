@@ -1,10 +1,16 @@
 import type { Pipeline, PipelineRecord } from "cloudflare:pipelines"
 import { DurableObject } from "cloudflare:workers"
+import {
+  Analytics,
+  type AnalyticsEntitlementMeterFact,
+  entitlementMeterFactSchemaV1,
+} from "@unprice/analytics"
 import { parseLakehouseEvent } from "@unprice/lakehouse"
 import type { Logger } from "@unprice/logs"
 import { and, asc, inArray, isNull, lt } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
+import { z } from "zod"
 import { createDoLogger, runDoOperation } from "~/observability"
 import {
   ALARM_RETRY_DELAY_MS,
@@ -31,6 +37,7 @@ type CommitResult = {
 }
 
 export class IngestionAuditDO extends DurableObject {
+  private readonly analytics: Analytics
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly ready: Promise<void>
   private readonly appEnv?: string
@@ -57,6 +64,13 @@ export class IngestionAuditDO extends DurableObject {
         platform: "cloudflare",
         durable_object_id: requestId,
       },
+    })
+
+    this.analytics = new Analytics({
+      emit: true,
+      tinybirdToken: env.TINYBIRD_TOKEN,
+      tinybirdUrl: env.TINYBIRD_URL,
+      logger: this.logger,
     })
 
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
@@ -138,6 +152,8 @@ export class IngestionAuditDO extends DurableObject {
           firstSeenAt: Math.min(...entriesToInsert.map((entry) => entry.firstSeenAt)),
           createdAt: Date.now(),
           entriesJson: JSON.stringify(entriesToInsert),
+          auditPublishedAt: null,
+          meterFactsPublishedAt: null,
           publishedAt: null,
         })
         .run()
@@ -195,6 +211,8 @@ export class IngestionAuditDO extends DurableObject {
       .select({
         id: ingestionAuditBatchesTable.id,
         entriesJson: ingestionAuditBatchesTable.entriesJson,
+        auditPublishedAt: ingestionAuditBatchesTable.auditPublishedAt,
+        meterFactsPublishedAt: ingestionAuditBatchesTable.meterFactsPublishedAt,
       })
       .from(ingestionAuditBatchesTable)
       .where(isNull(ingestionAuditBatchesTable.publishedAt))
@@ -207,33 +225,105 @@ export class IngestionAuditDO extends DurableObject {
     }
 
     try {
-      const events = batchRows.flatMap((row) =>
-        this.parseLedgerEntries(row.entriesJson, { strict: true }).map((entry): PipelineRecord => {
-          const payload = JSON.parse(entry.auditPayloadJson)
-          return parseLakehouseEvent("events", payload) as PipelineRecord
-        })
-      )
-
-      await this.publishEvents(events)
-
+      const parsedRows = batchRows.map((row) => ({
+        ...row,
+        entries: this.parseLedgerEntries(row.entriesJson, { strict: true }),
+      }))
       const now = Date.now()
-      const ids = batchRows.map((row) => row.id)
-      if (ids.length > 0) {
-        for (let i = 0; i < ids.length; i += AUDIT_PUBLISH_UPDATE_BATCH_SIZE) {
-          const batch = ids.slice(i, i + AUDIT_PUBLISH_UPDATE_BATCH_SIZE)
-          this.db
-            .update(ingestionAuditBatchesTable)
-            .set({
-              publishedAt: now,
-            })
-            .where(inArray(ingestionAuditBatchesTable.id, batch))
-            .run()
-        }
+      const auditPendingRows = parsedRows.filter((row) => row.auditPublishedAt == null)
+      const factPendingRows = parsedRows.filter((row) => row.meterFactsPublishedAt == null)
+
+      if (auditPendingRows.length > 0) {
+        const events = auditPendingRows.flatMap((row) =>
+          row.entries.map((entry): PipelineRecord => {
+            const payload = JSON.parse(entry.auditPayloadJson)
+            return parseLakehouseEvent("events", payload) as PipelineRecord
+          })
+        )
+
+        await this.publishEvents(events)
+        this.markAuditRows(
+          auditPendingRows.map((row) => row.id),
+          { auditPublishedAt: now }
+        )
       }
 
+      if (factPendingRows.length > 0) {
+        const facts = factPendingRows.flatMap((row) => this.parseMeterFacts(row.entries))
+        if (facts.length > 0) {
+          await this.publishMeterFacts(facts)
+        }
+        this.markAuditRows(
+          factPendingRows.map((row) => row.id),
+          { meterFactsPublishedAt: now }
+        )
+      }
+
+      const auditCompletedIds = new Set(auditPendingRows.map((row) => row.id))
+      const factCompletedIds = new Set(factPendingRows.map((row) => row.id))
+      const completeRowIds = parsedRows
+        .filter(
+          (row) =>
+            (row.auditPublishedAt != null || auditCompletedIds.has(row.id)) &&
+            (row.meterFactsPublishedAt != null || factCompletedIds.has(row.id))
+        )
+        .map((row) => row.id)
+      this.markAuditRows(completeRowIds, { publishedAt: now })
+
       return true
-    } catch {
+    } catch (error) {
+      this.logger.warn("failed to publish ingestion audit batch", {
+        error: error instanceof Error ? error.message : String(error),
+      })
       return false
+    }
+  }
+
+  private markAuditRows(
+    rowIds: number[],
+    values: {
+      auditPublishedAt?: number
+      meterFactsPublishedAt?: number
+      publishedAt?: number
+    }
+  ): void {
+    for (let i = 0; i < rowIds.length; i += AUDIT_PUBLISH_UPDATE_BATCH_SIZE) {
+      const batch = rowIds.slice(i, i + AUDIT_PUBLISH_UPDATE_BATCH_SIZE)
+      if (batch.length === 0) {
+        continue
+      }
+      this.db
+        .update(ingestionAuditBatchesTable)
+        .set(values)
+        .where(inArray(ingestionAuditBatchesTable.id, batch))
+        .run()
+    }
+  }
+
+  private parseMeterFacts(entries: LedgerEntry[]): AnalyticsEntitlementMeterFact[] {
+    const facts: AnalyticsEntitlementMeterFact[] = []
+
+    for (const entry of entries) {
+      if (!entry.meterFactsJson) {
+        continue
+      }
+
+      const parsed = JSON.parse(entry.meterFactsJson)
+      facts.push(...z.array(entitlementMeterFactSchemaV1).parse(parsed))
+    }
+
+    return facts
+  }
+
+  private async publishMeterFacts(facts: AnalyticsEntitlementMeterFact[]): Promise<void> {
+    const result = await this.analytics.ingestEntitlementMeterFacts(facts)
+    const successful = result?.successful_rows ?? 0
+    const quarantined = result?.quarantined_rows ?? 0
+
+    if (successful !== facts.length || quarantined !== 0) {
+      throw new Error(
+        `Tinybird entitlement meter facts ingestion failed: expected=${facts.length} successful=${successful} quarantined=${quarantined}`
+      )
     }
   }
 

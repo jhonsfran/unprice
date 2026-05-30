@@ -11,6 +11,7 @@ const SERVICE_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 type AuditEntryFixture = {
   auditPayloadJson: string
   idempotencyKey: string
+  meterFactsJson?: string
   rejectionReason?: string
   resultJson: string
   status: string
@@ -387,18 +388,25 @@ describe("IngestionService entitlement routing", () => {
 
   it("retries async queue outcomes when audit commit fails after entitlement apply", async () => {
     const entitlement = createEntitlement()
-    const applyBatch = vi
-      .fn()
-      .mockImplementation(
-        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
-          Promise.resolve({
-            results: input.events.map((event) => ({
-              allowed: true,
-              correlationKey: event.correlationKey,
-              idempotencyKey: event.idempotencyKey,
-            })),
-          })
-      )
+    const applyBatch = vi.fn().mockImplementation(
+      (input: {
+        entitlement: { customerEntitlementId: string }
+        events: { correlationKey: string; id: string; idempotencyKey: string }[]
+      }) =>
+        Promise.resolve({
+          results: input.events.map((event) => ({
+            allowed: true,
+            correlationKey: event.correlationKey,
+            idempotencyKey: event.idempotencyKey,
+            meterFacts: [
+              {
+                event_id: event.id,
+                customer_entitlement_id: input.entitlement.customerEntitlementId,
+              },
+            ],
+          })),
+        })
+    )
     const commit = vi.fn().mockRejectedValue(new Error("audit unavailable"))
     const logger = createLogger()
 
@@ -455,18 +463,25 @@ describe("IngestionService entitlement routing", () => {
   it("rejects duplicate active entitlements for the same customer feature", async () => {
     const entitlement = createEntitlement()
     const apply = vi.fn()
-    const applyBatch = vi
-      .fn()
-      .mockImplementation(
-        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
-          Promise.resolve({
-            results: input.events.map((event) => ({
-              allowed: true,
-              correlationKey: event.correlationKey,
-              idempotencyKey: event.idempotencyKey,
-            })),
-          })
-      )
+    const applyBatch = vi.fn().mockImplementation(
+      (input: {
+        entitlement: { customerEntitlementId: string }
+        events: { correlationKey: string; id: string; idempotencyKey: string }[]
+      }) =>
+        Promise.resolve({
+          results: input.events.map((event) => ({
+            allowed: true,
+            correlationKey: event.correlationKey,
+            idempotencyKey: event.idempotencyKey,
+            meterFacts: [
+              {
+                event_id: event.id,
+                customer_entitlement_id: input.entitlement.customerEntitlementId,
+              },
+            ],
+          })),
+        })
+    )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
       apply,
       applyBatch,
@@ -555,18 +570,25 @@ describe("IngestionService entitlement routing", () => {
       },
     })
     const apply = vi.fn()
-    const applyBatch = vi
-      .fn()
-      .mockImplementation(
-        (input: { events: { correlationKey: string; idempotencyKey: string }[] }) =>
-          Promise.resolve({
-            results: input.events.map((event) => ({
-              allowed: true,
-              correlationKey: event.correlationKey,
-              idempotencyKey: event.idempotencyKey,
-            })),
-          })
-      )
+    const applyBatch = vi.fn().mockImplementation(
+      (input: {
+        entitlement: { customerEntitlementId: string }
+        events: { correlationKey: string; id: string; idempotencyKey: string }[]
+      }) =>
+        Promise.resolve({
+          results: input.events.map((event) => ({
+            allowed: true,
+            correlationKey: event.correlationKey,
+            idempotencyKey: event.idempotencyKey,
+            meterFacts: [
+              {
+                event_id: event.id,
+                customer_entitlement_id: input.entitlement.customerEntitlementId,
+              },
+            ],
+          })),
+        })
+    )
     const getEntitlementWindowStub = vi.fn().mockReturnValue({
       apply,
       applyBatch,
@@ -646,6 +668,16 @@ describe("IngestionService entitlement routing", () => {
       status: "processed",
     })
     expect(JSON.parse(entry.resultJson)).toEqual({ state: "processed" })
+    expect(JSON.parse(entry.meterFactsJson ?? "[]")).toEqual([
+      {
+        event_id: "evt_123",
+        customer_entitlement_id: "ce_events",
+      },
+      {
+        event_id: "evt_123",
+        customer_entitlement_id: "ce_keys",
+      },
+    ])
     expect(logger.info).toHaveBeenCalledWith(
       "raw ingestion entitlement fanout",
       expect.objectContaining({

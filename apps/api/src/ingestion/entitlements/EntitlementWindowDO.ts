@@ -1,6 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
 import {
-  Analytics,
   type AnalyticsEntitlementMeterFact,
   entitlementMeterFactSchemaV1,
 } from "@unprice/analytics"
@@ -47,7 +46,7 @@ import {
   computeSyncGrowRefillAmount,
   updateSpendVelocity,
 } from "@unprice/services/wallet/reservation-sizing"
-import { asc, eq, inArray, lt, lte } from "drizzle-orm"
+import { asc, desc, eq, inArray, lt } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import { z } from "zod"
@@ -55,19 +54,16 @@ import type { Env } from "~/env"
 import { createDoLogger, runDoOperation } from "~/observability"
 import {
   APPLY_BATCH_SIZE_LIMIT,
-  FLUSH_BATCH_SIZE,
   FLUSH_INTERVAL_MS,
   IDEMPOTENCY_CLEANUP_BATCH_SIZE,
   IDEMPOTENCY_CLEANUP_INTERVAL_MS,
-  OUTBOX_DEPTH_ALERT_THRESHOLD,
   WALLET_RESERVATION_ROW_ID,
 } from "./constants"
 import {
   entitlementConfigTable,
-  grantWindowsTable,
+  entitlementPeriodUsageTable,
   grantsTable,
   idempotencyKeyBatchesTable,
-  meterFactsOutboxBatchesTable,
   meterStateTable,
   schema,
   walletReservationTable,
@@ -151,6 +147,7 @@ type DeniedReason = Extract<
 type ApplyResult = {
   allowed: boolean
   deniedReason?: DeniedReason
+  meterFacts?: AnalyticsEntitlementMeterFact[]
   message?: string
 }
 
@@ -172,7 +169,7 @@ type ReservationGrowthResult =
   | { kind: "already_funded" }
   | { kind: "refilled"; trigger: RefillTrigger }
 
-const outboxFactSchema = z
+const entitlementApplyMeterFactSchema = z
   .object({
     event_id: z.string(),
     idempotency_key: z.string(),
@@ -204,12 +201,7 @@ const outboxFactSchema = z
     amount_after: fact.amount_after ?? fact.amount,
   }))
 
-type OutboxFact = z.output<typeof outboxFactSchema>
-
-type OutboxBatchFlushRow = {
-  id: number
-  payloads: string
-}
+type EntitlementApplyMeterFact = z.output<typeof entitlementApplyMeterFactSchema>
 
 const rawEventSchema = z.object({
   id: z.string(),
@@ -291,6 +283,17 @@ const batchIdempotencyEntrySchema = z.object({
     ])
     .nullable(),
   denyMessage: z.string().nullable(),
+  meterFacts: z.array(entitlementMeterFactSchemaV1).optional().default([]),
+})
+
+const compactGrantConsumptionStateSchema = z.object({
+  bucketKey: z.string().min(1),
+  grantId: z.string().min(1),
+  periodKey: z.string().min(1),
+  periodStartAt: z.number().finite(),
+  periodEndAt: z.number().finite(),
+  consumedInCurrentWindow: z.number().finite(),
+  exhaustedAt: z.number().finite().nullable(),
 })
 
 type BatchIdempotencyEntry = z.infer<typeof batchIdempotencyEntrySchema>
@@ -430,7 +433,6 @@ type EnforcementStateCache = {
 }
 
 export class EntitlementWindowDO extends DurableObject {
-  private readonly analytics: Analytics
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
   private readonly logger: Logger
   private readonly ready: Promise<void>
@@ -466,24 +468,11 @@ export class EntitlementWindowDO extends DurableObject {
       },
     })
 
-    this.analytics = new Analytics({
-      emit: true,
-      tinybirdToken: env.TINYBIRD_TOKEN,
-      tinybirdUrl: env.TINYBIRD_URL,
-      logger: this.logger,
-    })
-
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(this.db, migrations)
       this.hydrateBatchIdempotencyResults()
       this.nextAlarmAt = await this.ctx.storage.getAlarm()
-      const now = Date.now()
-      if ((this.nextAlarmAt === null || this.nextAlarmAt <= now) && this.getOutboxCount() > 0) {
-        const nextFlushAt = now + FLUSH_INTERVAL_MS
-        await this.ctx.storage.setAlarm(nextFlushAt)
-        this.nextAlarmAt = nextFlushAt
-      }
 
       // Crash recovery. If the DO was evicted mid-flush, the SQLite row still
       // carries `pending_flush_seq > flush_seq`. Re-issue the flush with the
@@ -684,14 +673,12 @@ export class EntitlementWindowDO extends DurableObject {
     const metrics = createApplyBatchMetrics()
     const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
     const idempotencyEntries: BatchIdempotencyEntry[] = []
-    const outboxFacts: OutboxFact[] = []
     const touchedGrantStates = new Map<string, GrantConsumptionState>()
     const grantStates = setup.grantStates.map((state) => ({ ...state }))
     const meterState: MeterStateDraft = { ...setup.meterState }
     let wallet = setup.wallet ? { ...setup.wallet } : null
     let walletDirty = false
     let refillTrigger: RefillTrigger | null = null
-    let insertedFactCount = 0
 
     for (const event of input.events) {
       const activeGrants = resolveActiveGrants(setup.grants, event.timestamp)
@@ -705,10 +692,9 @@ export class EntitlementWindowDO extends DurableObject {
         setup.cachedResults.get(event.idempotencyKey)
       if (cached) {
         metrics.duplicate_count++
+        const cachedResult = this.idempotencyEntryToApplyResult(cached)
         results.push({
-          allowed: cached.allowed,
-          deniedReason: cached.deniedReason ?? undefined,
-          message: cached.denyMessage ?? undefined,
+          ...cachedResult,
           correlationKey: event.correlationKey,
           idempotencyKey: event.idempotencyKey,
         })
@@ -735,6 +721,7 @@ export class EntitlementWindowDO extends DurableObject {
             allowed: false,
             deniedReason: deniedResult.deniedReason ?? null,
             denyMessage: deniedResult.message ?? null,
+            meterFacts: [],
           },
           stagedResultsByKey,
         })
@@ -763,7 +750,6 @@ export class EntitlementWindowDO extends DurableObject {
       if (needsBootstrap) {
         if (
           idempotencyEntries.length > 0 ||
-          outboxFacts.length > 0 ||
           meterState.dirty ||
           touchedGrantStates.size > 0 ||
           walletDirty
@@ -800,6 +786,7 @@ export class EntitlementWindowDO extends DurableObject {
                 allowed: false,
                 deniedReason: denial.deniedReason ?? null,
                 denyMessage: denial.message ?? null,
+                meterFacts: [],
               },
               stagedResultsByKey,
             })
@@ -856,7 +843,6 @@ export class EntitlementWindowDO extends DurableObject {
           usesWalletReservation &&
           wallet?.reservationId &&
           (idempotencyEntries.length > 0 ||
-            outboxFacts.length > 0 ||
             meterState.dirty ||
             touchedGrantStates.size > 0 ||
             walletDirty)
@@ -879,6 +865,7 @@ export class EntitlementWindowDO extends DurableObject {
             allowed: false,
             deniedReason: deniedResult.deniedReason ?? null,
             denyMessage: deniedResult.message ?? null,
+            meterFacts: [],
           },
           stagedResultsByKey,
         })
@@ -891,7 +878,6 @@ export class EntitlementWindowDO extends DurableObject {
         continue
       }
 
-      insertedFactCount += facts.length
       const { pricedFacts, touchedStates } = this.priceFactsFromGrantStates({
         activeGrants,
         entitlement: setup.entitlement,
@@ -1020,16 +1006,14 @@ export class EntitlementWindowDO extends DurableObject {
         walletDirty = true
       }
 
-      for (const pricedFact of pricedFacts) {
-        outboxFacts.push(
-          this.buildOutboxFactPayload({
-            createdAt,
-            input: eventInput,
-            meter: setup.meter,
-            pricedFact,
-          })
-        )
-      }
+      const meterFacts = pricedFacts.map((pricedFact) =>
+        this.buildMeterFactPayload({
+          createdAt,
+          input: eventInput,
+          meter: setup.meter,
+          pricedFact,
+        })
+      )
 
       this.stageBatchIdempotencyResult({
         entries: idempotencyEntries,
@@ -1039,6 +1023,7 @@ export class EntitlementWindowDO extends DurableObject {
           allowed: true,
           deniedReason: null,
           denyMessage: null,
+          meterFacts,
         },
         stagedResultsByKey,
       })
@@ -1046,21 +1031,23 @@ export class EntitlementWindowDO extends DurableObject {
         allowed: true,
         correlationKey: event.correlationKey,
         idempotencyKey: event.idempotencyKey,
+        meterFacts,
       })
     }
 
     if (
       meterState.dirty ||
       touchedGrantStates.size > 0 ||
-      outboxFacts.length > 0 ||
       idempotencyEntries.length > 0 ||
       walletDirty
     ) {
       metrics.meter_state_write_count = meterState.dirty ? (meterState.exists ? 1 : 2) : 0
-      metrics.grant_window_write_count = touchedGrantStates.size
+      metrics.grant_window_write_count = unique(
+        [...touchedGrantStates.values()].map((state) => state.periodKey)
+      ).length
       metrics.wallet_reservation_write_count = walletDirty && wallet ? 1 : 0
-      metrics.outbox_insert_count = outboxFacts.length > 0 ? 1 : 0
-      metrics.outbox_fact_count = outboxFacts.length
+      metrics.outbox_insert_count = 0
+      metrics.outbox_fact_count = 0
       metrics.idempotency_insert_count = idempotencyEntries.length > 0 ? 1 : 0
       metrics.idempotency_event_count = idempotencyEntries.length
 
@@ -1081,19 +1068,7 @@ export class EntitlementWindowDO extends DurableObject {
             .run()
         }
 
-        for (const state of touchedGrantStates.values()) {
-          this.writeGrantConsumption(tx, state)
-        }
-
-        if (outboxFacts.length > 0) {
-          tx.insert(meterFactsOutboxBatchesTable)
-            .values({
-              payloads: JSON.stringify(outboxFacts),
-              currency: setup.meter.currency,
-              createdAt,
-            })
-            .run()
-        }
+        this.writeGrantConsumptions(tx, touchedGrantStates.values())
 
         if (idempotencyEntries.length > 0) {
           tx.insert(idempotencyKeyBatchesTable)
@@ -1125,10 +1100,7 @@ export class EntitlementWindowDO extends DurableObject {
 
       this.recordBatchIdempotencyResults(idempotencyEntries)
       this.invalidateEnforcementStateCache()
-    }
-
-    if (insertedFactCount > 0 || this.getOutboxCount() > 0) {
-      await this.scheduleAlarmCoalesced(Date.now() + FLUSH_INTERVAL_MS)
+      this.schedulePostCommitAlarm()
     }
 
     if (refillTrigger) {
@@ -1243,6 +1215,7 @@ export class EntitlementWindowDO extends DurableObject {
           allowed: false,
           deniedReason: deniedResult.deniedReason ?? null,
           denyMessage: deniedResult.message ?? null,
+          meterFacts: [],
         })
         idempotencyInsertCount = 1
 
@@ -1287,6 +1260,7 @@ export class EntitlementWindowDO extends DurableObject {
             allowed: false,
             deniedReason: denial.deniedReason ?? null,
             denyMessage: denial.message ?? null,
+            meterFacts: [],
           })
           idempotencyInsertCount = 1
           result = denial
@@ -1310,18 +1284,14 @@ export class EntitlementWindowDO extends DurableObject {
               duplicateCount = 1
               return {
                 idempotencyEntry: null,
-                result: {
-                  allowed: existingBatchEntry.allowed,
-                  deniedReason: existingBatchEntry.deniedReason ?? undefined,
-                  message: existingBatchEntry.denyMessage ?? undefined,
-                },
+                result: this.idempotencyEntryToApplyResult(existingBatchEntry),
               }
             }
 
             const meterState = this.readMeterStateDraft(tx, meter.key, createdAt)
             const adapter = new InMemoryMeterStorageAdapter(meterState)
             // The engine persists only raw aggregation state through its adapter.
-            // Entitlement usage is written below into grant_windows by grant bucket.
+            // Entitlement usage is written below into compact period state.
             const engine = new AsyncMeterAggregationEngine([meter.config], adapter, input.now)
 
             const facts = engine.applyEventSync(input.event, {
@@ -1373,7 +1343,7 @@ export class EntitlementWindowDO extends DurableObject {
                 .run()
             }
 
-            const priced = this.priceFactsFromGrantWindows(tx, {
+            const priced = this.priceFactsFromCompactGrantState(tx, {
               activeGrants,
               entitlement,
               eventTimestamp: input.event.timestamp,
@@ -1382,7 +1352,7 @@ export class EntitlementWindowDO extends DurableObject {
             const pricedFacts = priced.pricedFacts
             pricedFactCount = pricedFacts.length
             grantAllocationCount = priced.touchedStateCount
-            grantWindowWriteCount = priced.touchedStateCount
+            grantWindowWriteCount = priced.periodWriteCount
 
             // Wallet check. Only engages when a reservation has been opened on
             // this window. Without a reservation the DO operates without local
@@ -1539,18 +1509,16 @@ export class EntitlementWindowDO extends DurableObject {
               }
             }
 
-            const outboxFacts = pricedFacts.map((pricedFact) =>
-              this.buildOutboxFactPayload({
+            const meterFacts = pricedFacts.map((pricedFact) =>
+              this.buildMeterFactPayload({
                 createdAt,
                 input,
                 meter,
                 pricedFact,
               })
             )
-
-            this.writeBatchOutboxFacts(tx, outboxFacts, meter.currency, createdAt)
-            outboxInsertCount = outboxFacts.length > 0 ? 1 : 0
-            outboxFactCount = outboxFacts.length
+            outboxInsertCount = 0
+            outboxFactCount = 0
 
             const idempotencyEntry: BatchIdempotencyEntry = {
               eventId: idempotencyKey,
@@ -1558,6 +1526,7 @@ export class EntitlementWindowDO extends DurableObject {
               allowed: true,
               deniedReason: null,
               denyMessage: null,
+              meterFacts,
             }
             this.writeBatchIdempotencyResults(tx, [idempotencyEntry])
             idempotencyInsertCount = 1
@@ -1572,16 +1541,13 @@ export class EntitlementWindowDO extends DurableObject {
 
             return {
               idempotencyEntry,
-              result: { allowed: true } as ApplyResult,
+              result: { allowed: true, meterFacts } as ApplyResult,
             }
           })
 
           if (txResult.idempotencyEntry) {
             this.recordBatchIdempotencyResults([txResult.idempotencyEntry])
-          }
-
-          if (txResult.result.allowed && insertedFactCount > 0) {
-            await this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS)
+            this.schedulePostCommitAlarm()
           }
 
           // Flush+refill must happen after commit so the new consumed/refill
@@ -1633,6 +1599,7 @@ export class EntitlementWindowDO extends DurableObject {
               allowed: false,
               deniedReason: deniedResult.deniedReason ?? null,
               denyMessage: deniedResult.message ?? null,
+              meterFacts: [],
             })
             idempotencyInsertCount = 1
 
@@ -1657,6 +1624,7 @@ export class EntitlementWindowDO extends DurableObject {
               allowed: false,
               deniedReason: deniedResult.deniedReason ?? null,
               denyMessage: deniedResult.message ?? null,
+              meterFacts: [],
             })
             idempotencyInsertCount = 1
 
@@ -1795,7 +1763,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     return {
       durableObjectId: this.ctx.id.toString(),
-      outboxCount: this.getOutboxCount(),
+      outboxCount: 0,
       nextAlarmAt: this.nextAlarmAt ?? (await this.ctx.storage.getAlarm()),
       lastIdempotencyCleanupAt: this.lastIdempotencyCleanupAt,
       walletReservation: window
@@ -1848,33 +1816,8 @@ export class EntitlementWindowDO extends DurableObject {
     let thrown: unknown
 
     try {
-      const batchRows = this.db
-        .select({
-          id: meterFactsOutboxBatchesTable.id,
-          payloads: meterFactsOutboxBatchesTable.payloads,
-        })
-        .from(meterFactsOutboxBatchesTable)
-        .orderBy(asc(meterFactsOutboxBatchesTable.id))
-        .limit(FLUSH_BATCH_SIZE)
-        .all()
-      let outboxBatchFlushed = false
-
-      if (batchRows.length > 0) {
-        outboxBatchFlushed = await this.flushBatchOutboxToTinybird(batchRows)
-
-        if (outboxBatchFlushed) {
-          const maxFlushedOutboxBatchId = batchRows.at(-1)?.id
-          if (maxFlushedOutboxBatchId !== undefined) {
-            this.db
-              .delete(meterFactsOutboxBatchesTable)
-              .where(lte(meterFactsOutboxBatchesTable.id, maxFlushedOutboxBatchId))
-              .run()
-          }
-        }
-      }
-      wideEvent.outbox_compact_batch_size = batchRows.length
-      wideEvent.outbox_compact_flushed = outboxBatchFlushed
-      const tinybirdFlushFailed = batchRows.length > 0 && !outboxBatchFlushed
+      const remainingOutboxCount = 0
+      const tinybirdFlushFailed = false
       wideEvent.tinybird_flush_failed = tinybirdFlushFailed
 
       // Keep idempotency keys beyond the public ingestion cap so delayed
@@ -1891,9 +1834,8 @@ export class EntitlementWindowDO extends DurableObject {
 
       wideEvent.idempotency_cleaned = staleIdempotencyCount
 
-      const remainingOutboxCount = this.getOutboxCount()
       wideEvent.outbox_remaining = remainingOutboxCount
-      wideEvent.outbox_alert = remainingOutboxCount > OUTBOX_DEPTH_ALERT_THRESHOLD
+      wideEvent.outbox_alert = false
 
       // Final-flush detection. Any of three triggers converges on the same
       // flush path: period end, inactivity, or an explicit deletion
@@ -1962,7 +1904,7 @@ export class EntitlementWindowDO extends DurableObject {
 
           if (isDeletionPending) {
             const latestWindow = this.readWalletReservation(this.db)
-            const latestOutboxCount = this.getOutboxCount()
+            const latestOutboxCount = 0
             wideEvent.outbox_remaining = latestOutboxCount
             wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, latestOutboxCount)
             wideEvent.recovery_required = latestWindow?.recoveryRequired ?? false
@@ -2081,8 +2023,8 @@ export class EntitlementWindowDO extends DurableObject {
           return
         }
 
-        // We don't know when this DO can be safely collected, and the outbox is
-        // empty. Go to sleep. Next apply() will wake us up.
+        // We don't know when this DO can be safely collected. Go to sleep.
+        // Next apply() will wake us up.
         wideEvent.outcome = "idle"
         return
       }
@@ -2134,10 +2076,10 @@ export class EntitlementWindowDO extends DurableObject {
         return
       }
 
-      // Pick the soonest among: outbox drain, pending wallet recheck,
-      // time-based flush deadline, reservation close deadlines, and
-      // self-destruct. Re-read the window because the time-flush above may
-      // have just updated `lastFlushedAt`.
+      // Pick the soonest among: pending wallet recheck, time-based flush
+      // deadline, reservation close deadlines, and self-destruct. Re-read
+      // the window because the time-flush above may have just updated
+      // `lastFlushedAt`.
       const finalWindow = this.readWalletReservation(this.db)
       const candidates: number[] = []
       const pushFutureCandidate = (timestamp: number | null) => {
@@ -2872,51 +2814,24 @@ export class EntitlementWindowDO extends DurableObject {
       }))
   }
 
-  private readGrantStates(tx: DrizzleSqliteDODatabase<typeof schema>): GrantConsumptionState[] {
-    return tx
-      .select({
-        bucketKey: grantWindowsTable.bucketKey,
-        grantId: grantWindowsTable.grantId,
-        periodKey: grantWindowsTable.periodKey,
-        periodStartAt: grantWindowsTable.periodStartAt,
-        periodEndAt: grantWindowsTable.periodEndAt,
-        consumedInCurrentWindow: grantWindowsTable.consumedInCurrentWindow,
-        exhaustedAt: grantWindowsTable.exhaustedAt,
-      })
-      .from(grantWindowsTable)
-      .all()
-  }
-
   private readGrantStatesForActiveGrants(
     tx: DrizzleSqliteDODatabase<typeof schema>,
     grants: ActiveGrantInput[],
     timestamp: number
   ): GrantConsumptionState[] {
-    const bucketKeys = [
-      ...new Set(
-        grants
-          .map((grant) => computeGrantPeriodBucket(grant, timestamp)?.bucketKey)
-          .filter((key): key is string => typeof key === "string" && key.length > 0)
-      ),
-    ]
+    const buckets = grants
+      .map((grant) => computeGrantPeriodBucket(grant, timestamp))
+      .filter((bucket): bucket is NonNullable<typeof bucket> => bucket !== null)
+    const bucketKeys = new Set(buckets.map((bucket) => bucket.bucketKey))
+    const periodKeys = unique(buckets.map((bucket) => bucket.periodKey))
 
-    if (bucketKeys.length === 0) {
+    if (bucketKeys.size === 0 || periodKeys.length === 0) {
       return []
     }
 
-    return tx
-      .select({
-        bucketKey: grantWindowsTable.bucketKey,
-        grantId: grantWindowsTable.grantId,
-        periodKey: grantWindowsTable.periodKey,
-        periodStartAt: grantWindowsTable.periodStartAt,
-        periodEndAt: grantWindowsTable.periodEndAt,
-        consumedInCurrentWindow: grantWindowsTable.consumedInCurrentWindow,
-        exhaustedAt: grantWindowsTable.exhaustedAt,
-      })
-      .from(grantWindowsTable)
-      .where(inArray(grantWindowsTable.bucketKey, bucketKeys))
-      .all()
+    return this.readGrantStatesForPeriodKeys(tx, periodKeys).filter((state) =>
+      bucketKeys.has(state.bucketKey)
+    )
   }
 
   private readGrantStatesForBatch(
@@ -2924,42 +2839,49 @@ export class EntitlementWindowDO extends DurableObject {
     grants: ActiveGrantInput[],
     timestamps: number[]
   ): GrantConsumptionState[] {
-    const bucketKeys = [
-      ...new Set(
-        timestamps.flatMap((timestamp) =>
-          grants
-            .map((grant) => computeGrantPeriodBucket(grant, timestamp)?.bucketKey)
-            .filter((key): key is string => typeof key === "string" && key.length > 0)
-        )
-      ),
-    ]
+    const buckets = timestamps.flatMap((timestamp) =>
+      grants
+        .map((grant) => computeGrantPeriodBucket(grant, timestamp))
+        .filter((bucket): bucket is NonNullable<typeof bucket> => bucket !== null)
+    )
+    const bucketKeys = new Set(buckets.map((bucket) => bucket.bucketKey))
+    const periodKeys = unique(buckets.map((bucket) => bucket.periodKey))
 
-    if (bucketKeys.length === 0) {
+    if (bucketKeys.size === 0 || periodKeys.length === 0) {
       return []
     }
 
-    const rows: GrantConsumptionState[] = []
-    for (let i = 0; i < bucketKeys.length; i += APPLY_BATCH_SIZE_LIMIT) {
-      rows.push(
-        ...tx
-          .select({
-            bucketKey: grantWindowsTable.bucketKey,
-            grantId: grantWindowsTable.grantId,
-            periodKey: grantWindowsTable.periodKey,
-            periodStartAt: grantWindowsTable.periodStartAt,
-            periodEndAt: grantWindowsTable.periodEndAt,
-            consumedInCurrentWindow: grantWindowsTable.consumedInCurrentWindow,
-            exhaustedAt: grantWindowsTable.exhaustedAt,
-          })
-          .from(grantWindowsTable)
-          .where(
-            inArray(grantWindowsTable.bucketKey, bucketKeys.slice(i, i + APPLY_BATCH_SIZE_LIMIT))
+    return this.readGrantStatesForPeriodKeys(tx, periodKeys).filter((state) =>
+      bucketKeys.has(state.bucketKey)
+    )
+  }
+
+  private readGrantStatesForPeriodKeys(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    periodKeys: string[]
+  ): GrantConsumptionState[] {
+    const states: GrantConsumptionState[] = []
+
+    for (let i = 0; i < periodKeys.length; i += APPLY_BATCH_SIZE_LIMIT) {
+      const rows = tx
+        .select({
+          grantStatesJson: entitlementPeriodUsageTable.grantStatesJson,
+        })
+        .from(entitlementPeriodUsageTable)
+        .where(
+          inArray(
+            entitlementPeriodUsageTable.periodKey,
+            periodKeys.slice(i, i + APPLY_BATCH_SIZE_LIMIT)
           )
-          .all()
-      )
+        )
+        .all()
+
+      for (const row of rows) {
+        states.push(...this.parseCompactGrantStates(row.grantStatesJson))
+      }
     }
 
-    return rows
+    return states
   }
 
   private selectGrantStatesForActiveGrants(
@@ -3074,12 +2996,12 @@ export class EntitlementWindowDO extends DurableObject {
     this.enforcementStateCache = null
   }
 
-  private buildOutboxFactPayload(params: {
+  private buildMeterFactPayload(params: {
     createdAt: number
     input: ApplyInput
     meter: MeterIdentity
     pricedFact: PricedFact
-  }): OutboxFact {
+  }): EntitlementApplyMeterFact {
     const { createdAt, input, meter, pricedFact } = params
 
     return {
@@ -3106,7 +3028,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  private priceFactsFromGrantWindows(
+  private priceFactsFromCompactGrantState(
     tx: DrizzleSqliteDODatabase<typeof schema>,
     params: {
       activeGrants: ActiveGrantInput[]
@@ -3114,7 +3036,7 @@ export class EntitlementWindowDO extends DurableObject {
       eventTimestamp: number
       facts: Fact[]
     }
-  ): { pricedFacts: PricedFact[]; touchedStateCount: number } {
+  ): { periodWriteCount: number; pricedFacts: PricedFact[]; touchedStateCount: number } {
     const grantStates = params.facts.some((fact) => fact.delta > 0)
       ? this.readGrantStatesForActiveGrants(tx, params.activeGrants, params.eventTimestamp)
       : []
@@ -3123,11 +3045,9 @@ export class EntitlementWindowDO extends DurableObject {
       grantStates,
     })
 
-    for (const state of touchedStates.values()) {
-      this.writeGrantConsumption(tx, state)
-    }
+    const periodWriteCount = this.writeGrantConsumptions(tx, touchedStates.values())
 
-    return { pricedFacts, touchedStateCount: touchedStates.size }
+    return { periodWriteCount, pricedFacts, touchedStateCount: touchedStates.size }
   }
 
   private priceFactsFromGrantStates(params: {
@@ -3249,40 +3169,93 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  private writeGrantConsumption(
+  private writeGrantConsumptions(
     tx: DrizzleSqliteDODatabase<typeof schema>,
-    state: GrantConsumptionState
-  ): void {
-    const existing = tx
-      .select({ bucketKey: grantWindowsTable.bucketKey })
-      .from(grantWindowsTable)
-      .where(eq(grantWindowsTable.bucketKey, state.bucketKey))
-      .get()
-
-    if (existing) {
-      tx.update(grantWindowsTable)
-        .set({
-          consumedInCurrentWindow: state.consumedInCurrentWindow,
-          exhaustedAt: state.exhaustedAt,
-        })
-        .where(eq(grantWindowsTable.bucketKey, state.bucketKey))
-        .run()
-      this.invalidateEnforcementStateCache()
-      return
+    states: Iterable<GrantConsumptionState>
+  ): number {
+    const statesByPeriod = new Map<string, GrantConsumptionState[]>()
+    for (const state of states) {
+      const existing = statesByPeriod.get(state.periodKey)
+      if (existing) {
+        existing.push(state)
+      } else {
+        statesByPeriod.set(state.periodKey, [state])
+      }
     }
 
-    tx.insert(grantWindowsTable)
-      .values({
-        bucketKey: state.bucketKey,
-        grantId: state.grantId,
-        periodKey: state.periodKey,
-        periodStartAt: state.periodStartAt,
-        periodEndAt: state.periodEndAt,
-        consumedInCurrentWindow: state.consumedInCurrentWindow,
-        exhaustedAt: state.exhaustedAt,
-      })
-      .run()
+    if (statesByPeriod.size === 0) {
+      return 0
+    }
+
+    const updatedAt = Date.now()
+    for (const [periodKey, periodStates] of statesByPeriod.entries()) {
+      const existing = tx
+        .select({
+          grantStatesJson: entitlementPeriodUsageTable.grantStatesJson,
+        })
+        .from(entitlementPeriodUsageTable)
+        .where(eq(entitlementPeriodUsageTable.periodKey, periodKey))
+        .get()
+
+      const mergedStates = existing ? this.parseCompactGrantStates(existing.grantStatesJson) : []
+      for (const state of periodStates) {
+        this.replaceGrantConsumptionState(mergedStates, state)
+      }
+
+      const sortedStates = mergedStates.sort((left, right) =>
+        left.bucketKey.localeCompare(right.bucketKey)
+      )
+      const grantStatesJson = JSON.stringify(sortedStates)
+      const periodStartAt = Math.min(...sortedStates.map((candidate) => candidate.periodStartAt))
+      const periodEndAt = Math.max(...sortedStates.map((candidate) => candidate.periodEndAt))
+
+      if (existing) {
+        tx.update(entitlementPeriodUsageTable)
+          .set({
+            periodStartAt,
+            periodEndAt,
+            grantStatesJson,
+            updatedAt,
+          })
+          .where(eq(entitlementPeriodUsageTable.periodKey, periodKey))
+          .run()
+      } else {
+        tx.insert(entitlementPeriodUsageTable)
+          .values({
+            periodKey,
+            periodStartAt,
+            periodEndAt,
+            grantStatesJson,
+            updatedAt,
+          })
+          .run()
+      }
+    }
+
     this.invalidateEnforcementStateCache()
+    return statesByPeriod.size
+  }
+
+  private parseCompactGrantStates(raw: string): GrantConsumptionState[] {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      this.logger.warn("skipping unparsable compact entitlement period state", {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      return []
+    }
+
+    const result = z.array(compactGrantConsumptionStateSchema).safeParse(parsed)
+    if (!result.success) {
+      this.logger.warn("skipping malformed compact entitlement period state", {
+        error: result.error.message,
+      })
+      return []
+    }
+
+    return result.data
   }
 
   private replaceGrantConsumptionState(
@@ -3342,19 +3315,26 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private readLifecycleEndAt(): number | null {
-    const grantWindowEnds = this.db
-      .select({ periodEndAt: grantWindowsTable.periodEndAt })
-      .from(grantWindowsTable)
-      .all()
-      .map((row) => row.periodEndAt)
-      .filter((end): end is number => typeof end === "number" && Number.isFinite(end))
+    const latestPeriodUsage = this.db
+      .select({ periodEndAt: entitlementPeriodUsageTable.periodEndAt })
+      .from(entitlementPeriodUsageTable)
+      .orderBy(desc(entitlementPeriodUsageTable.periodEndAt))
+      .limit(1)
+      .get()
 
+    const lifecycleEnds: number[] = []
+    if (
+      typeof latestPeriodUsage?.periodEndAt === "number" &&
+      Number.isFinite(latestPeriodUsage.periodEndAt)
+    ) {
+      lifecycleEnds.push(latestPeriodUsage.periodEndAt)
+    }
     const reservationEndAt = this.readWalletReservation(this.db)?.reservationEndAt
     if (typeof reservationEndAt === "number" && Number.isFinite(reservationEndAt)) {
-      grantWindowEnds.push(reservationEndAt)
+      lifecycleEnds.push(reservationEndAt)
     }
 
-    return grantWindowEnds.length > 0 ? Math.max(...grantWindowEnds) : null
+    return lifecycleEnds.length > 0 ? Math.max(...lifecycleEnds) : null
   }
 
   // Read the reservation-relevant fields in one shot. Returns `null` when
@@ -3749,11 +3729,30 @@ export class EntitlementWindowDO extends DurableObject {
     const batchEntry = this.getBatchIdempotencyResults().get(eventId)
     if (!batchEntry) return null
 
-    return {
-      allowed: batchEntry.allowed,
-      deniedReason: batchEntry.deniedReason ?? undefined,
-      message: batchEntry.denyMessage ?? undefined,
+    return this.idempotencyEntryToApplyResult(batchEntry)
+  }
+
+  private idempotencyEntryToApplyResult(entry: BatchIdempotencyEntry): ApplyResult {
+    const result: ApplyResult = {
+      allowed: entry.allowed,
     }
+    const meterFacts = this.nonEmptyMeterFacts(entry.meterFacts)
+    if (entry.deniedReason !== null) {
+      result.deniedReason = entry.deniedReason
+    }
+    if (entry.denyMessage !== null) {
+      result.message = entry.denyMessage
+    }
+    if (meterFacts) {
+      result.meterFacts = meterFacts
+    }
+    return result
+  }
+
+  private nonEmptyMeterFacts(
+    facts: AnalyticsEntitlementMeterFact[] | undefined
+  ): AnalyticsEntitlementMeterFact[] | undefined {
+    return facts && facts.length > 0 ? facts : undefined
   }
 
   private lookupCachedIdempotencyResults(eventIds: string[]): Map<string, BatchIdempotencyEntry> {
@@ -3838,6 +3837,7 @@ export class EntitlementWindowDO extends DurableObject {
   private persistBatchIdempotencyResult(entry: BatchIdempotencyEntry): void {
     this.writeBatchIdempotencyResults(this.db, [entry])
     this.recordBatchIdempotencyResults([entry])
+    this.schedulePostCommitAlarm()
   }
 
   private writeBatchIdempotencyResults(
@@ -3852,25 +3852,6 @@ export class EntitlementWindowDO extends DurableObject {
       .values({
         createdAt: entries[0]?.createdAt ?? Date.now(),
         entries: JSON.stringify(entries),
-      })
-      .run()
-  }
-
-  private writeBatchOutboxFacts(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    facts: OutboxFact[],
-    currency: string,
-    createdAt: number
-  ): void {
-    if (facts.length === 0) {
-      return
-    }
-
-    tx.insert(meterFactsOutboxBatchesTable)
-      .values({
-        payloads: JSON.stringify(facts),
-        currency,
-        createdAt,
       })
       .run()
   }
@@ -4290,50 +4271,6 @@ export class EntitlementWindowDO extends DurableObject {
     return this.walletService
   }
 
-  private async flushBatchOutboxToTinybird(batch: OutboxBatchFlushRow[]): Promise<boolean> {
-    let facts: AnalyticsEntitlementMeterFact[]
-
-    try {
-      facts = batch.flatMap((row) => {
-        const payloads = z.array(outboxFactSchema).parse(JSON.parse(row.payloads))
-        return payloads.map((payload) => entitlementMeterFactSchemaV1.parse(payload))
-      })
-    } catch (error) {
-      this.logger.error(error, {
-        context: "Failed to parse compact entitlement meter fact outbox payload",
-        batchSize: batch.length,
-      })
-      return false
-    }
-
-    if (facts.length === 0) {
-      return true
-    }
-
-    try {
-      const result = await this.analytics.ingestEntitlementMeterFacts(facts)
-      const successful = result?.successful_rows ?? 0
-      const quarantined = result?.quarantined_rows ?? 0
-
-      if (successful === facts.length && quarantined === 0) {
-        return true
-      }
-
-      this.logger.error("Tinybird compact entitlement meter facts ingestion failed", {
-        expected: facts.length,
-        successful,
-        quarantined,
-      })
-    } catch (error) {
-      this.logger.error(error, {
-        context: "Failed to ingest compact entitlement meter facts to Tinybird",
-        batchSize: facts.length,
-      })
-    }
-
-    return false
-  }
-
   private shouldRunIdempotencyCleanup(now: number): boolean {
     return (
       this.lastIdempotencyCleanupAt === null ||
@@ -4367,17 +4304,6 @@ export class EntitlementWindowDO extends DurableObject {
     return staleBatchRows.length
   }
 
-  private getOutboxCount(): number {
-    const batchOutboxCount = this.db
-      .select({ id: meterFactsOutboxBatchesTable.id })
-      .from(meterFactsOutboxBatchesTable)
-      .orderBy(asc(meterFactsOutboxBatchesTable.id))
-      .limit(OUTBOX_DEPTH_ALERT_THRESHOLD + 1)
-      .all().length
-
-    return batchOutboxCount
-  }
-
   private async scheduleAlarm(target: number): Promise<void> {
     const now = Date.now()
     if (this.nextAlarmAt !== null && this.nextAlarmAt > now && this.nextAlarmAt <= target) {
@@ -4393,13 +4319,7 @@ export class EntitlementWindowDO extends DurableObject {
     this.nextAlarmAt = target
   }
 
-  private async scheduleAlarmCoalesced(target: number): Promise<void> {
-    const now = Date.now()
-    if (this.nextAlarmAt !== null && this.nextAlarmAt > now && this.nextAlarmAt <= target) {
-      return
-    }
-
-    await this.ctx.storage.setAlarm(target)
-    this.nextAlarmAt = target
+  private schedulePostCommitAlarm(): void {
+    this.ctx.waitUntil(this.scheduleAlarm(Date.now() + FLUSH_INTERVAL_MS))
   }
 }

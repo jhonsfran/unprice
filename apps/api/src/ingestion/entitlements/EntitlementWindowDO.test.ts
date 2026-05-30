@@ -30,6 +30,7 @@ type IdempotencyRow = {
   allowed: boolean
   deniedReason: string | null
   denyMessage: string | null
+  meterFacts?: Record<string, unknown>[]
 }
 
 type MeterWindowRow = {
@@ -75,6 +76,14 @@ type GrantWindowRow = {
   periodEndAt: number
   periodKey: string
   periodStartAt: number
+}
+
+type PeriodUsageRow = {
+  grantStatesJson: string
+  periodEndAt: number
+  periodKey: string
+  periodStartAt: number
+  updatedAt: number
 }
 
 type GrantRow = {
@@ -146,6 +155,14 @@ const GRANT_WINDOW_KEYS = new Set<string>([
   "exhaustedAt",
 ])
 
+const PERIOD_USAGE_KEYS = new Set<string>([
+  "periodKey",
+  "periodStartAt",
+  "periodEndAt",
+  "grantStatesJson",
+  "updatedAt",
+])
+
 const GRANT_KEYS = new Set<string>([
   "grantId",
   "allowanceUnits",
@@ -179,6 +196,7 @@ type FakeDbState = {
   meterWindowRows: Map<string, MeterWindowRow>
   grantRows: Map<string, GrantRow>
   grantWindowRows: Map<string, GrantWindowRow>
+  periodUsageRows: Map<string, PeriodUsageRow>
   writeCounts: {
     idempotencyBatchRows: number
     outboxBatchRows: number
@@ -329,11 +347,12 @@ describe("EntitlementWindowDO", () => {
     const first = await durableObject.apply(input)
     const second = await durableObject.apply(input)
 
-    expect(first).toEqual({ allowed: true })
-    expect(second).toEqual({ allowed: true })
+    expect(first).toMatchObject({ allowed: true })
+    expect(second).toMatchObject({ allowed: true })
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(readIdempotencyEntries(db).size).toBe(1)
     expect(readOutboxPayloads(db)).toHaveLength(1)
+    await Promise.all(state.waitUntilPromises)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
 
     // priced payload surfaces ledger-scale amount + priced_at
@@ -389,9 +408,10 @@ describe("EntitlementWindowDO", () => {
       },
     })
 
-    await expect(Promise.all([first, second])).resolves.toEqual([
-      { allowed: true },
-      { allowed: true },
+    const results = await Promise.all([first, second])
+    expect(results).toEqual([
+      expect.objectContaining({ allowed: true }),
+      expect.objectContaining({ allowed: true }),
     ])
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
@@ -457,10 +477,248 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
     expect(readOutboxPayloads(db)).toHaveLength(1)
+  })
+
+  it("resets monthly entitlement usage when the grant period changes", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const amount = (event as { properties: { amount: number } }).properties.amount
+      const facts = [{ delta: amount, meterKey: DEFAULT_METER_KEY, valueAfter: amount }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const periodAStart = Date.UTC(2026, 0, 1)
+    const periodBStart = Date.UTC(2026, 1, 1)
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({
+      creditLinePolicy: "uncapped",
+      enforceLimit: true,
+      limit: 2,
+      periodStartAt: periodAStart,
+      periodEndAt: Date.UTC(2026, 2, 1),
+      resetConfig: { resetInterval: "month", resetIntervalCount: 1 },
+    })
+
+    const periodA = await durableObject.apply({
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_period_a",
+        properties: { amount: 2 },
+        timestamp: periodAStart + 1_000,
+      },
+      idempotencyKey: "idem_period_a",
+      now: periodAStart + 1_000,
+    })
+    const periodB = await durableObject.apply({
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_period_b",
+        properties: { amount: 1 },
+        timestamp: periodBStart,
+      },
+      idempotencyKey: "idem_period_b",
+      now: periodBStart,
+    })
+
+    expect(periodA).toMatchObject({ allowed: true })
+    expect(periodB).toMatchObject({ allowed: true })
+    expect(periodA.meterFacts?.[0]?.period_key).toBe(`month:${periodAStart}`)
+    expect(periodB.meterFacts?.[0]?.period_key).toBe(`month:${periodBStart}`)
+    await expect(
+      durableObject.getEnforcementState({
+        entitlement: baseInput.entitlement,
+        grants: baseInput.grants,
+        now: periodBStart,
+      })
+    ).resolves.toMatchObject({ isLimitReached: false, limit: 2, usage: 1 })
+  })
+
+  it("assigns boundary events to the correct entitlement period", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const periodAStart = Date.UTC(2026, 0, 1)
+    const periodBStart = Date.UTC(2026, 1, 1)
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({
+      creditLinePolicy: "uncapped",
+      limit: 10,
+      periodStartAt: periodAStart,
+      periodEndAt: Date.UTC(2026, 2, 1),
+      resetConfig: { resetInterval: "month", resetIntervalCount: 1 },
+    })
+
+    const oldPeriod = await durableObject.apply({
+      ...baseInput,
+      event: { ...baseInput.event, id: "evt_old_boundary", timestamp: periodBStart - 1 },
+      idempotencyKey: "idem_old_boundary",
+      now: periodBStart - 1,
+    })
+    const newPeriod = await durableObject.apply({
+      ...baseInput,
+      event: { ...baseInput.event, id: "evt_new_boundary", timestamp: periodBStart },
+      idempotencyKey: "idem_new_boundary",
+      now: periodBStart,
+    })
+
+    expect(oldPeriod.meterFacts?.[0]).toMatchObject({
+      amount_after: 100_000_000,
+      period_key: `month:${periodAStart}`,
+      value_after: 1,
+    })
+    expect(newPeriod.meterFacts?.[0]).toMatchObject({
+      amount_after: 100_000_000,
+      period_key: `month:${periodBStart}`,
+      value_after: 1,
+    })
+  })
+
+  it("keeps late old-period usage isolated from current-period enforcement", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const amount = (event as { properties: { amount: number } }).properties.amount
+      const facts = [{ delta: amount, meterKey: DEFAULT_METER_KEY, valueAfter: amount }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const periodAStart = Date.UTC(2026, 0, 1)
+    const periodBStart = Date.UTC(2026, 1, 1)
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({
+      creditLinePolicy: "uncapped",
+      limit: 10,
+      periodStartAt: periodAStart,
+      periodEndAt: Date.UTC(2026, 2, 1),
+      resetConfig: { resetInterval: "month", resetIntervalCount: 1 },
+    })
+
+    await durableObject.apply({
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_current_period",
+        properties: { amount: 1 },
+        timestamp: periodBStart,
+      },
+      idempotencyKey: "idem_current_period",
+      now: periodBStart,
+    })
+    const lateOldPeriod = await durableObject.apply({
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_late_old_period",
+        properties: { amount: 3 },
+        timestamp: periodBStart - 1,
+      },
+      idempotencyKey: "idem_late_old_period",
+      now: periodBStart + TEST_LATE_EVENT_GRACE_MS,
+    })
+    const tooLate = await durableObject.apply({
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_too_late_old_period",
+        properties: { amount: 3 },
+        timestamp: periodBStart - 1,
+      },
+      idempotencyKey: "idem_too_late_old_period",
+      now: periodBStart + TEST_LATE_EVENT_GRACE_MS + 1,
+    })
+
+    expect(lateOldPeriod).toMatchObject({ allowed: true })
+    expect(lateOldPeriod.meterFacts?.[0]?.period_key).toBe(`month:${periodAStart}`)
+    expect(tooLate).toMatchObject({
+      allowed: false,
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
+    expect(tooLate.meterFacts).toBeUndefined()
+    await expect(
+      durableObject.getEnforcementState({
+        entitlement: baseInput.entitlement,
+        grants: baseInput.grants,
+        now: periodBStart,
+      })
+    ).resolves.toMatchObject({ usage: 1 })
+  })
+
+  it("replays old-period idempotency after the next period without mutating current usage", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const amount = (event as { properties: { amount: number } }).properties.amount
+      const facts = [{ delta: amount, meterKey: DEFAULT_METER_KEY, valueAfter: amount }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const periodAStart = Date.UTC(2026, 0, 1)
+    const periodBStart = Date.UTC(2026, 1, 1)
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({
+      creditLinePolicy: "uncapped",
+      periodStartAt: periodAStart,
+      periodEndAt: Date.UTC(2026, 2, 1),
+      resetConfig: { resetInterval: "month", resetIntervalCount: 1 },
+    })
+    const periodAInput = {
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_replay_old_period",
+        properties: { amount: 2 },
+        timestamp: periodAStart + 1_000,
+      },
+      idempotencyKey: "idem_replay_old_period",
+      now: periodAStart + 1_000,
+    }
+
+    const original = await durableObject.apply(periodAInput)
+    await durableObject.apply({
+      ...baseInput,
+      event: {
+        ...baseInput.event,
+        id: "evt_replay_current_period",
+        properties: { amount: 1 },
+        timestamp: periodBStart,
+      },
+      idempotencyKey: "idem_replay_current_period",
+      now: periodBStart,
+    })
+    const replay = await durableObject.apply({ ...periodAInput, now: periodBStart })
+
+    expect(replay).toEqual(original)
+    expect(testState.engineApply).toHaveBeenCalledTimes(2)
+    await expect(
+      durableObject.getEnforcementState({
+        entitlement: baseInput.entitlement,
+        grants: baseInput.grants,
+        now: periodBStart,
+      })
+    ).resolves.toMatchObject({ usage: 1 })
   })
 
   it("preserves sub-cent pricing precisely across many events", async () => {
@@ -544,7 +802,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(db.storageReadCounts.grantWindows).toBe(2)
     expect(db.grantWindowRows.get(activeBucketKey)?.consumedInCurrentWindow).toBe(5)
   })
@@ -587,7 +845,8 @@ describe("EntitlementWindowDO", () => {
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(readIdempotencyEntries(db).size).toBe(1)
     expect(readOutboxPayloads(db)).toHaveLength(0)
-    expect(state.alarmAt).toBeNull()
+    await Promise.all(state.waitUntilPromises)
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
   it("allows the last call that crosses a hard limit, then denies the next call", async () => {
@@ -636,7 +895,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(crossing).toEqual({ allowed: true })
+    expect(crossing).toMatchObject({ allowed: true })
     expect(afterLimit).toEqual({
       allowed: false,
       deniedReason: "LIMIT_EXCEEDED",
@@ -679,7 +938,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(readOutboxPayloads(db)).toHaveLength(1)
     expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({ allowed: true })
   })
@@ -843,8 +1102,8 @@ describe("EntitlementWindowDO", () => {
     ])
     expect(db.idempotencyBatchRows).toHaveLength(1)
     expect(JSON.parse(db.idempotencyBatchRows[0]!.entries)).toHaveLength(2)
-    expect(db.outboxBatchRows).toHaveLength(1)
-    expect(JSON.parse(db.outboxBatchRows[0]!.payloads)).toHaveLength(2)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
+    expect(db.outboxBatchRows).toHaveLength(0)
     expect(testState.logger.info).not.toHaveBeenCalledWith("entitlement apply", expect.anything())
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
@@ -934,7 +1193,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.idempotencyBatchRows).toHaveLength(1)
   })
 
-  it("uses compact async batch rows for idempotency and fact outbox writes", async () => {
+  it("uses compact async batch rows for idempotency and returned meter facts", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -968,7 +1227,7 @@ describe("EntitlementWindowDO", () => {
 
     expect(result.results).toHaveLength(100)
     expect(db.writeCounts.idempotencyBatchRows).toBe(1)
-    expect(db.writeCounts.outboxBatchRows).toBe(1)
+    expect(db.writeCounts.outboxBatchRows).toBe(0)
     // The test engine is mocked and returns facts directly, so it does not
     // touch the meter-state adapter. The production path adds one insert and
     // one final update when the meter row is new.
@@ -976,7 +1235,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.writeCounts.grantWindowRows).toBe(1)
     expect(db.writeCounts.walletRows).toBe(0)
     expect(JSON.parse(db.idempotencyBatchRows[0]!.entries)).toHaveLength(100)
-    expect(JSON.parse(db.outboxBatchRows[0]!.payloads)).toHaveLength(100)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(100)
 
     const compactWrites =
       db.writeCounts.idempotencyBatchRows +
@@ -986,9 +1245,10 @@ describe("EntitlementWindowDO", () => {
       db.writeCounts.walletRows
     const compactWriteSiteModel = compactWrites + 2
     const perEventWriteModel = 100 * 4
-    expect(compactWrites).toBe(3)
-    expect(compactWriteSiteModel).toBe(5)
+    expect(compactWrites).toBe(2)
+    expect(compactWriteSiteModel).toBe(4)
     expect(compactWriteSiteModel).toBeLessThanOrEqual(perEventWriteModel / 10)
+    await Promise.all(state.waitUntilPromises)
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
@@ -999,8 +1259,8 @@ describe("EntitlementWindowDO", () => {
         meter_state_write_count: 0,
         grant_window_write_count: 1,
         wallet_reservation_write_count: 0,
-        outbox_insert_count: 1,
-        outbox_fact_count: 100,
+        outbox_insert_count: 0,
+        outbox_fact_count: 0,
         idempotency_insert_count: 1,
         idempotency_event_count: 100,
       })
@@ -1051,7 +1311,8 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(5 * 100_000_000)
     expect(db.writeCounts.walletRows).toBe(1)
     expect(db.writeCounts.idempotencyBatchRows).toBe(1)
-    expect(db.writeCounts.outboxBatchRows).toBe(1)
+    expect(db.writeCounts.outboxBatchRows).toBe(0)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(5)
   })
 
   it("falls back to sequential batch replay when wallet bootstrap is needed after staged events", async () => {
@@ -1109,7 +1370,8 @@ describe("EntitlementWindowDO", () => {
     ])
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
     expect(db.idempotencyBatchRows).toHaveLength(2)
-    expect(db.outboxBatchRows).toHaveLength(2)
+    expect(db.outboxBatchRows).toHaveLength(0)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch falling back to sequential per-event apply",
       expect.objectContaining({
@@ -1282,7 +1544,8 @@ describe("EntitlementWindowDO", () => {
     expect(wallet?.flushedAmount).toBeGreaterThanOrEqual(100_000_000)
     expect(wallet?.flushSeq).toBeGreaterThanOrEqual(1)
     expect(db.idempotencyBatchRows).toHaveLength(2)
-    expect(db.outboxBatchRows).toHaveLength(2)
+    expect(db.outboxBatchRows).toHaveLength(0)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch falling back to sequential per-event apply",
       expect.objectContaining({
@@ -1343,12 +1606,12 @@ describe("EntitlementWindowDO", () => {
       })
     }
 
-    const optimizedFacts = JSON.parse(optimizedDb.outboxBatchRows[0]!.payloads)
+    const optimizedFacts = readIdempotencyMeterFacts(optimizedDb)
     const sequentialFacts = readOutboxPayloads(sequentialDb)
     expect(optimizedFacts).toEqual(sequentialFacts)
   })
 
-  it("recovers compact async idempotency and fact outbox after Durable Object eviction", async () => {
+  it("recovers compact async idempotency and returned facts after Durable Object eviction", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const firstState = createDurableObjectState()
     const db = createFakeDbState()
@@ -1381,7 +1644,8 @@ describe("EntitlementWindowDO", () => {
     await firstObject.applyBatch(batchInput)
 
     expect(db.idempotencyBatchRows).toHaveLength(1)
-    expect(db.outboxBatchRows).toHaveLength(1)
+    expect(db.outboxBatchRows).toHaveLength(0)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(1)
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
 
     const recoveredState = createDurableObjectState()
@@ -1397,15 +1661,15 @@ describe("EntitlementWindowDO", () => {
     ])
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(db.idempotencyBatchRows).toHaveLength(1)
-    expect(db.outboxBatchRows).toHaveLength(1)
+    expect(db.outboxBatchRows).toHaveLength(0)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(1)
   })
 
-  it("re-arms compact outbox and replays idempotency after eviction before alarm scheduling", async () => {
+  it("replays compact idempotency after eviction without fact-outbox alarm work", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
-    pushOutboxBatchRow(db, 1)
     pushIdempotencyBatchRow(db, "idem_evicted_before_alarm", {
       createdAt: BASE_NOW,
       id: 1,
@@ -1442,8 +1706,8 @@ describe("EntitlementWindowDO", () => {
     ])
     expect(testState.engineApply).not.toHaveBeenCalled()
     expect(db.idempotencyBatchRows).toHaveLength(1)
-    expect(db.outboxBatchRows).toHaveLength(1)
-    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+    expect(db.outboxBatchRows).toHaveLength(0)
+    expect(state.alarmAt).toBeNull()
   })
 
   it("deduplicates repeated idempotency keys staged within the same compact batch", async () => {
@@ -1500,7 +1764,7 @@ describe("EntitlementWindowDO", () => {
     expect(JSON.parse(db.idempotencyBatchRows[0]!.entries)).toHaveLength(1)
   })
 
-  it("flushes queued facts during alarm and schedules self-destruct when the outbox is empty", async () => {
+  it("keeps meter facts out of the entitlement alarm and schedules lifecycle work", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1510,10 +1774,6 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    testState.analyticsIngest.mockResolvedValue({
-      quarantined_rows: 0,
-      successful_rows: 1,
-    })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const input = createApplyInput({
@@ -1521,12 +1781,9 @@ describe("EntitlementWindowDO", () => {
     })
 
     await durableObject.apply(input)
-    // Cloudflare auto-clears the scheduled alarm before invoking alarm()
-    state.alarmAt = null
-    await durableObject.alarm()
-
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(testState.analyticsIngest).toHaveBeenCalledWith([
+    await Promise.all(state.waitUntilPromises)
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+    expect(readIdempotencyMeterFacts(db)).toEqual([
       expect.objectContaining({
         delta: 2,
         event_id: input.event.id,
@@ -1540,25 +1797,22 @@ describe("EntitlementWindowDO", () => {
         currency: "USD",
       }),
     ])
-    expect(readOutboxPayloads(db)).toHaveLength(0)
-    // The default mocked apply opens a wallet reservation. Once the outbox
-    // and reservation usage are flushed, the period-close deadline is the
-    // next real lifecycle wakeup.
+
+    // Cloudflare auto-clears the scheduled alarm before invoking alarm()
+    state.alarmAt = null
+    await durableObject.alarm()
+
+    expect(testState.analyticsIngest).not.toHaveBeenCalled()
     expect(state.alarmAt).toBe(BASE_NOW + 60_000)
   })
 
-  it("cleans alarm outbox by id range and idempotency batches by TTL cutoff", async () => {
+  it("cleans idempotency batches by TTL cutoff without a fact outbox drain", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
-    testState.analyticsIngest.mockResolvedValue({
-      quarantined_rows: 0,
-      successful_rows: 200,
-    })
 
     for (let index = 1; index <= 200; index++) {
-      pushOutboxBatchRow(db, index)
       pushIdempotencyBatchRow(db, `stale_evt_${index}`, {
         createdAt: BASE_NOW - TEST_DO_IDEMPOTENCY_TTL_MS - 1,
         id: index,
@@ -1569,40 +1823,10 @@ describe("EntitlementWindowDO", () => {
 
     await durableObject.alarm()
 
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(readOutboxPayloads(db)).toHaveLength(0)
-    expect(db.deleteOutboxRangeMaxIds).toEqual([200])
+    expect(testState.analyticsIngest).not.toHaveBeenCalled()
+    expect(db.deleteOutboxRangeMaxIds).toEqual([])
     expect(readIdempotencyEntries(db).size).toBe(0)
     expect(db.deleteInArrayBatchSizes).toEqual([200])
-  })
-
-  it("reschedules a fired alarm when a flush batch leaves facts in the outbox", async () => {
-    const EntitlementWindowDO = await loadEntitlementWindowDO()
-    const state = createDurableObjectState()
-    const db = createFakeDbState()
-    testState.db = db
-    testState.analyticsIngest.mockImplementation((facts: unknown[]) =>
-      Promise.resolve({
-        quarantined_rows: 0,
-        successful_rows: facts.length,
-      })
-    )
-
-    // Simulate runtimes/tests that still expose the just-fired alarm timestamp
-    // while alarm() is running. It must be replaced if the outbox still has work.
-    state.alarmAt = BASE_NOW
-
-    for (let index = 1; index <= 1200; index++) {
-      pushOutboxBatchRow(db, index)
-    }
-
-    const durableObject = new EntitlementWindowDO(state, createEnv())
-
-    await durableObject.alarm()
-
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(readOutboxPayloads(db)).toHaveLength(200)
-    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
   })
 
   it("retains idempotency batches past the ingestion age cap and cleans them at the DO TTL", async () => {
@@ -1653,117 +1877,6 @@ describe("EntitlementWindowDO", () => {
     expect(readIdempotencyEntry(db, "stale_first")).toBeUndefined()
     expect(readIdempotencyEntry(db, "stale_second")).toBeDefined()
     expect(db.deleteInArrayBatchSizes).toEqual([1])
-  })
-
-  it("keeps rows in the outbox for retry when Tinybird flush fails", async () => {
-    const EntitlementWindowDO = await loadEntitlementWindowDO()
-    const state = createDurableObjectState()
-    const db = createFakeDbState()
-    testState.db = db
-    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
-      const facts = [{ delta: 2, meterKey: DEFAULT_METER_KEY, valueAfter: 2 }]
-      options?.beforePersist?.(facts)
-      return facts
-    })
-    testState.analyticsIngest.mockRejectedValueOnce(new Error("tinybird down"))
-
-    const durableObject = new EntitlementWindowDO(state, createEnv())
-    const input = createApplyInput()
-
-    await durableObject.apply(input)
-    await durableObject.alarm()
-
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    // Failed flush leaves the row in the outbox
-    expect(readOutboxPayloads(db)).toHaveLength(1)
-
-    // Next alarm retries successfully and drains the outbox
-    testState.analyticsIngest.mockResolvedValueOnce({
-      quarantined_rows: 0,
-      successful_rows: 1,
-    })
-    await durableObject.alarm()
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
-    expect(readOutboxPayloads(db)).toHaveLength(0)
-  })
-
-  it("keeps compact batch outbox rows for retry when Tinybird flush fails", async () => {
-    const EntitlementWindowDO = await loadEntitlementWindowDO()
-    const state = createDurableObjectState()
-    const db = createFakeDbState()
-    testState.db = db
-    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
-      const index = Number(String((event as { id: string }).id).replace("evt_batch_", ""))
-      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: index + 1 }]
-      options?.beforePersist?.(facts)
-      return facts
-    })
-    testState.analyticsIngest.mockRejectedValueOnce(new Error("tinybird down"))
-
-    const durableObject = new EntitlementWindowDO(state, createEnv())
-    const baseInput = createApplyInput({ creditLinePolicy: "uncapped" })
-    await durableObject.applyBatch({
-      customerId: baseInput.customerId,
-      entitlement: baseInput.entitlement,
-      enforceLimit: false,
-      events: Array.from({ length: 3 }, (_, index) => ({
-        ...baseInput.event,
-        correlationKey: `batch_${index}`,
-        id: `evt_batch_${index}`,
-        idempotencyKey: `idem_batch_${index}`,
-        now: BASE_NOW + index,
-        timestamp: BASE_NOW + index,
-      })),
-      grants: baseInput.grants,
-      projectId: baseInput.projectId,
-    })
-
-    await durableObject.alarm()
-
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(db.outboxBatchRows).toHaveLength(1)
-
-    testState.analyticsIngest.mockResolvedValueOnce({
-      quarantined_rows: 0,
-      successful_rows: 3,
-    })
-    await durableObject.alarm()
-
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
-    expect(db.outboxBatchRows).toHaveLength(0)
-  })
-
-  it("retries Tinybird outbox after eviction before the delete commit", async () => {
-    const EntitlementWindowDO = await loadEntitlementWindowDO()
-    const state = createDurableObjectState()
-    const db = createFakeDbState()
-    testState.db = db
-    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
-      const facts = [{ delta: 2, meterKey: DEFAULT_METER_KEY, valueAfter: 2 }]
-      options?.beforePersist?.(facts)
-      return facts
-    })
-    testState.analyticsIngest.mockRejectedValueOnce(new Error("tinybird down"))
-
-    const first = new EntitlementWindowDO(state, createEnv())
-    await first.apply(createApplyInput())
-    await first.alarm()
-
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
-    expect(readOutboxPayloads(db)).toHaveLength(1)
-
-    // Same storage, new object instance: the in-memory isolate disappeared
-    // after Tinybird failed/before the outbox row could be deleted.
-    const revived = new EntitlementWindowDO(state, createEnv())
-    testState.analyticsIngest.mockResolvedValueOnce({
-      quarantined_rows: 0,
-      successful_rows: 1,
-    })
-
-    await revived.alarm()
-
-    expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
-    expect(readOutboxPayloads(db)).toHaveLength(0)
   })
 
   it("does not call ledger/rating services for free features (no lazy reservation needed)", async () => {
@@ -1908,7 +2021,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(readOutboxPayloads(db)).toHaveLength(2)
 
     const payloads = readOutboxPayloads(db)
@@ -2330,12 +2443,12 @@ describe("EntitlementWindowDO", () => {
     // wallet reservation row so it survives eviction.
     const first = new EntitlementWindowDO(state, createEnv())
     await first.apply(input)
+    await Promise.all(state.waitUntilPromises)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationEndAt).toBe(
       input.grants[0]!.expiresAt
     )
 
-    // Simulate eviction: Cloudflare clears the alarm and evicts the DO.
-    state.alarmAt = null
+    // Simulate eviction: the persisted alarm remains while the DO instance is replaced.
     const revived = new EntitlementWindowDO(state, createEnv())
     await revived.getStatus()
     expect(state.alarmAt).toBe(BASE_NOW + 30_000)
@@ -2363,10 +2476,10 @@ describe("EntitlementWindowDO", () => {
 
     const input = createApplyInput()
     const first = new EntitlementWindowDO(state, createEnv())
-    await expect(first.apply(input)).resolves.toEqual({ allowed: true })
+    await expect(first.apply(input)).resolves.toMatchObject({ allowed: true })
 
     const revived = new EntitlementWindowDO(state, createEnv())
-    await expect(revived.apply(input)).resolves.toEqual({ allowed: true })
+    await expect(revived.apply(input)).resolves.toMatchObject({ allowed: true })
 
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
@@ -2422,7 +2535,7 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(createApplyInput())
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     // Bootstrap fired with the period window from the input.
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
     expect(testState.createReservation).toHaveBeenCalledWith(
@@ -2473,7 +2586,7 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(createApplyInput())
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(testState.createReservation).toHaveBeenCalledWith(
       expect.objectContaining({ requestedAmount: 150 })
     )
@@ -2513,7 +2626,7 @@ describe("EntitlementWindowDO", () => {
       createApplyInput({ event: { ...createApplyInput().event, properties: { amount: 1 } } })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(testState.createReservation).toHaveBeenCalledWith(
       expect.objectContaining({ requestedAmount: 5 * 100_000_000 })
     )
@@ -2561,7 +2674,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
 
     const revived = new EntitlementWindowDO(state, createEnv())
-    await expect(revived.apply(input)).resolves.toEqual({ allowed: true })
+    await expect(revived.apply(input)).resolves.toMatchObject({ allowed: true })
 
     expect(testState.createReservation).toHaveBeenCalledTimes(2)
     const expectedIdempotencyKey = `do_lazy:ce_123:onetime:${BASE_NOW - 60_000}`
@@ -2747,7 +2860,7 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(createApplyInput({ creditLinePolicy: "uncapped" }))
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(testState.createReservation).not.toHaveBeenCalled()
     expect(readOutboxPayloads(db)).toHaveLength(1)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeUndefined()
@@ -2798,7 +2911,7 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(createApplyInput())
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(testState.flushReservation).toHaveBeenCalledTimes(1)
     expect(testState.flushReservation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2906,7 +3019,7 @@ describe("EntitlementWindowDO", () => {
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(2 * 100_000_000 - 10)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.flushSeq).toBe(2)
-    expect(state.waitUntilPromises).toHaveLength(1)
+    expect(state.waitUntilPromises).toHaveLength(2)
   })
 
   it("caps synchronous grow when the current event is larger than max outstanding", async () => {
@@ -3024,14 +3137,14 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(createApplyInput())
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
     // 5 events @ $1.00 = $5.00 at LEDGER_SCALE=8.
     expect(row.consumedAmount).toBe(5 * 100_000_000)
     // Refill was scheduled via ctx.waitUntil; the stub body settles
     // synchronously on the microtask queue, so by the time this assertion runs
     // the single-flight flag has already cleared.
-    expect(state.waitUntilPromises).toHaveLength(1)
+    expect(state.waitUntilPromises).toHaveLength(2)
 
     await Promise.all(state.waitUntilPromises)
     const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
@@ -3080,8 +3193,8 @@ describe("EntitlementWindowDO", () => {
       createApplyInput({ event: { ...createApplyInput().event, properties: { amount: 2 } } })
     )
 
-    expect(result).toEqual({ allowed: true })
-    expect(state.waitUntilPromises).toHaveLength(1)
+    expect(result).toMatchObject({ allowed: true })
+    expect(state.waitUntilPromises).toHaveLength(2)
     expect(testState.flushReservation).toHaveBeenCalledWith(
       expect.objectContaining({
         reservationId: "res_fast_burn",
@@ -3137,10 +3250,10 @@ describe("EntitlementWindowDO", () => {
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(createApplyInput())
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     // consumedAmount still advances; only the refill trigger is suppressed.
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(2 * 100_000_000)
-    expect(state.waitUntilPromises).toHaveLength(0)
+    expect(state.waitUntilPromises).toHaveLength(1)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.pendingFlushSeq).toBe(4)
     expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.flushSeq).toBe(4)
   })
@@ -3186,11 +3299,11 @@ describe("EntitlementWindowDO", () => {
       createApplyInput({ event: { ...createApplyInput().event, properties: { amount: -5 } } })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
     expect(row.consumedAmount).toBe(8 * 100_000_000)
     expect(row.consumedAmount).toBeGreaterThanOrEqual(row.flushedAmount ?? 0)
-    expect(state.waitUntilPromises).toHaveLength(0)
+    expect(state.waitUntilPromises).toHaveLength(1)
 
     const payload = readOutboxPayloads(db)[0]!
     expect(payload.amount).toBe(-5 * 100_000_000)
@@ -3249,7 +3362,7 @@ describe("EntitlementWindowDO", () => {
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
     const result = await durableObject.apply(createApplyInput())
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     await Promise.all(state.waitUntilPromises)
 
     // Contract with WalletService: projectId/customerId/currency come from
@@ -3516,7 +3629,7 @@ describe("EntitlementWindowDO", () => {
     )
     await Promise.all(state.waitUntilPromises)
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(testState.flushReservation).toHaveBeenCalledTimes(1)
     expect(testState.flushReservation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3584,7 +3697,7 @@ describe("EntitlementWindowDO", () => {
     }
 
     const first = new EntitlementWindowDO(state, createEnv())
-    await expect(first.apply(createApplyInput())).resolves.toEqual({ allowed: true })
+    await expect(first.apply(createApplyInput())).resolves.toMatchObject({ allowed: true })
     await Promise.all(state.waitUntilPromises)
 
     expect(testState.flushReservation).toHaveBeenCalledTimes(1)
@@ -4127,12 +4240,11 @@ describe("EntitlementWindowDO", () => {
     expect(testState.logger.warn).not.toHaveBeenCalled()
   })
 
-  it("alarm keeps storage and alerts when Tinybird blocks deletion cleanup", async () => {
+  it("deletion cleanup no longer waits on entitlement-local fact outbox rows", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
     testState.db = db
-    testState.analyticsIngest.mockRejectedValueOnce(new Error("tinybird down"))
     testState.flushReservation.mockResolvedValue({
       err: null,
       val: {
@@ -4176,14 +4288,11 @@ describe("EntitlementWindowDO", () => {
     )
     expect(readOutboxPayloads(db)).toHaveLength(1)
     expect(state.deletedAlarm).toBe(true)
-    expect(state.deletedAll).toBe(false)
-    expect(testState.logger.warn).toHaveBeenCalledWith(
+    expect(state.deletedAll).toBe(true)
+    expect(testState.analyticsIngest).not.toHaveBeenCalled()
+    expect(testState.logger.warn).not.toHaveBeenCalledWith(
       "entitlement deletion cleanup failed",
-      expect.objectContaining({
-        operator_action_required: true,
-        outbox_remaining: 1,
-        tinybird_flush_failed: true,
-      })
+      expect.anything()
     )
   })
 
@@ -4443,7 +4552,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
 
     // €1.031 = 1 × 10^8 + 31 × 10^5 = 103_100_000 minor units at LEDGER_SCALE=8.
     // This is what proves the flat fee is captured: a unit-price-only
@@ -4516,7 +4625,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
 
     // €0.001 = 100_000 minor units at scale-8. The flat fee is NOT charged
     // again — it accrued once at the 30→31 boundary. The diff approach
@@ -4575,7 +4684,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
 
     // €1.05 = 50 × €0.001 + €1 flat = 1_050_000 × 100 = 105_000_000 minor
     // units at scale-8.
@@ -4617,7 +4726,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(testState.createReservation).not.toHaveBeenCalled()
 
     expect(readOutboxPayloads(db)).toHaveLength(1)
@@ -4679,7 +4788,7 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(result).toEqual({ allowed: true })
+    expect(result).toMatchObject({ allowed: true })
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
 
     const call = testState.createReservation.mock.calls[0]?.[0] as { requestedAmount: number }
@@ -4893,7 +5002,7 @@ async function loadEntitlementWindowDO() {
     Analytics: class {
       public ingestEntitlementMeterFacts = testState.analyticsIngest
     },
-    entitlementMeterFactSchemaV1: { parse: (p: unknown) => p },
+    entitlementMeterFactSchemaV1: z.object({}).passthrough(),
   }))
 
   vi.doMock("@unprice/db/validators", () => ({
@@ -4978,13 +5087,54 @@ async function loadEntitlementWindowDO() {
         (right.expiresAt ?? Number.POSITIVE_INFINITY) ||
       left.grantId.localeCompare(right.grantId)
 
-    const computeGrantPeriodBucket = (grant: {
-      effectiveAt: number
-      expiresAt: number | null
-      grantId: string
-      resetConfig?: { resetInterval: string } | null
-    }) => {
+    const computeGrantPeriodBucket = (
+      grant: {
+        effectiveAt: number
+        expiresAt: number | null
+        grantId: string
+        resetConfig?: { resetInterval: string; resetIntervalCount?: number } | null
+      },
+      timestamp = Date.now()
+    ) => {
       const interval = grant.resetConfig?.resetInterval ?? "onetime"
+      if (interval === "month") {
+        const count = grant.resetConfig?.resetIntervalCount ?? 1
+        const effective = new Date(grant.effectiveAt)
+        const at = new Date(timestamp)
+        const monthDelta =
+          (at.getUTCFullYear() - effective.getUTCFullYear()) * 12 +
+          at.getUTCMonth() -
+          effective.getUTCMonth()
+        const periodIndex = Math.max(0, Math.floor(monthDelta / count) * count)
+        const start = Date.UTC(
+          effective.getUTCFullYear(),
+          effective.getUTCMonth() + periodIndex,
+          effective.getUTCDate(),
+          effective.getUTCHours(),
+          effective.getUTCMinutes(),
+          effective.getUTCSeconds(),
+          effective.getUTCMilliseconds()
+        )
+        const next = new Date(start)
+        const end = Date.UTC(
+          next.getUTCFullYear(),
+          next.getUTCMonth() + count,
+          next.getUTCDate(),
+          next.getUTCHours(),
+          next.getUTCMinutes(),
+          next.getUTCSeconds(),
+          next.getUTCMilliseconds()
+        )
+        const periodEnd = grant.expiresAt === null ? end : Math.min(end, grant.expiresAt)
+        const periodKey = `${interval}:${start}`
+        return {
+          bucketKey: `${grant.grantId}:${periodKey}`,
+          periodKey,
+          start,
+          end: periodEnd,
+        }
+      }
+
       const periodKey = `${interval}:${grant.effectiveAt}`
       return {
         bucketKey: `${grant.grantId}:${periodKey}`,
@@ -5043,6 +5193,7 @@ async function loadEntitlementWindowDO() {
         resetConfig?: { resetInterval: string } | null
       }>
       states: GrantWindowRow[]
+      timestamp?: number
     }) => {
       const statesByBucketKey = new Map(params.states.map((state) => [state.bucketKey, state]))
       let available = 0
@@ -5051,7 +5202,7 @@ async function loadEntitlementWindowDO() {
         const allowanceUnits = getGrantAllowance(grant)
         if (allowanceUnits === null) return Number.POSITIVE_INFINITY
 
-        const bucket = computeGrantPeriodBucket(grant)
+        const bucket = computeGrantPeriodBucket(grant, params.timestamp)
         const consumed = statesByBucketKey.get(bucket.bucketKey)?.consumedInCurrentWindow ?? 0
         available += Math.max(0, allowanceUnits - consumed)
       }
@@ -5067,10 +5218,11 @@ async function loadEntitlementWindowDO() {
         resetConfig?: { resetInterval: string } | null
       }>
       states: GrantWindowRow[]
+      timestamp?: number
     }) => {
       const statesByBucketKey = new Map(params.states.map((state) => [state.bucketKey, state]))
       return params.grants.reduce((total, grant) => {
-        const bucket = computeGrantPeriodBucket(grant)
+        const bucket = computeGrantPeriodBucket(grant, params.timestamp)
         return total + (statesByBucketKey.get(bucket.bucketKey)?.consumedInCurrentWindow ?? 0)
       }, 0)
     }
@@ -5122,7 +5274,7 @@ async function loadEntitlementWindowDO() {
 
         for (const grant of grants) {
           if (remaining <= 0) break
-          const bucket = computeGrantPeriodBucket(grant)
+          const bucket = computeGrantPeriodBucket(grant, params.timestamp)
           const state = statesByBucketKey.get(bucket.bucketKey) ?? {
             bucketKey: bucket.bucketKey,
             grantId: grant.grantId,
@@ -5200,10 +5352,13 @@ async function loadEntitlementWindowDO() {
       env: unknown
     ) => {
       alarm: () => Promise<void>
-      apply: (
-        input: ReturnType<typeof createApplyInput>
-      ) => Promise<{ allowed: boolean; deniedReason?: string; message?: string }>
-      getEnforcementState: () => Promise<{
+      apply: (input: ReturnType<typeof createApplyInput>) => Promise<{
+        allowed: boolean
+        deniedReason?: string
+        message?: string
+        meterFacts?: Record<string, unknown>[]
+      }>
+      getEnforcementState: (input?: unknown) => Promise<{
         isLimitReached: boolean
         limit: number | null
         spending: {
@@ -5255,6 +5410,7 @@ function createFakeDbState(): FakeDbState {
     meterWindowRows: new Map(),
     grantRows: new Map(),
     grantWindowRows: new Map(),
+    periodUsageRows: new Map(),
     writeCounts: {
       idempotencyBatchRows: 0,
       outboxBatchRows: 0,
@@ -5361,9 +5517,19 @@ function pushIdempotencyBatchRow(
 }
 
 function readOutboxPayloads(db: FakeDbState): Record<string, unknown>[] {
-  return [
-    ...db.outboxBatchRows.flatMap((row) => JSON.parse(row.payloads) as Record<string, unknown>[]),
-  ]
+  const outboxPayloads = db.outboxBatchRows.flatMap(
+    (row) => JSON.parse(row.payloads) as Record<string, unknown>[]
+  )
+
+  if (outboxPayloads.length > 0) {
+    return outboxPayloads
+  }
+
+  return readIdempotencyMeterFacts(db)
+}
+
+function readIdempotencyMeterFacts(db: FakeDbState): Record<string, unknown>[] {
+  return [...readIdempotencyEntries(db).values()].flatMap((entry) => entry.meterFacts ?? [])
 }
 
 function readIdempotencyEntries(db: FakeDbState): Map<string, IdempotencyRow> {
@@ -5376,6 +5542,7 @@ function readIdempotencyEntries(db: FakeDbState): Map<string, IdempotencyRow> {
       allowed: boolean
       deniedReason: string | null
       denyMessage: string | null
+      meterFacts?: Record<string, unknown>[]
     }>
 
     for (const entry of batch) {
@@ -5384,6 +5551,7 @@ function readIdempotencyEntries(db: FakeDbState): Map<string, IdempotencyRow> {
         allowed: entry.allowed,
         deniedReason: entry.deniedReason,
         denyMessage: entry.denyMessage,
+        meterFacts: entry.meterFacts,
       })
     }
   }
@@ -5411,6 +5579,7 @@ function buildFakeDrizzle(state: FakeDbState) {
         if (
           value === "meter_facts_outbox_batches" ||
           value === "idempotency_key_batches" ||
+          value === "entitlement_period_usage" ||
           value === "grant_windows" ||
           value === "meter_state" ||
           value === "wallet_reservation"
@@ -5457,6 +5626,43 @@ function buildFakeDrizzle(state: FakeDbState) {
     }
   }
 
+  const mirrorPeriodUsageStates = (row: PeriodUsageRow): void => {
+    const states = JSON.parse(row.grantStatesJson) as GrantWindowRow[]
+    for (const candidate of states) {
+      state.grantWindowRows.set(candidate.bucketKey, {
+        bucketKey: String(candidate.bucketKey),
+        grantId: String(candidate.grantId),
+        periodKey: String(candidate.periodKey),
+        periodStartAt: Number(candidate.periodStartAt),
+        periodEndAt: Number(candidate.periodEndAt),
+        consumedInCurrentWindow: Number(candidate.consumedInCurrentWindow),
+        exhaustedAt: candidate.exhaustedAt != null ? Number(candidate.exhaustedAt) : null,
+      })
+    }
+  }
+
+  const hydratePeriodUsageRowsFromGrantWindows = (): void => {
+    const grouped = new Map<string, GrantWindowRow[]>()
+    for (const row of state.grantWindowRows.values()) {
+      const rows = grouped.get(row.periodKey) ?? []
+      rows.push(row)
+      grouped.set(row.periodKey, rows)
+    }
+
+    for (const [periodKey, rows] of grouped.entries()) {
+      if (state.periodUsageRows.has(periodKey)) {
+        continue
+      }
+      state.periodUsageRows.set(periodKey, {
+        periodKey,
+        periodStartAt: Math.min(...rows.map((row) => row.periodStartAt)),
+        periodEndAt: Math.max(...rows.map((row) => row.periodEndAt)),
+        grantStatesJson: JSON.stringify(rows),
+        updatedAt: BASE_NOW,
+      })
+    }
+  }
+
   const db = {
     transaction<T>(callback: (tx: typeof db) => T): T {
       const idempotencyBatchSnapshot = [...state.idempotencyBatchRows]
@@ -5465,6 +5671,7 @@ function buildFakeDrizzle(state: FakeDbState) {
       const meterPricingSnapshot = new Map(state.meterWindowRows)
       const grantSnapshot = new Map(state.grantRows)
       const grantWindowSnapshot = new Map(state.grantWindowRows)
+      const periodUsageSnapshot = new Map(state.periodUsageRows)
       const outboxBatchIdSnapshot = nextOutboxBatchId
       const idempotencyBatchIdSnapshot = nextIdempotencyBatchId
       try {
@@ -5487,6 +5694,9 @@ function buildFakeDrizzle(state: FakeDbState) {
         state.grantWindowRows.clear()
         for (const [k, v] of Array.from(grantWindowSnapshot.entries()))
           state.grantWindowRows.set(k, v)
+        state.periodUsageRows.clear()
+        for (const [k, v] of Array.from(periodUsageSnapshot.entries()))
+          state.periodUsageRows.set(k, v)
         nextOutboxBatchId = outboxBatchIdSnapshot
         nextIdempotencyBatchId = idempotencyBatchIdSnapshot
         throw error
@@ -5497,6 +5707,7 @@ function buildFakeDrizzle(state: FakeDbState) {
       const keys = Object.keys(fields)
       let cond: DrizzleCondition | undefined
       let limitCount: number | undefined
+      let orderDirection: "asc" | "desc" | undefined
       let sourceTable: string | null = null
 
       return {
@@ -5508,7 +5719,8 @@ function buildFakeDrizzle(state: FakeDbState) {
           cond = c
           return this
         },
-        orderBy() {
+        orderBy(order?: { kind?: string }) {
+          orderDirection = order?.kind === "asc" || order?.kind === "desc" ? order.kind : undefined
           return this
         },
         limit(n: number) {
@@ -5516,6 +5728,9 @@ function buildFakeDrizzle(state: FakeDbState) {
           return this
         },
         get() {
+          if (sourceTable === "entitlement_period_usage") {
+            hydratePeriodUsageRowsFromGrantWindows()
+          }
           if (sourceTable === "idempotency_key_batches") {
             return undefined
           }
@@ -5563,9 +5778,25 @@ function buildFakeDrizzle(state: FakeDbState) {
             for (const key of keys) row[key] = (source as Record<string, unknown>)[key]
             return row
           }
+          if (keys.every((k) => PERIOD_USAGE_KEYS.has(k))) {
+            const rows = [...state.periodUsageRows.values()].sort((left, right) =>
+              orderDirection === "desc"
+                ? right.periodEndAt - left.periodEndAt
+                : left.periodEndAt - right.periodEndAt
+            )
+            const source =
+              cond?.value !== undefined ? state.periodUsageRows.get(String(cond.value)) : rows[0]
+            if (!source) return undefined
+            const row: Record<string, unknown> = {}
+            for (const key of keys) row[key] = (source as Record<string, unknown>)[key]
+            return row
+          }
           throw new Error(`Unsupported select().get(): ${keys}`)
         },
         all() {
+          if (sourceTable === "entitlement_period_usage") {
+            hydratePeriodUsageRowsFromGrantWindows()
+          }
           if (sourceTable === "idempotency_key_batches") {
             if (keys.includes("entries")) {
               return state.idempotencyBatchRows
@@ -5599,6 +5830,27 @@ function buildFakeDrizzle(state: FakeDbState) {
             const rows = [...state.grantWindowRows.values()]
               .filter((row) => matchGrantWindowCondition(row, cond))
               .sort((a, b) => a.grantId.localeCompare(b.grantId))
+            state.storageReadCounts.grantWindows += rows.length
+            return rows.map((source) => {
+              const row: Record<string, unknown> = {}
+              for (const key of keys) row[key] = (source as Record<string, unknown>)[key]
+              return row
+            })
+          }
+          if (
+            sourceTable === "entitlement_period_usage" &&
+            keys.every((k) => PERIOD_USAGE_KEYS.has(k))
+          ) {
+            const rows = [...state.periodUsageRows.values()].filter((row) => {
+              if (!cond) return true
+              if (cond.kind === "inArray") {
+                return (cond.values ?? []).map(String).includes(row.periodKey)
+              }
+              if (cond.kind === "eq") {
+                return row.periodKey === String(cond.value)
+              }
+              return true
+            })
             state.storageReadCounts.grantWindows += rows.length
             return rows.map((source) => {
               const row: Record<string, unknown> = {}
@@ -5663,6 +5915,21 @@ function buildFakeDrizzle(state: FakeDbState) {
                   consumedInCurrentWindow: Number(value.consumedInCurrentWindow ?? 0),
                   exhaustedAt: value.exhaustedAt != null ? Number(value.exhaustedAt) : null,
                 })
+                return
+              }
+              if (sourceTable === "entitlement_period_usage" && "grantStatesJson" in value) {
+                const key = String(value.periodKey)
+                const row = {
+                  periodKey: key,
+                  periodStartAt: Number(value.periodStartAt),
+                  periodEndAt: Number(value.periodEndAt),
+                  grantStatesJson: String(value.grantStatesJson),
+                  updatedAt: Number(value.updatedAt),
+                }
+                if (state.periodUsageRows.has(key)) return
+                state.writeCounts.grantWindowRows++
+                state.periodUsageRows.set(key, row)
+                mirrorPeriodUsageStates(row)
                 return
               }
               if ("grantId" in value && "allowanceUnits" in value) {
@@ -5779,6 +6046,27 @@ function buildFakeDrizzle(state: FakeDbState) {
               return this
             },
             run() {
+              if (sourceTable === "entitlement_period_usage") {
+                const periodKey = String(cond?.value ?? "")
+                const row = state.periodUsageRows.get(periodKey)
+                if (!row) return
+                state.writeCounts.grantWindowRows++
+                const nextRow = {
+                  ...row,
+                  periodStartAt:
+                    patch.periodStartAt != null ? Number(patch.periodStartAt) : row.periodStartAt,
+                  periodEndAt:
+                    patch.periodEndAt != null ? Number(patch.periodEndAt) : row.periodEndAt,
+                  grantStatesJson:
+                    patch.grantStatesJson != null
+                      ? String(patch.grantStatesJson)
+                      : row.grantStatesJson,
+                  updatedAt: patch.updatedAt != null ? Number(patch.updatedAt) : row.updatedAt,
+                }
+                state.periodUsageRows.set(periodKey, nextRow)
+                mirrorPeriodUsageStates(nextRow)
+                return
+              }
               if ("consumedInCurrentWindow" in patch || "exhaustedAt" in patch) {
                 const bucketKey = String(cond?.value ?? "")
                 const row = state.grantWindowRows.get(bucketKey)

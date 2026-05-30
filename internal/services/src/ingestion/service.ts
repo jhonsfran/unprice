@@ -1,3 +1,4 @@
+import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import type {
   BillingConfig,
   ConfigFeatureVersionType,
@@ -90,6 +91,7 @@ type EntitlementWindowApplyResult = {
     IngestionRejectionReason,
     "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
   >
+  meterFacts?: AnalyticsEntitlementMeterFact[]
   message?: string
 }
 
@@ -183,6 +185,7 @@ export interface EntitlementWindowClient {
 type Result<T, E> = { err: E; val?: undefined } | { err?: undefined; val: T }
 
 type MessageOutcome = {
+  meterFacts?: AnalyticsEntitlementMeterFact[]
   message: IngestionQueueMessage
   outcome: IngestionOutcome
 }
@@ -318,7 +321,7 @@ export class IngestionService {
     await this.commitOutcomesToAudit(
       message.projectId,
       message.customerId,
-      [{ message, outcome }],
+      [{ message, outcome, meterFacts: applyResult.meterFacts }],
       {
         strict: true,
       }
@@ -630,6 +633,7 @@ export class IngestionService {
     const plannedApplyCountsByKey = new Map<string, number>()
     const lateClosedApplyCountsByKey = new Map<string, number>()
     const deniedReasonsByKey = new Map<string, IngestionRejectionReason>()
+    const meterFactsByKey = new Map<string, AnalyticsEntitlementMeterFact[]>()
     let matchedEntitlementCount = 0
     let matchedEntitlementsPerEventMax = 0
     const applyGroups = new Map<
@@ -725,6 +729,12 @@ export class IngestionService {
               messageKey,
               (allowedApplyCountsByKey.get(messageKey) ?? 0) + 1
             )
+            const meterFacts = applyResult.meterFacts ?? []
+            if (meterFacts.length > 0) {
+              const existingFacts = meterFactsByKey.get(messageKey) ?? []
+              existingFacts.push(...meterFacts)
+              meterFactsByKey.set(messageKey, existingFacts)
+            }
           } else if (applyResult.deniedReason === "LATE_EVENT_CLOSED_PERIOD") {
             lateClosedApplyCountsByKey.set(
               messageKey,
@@ -753,6 +763,7 @@ export class IngestionService {
 
     const outcomes = messages.map((message) => ({
       message,
+      meterFacts: meterFactsByKey.get(this.getMessageOutcomeKey(message, messageOutcomeKeys)),
       outcome: outcomesByKey.get(this.getMessageOutcomeKey(message, messageOutcomeKeys)) ?? {
         state: "processed",
       },
@@ -789,8 +800,10 @@ export class IngestionService {
     outcomes: MessageOutcome[]
   ): Promise<ShardedAuditEntry[]> {
     return Promise.all(
-      outcomes.map(async ({ message, outcome }) => ({
-        entry: await this.buildAuditEntry(projectId, customerId, message, outcome),
+      outcomes.map(async ({ message, meterFacts, outcome }) => ({
+        entry: await this.buildAuditEntry(projectId, customerId, message, outcome, {
+          meterFacts,
+        }),
         shardIndex: selectIngestionAuditShardIndex(message.idempotencyKey),
       }))
     )
@@ -800,7 +813,10 @@ export class IngestionService {
     projectId: string,
     customerId: string,
     message: IngestionQueueMessage,
-    outcome: IngestionOutcome
+    outcome: IngestionOutcome,
+    options: {
+      meterFacts?: AnalyticsEntitlementMeterFact[]
+    } = {}
   ): Promise<IngestionAuditEntry> {
     const handledAt = this.now()
     const [canonicalAuditId, payloadHash] = await Promise.all([
@@ -818,6 +834,10 @@ export class IngestionService {
       auditPayloadJson: JSON.stringify(
         buildAuditPayload(message, outcome, canonicalAuditId, payloadHash, handledAt)
       ),
+      meterFactsJson:
+        options.meterFacts && options.meterFacts.length > 0
+          ? JSON.stringify(options.meterFacts)
+          : undefined,
       firstSeenAt: message.receivedAt,
     }
   }

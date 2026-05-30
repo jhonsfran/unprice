@@ -8,6 +8,8 @@ export const ingestionAuditBatchesTable = sqliteTable(
     firstSeenAt: integer("first_seen_at").notNull(),
     createdAt: integer("created_at").notNull(),
     entriesJson: text("entries_json").notNull(),
+    auditPublishedAt: integer("audit_published_at"),
+    meterFactsPublishedAt: integer("meter_facts_published_at"),
     publishedAt: integer("published_at"),
   },
   (table) => ({

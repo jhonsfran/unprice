@@ -3,6 +3,7 @@ export type LedgerEntry = {
   canonicalAuditId: string
   firstSeenAt: number
   idempotencyKey: string
+  meterFactsJson?: string
   payloadHash: string
   rejectionReason?: string
   resultJson: string
@@ -20,6 +21,7 @@ export function isLedgerEntry(value: unknown): value is LedgerEntry {
     typeof record.canonicalAuditId === "string" &&
     typeof record.firstSeenAt === "number" &&
     typeof record.idempotencyKey === "string" &&
+    (record.meterFactsJson === undefined || typeof record.meterFactsJson === "string") &&
     typeof record.payloadHash === "string" &&
     typeof record.resultJson === "string" &&
     (record.status === "processed" || record.status === "rejected") &&

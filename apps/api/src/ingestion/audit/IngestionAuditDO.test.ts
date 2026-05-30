@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 const SQL_BOUND_PARAMETER_LIMIT = 100
@@ -19,6 +20,8 @@ type FakeAuditBatchRow = {
   first_seen_at: number
   created_at: number
   entries_json: string
+  audit_published_at: number | null
+  meter_facts_published_at: number | null
   published_at: number | null
 }
 
@@ -41,6 +44,7 @@ type FakeDurableObjectState = {
 }
 
 const testState = {
+  analyticsIngest: vi.fn(),
   db: null as FakeDbState | null,
   logger: {
     debug: vi.fn(),
@@ -57,6 +61,13 @@ const testState = {
 describe("IngestionAuditDO", () => {
   beforeEach(() => {
     for (const fn of Object.values(testState.logger)) fn.mockReset()
+    testState.analyticsIngest.mockReset()
+    testState.analyticsIngest.mockImplementation((facts: unknown[]) =>
+      Promise.resolve({
+        quarantined_rows: 0,
+        successful_rows: facts.length,
+      })
+    )
     testState.migrate.mockReset()
     vi.spyOn(Date, "now").mockReturnValue(BASE_NOW)
   })
@@ -273,6 +284,8 @@ describe("IngestionAuditDO", () => {
       first_seen_at: BASE_NOW - 1,
       created_at: BASE_NOW - 1,
       entries_json: "{not valid json",
+      audit_published_at: null,
+      meter_facts_published_at: null,
       published_at: null,
     })
     db.batchRows.push({
@@ -280,6 +293,8 @@ describe("IngestionAuditDO", () => {
       first_seen_at: BASE_NOW,
       created_at: BASE_NOW,
       entries_json: JSON.stringify([validEntry]),
+      audit_published_at: null,
+      meter_facts_published_at: null,
       published_at: null,
     })
 
@@ -344,6 +359,8 @@ describe("IngestionAuditDO", () => {
         first_seen_at: BASE_NOW + index,
         created_at: BASE_NOW + index,
         entries_json: JSON.stringify([entry]),
+        audit_published_at: null,
+        meter_facts_published_at: null,
         published_at: null,
       })
     }
@@ -360,7 +377,7 @@ describe("IngestionAuditDO", () => {
     expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
     expect(pipelineEvents.send.mock.calls[0]?.[0]).toHaveLength(125)
     expect(db.batchRows.every((row) => row.published_at === BASE_NOW)).toBe(true)
-    expect(db.publishUpdateBatchSizes).toEqual([99, 26])
+    expect(db.publishUpdateBatchSizes).toEqual([99, 26, 99, 26, 99, 26])
   })
 
   it("marks unpublished rows as published after successful pipeline flush", async () => {
@@ -389,7 +406,93 @@ describe("IngestionAuditDO", () => {
     await durableObject.alarm()
 
     expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngest).not.toHaveBeenCalled()
+    expect(db.batchRows[0]?.audit_published_at).toBe(BASE_NOW)
+    expect(db.batchRows[0]?.meter_facts_published_at).toBe(BASE_NOW)
     expect(db.batchRows[0]?.published_at).toBe(BASE_NOW)
+  })
+
+  it("publishes audit events and meter facts with independent markers", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const pipelineEvents = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+    testState.db = db
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: pipelineEvents,
+      } as never
+    )
+
+    await durableObject.commit([
+      createLedgerEntry({
+        idempotencyKey: "idem_fact_publish",
+        meterFactsJson: JSON.stringify([{ event_id: "evt_fact", amount: 100 }]),
+        payloadHash: "hash_fact_publish",
+      }),
+    ])
+
+    await durableObject.alarm()
+
+    expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngest).toHaveBeenCalledWith([{ event_id: "evt_fact", amount: 100 }])
+    expect(db.batchRows[0]).toMatchObject({
+      audit_published_at: BASE_NOW,
+      meter_facts_published_at: BASE_NOW,
+      published_at: BASE_NOW,
+    })
+  })
+
+  it("retries only meter facts when fact publish fails after audit publish succeeds", async () => {
+    const IngestionAuditDO = await loadIngestionAuditDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    const pipelineEvents = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+    testState.db = db
+    testState.analyticsIngest.mockRejectedValueOnce(new Error("tinybird down"))
+
+    const durableObject = new IngestionAuditDO(
+      state as never,
+      {
+        PIPELINE_EVENTS: pipelineEvents,
+      } as never
+    )
+
+    await durableObject.commit([
+      createLedgerEntry({
+        idempotencyKey: "idem_fact_retry",
+        meterFactsJson: JSON.stringify([{ event_id: "evt_fact_retry", amount: 200 }]),
+        payloadHash: "hash_fact_retry",
+      }),
+    ])
+
+    await durableObject.alarm()
+
+    expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(1)
+    expect(db.batchRows[0]).toMatchObject({
+      audit_published_at: BASE_NOW,
+      meter_facts_published_at: null,
+      published_at: null,
+    })
+    expect(state.alarmAt).toBe(BASE_NOW + 30_000)
+
+    await durableObject.alarm()
+
+    expect(pipelineEvents.send).toHaveBeenCalledTimes(1)
+    expect(testState.analyticsIngest).toHaveBeenCalledTimes(2)
+    expect(db.batchRows[0]).toMatchObject({
+      audit_published_at: BASE_NOW,
+      meter_facts_published_at: BASE_NOW,
+      published_at: BASE_NOW,
+    })
   })
 
   it("publishes to the local pipeline URL in development", async () => {
@@ -510,6 +613,8 @@ describe("IngestionAuditDO", () => {
       first_seen_at: BASE_NOW - TEST_AUDIT_RETENTION_MS - 1,
       created_at: BASE_NOW - TEST_AUDIT_RETENTION_MS - 1,
       entries_json: "[]",
+      audit_published_at: BASE_NOW - 1,
+      meter_facts_published_at: BASE_NOW - 1,
       published_at: BASE_NOW - 1,
     })
     db.batchRows.push({
@@ -517,6 +622,8 @@ describe("IngestionAuditDO", () => {
       first_seen_at: BASE_NOW - TEST_AUDIT_RETENTION_MS - 1,
       created_at: BASE_NOW - TEST_AUDIT_RETENTION_MS - 1,
       entries_json: "[]",
+      audit_published_at: null,
+      meter_facts_published_at: null,
       published_at: null,
     })
     db.batchRows.push({
@@ -524,6 +631,8 @@ describe("IngestionAuditDO", () => {
       first_seen_at: BASE_NOW - 1000,
       created_at: BASE_NOW - 1000,
       entries_json: "[]",
+      audit_published_at: BASE_NOW - 1,
+      meter_facts_published_at: BASE_NOW - 1,
       published_at: BASE_NOW - 1,
     })
     db.batchRows.push({
@@ -531,6 +640,8 @@ describe("IngestionAuditDO", () => {
       first_seen_at: BASE_NOW - TEST_INGESTION_MAX_EVENT_AGE_MS - 24 * 60 * 60 * 1000,
       created_at: BASE_NOW - TEST_INGESTION_MAX_EVENT_AGE_MS - 24 * 60 * 60 * 1000,
       entries_json: "[]",
+      audit_published_at: BASE_NOW - 1,
+      meter_facts_published_at: BASE_NOW - 1,
       published_at: BASE_NOW - 1,
     })
 
@@ -562,6 +673,13 @@ async function loadIngestionAuditDO() {
 
   vi.doMock("@unprice/lakehouse", () => ({
     parseLakehouseEvent: vi.fn((_source: string, payload: unknown) => payload),
+  }))
+
+  vi.doMock("@unprice/analytics", () => ({
+    Analytics: class {
+      public ingestEntitlementMeterFacts = testState.analyticsIngest
+    },
+    entitlementMeterFactSchemaV1: z.object({}).passthrough(),
   }))
 
   vi.doMock("@unprice/observability", () => ({}))
@@ -734,6 +852,8 @@ function buildFakeDrizzle(state: FakeDbState) {
               .map((row) => ({
                 id: row.id,
                 entriesJson: row.entries_json,
+                auditPublishedAt: row.audit_published_at,
+                meterFactsPublishedAt: row.meter_facts_published_at,
               }))
           }
 
@@ -753,6 +873,14 @@ function buildFakeDrizzle(state: FakeDbState) {
               first_seen_at: Number(row.firstSeenAt),
               created_at: Number(row.createdAt),
               entries_json: String(row.entriesJson),
+              audit_published_at:
+                row.auditPublishedAt === null || row.auditPublishedAt === undefined
+                  ? null
+                  : Number(row.auditPublishedAt),
+              meter_facts_published_at:
+                row.meterFactsPublishedAt === null || row.meterFactsPublishedAt === undefined
+                  ? null
+                  : Number(row.meterFactsPublishedAt),
               published_at:
                 row.publishedAt === null || row.publishedAt === undefined
                   ? null
@@ -765,7 +893,7 @@ function buildFakeDrizzle(state: FakeDbState) {
       return {
         values(value: Record<string, unknown> | Record<string, unknown>[]) {
           rows = Array.isArray(value) ? value : [value]
-          assertSqlBoundParameterCount(rows.length * 4)
+          assertSqlBoundParameterCount(rows.length * 7)
           return this
         },
         onConflictDoNothing() {
@@ -804,6 +932,20 @@ function buildFakeDrizzle(state: FakeDbState) {
                     const publishedAt = values.publishedAt
                     row.published_at =
                       publishedAt === null || publishedAt === undefined ? null : Number(publishedAt)
+                  }
+                  if ("auditPublishedAt" in values) {
+                    const auditPublishedAt = values.auditPublishedAt
+                    row.audit_published_at =
+                      auditPublishedAt === null || auditPublishedAt === undefined
+                        ? null
+                        : Number(auditPublishedAt)
+                  }
+                  if ("meterFactsPublishedAt" in values) {
+                    const meterFactsPublishedAt = values.meterFactsPublishedAt
+                    row.meter_facts_published_at =
+                      meterFactsPublishedAt === null || meterFactsPublishedAt === undefined
+                        ? null
+                        : Number(meterFactsPublishedAt)
                   }
                 }
                 return
@@ -924,6 +1066,7 @@ function execSqlCleanup(
 
 function createLedgerEntry(overrides: {
   idempotencyKey: string
+  meterFactsJson?: string
   payloadHash: string
 }) {
   return {
@@ -933,6 +1076,7 @@ function createLedgerEntry(overrides: {
     canonicalAuditId: `canonical_${overrides.idempotencyKey}`,
     firstSeenAt: BASE_NOW,
     idempotencyKey: overrides.idempotencyKey,
+    meterFactsJson: overrides.meterFactsJson,
     payloadHash: overrides.payloadHash,
     rejectionReason: undefined,
     resultJson: JSON.stringify({ state: "processed" }),

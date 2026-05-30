@@ -99,7 +99,8 @@ export const registerIngestEventsV1 = (app: App) =>
     const logger = c.get("logger")
 
     // we shard the load in 2 queues for now, more than enough as we scale we add more
-    const availableQueues = [c.env.QUEUE_SHARD_0, c.env.QUEUE_SHARD_1]
+    // const availableQueues = [c.env.QUEUE_SHARD_0, c.env.QUEUE_SHARD_1]
+    const availableQueues = [c.env.QUEUE_SHARD_0] // only one queue for now
 
     // 1. auth for the request
     const key = await keyAuth(c)

@@ -1,6 +1,8 @@
 import { DO_IDEMPOTENCY_TTL_MS } from "@unprice/services/entitlements"
 
 export const BATCH_TABLE_NAME = "ingestion_audit_batches"
+// Audit publishes facts returned by entitlement replay, so audit dedupe must
+// live at least as long as entitlement idempotency.
 export const AUDIT_RETENTION_MS = DO_IDEMPOTENCY_TTL_MS
 export const SQLITE_BOUND_PARAMETER_LIMIT = 100
 export const AUDIT_PUBLISH_UPDATE_BATCH_SIZE = SQLITE_BOUND_PARAMETER_LIMIT - 1

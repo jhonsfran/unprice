@@ -5,6 +5,7 @@ export type IngestionAuditEntry = {
   canonicalAuditId: string
   firstSeenAt: number
   idempotencyKey: string
+  meterFactsJson?: string
   payloadHash: string
   rejectionReason?: string
   resultJson: string
