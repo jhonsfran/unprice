@@ -8,7 +8,6 @@ import { init } from "~/middleware/init"
 import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
 export { DurableObjectProject } from "~/project/do"
-export { IngestionAuditDO } from "~/ingestion/audit/IngestionAuditDO"
 export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
@@ -33,10 +32,16 @@ import { registerGetRealtimeTicketV1 } from "./routes/realtime/getRealtimeTicket
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
 
 import { env } from "cloudflare:workers"
-import type { IngestionQueueMessage } from "@unprice/services/ingestion"
+import {
+  type IngestionQueueMessage,
+  type IngestionReportingEnvelope,
+  ingestionQueueMessageSchema,
+  ingestionReportingEnvelopeSchema,
+} from "@unprice/services/ingestion"
 import { timing } from "hono/timing"
 import { verifyRealtimeTicket } from "~/auth/ticket"
 import { serializeError } from "~/errors/log"
+import { consumeIngestionReportingQueueBatch } from "~/ingestion/reporting/consumer"
 import { consumeIngestionBatch } from "~/ingestion/service"
 import { knownRoute } from "~/middleware/known-route"
 import { obs } from "~/middleware/obs"
@@ -210,13 +215,13 @@ const handler = {
     }
   },
   queue: async (
-    batch: MessageBatch<IngestionQueueMessage>,
+    batch: MessageBatch<IngestionQueueMessage | IngestionReportingEnvelope>,
     env: Env,
     executionCtx: ExecutionContext
   ) => {
     try {
       const parsedEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
-      await consumeIngestionBatch(batch, parsedEnv, executionCtx, apiDrain ?? undefined)
+      await dispatchIngestionQueueBatch(batch, parsedEnv, executionCtx)
     } catch (error) {
       const serializedError = serializeError(error)
 
@@ -233,6 +238,78 @@ const handler = {
       throw error
     }
   },
-} satisfies ExportedHandler<Env, IngestionQueueMessage>
+} satisfies ExportedHandler<Env, IngestionQueueMessage | IngestionReportingEnvelope>
+
+async function dispatchIngestionQueueBatch(
+  batch: MessageBatch<IngestionQueueMessage | IngestionReportingEnvelope>,
+  env: Env,
+  executionCtx: ExecutionContext
+): Promise<void> {
+  const rawMessages: Message<IngestionQueueMessage>[] = []
+  const reportingMessages: Message<IngestionReportingEnvelope>[] = []
+
+  for (const message of batch.messages) {
+    const reportingMessage = ingestionReportingEnvelopeSchema.safeParse(message.body)
+    if (reportingMessage.success) {
+      reportingMessages.push(withParsedBody(message, reportingMessage.data))
+      continue
+    }
+
+    const rawMessage = ingestionQueueMessageSchema.safeParse(message.body)
+    if (rawMessage.success) {
+      rawMessages.push(withParsedBody(message, rawMessage.data))
+      continue
+    }
+
+    log.error({
+      code: "MALFORMED_INGESTION_QUEUE_MESSAGE",
+      message: "dropping malformed ingestion queue message",
+      queue: batch.queue,
+      reporting_errors: reportingMessage.error.issues,
+      raw_errors: rawMessage.error.issues,
+    })
+    message.ack()
+  }
+
+  if (rawMessages.length > 0) {
+    await consumeIngestionBatch(
+      withMessages(batch, rawMessages),
+      env,
+      executionCtx,
+      apiDrain ?? undefined
+    )
+  }
+
+  if (reportingMessages.length > 0) {
+    await consumeIngestionReportingQueueBatch(
+      withMessages(batch, reportingMessages),
+      env,
+      executionCtx,
+      apiDrain ?? undefined
+    )
+  }
+}
+
+function withParsedBody<T>(
+  message: Message<IngestionQueueMessage | IngestionReportingEnvelope>,
+  body: T
+): Message<T> {
+  return {
+    ...message,
+    ack: message.ack.bind(message),
+    body,
+    retry: message.retry.bind(message),
+  } as Message<T>
+}
+
+function withMessages<T>(
+  batch: MessageBatch<IngestionQueueMessage | IngestionReportingEnvelope>,
+  messages: Message<T>[]
+): MessageBatch<T> {
+  return {
+    ...batch,
+    messages,
+  } as MessageBatch<T>
+}
 
 export default handler

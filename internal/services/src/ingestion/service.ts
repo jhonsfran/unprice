@@ -17,15 +17,6 @@ import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import {
-  type IngestionAuditClient,
-  type IngestionAuditCommitResult,
-  type IngestionAuditEntry,
-  computeCanonicalAuditId,
-  computePayloadHash,
-  selectIngestionAuditShardIndex,
-} from "./audit"
-import { UnPriceIngestionError } from "./errors"
-import {
   EVENTS_SCHEMA_VERSION,
   type EntitlementWindowState,
   type FeatureVerificationResult,
@@ -39,6 +30,14 @@ import {
   filterIngestionEntitlementsWithValidAggregationPayload,
   isIngestionEntitlementActiveAt,
 } from "./message"
+import {
+  type IngestionReportingAuditRecord,
+  type IngestionReportingEnvelope,
+  type IngestionReportingQueueClient,
+  chunkIngestionReportingEnvelope,
+  computeCanonicalAuditId,
+  computePayloadHash,
+} from "./reporting"
 
 export type IngestionGrant = {
   allowanceUnits: number | null
@@ -190,23 +189,18 @@ type MessageOutcome = {
   outcome: IngestionOutcome
 }
 
-type ShardedAuditEntry = {
-  entry: IngestionAuditEntry
-  shardIndex: number
-}
-
-type CommitAuditOptions = {
-  strict?: boolean
-}
-
 const GRANT_CONTEXT_CACHE_BUCKET_MS = 300_000
 const ENTITLEMENT_APPLY_BATCH_SIZE = 100
 const DEFAULT_FANOUT_WARNING_THRESHOLD = 5
 
+const noopReportingClient: IngestionReportingQueueClient = {
+  send: async () => {},
+}
+
 export class IngestionService {
   private readonly entitlementService: EntitlementService
   private readonly entitlementWindowClient: EntitlementWindowClient
-  private readonly auditClient: IngestionAuditClient
+  private readonly reportingClient: IngestionReportingQueueClient
   private readonly cache: Pick<Cache, "ingestionPreparedGrantContext">
   private readonly fanoutWarningThreshold: number
   private readonly logger: Logger
@@ -218,14 +212,14 @@ export class IngestionService {
     entitlementService: EntitlementService
     entitlementWindowClient: EntitlementWindowClient
     fanoutWarningThreshold?: number
-    auditClient: IngestionAuditClient
+    reportingClient?: IngestionReportingQueueClient
     logger: Logger
     now?: () => number
     waitUntil: (promise: Promise<unknown>) => void
   }) {
     this.entitlementService = opts.entitlementService
     this.entitlementWindowClient = opts.entitlementWindowClient
-    this.auditClient = opts.auditClient
+    this.reportingClient = opts.reportingClient ?? noopReportingClient
     this.cache = opts.cache
     this.fanoutWarningThreshold = opts.fanoutWarningThreshold ?? DEFAULT_FANOUT_WARNING_THRESHOLD
     this.logger = opts.logger
@@ -318,14 +312,9 @@ export class IngestionService {
     }
 
     const outcome: IngestionOutcome = { state: "processed" }
-    await this.commitOutcomesToAudit(
-      message.projectId,
-      message.customerId,
-      [{ message, outcome, meterFacts: applyResult.meterFacts }],
-      {
-        strict: true,
-      }
-    )
+    await this.enqueueOutcomesToReporting(message.projectId, message.customerId, [
+      { message, outcome, meterFacts: applyResult.meterFacts },
+    ])
 
     return this.toSyncResult({
       allowed: true,
@@ -457,7 +446,7 @@ export class IngestionService {
       })
 
       if (tooOldOutcomes.length > 0) {
-        await this.commitOutcomesToAudit(projectId, customerId, tooOldOutcomes)
+        await this.enqueueOutcomesToReporting(projectId, customerId, tooOldOutcomes)
       }
 
       if (freshMessages.length === 0) {
@@ -476,22 +465,16 @@ export class IngestionService {
           projectId,
           rejectionReason: preparedGroup.rejectionReason,
         })
-        await this.commitOutcomesToAudit(projectId, customerId, outcomes)
+        await this.enqueueOutcomesToReporting(projectId, customerId, outcomes)
         return [
           ...this.mapOutcomesToAckResults(outcomes),
           ...this.mapOutcomesToAckResults(tooOldOutcomes),
         ]
       }
 
-      const { fresh, duplicateOutcomes } = await this.filterCrossPeriodDuplicates(
-        projectId,
-        customerId,
-        preparedGroup.messages
-      )
-
       const freshOutcomes =
-        fresh.length > 0
-          ? await this.processPreparedMessages(fresh, {
+        preparedGroup.messages.length > 0
+          ? await this.processPreparedMessages(preparedGroup.messages, {
               candidateEntitlements: preparedGroup.candidateEntitlements,
               customerId,
               projectId,
@@ -499,21 +482,25 @@ export class IngestionService {
             })
           : []
 
-      await this.commitOutcomesToAudit(projectId, customerId, freshOutcomes)
+      await this.enqueueOutcomesToReporting(projectId, customerId, freshOutcomes)
 
       this.logger.info("raw ingestion customer group", {
         projectId,
         customerId,
         raw_event_count: messages.length,
-        fresh_event_count: fresh.length,
+        fresh_event_count: preparedGroup.messages.length,
         too_old_event_count: tooOldOutcomes.length,
-        cross_period_duplicate_count: duplicateOutcomes.length,
-        audit_entry_count: freshOutcomes.length,
+        reporting_envelope_count: freshOutcomes.length > 0 ? 1 : 0,
+        reporting_audit_record_count: freshOutcomes.length,
+        reporting_meter_fact_count: freshOutcomes.reduce(
+          (count, outcome) => count + (outcome.meterFacts?.length ?? 0),
+          0
+        ),
+        raw_events_per_reporting_envelope: freshOutcomes.length,
       })
 
       return [
         ...this.mapOutcomesToAckResults(freshOutcomes),
-        ...duplicateOutcomes.map(({ message }) => this.ackMessage(message)),
         ...this.mapOutcomesToAckResults(tooOldOutcomes),
       ]
     } catch (error) {
@@ -783,41 +770,66 @@ export class IngestionService {
     return outcomes
   }
 
-  private async commitOutcomesToAudit(
-    projectId: string,
-    customerId: string,
-    outcomes: MessageOutcome[],
-    options: CommitAuditOptions = {}
-  ): Promise<void> {
-    const auditEntries = await this.buildAuditEntries(projectId, customerId, outcomes)
-    const auditEntriesByShard = this.bucketAuditEntriesByShard(auditEntries)
-    await this.flushAuditEntries(projectId, customerId, auditEntriesByShard, options)
-  }
-
-  private async buildAuditEntries(
+  private async enqueueOutcomesToReporting(
     projectId: string,
     customerId: string,
     outcomes: MessageOutcome[]
-  ): Promise<ShardedAuditEntry[]> {
-    return Promise.all(
-      outcomes.map(async ({ message, meterFacts, outcome }) => ({
-        entry: await this.buildAuditEntry(projectId, customerId, message, outcome, {
-          meterFacts,
-        }),
-        shardIndex: selectIngestionAuditShardIndex(message.idempotencyKey),
-      }))
-    )
+  ): Promise<void> {
+    if (outcomes.length === 0) {
+      return
+    }
+
+    const envelope = await this.buildReportingEnvelope(projectId, customerId, outcomes)
+    const chunks = chunkIngestionReportingEnvelope(envelope)
+
+    try {
+      await Promise.all(chunks.map((chunk) => this.reportingClient.send(chunk)))
+    } catch (error) {
+      this.logger.error("ingestion reporting enqueue failed", {
+        projectId,
+        customerId,
+        reporting_envelope_count: chunks.length,
+        reporting_audit_record_count: envelope.auditRecords.length,
+        reporting_meter_fact_count: envelope.meterFacts.length,
+        reporting_enqueue_failure_count: chunks.length,
+        error,
+      })
+
+      throw error
+    }
   }
 
-  private async buildAuditEntry(
+  private async buildReportingEnvelope(
+    projectId: string,
+    customerId: string,
+    outcomes: MessageOutcome[]
+  ): Promise<IngestionReportingEnvelope> {
+    const [auditRecords, envelopeId] = await Promise.all([
+      Promise.all(
+        outcomes.map(({ message, outcome }) =>
+          this.buildReportingAuditRecord(projectId, customerId, message, outcome)
+        )
+      ),
+      this.buildReportingEnvelopeId(projectId, customerId, outcomes),
+    ])
+
+    return {
+      kind: "ingestion.reporting.v1",
+      envelopeId,
+      createdAt: this.now(),
+      projectId,
+      customerId,
+      auditRecords,
+      meterFacts: outcomes.flatMap((outcome) => outcome.meterFacts ?? []),
+    }
+  }
+
+  private async buildReportingAuditRecord(
     projectId: string,
     customerId: string,
     message: IngestionQueueMessage,
-    outcome: IngestionOutcome,
-    options: {
-      meterFacts?: AnalyticsEntitlementMeterFact[]
-    } = {}
-  ): Promise<IngestionAuditEntry> {
+    outcome: IngestionOutcome
+  ): Promise<IngestionReportingAuditRecord> {
     const handledAt = this.now()
     const [canonicalAuditId, payloadHash] = await Promise.all([
       computeCanonicalAuditId(projectId, customerId, message.idempotencyKey),
@@ -828,172 +840,28 @@ export class IngestionService {
       idempotencyKey: message.idempotencyKey,
       canonicalAuditId,
       payloadHash,
+      projectId,
+      customerId,
       status: outcome.state,
       rejectionReason: outcome.rejectionReason,
-      resultJson: JSON.stringify(outcome),
       auditPayloadJson: JSON.stringify(
         buildAuditPayload(message, outcome, canonicalAuditId, payloadHash, handledAt)
       ),
-      meterFactsJson:
-        options.meterFacts && options.meterFacts.length > 0
-          ? JSON.stringify(options.meterFacts)
-          : undefined,
       firstSeenAt: message.receivedAt,
+      handledAt,
     }
   }
 
-  private bucketAuditEntriesByShard(
-    auditEntries: ShardedAuditEntry[]
-  ): Map<number, IngestionAuditEntry[]> {
-    const auditEntriesByShard = new Map<number, IngestionAuditEntry[]>()
-
-    for (const { entry, shardIndex } of auditEntries) {
-      const existingEntries = auditEntriesByShard.get(shardIndex)
-
-      if (existingEntries) {
-        existingEntries.push(entry)
-        continue
-      }
-
-      auditEntriesByShard.set(shardIndex, [entry])
-    }
-
-    return auditEntriesByShard
-  }
-
-  private async flushAuditEntries(
+  private async buildReportingEnvelopeId(
     projectId: string,
     customerId: string,
-    auditEntriesByShard: Map<number, IngestionAuditEntry[]>,
-    options: CommitAuditOptions = {}
-  ): Promise<void> {
-    const commitPromises = [...auditEntriesByShard.entries()].map(async ([shardIndex, entries]) => {
-      let result: IngestionAuditCommitResult
+    outcomes: MessageOutcome[]
+  ): Promise<string> {
+    const idempotencyKey = outcomes
+      .map(({ message }) => `${message.idempotencyKey}:${message.id}`)
+      .join("|")
 
-      try {
-        result = await this.auditClient
-          .getAuditStub({
-            projectId,
-            customerId,
-            shardIndex,
-          })
-          .commit(entries)
-      } catch (error) {
-        this.logger.error("audit commit failed", {
-          projectId,
-          customerId,
-          shardIndex,
-          error: formatUnknownError(error),
-        })
-
-        throw error
-      }
-
-      if (result.conflicts > 0) {
-        this.logger.warn("audit payload conflicts detected", {
-          projectId,
-          customerId,
-          conflicts: result.conflicts,
-          idempotencyKeys: entries.map((entry) => entry.idempotencyKey),
-          shardIndex,
-        })
-
-        if (options.strict) {
-          throw new UnPriceIngestionError({
-            code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
-            message:
-              "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
-            context: {
-              customerId,
-              projectId,
-              conflicts: result.conflicts,
-              idempotencyKeys: entries.map((entry) => entry.idempotencyKey),
-              shardIndex,
-            },
-          })
-        }
-      }
-    })
-
-    await Promise.all(commitPromises)
-  }
-
-  private commitToAuditAsync(message: IngestionQueueMessage, outcome: IngestionOutcome): void {
-    this.waitUntil(
-      this.commitOutcomesToAudit(message.projectId, message.customerId, [{ message, outcome }])
-    )
-  }
-
-  private async filterCrossPeriodDuplicates(
-    projectId: string,
-    customerId: string,
-    messages: IngestionQueueMessage[]
-  ): Promise<{
-    duplicateOutcomes: MessageOutcome[]
-    fresh: IngestionQueueMessage[]
-  }> {
-    if (messages.length === 0) {
-      return { fresh: [], duplicateOutcomes: [] }
-    }
-
-    try {
-      const keysByShard = new Map<number, string[]>()
-
-      for (const message of messages) {
-        const shardIndex = selectIngestionAuditShardIndex(message.idempotencyKey)
-        const existing = keysByShard.get(shardIndex)
-        if (existing) {
-          existing.push(message.idempotencyKey)
-        } else {
-          keysByShard.set(shardIndex, [message.idempotencyKey])
-        }
-      }
-
-      const shardResults = await Promise.all(
-        [...keysByShard.entries()].map(([shardIndex, keys]) =>
-          this.auditClient.getAuditStub({ projectId, customerId, shardIndex }).exists(keys)
-        )
-      )
-
-      const knownKeys = new Set(shardResults.flat())
-
-      if (knownKeys.size === 0) {
-        return { fresh: messages, duplicateOutcomes: [] }
-      }
-
-      const fresh: IngestionQueueMessage[] = []
-      const duplicateOutcomes: MessageOutcome[] = []
-
-      for (const message of messages) {
-        if (knownKeys.has(message.idempotencyKey)) {
-          duplicateOutcomes.push({
-            message,
-            outcome: { state: "processed" },
-          })
-        } else {
-          fresh.push(message)
-        }
-      }
-
-      if (duplicateOutcomes.length > 0) {
-        this.logger.info("cross-period duplicates filtered", {
-          projectId,
-          customerId,
-          duplicateCount: duplicateOutcomes.length,
-          freshCount: fresh.length,
-        })
-      }
-
-      return { fresh, duplicateOutcomes }
-    } catch (error) {
-      this.logger.warn("audit cross-period dedup failed, processing all messages", {
-        projectId,
-        customerId,
-        messageCount: messages.length,
-        error,
-      })
-      return { fresh: messages, duplicateOutcomes: [] }
-    }
+    return computeCanonicalAuditId(projectId, customerId, idempotencyKey)
   }
 
   private mapOutcomesToAckResults(outcomes: MessageOutcome[]): IngestionMessageProcessingResult[] {
@@ -1452,14 +1320,9 @@ export class IngestionService {
       projectId,
       rejectionReason: outcome.rejectionReason,
     })
-    await this.commitOutcomesToAudit(
-      message.projectId,
-      message.customerId,
-      [{ message, outcome }],
-      {
-        strict: true,
-      }
-    )
+    await this.enqueueOutcomesToReporting(message.projectId, message.customerId, [
+      { message, outcome },
+    ])
 
     return this.toSyncResult({
       allowed: false,
@@ -1512,18 +1375,6 @@ function buildAuditPayload(
 
 function toEventDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10)
-}
-
-function formatUnknownError(error: unknown): Record<string, unknown> | string {
-  if (error instanceof Error) {
-    return {
-      type: error.name,
-      message: error.message,
-      stack: error.stack,
-    }
-  }
-
-  return String(error ?? "unknown")
 }
 
 function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueueMessage): number {

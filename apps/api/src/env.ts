@@ -5,7 +5,6 @@ import { env as envDb } from "@unprice/db/env"
 import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
-import type { IngestionAuditDO } from "~/ingestion/audit/IngestionAuditDO"
 import type { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 import type { DurableObjectProject } from "./project/do"
 
@@ -52,9 +51,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       entitlementwindow: z.custom<DurableObjectNamespace<EntitlementWindowDO>>(
         (ns) => typeof ns === "object"
       ),
-      ingestionaudit: z.custom<DurableObjectNamespace<IngestionAuditDO>>(
-        (ns) => typeof ns === "object"
-      ),
       RL_FREE_1000_60s: cloudflareRatelimiter,
       RL_FREE_6000_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),
@@ -65,6 +61,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       PIPELINE_EVENTS: cloudflarePipeline.optional(),
       QUEUE_SHARD_0: cloudflareQueue,
       QUEUE_SHARD_1: cloudflareQueue,
+      INGESTION_REPORTING_QUEUE: cloudflareQueue,
       LAKEHOUSE: cloudflareR2Bucket,
       LAKEHOUSE_FILE_PLAN_BASE_URL: z.string().url(),
       LAKEHOUSE_API_TOKEN: z.string(),

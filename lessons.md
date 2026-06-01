@@ -23,16 +23,19 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-08: `/v1/usage/get` returns raw usage/spend from Tinybird; Hono formats display money.
 - 2026-05-08: Keep Tinybird response parsers tolerant during endpoint rollouts; old cloud
   shapes can lag local code.
+- 2026-05-31: Tinybird `AggregateFunction` state migrations that change `argMax` version type
+  cannot direct-`CAST` old states; `FORWARD_QUERY` must `finalizeAggregation` the old value and
+  `initializeAggregation('argMaxState', value, new_version)` for the new state.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
   and `amount_after` for cumulative spend.
 - 2026-05-08: Sync ingest idempotency must re-enter entitlement apply replay, not synthesize a
   duplicate from audit `exists`.
 - 2026-05-08: API wallet-empty messages should use configured meter/event slugs, not derived
   storage keys.
-- 2026-05-09: `/v1/events/ingest/sync` must await strict `IngestionAuditDO.commit`; `waitUntil`
-  alone is not durable enough.
-- 2026-05-09: Strict audit payload conflicts are expected idempotency failures; map them to API
-  `409 CONFLICT`.
+- 2026-05-09: `/v1/events/ingest/sync` must await durable reporting enqueue; `waitUntil`
+  alone is not durable enough for ingestion evidence.
+- 2026-05-09: Audit payload drift is asynchronous evidence, not a sync-ingest `409`; group
+  `canonicalAuditId` and count distinct `payloadHash` values in the audit lake.
 - 2026-05-09: Keep sync ingest on the low-latency auth path with `Server-Timing`; do not add the
   API-key rate-limit binding.
 - 2026-05-09: Persist final wallet flush intent before external wallet I/O so recovery replays
@@ -55,8 +58,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-25: Public API route allowlists must run before `init()` so scanner 404s do not
   construct cache, DB, service, or log-drain context.
 - 2026-05-08: Test DO eviction/recovery with a new DO instance over the same fake storage.
-- 2026-05-11: For usage concurrency, test `EntitlementWindowDO` and `IngestionAuditDO`, not only
-  the service adapter.
+- 2026-05-11: For usage concurrency, test `EntitlementWindowDO` replay and reporting enqueue
+  retry paths, not only the service adapter.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do
@@ -77,12 +80,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-30: EntitlementWindowDO no longer uses a local fact outbox; post-apply commits must
   still schedule lifecycle alarms so wallet final flush, idempotency cleanup, and retention wakeups
   continue.
-- 2026-05-31: While `IngestionAuditDO` publishes facts returned by entitlement replay,
-  audit dedupe retention must not expire before entitlement idempotency retention.
-- 2026-05-17: IngestionAuditDO commit/publish paths should batch indexed key lookups and
-  published-at updates; per-entry SQL loops inflate DO wall time under queue batches.
-- 2026-05-18: Cloudflare SQLite-backed DO queries allow only 100 bound parameters; batch
-  `IngestionAuditDO` inserts by column count and remember update `SET` values also consume binds.
+- 2026-05-31: Ingestion hot paths enqueue append-only reporting envelopes after
+  `EntitlementWindowDO` apply; do not reintroduce `IngestionAuditDO.exists` or
+  `IngestionAuditDO.commit` into sync or async request handling.
+- 2026-05-31: `IngestionAuditDO` is retired; keep only the `deleted_classes` migration marker
+  in `apps/api/wrangler.jsonc`, and use reporting envelopes for audit/Pipeline/Tinybird delivery.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
 

@@ -1,1 +1,0 @@
-CREATE INDEX `idx_ingestion_audit_published_retention` ON `ingestion_audit` (`first_seen_at`) WHERE "ingestion_audit"."published_at" IS NOT NULL;

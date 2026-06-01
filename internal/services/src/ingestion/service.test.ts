@@ -1,21 +1,94 @@
 import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
-import { selectIngestionAuditShardIndex } from "./audit"
-import type { UnPriceIngestionError } from "./errors"
 import type { IngestionQueueMessage } from "./message"
+import {
+  INGESTION_REPORTING_ENVELOPE_TARGET_BYTES,
+  type IngestionReportingEnvelope,
+  chunkIngestionReportingEnvelope,
+  getIngestionReportingEnvelopeSerializedBytes,
+  ingestionReportingEnvelopeSchema,
+} from "./reporting"
 import { type IngestionEntitlement, IngestionService } from "./service"
 
 const SERVICE_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 
-type AuditEntryFixture = {
-  auditPayloadJson: string
-  idempotencyKey: string
-  meterFactsJson?: string
-  rejectionReason?: string
-  resultJson: string
-  status: string
-}
+describe("ingestion reporting contract", () => {
+  it("accepts one envelope with one processed event and one fact", () => {
+    const envelope = createReportingEnvelope({
+      auditRecords: [createReportingAuditRecord()],
+      meterFacts: [createReportingMeterFact()],
+    })
+
+    expect(() => ingestionReportingEnvelopeSchema.parse(envelope)).not.toThrow()
+    expect(chunkIngestionReportingEnvelope(envelope)).toEqual([envelope])
+    expect(getIngestionReportingEnvelopeSerializedBytes(envelope)).toBeLessThanOrEqual(
+      INGESTION_REPORTING_ENVELOPE_TARGET_BYTES
+    )
+  })
+
+  it("accepts one envelope with multiple audit records and multiple facts", () => {
+    const envelope = createReportingEnvelope({
+      auditRecords: [
+        createReportingAuditRecord({ idempotencyKey: "idem_1", status: "processed" }),
+        createReportingAuditRecord({
+          idempotencyKey: "idem_2",
+          status: "rejected",
+          rejectionReason: "LIMIT_EXCEEDED",
+        }),
+      ],
+      meterFacts: [
+        createReportingMeterFact({ event_id: "evt_1", idempotency_key: "idem_1" }),
+        createReportingMeterFact({
+          event_id: "evt_2",
+          idempotency_key: "idem_2",
+          value_after: 2,
+        }),
+      ],
+    })
+
+    const parsed = ingestionReportingEnvelopeSchema.parse(envelope)
+
+    expect(parsed.auditRecords).toHaveLength(2)
+    expect(parsed.meterFacts).toHaveLength(2)
+    expect(parsed.auditRecords.map((record) => record.status)).toEqual(["processed", "rejected"])
+  })
+
+  it("chunks envelopes when serialized payload size exceeds the target byte size", () => {
+    const envelope = createReportingEnvelope({
+      envelopeId: "env_large",
+      auditRecords: [
+        createReportingAuditRecord({
+          idempotencyKey: "idem_large_1",
+          auditPayloadJson: JSON.stringify({ body: "x".repeat(70_000) }),
+        }),
+        createReportingAuditRecord({
+          idempotencyKey: "idem_large_2",
+          auditPayloadJson: JSON.stringify({ body: "y".repeat(70_000) }),
+        }),
+      ],
+      meterFacts: [],
+    })
+
+    const chunks = chunkIngestionReportingEnvelope(envelope)
+
+    expect(getIngestionReportingEnvelopeSerializedBytes(envelope)).toBeGreaterThan(
+      INGESTION_REPORTING_ENVELOPE_TARGET_BYTES
+    )
+    expect(chunks).toHaveLength(2)
+    expect(chunks.map((chunk) => chunk.envelopeId)).toEqual(["env_large", "env_large:2"])
+    expect(
+      chunks.flatMap((chunk) => chunk.auditRecords.map((record) => record.idempotencyKey))
+    ).toEqual(["idem_large_1", "idem_large_2"])
+    expect(
+      chunks.every(
+        (chunk) =>
+          getIngestionReportingEnvelopeSerializedBytes(chunk) <=
+          INGESTION_REPORTING_ENVELOPE_TARGET_BYTES
+      )
+    ).toBe(true)
+  })
+})
 
 describe("IngestionService entitlement routing", () => {
   it("loads customer entitlements and routes by customerEntitlementId", async () => {
@@ -25,7 +98,7 @@ describe("IngestionService entitlement routing", () => {
       apply,
       getEnforcementState: vi.fn(),
     })
-    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -102,14 +175,9 @@ describe("IngestionService entitlement routing", () => {
         ),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -150,7 +218,7 @@ describe("IngestionService entitlement routing", () => {
     )
   })
 
-  it("replays sync entitlement-window denials instead of treating audited duplicates as processed", async () => {
+  it("replays sync entitlement-window denials through reporting", async () => {
     const entitlement = createEntitlement()
     const apply = vi.fn().mockResolvedValue({
       allowed: false,
@@ -161,7 +229,7 @@ describe("IngestionService entitlement routing", () => {
       apply,
       getEnforcementState: vi.fn(),
     })
-    const exists = vi.fn().mockResolvedValue(["idem_123"])
+    const send = vi.fn().mockResolvedValue(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -171,14 +239,9 @@ describe("IngestionService entitlement routing", () => {
           .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit: vi.fn().mockResolvedValue({ inserted: 0, duplicates: 1, conflicts: 0 }),
-          exists,
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -204,15 +267,22 @@ describe("IngestionService entitlement routing", () => {
       rejectionReason: "WALLET_EMPTY",
       state: "rejected",
     })
-    expect(exists).not.toHaveBeenCalled()
     expect(apply).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledTimes(1)
+    const envelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
+    expect(envelope.auditRecords[0]).toMatchObject({
+      idempotencyKey: "idem_123",
+      rejectionReason: "WALLET_EMPTY",
+      status: "rejected",
+    })
+    expect(envelope.meterFacts).toEqual([])
   })
 
-  it("fails sync ingestion when the strict audit commit fails", async () => {
+  it("fails sync ingestion when reporting enqueue fails", async () => {
     const entitlement = createEntitlement()
     const apply = vi.fn().mockResolvedValue({ allowed: true })
     const waitUntil = vi.fn()
-    const commit = vi.fn().mockRejectedValue(new Error("audit unavailable"))
+    const send = vi.fn().mockRejectedValue(new Error("reporting unavailable"))
 
     const service = new IngestionService({
       cache: createCache(),
@@ -227,14 +297,9 @@ describe("IngestionService entitlement routing", () => {
           getEnforcementState: vi.fn(),
         }),
       },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil,
     })
 
@@ -254,14 +319,14 @@ describe("IngestionService entitlement routing", () => {
           properties: { amount: 1 },
         },
       })
-    ).rejects.toThrow("audit unavailable")
+    ).rejects.toThrow("reporting unavailable")
 
     expect(apply).toHaveBeenCalledTimes(1)
-    expect(commit).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledTimes(1)
     expect(waitUntil).not.toHaveBeenCalled()
   })
 
-  it("retries a sync replay after audit fails without charging the same idempotency key twice", async () => {
+  it("retries a sync replay after reporting enqueue fails without charging the same idempotency key twice", async () => {
     const entitlement = createEntitlement()
     const chargedKeys = new Set<string>()
     let chargeCount = 0
@@ -272,10 +337,10 @@ describe("IngestionService entitlement routing", () => {
       }
       return Promise.resolve({ allowed: true })
     })
-    const commit = vi
+    const send = vi
       .fn()
-      .mockRejectedValueOnce(new Error("audit unavailable"))
-      .mockResolvedValueOnce({ inserted: 1, duplicates: 0, conflicts: 0 })
+      .mockRejectedValueOnce(new Error("reporting unavailable"))
+      .mockResolvedValueOnce(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -290,14 +355,9 @@ describe("IngestionService entitlement routing", () => {
           getEnforcementState: vi.fn(),
         }),
       },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
     const message = createMessage(entitlement)
@@ -307,7 +367,7 @@ describe("IngestionService entitlement routing", () => {
         featureSlug: entitlement.featureSlug,
         message,
       })
-    ).rejects.toThrow("audit unavailable")
+    ).rejects.toThrow("reporting unavailable")
 
     const retry = await service.ingestFeatureSync({
       featureSlug: entitlement.featureSlug,
@@ -319,15 +379,14 @@ describe("IngestionService entitlement routing", () => {
       state: "processed",
     })
     expect(apply).toHaveBeenCalledTimes(2)
-    expect(commit).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenCalledTimes(2)
     expect(chargeCount).toBe(1)
   })
 
-  it("throws a typed ingestion error when strict audit detects a payload conflict", async () => {
+  it("enqueues allowed sync audit and facts before returning", async () => {
     const entitlement = createEntitlement()
-    const logger = createLogger()
-    const waitUntil = vi.fn()
-    const commit = vi.fn().mockResolvedValue({ inserted: 0, duplicates: 0, conflicts: 1 })
+    const meterFact = createReportingMeterFact()
+    const send = vi.fn().mockResolvedValue(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -338,76 +397,71 @@ describe("IngestionService entitlement routing", () => {
       } as never,
       entitlementWindowClient: {
         getEntitlementWindowStub: vi.fn().mockReturnValue({
-          apply: vi.fn().mockResolvedValue({ allowed: true }),
+          apply: vi.fn().mockResolvedValue({ allowed: true, meterFacts: [meterFact] }),
           getEnforcementState: vi.fn(),
         }),
       },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
-      logger: logger as never,
+      logger: createLogger() as never,
       now: () => SERVICE_NOW,
-      waitUntil,
+      reportingClient: { send },
+      waitUntil: vi.fn(),
     })
 
-    await expect(
-      service.ingestFeatureSync({
-        featureSlug: entitlement.featureSlug,
-        message: {
-          version: 1,
-          projectId: entitlement.projectId,
-          customerId: entitlement.customerId,
-          requestId: "req_123",
-          receivedAt: SERVICE_NOW,
-          idempotencyKey: "idem_123",
-          id: "evt_123",
-          slug: "usage.recorded",
-          timestamp: Date.UTC(2026, 2, 19),
-          properties: { amount: 1 },
-        },
-      })
-    ).rejects.toMatchObject({
-      code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
-      message:
-        "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
-    } satisfies Partial<UnPriceIngestionError>)
+    const message = createMessage(entitlement)
+    const result = await service.ingestFeatureSync({
+      featureSlug: entitlement.featureSlug,
+      message,
+    })
 
-    expect(logger.warn).toHaveBeenCalledWith(
-      "audit payload conflicts detected",
-      expect.objectContaining({
-        conflicts: 1,
-        idempotencyKeys: ["idem_123"],
-      })
-    )
-    expect(logger.error).not.toHaveBeenCalled()
-    expect(waitUntil).not.toHaveBeenCalled()
+    expect(result).toEqual({
+      allowed: true,
+      state: "processed",
+    })
+    expect(send).toHaveBeenCalledTimes(1)
+    const envelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
+    expect(envelope.auditRecords[0]).toMatchObject({
+      idempotencyKey: "idem_123",
+      status: "processed",
+    })
+    expect(envelope.meterFacts).toEqual([meterFact])
   })
 
-  it("retries async queue outcomes when audit commit fails after entitlement apply", async () => {
+  it("retries async queue outcomes when reporting enqueue fails after entitlement apply", async () => {
     const entitlement = createEntitlement()
+    const chargedKeys = new Set<string>()
+    let chargeCount = 0
     const applyBatch = vi.fn().mockImplementation(
       (input: {
         entitlement: { customerEntitlementId: string }
         events: { correlationKey: string; id: string; idempotencyKey: string }[]
-      }) =>
-        Promise.resolve({
+      }) => {
+        for (const event of input.events) {
+          if (!chargedKeys.has(event.idempotencyKey)) {
+            chargedKeys.add(event.idempotencyKey)
+            chargeCount++
+          }
+        }
+
+        return Promise.resolve({
           results: input.events.map((event) => ({
             allowed: true,
             correlationKey: event.correlationKey,
             idempotencyKey: event.idempotencyKey,
             meterFacts: [
-              {
+              createReportingMeterFact({
                 event_id: event.id,
+                idempotency_key: event.idempotencyKey,
                 customer_entitlement_id: input.entitlement.customerEntitlementId,
-              },
+              }),
             ],
           })),
         })
+      }
     )
-    const commit = vi.fn().mockRejectedValue(new Error("audit unavailable"))
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("reporting unavailable"))
+      .mockResolvedValueOnce(undefined)
     const logger = createLogger()
 
     const service = new IngestionService({
@@ -424,33 +478,27 @@ describe("IngestionService entitlement routing", () => {
           getEnforcementState: vi.fn(),
         }),
       },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: logger as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
-    const result = await service.processCustomerGroup({
+    const group = {
       customerId: entitlement.customerId,
       projectId: entitlement.projectId,
       messages: [createMessage(entitlement)],
-    })
+    }
+    const result = await service.processCustomerGroup(group)
+    const retry = await service.processCustomerGroup(group)
 
     expect(result).toHaveLength(1)
     expect(result[0]?.disposition.action).toBe("retry")
-    expect(applyBatch).toHaveBeenCalledTimes(1)
-    expect(commit).toHaveBeenCalledTimes(1)
-    expect(logger.error).toHaveBeenCalledWith(
-      "audit commit failed",
-      expect.objectContaining({
-        error: expect.objectContaining({ message: "audit unavailable" }),
-      })
-    )
+    expect(retry[0]?.disposition.action).toBe("ack")
+    expect(applyBatch).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(chargeCount).toBe(1)
+    expect((send.mock.calls[1]?.[0] as IngestionReportingEnvelope).meterFacts).toHaveLength(1)
     expect(logger.error).toHaveBeenCalledWith(
       "raw ingestion queue processing failed",
       expect.objectContaining({
@@ -474,10 +522,11 @@ describe("IngestionService entitlement routing", () => {
             correlationKey: event.correlationKey,
             idempotencyKey: event.idempotencyKey,
             meterFacts: [
-              {
+              createReportingMeterFact({
                 event_id: event.id,
+                idempotency_key: event.idempotencyKey,
                 customer_entitlement_id: input.entitlement.customerEntitlementId,
-              },
+              }),
             ],
           })),
         })
@@ -504,12 +553,6 @@ describe("IngestionService entitlement routing", () => {
         ),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit: vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 }),
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: logger as never,
       now: () => SERVICE_NOW,
       waitUntil: vi.fn(),
@@ -581,10 +624,11 @@ describe("IngestionService entitlement routing", () => {
             correlationKey: event.correlationKey,
             idempotencyKey: event.idempotencyKey,
             meterFacts: [
-              {
+              createReportingMeterFact({
                 event_id: event.id,
+                idempotency_key: event.idempotencyKey,
                 customer_entitlement_id: input.entitlement.customerEntitlementId,
-              },
+              }),
             ],
           })),
         })
@@ -594,7 +638,7 @@ describe("IngestionService entitlement routing", () => {
       applyBatch,
       getEnforcementState: vi.fn(),
     })
-    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
     const logger = createLogger()
 
     const service = new IngestionService({
@@ -610,14 +654,9 @@ describe("IngestionService entitlement routing", () => {
           ),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: logger as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -658,25 +697,23 @@ describe("IngestionService entitlement routing", () => {
     expect(applyBatch.mock.calls.map(([input]) => input.entitlement.customerEntitlementId)).toEqual(
       ["ce_events", "ce_keys"]
     )
-    expect(commit).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledTimes(1)
 
-    const [entries] = commit.mock.calls[0]! as [AuditEntryFixture[]]
-    const entry = entries[0]!
-    expect(entry).toMatchObject({
+    const envelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
+    expect(envelope.auditRecords[0]).toMatchObject({
       idempotencyKey: "idem_123",
       rejectionReason: undefined,
       status: "processed",
     })
-    expect(JSON.parse(entry.resultJson)).toEqual({ state: "processed" })
-    expect(JSON.parse(entry.meterFactsJson ?? "[]")).toEqual([
-      {
+    expect(envelope.meterFacts).toEqual([
+      expect.objectContaining({
         event_id: "evt_123",
         customer_entitlement_id: "ce_events",
-      },
-      {
+      }),
+      expect.objectContaining({
         event_id: "evt_123",
         customer_entitlement_id: "ce_keys",
-      },
+      }),
     ])
     expect(logger.info).toHaveBeenCalledWith(
       "raw ingestion entitlement fanout",
@@ -692,8 +729,9 @@ describe("IngestionService entitlement routing", () => {
       expect.objectContaining({
         raw_event_count: 1,
         fresh_event_count: 1,
-        cross_period_duplicate_count: 0,
-        audit_entry_count: 1,
+        reporting_envelope_count: 1,
+        reporting_audit_record_count: 1,
+        reporting_meter_fact_count: 2,
       })
     )
     expect(logger.error).not.toHaveBeenCalled()
@@ -745,12 +783,6 @@ describe("IngestionService entitlement routing", () => {
           apply: vi.fn(),
           applyBatch,
           getEnforcementState: vi.fn(),
-        }),
-      },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit: vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 }),
-          exists: vi.fn().mockResolvedValue([]),
         }),
       },
       fanoutWarningThreshold: 2,
@@ -858,7 +890,7 @@ describe("IngestionService entitlement routing", () => {
           params.customerEntitlementId === "ce_events" ? eventsApplyBatch : keysApplyBatch,
         getEnforcementState: vi.fn(),
       }))
-    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -873,14 +905,9 @@ describe("IngestionService entitlement routing", () => {
           ),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
     const group = {
@@ -904,7 +931,7 @@ describe("IngestionService entitlement routing", () => {
     expect(eventsApplyBatch).toHaveBeenCalledTimes(2)
     expect(keysApplyBatch).toHaveBeenCalledTimes(2)
     expect(eventsChargeCount).toBe(1)
-    expect(commit).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it("keeps async fanout processed when one meter applies before another denies late", async () => {
@@ -957,7 +984,7 @@ describe("IngestionService entitlement routing", () => {
       applyBatch,
       getEnforcementState: vi.fn(),
     })
-    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -972,14 +999,9 @@ describe("IngestionService entitlement routing", () => {
           ),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -1005,14 +1027,12 @@ describe("IngestionService entitlement routing", () => {
     expect(result).toHaveLength(1)
     expect(result[0]?.disposition.action).toBe("ack")
 
-    const [entries] = commit.mock.calls[0]! as [AuditEntryFixture[]]
-    const entry = entries[0]!
-    expect(entry).toMatchObject({
+    const envelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
+    expect(envelope.auditRecords[0]).toMatchObject({
       idempotencyKey: "idem_123",
       rejectionReason: undefined,
       status: "processed",
     })
-    expect(JSON.parse(entry.resultJson)).toEqual({ state: "processed" })
   })
 
   it("rejects async queue outcomes when no entitlement apply is allowed", async () => {
@@ -1035,7 +1055,7 @@ describe("IngestionService entitlement routing", () => {
       applyBatch,
       getEnforcementState: vi.fn(),
     })
-    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
     const logger = createLogger()
 
     const service = new IngestionService({
@@ -1046,14 +1066,9 @@ describe("IngestionService entitlement routing", () => {
           .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: logger as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -1079,16 +1094,15 @@ describe("IngestionService entitlement routing", () => {
     expect(result).toHaveLength(1)
     expect(result[0]?.disposition.action).toBe("ack")
 
-    const [entries] = commit.mock.calls[0]! as [AuditEntryFixture[]]
-    const entry = entries[0]!
-    expect(entry).toMatchObject({
+    const envelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
+    expect(envelope.auditRecords[0]).toMatchObject({
       idempotencyKey: "idem_123",
       rejectionReason: "WALLET_EMPTY",
       status: "rejected",
     })
-    expect(JSON.parse(entry.resultJson)).toEqual({
+    expect(JSON.parse(envelope.auditRecords[0]?.auditPayloadJson ?? "{}")).toMatchObject({
       state: "rejected",
-      rejectionReason: "WALLET_EMPTY",
+      rejection_reason: "WALLET_EMPTY",
     })
     expect(logger.warn).toHaveBeenCalledWith(
       "raw ingestion message rejected",
@@ -1127,7 +1141,7 @@ describe("IngestionService entitlement routing", () => {
       applyBatch,
       getEnforcementState: vi.fn(),
     })
-    const commit = vi.fn().mockResolvedValue({ inserted: 2, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -1137,14 +1151,9 @@ describe("IngestionService entitlement routing", () => {
           .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -1182,9 +1191,9 @@ describe("IngestionService entitlement routing", () => {
     expect(result).toHaveLength(2)
     expect(result.every((item) => item.disposition.action === "ack")).toBe(true)
 
-    const [entries] = commit.mock.calls[0]! as [AuditEntryFixture[]]
+    const envelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
     const entriesByEventId = new Map(
-      entries.map((entry) => [JSON.parse(entry.auditPayloadJson).id, entry])
+      envelope.auditRecords.map((entry) => [JSON.parse(entry.auditPayloadJson).id, entry])
     )
     expect(entriesByEventId.get("evt_first")).toMatchObject({
       status: "processed",
@@ -1216,7 +1225,7 @@ describe("IngestionService entitlement routing", () => {
       applyBatch,
       getEnforcementState: vi.fn(),
     })
-    const commit = vi.fn().mockResolvedValue({ inserted: 101, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -1226,14 +1235,9 @@ describe("IngestionService entitlement routing", () => {
           .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -1261,10 +1265,8 @@ describe("IngestionService entitlement routing", () => {
     expect(apply).not.toHaveBeenCalled()
     expect(applyBatch).toHaveBeenCalledTimes(2)
     expect(applyBatch.mock.calls.map(([input]) => input.events.length)).toEqual([100, 1])
-    expect(commit).toHaveBeenCalledTimes(
-      new Set(messages.map((message) => selectIngestionAuditShardIndex(message.idempotencyKey)))
-        .size
-    )
+    expect(send).toHaveBeenCalledTimes(1)
+    expect((send.mock.calls[0]?.[0] as IngestionReportingEnvelope).auditRecords).toHaveLength(101)
   })
 
   it("returns CUSTOMER_NOT_FOUND when verifying a missing customer", async () => {
@@ -1275,12 +1277,6 @@ describe("IngestionService entitlement routing", () => {
         customerExists: vi.fn().mockResolvedValue(Ok(false)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit: vi.fn(),
-          exists: vi.fn(),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       waitUntil: vi.fn(),
@@ -1308,12 +1304,6 @@ describe("IngestionService entitlement routing", () => {
         customerExists: vi.fn().mockResolvedValue(Ok(true)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit: vi.fn(),
-          exists: vi.fn(),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       waitUntil: vi.fn(),
@@ -1360,12 +1350,6 @@ describe("IngestionService entitlement routing", () => {
             .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
         } as never,
         entitlementWindowClient: { getEntitlementWindowStub },
-        auditClient: {
-          getAuditStub: vi.fn().mockReturnValue({
-            commit: vi.fn(),
-            exists: vi.fn(),
-          }),
-        },
         logger: createLogger() as never,
         now: () => SERVICE_NOW,
         waitUntil: vi.fn(),
@@ -1412,12 +1396,6 @@ describe("IngestionService entitlement routing", () => {
           .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit: vi.fn(),
-          exists: vi.fn(),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       waitUntil: vi.fn(),
@@ -1469,12 +1447,6 @@ describe("IngestionService entitlement routing", () => {
           .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit: vi.fn(),
-          exists: vi.fn(),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       waitUntil: vi.fn(),
@@ -1511,7 +1483,7 @@ describe("IngestionService entitlement routing", () => {
       apply,
       getEnforcementState: vi.fn(),
     })
-    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
 
     const service = new IngestionService({
       cache: createCache(),
@@ -1521,14 +1493,9 @@ describe("IngestionService entitlement routing", () => {
           .mockResolvedValue(Ok([createCustomerEntitlementRecord(entitlement)] as never)),
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -1553,17 +1520,16 @@ describe("IngestionService entitlement routing", () => {
 
     expect(result).toHaveLength(1)
     expect(result[0]?.disposition.action).toBe("ack")
-    expect(commit).toHaveBeenCalledTimes(1)
 
-    const [entries] = commit.mock.calls[0]!
-    expect(entries[0]).toMatchObject({
+    const envelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
+    expect(envelope.auditRecords[0]).toMatchObject({
       idempotencyKey: "idem_123",
       status: "rejected",
       rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
     })
-    expect(JSON.parse(entries[0].resultJson)).toEqual({
+    expect(JSON.parse(envelope.auditRecords[0]?.auditPayloadJson ?? "{}")).toMatchObject({
       state: "rejected",
-      rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+      rejection_reason: "LATE_EVENT_CLOSED_PERIOD",
     })
   })
 
@@ -1571,7 +1537,7 @@ describe("IngestionService entitlement routing", () => {
     const entitlement = createEntitlement()
     const getCustomerEntitlementsForCustomer = vi.fn()
     const getEntitlementWindowStub = vi.fn()
-    const commit = vi.fn().mockResolvedValue({ inserted: 1, duplicates: 0, conflicts: 0 })
+    const send = vi.fn().mockResolvedValue(undefined)
     const logger = createLogger()
 
     const service = new IngestionService({
@@ -1580,14 +1546,9 @@ describe("IngestionService entitlement routing", () => {
         getCustomerEntitlementsForCustomer,
       } as never,
       entitlementWindowClient: { getEntitlementWindowStub },
-      auditClient: {
-        getAuditStub: vi.fn().mockReturnValue({
-          commit,
-          exists: vi.fn().mockResolvedValue([]),
-        }),
-      },
       logger: logger as never,
       now: () => SERVICE_NOW,
+      reportingClient: { send },
       waitUntil: vi.fn(),
     })
 
@@ -1623,16 +1584,76 @@ describe("IngestionService entitlement routing", () => {
         rejectionReason: "EVENT_TOO_OLD",
       })
     )
-    expect(commit).toHaveBeenCalledTimes(1)
+    expect(send).toHaveBeenCalledTimes(1)
 
-    const [entries] = commit.mock.calls[0]!
-    expect(entries[0]).toMatchObject({
+    const envelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
+    expect(envelope.auditRecords[0]).toMatchObject({
       idempotencyKey: "idem_too_old",
       status: "rejected",
       rejectionReason: "EVENT_TOO_OLD",
     })
   })
 })
+
+function createReportingEnvelope(
+  overrides: Partial<IngestionReportingEnvelope> = {}
+): IngestionReportingEnvelope {
+  return {
+    kind: "ingestion.reporting.v1",
+    envelopeId: "env_123",
+    createdAt: SERVICE_NOW,
+    projectId: "proj_123",
+    customerId: "cus_123",
+    auditRecords: [],
+    meterFacts: [],
+    ...overrides,
+  }
+}
+
+function createReportingAuditRecord(
+  overrides: Partial<IngestionReportingEnvelope["auditRecords"][number]> = {}
+): IngestionReportingEnvelope["auditRecords"][number] {
+  return {
+    canonicalAuditId: "audit_123",
+    payloadHash: "hash_123",
+    idempotencyKey: "idem_123",
+    projectId: "proj_123",
+    customerId: "cus_123",
+    status: "processed",
+    firstSeenAt: SERVICE_NOW,
+    handledAt: SERVICE_NOW + 1,
+    auditPayloadJson: JSON.stringify({ id: "evt_123" }),
+    ...overrides,
+  }
+}
+
+function createReportingMeterFact(
+  overrides: Partial<IngestionReportingEnvelope["meterFacts"][number]> = {}
+): IngestionReportingEnvelope["meterFacts"][number] {
+  return {
+    event_id: "evt_123",
+    idempotency_key: "idem_123",
+    project_id: "proj_123",
+    customer_id: "cus_123",
+    customer_entitlement_id: "ce_123",
+    feature_slug: "api_calls",
+    period_key: "2026-03",
+    event_slug: "usage.recorded",
+    aggregation_method: "sum",
+    timestamp: SERVICE_NOW,
+    created_at: SERVICE_NOW + 1,
+    delta: 1,
+    value_after: 1,
+    grant_id: "grant_123",
+    feature_plan_version_id: "fpv_123",
+    amount: 0,
+    amount_after: 0,
+    amount_scale: 8,
+    currency: "USD",
+    priced_at: SERVICE_NOW + 1,
+    ...overrides,
+  }
+}
 
 function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {

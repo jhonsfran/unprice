@@ -2,8 +2,8 @@ import type { Logger } from "@unprice/logs"
 import type { Cache } from "@unprice/services/cache"
 import type { EntitlementService } from "@unprice/services/entitlements"
 import { describe, expect, it, vi } from "vitest"
-import { CloudflareAuditClient } from "./audit/client"
 import { CloudflareEntitlementWindowClient } from "./entitlements/client"
+import { CloudflareReportingQueueClient } from "./reporting/client"
 import { createIngestionService } from "./service"
 
 describe("createIngestionService", () => {
@@ -13,8 +13,8 @@ describe("createIngestionService", () => {
       entitlementwindow: {
         getByName: vi.fn(),
       },
-      ingestionaudit: {
-        getByName: vi.fn(),
+      INGESTION_REPORTING_QUEUE: {
+        send: vi.fn(),
       },
     }
 
@@ -37,11 +37,11 @@ describe("createIngestionService", () => {
     })
 
     const rawService = service as unknown as {
-      auditClient: unknown
       entitlementWindowClient: unknown
+      reportingClient: unknown
     }
 
     expect(rawService.entitlementWindowClient).toBeInstanceOf(CloudflareEntitlementWindowClient)
-    expect(rawService.auditClient).toBeInstanceOf(CloudflareAuditClient)
+    expect(rawService.reportingClient).toBeInstanceOf(CloudflareReportingQueueClient)
   })
 })

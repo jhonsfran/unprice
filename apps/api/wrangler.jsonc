@@ -39,6 +39,10 @@
             "queue": "unprice-api-ingestion-shard-1-prod"
           },
           {
+            "binding": "INGESTION_REPORTING_QUEUE",
+            "queue": "unprice-api-ingestion-reporting-prod"
+          },
+          {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-prod"
           }
@@ -55,6 +59,13 @@
             "queue": "unprice-api-ingestion-shard-1-prod",
             "max_batch_size": 100,
             "max_batch_timeout": 20,
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
+          },
+          {
+            "queue": "unprice-api-ingestion-reporting-prod",
+            "max_batch_size": 100,
+            "max_batch_timeout": 30,
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
           }
@@ -101,10 +112,6 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
-          },
-          {
-            "name": "ingestionaudit",
-            "class_name": "IngestionAuditDO"
           }
         ]
       },
@@ -120,6 +127,10 @@
         {
           "tag": "v4",
           "new_sqlite_classes": ["IngestionAuditDO"]
+        },
+        {
+          "tag": "v5",
+          "deleted_classes": ["IngestionAuditDO"]
         }
       ]
     },
@@ -156,6 +167,10 @@
             "queue": "unprice-api-ingestion-shard-1-preview"
           },
           {
+            "binding": "INGESTION_REPORTING_QUEUE",
+            "queue": "unprice-api-ingestion-reporting-preview"
+          },
+          {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-preview"
           }
@@ -172,6 +187,13 @@
             "queue": "unprice-api-ingestion-shard-1-preview",
             "max_batch_size": 100,
             "max_batch_timeout": 20,
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
+          },
+          {
+            "queue": "unprice-api-ingestion-reporting-preview",
+            "max_batch_size": 100,
+            "max_batch_timeout": 30,
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
           }
@@ -220,10 +242,6 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
-          },
-          {
-            "name": "ingestionaudit",
-            "class_name": "IngestionAuditDO"
           }
         ]
       },
@@ -239,6 +257,10 @@
         {
           "tag": "v4",
           "new_sqlite_classes": ["IngestionAuditDO"]
+        },
+        {
+          "tag": "v5",
+          "deleted_classes": ["IngestionAuditDO"]
         }
       ]
     },
@@ -261,6 +283,10 @@
             "queue": "unprice-api-ingestion-shard-1-dev"
           },
           {
+            "binding": "INGESTION_REPORTING_QUEUE",
+            "queue": "unprice-api-ingestion-reporting-dev"
+          },
+          {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-dev"
           }
@@ -277,6 +303,13 @@
             "queue": "unprice-api-ingestion-shard-1-dev",
             "max_batch_size": 100,
             "max_batch_timeout": 1, // to avoid wait in dev
+            "max_retries": 3,
+            "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
+          },
+          {
+            "queue": "unprice-api-ingestion-reporting-dev",
+            "max_batch_size": 100,
+            "max_batch_timeout": 5, // to avoid wait in dev
             "max_retries": 3,
             "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
           }
@@ -319,10 +352,6 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
-          },
-          {
-            "name": "ingestionaudit",
-            "class_name": "IngestionAuditDO"
           }
         ]
       },
@@ -344,6 +373,10 @@
         {
           "tag": "v4",
           "new_sqlite_classes": ["IngestionAuditDO"]
+        },
+        {
+          "tag": "v5",
+          "deleted_classes": ["IngestionAuditDO"]
         }
       ]
     }

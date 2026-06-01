@@ -16,10 +16,9 @@
     "test:file": "vitest run \"$@\"",
     "gentypes": "wrangler types",
     "clean": "rm -rf .turbo node_modules dist .wrangler",
-    "db:generate": "pnpm db:generate:ingestion:entitlements && pnpm db:generate:ingestion:audit",
+    "db:generate": "pnpm db:generate:ingestion:entitlements",
     "db:generate:ingestion:entitlements": "drizzle-kit generate --config=drizzle.ingestion.entitlements.config.ts",
-    "db:generate:ingestion:audit": "drizzle-kit generate --config=drizzle.ingestion.audit.config.ts",
-    "db:check:ingestion:migrations": "pnpm db:generate:ingestion:entitlements && pnpm db:generate:ingestion:audit && git diff --exit-code -- src/ingestion/entitlements/drizzle src/ingestion/audit/drizzle",
+    "db:check:ingestion:migrations": "pnpm db:generate:ingestion:entitlements && git diff --exit-code -- src/ingestion/entitlements/drizzle",
     "type-check": "pnpm exec tsc --noEmit",
     "type-check:full": "pnpm exec wrangler types && pnpm exec tsc --noEmit"
   },

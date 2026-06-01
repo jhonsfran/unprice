@@ -8,15 +8,15 @@ import {
   IngestionService,
 } from "@unprice/services/ingestion"
 import type { Env } from "~/env"
-import { CloudflareAuditClient } from "./audit/client"
 import { CloudflareEntitlementWindowClient } from "./entitlements/client"
 import { createQueueServices } from "./queue"
+import { CloudflareReportingQueueClient } from "./reporting/client"
 
 export { IngestionService } from "@unprice/services/ingestion"
 
 type CreateIngestionServiceParams = {
   cache: Pick<Cache, "ingestionPreparedGrantContext">
-  env: Pick<Env, "APP_ENV" | "entitlementwindow" | "ingestionaudit">
+  env: Pick<Env, "APP_ENV" | "entitlementwindow" | "INGESTION_REPORTING_QUEUE">
   entitlementService: EntitlementService
   logger: Logger
   now?: () => number
@@ -28,7 +28,7 @@ export function createIngestionService(params: CreateIngestionServiceParams): In
     cache: params.cache,
     entitlementService: params.entitlementService,
     entitlementWindowClient: new CloudflareEntitlementWindowClient(params.env),
-    auditClient: new CloudflareAuditClient(params.env),
+    reportingClient: new CloudflareReportingQueueClient(params.env),
     logger: params.logger,
     now: params.now,
     waitUntil: params.waitUntil,
