@@ -16,8 +16,8 @@ export const env = createEnv({
       })
       .pipe(z.boolean()),
     DATABASE_URL: z.string().min(1).url(),
-    DATABASE_READ1_URL: z.string().optional().default(""),
-    DATABASE_READ2_URL: z.string().optional().default(""),
+    DATABASE_READ1_URL: z.string().optional(),
+    DATABASE_READ2_URL: z.string().optional(),
     UNPRICE_API_KEY: z.string().optional(),
     MAIN_PROJECT_ID: z.string().optional(),
   },

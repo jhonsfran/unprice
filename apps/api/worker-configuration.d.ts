@@ -22,8 +22,8 @@ declare namespace Cloudflare {
 		DATABASE_URL: string;
 		LAKEHOUSE_API_TOKEN: string;
 		LOCAL_PIPELINE_URL: string;
-		DATABASE_READ1_URL: string;
-		DATABASE_READ2_URL: string;
+		DATABASE_READ1_URL?: string;
+		DATABASE_READ2_URL?: string;
 		ENCRYPTION_KEY: string;
 		AUTH_SECRET: string;
 		DRIZZLE_LOG: string;
@@ -58,8 +58,8 @@ declare namespace Cloudflare {
 		DATABASE_URL: string;
 		LAKEHOUSE_API_TOKEN: string;
 		LOCAL_PIPELINE_URL: string;
-		DATABASE_READ1_URL: string;
-		DATABASE_READ2_URL: string;
+		DATABASE_READ1_URL?: string;
+		DATABASE_READ2_URL?: string;
 		ENCRYPTION_KEY: string;
 		AUTH_SECRET: string;
 		DRIZZLE_LOG: string;
@@ -94,8 +94,8 @@ declare namespace Cloudflare {
 		DATABASE_URL: string;
 		LAKEHOUSE_API_TOKEN: string;
 		LOCAL_PIPELINE_URL: string;
-		DATABASE_READ1_URL: string;
-		DATABASE_READ2_URL: string;
+		DATABASE_READ1_URL?: string;
+		DATABASE_READ2_URL?: string;
 		ENCRYPTION_KEY: string;
 		AUTH_SECRET: string;
 		DRIZZLE_LOG: string;
@@ -124,8 +124,8 @@ declare namespace Cloudflare {
 		DATABASE_URL: string;
 		LAKEHOUSE_API_TOKEN: string;
 		LOCAL_PIPELINE_URL: string;
-		DATABASE_READ1_URL: string;
-		DATABASE_READ2_URL: string;
+		DATABASE_READ1_URL?: string;
+		DATABASE_READ2_URL?: string;
 		ENCRYPTION_KEY: string;
 		AUTH_SECRET: string;
 		DRIZZLE_LOG: string;
