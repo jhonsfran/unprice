@@ -1,4 +1,4 @@
-import { Analytics } from "@unprice/analytics"
+import { Analytics, type AnalyticsIngestionEvent, ingestionEventSchemaV1 } from "@unprice/analytics"
 import type { Logger } from "@unprice/logs"
 import { createStandaloneRequestLogger } from "@unprice/observability"
 import {
@@ -25,16 +25,23 @@ export type IngestionReportingQueueBatch = {
   messages: readonly IngestionReportingQueueBatchMessage[]
 }
 
+type IngestionEventIngest = (
+  events: AnalyticsIngestionEvent[]
+) => Promise<{ quarantined_rows?: number; successful_rows?: number } | undefined>
+
 export class IngestionReportingConsumer {
   private readonly logger: Logger
   private readonly publishAuditRecords: AuditRecordPublisher
+  private readonly ingestIngestionEvents: IngestionEventIngest
   private readonly ingestMeterFacts: MeterFactIngest
 
   constructor(opts: {
+    ingestIngestionEvents: IngestionEventIngest
     ingestMeterFacts: MeterFactIngest
     logger: Logger
     publishAuditRecords: AuditRecordPublisher
   }) {
+    this.ingestIngestionEvents = opts.ingestIngestionEvents
     this.ingestMeterFacts = opts.ingestMeterFacts
     this.logger = opts.logger
     this.publishAuditRecords = opts.publishAuditRecords
@@ -48,10 +55,36 @@ export class IngestionReportingConsumer {
     const auditRecords = envelopes.flatMap((envelope) => envelope.auditRecords)
     const meterFacts = envelopes.flatMap((envelope) => envelope.meterFacts)
     const tinybirdChunks = chunkMeterFactsForTinybird(meterFacts)
+    const ingestionEvents = auditRecords.map((record) => {
+      const payload = JSON.parse(record.auditPayloadJson) as Record<string, unknown>
+
+      return {
+        event_id: String(payload.id),
+        canonical_audit_id: record.canonicalAuditId,
+        payload_hash: record.payloadHash,
+        workspace_id: record.workspaceId,
+        project_id: record.projectId,
+        customer_id: record.customerId,
+        environment: record.environment,
+        api_key_id: record.apiKeyId,
+        source_type: record.sourceType,
+        source_id: record.sourceId,
+        source_name: record.sourceName,
+        event_slug: String(payload.slug),
+        idempotency_key: record.idempotencyKey,
+        state: record.status,
+        rejection_reason: record.rejectionReason ?? null,
+        timestamp: Number(payload.timestamp),
+        received_at: record.firstSeenAt,
+        handled_at: record.handledAt,
+        created_at: Date.now(),
+      }
+    })
     const pipelineSendCount = auditRecords.length > 0 ? 1 : 0
 
     await this.publishAuditRecords(auditRecords)
     await publishMeterFactChunks(tinybirdChunks, this.ingestMeterFacts)
+    await publishIngestionEvents(ingestionEvents, this.ingestIngestionEvents)
 
     for (const message of batch.messages) {
       message.ack()
@@ -86,6 +119,7 @@ export function createIngestionReportingConsumer(params: {
   })
 
   return new IngestionReportingConsumer({
+    ingestIngestionEvents: analytics.ingestIngestionEvents,
     ingestMeterFacts: analytics.ingestEntitlementMeterFacts,
     logger: params.logger,
     publishAuditRecords: createAuditRecordPublisher(params.env),
@@ -147,5 +181,25 @@ export async function consumeIngestionReportingQueueBatch(
     if (drain) {
       executionCtx.waitUntil(drain.flush())
     }
+  }
+}
+
+async function publishIngestionEvents(
+  events: AnalyticsIngestionEvent[],
+  ingestIngestionEvents: IngestionEventIngest
+): Promise<void> {
+  if (events.length === 0) {
+    return
+  }
+
+  const parsedEvents = events.map((event) => ingestionEventSchemaV1.parse(event))
+  const result = await ingestIngestionEvents(parsedEvents)
+  const successful = result?.successful_rows ?? 0
+  const quarantined = result?.quarantined_rows ?? 0
+
+  if (successful !== parsedEvents.length || quarantined !== 0) {
+    throw new Error(
+      `Tinybird ingestion events ingestion failed: expected=${parsedEvents.length} successful=${successful} quarantined=${quarantined}`
+    )
   }
 }

@@ -8,6 +8,7 @@ import {
   analyticsEventSchema,
   entitlementMeterFactSchemaV1,
   featureUsagePeriodRowSchema,
+  ingestionEventSchemaV1,
   pageEventSchema,
   schemaPlanClick,
 } from "./validators"
@@ -50,6 +51,14 @@ export class Analytics {
     return this.writeClient.buildIngestEndpoint({
       datasource: "unprice_entitlement_meter_facts",
       event: entitlementMeterFactSchemaV1,
+      wait: true,
+    })
+  }
+
+  public get ingestIngestionEvents() {
+    return this.writeClient.buildIngestEndpoint({
+      datasource: "unprice_ingestion_events",
+      event: ingestionEventSchemaV1,
       wait: true,
     })
   }

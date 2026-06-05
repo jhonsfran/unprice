@@ -1,0 +1,26 @@
+TOKEN "web-apps" READ
+
+TAGS "ingestion,status"
+
+NODE ingestion_recent_node
+SQL >
+    %
+    SELECT
+      event_id,
+      canonical_audit_id,
+      customer_id,
+      event_slug,
+      source_type,
+      source_id,
+      state,
+      rejection_reason,
+      timestamp,
+      received_at,
+      handled_at
+    FROM unprice_ingestion_events
+    WHERE project_id = {{ String(project_id) }}
+      AND customer_id = {{ String(customer_id) }}
+    ORDER BY handled_at DESC
+    LIMIT {{ Int32(limit, 50) }}
+
+TYPE endpoint

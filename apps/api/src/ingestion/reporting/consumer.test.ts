@@ -14,7 +14,12 @@ describe("IngestionReportingConsumer", () => {
       quarantined_rows: 0,
       successful_rows: 1,
     })
+    const ingestIngestionEvents = vi.fn().mockResolvedValue({
+      quarantined_rows: 0,
+      successful_rows: 1,
+    })
     const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents,
       ingestMeterFacts,
       logger: createLogger() as never,
       publishAuditRecords,
@@ -35,6 +40,29 @@ describe("IngestionReportingConsumer", () => {
 
     expect(publishAuditRecords).toHaveBeenCalledWith([auditRecord])
     expect(ingestMeterFacts).toHaveBeenCalledWith([meterFact])
+    expect(ingestIngestionEvents).toHaveBeenCalledWith([
+      {
+        event_id: "evt_123",
+        canonical_audit_id: "audit_123",
+        payload_hash: "hash_123",
+        workspace_id: "ws_123",
+        project_id: "proj_123",
+        customer_id: "cus_123",
+        environment: "test",
+        api_key_id: "key_123",
+        source_type: "api_key",
+        source_id: "key_123",
+        source_name: null,
+        event_slug: "usage.recorded",
+        idempotency_key: "idem_123",
+        state: "processed",
+        rejection_reason: null,
+        timestamp: TEST_NOW,
+        received_at: TEST_NOW,
+        handled_at: TEST_NOW + 1,
+        created_at: expect.any(Number),
+      },
+    ])
     expect(ack).toHaveBeenCalledTimes(1)
   })
 
@@ -53,6 +81,10 @@ describe("IngestionReportingConsumer", () => {
       })
     )
     const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents: vi.fn().mockResolvedValue({
+        quarantined_rows: 0,
+        successful_rows: 0,
+      }),
       ingestMeterFacts,
       logger: createLogger() as never,
       publishAuditRecords: vi.fn().mockResolvedValue(undefined),
@@ -98,6 +130,7 @@ describe("IngestionReportingConsumer", () => {
     const ack = vi.fn()
     const retry = vi.fn()
     const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents: vi.fn(),
       ingestMeterFacts: vi.fn().mockResolvedValue({
         quarantined_rows: 0,
         successful_rows: 0,
@@ -122,11 +155,48 @@ describe("IngestionReportingConsumer", () => {
     expect(retry).not.toHaveBeenCalled()
   })
 
+  it("throws so Cloudflare retries the queue batch when ingestion status publishing fails", async () => {
+    const ack = vi.fn()
+    const retry = vi.fn()
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents: vi.fn().mockResolvedValue({
+        quarantined_rows: 0,
+        successful_rows: 0,
+      }),
+      ingestMeterFacts: vi.fn().mockResolvedValue({
+        quarantined_rows: 0,
+        successful_rows: 1,
+      }),
+      logger: createLogger() as never,
+      publishAuditRecords: vi.fn().mockResolvedValue(undefined),
+    })
+
+    await expect(
+      consumer.consumeBatch({
+        messages: [
+          {
+            ack,
+            body: createEnvelope({
+              auditRecords: [createAuditRecord()],
+              meterFacts: [createMeterFact()],
+            }),
+            retry,
+          },
+        ],
+      })
+    ).rejects.toThrow("Tinybird ingestion events ingestion failed")
+
+    expect(ack).not.toHaveBeenCalled()
+    expect(retry).not.toHaveBeenCalled()
+  })
+
   it("throws so Cloudflare retries the queue batch when Pipeline fails", async () => {
     const ack = vi.fn()
     const retry = vi.fn()
     const ingestMeterFacts = vi.fn()
+    const ingestIngestionEvents = vi.fn()
     const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents,
       ingestMeterFacts,
       logger: createLogger() as never,
       publishAuditRecords: vi.fn().mockRejectedValue(new Error("pipeline down")),
@@ -148,6 +218,7 @@ describe("IngestionReportingConsumer", () => {
     ).rejects.toThrow("pipeline down")
 
     expect(ingestMeterFacts).not.toHaveBeenCalled()
+    expect(ingestIngestionEvents).not.toHaveBeenCalled()
     expect(ack).not.toHaveBeenCalled()
     expect(retry).not.toHaveBeenCalled()
   })
@@ -165,8 +236,13 @@ describe("IngestionReportingConsumer", () => {
       quarantined_rows: 0,
       successful_rows: 2,
     })
+    const ingestIngestionEvents = vi.fn().mockResolvedValue({
+      quarantined_rows: 0,
+      successful_rows: 2,
+    })
     const publishAuditRecords = vi.fn().mockResolvedValue(undefined)
     const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents,
       ingestMeterFacts,
       logger: createLogger() as never,
       publishAuditRecords,
@@ -181,6 +257,7 @@ describe("IngestionReportingConsumer", () => {
 
     expect(publishAuditRecords).toHaveBeenCalledWith([auditRecord, auditRecord])
     expect(ingestMeterFacts).toHaveBeenCalledWith([meterFact, meterFact])
+    expect(ingestIngestionEvents).toHaveBeenCalledTimes(1)
     expect(firstAck).toHaveBeenCalledTimes(1)
     expect(secondAck).toHaveBeenCalledTimes(1)
   })

@@ -184,6 +184,28 @@ export const entitlementMeterFactSchemaV1 = z.object({
   priced_at: z.number().int(),
 })
 
+export const ingestionEventSchemaV1 = z.object({
+  event_id: z.string(),
+  canonical_audit_id: z.string(),
+  payload_hash: z.string(),
+  workspace_id: z.string(),
+  project_id: z.string(),
+  customer_id: z.string(),
+  environment: z.string(),
+  api_key_id: z.string().nullable().optional(),
+  source_type: z.enum(["api_key", "system", "unknown"]),
+  source_id: z.string(),
+  source_name: z.string().nullable().optional(),
+  event_slug: z.string(),
+  idempotency_key: z.string(),
+  state: z.enum(["processed", "rejected"]),
+  rejection_reason: z.string().nullable().optional(),
+  timestamp: z.number().int(),
+  received_at: z.number().int(),
+  handled_at: z.number().int(),
+  created_at: z.number().int(),
+})
+
 export const auditLogSchemaV1 = z.object({
   workspace_id: z.string(),
   audit_log_id: z.string(),
@@ -374,6 +396,7 @@ export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
 export type AnalyticsEntitlementMeterFact = z.infer<typeof entitlementMeterFactSchemaV1>
+export type AnalyticsIngestionEvent = z.infer<typeof ingestionEventSchemaV1>
 
 // Plan conversion response schemas
 export const planConversionResponseSchema = z.object({
