@@ -56,6 +56,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-18: HTTP tRPC inside Next.js should enrich the enclosing Next wide event
   instead of emitting a second event; only standalone/RSC tRPC contexts should emit
   their own batched procedure event.
+- 2026-06-05: `cloudflare/wrangler-action` fails before deploy when a listed secret is
+  empty; build the secret list dynamically for optional Worker secrets such as
+  `DATABASE_READ1_URL` and `DATABASE_READ2_URL`.
 - 2026-05-25: Public API route allowlists must run before `init()` so scanner 404s do not
   construct cache, DB, service, or log-drain context.
 - 2026-05-08: Test DO eviction/recovery with a new DO instance over the same fake storage.
