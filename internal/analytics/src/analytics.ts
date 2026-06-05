@@ -13,6 +13,12 @@ import {
   explainChargeSummaryRowSchema,
   featureUsagePeriodRowSchema,
   ingestionEventSchemaV1,
+  ingestionLiveQuerySchema,
+  ingestionLiveRowSchema,
+  ingestionRecentEventRowSchema,
+  ingestionRecentQuerySchema,
+  ingestionRejectionRowSchema,
+  ingestionRejectionsQuerySchema,
   pageEventSchema,
   schemaPlanClick,
 } from "./validators"
@@ -274,6 +280,45 @@ export class Analytics {
       pipe: "v1_explain_charge_summary",
       parameters: explainChargeSummaryQuerySchema,
       data: explainChargeSummaryRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionLive() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_live",
+      parameters: ingestionLiveQuerySchema,
+      data: ingestionLiveRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionRejections() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_rejections",
+      parameters: ingestionRejectionsQuerySchema,
+      data: ingestionRejectionRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionRecent() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_recent",
+      parameters: ingestionRecentQuerySchema,
+      data: ingestionRecentEventRowSchema,
       opts: {
         cache: "no-store",
         retries: 3,

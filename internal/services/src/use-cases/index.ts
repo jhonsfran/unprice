@@ -1,5 +1,15 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
+export {
+  getIngestionStatus,
+  getIngestionStatusInputSchema,
+  getIngestionStatusOutputSchema,
+} from "./analytics/get-ingestion-status"
+export type {
+  GetIngestionStatusDeps,
+  GetIngestionStatusInput,
+  GetIngestionStatusOutput,
+} from "./analytics/get-ingestion-status"
 export { activateSubscription } from "./billing/provision-period"
 export {
   ExplainChargeError,

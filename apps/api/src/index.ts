@@ -12,6 +12,7 @@ export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowD
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
 import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
+import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
 import { registerGetEntitlementWindowStatusV1 } from "./routes/entitlements/getEntitlementWindowStatusV1"
@@ -181,6 +182,7 @@ registerGetSubscriptionV1(app)
 
 // Usage routes
 registerExplainChargeV1(app)
+registerGetIngestionStatusV1(app)
 registerGetAnalyticsUsageV1(app)
 
 // Wallet routes

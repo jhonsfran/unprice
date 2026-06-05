@@ -32,6 +32,8 @@ SQL >
     )
     WHERE 1 = 1
       AND state = 'rejected'
+      {% if defined(source_id) %} AND source_id = {{ String(source_id) }} {% end %}
+      {% if defined(event_slug) %} AND event_slug = {{ String(event_slug) }} {% end %}
     GROUP BY rejection_reason, event_slug, source_id, source_type
     ORDER BY event_count DESC, last_seen_at DESC
     LIMIT {{ Int32(limit, 20) }}

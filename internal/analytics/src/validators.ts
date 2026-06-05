@@ -317,6 +317,63 @@ export const explainChargeSummaryRowSchema = z.object({
   multi_component_event_count: z.number().int().nonnegative(),
 })
 
+export const ingestionStatusWindowQuerySchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string(),
+  from_ts: z.number().int(),
+  to_ts: z.number().int(),
+})
+
+export const ingestionLiveQuerySchema = ingestionStatusWindowQuerySchema.extend({
+  source_id: z.string().optional(),
+  event_slug: z.string().optional(),
+})
+
+export const ingestionRejectionsQuerySchema = ingestionStatusWindowQuerySchema.extend({
+  source_id: z.string().optional(),
+  event_slug: z.string().optional(),
+  limit: z.number().int().min(1).max(100).default(50),
+})
+
+export const ingestionRecentQuerySchema = ingestionStatusWindowQuerySchema.extend({
+  source_id: z.string().optional(),
+  event_slug: z.string().optional(),
+  limit: z.number().int().min(1).max(100).default(50),
+})
+
+export const ingestionLiveRowSchema = z.object({
+  second: z.string(),
+  processed: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+})
+
+export const ingestionRejectionRowSchema = z.object({
+  rejection_reason: z.string().nullable(),
+  event_slug: z.string(),
+  source_id: z.string(),
+  source_type: z.string(),
+  event_count: z.number().int().nonnegative(),
+  last_seen_at: z.number().int(),
+})
+
+export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
+  .pick({
+    event_id: true,
+    canonical_audit_id: true,
+    event_slug: true,
+    source_type: true,
+    source_id: true,
+    state: true,
+    rejection_reason: true,
+    timestamp: true,
+    received_at: true,
+    handled_at: true,
+  })
+  .extend({
+    rejection_reason: z.string().nullable(),
+  })
+
 export const usageSpendingResponseSchema = z.object({
   amount: z.string(),
   currency: z.string().length(3),
@@ -458,6 +515,9 @@ export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
 export type FeatureUsagePeriodRow = z.infer<typeof featureUsagePeriodRowSchema>
 export type ExplainChargeEventRow = z.infer<typeof explainChargeEventRowSchema>
 export type ExplainChargeSummaryRow = z.infer<typeof explainChargeSummaryRowSchema>
+export type IngestionLiveRow = z.infer<typeof ingestionLiveRowSchema>
+export type IngestionRejectionRow = z.infer<typeof ingestionRejectionRowSchema>
+export type IngestionRecentEventRow = z.infer<typeof ingestionRecentEventRowSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
