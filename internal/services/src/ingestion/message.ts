@@ -1,5 +1,5 @@
 import { z } from "zod"
-import type { IngestionEntitlement } from "./service"
+import type { IngestionEntitlement } from "./entitlement-context"
 
 export const ingestionQueueMessageSchema = z.object({
   version: z.literal(1),

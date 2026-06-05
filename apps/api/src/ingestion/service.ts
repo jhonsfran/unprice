@@ -20,7 +20,6 @@ type CreateIngestionServiceParams = {
   entitlementService: EntitlementService
   logger: Logger
   now?: () => number
-  waitUntil: (promise: Promise<unknown>) => void
 }
 
 export function createIngestionService(params: CreateIngestionServiceParams): IngestionService {
@@ -31,7 +30,6 @@ export function createIngestionService(params: CreateIngestionServiceParams): In
     reportingClient: new CloudflareReportingQueueClient(params.env),
     logger: params.logger,
     now: params.now,
-    waitUntil: params.waitUntil,
   })
 }
 
@@ -70,7 +68,6 @@ export async function consumeIngestionBatch(
     entitlementService: services.entitlements,
     logger,
     env,
-    waitUntil: executionCtx.waitUntil.bind(executionCtx),
   })
 
   const consumer = new IngestionQueueConsumer({

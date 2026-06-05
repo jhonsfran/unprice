@@ -1,6 +1,6 @@
 import type { IngestionReportingEnvelope } from "@unprice/services/ingestion"
 import { describe, expect, it, vi } from "vitest"
-import { IngestionReportingConsumer } from "./consumer"
+import { IngestionReportingConsumer, chunkMeterFactsForTinybird } from "./consumer"
 
 const TEST_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 
@@ -70,6 +70,28 @@ describe("IngestionReportingConsumer", () => {
 
     expect(ingestMeterFacts).toHaveBeenCalledTimes(2)
     expect(ingestMeterFacts.mock.calls.map(([chunk]) => chunk.length)).toEqual([5_000, 1])
+  })
+
+  it("chunks Tinybird writes by NDJSON byte size", () => {
+    const firstFact = createMeterFact({
+      event_id: "evt_large_1",
+      idempotency_key: "idem_large_1",
+      feature_slug: "x".repeat(100),
+    })
+    const secondFact = createMeterFact({
+      event_id: "evt_large_2",
+      idempotency_key: "idem_large_2",
+      feature_slug: "y".repeat(100),
+    })
+    const firstFactBytes = getNdjsonBytes(firstFact)
+    const secondFactBytes = getNdjsonBytes(secondFact)
+
+    const chunks = chunkMeterFactsForTinybird([firstFact, secondFact], {
+      maxFactsPerRequest: 100,
+      maxNdjsonBytesPerRequest: Math.max(firstFactBytes, secondFactBytes),
+    })
+
+    expect(chunks).toEqual([[firstFact], [secondFact]])
   })
 
   it("throws so Cloudflare retries the queue batch when Tinybird fails", async () => {
@@ -248,4 +270,8 @@ function createLogger() {
     set: vi.fn(),
     warn: vi.fn(),
   }
+}
+
+function getNdjsonBytes(value: unknown): number {
+  return new TextEncoder().encode(`${JSON.stringify(value)}\n`).byteLength
 }

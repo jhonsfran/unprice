@@ -1,29 +1,16 @@
 import type { Logger } from "@unprice/logs"
 import type { IngestionMessageProcessingResult } from "./interface"
+import { type IngestionQueueMessage, partitionDuplicateQueuedMessages } from "./message"
 import {
-  type IngestionQueueConsumerMessage,
-  type IngestionQueueMessage,
-  type IngestionQueueRetryOptions,
-  ingestionQueueMessageSchema,
-  partitionDuplicateQueuedMessages,
-  sortQueuedMessages,
-} from "./message"
+  type IngestionQueueBatch,
+  ackDuplicateQueuedMessages,
+  applyIngestionGroupResults,
+  groupQueuedMessagesByCustomer,
+  parseIngestionQueueBatchMessages,
+  retryQueuedMessages,
+} from "./queue-consumer-helpers"
 
-export type IngestionQueueBatchMessage = {
-  ack: () => void
-  body: IngestionQueueMessage
-  retry: (options?: IngestionQueueRetryOptions) => void
-}
-
-export type IngestionQueueBatch = {
-  messages: readonly IngestionQueueBatchMessage[]
-}
-
-type CustomerQueueGroup = {
-  customerId: string
-  messages: IngestionQueueConsumerMessage[]
-  projectId: string
-}
+export type { IngestionQueueBatch, IngestionQueueBatchMessage } from "./queue-consumer-helpers"
 
 type GroupProcessor = {
   processCustomerGroup(params: {
@@ -46,7 +33,7 @@ export class IngestionQueueConsumer {
   }
 
   public async consumeBatch(batch: IngestionQueueBatch): Promise<void> {
-    const validMessages = this.parseBatchMessages(batch)
+    const validMessages = parseIngestionQueueBatchMessages(batch, this.logger)
 
     if (validMessages.length === 0) {
       this.logger.debug("No messages to process")
@@ -55,14 +42,14 @@ export class IngestionQueueConsumer {
 
     const { duplicates, unique } = partitionDuplicateQueuedMessages(validMessages)
 
-    this.ackDuplicateMessages(duplicates)
+    ackDuplicateQueuedMessages(duplicates, this.logger)
 
     if (unique.length === 0) {
       this.logger.debug("no unique messages to process")
       return
     }
 
-    for (const group of this.groupMessagesByCustomer(unique)) {
+    for (const group of groupQueuedMessagesByCustomer(unique)) {
       try {
         const groupResults = await this.processor.processCustomerGroup({
           customerId: group.customerId,
@@ -70,7 +57,11 @@ export class IngestionQueueConsumer {
           projectId: group.projectId,
         })
 
-        this.applyGroupResults(group.messages, groupResults)
+        applyIngestionGroupResults({
+          logger: this.logger,
+          queueMessages: group.messages,
+          results: groupResults,
+        })
       } catch (error) {
         this.logger.error("ingestion queue group processing failed", {
           customerId: group.customerId,
@@ -78,110 +69,8 @@ export class IngestionQueueConsumer {
           error,
         })
 
-        for (const message of group.messages) {
-          message.retry()
-        }
+        retryQueuedMessages(group.messages)
       }
     }
-  }
-
-  private parseBatchMessages(batch: IngestionQueueBatch): IngestionQueueConsumerMessage[] {
-    return batch.messages.flatMap((message) => {
-      const parsed = ingestionQueueMessageSchema.safeParse(message.body)
-
-      if (!parsed.success) {
-        this.logger.error("dropping malformed ingestion queue message", {
-          errors: parsed.error.issues,
-        })
-        message.ack()
-        return []
-      }
-
-      return [
-        {
-          ack: message.ack.bind(message),
-          body: parsed.data,
-          retry: message.retry.bind(message),
-        } satisfies IngestionQueueConsumerMessage,
-      ]
-    })
-  }
-
-  private ackDuplicateMessages(duplicates: IngestionQueueConsumerMessage[]): void {
-    for (const duplicate of duplicates) {
-      this.logger.debug("dropping duplicate ingestion queue message from same batch", {
-        projectId: duplicate.body.projectId,
-        customerId: duplicate.body.customerId,
-        eventId: duplicate.body.id,
-        idempotencyKey: duplicate.body.idempotencyKey,
-      })
-      duplicate.ack()
-    }
-  }
-
-  private groupMessagesByCustomer(messages: IngestionQueueConsumerMessage[]): CustomerQueueGroup[] {
-    const groups = new Map<string, CustomerQueueGroup>()
-
-    for (const message of messages) {
-      const key = `${message.body.projectId}:${message.body.customerId}`
-      const existing = groups.get(key)
-
-      if (existing) {
-        existing.messages.push(message)
-        continue
-      }
-
-      groups.set(key, {
-        projectId: message.body.projectId,
-        customerId: message.body.customerId,
-        messages: [message],
-      })
-    }
-
-    return [...groups.values()].map((group) => ({
-      ...group,
-      messages: group.messages.sort(sortQueuedMessages),
-    }))
-  }
-
-  private applyGroupResults(
-    queueMessages: IngestionQueueConsumerMessage[],
-    results: IngestionMessageProcessingResult[]
-  ): void {
-    const resultsByKey = new Map<string, IngestionMessageProcessingResult>(
-      results.map((result) => [this.buildResultKey(result.message), result])
-    )
-
-    for (const queueMessage of queueMessages) {
-      const result = resultsByKey.get(this.buildResultKey(queueMessage.body))
-
-      if (!result) {
-        this.logger.error("missing ingestion processing result for queued message", {
-          customerId: queueMessage.body.customerId,
-          eventId: queueMessage.body.id,
-          idempotencyKey: queueMessage.body.idempotencyKey,
-          projectId: queueMessage.body.projectId,
-        })
-        queueMessage.retry()
-        continue
-      }
-
-      if (result.disposition.action === "ack") {
-        queueMessage.ack()
-        continue
-      }
-
-      queueMessage.retry(
-        result.disposition.retryAfterSeconds
-          ? {
-              delaySeconds: result.disposition.retryAfterSeconds,
-            }
-          : undefined
-      )
-    }
-  }
-
-  private buildResultKey(message: IngestionQueueMessage): string {
-    return `${message.projectId}:${message.customerId}:${message.idempotencyKey}`
   }
 }

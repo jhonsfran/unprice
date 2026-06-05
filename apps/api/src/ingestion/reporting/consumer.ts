@@ -1,28 +1,19 @@
-import type { PipelineRecord } from "cloudflare:pipelines"
-import {
-  Analytics,
-  type AnalyticsEntitlementMeterFact,
-  entitlementMeterFactSchemaV1,
-} from "@unprice/analytics"
-import { parseLakehouseEvent } from "@unprice/lakehouse"
+import { Analytics } from "@unprice/analytics"
 import type { Logger } from "@unprice/logs"
 import { createStandaloneRequestLogger } from "@unprice/observability"
 import {
-  type IngestionReportingAuditRecord,
   type IngestionReportingEnvelope,
   ingestionReportingEnvelopeSchema,
 } from "@unprice/services/ingestion"
 import type { Env } from "~/env"
+import { type AuditRecordPublisher, createAuditRecordPublisher } from "./audit-record-publisher"
+import {
+  type MeterFactIngest,
+  chunkMeterFactsForTinybird,
+  publishMeterFactChunks,
+} from "./tinybird-meter-facts"
 
-const TINYBIRD_MAX_FACTS_PER_REQUEST = 5_000
-const TINYBIRD_MAX_NDJSON_BYTES_PER_REQUEST = 5 * 1024 * 1024
-
-const textEncoder = new TextEncoder()
-
-type TinybirdIngestResult = {
-  quarantined_rows?: number
-  successful_rows?: number
-}
+export { chunkMeterFactsForTinybird } from "./tinybird-meter-facts"
 
 export type IngestionReportingQueueBatchMessage = {
   ack: () => void
@@ -33,11 +24,6 @@ export type IngestionReportingQueueBatchMessage = {
 export type IngestionReportingQueueBatch = {
   messages: readonly IngestionReportingQueueBatchMessage[]
 }
-
-type AuditRecordPublisher = (records: IngestionReportingAuditRecord[]) => Promise<void>
-type MeterFactIngest = (
-  facts: AnalyticsEntitlementMeterFact[]
-) => Promise<TinybirdIngestResult | undefined>
 
 export class IngestionReportingConsumer {
   private readonly logger: Logger
@@ -65,7 +51,7 @@ export class IngestionReportingConsumer {
     const pipelineSendCount = auditRecords.length > 0 ? 1 : 0
 
     await this.publishAuditRecords(auditRecords)
-    await this.publishMeterFacts(meterFacts)
+    await publishMeterFactChunks(tinybirdChunks, this.ingestMeterFacts)
 
     for (const message of batch.messages) {
       message.ack()
@@ -82,20 +68,6 @@ export class IngestionReportingConsumer {
       pipeline_records_per_pipeline_send:
         pipelineSendCount > 0 ? auditRecords.length / pipelineSendCount : 0,
     })
-  }
-
-  private async publishMeterFacts(facts: AnalyticsEntitlementMeterFact[]): Promise<void> {
-    for (const chunk of chunkMeterFactsForTinybird(facts)) {
-      const result = await this.ingestMeterFacts(chunk)
-      const successful = result?.successful_rows ?? 0
-      const quarantined = result?.quarantined_rows ?? 0
-
-      if (successful !== chunk.length || quarantined !== 0) {
-        throw new Error(
-          `Tinybird entitlement meter facts ingestion failed: expected=${chunk.length} successful=${successful} quarantined=${quarantined}`
-        )
-      }
-    }
   }
 }
 
@@ -176,109 +148,4 @@ export async function consumeIngestionReportingQueueBatch(
       executionCtx.waitUntil(drain.flush())
     }
   }
-}
-
-export function chunkMeterFactsForTinybird(
-  facts: AnalyticsEntitlementMeterFact[],
-  limits: {
-    maxFactsPerRequest?: number
-    maxNdjsonBytesPerRequest?: number
-  } = {}
-): AnalyticsEntitlementMeterFact[][] {
-  const maxFactsPerRequest = limits.maxFactsPerRequest ?? TINYBIRD_MAX_FACTS_PER_REQUEST
-  const maxNdjsonBytesPerRequest =
-    limits.maxNdjsonBytesPerRequest ?? TINYBIRD_MAX_NDJSON_BYTES_PER_REQUEST
-
-  if (maxFactsPerRequest <= 0 || maxNdjsonBytesPerRequest <= 0) {
-    throw new Error("Tinybird chunk limits must be greater than zero")
-  }
-
-  const chunks: AnalyticsEntitlementMeterFact[][] = []
-  let currentChunk: AnalyticsEntitlementMeterFact[] = []
-  let currentChunkBytes = 0
-
-  for (const fact of facts) {
-    const parsedFact = entitlementMeterFactSchemaV1.parse(fact)
-    const factBytes = ndjsonByteLength(parsedFact)
-
-    if (factBytes > maxNdjsonBytesPerRequest) {
-      throw new Error(
-        `Tinybird entitlement meter fact exceeds NDJSON byte limit: ${maxNdjsonBytesPerRequest}`
-      )
-    }
-
-    const nextChunkWouldExceedCount = currentChunk.length >= maxFactsPerRequest
-    const nextChunkWouldExceedBytes =
-      currentChunk.length > 0 && currentChunkBytes + factBytes > maxNdjsonBytesPerRequest
-
-    if (nextChunkWouldExceedCount || nextChunkWouldExceedBytes) {
-      chunks.push(currentChunk)
-      currentChunk = []
-      currentChunkBytes = 0
-    }
-
-    currentChunk.push(parsedFact)
-    currentChunkBytes += factBytes
-  }
-
-  if (currentChunk.length > 0) {
-    chunks.push(currentChunk)
-  }
-
-  return chunks
-}
-
-function createAuditRecordPublisher(
-  env: Pick<Env, "APP_ENV" | "LOCAL_PIPELINE_URL" | "PIPELINE_EVENTS">
-): AuditRecordPublisher {
-  return async (records) => {
-    if (records.length === 0) {
-      return
-    }
-
-    const events = records.map((record): PipelineRecord => {
-      const payload = JSON.parse(record.auditPayloadJson)
-      return parseLakehouseEvent("events", payload) as PipelineRecord
-    })
-
-    const localPipelineUrl = resolveLocalPipelineUrl(env)
-
-    if (localPipelineUrl) {
-      await sendToLocalPipeline(localPipelineUrl, events)
-      return
-    }
-
-    if (!env.PIPELINE_EVENTS) {
-      throw new Error("PIPELINE_EVENTS binding is required when LOCAL_PIPELINE_URL is not set")
-    }
-
-    await env.PIPELINE_EVENTS.send(events)
-  }
-}
-
-function resolveLocalPipelineUrl(env: Pick<Env, "APP_ENV" | "LOCAL_PIPELINE_URL">): string | null {
-  if (env.APP_ENV !== "development") {
-    return null
-  }
-
-  const localPipelineUrl = env.LOCAL_PIPELINE_URL?.trim()
-  return localPipelineUrl && localPipelineUrl.length > 0 ? localPipelineUrl : null
-}
-
-async function sendToLocalPipeline(url: string, events: PipelineRecord[]): Promise<void> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(events),
-  })
-
-  if (!response.ok) {
-    throw new Error(`local pipeline sink failed with status ${response.status}`)
-  }
-}
-
-function ndjsonByteLength(value: unknown): number {
-  return textEncoder.encode(`${JSON.stringify(value)}\n`).byteLength
 }

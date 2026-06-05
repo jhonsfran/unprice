@@ -11,6 +11,7 @@ patterns. Keep it cheap to load and useful.
 - Update an existing section instead of adding duplicate narrative.
 - Do not record secrets, customer data, or one-off local noise.
 - Architecture rule changes need an ADR link.
+- You need to use nvm use to install the proper node version of the project
 
 ## Cloudflare, API, And Ingestion
 

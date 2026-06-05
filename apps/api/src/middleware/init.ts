@@ -187,7 +187,6 @@ export function init(): MiddlewareHandler<HonoEnv> {
       entitlementService: svcCtx.entitlements,
       logger,
       env: c.env,
-      waitUntil,
     })
 
     c.set("cache", cache)

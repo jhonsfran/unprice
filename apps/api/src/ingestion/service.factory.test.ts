@@ -31,17 +31,24 @@ describe("createIngestionService", () => {
         debug: vi.fn(),
       } as unknown as Logger,
       env,
-      waitUntil: (_promise: Promise<unknown>): void => {
-        throw new Error("Function not implemented.")
-      },
     })
 
     const rawService = service as unknown as {
-      entitlementWindowClient: unknown
-      reportingClient: unknown
+      syncProcessor: {
+        entitlementWindowApplier: {
+          entitlementWindowClient: unknown
+        }
+        reportingDispatcher: {
+          reportingClient: unknown
+        }
+      }
     }
 
-    expect(rawService.entitlementWindowClient).toBeInstanceOf(CloudflareEntitlementWindowClient)
-    expect(rawService.reportingClient).toBeInstanceOf(CloudflareReportingQueueClient)
+    expect(
+      rawService.syncProcessor.entitlementWindowApplier.entitlementWindowClient
+    ).toBeInstanceOf(CloudflareEntitlementWindowClient)
+    expect(rawService.syncProcessor.reportingDispatcher.reportingClient).toBeInstanceOf(
+      CloudflareReportingQueueClient
+    )
   })
 })

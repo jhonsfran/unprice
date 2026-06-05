@@ -1,6 +1,7 @@
 import { Ok } from "@unprice/error"
 import { describe, expect, it, vi } from "vitest"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
+import type { IngestionEntitlement } from "./entitlement-context"
 import type { IngestionQueueMessage } from "./message"
 import {
   INGESTION_REPORTING_ENVELOPE_TARGET_BYTES,
@@ -9,7 +10,7 @@ import {
   getIngestionReportingEnvelopeSerializedBytes,
   ingestionReportingEnvelopeSchema,
 } from "./reporting"
-import { type IngestionEntitlement, IngestionService } from "./service"
+import { IngestionService } from "./service"
 
 const SERVICE_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 
@@ -178,7 +179,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const result = await service.ingestFeatureSync({
@@ -242,7 +242,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const result = await service.ingestFeatureSync({
@@ -281,7 +280,6 @@ describe("IngestionService entitlement routing", () => {
   it("fails sync ingestion when reporting enqueue fails", async () => {
     const entitlement = createEntitlement()
     const apply = vi.fn().mockResolvedValue({ allowed: true })
-    const waitUntil = vi.fn()
     const send = vi.fn().mockRejectedValue(new Error("reporting unavailable"))
 
     const service = new IngestionService({
@@ -300,7 +298,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil,
     })
 
     await expect(
@@ -323,7 +320,6 @@ describe("IngestionService entitlement routing", () => {
 
     expect(apply).toHaveBeenCalledTimes(1)
     expect(send).toHaveBeenCalledTimes(1)
-    expect(waitUntil).not.toHaveBeenCalled()
   })
 
   it("retries a sync replay after reporting enqueue fails without charging the same idempotency key twice", async () => {
@@ -358,7 +354,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
     const message = createMessage(entitlement)
 
@@ -404,7 +399,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const message = createMessage(entitlement)
@@ -481,7 +475,6 @@ describe("IngestionService entitlement routing", () => {
       logger: logger as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const group = {
@@ -555,7 +548,6 @@ describe("IngestionService entitlement routing", () => {
       entitlementWindowClient: { getEntitlementWindowStub },
       logger: logger as never,
       now: () => SERVICE_NOW,
-      waitUntil: vi.fn(),
     })
 
     const result = await service.ingestFeatureSync({
@@ -657,7 +649,6 @@ describe("IngestionService entitlement routing", () => {
       logger: logger as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const result = await service.processCustomerGroup({
@@ -788,7 +779,6 @@ describe("IngestionService entitlement routing", () => {
       fanoutWarningThreshold: 2,
       logger: logger as never,
       now: () => SERVICE_NOW,
-      waitUntil: vi.fn(),
     })
 
     const [entitlement] = entitlements
@@ -908,7 +898,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
     const group = {
       customerId: eventsEntitlement.customerId,
@@ -1002,7 +991,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const result = await service.processCustomerGroup({
@@ -1069,7 +1057,6 @@ describe("IngestionService entitlement routing", () => {
       logger: logger as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const result = await service.processCustomerGroup({
@@ -1154,7 +1141,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const result = await service.processCustomerGroup({
@@ -1238,7 +1224,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const messages = Array.from({ length: 101 }, (_, index) => ({
@@ -1279,7 +1264,6 @@ describe("IngestionService entitlement routing", () => {
       entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
-      waitUntil: vi.fn(),
     })
 
     const result = await service.verifyFeatureStatus({
@@ -1306,7 +1290,6 @@ describe("IngestionService entitlement routing", () => {
       entitlementWindowClient: { getEntitlementWindowStub: vi.fn() },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
-      waitUntil: vi.fn(),
     })
 
     const result = await service.verifyFeatureStatus({
@@ -1352,7 +1335,6 @@ describe("IngestionService entitlement routing", () => {
         entitlementWindowClient: { getEntitlementWindowStub },
         logger: createLogger() as never,
         now: () => SERVICE_NOW,
-        waitUntil: vi.fn(),
       })
 
       await expect(
@@ -1398,7 +1380,6 @@ describe("IngestionService entitlement routing", () => {
       entitlementWindowClient: { getEntitlementWindowStub },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
-      waitUntil: vi.fn(),
     })
 
     const result = await service.verifyFeatureStatus({
@@ -1449,7 +1430,6 @@ describe("IngestionService entitlement routing", () => {
       entitlementWindowClient: { getEntitlementWindowStub },
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
-      waitUntil: vi.fn(),
     })
 
     await expect(
@@ -1496,7 +1476,6 @@ describe("IngestionService entitlement routing", () => {
       logger: createLogger() as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const result = await service.processCustomerGroup({
@@ -1549,7 +1528,6 @@ describe("IngestionService entitlement routing", () => {
       logger: logger as never,
       now: () => SERVICE_NOW,
       reportingClient: { send },
-      waitUntil: vi.fn(),
     })
 
     const result = await service.processCustomerGroup({

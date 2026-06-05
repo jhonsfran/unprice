@@ -1,18 +1,10 @@
 import { DurableObject } from "cloudflare:workers"
-import {
-  type AnalyticsEntitlementMeterFact,
-  entitlementMeterFactSchemaV1,
-} from "@unprice/analytics"
 import { createConnection } from "@unprice/db"
-import {
-  type ConfigFeatureVersionType,
-  type CreditLinePolicy,
-  type Currency,
-  type OverageStrategy,
-  type ResetConfig,
-  configFeatureSchema,
-  creditLinePolicySchema,
-  meterConfigSchema,
+import type {
+  ConfigFeatureVersionType,
+  Currency,
+  OverageStrategy,
+  ResetConfig,
 } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { LEDGER_SCALE } from "@unprice/money"
@@ -29,18 +21,20 @@ import {
   computeMaxMarginalPriceMinor,
   computeUsagePriceDeltaMinor,
   consumeGrantsByPriority,
-  deriveMeterKey,
   resolveActiveGrants,
   resolveAvailableGrantUnits,
   resolveConsumedGrantUnits,
 } from "@unprice/services/entitlements"
-import type { IngestionRejectionReason } from "@unprice/services/ingestion"
 import { LedgerGateway } from "@unprice/services/ledger"
-import { type ReservationCloseReason, WalletService } from "@unprice/services/wallet"
+import {
+  type CreateReservationOutput,
+  type ReservationCloseReason,
+  WalletService,
+} from "@unprice/services/wallet"
 import {
   DEFAULT_RESERVATION_POLICY,
+  type InitialReservationDecision,
   type ReservationPolicy,
-  computeEffectiveWalletCost,
   computeInitialReservation,
   computeRefillDecision,
   computeSyncGrowRefillAmount,
@@ -49,9 +43,18 @@ import {
 import { asc, desc, eq, inArray, lt } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
-import { z } from "zod"
 import type { Env } from "~/env"
 import { createDoLogger, runDoOperation } from "~/observability"
+import {
+  buildBatchEventApplyInput,
+  createAllowedBatchOutcome,
+  createCachedBatchResult,
+  createDeniedBatchOutcome,
+  hasStagedBatchMutations,
+  idempotencyEntryToApplyResult,
+  planWalletReservationSpend,
+  stageBatchIdempotencyEntry,
+} from "./batch-apply-helpers"
 import {
   APPLY_BATCH_SIZE_LIMIT,
   FLUSH_INTERVAL_MS,
@@ -59,6 +62,43 @@ import {
   IDEMPOTENCY_CLEANUP_INTERVAL_MS,
   WALLET_RESERVATION_ROW_ID,
 } from "./constants"
+import {
+  type ActiveGrantInput,
+  type ApplyBatchInput,
+  type ApplyBatchInternalResult,
+  type ApplyBatchMetrics,
+  type ApplyBatchResultRow,
+  type ApplyGrantInput,
+  type ApplyInnerOptions,
+  type ApplyInput,
+  type ApplyResult,
+  type BatchIdempotencyEntry,
+  type CloseReservationOptions,
+  type CloseReservationResult,
+  type DeniedReason,
+  type EnforcementStateCache,
+  type EnforcementStateInput,
+  type EnforcementStateResult,
+  type EntitlementApplyMeterFact,
+  type EntitlementConfigInput,
+  type EntitlementCreditLinePolicy,
+  EntitlementWindowBatchSequentialReplayRequired,
+  EntitlementWindowLimitExceededError,
+  EntitlementWindowReservationUnderfundedError,
+  type EntitlementWindowStatus,
+  EntitlementWindowWalletEmptyError,
+  type MeterIdentity,
+  type PricedFact,
+  type RefillTrigger,
+  type ReservationGrowthResult,
+  type WalletReservationSnapshot,
+  applyBatchInputSchema,
+  applyInputSchema,
+  batchIdempotencyEntryListSchema,
+  compactGrantConsumptionStateListSchema,
+  createApplyBatchMetrics,
+  enforcementStateInputSchema,
+} from "./contracts"
 import {
   entitlementConfigTable,
   entitlementPeriodUsageTable,
@@ -69,6 +109,11 @@ import {
   walletReservationTable,
 } from "./db/schema"
 import migrations from "./drizzle/migrations"
+import {
+  extractCurrencyCodeFromFeatureConfig,
+  readNumericEventField,
+  resolveMeterIdentity,
+} from "./meter-helpers"
 import { InMemoryMeterStorageAdapter, type MeterStateDraft } from "./meter-state-adapter"
 import {
   inactivityThresholdMs,
@@ -78,358 +123,168 @@ import {
   unique,
 } from "./utils"
 
-class EntitlementWindowLimitExceededError extends Error {
-  constructor(
-    public readonly params: {
-      eventId: string
-      meterKey: string
-      available: number
-    }
-  ) {
-    super(`Limit exceeded for meter ${params.meterKey}`)
-    this.name = EntitlementWindowLimitExceededError.name
-  }
-}
+export { entitlementWindowStatusSchema } from "./contracts"
+export type { EntitlementWindowStatus } from "./contracts"
 
-// Raised when the wallet really cannot fund the current event. The DO converts
-// this into a denied ApplyResult, persists the denial to the idempotency table,
-// and returns WALLET_EMPTY so retries are stable.
-class EntitlementWindowWalletEmptyError extends Error {
-  constructor(
-    public readonly params: {
-      eventId: string
-      meterKey: string
-      meterSlug: string
-      reservationId: string
-      cost: number
-      remaining: number
-      eventTimestamp: number
-    }
-  ) {
-    super(`Wallet empty for meter ${params.meterSlug} (reservation ${params.reservationId})`)
-    this.name = EntitlementWindowWalletEmptyError.name
-  }
-}
-
-// Raised from the SQLite transaction when the local reservation is too small
-// for the current event. The caller can then do external wallet I/O outside the
-// transaction, grow the reservation, and retry once before returning
-// WALLET_EMPTY.
-class EntitlementWindowReservationUnderfundedError extends Error {
-  constructor(
-    public readonly params: {
-      eventId: string
-      meterKey: string
-      meterSlug: string
-      reservationId: string
-      cost: number
-      remaining: number
-      eventTimestamp: number
-    }
-  ) {
-    super(`Reservation underfunded for meter ${params.meterSlug}`)
-    this.name = EntitlementWindowReservationUnderfundedError.name
-  }
-}
-
-class EntitlementWindowBatchSequentialReplayRequired extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = EntitlementWindowBatchSequentialReplayRequired.name
-  }
-}
-
-type DeniedReason = Extract<
-  IngestionRejectionReason,
-  "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
+type OptimizedBatchWriteMetrics = Pick<
+  ApplyBatchMetrics,
+  | "grant_window_write_count"
+  | "idempotency_event_count"
+  | "idempotency_insert_count"
+  | "meter_state_write_count"
+  | "outbox_fact_count"
+  | "outbox_insert_count"
+  | "wallet_reservation_write_count"
 >
 
-type ApplyResult = {
-  allowed: boolean
-  deniedReason?: DeniedReason
-  meterFacts?: AnalyticsEntitlementMeterFact[]
-  message?: string
-}
-
-type ApplyInnerOptions = {
-  emitLog?: boolean
-}
-
-// Internal: bubbled out of the apply() transaction so the post-commit
-// scheduler can fire `ctx.waitUntil(requestFlushAndRefill(...))` without
-// holding the tx open. Amounts are pgledger scale-8 minor units.
-type RefillTrigger = {
-  flushSeq: number
-  flushAmount: number
-  refillAmount: number
-  effectiveAt: number
-}
-
-type ReservationGrowthResult =
-  | { kind: "already_funded" }
-  | { kind: "refilled"; trigger: RefillTrigger }
-
-const entitlementApplyMeterFactSchema = z
-  .object({
-    event_id: z.string(),
-    idempotency_key: z.string(),
-    project_id: z.string(),
-    customer_id: z.string(),
-    currency: z.string().length(3),
-    customer_entitlement_id: z.string(),
-    grant_id: z.string(),
-    feature_plan_version_id: z.string().nullable().optional(),
-    feature_slug: z.string(),
-    period_key: z.string(),
-    event_slug: z.string(),
-    aggregation_method: z.string(),
-    timestamp: z.number(),
-    created_at: z.number(),
-    delta: z.number(),
-    value_after: z.number(),
-    // Signed integer at LEDGER_SCALE (8). Number (not bigint) — at scale 8,
-    // Number.MAX_SAFE_INTEGER covers ~$90M per event, far beyond any plausible
-    // per-event delta. Negative values represent corrections/refunds; clamping
-    // belongs at invoicing.
-    amount: z.number().int(),
-    amount_after: z.number().int().optional(),
-    amount_scale: z.literal(LEDGER_SCALE),
-    priced_at: z.number().int(),
-  })
-  .transform((fact) => ({
-    ...fact,
-    amount_after: fact.amount_after ?? fact.amount,
-  }))
-
-type EntitlementApplyMeterFact = z.output<typeof entitlementApplyMeterFactSchema>
-
-const rawEventSchema = z.object({
-  id: z.string(),
-  slug: z.string(),
-  timestamp: z.number().finite(),
-  properties: z.record(z.unknown()),
-})
-
-const overageStrategySchema = z.enum(["none", "last-call", "always"] satisfies readonly [
-  OverageStrategy,
-  ...OverageStrategy[],
-])
-
-const resetConfigSnapshotSchema = z.custom<ResetConfig>(
-  (val) => val != null && typeof val === "object"
-)
-
-const activeGrantSchema = z.object({
-  allowanceUnits: z.number().finite().nullable(),
-  effectiveAt: z.number().finite(),
-  expiresAt: z.number().finite().nullable(),
-  grantId: z.string().min(1),
-  priority: z.number().int(),
-})
-
-const entitlementConfigSchema = z.object({
-  creditLinePolicy: creditLinePolicySchema.default("uncapped"),
-  customerEntitlementId: z.string().min(1),
-  customerId: z.string().min(1),
-  effectiveAt: z.number().finite(),
-  expiresAt: z.number().finite().nullable(),
-  featureConfig: configFeatureSchema,
-  featurePlanVersionId: z.string().min(1),
-  featureSlug: z.string().min(1),
-  featureType: z.string().min(1),
-  meterConfig: meterConfigSchema,
-  overageStrategy: overageStrategySchema,
-  projectId: z.string().min(1),
-  resetConfig: resetConfigSnapshotSchema.nullable().optional(),
-})
-
-const applyInputSchema = z.object({
-  event: rawEventSchema,
-  idempotencyKey: z.string().min(1),
-  projectId: z.string().min(1),
-  customerId: z.string().min(1),
-  entitlement: entitlementConfigSchema,
-  grants: z.array(activeGrantSchema).min(1),
-  enforceLimit: z.boolean(),
-  now: z.number().finite(),
-})
-
-const applyBatchEventSchema = rawEventSchema.extend({
-  correlationKey: z.string().min(1),
-  idempotencyKey: z.string().min(1),
-  now: z.number().finite(),
-})
-
-const applyBatchInputSchema = applyInputSchema
-  .omit({ event: true, idempotencyKey: true, now: true })
-  .extend({
-    events: z.array(applyBatchEventSchema).min(1).max(APPLY_BATCH_SIZE_LIMIT),
-  })
-
-const enforcementStateInputSchema = z.object({
-  entitlement: entitlementConfigSchema,
-  grants: z.array(activeGrantSchema),
-  now: z.number().finite(),
-})
-
-const batchIdempotencyEntrySchema = z.object({
-  eventId: z.string().min(1),
-  createdAt: z.number().finite(),
-  allowed: z.boolean(),
-  deniedReason: z
-    .enum(["LIMIT_EXCEEDED", "WALLET_EMPTY", "LATE_EVENT_CLOSED_PERIOD"] satisfies readonly [
-      DeniedReason,
-      ...DeniedReason[],
-    ])
-    .nullable(),
-  denyMessage: z.string().nullable(),
-  meterFacts: z.array(entitlementMeterFactSchemaV1).optional().default([]),
-})
-
-const compactGrantConsumptionStateSchema = z.object({
-  bucketKey: z.string().min(1),
-  grantId: z.string().min(1),
-  periodKey: z.string().min(1),
-  periodStartAt: z.number().finite(),
-  periodEndAt: z.number().finite(),
-  consumedInCurrentWindow: z.number().finite(),
-  exhaustedAt: z.number().finite().nullable(),
-})
-
-type BatchIdempotencyEntry = z.infer<typeof batchIdempotencyEntrySchema>
-
-type ApplyInput = z.infer<typeof applyInputSchema>
-type ApplyBatchInput = z.infer<typeof applyBatchInputSchema>
-type ApplyGrantInput = z.infer<typeof activeGrantSchema>
-type ApplyBatchResultRow = ApplyResult & { correlationKey: string; idempotencyKey: string }
-type ApplyBatchMetrics = {
-  duplicate_count: number
-  grant_allocation_count: number
-  grant_window_write_count: number
-  idempotency_event_count: number
-  idempotency_insert_count: number
-  meter_state_write_count: number
-  outbox_fact_count: number
-  outbox_insert_count: number
-  priced_fact_count: number
-  wallet_reservation_write_count: number
-}
-type ApplyBatchInternalResult = {
-  results: ApplyBatchResultRow[]
-  metrics: ApplyBatchMetrics
-}
-
-function createApplyBatchMetrics(): ApplyBatchMetrics {
-  return {
-    duplicate_count: 0,
-    grant_allocation_count: 0,
-    grant_window_write_count: 0,
-    idempotency_event_count: 0,
-    idempotency_insert_count: 0,
-    meter_state_write_count: 0,
-    outbox_fact_count: 0,
-    outbox_insert_count: 0,
-    priced_fact_count: 0,
-    wallet_reservation_write_count: 0,
-  }
-}
-
-export const entitlementWindowStatusSchema = z.object({
-  durableObjectId: z.string(),
-  outboxCount: z.number().int(),
-  nextAlarmAt: z.number().nullable(),
-  lastIdempotencyCleanupAt: z.number().nullable(),
-  walletReservation: z
-    .object({
-      reservationId: z.string().nullable(),
-      projectId: z.string().nullable(),
-      customerId: z.string().nullable(),
-      currency: z.string().nullable(),
-      reservationEndAt: z.number().nullable(),
-      consumedAmount: z.number().int(),
-      flushedAmount: z.number().int(),
-      unflushedAmount: z.number().int(),
-      allocationAmount: z.number().int(),
-      refillInFlight: z.boolean(),
-      flushSeq: z.number().int(),
-      pendingFlushSeq: z.number().int().nullable(),
-      pendingFlushFinal: z.boolean(),
-      pendingFlushAmount: z.number().int().nullable(),
-      pendingRefillAmount: z.number().int(),
-      lastEventAt: z.number().nullable(),
-      lastFlushedAt: z.number().nullable(),
-      deletionRequested: z.boolean(),
-      recoveryRequired: z.boolean(),
-    })
-    .nullable(),
-})
-
-export type EntitlementWindowStatus = z.infer<typeof entitlementWindowStatusSchema>
-type EnforcementStateInput = z.infer<typeof enforcementStateInputSchema>
-type ActiveGrantInput = ApplyGrantInput & {
-  cadenceEffectiveAt: number
-  cadenceExpiresAt: number | null
-  currencyCode: string
-  resetConfig: ResetConfig | null
-}
-type EntitlementConfigInput = z.infer<typeof entitlementConfigSchema>
-type EntitlementCreditLinePolicy = CreditLinePolicy
-
-type MeterIdentity = {
-  customerEntitlementId: string
-  currency: string
-  key: string
-  config: MeterConfig
-}
-
-type PricedFact = {
-  amountAfterMinor: number
-  amountMinor: number
-  currency: string
-  fact: Fact
-  featurePlanVersionId: string
-  featureSlug: string
-  grantId: string
-  periodKey: string
-  usageAfter: number
-  usageBefore: number
-  units: number
-}
-
-type CloseReservationResult =
-  | {
-      ok: true
-      outcome: "already_reconciled" | "deferred" | "no_reservation" | "success"
-      reason?: "deletion_requested" | "pending_wallet_flush" | "recovery_required"
-    }
-  | {
-      errorMessage?: string
-      ok: false
-      outcome: "exception" | "wallet_error"
-    }
-
-type CloseReservationOptions = {
-  allowDeletionRequested?: boolean
-  closeReason: ReservationCloseReason
-  recoverPendingFinal?: boolean
-}
-
-type EnforcementStateResult = {
-  isLimitReached: boolean
-  limit: number | null
-  spending: {
-    currency: string
-    ledgerAmount: number
-    scale: typeof LEDGER_SCALE
-  }
-  usage: number
-}
-
-type EnforcementStateCache = {
-  entitlement: EntitlementConfigInput | null
+type OptimizedBatchSetup = {
+  cachedResults: Map<string, BatchIdempotencyEntry>
+  entitlement: EntitlementConfigInput
   grants: ActiveGrantInput[]
-  inputSignature: string | null
-  states: GrantConsumptionState[]
+  grantStates: GrantConsumptionState[]
+  meter: MeterIdentity
+  meterState: MeterStateDraft
+  wallet: WalletReservationSnapshot
+}
+
+type OptimizedBatchProcessingState = {
+  grantStates: GrantConsumptionState[]
+  idempotencyEntries: BatchIdempotencyEntry[]
+  meterState: MeterStateDraft
+  metrics: ApplyBatchMetrics
+  refillTrigger: RefillTrigger | null
+  results: ApplyBatchResultRow[]
+  stagedResultsByKey: Map<string, BatchIdempotencyEntry>
+  touchedGrantStates: Map<string, GrantConsumptionState>
+  wallet: WalletReservationSnapshot
+  walletDirty: boolean
+}
+
+function createOptimizedBatchProcessingState(
+  setup: OptimizedBatchSetup
+): OptimizedBatchProcessingState {
+  return {
+    grantStates: setup.grantStates.map((state) => ({ ...state })),
+    idempotencyEntries: [],
+    meterState: { ...setup.meterState },
+    metrics: createApplyBatchMetrics(),
+    refillTrigger: null,
+    results: [],
+    stagedResultsByKey: new Map<string, BatchIdempotencyEntry>(),
+    touchedGrantStates: new Map<string, GrantConsumptionState>(),
+    wallet: setup.wallet ? { ...setup.wallet } : null,
+    walletDirty: false,
+  }
+}
+
+type SingleApplyExecutionMetrics = {
+  duplicateCount: number
+  grantAllocationCount: number
+  grantWindowWriteCount: number
+  idempotencyInsertCount: number
+  insertedFactCount: number
+  meterStateWriteCount: number
+  outboxFactCount: number
+  outboxInsertCount: number
+  pricedFactCount: number
+  refillTrigger: RefillTrigger | null
+  reservationEngaged: boolean
+  totalCost: number
+  walletReservationWriteCount: number
+}
+
+type SingleApplyContext = {
+  activeGrants: ActiveGrantInput[]
+  creditLinePolicy: EntitlementCreditLinePolicy
+  entitlement: EntitlementConfigInput
+  meter: MeterIdentity
+  overageStrategy: OverageStrategy
+}
+
+type SingleApplyBootstrapOutcome = {
+  result: ApplyResult | null
+  usesWalletReservation: boolean
+}
+
+type SingleApplyErrorRecovery =
+  | { kind: "retry"; synchronousRefillAttempted: boolean }
+  | { kind: "done"; result: ApplyResult; synchronousRefillAttempted: boolean }
+
+type SingleApplyWalletSpendOutcome = {
+  lastEventAtStamped: boolean
+  window: WalletReservationSnapshot
+}
+
+type ReservationCloseFlushIntent = {
+  nextSeq: number
+  unflushed: number
+}
+
+type ReservationCloseCaptureOutcome =
+  | { kind: "captured"; capturedAmount: number }
+  | { kind: "done"; result: CloseReservationResult }
+
+type ReservationCloseReleaseOutcome =
+  | {
+      kind: "released"
+      refundedPurchasedAmount: number
+      releasedAmount: number
+      restoredGrantedAmount: number
+    }
+  | { kind: "done"; result: CloseReservationResult }
+
+type ReservationBootstrapPlan = {
+  bucket: NonNullable<ReturnType<typeof computeGrantPeriodBucket>>
+  idempotencyKey: string
+  policy: ReservationPolicy
+  sampledAtMs: number
+  sizing: InitialReservationDecision
+}
+
+function createSingleApplyExecutionMetrics(): SingleApplyExecutionMetrics {
+  return {
+    duplicateCount: 0,
+    grantAllocationCount: 0,
+    grantWindowWriteCount: 0,
+    idempotencyInsertCount: 0,
+    insertedFactCount: 0,
+    meterStateWriteCount: 0,
+    outboxFactCount: 0,
+    outboxInsertCount: 0,
+    pricedFactCount: 0,
+    refillTrigger: null,
+    reservationEngaged: false,
+    totalCost: 0,
+    walletReservationWriteCount: 0,
+  }
+}
+
+type OpenWalletReservationSnapshot = NonNullable<WalletReservationSnapshot> & {
+  reservationId: string
+}
+type IdentifiedWalletReservationSnapshot = OpenWalletReservationSnapshot & {
+  customerId: string
+  projectId: string
+}
+type ClosableWalletReservationSnapshot = IdentifiedWalletReservationSnapshot
+
+type ReservationGrowthReadiness =
+  | { kind: "ready"; currentRemaining: number; window: IdentifiedWalletReservationSnapshot }
+  | { kind: "already_funded" }
+  | { kind: "unavailable" }
+
+type ReservationGrowthPlan = {
+  refillDecision: ReturnType<typeof computeRefillDecision>
+  spendVelocity: {
+    lastRateSampledAtMs: number | null
+    spendEwmaAmount: number
+  }
+  trigger: RefillTrigger
+}
+
+type AlarmReservationCloseTrigger = {
+  closeReason: ReservationCloseReason
+  isDeletionPending: boolean
 }
 
 export class EntitlementWindowDO extends DurableObject {
@@ -631,11 +486,12 @@ export class EntitlementWindowDO extends DurableObject {
     return { results, metrics }
   }
 
-  private async applyBatchOptimized(input: ApplyBatchInput): Promise<ApplyBatchInternalResult> {
-    const createdAt = Date.now()
-    const idempotencyKeys = unique(input.events.map((event) => event.idempotencyKey))
-
-    const setup = this.db.transaction((tx) => {
+  private prepareOptimizedBatch(
+    input: ApplyBatchInput,
+    createdAt: number,
+    idempotencyKeys: string[]
+  ): OptimizedBatchSetup {
+    return this.db.transaction((tx) => {
       this.syncEntitlementConfig(tx, {
         entitlement: input.entitlement,
         createdAt,
@@ -652,7 +508,7 @@ export class EntitlementWindowDO extends DurableObject {
       }
 
       const grants = this.readGrants(tx)
-      const meter = this.resolveMeterIdentity(entitlement)
+      const meter = resolveMeterIdentity(entitlement)
 
       return {
         cachedResults: this.lookupCachedIdempotencyResults(idempotencyKeys),
@@ -668,446 +524,508 @@ export class EntitlementWindowDO extends DurableObject {
         wallet: this.readWalletReservation(tx),
       }
     })
+  }
 
-    const results: ApplyBatchResultRow[] = []
-    const metrics = createApplyBatchMetrics()
-    const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
-    const idempotencyEntries: BatchIdempotencyEntry[] = []
-    const touchedGrantStates = new Map<string, GrantConsumptionState>()
-    const grantStates = setup.grantStates.map((state) => ({ ...state }))
-    const meterState: MeterStateDraft = { ...setup.meterState }
-    let wallet = setup.wallet ? { ...setup.wallet } : null
-    let walletDirty = false
-    let refillTrigger: RefillTrigger | null = null
+  private async applyBatchOptimized(input: ApplyBatchInput): Promise<ApplyBatchInternalResult> {
+    const createdAt = Date.now()
+    const idempotencyKeys = unique(input.events.map((event) => event.idempotencyKey))
+    const setup = this.prepareOptimizedBatch(input, createdAt, idempotencyKeys)
+    const state = createOptimizedBatchProcessingState(setup)
 
     for (const event of input.events) {
-      const activeGrants = resolveActiveGrants(setup.grants, event.timestamp)
-
-      if (activeGrants.length === 0) {
-        throw new Error("No active grants found for event timestamp")
-      }
-
-      const cached =
-        stagedResultsByKey.get(event.idempotencyKey) ??
-        setup.cachedResults.get(event.idempotencyKey)
-      if (cached) {
-        metrics.duplicate_count++
-        const cachedResult = this.idempotencyEntryToApplyResult(cached)
-        results.push({
-          ...cachedResult,
-          correlationKey: event.correlationKey,
-          idempotencyKey: event.idempotencyKey,
-        })
-        continue
-      }
-
-      const lateClosedPeriod = this.resolveLateClosedPeriod({
-        activeGrants,
-        eventTimestamp: event.timestamp,
-        now: event.now,
+      await this.processOptimizedBatchEvent({
+        createdAt,
+        event,
+        input,
+        setup,
+        state,
       })
+    }
 
-      if (lateClosedPeriod) {
-        const deniedResult: ApplyResult = {
-          allowed: false,
-          deniedReason: "LATE_EVENT_CLOSED_PERIOD",
-          message: `Event timestamp is ${lateClosedPeriod.lagMs}ms after the closed period grace window`,
-        }
-        this.stageBatchIdempotencyResult({
-          entries: idempotencyEntries,
-          entry: {
-            eventId: event.idempotencyKey,
-            createdAt,
-            allowed: false,
-            deniedReason: deniedResult.deniedReason ?? null,
-            denyMessage: deniedResult.message ?? null,
-            meterFacts: [],
-          },
-          stagedResultsByKey,
-        })
-        results.push({
-          ...deniedResult,
-          correlationKey: event.correlationKey,
-          idempotencyKey: event.idempotencyKey,
-        })
-        continue
-      }
-
-      const eventInput: ApplyInput = {
-        ...input,
-        event: {
-          id: event.id,
-          slug: event.slug,
-          timestamp: event.timestamp,
-          properties: event.properties,
-        },
-        idempotencyKey: event.idempotencyKey,
-        now: event.now,
-      }
-      const usesWalletReservation = input.entitlement.creditLinePolicy !== "uncapped"
-      const needsBootstrap = usesWalletReservation && (!wallet || wallet.reservationId === null)
-
-      if (needsBootstrap) {
-        if (
-          idempotencyEntries.length > 0 ||
-          meterState.dirty ||
-          touchedGrantStates.size > 0 ||
-          walletDirty
-        ) {
-          throw new EntitlementWindowBatchSequentialReplayRequired(
-            "wallet bootstrap after staged batch mutations"
-          )
-        }
-
-        const projectedCost = this.computeProjectedBatchEventCostMinor({
-          activeGrants,
-          entitlement: eventInput.entitlement,
-          event: eventInput.event,
-          eventTimestamp: event.timestamp,
-          grantStates,
-          meter: setup.meter,
-          meterState,
-        })
-
-        if (projectedCost > 0) {
-          const denial = await this.bootstrapReservationForProjectedCost({
-            activeGrants,
-            input: eventInput,
-            meter: setup.meter,
-            projectedCost,
-          })
-
-          if (denial) {
-            this.stageBatchIdempotencyResult({
-              entries: idempotencyEntries,
-              entry: {
-                eventId: event.idempotencyKey,
-                createdAt,
-                allowed: false,
-                deniedReason: denial.deniedReason ?? null,
-                denyMessage: denial.message ?? null,
-                meterFacts: [],
-              },
-              stagedResultsByKey,
-            })
-            results.push({
-              ...denial,
-              correlationKey: event.correlationKey,
-              idempotencyKey: event.idempotencyKey,
-            })
-            continue
-          }
-
-          wallet = this.readWalletReservation(this.db)
-        }
-      }
-
-      let facts: Fact[]
-      try {
-        const adapter = new InMemoryMeterStorageAdapter(meterState)
-        const engine = new AsyncMeterAggregationEngine([setup.meter.config], adapter, event.now)
-        facts = engine.applyEventSync(eventInput.event, {
-          beforePersist: (pendingFacts) => {
-            if (!input.enforceLimit) {
-              return
-            }
-
-            const exceeded = this.findGrantLimitExceededFact({
-              activeGrants,
-              facts: pendingFacts,
-              overageStrategy: setup.entitlement.overageStrategy,
-              states: this.selectGrantStatesForActiveGrants(
-                activeGrants,
-                grantStates,
-                event.timestamp
-              ),
-              entitlement: setup.entitlement,
-              timestamp: event.timestamp,
-            })
-
-            if (exceeded) {
-              throw new EntitlementWindowLimitExceededError({
-                available: exceeded.available,
-                eventId: event.id,
-                meterKey: exceeded.fact.meterKey,
-              })
-            }
-          },
-        })
-      } catch (error) {
-        if (!(error instanceof EntitlementWindowLimitExceededError)) {
-          throw error
-        }
-
-        if (
-          usesWalletReservation &&
-          wallet?.reservationId &&
-          (idempotencyEntries.length > 0 ||
-            meterState.dirty ||
-            touchedGrantStates.size > 0 ||
-            walletDirty)
-        ) {
-          throw new EntitlementWindowBatchSequentialReplayRequired(
-            "wallet reservation close after staged batch mutations"
-          )
-        }
-
-        const deniedResult: ApplyResult = {
-          allowed: false,
-          deniedReason: "LIMIT_EXCEEDED",
-          message: error.message,
-        }
-        this.stageBatchIdempotencyResult({
-          entries: idempotencyEntries,
-          entry: {
-            eventId: event.idempotencyKey,
-            createdAt,
-            allowed: false,
-            deniedReason: deniedResult.deniedReason ?? null,
-            denyMessage: deniedResult.message ?? null,
-            meterFacts: [],
-          },
-          stagedResultsByKey,
-        })
-        this.ctx.waitUntil(this.closeReservation({ closeReason: "limit_reached" }))
-        results.push({
-          ...deniedResult,
-          correlationKey: event.correlationKey,
-          idempotencyKey: event.idempotencyKey,
-        })
-        continue
-      }
-
-      const { pricedFacts, touchedStates } = this.priceFactsFromGrantStates({
-        activeGrants,
-        entitlement: setup.entitlement,
-        eventTimestamp: event.timestamp,
-        facts,
-        grantStates,
+    Object.assign(
+      state.metrics,
+      this.commitOptimizedBatch({
+        createdAt,
+        idempotencyEntries: state.idempotencyEntries,
+        meter: setup.meter,
+        meterState: state.meterState,
+        touchedGrantStates: state.touchedGrantStates,
+        wallet: state.wallet,
+        walletDirty: state.walletDirty,
       })
-      metrics.priced_fact_count += pricedFacts.length
-      metrics.grant_allocation_count += touchedStates.size
+    )
 
-      for (const [bucketKey, state] of touchedStates.entries()) {
-        touchedGrantStates.set(bucketKey, state)
-      }
+    if (state.refillTrigger) {
+      this.ctx.waitUntil(this.requestFlushAndRefill(state.refillTrigger))
+    }
 
-      if (usesWalletReservation && wallet?.reservationId && pricedFacts.length > 0) {
-        const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
-        const effectiveCost = computeEffectiveWalletCost({
-          requestedCostAmount: totalCost,
-          consumedAmount: wallet.consumedAmount,
-          flushedAmount: wallet.flushedAmount,
-        })
-        const currentRemaining = Math.max(0, wallet.allocationAmount - wallet.consumedAmount)
+    return { results: state.results, metrics: state.metrics }
+  }
 
-        if (effectiveCost.effectiveCostAmount > currentRemaining) {
-          throw new EntitlementWindowBatchSequentialReplayRequired("wallet reservation underfunded")
-        }
+  private async processOptimizedBatchEvent(params: {
+    createdAt: number
+    event: ApplyBatchInput["events"][number]
+    input: ApplyBatchInput
+    setup: OptimizedBatchSetup
+    state: OptimizedBatchProcessingState
+  }): Promise<void> {
+    const { createdAt, event, input, setup, state } = params
+    const activeGrants = resolveActiveGrants(setup.grants, event.timestamp)
 
-        const nextConsumedAmount = wallet.consumedAmount + effectiveCost.effectiveCostAmount
-        const currentEventCostAmount = Math.max(0, totalCost)
-        const pricePerEventAmount = Math.max(
-          currentEventCostAmount,
-          computeMaxMarginalPriceMinor(setup.entitlement.featureConfig)
-        )
-        const flushAmount = Math.max(0, nextConsumedAmount - wallet.flushedAmount)
-        const hasPendingNonFinalFlush =
-          !wallet.pendingFlushFinal &&
-          wallet.pendingFlushSeq !== null &&
-          wallet.pendingFlushSeq !== undefined &&
-          wallet.pendingFlushSeq > wallet.flushSeq
-        let spendVelocity = {
-          spendEwmaAmount: wallet.spendEwmaAmount,
-          lastRateSampledAtMs: wallet.lastRateSampledAtMs,
-        }
-        let refillDecision = computeRefillDecision({
-          allocationAmount: wallet.allocationAmount,
-          consumedAmount: nextConsumedAmount,
-          flushedAmount: wallet.flushedAmount,
-          targetReservationAmount: wallet.targetReservationAmount,
-          spendEwmaAmount: spendVelocity.spendEwmaAmount,
-          lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
-          maxEventCostAmount: wallet.maxEventCostAmount,
-          currentEventCostAmount,
-          pricePerEventAmount,
-          policy: this.reservationPolicy(),
-        })
+    if (activeGrants.length === 0) {
+      throw new Error("No active grants found for event timestamp")
+    }
 
-        if (
-          refillDecision.needsRefill &&
-          !wallet.refillInFlight &&
-          !hasPendingNonFinalFlush &&
-          flushAmount > 0
-        ) {
-          spendVelocity = updateSpendVelocity({
-            previousSpendEwmaAmount: wallet.spendEwmaAmount,
-            previousLastRateSampledAtMs: wallet.lastRateSampledAtMs,
-            flushAmount,
-            nowMs: createdAt,
-            policy: this.reservationPolicy(),
-          })
-          refillDecision = computeRefillDecision({
-            allocationAmount: wallet.allocationAmount,
-            consumedAmount: nextConsumedAmount,
-            flushedAmount: wallet.flushedAmount,
-            targetReservationAmount: wallet.targetReservationAmount,
-            spendEwmaAmount: spendVelocity.spendEwmaAmount,
-            lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
-            maxEventCostAmount: wallet.maxEventCostAmount,
-            currentEventCostAmount,
-            pricePerEventAmount,
-            policy: this.reservationPolicy(),
-          })
-        }
-
-        wallet = {
-          ...wallet,
-          consumedAmount: nextConsumedAmount,
-          targetReservationAmount: refillDecision.targetReservationAmount,
-          spendEwmaAmount: spendVelocity.spendEwmaAmount,
-          lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
-          maxEventCostAmount: refillDecision.maxEventCostAmount,
-          lastEventAt: createdAt,
-        }
-        walletDirty = true
-
-        const shouldScheduleRefill =
-          !wallet.refillInFlight &&
-          (hasPendingNonFinalFlush ||
-            (refillDecision.needsRefill && refillDecision.refillAmount > 0))
-
-        if (shouldScheduleRefill) {
-          const nextSeq = hasPendingNonFinalFlush ? wallet.pendingFlushSeq! : wallet.flushSeq + 1
-          const pendingFlushAmount = hasPendingNonFinalFlush
-            ? (wallet.pendingFlushAmount ?? flushAmount)
-            : flushAmount
-          const refillAmount = hasPendingNonFinalFlush
-            ? wallet.pendingRefillAmount
-            : refillDecision.refillAmount
-
-          wallet = {
-            ...wallet,
-            refillInFlight: true,
-            pendingFlushSeq: nextSeq,
-            pendingFlushFinal: false,
-            pendingFlushAmount,
-            pendingRefillAmount: refillAmount,
-          }
-          refillTrigger = {
-            flushSeq: nextSeq,
-            flushAmount: pendingFlushAmount,
-            refillAmount,
-            effectiveAt: event.timestamp,
-          }
-        }
-      } else if (wallet?.reservationId) {
-        wallet = { ...wallet, lastEventAt: createdAt }
-        walletDirty = true
-      }
-
-      const meterFacts = pricedFacts.map((pricedFact) =>
-        this.buildMeterFactPayload({
-          createdAt,
-          input: eventInput,
-          meter: setup.meter,
-          pricedFact,
+    const cached =
+      state.stagedResultsByKey.get(event.idempotencyKey) ??
+      setup.cachedResults.get(event.idempotencyKey)
+    if (cached) {
+      state.metrics.duplicate_count++
+      state.results.push(
+        createCachedBatchResult({
+          entry: cached,
+          correlationKey: event.correlationKey,
+          idempotencyKey: event.idempotencyKey,
         })
       )
+      return
+    }
 
-      this.stageBatchIdempotencyResult({
-        entries: idempotencyEntries,
-        entry: {
-          eventId: event.idempotencyKey,
-          createdAt,
-          allowed: true,
-          deniedReason: null,
-          denyMessage: null,
-          meterFacts,
-        },
-        stagedResultsByKey,
+    const lateClosedPeriod = this.resolveLateClosedPeriod({
+      activeGrants,
+      eventTimestamp: event.timestamp,
+      now: event.now,
+    })
+
+    if (lateClosedPeriod) {
+      this.stageOptimizedBatchDeniedResult({
+        createdAt,
+        deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+        message: `Event timestamp is ${lateClosedPeriod.lagMs}ms after the closed period grace window`,
+        event,
+        state,
       })
-      results.push({
-        allowed: true,
-        correlationKey: event.correlationKey,
-        idempotencyKey: event.idempotencyKey,
-        meterFacts,
+      return
+    }
+
+    const eventInput = buildBatchEventApplyInput(input, event)
+    const usesWalletReservation = input.entitlement.creditLinePolicy !== "uncapped"
+    const bootstrapHandled = await this.ensureOptimizedBatchWalletBootstrap({
+      activeGrants,
+      createdAt,
+      event,
+      eventInput,
+      setup,
+      state,
+      usesWalletReservation,
+    })
+    if (bootstrapHandled) {
+      return
+    }
+
+    const pricedFacts = this.applyAndPriceOptimizedBatchEvent({
+      activeGrants,
+      createdAt,
+      event,
+      eventInput,
+      input,
+      setup,
+      state,
+      usesWalletReservation,
+    })
+    if (!pricedFacts) {
+      return
+    }
+
+    this.applyOptimizedBatchWalletSpend({
+      createdAt,
+      event,
+      pricedFacts,
+      setup,
+      state,
+      usesWalletReservation,
+    })
+    this.stageOptimizedBatchAllowedResult({
+      createdAt,
+      event,
+      eventInput,
+      pricedFacts,
+      setup,
+      state,
+    })
+  }
+
+  private applyAndPriceOptimizedBatchEvent(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    event: ApplyBatchInput["events"][number]
+    eventInput: ApplyInput
+    input: ApplyBatchInput
+    setup: OptimizedBatchSetup
+    state: OptimizedBatchProcessingState
+    usesWalletReservation: boolean
+  }): PricedFact[] | null {
+    const {
+      activeGrants,
+      createdAt,
+      event,
+      eventInput,
+      input,
+      setup,
+      state,
+      usesWalletReservation,
+    } = params
+    let facts: Fact[]
+    try {
+      facts = this.applyOptimizedBatchMeterEvent({
+        activeGrants,
+        event,
+        eventInput,
+        input,
+        setup,
+        state,
       })
+    } catch (error) {
+      if (!(error instanceof EntitlementWindowLimitExceededError)) {
+        throw error
+      }
+
+      if (
+        usesWalletReservation &&
+        state.wallet?.reservationId &&
+        this.hasOptimizedBatchStagedMutations(state)
+      ) {
+        throw new EntitlementWindowBatchSequentialReplayRequired(
+          "wallet reservation close after staged batch mutations"
+        )
+      }
+
+      this.stageOptimizedBatchDeniedResult({
+        createdAt,
+        deniedReason: "LIMIT_EXCEEDED",
+        message: error.message,
+        event,
+        state,
+      })
+      this.ctx.waitUntil(this.closeReservation({ closeReason: "limit_reached" }))
+      return null
+    }
+
+    const { pricedFacts, touchedStates } = this.priceFactsFromGrantStates({
+      activeGrants,
+      entitlement: setup.entitlement,
+      eventTimestamp: event.timestamp,
+      facts,
+      grantStates: state.grantStates,
+    })
+    state.metrics.priced_fact_count += pricedFacts.length
+    state.metrics.grant_allocation_count += touchedStates.size
+
+    for (const [bucketKey, grantState] of touchedStates.entries()) {
+      state.touchedGrantStates.set(bucketKey, grantState)
+    }
+
+    return pricedFacts
+  }
+
+  private stageOptimizedBatchAllowedResult(params: {
+    createdAt: number
+    event: ApplyBatchInput["events"][number]
+    eventInput: ApplyInput
+    pricedFacts: PricedFact[]
+    setup: OptimizedBatchSetup
+    state: OptimizedBatchProcessingState
+  }): void {
+    const { createdAt, event, eventInput, pricedFacts, setup, state } = params
+    const meterFacts = pricedFacts.map((pricedFact) =>
+      this.buildMeterFactPayload({
+        createdAt,
+        input: eventInput,
+        meter: setup.meter,
+        pricedFact,
+      })
+    )
+
+    const allowed = createAllowedBatchOutcome({
+      correlationKey: event.correlationKey,
+      createdAt,
+      idempotencyKey: event.idempotencyKey,
+      meterFacts,
+    })
+    stageBatchIdempotencyEntry({
+      entries: state.idempotencyEntries,
+      entry: allowed.entry,
+      stagedResultsByKey: state.stagedResultsByKey,
+    })
+    state.results.push(allowed.result)
+  }
+
+  private async ensureOptimizedBatchWalletBootstrap(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    event: ApplyBatchInput["events"][number]
+    eventInput: ApplyInput
+    setup: OptimizedBatchSetup
+    state: OptimizedBatchProcessingState
+    usesWalletReservation: boolean
+  }): Promise<boolean> {
+    const { activeGrants, createdAt, event, eventInput, setup, state, usesWalletReservation } =
+      params
+    const needsBootstrap =
+      usesWalletReservation && (!state.wallet || state.wallet.reservationId === null)
+
+    if (!needsBootstrap) {
+      return false
+    }
+
+    if (this.hasOptimizedBatchStagedMutations(state)) {
+      throw new EntitlementWindowBatchSequentialReplayRequired(
+        "wallet bootstrap after staged batch mutations"
+      )
+    }
+
+    const projectedCost = this.computeProjectedBatchEventCostMinor({
+      activeGrants,
+      entitlement: eventInput.entitlement,
+      event: eventInput.event,
+      eventTimestamp: event.timestamp,
+      grantStates: state.grantStates,
+      meter: setup.meter,
+      meterState: state.meterState,
+    })
+
+    if (projectedCost <= 0) {
+      return false
+    }
+
+    const denial = await this.bootstrapReservationForProjectedCost({
+      activeGrants,
+      input: eventInput,
+      meter: setup.meter,
+      projectedCost,
+    })
+
+    if (denial) {
+      this.stageOptimizedBatchDeniedResult({
+        createdAt,
+        deniedReason: denial.deniedReason,
+        message: denial.message,
+        event,
+        state,
+      })
+      return true
+    }
+
+    state.wallet = this.readWalletReservation(this.db)
+    return false
+  }
+
+  private applyOptimizedBatchMeterEvent(params: {
+    activeGrants: ActiveGrantInput[]
+    event: ApplyBatchInput["events"][number]
+    eventInput: ApplyInput
+    input: ApplyBatchInput
+    setup: OptimizedBatchSetup
+    state: OptimizedBatchProcessingState
+  }): Fact[] {
+    const { activeGrants, event, eventInput, input, setup, state } = params
+    const adapter = new InMemoryMeterStorageAdapter(state.meterState)
+    const engine = new AsyncMeterAggregationEngine([setup.meter.config], adapter, event.now)
+    return engine.applyEventSync(eventInput.event, {
+      beforePersist: (pendingFacts) => {
+        if (!input.enforceLimit) {
+          return
+        }
+
+        const exceeded = this.findGrantLimitExceededFact({
+          activeGrants,
+          facts: pendingFacts,
+          overageStrategy: setup.entitlement.overageStrategy,
+          states: this.selectGrantStatesForActiveGrants(
+            activeGrants,
+            state.grantStates,
+            event.timestamp
+          ),
+          entitlement: setup.entitlement,
+          timestamp: event.timestamp,
+        })
+
+        if (exceeded) {
+          throw new EntitlementWindowLimitExceededError({
+            available: exceeded.available,
+            eventId: event.id,
+            meterKey: exceeded.fact.meterKey,
+          })
+        }
+      },
+    })
+  }
+
+  private applyOptimizedBatchWalletSpend(params: {
+    createdAt: number
+    event: ApplyBatchInput["events"][number]
+    pricedFacts: PricedFact[]
+    setup: OptimizedBatchSetup
+    state: OptimizedBatchProcessingState
+    usesWalletReservation: boolean
+  }): void {
+    const { createdAt, event, pricedFacts, setup, state, usesWalletReservation } = params
+    const wallet = state.wallet
+
+    if (usesWalletReservation && wallet?.reservationId && pricedFacts.length > 0) {
+      const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+      const spendPlan = planWalletReservationSpend({
+        createdAt,
+        entitlement: setup.entitlement,
+        eventTimestamp: event.timestamp,
+        policy: this.reservationPolicy(),
+        totalCost,
+        window: { ...wallet, reservationId: wallet.reservationId },
+      })
+
+      if (spendPlan.kind === "underfunded") {
+        throw new EntitlementWindowBatchSequentialReplayRequired("wallet reservation underfunded")
+      }
+
+      let nextWallet: NonNullable<WalletReservationSnapshot> = {
+        ...wallet,
+        ...spendPlan.walletStateUpdate,
+      }
+      state.walletDirty = true
+
+      if (spendPlan.refillStateUpdate) {
+        nextWallet = {
+          ...nextWallet,
+          ...spendPlan.refillStateUpdate,
+        }
+        state.refillTrigger = spendPlan.refillTrigger
+      }
+
+      state.wallet = nextWallet
+      return
+    }
+
+    if (wallet?.reservationId) {
+      state.wallet = { ...wallet, lastEventAt: createdAt }
+      state.walletDirty = true
+    }
+  }
+
+  private hasOptimizedBatchStagedMutations(state: OptimizedBatchProcessingState): boolean {
+    return hasStagedBatchMutations({
+      idempotencyEntryCount: state.idempotencyEntries.length,
+      meterStateDirty: state.meterState.dirty,
+      touchedGrantStateCount: state.touchedGrantStates.size,
+      walletDirty: state.walletDirty,
+    })
+  }
+
+  private stageOptimizedBatchDeniedResult(params: {
+    createdAt: number
+    deniedReason?: DeniedReason
+    event: ApplyBatchInput["events"][number]
+    message?: string
+    state: OptimizedBatchProcessingState
+  }): ApplyBatchResultRow {
+    const { createdAt, deniedReason, event, message, state } = params
+    const denied = createDeniedBatchOutcome({
+      correlationKey: event.correlationKey,
+      createdAt,
+      deniedReason,
+      idempotencyKey: event.idempotencyKey,
+      message,
+    })
+    stageBatchIdempotencyEntry({
+      entries: state.idempotencyEntries,
+      entry: denied.entry,
+      stagedResultsByKey: state.stagedResultsByKey,
+    })
+    state.results.push(denied.result)
+    return denied.result
+  }
+
+  private commitOptimizedBatch(params: {
+    createdAt: number
+    idempotencyEntries: BatchIdempotencyEntry[]
+    meter: MeterIdentity
+    meterState: MeterStateDraft
+    touchedGrantStates: Map<string, GrantConsumptionState>
+    wallet: WalletReservationSnapshot
+    walletDirty: boolean
+  }): OptimizedBatchWriteMetrics {
+    const writeMetrics: OptimizedBatchWriteMetrics = {
+      meter_state_write_count: params.meterState.dirty ? (params.meterState.exists ? 1 : 2) : 0,
+      grant_window_write_count: unique(
+        [...params.touchedGrantStates.values()].map((state) => state.periodKey)
+      ).length,
+      wallet_reservation_write_count: params.walletDirty && params.wallet ? 1 : 0,
+      outbox_insert_count: 0,
+      outbox_fact_count: 0,
+      idempotency_insert_count: params.idempotencyEntries.length > 0 ? 1 : 0,
+      idempotency_event_count: params.idempotencyEntries.length,
     }
 
     if (
-      meterState.dirty ||
-      touchedGrantStates.size > 0 ||
-      idempotencyEntries.length > 0 ||
-      walletDirty
+      !params.meterState.dirty &&
+      params.touchedGrantStates.size === 0 &&
+      params.idempotencyEntries.length === 0 &&
+      !params.walletDirty
     ) {
-      metrics.meter_state_write_count = meterState.dirty ? (meterState.exists ? 1 : 2) : 0
-      metrics.grant_window_write_count = unique(
-        [...touchedGrantStates.values()].map((state) => state.periodKey)
-      ).length
-      metrics.wallet_reservation_write_count = walletDirty && wallet ? 1 : 0
-      metrics.outbox_insert_count = 0
-      metrics.outbox_fact_count = 0
-      metrics.idempotency_insert_count = idempotencyEntries.length > 0 ? 1 : 0
-      metrics.idempotency_event_count = idempotencyEntries.length
+      return writeMetrics
+    }
 
-      // Keep replay seals, priced fact publish intent, and local accounting in one
-      // synchronous DO SQLite transaction. No await belongs inside this block.
-      this.db.transaction((tx) => {
-        if (meterState.dirty) {
-          this.ensureMeterState(tx, {
-            meterKey: setup.meter.key,
-            createdAt: meterState.createdAt,
+    // Keep replay seals, priced fact publish intent, and local accounting in one
+    // synchronous DO SQLite transaction. No await belongs inside this block.
+    this.db.transaction((tx) => {
+      if (params.meterState.dirty) {
+        this.ensureMeterState(tx, {
+          meterKey: params.meter.key,
+          createdAt: params.meterState.createdAt,
+        })
+        tx.update(meterStateTable)
+          .set({
+            usage: params.meterState.usage,
+            updatedAt: params.meterState.updatedAt,
           })
-          tx.update(meterStateTable)
-            .set({
-              usage: meterState.usage,
-              updatedAt: meterState.updatedAt,
-            })
-            .where(eq(meterStateTable.meterKey, setup.meter.key))
-            .run()
-        }
+          .where(eq(meterStateTable.meterKey, params.meter.key))
+          .run()
+      }
 
-        this.writeGrantConsumptions(tx, touchedGrantStates.values())
+      this.writeGrantConsumptions(tx, params.touchedGrantStates.values())
 
-        if (idempotencyEntries.length > 0) {
-          tx.insert(idempotencyKeyBatchesTable)
-            .values({
-              createdAt,
-              entries: JSON.stringify(idempotencyEntries),
-            })
-            .run()
-        }
+      if (params.idempotencyEntries.length > 0) {
+        tx.insert(idempotencyKeyBatchesTable)
+          .values({
+            createdAt: params.createdAt,
+            entries: JSON.stringify(params.idempotencyEntries),
+          })
+          .run()
+      }
 
-        if (walletDirty && wallet) {
-          tx.update(walletReservationTable)
-            .set({
-              consumedAmount: wallet.consumedAmount,
-              targetReservationAmount: wallet.targetReservationAmount,
-              spendEwmaAmount: wallet.spendEwmaAmount,
-              lastRateSampledAtMs: wallet.lastRateSampledAtMs,
-              maxEventCostAmount: wallet.maxEventCostAmount,
-              refillInFlight: wallet.refillInFlight,
-              pendingFlushSeq: wallet.pendingFlushSeq,
-              pendingFlushFinal: wallet.pendingFlushFinal,
-              pendingFlushAmount: wallet.pendingFlushAmount,
-              pendingRefillAmount: wallet.pendingRefillAmount,
-              lastEventAt: wallet.lastEventAt,
-            })
-            .run()
-        }
-      })
+      if (params.walletDirty && params.wallet) {
+        tx.update(walletReservationTable)
+          .set({
+            consumedAmount: params.wallet.consumedAmount,
+            targetReservationAmount: params.wallet.targetReservationAmount,
+            spendEwmaAmount: params.wallet.spendEwmaAmount,
+            lastRateSampledAtMs: params.wallet.lastRateSampledAtMs,
+            maxEventCostAmount: params.wallet.maxEventCostAmount,
+            refillInFlight: params.wallet.refillInFlight,
+            pendingFlushSeq: params.wallet.pendingFlushSeq,
+            pendingFlushFinal: params.wallet.pendingFlushFinal,
+            pendingFlushAmount: params.wallet.pendingFlushAmount,
+            pendingRefillAmount: params.wallet.pendingRefillAmount,
+            lastEventAt: params.wallet.lastEventAt,
+          })
+          .run()
+      }
+    })
 
-      this.recordBatchIdempotencyResults(idempotencyEntries)
-      this.invalidateEnforcementStateCache()
-      this.schedulePostCommitAlarm()
-    }
+    this.recordBatchIdempotencyResults(params.idempotencyEntries)
+    this.invalidateEnforcementStateCache()
+    this.schedulePostCommitAlarm()
 
-    if (refillTrigger) {
-      this.ctx.waitUntil(this.requestFlushAndRefill(refillTrigger))
-    }
-
-    return { results, metrics }
+    return writeMetrics
   }
 
   private async applyInner(
@@ -1118,7 +1036,213 @@ export class EntitlementWindowDO extends DurableObject {
     const input = applyInputSchema.parse(rawInput)
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
+    const { activeGrants, creditLinePolicy, entitlement, meter, overageStrategy } =
+      this.prepareSingleApplyContext(input, createdAt)
 
+    // One canonical log line per apply() — populated as we go, emitted in
+    // the finally block so every code path (success, denial, throw) lands
+    // in the same wide event.
+    const wideEvent = this.createSingleApplyWideEvent({
+      activeGrants,
+      creditLinePolicy,
+      entitlement,
+      idempotencyKey,
+      input,
+      meter,
+    })
+
+    let result: ApplyResult | undefined
+    let thrown: unknown
+    const metrics = createSingleApplyExecutionMetrics()
+
+    try {
+      const cachedResult = this.resolveCachedSingleApplyReplay({
+        idempotencyKey,
+        metrics,
+        wideEvent,
+      })
+      if (cachedResult) {
+        result = cachedResult
+        return cachedResult
+      }
+
+      const lateDenial = this.rejectLateClosedPeriodSingleApply({
+        activeGrants,
+        createdAt,
+        idempotencyKey,
+        input,
+        metrics,
+        wideEvent,
+      })
+      if (lateDenial) {
+        result = lateDenial
+        return lateDenial
+      }
+
+      const bootstrap = await this.handleSingleApplyReservationBootstrap({
+        activeGrants,
+        createdAt,
+        creditLinePolicy,
+        idempotencyKey,
+        input,
+        meter,
+        metrics,
+        wideEvent,
+      })
+      if (bootstrap.result) {
+        result = bootstrap.result
+        return bootstrap.result
+      }
+
+      const execution = await this.executeSingleApplyWithWalletRecovery({
+        activeGrants,
+        createdAt,
+        entitlement,
+        idempotencyKey,
+        input,
+        meter,
+        overageStrategy,
+        usesWalletReservation: bootstrap.usesWalletReservation,
+        wideEvent,
+      })
+      Object.assign(metrics, execution.metrics)
+      result = execution.result
+      return execution.result
+    } catch (error) {
+      thrown = error
+      throw error
+    } finally {
+      this.logSingleApplyResult({
+        emitLog: options.emitLog ?? true,
+        metrics,
+        result,
+        startTime,
+        thrown,
+        wideEvent,
+      })
+    }
+  }
+
+  private resolveCachedSingleApplyReplay(params: {
+    idempotencyKey: string
+    metrics: SingleApplyExecutionMetrics
+    wideEvent: Record<string, unknown>
+  }): ApplyResult | null {
+    const { idempotencyKey, metrics, wideEvent } = params
+    // Idempotency short-circuit before any wallet I/O. A retried event with a
+    // cached result must not re-call wallet.createReservation.
+    const cachedResult = this.lookupCachedIdempotencyResult(idempotencyKey)
+    if (!cachedResult) {
+      wideEvent.idempotent_replay = false
+      return null
+    }
+
+    metrics.duplicateCount = 1
+    wideEvent.idempotent_replay = true
+    return cachedResult
+  }
+
+  private rejectLateClosedPeriodSingleApply(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    idempotencyKey: string
+    input: ApplyInput
+    metrics: SingleApplyExecutionMetrics
+    wideEvent: Record<string, unknown>
+  }): ApplyResult | null {
+    const { activeGrants, createdAt, idempotencyKey, input, metrics, wideEvent } = params
+    const lateClosedPeriod = this.resolveLateClosedPeriod({
+      activeGrants,
+      eventTimestamp: input.event.timestamp,
+      now: input.now,
+    })
+
+    if (!lateClosedPeriod) {
+      wideEvent.late_event_rejected = false
+      return null
+    }
+
+    const deniedResult = this.persistDeniedApplyResult({
+      idempotencyKey,
+      createdAt,
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+      message: `Event timestamp is ${lateClosedPeriod.lagMs}ms after the closed period grace window`,
+    })
+    metrics.idempotencyInsertCount = 1
+
+    wideEvent.late_event_rejected = true
+    wideEvent.late_event_lag_ms = lateClosedPeriod.lagMs
+    wideEvent.late_event_period_end_at = lateClosedPeriod.periodEndAt
+    return deniedResult
+  }
+
+  private async handleSingleApplyReservationBootstrap(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    creditLinePolicy: EntitlementCreditLinePolicy
+    idempotencyKey: string
+    input: ApplyInput
+    meter: MeterIdentity
+    metrics: SingleApplyExecutionMetrics
+    wideEvent: Record<string, unknown>
+  }): Promise<SingleApplyBootstrapOutcome> {
+    const {
+      activeGrants,
+      createdAt,
+      creditLinePolicy,
+      idempotencyKey,
+      input,
+      meter,
+      metrics,
+      wideEvent,
+    } = params
+    // Lazy reservation bootstrap. If this DO has never opened a reservation
+    // for the current period, only open one when the current event produces a
+    // positive priced delta. Free-tier events stay off the wallet path; the
+    // first paid boundary-crossing event bootstraps the wallet.
+    //
+    // Out-of-tx because Postgres ↔ SQLite can't share a single transaction.
+    // A small in-memory single-flight prevents duplicate wallet calls while
+    // this DO instance is awaiting external I/O.
+    const preWindow = this.readWalletReservation(this.db)
+    const usesWalletReservation = creditLinePolicy !== "uncapped"
+    const needsBootstrap = usesWalletReservation && (!preWindow || preWindow.reservationId === null)
+    wideEvent.bootstrap_attempted = needsBootstrap
+
+    if (!needsBootstrap) {
+      wideEvent.bootstrap_outcome = usesWalletReservation
+        ? "reservation_already_open"
+        : "disabled_by_credit_line_policy"
+      return { result: null, usesWalletReservation }
+    }
+
+    let denial: ApplyResult | null
+    try {
+      denial = await this.bootstrapReservationSingleFlight(input, activeGrants, meter)
+    } catch (error) {
+      wideEvent.bootstrap_outcome = "error"
+      throw error
+    }
+
+    if (!denial) {
+      wideEvent.bootstrap_outcome = "success"
+      return { result: null, usesWalletReservation }
+    }
+
+    wideEvent.bootstrap_outcome = "denied"
+    // Persist the denial idempotently so retries return the same answer
+    // without re-calling the wallet. The DO's normal denial-cache pattern.
+    const deniedResult = this.persistDeniedApplyResult({
+      idempotencyKey,
+      createdAt,
+      deniedReason: denial.deniedReason,
+      message: denial.message,
+    })
+    metrics.idempotencyInsertCount = 1
+    return { result: deniedResult, usesWalletReservation }
+  }
+
+  private prepareSingleApplyContext(input: ApplyInput, createdAt: number): SingleApplyContext {
     const activeGrants = this.db.transaction((tx) => {
       this.syncEntitlementConfig(tx, {
         entitlement: input.entitlement,
@@ -1144,14 +1268,25 @@ export class EntitlementWindowDO extends DurableObject {
       throw new Error("No entitlement config found after sync")
     }
 
-    const meter = this.resolveMeterIdentity(entitlement)
-    const overageStrategy = entitlement.overageStrategy
-    const creditLinePolicy: EntitlementCreditLinePolicy = input.entitlement.creditLinePolicy
+    return {
+      activeGrants,
+      creditLinePolicy: input.entitlement.creditLinePolicy,
+      entitlement,
+      meter: resolveMeterIdentity(entitlement),
+      overageStrategy: entitlement.overageStrategy,
+    }
+  }
 
-    // One canonical log line per apply() — populated as we go, emitted in
-    // the finally block so every code path (success, denial, throw) lands
-    // in the same wide event.
-    const wideEvent: Record<string, unknown> = {
+  private createSingleApplyWideEvent(params: {
+    activeGrants: ActiveGrantInput[]
+    creditLinePolicy: EntitlementCreditLinePolicy
+    entitlement: EntitlementConfigInput
+    idempotencyKey: string
+    input: ApplyInput
+    meter: MeterIdentity
+  }): Record<string, unknown> {
+    const { activeGrants, creditLinePolicy, entitlement, idempotencyKey, input, meter } = params
+    return {
       operation: "apply",
       event_id: input.event.id,
       event_slug: input.event.slug,
@@ -1167,530 +1302,567 @@ export class EntitlementWindowDO extends DurableObject {
       enforce_limit: input.enforceLimit,
       credit_line_policy: creditLinePolicy,
     }
+  }
 
-    let result: ApplyResult | undefined
-    let thrown: unknown
-    let duplicateCount = 0
-    let insertedFactCount = 0
-    let pricedFactCount = 0
-    let grantAllocationCount = 0
-    let meterStateWriteCount = 0
-    let grantWindowWriteCount = 0
-    let walletReservationWriteCount = 0
-    let outboxInsertCount = 0
-    let outboxFactCount = 0
-    let idempotencyInsertCount = 0
-    let refillTrigger: RefillTrigger | null = null
-    let totalCost = 0
-    let reservationEngaged = false
+  private logSingleApplyResult(params: {
+    emitLog: boolean
+    metrics: SingleApplyExecutionMetrics
+    result: ApplyResult | undefined
+    startTime: number
+    thrown: unknown
+    wideEvent: Record<string, unknown>
+  }): void {
+    const { emitLog, metrics, result, startTime, thrown, wideEvent } = params
+    wideEvent.event_count = 1
+    wideEvent.processed_count = result ? 1 : 0
+    wideEvent.duplicate_count = metrics.duplicateCount
+    wideEvent.fact_count = metrics.insertedFactCount
+    wideEvent.priced_fact_count = metrics.pricedFactCount
+    wideEvent.grant_allocation_count = metrics.grantAllocationCount
+    wideEvent.meter_state_write_count = metrics.meterStateWriteCount
+    wideEvent.grant_window_write_count = metrics.grantWindowWriteCount
+    wideEvent.wallet_reservation_write_count = metrics.walletReservationWriteCount
+    wideEvent.outbox_insert_count = metrics.outboxInsertCount
+    wideEvent.outbox_fact_count = metrics.outboxFactCount
+    wideEvent.idempotency_insert_count = metrics.idempotencyInsertCount
+    wideEvent.cost_minor = metrics.totalCost
+    wideEvent.reservation_engaged = metrics.reservationEngaged
 
-    try {
-      // Idempotency short-circuit before any wallet I/O. A retried event with a
-      // cached result must not re-call wallet.createReservation.
-      const cachedResult = this.lookupCachedIdempotencyResult(idempotencyKey)
-      if (cachedResult) {
-        duplicateCount = 1
-        wideEvent.idempotent_replay = true
-        result = cachedResult
-        return cachedResult
+    const trigger = metrics.refillTrigger
+    wideEvent.refill_triggered = trigger !== null
+    if (trigger) {
+      wideEvent.refill_seq = trigger.flushSeq
+      wideEvent.reservation_refill_requested_amount = trigger.refillAmount
+      wideEvent.refill_flush_amount = trigger.flushAmount
+    }
+    wideEvent.duration_ms = Date.now() - startTime
+
+    if (result) {
+      wideEvent.allowed = result.allowed
+      wideEvent.denied_reason = result.deniedReason ?? null
+      if (!result.allowed) {
+        wideEvent.deny_message = result.message ?? null
       }
-      wideEvent.idempotent_replay = false
+      wideEvent.outcome = result.allowed ? "success" : "denied"
+    } else if (thrown) {
+      wideEvent.outcome = "error"
+      wideEvent.error_type = thrown instanceof Error ? thrown.name : "unknown"
+      wideEvent.error_message = thrown instanceof Error ? thrown.message : String(thrown)
+    }
 
-      const lateClosedPeriod = this.resolveLateClosedPeriod({
-        activeGrants,
-        eventTimestamp: input.event.timestamp,
-        now: input.now,
-      })
+    if (emitLog) {
+      this.logger.info("entitlement apply", wideEvent)
+    }
+  }
 
-      if (lateClosedPeriod) {
-        const deniedResult: ApplyResult = {
-          allowed: false,
-          deniedReason: "LATE_EVENT_CLOSED_PERIOD",
-          message: `Event timestamp is ${lateClosedPeriod.lagMs}ms after the closed period grace window`,
-        }
+  private async executeSingleApplyWithWalletRecovery(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    entitlement: EntitlementConfigInput
+    idempotencyKey: string
+    input: ApplyInput
+    meter: MeterIdentity
+    overageStrategy: OverageStrategy
+    usesWalletReservation: boolean
+    wideEvent: Record<string, unknown>
+  }): Promise<{ metrics: SingleApplyExecutionMetrics; result: ApplyResult }> {
+    const {
+      activeGrants,
+      createdAt,
+      entitlement,
+      idempotencyKey,
+      input,
+      meter,
+      overageStrategy,
+      usesWalletReservation,
+      wideEvent,
+    } = params
+    const metrics = createSingleApplyExecutionMetrics()
+    let synchronousRefillAttempted = false
 
-        this.persistBatchIdempotencyResult({
-          eventId: idempotencyKey,
+    for (;;) {
+      metrics.refillTrigger = null
+
+      try {
+        const txResult = this.commitSingleApplyTransaction({
+          activeGrants,
           createdAt,
-          allowed: false,
-          deniedReason: deniedResult.deniedReason ?? null,
-          denyMessage: deniedResult.message ?? null,
-          meterFacts: [],
+          entitlement,
+          idempotencyKey,
+          input,
+          meter,
+          metrics,
+          overageStrategy,
+          usesWalletReservation,
+          wideEvent,
         })
-        idempotencyInsertCount = 1
 
-        wideEvent.late_event_rejected = true
-        wideEvent.late_event_lag_ms = lateClosedPeriod.lagMs
-        wideEvent.late_event_period_end_at = lateClosedPeriod.periodEndAt
-        result = deniedResult
-        return deniedResult
-      }
-      wideEvent.late_event_rejected = false
-
-      // Lazy reservation bootstrap. If this DO has never opened a reservation
-      // for the current period, only open one when the current event produces a
-      // positive priced delta. Free-tier events stay off the wallet path; the
-      // first paid boundary-crossing event bootstraps the wallet.
-      //
-      // Out-of-tx because Postgres ↔ SQLite can't share a single transaction.
-      // A small in-memory single-flight prevents duplicate wallet calls while
-      // this DO instance is awaiting external I/O.
-      const preWindow = this.readWalletReservation(this.db)
-      const usesWalletReservation = creditLinePolicy !== "uncapped"
-      const needsBootstrap =
-        usesWalletReservation && (!preWindow || preWindow.reservationId === null)
-      wideEvent.bootstrap_attempted = needsBootstrap
-
-      if (needsBootstrap) {
-        let denial: ApplyResult | null
-        try {
-          denial = await this.bootstrapReservationSingleFlight(input, activeGrants, meter)
-        } catch (error) {
-          wideEvent.bootstrap_outcome = "error"
-          throw error
+        if (txResult.idempotencyEntry) {
+          this.recordBatchIdempotencyResults([txResult.idempotencyEntry])
+          this.schedulePostCommitAlarm()
         }
 
-        if (denial) {
-          wideEvent.bootstrap_outcome = "denied"
-          // Persist the denial idempotently so retries return the same answer
-          // without re-calling the wallet. The DO's normal denial-cache pattern.
-          this.persistBatchIdempotencyResult({
-            eventId: idempotencyKey,
-            createdAt,
-            allowed: false,
-            deniedReason: denial.deniedReason ?? null,
-            denyMessage: denial.message ?? null,
-            meterFacts: [],
-          })
-          idempotencyInsertCount = 1
-          result = denial
-          return denial
+        // Flush+refill must happen after commit so the new consumed/refill
+        // state is visible to `requestFlushAndRefill`, and must outlive the
+        // request via `ctx.waitUntil` so it continues after apply() returns.
+        if (metrics.refillTrigger) {
+          this.ctx.waitUntil(this.requestFlushAndRefill(metrics.refillTrigger))
         }
-        wideEvent.bootstrap_outcome = "success"
-      } else if (!usesWalletReservation) {
-        wideEvent.bootstrap_outcome = "disabled_by_credit_line_policy"
-      } else {
-        wideEvent.bootstrap_outcome = "reservation_already_open"
-      }
 
-      let synchronousRefillAttempted = false
-      for (;;) {
-        refillTrigger = null
+        return { metrics, result: txResult.result }
+      } catch (error) {
+        const recovery = await this.recoverSingleApplyCommitError({
+          createdAt,
+          error,
+          idempotencyKey,
+          metrics,
+          synchronousRefillAttempted,
+          wideEvent,
+        })
+        synchronousRefillAttempted = recovery.synchronousRefillAttempted
 
-        try {
-          const txResult = this.db.transaction((tx) => {
-            const existingBatchEntry = this.getBatchIdempotencyResults().get(idempotencyKey)
-            if (existingBatchEntry) {
-              duplicateCount = 1
-              return {
-                idempotencyEntry: null,
-                result: this.idempotencyEntryToApplyResult(existingBatchEntry),
-              }
-            }
-
-            const meterState = this.readMeterStateDraft(tx, meter.key, createdAt)
-            const adapter = new InMemoryMeterStorageAdapter(meterState)
-            // The engine persists only raw aggregation state through its adapter.
-            // Entitlement usage is written below into compact period state.
-            const engine = new AsyncMeterAggregationEngine([meter.config], adapter, input.now)
-
-            const facts = engine.applyEventSync(input.event, {
-              // A limit hit is still a valid ingestion event. We store the denied
-              // result in the DO idempotency table so queue retries stay stable,
-              // while the ingestion service treats the event as processed.
-              beforePersist: (pendingFacts) => {
-                if (!input.enforceLimit) {
-                  return
-                }
-
-                const exceeded = this.findGrantLimitExceededFact({
-                  activeGrants,
-                  facts: pendingFacts,
-                  overageStrategy,
-                  states: this.readGrantStatesForActiveGrants(
-                    tx,
-                    activeGrants,
-                    input.event.timestamp
-                  ),
-                  entitlement,
-                  timestamp: input.event.timestamp,
-                })
-
-                if (exceeded) {
-                  throw new EntitlementWindowLimitExceededError({
-                    available: exceeded.available,
-                    eventId: input.event.id,
-                    meterKey: exceeded.fact.meterKey,
-                  })
-                }
-              },
-            })
-
-            insertedFactCount = facts.length
-
-            if (meterState.dirty) {
-              meterStateWriteCount = meterState.exists ? 1 : 2
-              this.ensureMeterState(tx, {
-                meterKey: meter.key,
-                createdAt: meterState.createdAt,
-              })
-              tx.update(meterStateTable)
-                .set({
-                  usage: meterState.usage,
-                  updatedAt: meterState.updatedAt,
-                })
-                .where(eq(meterStateTable.meterKey, meter.key))
-                .run()
-            }
-
-            const priced = this.priceFactsFromCompactGrantState(tx, {
-              activeGrants,
-              entitlement,
-              eventTimestamp: input.event.timestamp,
-              facts,
-            })
-            const pricedFacts = priced.pricedFacts
-            pricedFactCount = pricedFacts.length
-            grantAllocationCount = priced.touchedStateCount
-            grantWindowWriteCount = priced.periodWriteCount
-
-            // Wallet check. Only engages when a reservation has been opened on
-            // this window. Without a reservation the DO operates without local
-            // allocation tracking or refill triggers.
-            const window = this.readWalletReservation(tx)
-            let walletLastEventAtStamped = false
-            if (usesWalletReservation && window?.reservationId && pricedFacts.length > 0) {
-              reservationEngaged = true
-              // Pricing has already run through Dinero and was normalized into
-              // ledger-scale integers. Mixed currencies are rejected at grant sync.
-              totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
-
-              const effectiveCost = computeEffectiveWalletCost({
-                requestedCostAmount: totalCost,
-                consumedAmount: window.consumedAmount,
-                flushedAmount: window.flushedAmount,
-              })
-              const currentRemaining = Math.max(0, window.allocationAmount - window.consumedAmount)
-
-              if (effectiveCost.effectiveCostAmount > currentRemaining) {
-                throw new EntitlementWindowReservationUnderfundedError({
-                  eventId: input.event.id,
-                  meterKey: meter.key,
-                  meterSlug: meter.config.eventSlug,
-                  reservationId: window.reservationId,
-                  cost: totalCost,
-                  remaining: currentRemaining,
-                  eventTimestamp: input.event.timestamp,
-                })
-              }
-
-              const nextConsumedAmount = window.consumedAmount + effectiveCost.effectiveCostAmount
-              const currentEventCostAmount = Math.max(0, totalCost)
-              const pricePerEventAmount = Math.max(
-                currentEventCostAmount,
-                computeMaxMarginalPriceMinor(entitlement.featureConfig)
-              )
-              const flushAmount = Math.max(0, nextConsumedAmount - window.flushedAmount)
-              const hasPendingNonFinalFlush =
-                !window.pendingFlushFinal &&
-                window.pendingFlushSeq !== null &&
-                window.pendingFlushSeq !== undefined &&
-                window.pendingFlushSeq > window.flushSeq
-              let spendVelocity = {
-                spendEwmaAmount: window.spendEwmaAmount,
-                lastRateSampledAtMs: window.lastRateSampledAtMs,
-              }
-              let refillDecision = computeRefillDecision({
-                allocationAmount: window.allocationAmount,
-                consumedAmount: nextConsumedAmount,
-                flushedAmount: window.flushedAmount,
-                targetReservationAmount: window.targetReservationAmount,
-                spendEwmaAmount: spendVelocity.spendEwmaAmount,
-                lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
-                maxEventCostAmount: window.maxEventCostAmount,
-                currentEventCostAmount,
-                pricePerEventAmount,
-                policy: this.reservationPolicy(),
-              })
-
-              if (
-                refillDecision.needsRefill &&
-                !window.refillInFlight &&
-                !hasPendingNonFinalFlush &&
-                flushAmount > 0
-              ) {
-                // Only sample velocity for a new refill decision. If a prior
-                // flush seq is pending, retry the persisted refill amount
-                // instead of changing the ledger request for that seq.
-                spendVelocity = updateSpendVelocity({
-                  previousSpendEwmaAmount: window.spendEwmaAmount,
-                  previousLastRateSampledAtMs: window.lastRateSampledAtMs,
-                  flushAmount,
-                  nowMs: createdAt,
-                  policy: this.reservationPolicy(),
-                })
-                refillDecision = computeRefillDecision({
-                  allocationAmount: window.allocationAmount,
-                  consumedAmount: nextConsumedAmount,
-                  flushedAmount: window.flushedAmount,
-                  targetReservationAmount: window.targetReservationAmount,
-                  spendEwmaAmount: spendVelocity.spendEwmaAmount,
-                  lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
-                  maxEventCostAmount: window.maxEventCostAmount,
-                  currentEventCostAmount,
-                  pricePerEventAmount,
-                  policy: this.reservationPolicy(),
-                })
-              }
-
-              wideEvent.wallet_raw_cost_minor = totalCost
-              wideEvent.wallet_effective_cost_minor = effectiveCost.effectiveCostAmount
-              wideEvent.wallet_clamped_negative_minor = effectiveCost.clampedNegativeAmount
-              wideEvent.reservation_remaining_amount = refillDecision.remainingAmount
-              wideEvent.reservation_target_amount = refillDecision.targetReservationAmount
-              wideEvent.reservation_threshold_amount = refillDecision.watermarkAmount
-              wideEvent.reservation_refill_requested_amount = refillDecision.refillAmount
-
-              // Synchronous SQLite write before any post-commit action. On
-              // replay the idempotency row short-circuits above, so this only
-              // runs on the first-success path.
-              tx.update(walletReservationTable)
-                .set({
-                  consumedAmount: nextConsumedAmount,
-                  targetReservationAmount: refillDecision.targetReservationAmount,
-                  spendEwmaAmount: spendVelocity.spendEwmaAmount,
-                  lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
-                  maxEventCostAmount: refillDecision.maxEventCostAmount,
-                  lastEventAt: createdAt,
-                })
-                .run()
-              walletReservationWriteCount++
-              walletLastEventAtStamped = true
-
-              const shouldScheduleRefill =
-                !window.refillInFlight &&
-                (hasPendingNonFinalFlush ||
-                  (refillDecision.needsRefill && refillDecision.refillAmount > 0))
-
-              if (shouldScheduleRefill) {
-                const nextSeq = hasPendingNonFinalFlush
-                  ? window.pendingFlushSeq!
-                  : window.flushSeq + 1
-                const pendingFlushAmount = hasPendingNonFinalFlush
-                  ? (window.pendingFlushAmount ?? flushAmount)
-                  : flushAmount
-                const refillAmount = hasPendingNonFinalFlush
-                  ? window.pendingRefillAmount
-                  : refillDecision.refillAmount
-
-                // pendingRefillAmount is part of the idempotency envelope for
-                // flush:{reservationId}:{flushSeq}. Crash recovery may fold in
-                // newer unflushed consumption, but the refill leg for an
-                // existing seq must stay stable.
-                tx.update(walletReservationTable)
-                  .set({
-                    refillInFlight: true,
-                    pendingFlushSeq: nextSeq,
-                    pendingFlushFinal: false,
-                    pendingFlushAmount,
-                    pendingRefillAmount: refillAmount,
-                  })
-                  .run()
-                walletReservationWriteCount++
-
-                refillTrigger = {
-                  flushSeq: nextSeq,
-                  // Flush leg = cumulative consumed - already flushed. Zero on the
-                  // first refill means capture skips the recognize leg.
-                  flushAmount: pendingFlushAmount,
-                  refillAmount,
-                  effectiveAt: input.event.timestamp,
-                }
-              }
-            }
-
-            const meterFacts = pricedFacts.map((pricedFact) =>
-              this.buildMeterFactPayload({
-                createdAt,
-                input,
-                meter,
-                pricedFact,
-              })
-            )
-            outboxInsertCount = 0
-            outboxFactCount = 0
-
-            const idempotencyEntry: BatchIdempotencyEntry = {
-              eventId: idempotencyKey,
-              createdAt,
-              allowed: true,
-              deniedReason: null,
-              denyMessage: null,
-              meterFacts,
-            }
-            this.writeBatchIdempotencyResults(tx, [idempotencyEntry])
-            idempotencyInsertCount = 1
-
-            // Stamp the inactivity watermark on every successful commit. alarm()
-            // uses `now - lastEventAt > INACTIVITY_THRESHOLD_MS` to decide when to
-            // close out a dormant reservation without waiting for period end.
-            if (window?.reservationId && !walletLastEventAtStamped) {
-              tx.update(walletReservationTable).set({ lastEventAt: createdAt }).run()
-              walletReservationWriteCount++
-            }
-
-            return {
-              idempotencyEntry,
-              result: { allowed: true, meterFacts } as ApplyResult,
-            }
-          })
-
-          if (txResult.idempotencyEntry) {
-            this.recordBatchIdempotencyResults([txResult.idempotencyEntry])
-            this.schedulePostCommitAlarm()
-          }
-
-          // Flush+refill must happen after commit so the new consumed/refill
-          // state is visible to `requestFlushAndRefill`, and must outlive the
-          // request via `ctx.waitUntil` so it continues after apply() returns.
-          if (refillTrigger) {
-            this.ctx.waitUntil(this.requestFlushAndRefill(refillTrigger))
-          }
-
-          result = txResult.result
-          return txResult.result
-        } catch (error) {
-          let handledError: unknown = error
-
-          if (handledError instanceof EntitlementWindowReservationUnderfundedError) {
-            if (!synchronousRefillAttempted) {
-              synchronousRefillAttempted = true
-              wideEvent.sync_refill_attempted = true
-              wideEvent.sync_refill_cost_minor = handledError.params.cost
-              wideEvent.sync_refill_remaining_minor = handledError.params.remaining
-
-              const growth = await this.growReservationForCurrentEvent(handledError.params)
-
-              if (growth) {
-                wideEvent.sync_refill_outcome = growth.kind
-                if (growth.kind === "refilled") {
-                  wideEvent.sync_refill_seq = growth.trigger.flushSeq
-                  wideEvent.sync_refill_flush_amount = growth.trigger.flushAmount
-                  wideEvent.sync_refill_requested_amount = growth.trigger.refillAmount
-                }
-                continue
-              }
-            }
-
-            handledError = new EntitlementWindowWalletEmptyError(handledError.params)
-          }
-
-          if (handledError instanceof EntitlementWindowLimitExceededError) {
-            const deniedResult: ApplyResult = {
-              allowed: false,
-              deniedReason: "LIMIT_EXCEEDED",
-              message: handledError.message,
-            }
-
-            // limit exceeded is a valid state
-            this.persistBatchIdempotencyResult({
-              eventId: idempotencyKey,
-              createdAt,
-              allowed: false,
-              deniedReason: deniedResult.deniedReason ?? null,
-              denyMessage: deniedResult.message ?? null,
-              meterFacts: [],
-            })
-            idempotencyInsertCount = 1
-
-            this.ctx.waitUntil(this.closeReservation({ closeReason: "limit_reached" }))
-            result = deniedResult
-            return deniedResult
-          }
-
-          if (handledError instanceof EntitlementWindowWalletEmptyError) {
-            const deniedResult: ApplyResult = {
-              allowed: false,
-              deniedReason: "WALLET_EMPTY",
-              message: handledError.message,
-            }
-
-            // wallet empty is a valid state as well. By this point the DO has
-            // already made one synchronous growth attempt when the local
-            // reservation was the only thing short of funding the event.
-            this.persistBatchIdempotencyResult({
-              eventId: idempotencyKey,
-              createdAt,
-              allowed: false,
-              deniedReason: deniedResult.deniedReason ?? null,
-              denyMessage: deniedResult.message ?? null,
-              meterFacts: [],
-            })
-            idempotencyInsertCount = 1
-
-            this.ctx.waitUntil(this.closeReservation({ closeReason: "wallet_empty" }))
-
-            result = deniedResult
-            return deniedResult
-          }
-
-          if (
-            handledError instanceof EventTimestampTooFarInFutureError ||
-            handledError instanceof EventTimestampTooOldError
-          ) {
-            throw handledError
-          }
-
-          throw handledError
+        if (recovery.kind === "retry") {
+          continue
         }
-      }
-    } catch (error) {
-      thrown = error
-      throw error
-    } finally {
-      wideEvent.event_count = 1
-      wideEvent.processed_count = result ? 1 : 0
-      wideEvent.duplicate_count = duplicateCount
-      wideEvent.fact_count = insertedFactCount
-      wideEvent.priced_fact_count = pricedFactCount
-      wideEvent.grant_allocation_count = grantAllocationCount
-      wideEvent.meter_state_write_count = meterStateWriteCount
-      wideEvent.grant_window_write_count = grantWindowWriteCount
-      wideEvent.wallet_reservation_write_count = walletReservationWriteCount
-      wideEvent.outbox_insert_count = outboxInsertCount
-      wideEvent.outbox_fact_count = outboxFactCount
-      wideEvent.idempotency_insert_count = idempotencyInsertCount
-      wideEvent.cost_minor = totalCost
-      wideEvent.reservation_engaged = reservationEngaged
 
-      // refillTrigger is assigned inside a transaction callback, which
-      // defeats TS flow analysis here — it still thinks the value is `null`.
-      const trigger = refillTrigger as RefillTrigger | null
-      wideEvent.refill_triggered = trigger !== null
-      if (trigger) {
-        wideEvent.refill_seq = trigger.flushSeq
-        wideEvent.reservation_refill_requested_amount = trigger.refillAmount
-        wideEvent.refill_flush_amount = trigger.flushAmount
-      }
-      wideEvent.duration_ms = Date.now() - startTime
-
-      if (result) {
-        wideEvent.allowed = result.allowed
-        wideEvent.denied_reason = result.deniedReason ?? null
-        if (!result.allowed) {
-          wideEvent.deny_message = result.message ?? null
-        }
-        wideEvent.outcome = result.allowed ? "success" : "denied"
-      } else if (thrown) {
-        wideEvent.outcome = "error"
-        wideEvent.error_type = thrown instanceof Error ? thrown.name : "unknown"
-        wideEvent.error_message = thrown instanceof Error ? thrown.message : String(thrown)
-      }
-
-      if (options.emitLog ?? true) {
-        this.logger.info("entitlement apply", wideEvent)
+        return { metrics, result: recovery.result }
       }
     }
+  }
+
+  private async recoverSingleApplyCommitError(params: {
+    createdAt: number
+    error: unknown
+    idempotencyKey: string
+    metrics: SingleApplyExecutionMetrics
+    synchronousRefillAttempted: boolean
+    wideEvent: Record<string, unknown>
+  }): Promise<SingleApplyErrorRecovery> {
+    const { createdAt, idempotencyKey, metrics, wideEvent } = params
+    let { synchronousRefillAttempted } = params
+    let handledError: unknown = params.error
+
+    if (handledError instanceof EntitlementWindowReservationUnderfundedError) {
+      if (!synchronousRefillAttempted) {
+        synchronousRefillAttempted = true
+        wideEvent.sync_refill_attempted = true
+        wideEvent.sync_refill_cost_minor = handledError.params.cost
+        wideEvent.sync_refill_remaining_minor = handledError.params.remaining
+
+        const growth = await this.growReservationForCurrentEvent(handledError.params)
+
+        if (growth) {
+          wideEvent.sync_refill_outcome = growth.kind
+          if (growth.kind === "refilled") {
+            wideEvent.sync_refill_seq = growth.trigger.flushSeq
+            wideEvent.sync_refill_flush_amount = growth.trigger.flushAmount
+            wideEvent.sync_refill_requested_amount = growth.trigger.refillAmount
+          }
+          return { kind: "retry", synchronousRefillAttempted }
+        }
+      }
+
+      handledError = new EntitlementWindowWalletEmptyError(handledError.params)
+    }
+
+    if (handledError instanceof EntitlementWindowLimitExceededError) {
+      const deniedResult = this.persistDeniedApplyResult({
+        idempotencyKey,
+        createdAt,
+        deniedReason: "LIMIT_EXCEEDED",
+        message: handledError.message,
+        closeReason: "limit_reached",
+      })
+      metrics.idempotencyInsertCount = 1
+
+      return { kind: "done", result: deniedResult, synchronousRefillAttempted }
+    }
+
+    if (handledError instanceof EntitlementWindowWalletEmptyError) {
+      const deniedResult = this.persistDeniedApplyResult({
+        idempotencyKey,
+        createdAt,
+        deniedReason: "WALLET_EMPTY",
+        message: handledError.message,
+        closeReason: "wallet_empty",
+      })
+      metrics.idempotencyInsertCount = 1
+
+      return { kind: "done", result: deniedResult, synchronousRefillAttempted }
+    }
+
+    if (
+      handledError instanceof EventTimestampTooFarInFutureError ||
+      handledError instanceof EventTimestampTooOldError
+    ) {
+      throw handledError
+    }
+
+    throw handledError
+  }
+
+  private commitSingleApplyTransaction(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    entitlement: EntitlementConfigInput
+    idempotencyKey: string
+    input: ApplyInput
+    meter: MeterIdentity
+    metrics: SingleApplyExecutionMetrics
+    overageStrategy: OverageStrategy
+    usesWalletReservation: boolean
+    wideEvent: Record<string, unknown>
+  }): { idempotencyEntry: BatchIdempotencyEntry | null; result: ApplyResult } {
+    const {
+      activeGrants,
+      createdAt,
+      entitlement,
+      idempotencyKey,
+      input,
+      meter,
+      metrics,
+      overageStrategy,
+      usesWalletReservation,
+      wideEvent,
+    } = params
+
+    return this.db.transaction((tx) => {
+      const existingBatchEntry = this.getBatchIdempotencyResults().get(idempotencyKey)
+      if (existingBatchEntry) {
+        metrics.duplicateCount = 1
+        return {
+          idempotencyEntry: null,
+          result: idempotencyEntryToApplyResult(existingBatchEntry),
+        }
+      }
+
+      const pricedFacts = this.applyAndPriceSingleApplyEvent(tx, {
+        activeGrants,
+        createdAt,
+        entitlement,
+        input,
+        meter,
+        metrics,
+        overageStrategy,
+      })
+
+      const walletSpend = this.applySingleApplyWalletReservationSpend(tx, {
+        createdAt,
+        entitlement,
+        input,
+        meter,
+        metrics,
+        pricedFacts,
+        usesWalletReservation,
+        wideEvent,
+      })
+
+      const meterFacts = pricedFacts.map((pricedFact) =>
+        this.buildMeterFactPayload({
+          createdAt,
+          input,
+          meter,
+          pricedFact,
+        })
+      )
+      metrics.outboxInsertCount = 0
+      metrics.outboxFactCount = 0
+
+      const idempotencyEntry = this.persistAllowedSingleApplyResult(tx, {
+        createdAt,
+        idempotencyKey,
+        meterFacts,
+        metrics,
+      })
+
+      this.stampSingleApplyWalletActivity(tx, {
+        createdAt,
+        metrics,
+        walletSpend,
+      })
+
+      return {
+        idempotencyEntry,
+        result: { allowed: true, meterFacts } as ApplyResult,
+      }
+    })
+  }
+
+  private applyAndPriceSingleApplyEvent(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    params: {
+      activeGrants: ActiveGrantInput[]
+      createdAt: number
+      entitlement: EntitlementConfigInput
+      input: ApplyInput
+      meter: MeterIdentity
+      metrics: SingleApplyExecutionMetrics
+      overageStrategy: OverageStrategy
+    }
+  ): PricedFact[] {
+    const { activeGrants, createdAt, entitlement, input, meter, metrics, overageStrategy } = params
+    const { facts, meterState } = this.applySingleMeterEventInTransaction({
+      activeGrants,
+      createdAt,
+      entitlement,
+      input,
+      meter,
+      metrics,
+      overageStrategy,
+      tx,
+    })
+
+    this.persistMeterStateDraft(tx, { meter, meterState, metrics })
+
+    const priced = this.priceFactsFromCompactGrantState(tx, {
+      activeGrants,
+      entitlement,
+      eventTimestamp: input.event.timestamp,
+      facts,
+    })
+    metrics.pricedFactCount = priced.pricedFacts.length
+    metrics.grantAllocationCount = priced.touchedStateCount
+    metrics.grantWindowWriteCount = priced.periodWriteCount
+
+    return priced.pricedFacts
+  }
+
+  private applySingleApplyWalletReservationSpend(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    params: {
+      createdAt: number
+      entitlement: EntitlementConfigInput
+      input: ApplyInput
+      meter: MeterIdentity
+      metrics: SingleApplyExecutionMetrics
+      pricedFacts: PricedFact[]
+      usesWalletReservation: boolean
+      wideEvent: Record<string, unknown>
+    }
+  ): SingleApplyWalletSpendOutcome {
+    const {
+      createdAt,
+      entitlement,
+      input,
+      meter,
+      metrics,
+      pricedFacts,
+      usesWalletReservation,
+      wideEvent,
+    } = params
+    // Wallet check. Only engages when a reservation has been opened on
+    // this window. Without a reservation the DO operates without local
+    // allocation tracking or refill triggers.
+    const window = this.readWalletReservation(tx)
+    if (!usesWalletReservation || !window?.reservationId || pricedFacts.length === 0) {
+      return { lastEventAtStamped: false, window }
+    }
+
+    metrics.reservationEngaged = true
+    const walletSpend = this.applyWalletReservationSpendForEvent({
+      createdAt,
+      entitlement,
+      input,
+      meter,
+      pricedFacts,
+      tx,
+      wideEvent,
+      window: { ...window, reservationId: window.reservationId },
+    })
+    metrics.totalCost = walletSpend.totalCost
+    metrics.walletReservationWriteCount += walletSpend.walletReservationWriteCount
+    metrics.refillTrigger = walletSpend.refillTrigger
+    return { lastEventAtStamped: true, window }
+  }
+
+  private stampSingleApplyWalletActivity(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    params: {
+      createdAt: number
+      metrics: SingleApplyExecutionMetrics
+      walletSpend: SingleApplyWalletSpendOutcome
+    }
+  ): void {
+    const { createdAt, metrics, walletSpend } = params
+    // Stamp the inactivity watermark on every successful commit. alarm()
+    // uses `now - lastEventAt > INACTIVITY_THRESHOLD_MS` to decide when to
+    // close out a dormant reservation without waiting for period end.
+    if (!walletSpend.window?.reservationId || walletSpend.lastEventAtStamped) {
+      return
+    }
+
+    tx.update(walletReservationTable).set({ lastEventAt: createdAt }).run()
+    metrics.walletReservationWriteCount++
+  }
+
+  private applySingleMeterEventInTransaction(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    entitlement: EntitlementConfigInput
+    input: ApplyInput
+    meter: MeterIdentity
+    metrics: SingleApplyExecutionMetrics
+    overageStrategy: OverageStrategy
+    tx: DrizzleSqliteDODatabase<typeof schema>
+  }): { facts: Fact[]; meterState: MeterStateDraft } {
+    const { activeGrants, createdAt, entitlement, input, meter, metrics, overageStrategy, tx } =
+      params
+    const meterState = this.readMeterStateDraft(tx, meter.key, createdAt)
+    const adapter = new InMemoryMeterStorageAdapter(meterState)
+    // The engine persists only raw aggregation state through its adapter.
+    // Entitlement usage is written below into compact period state.
+    const engine = new AsyncMeterAggregationEngine([meter.config], adapter, input.now)
+
+    const facts = engine.applyEventSync(input.event, {
+      // A limit hit is still a valid ingestion event. We store the denied
+      // result in the DO idempotency table so queue retries stay stable,
+      // while the ingestion service treats the event as processed.
+      beforePersist: (pendingFacts) => {
+        if (!input.enforceLimit) {
+          return
+        }
+
+        const exceeded = this.findGrantLimitExceededFact({
+          activeGrants,
+          facts: pendingFacts,
+          overageStrategy,
+          states: this.readGrantStatesForActiveGrants(tx, activeGrants, input.event.timestamp),
+          entitlement,
+          timestamp: input.event.timestamp,
+        })
+
+        if (exceeded) {
+          throw new EntitlementWindowLimitExceededError({
+            available: exceeded.available,
+            eventId: input.event.id,
+            meterKey: exceeded.fact.meterKey,
+          })
+        }
+      },
+    })
+    metrics.insertedFactCount = facts.length
+
+    return { facts, meterState }
+  }
+
+  private persistMeterStateDraft(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    params: {
+      meter: MeterIdentity
+      meterState: MeterStateDraft
+      metrics: Pick<SingleApplyExecutionMetrics, "meterStateWriteCount">
+    }
+  ): void {
+    const { meter, meterState, metrics } = params
+
+    if (!meterState.dirty) {
+      return
+    }
+
+    metrics.meterStateWriteCount = meterState.exists ? 1 : 2
+    this.ensureMeterState(tx, {
+      meterKey: meter.key,
+      createdAt: meterState.createdAt,
+    })
+    tx.update(meterStateTable)
+      .set({
+        usage: meterState.usage,
+        updatedAt: meterState.updatedAt,
+      })
+      .where(eq(meterStateTable.meterKey, meter.key))
+      .run()
+  }
+
+  private persistAllowedSingleApplyResult(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    params: {
+      createdAt: number
+      idempotencyKey: string
+      meterFacts: BatchIdempotencyEntry["meterFacts"]
+      metrics: Pick<SingleApplyExecutionMetrics, "idempotencyInsertCount">
+    }
+  ): BatchIdempotencyEntry {
+    const { createdAt, idempotencyKey, meterFacts, metrics } = params
+    const idempotencyEntry: BatchIdempotencyEntry = {
+      eventId: idempotencyKey,
+      createdAt,
+      allowed: true,
+      deniedReason: null,
+      denyMessage: null,
+      meterFacts,
+    }
+    this.writeBatchIdempotencyResults(tx, [idempotencyEntry])
+    metrics.idempotencyInsertCount = 1
+    return idempotencyEntry
+  }
+
+  private applyWalletReservationSpendForEvent(params: {
+    createdAt: number
+    entitlement: EntitlementConfigInput
+    input: ApplyInput
+    meter: MeterIdentity
+    pricedFacts: PricedFact[]
+    tx: DrizzleSqliteDODatabase<typeof schema>
+    wideEvent: Record<string, unknown>
+    window: OpenWalletReservationSnapshot
+  }): {
+    refillTrigger: RefillTrigger | null
+    totalCost: number
+    walletReservationWriteCount: number
+  } {
+    const { createdAt, entitlement, input, meter, pricedFacts, tx, wideEvent, window } = params
+    let walletReservationWriteCount = 0
+    let refillTrigger: RefillTrigger | null = null
+
+    // Pricing has already run through Dinero and was normalized into
+    // ledger-scale integers. Mixed currencies are rejected at grant sync.
+    const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+    const spendPlan = planWalletReservationSpend({
+      createdAt,
+      entitlement,
+      eventTimestamp: input.event.timestamp,
+      policy: this.reservationPolicy(),
+      totalCost,
+      window,
+    })
+
+    if (spendPlan.kind === "underfunded") {
+      throw new EntitlementWindowReservationUnderfundedError({
+        eventId: input.event.id,
+        meterKey: meter.key,
+        meterSlug: meter.config.eventSlug,
+        reservationId: window.reservationId,
+        cost: totalCost,
+        remaining: spendPlan.currentRemaining,
+        eventTimestamp: input.event.timestamp,
+      })
+    }
+
+    wideEvent.wallet_raw_cost_minor = totalCost
+    wideEvent.wallet_effective_cost_minor = spendPlan.effectiveCostAmount
+    wideEvent.wallet_clamped_negative_minor = spendPlan.clampedNegativeAmount
+    wideEvent.reservation_remaining_amount = spendPlan.remainingAmount
+    wideEvent.reservation_target_amount = spendPlan.targetReservationAmount
+    wideEvent.reservation_threshold_amount = spendPlan.thresholdAmount
+    wideEvent.reservation_refill_requested_amount = spendPlan.refillAmount
+
+    // Synchronous SQLite write before any post-commit action. On replay the
+    // idempotency row short-circuits above, so this only runs on the
+    // first-success path.
+    tx.update(walletReservationTable).set(spendPlan.walletStateUpdate).run()
+    walletReservationWriteCount++
+
+    if (spendPlan.refillStateUpdate) {
+      // pendingRefillAmount is part of the idempotency envelope for
+      // flush:{reservationId}:{flushSeq}. Crash recovery may fold in newer
+      // unflushed consumption, but the refill leg for an existing seq must stay
+      // stable.
+      tx.update(walletReservationTable).set(spendPlan.refillStateUpdate).run()
+      walletReservationWriteCount++
+      refillTrigger = spendPlan.refillTrigger
+    }
+
+    return { refillTrigger, totalCost, walletReservationWriteCount }
   }
 
   public async getEnforcementState(
@@ -1735,7 +1907,7 @@ export class EntitlementWindowDO extends DurableObject {
       timestamp,
     })
 
-    const currency = this.extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig)
+    const currency = extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig)
 
     if (!currency) {
       throw new Error("No currency found for entitlement")
@@ -1820,131 +1992,20 @@ export class EntitlementWindowDO extends DurableObject {
       const tinybirdFlushFailed = false
       wideEvent.tinybird_flush_failed = tinybirdFlushFailed
 
-      // Keep idempotency keys beyond the public ingestion cap so delayed
-      // cleanup cannot erase the replay seal for an event we would accept.
-      let staleIdempotencyCount = 0
-      const runIdempotencyCleanup = this.shouldRunIdempotencyCleanup(now)
-      wideEvent.idempotency_cleanup_ran = runIdempotencyCleanup
-
-      if (runIdempotencyCleanup) {
-        staleIdempotencyCount = this.cleanupStaleIdempotencyKeys(now)
-        this.lastIdempotencyCleanupAt = now
-        wideEvent.idempotency_next_cleanup_at = now + IDEMPOTENCY_CLEANUP_INTERVAL_MS
-      }
-
-      wideEvent.idempotency_cleaned = staleIdempotencyCount
+      wideEvent.idempotency_cleaned = this.runAlarmIdempotencyCleanup(now, wideEvent)
 
       wideEvent.outbox_remaining = remainingOutboxCount
       wideEvent.outbox_alert = false
 
-      // Final-flush detection. Any of three triggers converges on the same
-      // flush path: period end, inactivity, or an explicit deletion
-      // request. A DO without a reservation (or one marked
-      // `recoveryRequired`) skips the flush — there's nothing to close out
-      // or the last attempt failed terminally and an operator has to look.
-      const window = this.readWalletReservation(this.db)
       const inactivityMs = inactivityThresholdMs(this.runtimeEnv)
-
-      wideEvent.reservation_id = window?.reservationId ?? null
-      wideEvent.recovery_required = window?.recoveryRequired ?? false
-
-      if (window?.reservationId && !window.recoveryRequired) {
-        const isPeriodEnd = window.reservationEndAt !== null && now >= window.reservationEndAt
-        const isInactive = window.lastEventAt !== null && now - window.lastEventAt >= inactivityMs
-        const isDeletionPending = window.deletionRequested
-
-        if (isPeriodEnd || isInactive || isDeletionPending) {
-          const closeReason: ReservationCloseReason = isDeletionPending
-            ? "deletion_requested"
-            : isPeriodEnd
-              ? "period_close"
-              : "inactivity"
-          wideEvent.close_reservation_reason = closeReason
-          const hasPendingWalletFlush = this.hasPendingWalletFlush(window)
-          const isPendingFinalFlush = hasPendingWalletFlush && window.pendingFlushFinal
-          if (hasPendingWalletFlush && !isPendingFinalFlush) {
-            wideEvent.close_reservation_deferred = true
-            wideEvent.pending_flush_seq = window.pendingFlushSeq
-            wideEvent.refill_in_flight = window.refillInFlight
-
-            if (isDeletionPending) {
-              this.logOperatorActionRequired("entitlement deletion has pending wallet flush", {
-                pending_flush_seq: window.pendingFlushSeq,
-                refill_in_flight: window.refillInFlight,
-                reservation_id: window.reservationId,
-              })
-              wideEvent.operator_action_required = true
-              wideEvent.outcome = "operator_required"
-              await this.ctx.storage.deleteAlarm()
-              return
-            }
-          }
-
-          if (!hasPendingWalletFlush || isPendingFinalFlush) {
-            const closeResult = await this.closeReservation({
-              allowDeletionRequested: isDeletionPending,
-              closeReason,
-              recoverPendingFinal: isPendingFinalFlush,
-            })
-            wideEvent.close_reservation_ok = closeResult.ok
-            wideEvent.close_reservation_outcome = closeResult.outcome
-            if (!closeResult.ok) {
-              wideEvent.close_reservation_error_message = closeResult.errorMessage ?? null
-              wideEvent.operator_action_required = true
-              wideEvent.outcome = "operator_required"
-              this.logOperatorActionRequired("entitlement wallet reservation close failed", {
-                error_message: closeResult.errorMessage ?? null,
-                close_reservation_outcome: closeResult.outcome,
-                reservation_id: window.reservationId,
-              })
-              await this.ctx.storage.deleteAlarm()
-              return
-            }
-          }
-
-          if (isDeletionPending) {
-            const latestWindow = this.readWalletReservation(this.db)
-            const latestOutboxCount = 0
-            wideEvent.outbox_remaining = latestOutboxCount
-            wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, latestOutboxCount)
-            wideEvent.recovery_required = latestWindow?.recoveryRequired ?? false
-            wideEvent.pending_wallet_flush = this.hasPendingWalletFlush(latestWindow)
-
-            if (this.isCleanupComplete(latestWindow, latestOutboxCount)) {
-              wideEvent.self_destruct = true
-              wideEvent.outcome = "deleted"
-              await this.ctx.storage.deleteAlarm()
-              await this.ctx.storage.deleteAll()
-              return
-            }
-
-            if (
-              tinybirdFlushFailed ||
-              this.hasPendingWalletFlush(latestWindow) ||
-              (latestWindow?.recoveryRequired ?? false)
-            ) {
-              wideEvent.self_destruct = false
-              wideEvent.operator_action_required = true
-              wideEvent.outcome = "operator_required"
-              this.logOperatorActionRequired("entitlement deletion cleanup failed", {
-                outbox_remaining: latestOutboxCount,
-                pending_flush_seq: latestWindow?.pendingFlushSeq ?? null,
-                recovery_required: latestWindow?.recoveryRequired ?? false,
-                reservation_id: latestWindow ? latestWindow.reservationId : window.reservationId,
-                tinybird_flush_failed: tinybirdFlushFailed,
-              })
-              await this.ctx.storage.deleteAlarm()
-              return
-            }
-
-            const nextAlarmAt = now + FLUSH_INTERVAL_MS
-            wideEvent.self_destruct = false
-            wideEvent.next_alarm_at = nextAlarmAt
-            wideEvent.outcome = "scheduled"
-            await this.scheduleAlarm(nextAlarmAt)
-            return
-          }
-        }
+      const closeHandled = await this.handleAlarmReservationClose({
+        inactivityMs,
+        now,
+        tinybirdFlushFailed,
+        wideEvent,
+      })
+      if (closeHandled) {
+        return
       }
 
       // Time-based flush: if a reservation is still open with unflushed
@@ -1958,176 +2019,20 @@ export class EntitlementWindowDO extends DurableObject {
       // (single-threaded per DO, but the apply path's `ctx.waitUntil` can
       // outlive the request and we don't want the alarm to race it).
       const flushIntervalMs = maxFlushIntervalMs(this.runtimeEnv)
-      const postFlushWindow = this.readWalletReservation(this.db)
-      let timeFlushTriggered = false
-      if (
-        postFlushWindow?.reservationId &&
-        !postFlushWindow.recoveryRequired &&
-        !postFlushWindow.refillInFlight
-      ) {
-        const unflushed = Math.max(
-          0,
-          postFlushWindow.consumedAmount - postFlushWindow.flushedAmount
-        )
-        const elapsedSinceLastFlush =
-          postFlushWindow.lastFlushedAt !== null
-            ? now - postFlushWindow.lastFlushedAt
-            : Number.POSITIVE_INFINITY
+      wideEvent.time_flush_triggered = await this.triggerTimeBasedWalletFlush({
+        flushIntervalMs,
+        now,
+        wideEvent,
+      })
 
-        if (unflushed > 0 && elapsedSinceLastFlush >= flushIntervalMs) {
-          timeFlushTriggered = true
-          const nextSeq = postFlushWindow.flushSeq + 1
-          const spendVelocity = updateSpendVelocity({
-            previousSpendEwmaAmount: postFlushWindow.spendEwmaAmount,
-            previousLastRateSampledAtMs: postFlushWindow.lastRateSampledAtMs,
-            flushAmount: unflushed,
-            nowMs: now,
-            policy: this.reservationPolicy(),
-          })
-          wideEvent.time_flush_seq = nextSeq
-          wideEvent.time_flush_amount = unflushed
-          this.db
-            .update(walletReservationTable)
-            .set({
-              refillInFlight: true,
-              pendingFlushSeq: nextSeq,
-              pendingFlushFinal: false,
-              pendingFlushAmount: unflushed,
-              pendingRefillAmount: 0,
-              spendEwmaAmount: spendVelocity.spendEwmaAmount,
-              lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
-            })
-            .run()
-          await this.requestFlushAndRefill({
-            flushSeq: nextSeq,
-            flushAmount: unflushed,
-            // Time-driven flush is purely about ledger freshness — don't
-            // top up allocation here. The DO's own refill trigger handles
-            // that when the threshold is actually crossed.
-            refillAmount: 0,
-            effectiveAt: Date.now(),
-          })
-        }
-      }
-      wideEvent.time_flush_triggered = timeFlushTriggered
-
-      const lifecycleEndAt = this.readLifecycleEndAt()
-      wideEvent.lifecycle_end_at = lifecycleEndAt
-
-      if (!lifecycleEndAt) {
-        if (remainingOutboxCount > 0) {
-          const nextAlarmAt = now + FLUSH_INTERVAL_MS
-          wideEvent.next_alarm_at = nextAlarmAt
-          wideEvent.outcome = "scheduled"
-          await this.scheduleAlarm(nextAlarmAt)
-          return
-        }
-
-        // We don't know when this DO can be safely collected. Go to sleep.
-        // Next apply() will wake us up.
-        wideEvent.outcome = "idle"
-        return
-      }
-
-      // After the latest known grant/reservation window we keep the DO alive
-      // for the full idempotency TTL before self-destructing.
-      const selfDestructAt = lifecycleEndAt + DO_IDEMPOTENCY_TTL_MS
-
-      if (now > selfDestructAt) {
-        const latestWindow = this.readWalletReservation(this.db)
-        wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, remainingOutboxCount)
-        wideEvent.self_destruct_due = true
-        wideEvent.pending_wallet_flush = this.hasPendingWalletFlush(latestWindow)
-        wideEvent.recovery_required = latestWindow?.recoveryRequired ?? false
-
-        if (this.isCleanupComplete(latestWindow, remainingOutboxCount)) {
-          wideEvent.self_destruct = true
-          wideEvent.outcome = "deleted"
-          await this.ctx.storage.deleteAlarm()
-          await this.ctx.storage.deleteAll()
-          return
-        }
-
-        if (
-          tinybirdFlushFailed ||
-          this.hasPendingWalletFlush(latestWindow) ||
-          (latestWindow?.recoveryRequired ?? false)
-        ) {
-          wideEvent.self_destruct = false
-          wideEvent.operator_action_required = true
-          wideEvent.outcome = "operator_required"
-          this.logOperatorActionRequired("entitlement retention cleanup failed", {
-            lifecycle_end_at: lifecycleEndAt,
-            outbox_remaining: remainingOutboxCount,
-            pending_flush_seq: latestWindow?.pendingFlushSeq ?? null,
-            recovery_required: latestWindow?.recoveryRequired ?? false,
-            self_destruct_at: selfDestructAt,
-            tinybird_flush_failed: tinybirdFlushFailed,
-          })
-          await this.ctx.storage.deleteAlarm()
-          return
-        }
-
-        const nextAlarmAt = now + FLUSH_INTERVAL_MS
-        wideEvent.self_destruct = false
-        wideEvent.next_alarm_at = nextAlarmAt
-        wideEvent.outcome = "scheduled"
-        await this.scheduleAlarm(nextAlarmAt)
-        return
-      }
-
-      // Pick the soonest among: pending wallet recheck, time-based flush
-      // deadline, reservation close deadlines, and self-destruct. Re-read
-      // the window because the time-flush above may have just updated
-      // `lastFlushedAt`.
-      const finalWindow = this.readWalletReservation(this.db)
-      const candidates: number[] = []
-      const pushFutureCandidate = (timestamp: number | null) => {
-        if (timestamp !== null && Number.isFinite(timestamp) && timestamp > now) {
-          candidates.push(timestamp)
-        }
-      }
-
-      if (remainingOutboxCount > 0) {
-        candidates.push(now + FLUSH_INTERVAL_MS)
-      }
-
-      if (finalWindow?.reservationId && !finalWindow.recoveryRequired) {
-        const pendingWalletFlush = this.hasPendingWalletFlush(finalWindow)
-        const unflushed = Math.max(0, finalWindow.consumedAmount - finalWindow.flushedAmount)
-
-        if (pendingWalletFlush) {
-          candidates.push(now + FLUSH_INTERVAL_MS)
-        }
-
-        if (unflushed > 0 && !finalWindow.refillInFlight) {
-          const baseline = finalWindow.lastFlushedAt ?? now
-          const flushAt = baseline + flushIntervalMs
-          candidates.push(flushAt > now ? flushAt : now + FLUSH_INTERVAL_MS)
-        }
-
-        pushFutureCandidate(finalWindow.reservationEndAt)
-        pushFutureCandidate(
-          finalWindow.lastEventAt !== null ? finalWindow.lastEventAt + inactivityMs : null
-        )
-      }
-
-      if (candidates.length === 0) {
-        // Nothing pending — wake up at retention expiry and emit the
-        // operator-facing retained-storage alarm.
-        wideEvent.next_alarm_at = selfDestructAt
-        wideEvent.outcome = "scheduled"
-        await this.scheduleAlarm(selfDestructAt)
-        return
-      }
-
-      const target = Math.min(...candidates, selfDestructAt)
-      // Never schedule in the past — at minimum wait one tick so we don't
-      // hot-loop the alarm on a baseline that's already overdue.
-      const scheduled = Math.max(now + 1_000, target)
-      wideEvent.next_alarm_at = scheduled
-      wideEvent.outcome = "scheduled"
-      await this.scheduleAlarm(scheduled)
+      await this.handleAlarmLifecycle({
+        flushIntervalMs,
+        inactivityMs,
+        now,
+        remainingOutboxCount,
+        tinybirdFlushFailed,
+        wideEvent,
+      })
     } catch (error) {
       thrown = error
       throw error
@@ -2140,6 +2045,462 @@ export class EntitlementWindowDO extends DurableObject {
       }
       this.logger.info("entitlement alarm", wideEvent)
     }
+  }
+
+  private async handleAlarmLifecycle(params: {
+    flushIntervalMs: number
+    inactivityMs: number
+    now: number
+    remainingOutboxCount: number
+    tinybirdFlushFailed: boolean
+    wideEvent: Record<string, unknown>
+  }): Promise<void> {
+    const {
+      flushIntervalMs,
+      inactivityMs,
+      now,
+      remainingOutboxCount,
+      tinybirdFlushFailed,
+      wideEvent,
+    } = params
+    const lifecycleEndAt = this.readLifecycleEndAt()
+    wideEvent.lifecycle_end_at = lifecycleEndAt
+
+    if (!lifecycleEndAt) {
+      if (remainingOutboxCount > 0) {
+        const nextAlarmAt = now + FLUSH_INTERVAL_MS
+        wideEvent.next_alarm_at = nextAlarmAt
+        wideEvent.outcome = "scheduled"
+        await this.scheduleAlarm(nextAlarmAt)
+        return
+      }
+
+      // We don't know when this DO can be safely collected. Go to sleep.
+      // Next apply() will wake us up.
+      wideEvent.outcome = "idle"
+      return
+    }
+
+    // After the latest known grant/reservation window we keep the DO alive
+    // for the full idempotency TTL before self-destructing.
+    const selfDestructAt = lifecycleEndAt + DO_IDEMPOTENCY_TTL_MS
+
+    if (now > selfDestructAt) {
+      await this.handleRetentionCleanupAlarm({
+        lifecycleEndAt,
+        now,
+        remainingOutboxCount,
+        selfDestructAt,
+        tinybirdFlushFailed,
+        wideEvent,
+      })
+      return
+    }
+
+    await this.scheduleNextLifecycleAlarm({
+      flushIntervalMs,
+      inactivityMs,
+      now,
+      remainingOutboxCount,
+      selfDestructAt,
+      wideEvent,
+    })
+  }
+
+  private async handleAlarmReservationClose(params: {
+    inactivityMs: number
+    now: number
+    tinybirdFlushFailed: boolean
+    wideEvent: Record<string, unknown>
+  }): Promise<boolean> {
+    const { inactivityMs, now, tinybirdFlushFailed, wideEvent } = params
+
+    // Final-flush detection. Any of three triggers converges on the same
+    // flush path: period end, inactivity, or an explicit deletion
+    // request. A DO without a reservation (or one marked
+    // `recoveryRequired`) skips the flush — there's nothing to close out
+    // or the last attempt failed terminally and an operator has to look.
+    const window = this.readWalletReservation(this.db)
+
+    wideEvent.reservation_id = window?.reservationId ?? null
+    wideEvent.recovery_required = window?.recoveryRequired ?? false
+
+    if (!window?.reservationId || window.recoveryRequired) {
+      return false
+    }
+    const closeWindow: OpenWalletReservationSnapshot = {
+      ...window,
+      reservationId: window.reservationId,
+    }
+
+    const trigger = this.resolveAlarmReservationCloseTrigger({
+      inactivityMs,
+      now,
+      window: closeWindow,
+    })
+    if (!trigger) {
+      return false
+    }
+
+    wideEvent.close_reservation_reason = trigger.closeReason
+    const hasPendingWalletFlush = this.hasPendingWalletFlush(window)
+    const isPendingFinalFlush = hasPendingWalletFlush && window.pendingFlushFinal
+
+    if (hasPendingWalletFlush && !isPendingFinalFlush) {
+      return await this.deferAlarmReservationCloseForPendingFlush({
+        isDeletionPending: trigger.isDeletionPending,
+        wideEvent,
+        window: closeWindow,
+      })
+    }
+
+    const closeFailed = await this.closeTriggeredAlarmReservation({
+      closeReason: trigger.closeReason,
+      isDeletionPending: trigger.isDeletionPending,
+      isPendingFinalFlush,
+      wideEvent,
+      window: closeWindow,
+    })
+    if (closeFailed) {
+      return true
+    }
+
+    if (trigger.isDeletionPending) {
+      await this.handleDeletionCleanupAlarm({
+        now,
+        originalWindow: closeWindow,
+        tinybirdFlushFailed,
+        wideEvent,
+      })
+      return true
+    }
+
+    return false
+  }
+
+  private resolveAlarmReservationCloseTrigger(params: {
+    inactivityMs: number
+    now: number
+    window: OpenWalletReservationSnapshot
+  }): AlarmReservationCloseTrigger | null {
+    const { inactivityMs, now, window } = params
+    const isPeriodEnd = window.reservationEndAt !== null && now >= window.reservationEndAt
+    const isInactive = window.lastEventAt !== null && now - window.lastEventAt >= inactivityMs
+    const isDeletionPending = window.deletionRequested
+
+    if (!isPeriodEnd && !isInactive && !isDeletionPending) {
+      return null
+    }
+
+    return {
+      closeReason: isDeletionPending
+        ? "deletion_requested"
+        : isPeriodEnd
+          ? "period_close"
+          : "inactivity",
+      isDeletionPending,
+    }
+  }
+
+  private async deferAlarmReservationCloseForPendingFlush(params: {
+    isDeletionPending: boolean
+    wideEvent: Record<string, unknown>
+    window: OpenWalletReservationSnapshot
+  }): Promise<boolean> {
+    const { isDeletionPending, wideEvent, window } = params
+    wideEvent.close_reservation_deferred = true
+    wideEvent.pending_flush_seq = window.pendingFlushSeq
+    wideEvent.refill_in_flight = window.refillInFlight
+
+    if (!isDeletionPending) {
+      return false
+    }
+
+    this.logOperatorActionRequired("entitlement deletion has pending wallet flush", {
+      pending_flush_seq: window.pendingFlushSeq,
+      refill_in_flight: window.refillInFlight,
+      reservation_id: window.reservationId,
+    })
+    wideEvent.operator_action_required = true
+    wideEvent.outcome = "operator_required"
+    await this.ctx.storage.deleteAlarm()
+    return true
+  }
+
+  private async closeTriggeredAlarmReservation(params: {
+    closeReason: ReservationCloseReason
+    isDeletionPending: boolean
+    isPendingFinalFlush: boolean
+    wideEvent: Record<string, unknown>
+    window: OpenWalletReservationSnapshot
+  }): Promise<boolean> {
+    const { closeReason, isDeletionPending, isPendingFinalFlush, wideEvent, window } = params
+    const closeResult = await this.closeReservation({
+      allowDeletionRequested: isDeletionPending,
+      closeReason,
+      recoverPendingFinal: isPendingFinalFlush,
+    })
+    wideEvent.close_reservation_ok = closeResult.ok
+    wideEvent.close_reservation_outcome = closeResult.outcome
+
+    if (closeResult.ok) {
+      return false
+    }
+
+    wideEvent.close_reservation_error_message = closeResult.errorMessage ?? null
+    wideEvent.operator_action_required = true
+    wideEvent.outcome = "operator_required"
+    this.logOperatorActionRequired("entitlement wallet reservation close failed", {
+      error_message: closeResult.errorMessage ?? null,
+      close_reservation_outcome: closeResult.outcome,
+      reservation_id: window.reservationId,
+    })
+    await this.ctx.storage.deleteAlarm()
+    return true
+  }
+
+  private runAlarmIdempotencyCleanup(now: number, wideEvent: Record<string, unknown>): number {
+    // Keep idempotency keys beyond the public ingestion cap so delayed cleanup
+    // cannot erase the replay seal for an event we would accept.
+    const runIdempotencyCleanup = this.shouldRunIdempotencyCleanup(now)
+    wideEvent.idempotency_cleanup_ran = runIdempotencyCleanup
+
+    if (!runIdempotencyCleanup) {
+      return 0
+    }
+
+    const staleIdempotencyCount = this.cleanupStaleIdempotencyKeys(now)
+    this.lastIdempotencyCleanupAt = now
+    wideEvent.idempotency_next_cleanup_at = now + IDEMPOTENCY_CLEANUP_INTERVAL_MS
+    return staleIdempotencyCount
+  }
+
+  private async triggerTimeBasedWalletFlush(params: {
+    flushIntervalMs: number
+    now: number
+    wideEvent: Record<string, unknown>
+  }): Promise<boolean> {
+    const { flushIntervalMs, now, wideEvent } = params
+    const postFlushWindow = this.readWalletReservation(this.db)
+    if (
+      !postFlushWindow?.reservationId ||
+      postFlushWindow.recoveryRequired ||
+      postFlushWindow.refillInFlight
+    ) {
+      return false
+    }
+
+    const unflushed = Math.max(0, postFlushWindow.consumedAmount - postFlushWindow.flushedAmount)
+    const elapsedSinceLastFlush =
+      postFlushWindow.lastFlushedAt !== null
+        ? now - postFlushWindow.lastFlushedAt
+        : Number.POSITIVE_INFINITY
+
+    if (unflushed <= 0 || elapsedSinceLastFlush < flushIntervalMs) {
+      return false
+    }
+
+    const nextSeq = postFlushWindow.flushSeq + 1
+    const spendVelocity = updateSpendVelocity({
+      previousSpendEwmaAmount: postFlushWindow.spendEwmaAmount,
+      previousLastRateSampledAtMs: postFlushWindow.lastRateSampledAtMs,
+      flushAmount: unflushed,
+      nowMs: now,
+      policy: this.reservationPolicy(),
+    })
+    wideEvent.time_flush_seq = nextSeq
+    wideEvent.time_flush_amount = unflushed
+    this.db
+      .update(walletReservationTable)
+      .set({
+        refillInFlight: true,
+        pendingFlushSeq: nextSeq,
+        pendingFlushFinal: false,
+        pendingFlushAmount: unflushed,
+        pendingRefillAmount: 0,
+        spendEwmaAmount: spendVelocity.spendEwmaAmount,
+        lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
+      })
+      .run()
+    await this.requestFlushAndRefill({
+      flushSeq: nextSeq,
+      flushAmount: unflushed,
+      // Time-driven flush is purely about ledger freshness — don't top up
+      // allocation here. The DO's own refill trigger handles that when the
+      // threshold is actually crossed.
+      refillAmount: 0,
+      effectiveAt: Date.now(),
+    })
+
+    return true
+  }
+
+  private async handleDeletionCleanupAlarm(params: {
+    now: number
+    originalWindow: OpenWalletReservationSnapshot
+    tinybirdFlushFailed: boolean
+    wideEvent: Record<string, unknown>
+  }): Promise<void> {
+    const { now, originalWindow, tinybirdFlushFailed, wideEvent } = params
+    const latestWindow = this.readWalletReservation(this.db)
+    const latestOutboxCount = 0
+    wideEvent.outbox_remaining = latestOutboxCount
+    wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, latestOutboxCount)
+    wideEvent.recovery_required = latestWindow?.recoveryRequired ?? false
+    wideEvent.pending_wallet_flush = this.hasPendingWalletFlush(latestWindow)
+
+    if (this.isCleanupComplete(latestWindow, latestOutboxCount)) {
+      wideEvent.self_destruct = true
+      wideEvent.outcome = "deleted"
+      await this.ctx.storage.deleteAlarm()
+      await this.ctx.storage.deleteAll()
+      return
+    }
+
+    if (
+      tinybirdFlushFailed ||
+      this.hasPendingWalletFlush(latestWindow) ||
+      (latestWindow?.recoveryRequired ?? false)
+    ) {
+      wideEvent.self_destruct = false
+      wideEvent.operator_action_required = true
+      wideEvent.outcome = "operator_required"
+      this.logOperatorActionRequired("entitlement deletion cleanup failed", {
+        outbox_remaining: latestOutboxCount,
+        pending_flush_seq: latestWindow?.pendingFlushSeq ?? null,
+        recovery_required: latestWindow?.recoveryRequired ?? false,
+        reservation_id: latestWindow ? latestWindow.reservationId : originalWindow.reservationId,
+        tinybird_flush_failed: tinybirdFlushFailed,
+      })
+      await this.ctx.storage.deleteAlarm()
+      return
+    }
+
+    const nextAlarmAt = now + FLUSH_INTERVAL_MS
+    wideEvent.self_destruct = false
+    wideEvent.next_alarm_at = nextAlarmAt
+    wideEvent.outcome = "scheduled"
+    await this.scheduleAlarm(nextAlarmAt)
+  }
+
+  private async handleRetentionCleanupAlarm(params: {
+    lifecycleEndAt: number
+    now: number
+    remainingOutboxCount: number
+    selfDestructAt: number
+    tinybirdFlushFailed: boolean
+    wideEvent: Record<string, unknown>
+  }): Promise<void> {
+    const {
+      lifecycleEndAt,
+      now,
+      remainingOutboxCount,
+      selfDestructAt,
+      tinybirdFlushFailed,
+      wideEvent,
+    } = params
+    const latestWindow = this.readWalletReservation(this.db)
+    wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, remainingOutboxCount)
+    wideEvent.self_destruct_due = true
+    wideEvent.pending_wallet_flush = this.hasPendingWalletFlush(latestWindow)
+    wideEvent.recovery_required = latestWindow?.recoveryRequired ?? false
+
+    if (this.isCleanupComplete(latestWindow, remainingOutboxCount)) {
+      wideEvent.self_destruct = true
+      wideEvent.outcome = "deleted"
+      await this.ctx.storage.deleteAlarm()
+      await this.ctx.storage.deleteAll()
+      return
+    }
+
+    if (
+      tinybirdFlushFailed ||
+      this.hasPendingWalletFlush(latestWindow) ||
+      (latestWindow?.recoveryRequired ?? false)
+    ) {
+      wideEvent.self_destruct = false
+      wideEvent.operator_action_required = true
+      wideEvent.outcome = "operator_required"
+      this.logOperatorActionRequired("entitlement retention cleanup failed", {
+        lifecycle_end_at: lifecycleEndAt,
+        outbox_remaining: remainingOutboxCount,
+        pending_flush_seq: latestWindow?.pendingFlushSeq ?? null,
+        recovery_required: latestWindow?.recoveryRequired ?? false,
+        self_destruct_at: selfDestructAt,
+        tinybird_flush_failed: tinybirdFlushFailed,
+      })
+      await this.ctx.storage.deleteAlarm()
+      return
+    }
+
+    const nextAlarmAt = now + FLUSH_INTERVAL_MS
+    wideEvent.self_destruct = false
+    wideEvent.next_alarm_at = nextAlarmAt
+    wideEvent.outcome = "scheduled"
+    await this.scheduleAlarm(nextAlarmAt)
+  }
+
+  private async scheduleNextLifecycleAlarm(params: {
+    flushIntervalMs: number
+    inactivityMs: number
+    now: number
+    remainingOutboxCount: number
+    selfDestructAt: number
+    wideEvent: Record<string, unknown>
+  }): Promise<void> {
+    const { flushIntervalMs, inactivityMs, now, remainingOutboxCount, selfDestructAt, wideEvent } =
+      params
+    // Pick the soonest among: pending wallet recheck, time-based flush
+    // deadline, reservation close deadlines, and self-destruct. Re-read the
+    // window because the time-flush may have just updated `lastFlushedAt`.
+    const finalWindow = this.readWalletReservation(this.db)
+    const candidates: number[] = []
+    const pushFutureCandidate = (timestamp: number | null) => {
+      if (timestamp !== null && Number.isFinite(timestamp) && timestamp > now) {
+        candidates.push(timestamp)
+      }
+    }
+
+    if (remainingOutboxCount > 0) {
+      candidates.push(now + FLUSH_INTERVAL_MS)
+    }
+
+    if (finalWindow?.reservationId && !finalWindow.recoveryRequired) {
+      const pendingWalletFlush = this.hasPendingWalletFlush(finalWindow)
+      const unflushed = Math.max(0, finalWindow.consumedAmount - finalWindow.flushedAmount)
+
+      if (pendingWalletFlush) {
+        candidates.push(now + FLUSH_INTERVAL_MS)
+      }
+
+      if (unflushed > 0 && !finalWindow.refillInFlight) {
+        const baseline = finalWindow.lastFlushedAt ?? now
+        const flushAt = baseline + flushIntervalMs
+        candidates.push(flushAt > now ? flushAt : now + FLUSH_INTERVAL_MS)
+      }
+
+      pushFutureCandidate(finalWindow.reservationEndAt)
+      pushFutureCandidate(
+        finalWindow.lastEventAt !== null ? finalWindow.lastEventAt + inactivityMs : null
+      )
+    }
+
+    if (candidates.length === 0) {
+      // Nothing pending — wake up at retention expiry and emit the
+      // operator-facing retained-storage alarm.
+      wideEvent.next_alarm_at = selfDestructAt
+      wideEvent.outcome = "scheduled"
+      await this.scheduleAlarm(selfDestructAt)
+      return
+    }
+
+    const target = Math.min(...candidates, selfDestructAt)
+    // Never schedule in the past — at minimum wait one tick so we don't
+    // hot-loop the alarm on a baseline that's already overdue.
+    const scheduled = Math.max(now + 1_000, target)
+    wideEvent.next_alarm_at = scheduled
+    wideEvent.outcome = "scheduled"
+    await this.scheduleAlarm(scheduled)
   }
 
   // Public RPC: mark this DO for teardown at the next alarm. We don't
@@ -2189,219 +2550,23 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     try {
-      if (!window?.reservationId) {
-        wideEvent.outcome = "no_reservation"
-        return { ok: true, outcome: "no_reservation" }
-      }
-
-      if (!window.projectId || !window.customerId) {
-        this.logger.error("reservation close requested without reservation identifiers", {
-          reservationId: window.reservationId,
-          projectId: window.projectId,
-          customerId: window.customerId,
-        })
-        wideEvent.outcome = "no_reservation"
-        return { ok: true, outcome: "no_reservation" }
-      }
-
-      if (window.recoveryRequired) {
-        wideEvent.outcome = "deferred"
-        wideEvent.reason = "recovery_required"
-        return { ok: true, outcome: "deferred", reason: "recovery_required" }
-      }
-
-      if (window.deletionRequested && !options.allowDeletionRequested) {
-        wideEvent.outcome = "deferred"
-        wideEvent.reason = "deletion_requested"
-        return { ok: true, outcome: "deferred", reason: "deletion_requested" }
-      }
-
-      const isRecoveringPendingFinal =
-        Boolean(options.recoverPendingFinal) &&
-        window.pendingFlushFinal &&
-        window.pendingFlushSeq !== null &&
-        window.pendingFlushSeq !== undefined &&
-        window.pendingFlushSeq > window.flushSeq
-
-      if (this.hasPendingWalletFlush(window) && !isRecoveringPendingFinal) {
-        wideEvent.outcome = "deferred"
-        wideEvent.reason = "pending_wallet_flush"
-        wideEvent.pending_flush_seq = window.pendingFlushSeq
-        wideEvent.refill_in_flight = window.refillInFlight
-        return { ok: true, outcome: "deferred", reason: "pending_wallet_flush" }
-      }
-
-      const derivedUnflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
-      const unflushed = isRecoveringPendingFinal
-        ? (window.pendingFlushAmount ?? derivedUnflushed)
-        : derivedUnflushed
-      const nextSeq = isRecoveringPendingFinal ? window.pendingFlushSeq! : window.flushSeq + 1
-      wideEvent.flush_seq = nextSeq
-      wideEvent.flush_amount = unflushed
-      wideEvent.recovering_pending_final = isRecoveringPendingFinal
-
-      this.db
-        .update(walletReservationTable)
-        .set({
-          pendingFlushSeq: nextSeq,
-          pendingFlushFinal: true,
-          pendingFlushAmount: unflushed,
-          pendingRefillAmount: 0,
-          refillInFlight: true,
-        })
-        .run()
-
-      const walletService = this.getWalletService()
-      const durableObjectId = this.ctx.id.toString()
-      const captureResult = await walletService.captureReservationUsage({
-        projectId: window.projectId,
-        customerId: window.customerId,
-        currency: window.currency as Currency,
-        reservationId: window.reservationId,
-        flushSeq: nextSeq,
-        amount: unflushed,
-        statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
-        metadata: {
-          requestedBy: "durable_object",
-          requestedById: durableObjectId,
-          durableObjectId,
-        },
-        sourceId: durableObjectId,
+      const precondition = this.resolveReservationClosePreconditions({
+        options,
+        wideEvent,
+        window,
       })
-
-      if (captureResult.err) {
-        if (
-          isRecoveringPendingFinal &&
-          captureResult.err.message === "WALLET_RESERVATION_ALREADY_RECONCILED"
-        ) {
-          this.db
-            .update(walletReservationTable)
-            .set({
-              reservationId: null,
-              flushedAmount: Math.max(window.flushedAmount, window.consumedAmount),
-              flushSeq: nextSeq,
-              pendingFlushSeq: null,
-              pendingFlushFinal: false,
-              pendingFlushAmount: null,
-              pendingRefillAmount: 0,
-              refillInFlight: false,
-              lastFlushedAt: Date.now(),
-            })
-            .run()
-
-          wideEvent.flushed_amount = Math.max(0, window.consumedAmount - window.flushedAmount)
-          wideEvent.flushed_after = Math.max(window.flushedAmount, window.consumedAmount)
-          wideEvent.outcome = "already_reconciled"
-          return { ok: true, outcome: "already_reconciled" }
-        }
-
-        this.logger.error(captureResult.err, {
-          context: "reservation close capture failed",
-          flushSeq: nextSeq,
-          reservationId: window.reservationId,
-        })
-        // Leave pendingFlushSeq set so an operator can inspect/replay the
-        // same seq; the ledger idempotency key keeps replays safe. Mark
-        // recoveryRequired so alarm() does not keep trying to close/delete.
-        this.db
-          .update(walletReservationTable)
-          .set({ recoveryRequired: true, refillInFlight: false })
-          .run()
-        wideEvent.outcome = "wallet_error"
-        wideEvent.error_message = captureResult.err.message
-        return {
-          errorMessage: captureResult.err.message,
-          ok: false,
-          outcome: "wallet_error",
-        }
+      if (precondition.kind === "done") {
+        return precondition.result
       }
+      const { isRecoveringPendingFinal } = precondition
+      const closeWindow = precondition.window
 
-      const releaseResult = await walletService.releaseReservation({
-        projectId: window.projectId,
-        customerId: window.customerId,
-        currency: window.currency as Currency,
-        reservationId: window.reservationId,
+      return await this.closeReservationWithWallet({
         closeReason: options.closeReason,
-        idempotencyKey: `release:${window.reservationId}:${options.closeReason}`,
-        metadata: {
-          requestedBy: "durable_object",
-          requestedById: durableObjectId,
-          durableObjectId,
-        },
-        sourceId: durableObjectId,
+        isRecoveringPendingFinal,
+        wideEvent,
+        window: closeWindow,
       })
-
-      if (releaseResult.err) {
-        if (
-          isRecoveringPendingFinal &&
-          releaseResult.err.message === "WALLET_RESERVATION_ALREADY_RECONCILED"
-        ) {
-          this.db
-            .update(walletReservationTable)
-            .set({
-              reservationId: null,
-              flushedAmount: Math.max(window.flushedAmount, window.consumedAmount),
-              flushSeq: nextSeq,
-              pendingFlushSeq: null,
-              pendingFlushFinal: false,
-              pendingFlushAmount: null,
-              pendingRefillAmount: 0,
-              refillInFlight: false,
-              lastFlushedAt: Date.now(),
-            })
-            .run()
-
-          wideEvent.flushed_amount = Math.max(0, window.consumedAmount - window.flushedAmount)
-          wideEvent.flushed_after = Math.max(window.flushedAmount, window.consumedAmount)
-          wideEvent.outcome = "already_reconciled"
-          return { ok: true, outcome: "already_reconciled" }
-        }
-
-        this.logger.error(releaseResult.err, {
-          context: "reservation close release failed",
-          flushSeq: nextSeq,
-          reservationId: window.reservationId,
-        })
-        this.db
-          .update(walletReservationTable)
-          .set({ recoveryRequired: true, refillInFlight: false })
-          .run()
-        wideEvent.outcome = "wallet_error"
-        wideEvent.error_message = releaseResult.err.message
-        return {
-          errorMessage: releaseResult.err.message,
-          ok: false,
-          outcome: "wallet_error",
-        }
-      }
-
-      // Reservation closed. Clear the id so future apply()s on this DO
-      // skip the wallet check until activateEntitlement opens a new one,
-      // and roll the flush bookkeeping forward. We don't zero
-      // consumed/allocation: they're historical totals and a reconciler
-      // reading SQLite shouldn't lose them.
-      this.db
-        .update(walletReservationTable)
-        .set({
-          reservationId: null,
-          flushedAmount: window.flushedAmount + captureResult.val.capturedAmount,
-          flushSeq: nextSeq,
-          pendingFlushSeq: null,
-          pendingFlushFinal: false,
-          pendingFlushAmount: null,
-          pendingRefillAmount: 0,
-          refillInFlight: false,
-          lastFlushedAt: Date.now(),
-        })
-        .run()
-
-      wideEvent.flushed_amount = captureResult.val.capturedAmount
-      wideEvent.flushed_after = window.flushedAmount + captureResult.val.capturedAmount
-      wideEvent.released_amount = releaseResult.val.releasedAmount
-      wideEvent.restored_granted_amount = releaseResult.val.restoredGrantedAmount
-      wideEvent.refunded_purchased_amount = releaseResult.val.refundedPurchasedAmount
-      wideEvent.outcome = "success"
-      return { ok: true, outcome: "success" }
     } catch (error) {
       this.logger.error(error, {
         context: "reservation close threw unexpectedly",
@@ -2423,6 +2588,378 @@ export class EntitlementWindowDO extends DurableObject {
     } finally {
       wideEvent.duration_ms = Date.now() - startTime
       this.logger.info("entitlement close_reservation", wideEvent)
+    }
+  }
+
+  private async closeReservationWithWallet(params: {
+    closeReason: ReservationCloseReason
+    isRecoveringPendingFinal: boolean
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): Promise<CloseReservationResult> {
+    const { closeReason, isRecoveringPendingFinal, wideEvent, window } = params
+    const walletService = this.getWalletService()
+    const durableObjectId = this.ctx.id.toString()
+    const flushIntent = this.persistFinalReservationFlushIntent({
+      isRecoveringPendingFinal,
+      wideEvent,
+      window,
+    })
+
+    const capture = await this.captureFinalReservationUsage({
+      durableObjectId,
+      isRecoveringPendingFinal,
+      nextSeq: flushIntent.nextSeq,
+      unflushed: flushIntent.unflushed,
+      walletService,
+      wideEvent,
+      window,
+    })
+    if (capture.kind === "done") {
+      return capture.result
+    }
+
+    const release = await this.releaseFinalReservation({
+      closeReason,
+      durableObjectId,
+      isRecoveringPendingFinal,
+      nextSeq: flushIntent.nextSeq,
+      walletService,
+      wideEvent,
+      window,
+    })
+    if (release.kind === "done") {
+      return release.result
+    }
+
+    return this.finalizeSuccessfulReservationClose({
+      capture,
+      nextSeq: flushIntent.nextSeq,
+      release,
+      wideEvent,
+      window,
+    })
+  }
+
+  private persistFinalReservationFlushIntent(params: {
+    isRecoveringPendingFinal: boolean
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): ReservationCloseFlushIntent {
+    const { isRecoveringPendingFinal, wideEvent, window } = params
+    const derivedUnflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
+    const unflushed = isRecoveringPendingFinal
+      ? (window.pendingFlushAmount ?? derivedUnflushed)
+      : derivedUnflushed
+    const nextSeq = isRecoveringPendingFinal ? window.pendingFlushSeq! : window.flushSeq + 1
+    wideEvent.flush_seq = nextSeq
+    wideEvent.flush_amount = unflushed
+    wideEvent.recovering_pending_final = isRecoveringPendingFinal
+
+    this.db
+      .update(walletReservationTable)
+      .set({
+        pendingFlushSeq: nextSeq,
+        pendingFlushFinal: true,
+        pendingFlushAmount: unflushed,
+        pendingRefillAmount: 0,
+        refillInFlight: true,
+      })
+      .run()
+
+    return { nextSeq, unflushed }
+  }
+
+  private async captureFinalReservationUsage(params: {
+    durableObjectId: string
+    isRecoveringPendingFinal: boolean
+    nextSeq: number
+    unflushed: number
+    walletService: WalletService
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): Promise<ReservationCloseCaptureOutcome> {
+    const {
+      durableObjectId,
+      isRecoveringPendingFinal,
+      nextSeq,
+      unflushed,
+      walletService,
+      wideEvent,
+      window,
+    } = params
+    const captureResult = await walletService.captureReservationUsage({
+      projectId: window.projectId,
+      customerId: window.customerId,
+      currency: window.currency as Currency,
+      reservationId: window.reservationId,
+      flushSeq: nextSeq,
+      amount: unflushed,
+      statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
+      metadata: {
+        requestedBy: "durable_object",
+        requestedById: durableObjectId,
+        durableObjectId,
+      },
+      sourceId: durableObjectId,
+    })
+
+    if (!captureResult.err) {
+      return { kind: "captured", capturedAmount: captureResult.val.capturedAmount }
+    }
+
+    if (
+      isRecoveringPendingFinal &&
+      captureResult.err.message === "WALLET_RESERVATION_ALREADY_RECONCILED"
+    ) {
+      return {
+        kind: "done",
+        result: this.markReservationAlreadyReconciled({ nextSeq, wideEvent, window }),
+      }
+    }
+
+    return {
+      kind: "done",
+      result: this.markReservationCloseWalletError({
+        context: "reservation close capture failed",
+        error: captureResult.err,
+        nextSeq,
+        wideEvent,
+        window,
+      }),
+    }
+  }
+
+  private async releaseFinalReservation(params: {
+    closeReason: ReservationCloseReason
+    durableObjectId: string
+    isRecoveringPendingFinal: boolean
+    nextSeq: number
+    walletService: WalletService
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): Promise<ReservationCloseReleaseOutcome> {
+    const {
+      closeReason,
+      durableObjectId,
+      isRecoveringPendingFinal,
+      nextSeq,
+      walletService,
+      wideEvent,
+      window,
+    } = params
+    const releaseResult = await walletService.releaseReservation({
+      projectId: window.projectId,
+      customerId: window.customerId,
+      currency: window.currency as Currency,
+      reservationId: window.reservationId,
+      closeReason,
+      idempotencyKey: `release:${window.reservationId}:${closeReason}`,
+      metadata: {
+        requestedBy: "durable_object",
+        requestedById: durableObjectId,
+        durableObjectId,
+      },
+      sourceId: durableObjectId,
+    })
+
+    if (!releaseResult.err) {
+      return {
+        kind: "released",
+        refundedPurchasedAmount: releaseResult.val.refundedPurchasedAmount,
+        releasedAmount: releaseResult.val.releasedAmount,
+        restoredGrantedAmount: releaseResult.val.restoredGrantedAmount,
+      }
+    }
+
+    if (
+      isRecoveringPendingFinal &&
+      releaseResult.err.message === "WALLET_RESERVATION_ALREADY_RECONCILED"
+    ) {
+      return {
+        kind: "done",
+        result: this.markReservationAlreadyReconciled({ nextSeq, wideEvent, window }),
+      }
+    }
+
+    return {
+      kind: "done",
+      result: this.markReservationCloseWalletError({
+        context: "reservation close release failed",
+        error: releaseResult.err,
+        nextSeq,
+        wideEvent,
+        window,
+      }),
+    }
+  }
+
+  private finalizeSuccessfulReservationClose(params: {
+    capture: Extract<ReservationCloseCaptureOutcome, { kind: "captured" }>
+    nextSeq: number
+    release: Extract<ReservationCloseReleaseOutcome, { kind: "released" }>
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): CloseReservationResult {
+    const { capture, nextSeq, release, wideEvent, window } = params
+    // Reservation closed. Clear the id so future apply()s on this DO
+    // skip the wallet check until activateEntitlement opens a new one,
+    // and roll the flush bookkeeping forward. We don't zero
+    // consumed/allocation: they're historical totals and a reconciler
+    // reading SQLite shouldn't lose them.
+    this.db
+      .update(walletReservationTable)
+      .set({
+        reservationId: null,
+        flushedAmount: window.flushedAmount + capture.capturedAmount,
+        flushSeq: nextSeq,
+        pendingFlushSeq: null,
+        pendingFlushFinal: false,
+        pendingFlushAmount: null,
+        pendingRefillAmount: 0,
+        refillInFlight: false,
+        lastFlushedAt: Date.now(),
+      })
+      .run()
+
+    wideEvent.flushed_amount = capture.capturedAmount
+    wideEvent.flushed_after = window.flushedAmount + capture.capturedAmount
+    wideEvent.released_amount = release.releasedAmount
+    wideEvent.restored_granted_amount = release.restoredGrantedAmount
+    wideEvent.refunded_purchased_amount = release.refundedPurchasedAmount
+    wideEvent.outcome = "success"
+    return { ok: true, outcome: "success" }
+  }
+
+  private resolveReservationClosePreconditions(params: {
+    options: CloseReservationOptions
+    wideEvent: Record<string, unknown>
+    window: WalletReservationSnapshot
+  }):
+    | { kind: "done"; result: CloseReservationResult }
+    | {
+        kind: "ready"
+        isRecoveringPendingFinal: boolean
+        window: ClosableWalletReservationSnapshot
+      } {
+    const { options, wideEvent, window } = params
+
+    if (!window?.reservationId) {
+      wideEvent.outcome = "no_reservation"
+      return { kind: "done", result: { ok: true, outcome: "no_reservation" } }
+    }
+
+    if (!window.projectId || !window.customerId) {
+      this.logger.error("reservation close requested without reservation identifiers", {
+        reservationId: window.reservationId,
+        projectId: window.projectId,
+        customerId: window.customerId,
+      })
+      wideEvent.outcome = "no_reservation"
+      return { kind: "done", result: { ok: true, outcome: "no_reservation" } }
+    }
+
+    if (window.recoveryRequired) {
+      wideEvent.outcome = "deferred"
+      wideEvent.reason = "recovery_required"
+      return {
+        kind: "done",
+        result: { ok: true, outcome: "deferred", reason: "recovery_required" },
+      }
+    }
+
+    if (window.deletionRequested && !options.allowDeletionRequested) {
+      wideEvent.outcome = "deferred"
+      wideEvent.reason = "deletion_requested"
+      return {
+        kind: "done",
+        result: { ok: true, outcome: "deferred", reason: "deletion_requested" },
+      }
+    }
+
+    const isRecoveringPendingFinal =
+      Boolean(options.recoverPendingFinal) &&
+      window.pendingFlushFinal &&
+      window.pendingFlushSeq !== null &&
+      window.pendingFlushSeq !== undefined &&
+      window.pendingFlushSeq > window.flushSeq
+
+    if (this.hasPendingWalletFlush(window) && !isRecoveringPendingFinal) {
+      wideEvent.outcome = "deferred"
+      wideEvent.reason = "pending_wallet_flush"
+      wideEvent.pending_flush_seq = window.pendingFlushSeq
+      wideEvent.refill_in_flight = window.refillInFlight
+      return {
+        kind: "done",
+        result: { ok: true, outcome: "deferred", reason: "pending_wallet_flush" },
+      }
+    }
+
+    return {
+      kind: "ready",
+      isRecoveringPendingFinal,
+      window: {
+        ...window,
+        customerId: window.customerId,
+        projectId: window.projectId,
+        reservationId: window.reservationId,
+      },
+    }
+  }
+
+  private markReservationAlreadyReconciled(params: {
+    nextSeq: number
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): CloseReservationResult {
+    const { nextSeq, wideEvent, window } = params
+    this.db
+      .update(walletReservationTable)
+      .set({
+        reservationId: null,
+        flushedAmount: Math.max(window.flushedAmount, window.consumedAmount),
+        flushSeq: nextSeq,
+        pendingFlushSeq: null,
+        pendingFlushFinal: false,
+        pendingFlushAmount: null,
+        pendingRefillAmount: 0,
+        refillInFlight: false,
+        lastFlushedAt: Date.now(),
+      })
+      .run()
+
+    wideEvent.flushed_amount = Math.max(0, window.consumedAmount - window.flushedAmount)
+    wideEvent.flushed_after = Math.max(window.flushedAmount, window.consumedAmount)
+    wideEvent.outcome = "already_reconciled"
+    return { ok: true, outcome: "already_reconciled" }
+  }
+
+  private markReservationCloseWalletError(params: {
+    context: string
+    error: Error
+    nextSeq: number
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): CloseReservationResult {
+    const { context, error, nextSeq, wideEvent, window } = params
+    this.logger.error(error, {
+      context,
+      flushSeq: nextSeq,
+      reservationId: window.reservationId,
+    })
+    // Leave pendingFlushSeq set so an operator can inspect/replay the same seq;
+    // the ledger idempotency key keeps replays safe. Mark recoveryRequired so
+    // alarm() does not keep trying to close/delete.
+    this.db
+      .update(walletReservationTable)
+      .set({ recoveryRequired: true, refillInFlight: false })
+      .run()
+    wideEvent.outcome = "wallet_error"
+    wideEvent.error_message = error.message
+    return {
+      errorMessage: error.message,
+      ok: false,
+      outcome: "wallet_error",
     }
   }
 
@@ -2472,63 +3009,6 @@ export class EntitlementWindowDO extends DurableObject {
         reservationEndAt: params.reservationEndAt,
       })
       .run()
-  }
-
-  private resolveMeterIdentity(entitlement: EntitlementConfigInput): MeterIdentity {
-    return {
-      customerEntitlementId: entitlement.customerEntitlementId,
-      currency: this.extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig) ?? "USD",
-      key: deriveMeterKey(entitlement.meterConfig),
-      config: entitlement.meterConfig,
-    }
-  }
-
-  private extractCurrencyCodeFromFeatureConfig(config: unknown): string | null {
-    const currencyFromPrice = this.extractCurrencyCode(config, "price")
-    if (currencyFromPrice) {
-      return currencyFromPrice
-    }
-
-    if (!this.isRecord(config) || !Array.isArray(config.tiers)) {
-      return null
-    }
-
-    for (const tier of config.tiers) {
-      const currencyFromTier = this.extractCurrencyCode(tier, "unitPrice")
-      if (currencyFromTier) {
-        return currencyFromTier
-      }
-    }
-
-    return null
-  }
-
-  private extractCurrencyCode(input: unknown, priceKey: string): string | null {
-    if (!this.isRecord(input)) {
-      return null
-    }
-
-    const price = input[priceKey]
-    if (!this.isRecord(price)) {
-      return null
-    }
-
-    const dinero = price.dinero
-    if (!this.isRecord(dinero)) {
-      return null
-    }
-
-    const currency = dinero.currency
-    if (!this.isRecord(currency)) {
-      return null
-    }
-
-    const code = currency.code
-    return typeof code === "string" && code.length > 0 ? code : null
-  }
-
-  private isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null
   }
 
   private resolveTotalGrantUnits(grants: ActiveGrantInput[]): number | null {
@@ -2805,7 +3285,7 @@ export class EntitlementWindowDO extends DurableObject {
         allowanceUnits: row.allowanceUnits ?? null,
         cadenceEffectiveAt: entitlement.effectiveAt,
         cadenceExpiresAt: entitlement.expiresAt,
-        currencyCode: this.extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig) ?? "USD",
+        currencyCode: extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig) ?? "USD",
         effectiveAt: row.effectiveAt,
         expiresAt: row.expiresAt ?? null,
         grantId: row.grantId,
@@ -3247,7 +3727,7 @@ export class EntitlementWindowDO extends DurableObject {
       return []
     }
 
-    const result = z.array(compactGrantConsumptionStateSchema).safeParse(parsed)
+    const result = compactGrantConsumptionStateListSchema.safeParse(parsed)
     if (!result.success) {
       this.logger.warn("skipping malformed compact entitlement period state", {
         error: result.error.message,
@@ -3341,32 +3821,9 @@ export class EntitlementWindowDO extends DurableObject {
   // no reservation row exists yet (pre-first-paid-apply). A row with a null
   // `reservationId` means the DO is operating without a reservation —
   // callers must treat that as "skip wallet check".
-  private readWalletReservation(tx: DrizzleSqliteDODatabase<typeof schema>): {
-    projectId: string | null
-    customerId: string | null
-    currency: string
-    reservationEndAt: number | null
-    reservationId: string | null
-    allocationAmount: number
-    consumedAmount: number
-    flushedAmount: number
-    refillThresholdBps: number
-    refillChunkAmount: number
-    targetReservationAmount: number
-    spendEwmaAmount: number
-    lastRateSampledAtMs: number | null
-    maxEventCostAmount: number
-    pendingRefillAmount: number
-    pendingFlushAmount: number | null
-    refillInFlight: boolean
-    flushSeq: number
-    pendingFlushSeq: number | null
-    pendingFlushFinal: boolean
-    lastEventAt: number | null
-    lastFlushedAt: number | null
-    deletionRequested: boolean
-    recoveryRequired: boolean
-  } | null {
+  private readWalletReservation(
+    tx: DrizzleSqliteDODatabase<typeof schema>
+  ): WalletReservationSnapshot {
     const row = tx
       .select({
         projectId: walletReservationTable.projectId,
@@ -3430,7 +3887,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  private hasPendingWalletFlush(window: ReturnType<typeof this.readWalletReservation>): boolean {
+  private hasPendingWalletFlush(window: WalletReservationSnapshot): boolean {
     return Boolean(
       window?.reservationId &&
         (window.refillInFlight ||
@@ -3467,6 +3924,33 @@ export class EntitlementWindowDO extends DurableObject {
   private async growReservationForCurrentEvent(
     params: EntitlementWindowReservationUnderfundedError["params"]
   ): Promise<ReservationGrowthResult | null> {
+    const readiness = this.resolveReservationGrowthReadiness(params)
+    if (readiness.kind === "already_funded") {
+      return { kind: "already_funded" }
+    }
+    if (readiness.kind === "unavailable") {
+      return null
+    }
+
+    const plan = this.planReservationGrowthForCurrentEvent({
+      currentRemaining: readiness.currentRemaining,
+      eventTimestamp: params.eventTimestamp,
+      eventCostAmount: params.cost,
+      window: readiness.window,
+    })
+    if (!plan) {
+      return null
+    }
+
+    this.persistReservationGrowthIntent(plan)
+    await this.requestFlushAndRefill(plan.trigger)
+
+    return { kind: "refilled", trigger: plan.trigger }
+  }
+
+  private resolveReservationGrowthReadiness(
+    params: EntitlementWindowReservationUnderfundedError["params"]
+  ): ReservationGrowthReadiness {
     const window = this.readWalletReservation(this.db)
     if (
       !window?.reservationId ||
@@ -3476,7 +3960,7 @@ export class EntitlementWindowDO extends DurableObject {
       window.recoveryRequired ||
       window.deletionRequested
     ) {
-      return null
+      return { kind: "unavailable" }
     }
 
     const currentRemaining = Math.max(0, window.allocationAmount - window.consumedAmount)
@@ -3490,15 +3974,34 @@ export class EntitlementWindowDO extends DurableObject {
       window.pendingFlushSeq > window.flushSeq
 
     if (window.refillInFlight && !hasPendingFlush) {
-      return null
+      return { kind: "unavailable" }
     }
 
     if (hasPendingFlush) {
       // A pending seq already has a persisted refill amount. Let normal
       // recovery/retry own it rather than starting a competing sync grow.
-      return null
+      return { kind: "unavailable" }
     }
 
+    return {
+      kind: "ready",
+      currentRemaining,
+      window: {
+        ...window,
+        customerId: window.customerId,
+        projectId: window.projectId,
+        reservationId: window.reservationId,
+      },
+    }
+  }
+
+  private planReservationGrowthForCurrentEvent(params: {
+    currentRemaining: number
+    eventCostAmount: number
+    eventTimestamp: number
+    window: IdentifiedWalletReservationSnapshot
+  }): ReservationGrowthPlan | null {
+    const { currentRemaining, eventCostAmount, eventTimestamp, window } = params
     const flushSeq = window.flushSeq + 1
     const flushAmount = Math.max(0, window.consumedAmount - window.flushedAmount)
     const spendVelocity =
@@ -3514,7 +4017,7 @@ export class EntitlementWindowDO extends DurableObject {
             spendEwmaAmount: window.spendEwmaAmount,
             lastRateSampledAtMs: window.lastRateSampledAtMs,
           }
-    const currentEventCostAmount = Math.max(0, params.cost)
+    const currentEventCostAmount = Math.max(0, eventCostAmount)
     const refillDecision = computeRefillDecision({
       allocationAmount: window.allocationAmount,
       consumedAmount: window.consumedAmount,
@@ -3538,31 +4041,34 @@ export class EntitlementWindowDO extends DurableObject {
       return null
     }
 
-    const trigger: RefillTrigger = {
-      flushSeq,
-      flushAmount,
-      refillAmount,
-      effectiveAt: params.eventTimestamp,
+    return {
+      refillDecision,
+      spendVelocity,
+      trigger: {
+        flushSeq,
+        flushAmount,
+        refillAmount,
+        effectiveAt: eventTimestamp,
+      },
     }
+  }
 
+  private persistReservationGrowthIntent(plan: ReservationGrowthPlan): void {
+    const { refillDecision, spendVelocity, trigger } = plan
     this.db
       .update(walletReservationTable)
       .set({
         refillInFlight: true,
-        pendingFlushSeq: flushSeq,
+        pendingFlushSeq: trigger.flushSeq,
         pendingFlushFinal: false,
-        pendingFlushAmount: flushAmount,
-        pendingRefillAmount: refillAmount,
+        pendingFlushAmount: trigger.flushAmount,
+        pendingRefillAmount: trigger.refillAmount,
         targetReservationAmount: refillDecision.targetReservationAmount,
         spendEwmaAmount: spendVelocity.spendEwmaAmount,
         lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
         maxEventCostAmount: refillDecision.maxEventCostAmount,
       })
       .run()
-
-    await this.requestFlushAndRefill(trigger)
-
-    return { kind: "refilled", trigger }
   }
 
   // Slice 7.5. Captures consumed reserved funds, then extends reservation
@@ -3595,118 +4101,43 @@ export class EntitlementWindowDO extends DurableObject {
   private async requestFlushAndRefillInner(trigger: RefillTrigger): Promise<void> {
     const startTime = Date.now()
     const window = this.readWalletReservation(this.db)
-
-    const wideEvent: Record<string, unknown> = {
-      operation: "flush_refill",
-      flush_seq: trigger.flushSeq,
-      flush_amount: trigger.flushAmount,
-      reservation_refill_requested_amount: trigger.refillAmount,
-      reservation_id: window?.reservationId ?? null,
-      project_id: window?.projectId ?? null,
-      customer_id: window?.customerId ?? null,
-      currency: window?.currency ?? null,
-      allocation_before: window?.allocationAmount ?? null,
-      consumed_before: window?.consumedAmount ?? null,
-      flushed_before: window?.flushedAmount ?? null,
-    }
+    const wideEvent = this.createFlushRefillWideEvent({ trigger, window })
 
     try {
-      if (!window?.reservationId || !window.projectId || !window.customerId) {
-        this.logger.error("flush+refill requested without a reservation", {
-          flushSeq: trigger.flushSeq,
-          flushAmount: trigger.flushAmount,
-          refillAmount: trigger.refillAmount,
-        })
-        this.db.update(walletReservationTable).set({ refillInFlight: false }).run()
-        wideEvent.outcome = "no_reservation"
-        return
-      }
-
-      const walletService = this.getWalletService()
-      const durableObjectId = this.ctx.id.toString()
-      const captureResult = await walletService.captureReservationUsage({
-        projectId: window.projectId,
-        customerId: window.customerId,
-        currency: window.currency as Currency,
-        reservationId: window.reservationId,
-        flushSeq: trigger.flushSeq,
-        amount: trigger.flushAmount,
-        statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
-        metadata: {
-          requestedBy: "durable_object",
-          requestedById: durableObjectId,
-          durableObjectId,
-        },
-        sourceId: durableObjectId,
+      const flushWindow = this.resolveFlushRefillWindow({
+        trigger,
+        wideEvent,
+        window,
       })
-
-      if (captureResult.err) {
-        this.logger.error(captureResult.err, {
-          context: "flush+refill capture failed",
-          flushSeq: trigger.flushSeq,
-          reservationId: window.reservationId,
-        })
-        // Clear the single-flight flag so apply() can re-trigger on the
-        // next event; leave pendingFlushSeq set so crash recovery picks up
-        // the same seq after an eviction.
-        this.db.update(walletReservationTable).set({ refillInFlight: false }).run()
-        wideEvent.outcome = "wallet_error"
-        wideEvent.error_message = captureResult.err.message
+      if (!flushWindow) {
         return
       }
 
-      const extendResult = await walletService.extendReservation({
-        projectId: window.projectId,
-        customerId: window.customerId,
-        currency: window.currency as Currency,
-        reservationId: window.reservationId,
-        flushSeq: trigger.flushSeq,
-        requestedAmount: trigger.refillAmount,
-        statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
-        effectiveAt: new Date(trigger.effectiveAt),
-        metadata: {
-          requestedBy: "durable_object",
-          requestedById: durableObjectId,
-          durableObjectId,
-        },
-        sourceId: durableObjectId,
+      const capturedAmount = await this.captureFlushRefillUsage({
+        trigger,
+        wideEvent,
+        window: flushWindow,
       })
-
-      if (extendResult.err) {
-        this.logger.error(extendResult.err, {
-          context: "flush+refill extend failed",
-          flushSeq: trigger.flushSeq,
-          reservationId: window.reservationId,
-        })
-        this.db.update(walletReservationTable).set({ refillInFlight: false }).run()
-        wideEvent.outcome = "wallet_error"
-        wideEvent.error_message = extendResult.err.message
+      if (capturedAmount === null) {
         return
       }
 
-      this.db
-        .update(walletReservationTable)
-        .set({
-          allocationAmount: window.allocationAmount + extendResult.val.grantedAmount,
-          flushedAmount: window.flushedAmount + captureResult.val.capturedAmount,
-          flushSeq: trigger.flushSeq,
-          pendingFlushSeq: null,
-          pendingFlushFinal: false,
-          pendingFlushAmount: null,
-          pendingRefillAmount: 0,
-          refillInFlight: false,
-          lastFlushedAt: Date.now(),
-        })
-        .run()
+      const grantedAmount = await this.extendFlushRefillReservation({
+        trigger,
+        wideEvent,
+        window: flushWindow,
+      })
+      if (grantedAmount === null) {
+        return
+      }
 
-      wideEvent.reservation_refill_granted_amount = extendResult.val.grantedAmount
-      wideEvent.reservation_refill_partial =
-        trigger.refillAmount > 0 && extendResult.val.grantedAmount < trigger.refillAmount
-      wideEvent.granted_amount = extendResult.val.grantedAmount
-      wideEvent.flushed_amount = captureResult.val.capturedAmount
-      wideEvent.allocation_after = window.allocationAmount + extendResult.val.grantedAmount
-      wideEvent.flushed_after = window.flushedAmount + captureResult.val.capturedAmount
-      wideEvent.outcome = "success"
+      this.finalizeSuccessfulFlushRefill({
+        capturedAmount,
+        grantedAmount,
+        trigger,
+        wideEvent,
+        window: flushWindow,
+      })
     } catch (error) {
       this.logger.error(error, {
         context: "flush+refill threw unexpectedly",
@@ -3722,6 +4153,180 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
+  private createFlushRefillWideEvent(params: {
+    trigger: RefillTrigger
+    window: WalletReservationSnapshot
+  }): Record<string, unknown> {
+    const { trigger, window } = params
+    return {
+      operation: "flush_refill",
+      flush_seq: trigger.flushSeq,
+      flush_amount: trigger.flushAmount,
+      reservation_refill_requested_amount: trigger.refillAmount,
+      reservation_id: window?.reservationId ?? null,
+      project_id: window?.projectId ?? null,
+      customer_id: window?.customerId ?? null,
+      currency: window?.currency ?? null,
+      allocation_before: window?.allocationAmount ?? null,
+      consumed_before: window?.consumedAmount ?? null,
+      flushed_before: window?.flushedAmount ?? null,
+    }
+  }
+
+  private resolveFlushRefillWindow(params: {
+    trigger: RefillTrigger
+    wideEvent: Record<string, unknown>
+    window: WalletReservationSnapshot
+  }): ClosableWalletReservationSnapshot | null {
+    const { trigger, wideEvent, window } = params
+    if (!window?.reservationId || !window.projectId || !window.customerId) {
+      this.logger.error("flush+refill requested without a reservation", {
+        flushSeq: trigger.flushSeq,
+        flushAmount: trigger.flushAmount,
+        refillAmount: trigger.refillAmount,
+      })
+      this.db.update(walletReservationTable).set({ refillInFlight: false }).run()
+      wideEvent.outcome = "no_reservation"
+      return null
+    }
+
+    return {
+      ...window,
+      customerId: window.customerId,
+      projectId: window.projectId,
+      reservationId: window.reservationId,
+    }
+  }
+
+  private finalizeSuccessfulFlushRefill(params: {
+    capturedAmount: number
+    grantedAmount: number
+    trigger: RefillTrigger
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): void {
+    const { capturedAmount, grantedAmount, trigger, wideEvent, window } = params
+    this.db
+      .update(walletReservationTable)
+      .set({
+        allocationAmount: window.allocationAmount + grantedAmount,
+        flushedAmount: window.flushedAmount + capturedAmount,
+        flushSeq: trigger.flushSeq,
+        pendingFlushSeq: null,
+        pendingFlushFinal: false,
+        pendingFlushAmount: null,
+        pendingRefillAmount: 0,
+        refillInFlight: false,
+        lastFlushedAt: Date.now(),
+      })
+      .run()
+
+    wideEvent.reservation_refill_granted_amount = grantedAmount
+    wideEvent.reservation_refill_partial =
+      trigger.refillAmount > 0 && grantedAmount < trigger.refillAmount
+    wideEvent.granted_amount = grantedAmount
+    wideEvent.flushed_amount = capturedAmount
+    wideEvent.allocation_after = window.allocationAmount + grantedAmount
+    wideEvent.flushed_after = window.flushedAmount + capturedAmount
+    wideEvent.outcome = "success"
+  }
+
+  private async captureFlushRefillUsage(params: {
+    trigger: RefillTrigger
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): Promise<number | null> {
+    const { trigger, wideEvent, window } = params
+    const durableObjectId = this.ctx.id.toString()
+    const captureResult = await this.getWalletService().captureReservationUsage({
+      projectId: window.projectId,
+      customerId: window.customerId,
+      currency: window.currency as Currency,
+      reservationId: window.reservationId,
+      flushSeq: trigger.flushSeq,
+      amount: trigger.flushAmount,
+      statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
+      metadata: {
+        requestedBy: "durable_object",
+        requestedById: durableObjectId,
+        durableObjectId,
+      },
+      sourceId: durableObjectId,
+    })
+
+    if (captureResult.err) {
+      this.markFlushRefillWalletError({
+        context: "flush+refill capture failed",
+        error: captureResult.err,
+        flushSeq: trigger.flushSeq,
+        reservationId: window.reservationId,
+        wideEvent,
+      })
+      return null
+    }
+
+    return captureResult.val.capturedAmount
+  }
+
+  private async extendFlushRefillReservation(params: {
+    trigger: RefillTrigger
+    wideEvent: Record<string, unknown>
+    window: ClosableWalletReservationSnapshot
+  }): Promise<number | null> {
+    const { trigger, wideEvent, window } = params
+    const durableObjectId = this.ctx.id.toString()
+    const extendResult = await this.getWalletService().extendReservation({
+      projectId: window.projectId,
+      customerId: window.customerId,
+      currency: window.currency as Currency,
+      reservationId: window.reservationId,
+      flushSeq: trigger.flushSeq,
+      requestedAmount: trigger.refillAmount,
+      statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
+      effectiveAt: new Date(trigger.effectiveAt),
+      metadata: {
+        requestedBy: "durable_object",
+        requestedById: durableObjectId,
+        durableObjectId,
+      },
+      sourceId: durableObjectId,
+    })
+
+    if (extendResult.err) {
+      this.markFlushRefillWalletError({
+        context: "flush+refill extend failed",
+        error: extendResult.err,
+        flushSeq: trigger.flushSeq,
+        reservationId: window.reservationId,
+        wideEvent,
+      })
+      return null
+    }
+
+    return extendResult.val.grantedAmount
+  }
+
+  private markFlushRefillWalletError(params: {
+    context: string
+    error: Error
+    flushSeq: number
+    reservationId: string
+    wideEvent: Record<string, unknown>
+  }): void {
+    const { context, error, flushSeq, reservationId, wideEvent } = params
+    this.logger.error(error, {
+      context,
+      flushSeq,
+      reservationId,
+    })
+    // Clear the single-flight flag so apply() can re-trigger on the
+    // next event; leave pendingFlushSeq set so crash recovery picks up
+    // the same seq after an eviction.
+    this.db.update(walletReservationTable).set({ refillInFlight: false }).run()
+    wideEvent.outcome = "wallet_error"
+    wideEvent.error_message = error.message
+  }
+
   // Looks up a previously committed idempotency result for this event id.
   // Used to short-circuit retries before any wallet I/O — the in-tx check
   // in apply() catches concurrent retries that race past this read.
@@ -3729,30 +4334,7 @@ export class EntitlementWindowDO extends DurableObject {
     const batchEntry = this.getBatchIdempotencyResults().get(eventId)
     if (!batchEntry) return null
 
-    return this.idempotencyEntryToApplyResult(batchEntry)
-  }
-
-  private idempotencyEntryToApplyResult(entry: BatchIdempotencyEntry): ApplyResult {
-    const result: ApplyResult = {
-      allowed: entry.allowed,
-    }
-    const meterFacts = this.nonEmptyMeterFacts(entry.meterFacts)
-    if (entry.deniedReason !== null) {
-      result.deniedReason = entry.deniedReason
-    }
-    if (entry.denyMessage !== null) {
-      result.message = entry.denyMessage
-    }
-    if (meterFacts) {
-      result.meterFacts = meterFacts
-    }
-    return result
-  }
-
-  private nonEmptyMeterFacts(
-    facts: AnalyticsEntitlementMeterFact[] | undefined
-  ): AnalyticsEntitlementMeterFact[] | undefined {
-    return facts && facts.length > 0 ? facts : undefined
+    return idempotencyEntryToApplyResult(batchEntry)
   }
 
   private lookupCachedIdempotencyResults(eventIds: string[]): Map<string, BatchIdempotencyEntry> {
@@ -3798,7 +4380,7 @@ export class EntitlementWindowDO extends DurableObject {
         continue
       }
 
-      const parsed = z.array(batchIdempotencyEntrySchema).safeParse(rawEntries)
+      const parsed = batchIdempotencyEntryListSchema.safeParse(rawEntries)
       if (!parsed.success) {
         this.logger.warn("skipping malformed idempotency batch row", {
           error: parsed.error.message,
@@ -3814,15 +4396,6 @@ export class EntitlementWindowDO extends DurableObject {
     this.batchIdempotencyResults = results
   }
 
-  private stageBatchIdempotencyResult(params: {
-    entries: BatchIdempotencyEntry[]
-    entry: BatchIdempotencyEntry
-    stagedResultsByKey: Map<string, BatchIdempotencyEntry>
-  }): void {
-    params.entries.push(params.entry)
-    params.stagedResultsByKey.set(params.entry.eventId, params.entry)
-  }
-
   private recordBatchIdempotencyResults(entries: BatchIdempotencyEntry[]): void {
     if (entries.length === 0) {
       return
@@ -3832,6 +4405,37 @@ export class EntitlementWindowDO extends DurableObject {
     for (const entry of entries) {
       results.set(entry.eventId, entry)
     }
+  }
+
+  private persistDeniedApplyResult(params: {
+    closeReason?: ReservationCloseReason
+    createdAt: number
+    deniedReason?: DeniedReason
+    idempotencyKey: string
+    message?: string
+  }): ApplyResult {
+    const deniedResult: ApplyResult = { allowed: false }
+    if (params.deniedReason) {
+      deniedResult.deniedReason = params.deniedReason
+    }
+    if (params.message) {
+      deniedResult.message = params.message
+    }
+
+    this.persistBatchIdempotencyResult({
+      eventId: params.idempotencyKey,
+      createdAt: params.createdAt,
+      allowed: false,
+      deniedReason: deniedResult.deniedReason ?? null,
+      denyMessage: deniedResult.message ?? null,
+      meterFacts: [],
+    })
+
+    if (params.closeReason) {
+      this.ctx.waitUntil(this.closeReservation({ closeReason: params.closeReason }))
+    }
+
+    return deniedResult
   }
 
   private persistBatchIdempotencyResult(entry: BatchIdempotencyEntry): void {
@@ -3920,40 +4524,25 @@ export class EntitlementWindowDO extends DurableObject {
     // will re-probe and bootstrap then.
     if (projectedCost <= 0) return null
 
-    const pricePerEvent = Math.max(
+    const plan = this.createReservationBootstrapPlan({
+      activeGrants,
+      input,
+      meter,
       projectedCost,
-      computeMaxMarginalPriceMinor(input.entitlement.featureConfig)
-    )
-    const policy = this.reservationPolicy()
-    const sizing = computeInitialReservation({
-      pricePerEventAmount: pricePerEvent,
-      currentEventCostAmount: projectedCost,
-      policy,
     })
-    if (sizing.requestedAmount <= 0) return null
+    if (!plan) return null
 
-    const walletService = this.getWalletService()
-    const reservationGrant = this.firstGrantByDrainOrder(activeGrants)
-    const reservationBucket = computeGrantPeriodBucket(reservationGrant, input.event.timestamp)
     const durableObjectId = this.ctx.id.toString()
-    const sampledAtMs = Date.now()
-
-    if (!reservationBucket) {
-      throw new Error("Unable to resolve grant bucket for reservation bootstrap")
-    }
-
-    const reservationIdempotencyKey = `do_lazy:${meter.customerEntitlementId}:${reservationBucket.periodKey}`
-
-    const result = await walletService.createReservation({
+    const result = await this.getWalletService().createReservation({
       projectId: input.projectId,
       customerId: input.customerId,
       currency: meter.currency as Currency,
       entitlementId: input.entitlement.customerEntitlementId,
-      requestedAmount: sizing.requestedAmount,
-      refillThresholdBps: policy.refillThresholdBps,
+      requestedAmount: plan.sizing.requestedAmount,
+      refillThresholdBps: plan.policy.refillThresholdBps,
       refillChunkAmount: 0,
-      periodStartAt: new Date(reservationBucket.start),
-      periodEndAt: new Date(reservationBucket.end),
+      periodStartAt: new Date(plan.bucket.start),
+      periodEndAt: new Date(plan.bucket.end),
       effectiveAt: new Date(input.event.timestamp),
       metadata: {
         requestedBy: "durable_object",
@@ -3963,11 +4552,11 @@ export class EntitlementWindowDO extends DurableObject {
         customerEntitlementId: input.entitlement.customerEntitlementId,
         featureSlug: input.entitlement.featureSlug,
         eventSlug: meter.config.eventSlug,
-        idempotencyKey: reservationIdempotencyKey,
+        idempotencyKey: plan.idempotencyKey,
       },
       // The (project, entitlement, period_start) unique index is the real
       // dedupe — this key just tags ledger entries for traceability.
-      idempotencyKey: reservationIdempotencyKey,
+      idempotencyKey: plan.idempotencyKey,
     })
 
     if (result.err) {
@@ -3976,60 +4565,20 @@ export class EntitlementWindowDO extends DurableObject {
         customer_id: input.customerId,
         project_id: input.projectId,
         customer_entitlement_id: input.entitlement.customerEntitlementId,
-        reservation_idempotency_key: reservationIdempotencyKey,
-        requested_amount: sizing.requestedAmount,
+        reservation_idempotency_key: plan.idempotencyKey,
+        requested_amount: plan.sizing.requestedAmount,
         projected_cost_minor: projectedCost,
       })
       throw result.err
     }
 
-    this.ensureMeterState(this.db, {
-      meterKey: meter.key,
-      createdAt: Date.now(),
+    this.persistBootstrapReservation({
+      input,
+      meter,
+      plan,
+      projectedCost,
+      reservation: result.val,
     })
-    this.ensureWalletReservation(this.db, {
-      projectId: input.projectId,
-      customerId: input.customerId,
-      currency: meter.currency,
-      reservationEndAt: reservationBucket.end,
-    })
-
-    // For a reused active reservation, only refresh the columns that
-    // concern wallet enforcement; preserve consumedAmount/flushedAmount/
-    // flushSeq because the existing flush bookkeeping is still in flight.
-    // For a fresh reservation, reset the bookkeeping to zero.
-    const reservationUpdate =
-      result.val.reused === "active"
-        ? {
-            reservationId: result.val.reservationId,
-            allocationAmount: result.val.allocationAmount,
-            refillThresholdBps: policy.refillThresholdBps,
-            refillChunkAmount: 0,
-            targetReservationAmount: sizing.targetReservationAmount,
-            spendEwmaAmount: 0,
-            lastRateSampledAtMs: sampledAtMs,
-            maxEventCostAmount: projectedCost,
-          }
-        : {
-            reservationId: result.val.reservationId,
-            allocationAmount: result.val.allocationAmount,
-            consumedAmount: 0,
-            flushedAmount: 0,
-            flushSeq: 0,
-            pendingFlushSeq: null,
-            pendingFlushFinal: false,
-            pendingFlushAmount: null,
-            pendingRefillAmount: 0,
-            refillThresholdBps: policy.refillThresholdBps,
-            refillChunkAmount: 0,
-            targetReservationAmount: sizing.targetReservationAmount,
-            spendEwmaAmount: 0,
-            lastRateSampledAtMs: sampledAtMs,
-            maxEventCostAmount: projectedCost,
-            refillInFlight: false,
-          }
-
-    this.db.update(walletReservationTable).set(reservationUpdate).run()
 
     if (result.val.allocationAmount <= 0) {
       // Wallet had no available funds — the reservation row exists with
@@ -4044,6 +4593,97 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     return null
+  }
+
+  private createReservationBootstrapPlan(params: {
+    activeGrants: ActiveGrantInput[]
+    input: ApplyInput
+    meter: MeterIdentity
+    projectedCost: number
+  }): ReservationBootstrapPlan | null {
+    const { activeGrants, input, meter, projectedCost } = params
+    const pricePerEvent = Math.max(
+      projectedCost,
+      computeMaxMarginalPriceMinor(input.entitlement.featureConfig)
+    )
+    const policy = this.reservationPolicy()
+    const sizing = computeInitialReservation({
+      pricePerEventAmount: pricePerEvent,
+      currentEventCostAmount: projectedCost,
+      policy,
+    })
+    if (sizing.requestedAmount <= 0) return null
+
+    const reservationGrant = this.firstGrantByDrainOrder(activeGrants)
+    const bucket = computeGrantPeriodBucket(reservationGrant, input.event.timestamp)
+    if (!bucket) {
+      throw new Error("Unable to resolve grant bucket for reservation bootstrap")
+    }
+
+    return {
+      bucket,
+      idempotencyKey: `do_lazy:${meter.customerEntitlementId}:${bucket.periodKey}`,
+      policy,
+      sampledAtMs: Date.now(),
+      sizing,
+    }
+  }
+
+  private persistBootstrapReservation(params: {
+    input: ApplyInput
+    meter: MeterIdentity
+    plan: ReservationBootstrapPlan
+    projectedCost: number
+    reservation: CreateReservationOutput
+  }): void {
+    const { input, meter, plan, projectedCost, reservation } = params
+    this.ensureMeterState(this.db, {
+      meterKey: meter.key,
+      createdAt: Date.now(),
+    })
+    this.ensureWalletReservation(this.db, {
+      projectId: input.projectId,
+      customerId: input.customerId,
+      currency: meter.currency,
+      reservationEndAt: plan.bucket.end,
+    })
+
+    // For a reused active reservation, only refresh the columns that
+    // concern wallet enforcement; preserve consumedAmount/flushedAmount/
+    // flushSeq because the existing flush bookkeeping is still in flight.
+    // For a fresh reservation, reset the bookkeeping to zero.
+    const reservationUpdate =
+      reservation.reused === "active"
+        ? {
+            reservationId: reservation.reservationId,
+            allocationAmount: reservation.allocationAmount,
+            refillThresholdBps: plan.policy.refillThresholdBps,
+            refillChunkAmount: 0,
+            targetReservationAmount: plan.sizing.targetReservationAmount,
+            spendEwmaAmount: 0,
+            lastRateSampledAtMs: plan.sampledAtMs,
+            maxEventCostAmount: projectedCost,
+          }
+        : {
+            reservationId: reservation.reservationId,
+            allocationAmount: reservation.allocationAmount,
+            consumedAmount: 0,
+            flushedAmount: 0,
+            flushSeq: 0,
+            pendingFlushSeq: null,
+            pendingFlushFinal: false,
+            pendingFlushAmount: null,
+            pendingRefillAmount: 0,
+            refillThresholdBps: plan.policy.refillThresholdBps,
+            refillChunkAmount: 0,
+            targetReservationAmount: plan.sizing.targetReservationAmount,
+            spendEwmaAmount: 0,
+            lastRateSampledAtMs: plan.sampledAtMs,
+            maxEventCostAmount: projectedCost,
+            refillInFlight: false,
+          }
+
+    this.db.update(walletReservationTable).set(reservationUpdate).run()
   }
 
   private computeProjectedCurrentEventCostMinor(
@@ -4118,7 +4758,7 @@ export class EntitlementWindowDO extends DurableObject {
         }
       }
       case "sum": {
-        const numericValue = this.readNumericEventField(meter.config, input.event)
+        const numericValue = readNumericEventField(meter.config, input.event)
         return {
           eventId: input.event.id,
           meterKey: meter.key,
@@ -4127,7 +4767,7 @@ export class EntitlementWindowDO extends DurableObject {
         }
       }
       case "max": {
-        const numericValue = this.readNumericEventField(meter.config, input.event)
+        const numericValue = readNumericEventField(meter.config, input.event)
         const nextValue = row ? Math.max(previousValue, numericValue) : numericValue
         return {
           eventId: input.event.id,
@@ -4137,7 +4777,7 @@ export class EntitlementWindowDO extends DurableObject {
         }
       }
       case "latest": {
-        const numericValue = this.readNumericEventField(meter.config, input.event)
+        const numericValue = readNumericEventField(meter.config, input.event)
         if (input.event.timestamp < previousUpdatedAt) {
           return {
             eventId: input.event.id,
@@ -4209,43 +4849,6 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     return total
-  }
-
-  private readNumericEventField(meterConfig: MeterConfig, event: ApplyInput["event"]): number {
-    const field = meterConfig.aggregationField
-
-    if (!field) {
-      throw new Error(`Meter ${meterConfig.eventId} requires an aggregation field`)
-    }
-
-    const rawValue = event.properties[field]
-    const numericValue = this.parseFiniteNumericValue(rawValue)
-
-    if (numericValue === null) {
-      throw new Error(
-        `Meter ${meterConfig.eventId} requires a finite numeric value at properties.${field}`
-      )
-    }
-
-    return numericValue
-  }
-
-  private parseFiniteNumericValue(value: unknown): number | null {
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : null
-    }
-
-    if (typeof value !== "string") {
-      return null
-    }
-
-    const trimmedValue = value.trim()
-    if (trimmedValue.length === 0) {
-      return null
-    }
-
-    const parsedValue = Number(trimmedValue)
-    return Number.isFinite(parsedValue) ? parsedValue : null
   }
 
   // Construct the wallet service on first use. Each DO instance opens at
