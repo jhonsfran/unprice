@@ -15,7 +15,7 @@ SQL >
       count() AS event_count,
       sum(delta) AS total_delta,
       sum(amount) AS total_amount,
-      max(amount_after) AS latest_amount_after,
+      argMax(amount_after, tuple(timestamp, created_at, event_id)) AS latest_amount_after,
       min(timestamp) AS first_event_at,
       max(timestamp) AS last_event_at,
       countIf(pricing_component_count > 1) AS multi_component_event_count
