@@ -398,10 +398,10 @@ export function resolvePricingComponentCount(
     ).size
   }
 
-  return tiers.filter((tier) => {
-    const tierStart = tier.firstUnit
+  return tiers.filter((tier, index) => {
+    const tierStart = index === 0 ? 0 : tier.firstUnit
     const tierEnd = tier.lastUnit ?? Number.POSITIVE_INFINITY
-    return upper >= tierStart && lower < tierEnd
+    return upper > tierStart && lower < tierEnd
   }).length
 }
 

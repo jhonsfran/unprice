@@ -655,6 +655,42 @@ describe("grant pricing helpers", () => {
     })
   })
 
+  it("explains positive fractional graduated usage below the first integer tier", () => {
+    const priceConfig = {
+      tierMode: "graduated",
+      usageMode: "tier",
+      tiers: [
+        {
+          firstUnit: 1,
+          lastUnit: 10,
+          unitPrice: price("1.00", EUR),
+          flatPrice: price("0.00", EUR),
+        },
+        {
+          firstUnit: 11,
+          lastUnit: null,
+          unitPrice: price("2.00", EUR),
+          flatPrice: price("0.00", EUR),
+        },
+      ],
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaExplanation({
+        priceConfig,
+        usageBefore: 0,
+        usageAfter: 0.1,
+      })
+    ).toEqual({
+      amountMinor: 10_000_000,
+      usageBefore: 0,
+      usageAfter: 0.1,
+      tierMode: "graduated",
+      tierIndex: 0,
+      pricingComponentCount: 1,
+    })
+  })
+
   it("explains unit pricing without tier pointers", () => {
     const priceConfig = {
       usageMode: "unit",

@@ -1750,6 +1750,9 @@ function createReportingMeterFact(
     amount_scale: 8,
     currency: "USD",
     priced_at: SERVICE_NOW + 1,
+    tier_index: null,
+    tier_mode: null,
+    pricing_component_count: 0,
     ...overrides,
   }
 }

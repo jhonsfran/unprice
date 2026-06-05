@@ -182,9 +182,9 @@ export const entitlementMeterFactSchemaV1 = z.object({
   amount_scale: z.literal(LEDGER_SCALE),
   currency: z.string().length(3),
   priced_at: z.number().int(),
-  tier_index: z.number().int().nullable().optional(),
-  tier_mode: z.enum(["volume", "graduated"]).nullable().optional(),
-  pricing_component_count: z.number().int().nonnegative().optional(),
+  tier_index: z.number().int().nullable(),
+  tier_mode: z.enum(["volume", "graduated"]).nullable(),
+  pricing_component_count: z.number().int().nonnegative(),
 })
 
 export const ingestionEventSchemaV1 = z.object({
