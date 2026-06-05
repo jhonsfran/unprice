@@ -79,6 +79,7 @@ export type ExplainChargeErrorCode =
   | "LEDGER_LINE_NOT_FOUND"
   | "BILLING_PERIOD_METADATA_MISSING"
   | "BILLING_PERIOD_NOT_FOUND"
+  | "BILLING_PERIOD_CONTEXT_MISMATCH"
   | "FEATURE_NOT_FOUND"
   | "PERIOD_KEY_NOT_DERIVED"
 
@@ -206,7 +207,29 @@ export async function explainCharge(
     )
   }
 
-  const customerEntitlement = await deps.db.query.customerEntitlements.findFirst({
+  if (
+    billingPeriod.invoiceId !== invoice.id ||
+    billingPeriod.customerId !== invoice.customerId ||
+    billingPeriod.statementKey !== invoice.statementKey
+  ) {
+    return Err(
+      new ExplainChargeError({
+        code: "BILLING_PERIOD_CONTEXT_MISMATCH",
+        message: "Billing period does not match invoice context",
+        context: {
+          billingPeriodId,
+          invoiceId: invoice.id,
+          billingPeriodInvoiceId: billingPeriod.invoiceId,
+          invoiceCustomerId: invoice.customerId,
+          billingPeriodCustomerId: billingPeriod.customerId,
+          invoiceStatementKey: invoice.statementKey,
+          billingPeriodStatementKey: billingPeriod.statementKey,
+        },
+      })
+    )
+  }
+
+  const scopedEntitlements = await deps.db.query.customerEntitlements.findMany({
     columns: {
       id: true,
       effectiveAt: true,
@@ -219,11 +242,13 @@ export async function explainCharge(
       eq(customerEntitlements.featurePlanVersionId, featurePlanVersion.id)
     ),
   })
+  const singleScopedEntitlement =
+    scopedEntitlements.length === 1 ? scopedEntitlements[0] : undefined
 
   const periodKey = computeGrantPeriodBucket(
     {
-      cadenceEffectiveAt: customerEntitlement?.effectiveAt ?? billingPeriod.cycleStartAt,
-      cadenceExpiresAt: customerEntitlement?.expiresAt ?? billingPeriod.cycleEndAt,
+      cadenceEffectiveAt: singleScopedEntitlement?.effectiveAt ?? billingPeriod.cycleStartAt,
+      cadenceExpiresAt: singleScopedEntitlement?.expiresAt ?? billingPeriod.cycleEndAt,
       effectiveAt: billingPeriod.cycleStartAt,
       expiresAt: billingPeriod.cycleEndAt,
       grantId: "explain-charge",
@@ -247,7 +272,6 @@ export async function explainCharge(
     customer_id: invoice.customerId,
     feature_slug: featureSlug,
     period_key: periodKey,
-    customer_entitlement_id: customerEntitlement?.id,
   }
 
   const analyticsResult = await wrapResult(
@@ -324,7 +348,7 @@ export async function explainCharge(
       customerId: invoice.customerId,
       featureSlug,
       periodKey,
-      customerEntitlementId: customerEntitlement?.id ?? null,
+      customerEntitlementId: singleScopedEntitlement?.id ?? null,
       featurePlanVersionId: featurePlanVersion.id,
     },
     summary,
@@ -346,7 +370,7 @@ export async function explainCharge(
     pagination: {
       limit: input.limit,
       offset: input.offset,
-      hasMore: events.length === input.limit,
+      hasMore: summary.eventCount > input.offset + events.length,
     },
   }
 

@@ -1,5 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
-import { Err, Ok } from "@unprice/error"
+import { Ok } from "@unprice/error"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -14,9 +14,13 @@ const useCaseMocks = vi.hoisted(() => ({
   explainCharge: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+  }
+})
 
 vi.mock("@unprice/services/use-cases", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@unprice/services/use-cases")>()
@@ -26,7 +30,6 @@ vi.mock("@unprice/services/use-cases", async (importOriginal) => {
   }
 })
 
-import { ExplainChargeError } from "@unprice/services/use-cases"
 import { registerExplainChargeV1 } from "./explainChargeV1"
 
 const verifiedKey = {
@@ -132,14 +135,6 @@ describe("explainChargeV1 route", () => {
   })
 
   it("does not let a non-main key choose another project", async () => {
-    useCaseMocks.explainCharge.mockResolvedValueOnce(
-      Err(
-        new ExplainChargeError({
-          code: "INVOICE_NOT_FOUND",
-          message: "Invoice not found",
-        })
-      )
-    )
     const { app, env, executionCtx } = createTestApp()
 
     const response = await app.fetch(
@@ -152,15 +147,45 @@ describe("explainChargeV1 route", () => {
       executionCtx
     )
 
-    expect(response.status).toBe(404)
+    expect(response.status).toBe(403)
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
-        code: "NOT_FOUND",
+        code: "FORBIDDEN",
       })
     )
+    expect(useCaseMocks.explainCharge).not.toHaveBeenCalled()
+  })
+
+  it("lets a main key select a project", async () => {
+    authMocks.keyAuth.mockResolvedValueOnce({
+      ...verifiedKey,
+      projectId: "main_proj",
+      project: {
+        ...verifiedKey.project,
+        id: "main_proj",
+        isMain: true,
+        workspace: {
+          ...verifiedKey.project.workspace,
+          isMain: true,
+        },
+      },
+    })
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        project_id: "proj_selected",
+        invoice_id: "inv_1",
+        entry_id: "entry_1",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
     expect(useCaseMocks.explainCharge).toHaveBeenCalledWith(expect.anything(), {
-      projectId: "proj_123",
-      invoiceId: "inv_other_project",
+      projectId: "proj_selected",
+      invoiceId: "inv_1",
       entryId: "entry_1",
       limit: 100,
       offset: 0,

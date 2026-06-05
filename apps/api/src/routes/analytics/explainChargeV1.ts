@@ -3,7 +3,7 @@ import { explainChargeEventRowSchema } from "@unprice/analytics"
 import { ExplainChargeError, explainCharge } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -69,6 +69,7 @@ export const route = createRoute({
   request: {
     body: jsonContentRequired(
       z.object({
+        project_id: z.string().optional(),
         invoice_id: z.string(),
         entry_id: z.string(),
         limit: z.number().int().min(1).max(500).default(100),
@@ -92,9 +93,20 @@ export type ExplainChargeApiResponse = z.infer<
 
 export const registerExplainChargeV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { invoice_id: invoiceId, entry_id: entryId, limit, offset } = c.req.valid("json")
+    const {
+      project_id: requestedProjectId,
+      invoice_id: invoiceId,
+      entry_id: entryId,
+      limit,
+      offset,
+    } = c.req.valid("json")
     const key = await keyAuth(c)
     const { ledger } = c.get("services")
+    const projectId = validateIsAllowedToAccessProject({
+      isMain: (key.project.isMain ?? false) || key.project.workspace.isMain,
+      key,
+      requestedProjectId: requestedProjectId ?? key.projectId,
+    })
 
     const result = await explainCharge(
       {
@@ -103,7 +115,7 @@ export const registerExplainChargeV1 = (app: App) =>
         analytics: c.get("analytics"),
       },
       {
-        projectId: key.projectId,
+        projectId,
         invoiceId,
         entryId,
         limit,
@@ -169,6 +181,7 @@ function explainChargeErrorToApiError(error: unknown): UnpriceApiError {
       case "BILLING_PERIOD_NOT_FOUND":
       case "FEATURE_NOT_FOUND":
         return new UnpriceApiError({ code: "NOT_FOUND", message: error.message })
+      case "BILLING_PERIOD_CONTEXT_MISMATCH":
       case "BILLING_PERIOD_METADATA_MISSING":
       case "PERIOD_KEY_NOT_DERIVED":
         return new UnpriceApiError({ code: "BAD_REQUEST", message: error.message })
