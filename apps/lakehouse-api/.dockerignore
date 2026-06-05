@@ -1,7 +1,0 @@
-.git
-.venv
-__pycache__
-*.pyc
-node_modules
-.wrangler
-python_modules

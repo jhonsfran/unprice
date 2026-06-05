@@ -438,20 +438,6 @@ export class Unprice {
     }
   }
 
-  public get lakehouse() {
-    return {
-      getFilePlan: (
-        req: PostBody<"/v1/lakehouse/file-plan">
-      ): Promise<ApiResult<PostResponse<"/v1/lakehouse/file-plan">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/lakehouse/file-plan", {
-            body: req,
-          })
-        )
-      },
-    }
-  }
-
   public get plans() {
     const getVersion = (
       req: GetPath<"/v1/plans/versions/get/{planVersionId}">

@@ -1,6 +1,6 @@
 import type { LakehouseSource } from "./source"
 
-export const LAKEHOUSE_PARTITION_COLUMNS = ["project_id", "customer_id", "event_date"] as const
+export const LAKEHOUSE_PARTITION_COLUMNS = [] as const
 
 export type LakehouseFieldType =
   | "string"
@@ -83,7 +83,8 @@ export const lakehouseSourceSchemaRegistry = {
         required: true,
         addedInVersion: 1,
         defaultValue: null,
-        description: "UTC date partition key formatted as YYYY-MM-DD.",
+        description:
+          "UTC event date column for filters. Cloudflare Data Catalog partitioning is sink-managed ingestion time, not this business date.",
       },
       {
         name: "schema_version",

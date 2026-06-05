@@ -136,10 +136,6 @@
                     "pages": ["libraries/ts/sdk/invoices/get"]
                   },
                   {
-                    "group": "Lakehouse",
-                    "pages": ["libraries/ts/sdk/lakehouse/get-file-plan"]
-                  },
-                  {
                     "group": "Payments",
                     "pages": [
                       "libraries/ts/sdk/payments/list-methods",

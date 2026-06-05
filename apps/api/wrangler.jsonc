@@ -22,12 +22,6 @@
         "pattern": "api.unprice.dev",
         "custom_domain": true
       },
-      "r2_buckets": [
-        {
-          "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-prod"
-        }
-      ],
       "queues": {
         "producers": [
           {
@@ -70,9 +64,6 @@
             "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
           }
         ]
-      },
-      "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         "bindings": [
@@ -150,12 +141,6 @@
         "pattern": "preview-api.unprice.dev",
         "custom_domain": true
       },
-      "r2_buckets": [
-        {
-          "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-dev"
-        }
-      ],
       "queues": {
         "producers": [
           {
@@ -198,9 +183,6 @@
             "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
           }
         ]
-      },
-      "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
@@ -266,12 +248,6 @@
     },
     "dev": {
       "workers_dev": true,
-      "r2_buckets": [
-        {
-          "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-dev"
-        }
-      ],
       "queues": {
         "producers": [
           {
@@ -314,9 +290,6 @@
             "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
           }
         ]
-      },
-      "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single

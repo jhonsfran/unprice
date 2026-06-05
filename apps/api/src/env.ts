@@ -25,11 +25,6 @@ export const cloudflareQueue = z.custom<Queue<unknown>>(
   (queue) =>
     !!queue && typeof queue === "object" && "send" in queue && typeof queue.send === "function"
 )
-export const cloudflareR2Bucket = z.custom<R2Bucket>(
-  (bucket) =>
-    !!bucket && typeof bucket === "object" && "put" in bucket && typeof bucket.put === "function"
-)
-
 function readOptionalStringBinding(workerEnv: Record<string, unknown>, key: string) {
   const value = workerEnv[key]
   return typeof value === "string" && value.length > 0 ? value : undefined
@@ -62,9 +57,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       QUEUE_SHARD_0: cloudflareQueue,
       QUEUE_SHARD_1: cloudflareQueue,
       INGESTION_REPORTING_QUEUE: cloudflareQueue,
-      LAKEHOUSE: cloudflareR2Bucket,
-      LAKEHOUSE_FILE_PLAN_BASE_URL: z.string().url(),
-      LAKEHOUSE_API_TOKEN: z.string(),
       STRIPE_API_KEY: z.string().optional(),
       STRIPE_CONNECT_WEBHOOK_SECRET: z.string().optional(),
     },

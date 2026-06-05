@@ -27,7 +27,6 @@ describe("Unprice client", () => {
     expect(typeof client.events.ingestSync).toBe("function")
     expect(typeof client.features.list).toBe("function")
     expect(typeof client.invoices.get).toBe("function")
-    expect(typeof client.lakehouse.getFilePlan).toBe("function")
     expect(typeof client.plans.getVersion).toBe("function")
     expect(typeof client.plans.listVersions).toBe("function")
     expect(typeof client.payments.methods.create).toBe("function")

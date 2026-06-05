@@ -21,7 +21,6 @@ import { registerVerifyV1 } from "./routes/entitlements/verifyV1"
 import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
 import { registerGetFeaturesV1 } from "./routes/features/getFeaturesV1"
-import { registerGetLakehouseFilePlanV1 } from "./routes/lakehouse/getLakehouseFilePlanV1"
 import { registerCreatePaymentMethodV1 } from "./routes/payments/methods/createPaymentMethodV1"
 import { registerListPaymentMethodsV1 } from "./routes/payments/methods/listPaymentMethodsV1"
 import { registerProviderSetupV1 } from "./routes/payments/providers/providerSetupV1"
@@ -158,9 +157,6 @@ registerGetFeaturesV1(app)
 
 // Invoice routes
 registerGetInvoiceV1(app)
-
-// Lakehouse routes
-registerGetLakehouseFilePlanV1(app)
 
 // Payment routes
 registerListPaymentMethodsV1(app)
