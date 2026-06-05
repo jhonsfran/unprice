@@ -55,31 +55,37 @@ describe("ingestion entitlement message helpers", () => {
   })
 
   it("requires source identity on ingestion queue messages", () => {
-    expect(
-      ingestionQueueMessageSchema.parse({
-        version: 1,
-        workspaceId: "ws_1",
-        projectId: "proj_1",
-        customerId: "cus_1",
-        requestId: "req_1",
-        receivedAt: 1_000,
-        idempotencyKey: "idem_1",
-        id: "evt_1",
-        slug: "tokens.used",
-        timestamp: 900,
-        properties: { tokens: 42 },
-        source: {
-          environment: "development",
-          apiKeyId: "key_1",
-          sourceType: "api_key",
-          sourceId: "key_1",
-          sourceName: null,
-        },
-      })
-    ).toMatchObject({
+    const message = {
+      version: 1,
+      workspaceId: "ws_1",
+      projectId: "proj_1",
+      customerId: "cus_1",
+      requestId: "req_1",
+      receivedAt: 1_000,
+      idempotencyKey: "idem_1",
+      id: "evt_1",
+      slug: "tokens.used",
+      timestamp: 900,
+      properties: { tokens: 42 },
+      source: {
+        environment: "development",
+        apiKeyId: "key_1",
+        sourceType: "api_key",
+        sourceId: "key_1",
+        sourceName: null,
+      },
+    }
+
+    expect(ingestionQueueMessageSchema.parse(message)).toMatchObject({
       workspaceId: "ws_1",
       source: { sourceType: "api_key", sourceId: "key_1" },
     })
+
+    const { workspaceId: _workspaceId, ...messageWithoutWorkspace } = message
+    const { source: _source, ...messageWithoutSource } = message
+
+    expect(() => ingestionQueueMessageSchema.parse(messageWithoutWorkspace)).toThrow()
+    expect(() => ingestionQueueMessageSchema.parse(messageWithoutSource)).toThrow()
   })
 
   it("rejects events outside the entitlement window", () => {
