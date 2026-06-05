@@ -11,6 +11,7 @@ export { DurableObjectProject } from "~/project/do"
 export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
+import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
 import { registerGetEntitlementWindowStatusV1 } from "./routes/entitlements/getEntitlementWindowStatusV1"
@@ -179,6 +180,7 @@ registerGetRealtimeTicketV1(app)
 registerGetSubscriptionV1(app)
 
 // Usage routes
+registerExplainChargeV1(app)
 registerGetAnalyticsUsageV1(app)
 
 // Wallet routes

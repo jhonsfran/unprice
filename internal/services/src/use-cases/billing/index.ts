@@ -37,5 +37,12 @@ export { activateSubscription } from "./provision-period"
 export type { ActivateSubscriptionDeps, ActivationGrant } from "./provision-period"
 export { deriveActivationInputsFromPlan } from "./derive-provision-inputs"
 export { billPeriod } from "./bill-period"
+export {
+  ExplainChargeError,
+  explainCharge,
+  explainChargeInputSchema,
+  explainChargeOutputSchema,
+} from "./explain-charge"
+export type { ExplainChargeDeps, ExplainChargeInput, ExplainChargeOutput } from "./explain-charge"
 export { renewPeriod } from "./renew-period"
 export { settlePrepaidInvoiceToWallet } from "./settle-invoice"

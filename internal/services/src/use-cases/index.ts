@@ -1,6 +1,17 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
 export { activateSubscription } from "./billing/provision-period"
+export {
+  ExplainChargeError,
+  explainCharge,
+  explainChargeInputSchema,
+  explainChargeOutputSchema,
+} from "./billing/explain-charge"
+export type {
+  ExplainChargeDeps,
+  ExplainChargeInput,
+  ExplainChargeOutput,
+} from "./billing/explain-charge"
 export { createSubscription } from "./subscription/create"
 export { deriveActivationInputsFromPlan } from "./billing/derive-provision-inputs"
 export { settlePrepaidInvoiceToWallet } from "./billing/settle-invoice"
