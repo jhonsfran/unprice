@@ -2,13 +2,20 @@ import type { Analytics, IngestionLiveRow, IngestionRecentEventRow } from "@unpr
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import { z } from "zod"
 
+export const getIngestionStatusWindowSchema = z
+  .object({
+    from: z.number().int(),
+    to: z.number().int(),
+  })
+  .refine((window) => window.from < window.to, {
+    message: "window.to must be greater than window.from",
+    path: ["to"],
+  })
+
 export const getIngestionStatusInputSchema = z.object({
   projectId: z.string(),
   customerId: z.string(),
-  window: z.object({
-    from: z.number().int(),
-    to: z.number().int(),
-  }),
+  window: getIngestionStatusWindowSchema,
   filter: z
     .object({
       sourceId: z.string().optional(),
@@ -68,8 +75,13 @@ export const getIngestionStatusOutputSchema = z.object({
 export type GetIngestionStatusInput = z.infer<typeof getIngestionStatusInputSchema>
 export type GetIngestionStatusOutput = z.infer<typeof getIngestionStatusOutputSchema>
 
+export type GetIngestionStatusAnalytics = Pick<
+  Analytics,
+  "getIngestionLive" | "getIngestionRejections" | "getIngestionRecent"
+>
+
 export type GetIngestionStatusDeps = {
-  analytics: Analytics
+  analytics: GetIngestionStatusAnalytics
   now?: () => number
 }
 
@@ -125,15 +137,6 @@ export async function getIngestionStatus(
 
   const [liveResponse, rejectionsResponse, recentResponse] = analyticsResult.val
   const live = (liveResponse.data ?? []).map(mapLiveRow)
-  const totals = live.reduce(
-    (acc, row) => ({
-      processed: acc.processed + row.processed,
-      rejected: acc.rejected + row.rejected,
-      total: acc.total + row.total,
-    }),
-    { processed: 0, rejected: 0, total: 0 }
-  )
-  const successRate = totals.total === 0 ? 0 : totals.processed / totals.total
   const rejections = (rejectionsResponse.data ?? [])
     .filter((row) => matchesFilter(row, input.filter))
     .slice(0, input.limit)
@@ -150,6 +153,8 @@ export async function getIngestionStatus(
     .filter((row) => matchesFilter(row, input.filter))
     .slice(0, input.limit)
     .map(mapRecentEventRow)
+  const totals = deriveTotals({ live, rejections, recentEvents })
+  const successRate = totals.total === 0 ? 0 : totals.processed / totals.total
   const latestHandledAt = getLatestHandledAt({ recentEvents, live, rejections })
   const now = deps.now?.() ?? Date.now()
 
@@ -224,6 +229,48 @@ function toTinybirdFilter(filter: IngestionStatusFilter): {
   return {
     ...(filter.sourceId ? { source_id: filter.sourceId } : {}),
     ...(filter.eventSlug ? { event_slug: filter.eventSlug } : {}),
+  }
+}
+
+function deriveTotals({
+  live,
+  rejections,
+  recentEvents,
+}: Pick<
+  GetIngestionStatusOutput,
+  "live" | "rejections" | "recentEvents"
+>): GetIngestionStatusOutput["totals"] {
+  const liveTotals = live.reduce(
+    (acc, row) => ({
+      processed: acc.processed + row.processed,
+      rejected: acc.rejected + row.rejected,
+      total: acc.total + row.total,
+    }),
+    { processed: 0, rejected: 0, total: 0 }
+  )
+
+  if (liveTotals.total > 0) {
+    return liveTotals
+  }
+
+  if (recentEvents.length > 0) {
+    const recentTotals = recentEvents.reduce(
+      (acc, event) => ({
+        processed: acc.processed + (event.state === "processed" ? 1 : 0),
+        rejected: acc.rejected + (event.state === "rejected" ? 1 : 0),
+        total: acc.total + 1,
+      }),
+      { processed: 0, rejected: 0, total: 0 }
+    )
+
+    return recentTotals
+  }
+
+  const rejected = rejections.reduce((sum, row) => sum + row.eventCount, 0)
+  return {
+    processed: 0,
+    rejected,
+    total: rejected,
   }
 }
 

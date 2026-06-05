@@ -10,14 +10,19 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["analytics"]
 
-export const getIngestionStatusApiRequestSchema = z.object({
-  customer_id: z.string(),
-  from_ts: z.number().int(),
-  to_ts: z.number().int(),
-  source_id: z.string().optional(),
-  event_slug: z.string().optional(),
-  limit: z.number().int().min(1).max(100).default(50),
-})
+export const getIngestionStatusApiRequestSchema = z
+  .object({
+    customer_id: z.string(),
+    from_ts: z.number().int(),
+    to_ts: z.number().int(),
+    source_id: z.string().optional(),
+    event_slug: z.string().optional(),
+    limit: z.number().int().min(1).max(100).default(50),
+  })
+  .refine((input) => input.from_ts < input.to_ts, {
+    message: "to_ts must be greater than from_ts",
+    path: ["to_ts"],
+  })
 
 export const route = createRoute({
   path: "/v1/analytics/ingestion/status",

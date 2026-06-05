@@ -36,6 +36,6 @@ SQL >
       {% if defined(event_slug) %} AND event_slug = {{ String(event_slug) }} {% end %}
     GROUP BY rejection_reason, event_slug, source_id, source_type
     ORDER BY event_count DESC, last_seen_at DESC
-    LIMIT {{ Int32(limit, 20) }}
+    LIMIT {{ Int32(limit, 50) }}
 
 TYPE endpoint

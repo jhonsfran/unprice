@@ -1,5 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { Analytics } from "@unprice/analytics"
+import { FetchError } from "@unprice/error"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -257,6 +258,48 @@ describe("getIngestionStatusV1 route", () => {
       limit: 50,
     })
   })
+
+  it("rejects invalid windows before auth", async () => {
+    const { app, env, executionCtx, getIngestionLive } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        customer_id: "cus_invalid",
+        from_ts: toTs,
+        to_ts: fromTs,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(400)
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+    expect(getIngestionLive).not.toHaveBeenCalled()
+  })
+
+  it("maps Tinybird failures to internal server errors", async () => {
+    const { app, env, executionCtx } = createTestApp({
+      liveError: new Error("tinybird unavailable"),
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customer_id: "cus_123",
+        from_ts: fromTs,
+        to_ts: toTs,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "tinybird unavailable",
+      })
+    )
+  })
 })
 
 function createTestApp(
@@ -264,10 +307,22 @@ function createTestApp(
     liveRows?: Array<Record<string, unknown>>
     rejectionRows?: Array<Record<string, unknown>>
     recentRows?: Array<Record<string, unknown>>
+    liveError?: Error
   } = {}
 ) {
   const app = new OpenAPIHono<HonoEnv>()
-  const getIngestionLive = vi.fn().mockResolvedValue({ data: options.liveRows ?? [] })
+  const getIngestionLive = vi.fn(() => {
+    if (options.liveError) {
+      return Promise.reject(
+        new FetchError({
+          message: options.liveError.message,
+          retry: true,
+        })
+      )
+    }
+
+    return Promise.resolve({ data: options.liveRows ?? [] })
+  })
   const getIngestionRejections = vi.fn().mockResolvedValue({ data: options.rejectionRows ?? [] })
   const getIngestionRecent = vi.fn().mockResolvedValue({ data: options.recentRows ?? [] })
 
