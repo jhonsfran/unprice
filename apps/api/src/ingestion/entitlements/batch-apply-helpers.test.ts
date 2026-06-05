@@ -1,0 +1,259 @@
+import { DEFAULT_RESERVATION_POLICY } from "@unprice/services/wallet/reservation-sizing"
+import { describe, expect, it } from "vitest"
+import {
+  buildBatchEventApplyInput,
+  createAllowedBatchOutcome,
+  createCachedBatchResult,
+  createDeniedBatchOutcome,
+  hasStagedBatchMutations,
+  idempotencyEntryToApplyResult,
+  planWalletReservationSpend,
+  stageBatchIdempotencyEntry,
+} from "./batch-apply-helpers"
+import type { ApplyBatchInput, BatchIdempotencyEntry, WalletReservationSnapshot } from "./contracts"
+
+describe("batch apply helpers", () => {
+  it("builds a single-event apply input from a batch event", () => {
+    const input = createBatchInput()
+    const event = input.events[0]!
+
+    expect(buildBatchEventApplyInput(input, event)).toMatchObject({
+      projectId: "proj_123",
+      customerId: "cus_123",
+      idempotencyKey: "idem_123",
+      now: 123,
+      event: {
+        id: "evt_123",
+        slug: "tokens_used",
+        timestamp: 100,
+        properties: { amount: 1 },
+      },
+    })
+  })
+
+  it("detects whether optimized batch processing has staged mutations", () => {
+    expect(
+      hasStagedBatchMutations({
+        idempotencyEntryCount: 0,
+        meterStateDirty: false,
+        touchedGrantStateCount: 0,
+        walletDirty: false,
+      })
+    ).toBe(false)
+
+    expect(
+      hasStagedBatchMutations({
+        idempotencyEntryCount: 1,
+        meterStateDirty: false,
+        touchedGrantStateCount: 0,
+        walletDirty: false,
+      })
+    ).toBe(true)
+  })
+
+  it("converts idempotency entries back to apply results", () => {
+    expect(
+      idempotencyEntryToApplyResult({
+        eventId: "idem_123",
+        createdAt: 1,
+        allowed: false,
+        deniedReason: "LIMIT_EXCEEDED",
+        denyMessage: "Limit exceeded",
+        meterFacts: [],
+      })
+    ).toEqual({
+      allowed: false,
+      deniedReason: "LIMIT_EXCEEDED",
+      message: "Limit exceeded",
+    })
+  })
+
+  it("creates and stages denied batch outcomes", () => {
+    const entries: BatchIdempotencyEntry[] = []
+    const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
+    const outcome = createDeniedBatchOutcome({
+      correlationKey: "corr_123",
+      createdAt: 1,
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+      idempotencyKey: "idem_123",
+      message: "late",
+    })
+
+    stageBatchIdempotencyEntry({
+      entries,
+      entry: outcome.entry,
+      stagedResultsByKey,
+    })
+
+    expect(outcome.result).toMatchObject({
+      allowed: false,
+      correlationKey: "corr_123",
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+      idempotencyKey: "idem_123",
+      message: "late",
+    })
+    expect(entries).toEqual([outcome.entry])
+    expect(stagedResultsByKey.get("idem_123")).toBe(outcome.entry)
+  })
+
+  it("creates allowed and cached batch result rows", () => {
+    const allowed = createAllowedBatchOutcome({
+      correlationKey: "corr_123",
+      createdAt: 1,
+      idempotencyKey: "idem_123",
+      meterFacts: [],
+    })
+
+    expect(allowed.result).toEqual({
+      allowed: true,
+      correlationKey: "corr_123",
+      idempotencyKey: "idem_123",
+      meterFacts: [],
+    })
+    expect(
+      createCachedBatchResult({
+        correlationKey: "corr_456",
+        entry: allowed.entry,
+        idempotencyKey: "idem_456",
+      })
+    ).toEqual({
+      allowed: true,
+      correlationKey: "corr_456",
+      idempotencyKey: "idem_456",
+    })
+  })
+
+  it("marks reservation spend as underfunded when the event exceeds local allocation", () => {
+    const plan = planWalletReservationSpend({
+      createdAt: 1,
+      entitlement: { featureConfig: {} },
+      eventTimestamp: 100,
+      policy: DEFAULT_RESERVATION_POLICY,
+      totalCost: 20,
+      window: createOpenWalletReservation({ allocationAmount: 10 }),
+    })
+
+    expect(plan).toMatchObject({
+      currentRemaining: 10,
+      effectiveCostAmount: 20,
+      kind: "underfunded",
+      totalCost: 20,
+    })
+  })
+
+  it("plans spend and refill state from the same reservation snapshot", () => {
+    const plan = planWalletReservationSpend({
+      createdAt: 1_000,
+      entitlement: { featureConfig: {} },
+      eventTimestamp: 900,
+      policy: { ...DEFAULT_RESERVATION_POLICY, refillThresholdBps: 9000 },
+      totalCost: 15,
+      window: createOpenWalletReservation({
+        allocationAmount: 100,
+        consumedAmount: 80,
+        flushedAmount: 70,
+        flushSeq: 3,
+      }),
+    })
+
+    expect(plan).toMatchObject({
+      effectiveCostAmount: 15,
+      kind: "funded",
+      walletStateUpdate: {
+        consumedAmount: 95,
+        lastEventAt: 1_000,
+      },
+      refillStateUpdate: {
+        pendingFlushAmount: 25,
+        pendingFlushFinal: false,
+        pendingFlushSeq: 4,
+        refillInFlight: true,
+      },
+      refillTrigger: {
+        effectiveAt: 900,
+        flushAmount: 25,
+        flushSeq: 4,
+      },
+    })
+  })
+})
+
+function createOpenWalletReservation(
+  overrides: Partial<NonNullable<WalletReservationSnapshot>> = {}
+): NonNullable<WalletReservationSnapshot> & { reservationId: string } {
+  return {
+    allocationAmount: 100,
+    consumedAmount: 0,
+    currency: "USD",
+    customerId: "cus_123",
+    deletionRequested: false,
+    flushedAmount: 0,
+    flushSeq: 0,
+    lastEventAt: null,
+    lastFlushedAt: null,
+    lastRateSampledAtMs: null,
+    maxEventCostAmount: 0,
+    pendingFlushAmount: null,
+    pendingFlushFinal: false,
+    pendingFlushSeq: null,
+    pendingRefillAmount: 0,
+    projectId: "proj_123",
+    recoveryRequired: false,
+    refillChunkAmount: 0,
+    refillInFlight: false,
+    refillThresholdBps: 2000,
+    reservationEndAt: null,
+    reservationId: "res_123",
+    spendEwmaAmount: 0,
+    targetReservationAmount: 100,
+    ...overrides,
+  }
+}
+
+function createBatchInput(): ApplyBatchInput {
+  return {
+    projectId: "proj_123",
+    customerId: "cus_123",
+    entitlement: {
+      creditLinePolicy: "capped",
+      customerEntitlementId: "ce_123",
+      customerId: "cus_123",
+      effectiveAt: 1,
+      expiresAt: null,
+      featureConfig: {},
+      featurePlanVersionId: "fpv_123",
+      featureSlug: "api_calls",
+      featureType: "usage",
+      meterConfig: {
+        aggregationField: "amount",
+        aggregationMethod: "sum",
+        eventId: "meter_123",
+        eventSlug: "tokens_used",
+      },
+      overageStrategy: "none",
+      projectId: "proj_123",
+      resetConfig: null,
+    },
+    grants: [
+      {
+        allowanceUnits: 100,
+        effectiveAt: 1,
+        expiresAt: null,
+        grantId: "grant_123",
+        priority: 1,
+      },
+    ],
+    enforceLimit: true,
+    events: [
+      {
+        correlationKey: "corr_123",
+        id: "evt_123",
+        idempotencyKey: "idem_123",
+        now: 123,
+        properties: { amount: 1 },
+        slug: "tokens_used",
+        timestamp: 100,
+      },
+    ],
+  } as ApplyBatchInput
+}

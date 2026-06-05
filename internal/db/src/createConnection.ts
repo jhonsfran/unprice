@@ -64,16 +64,16 @@ export function createConnection(opts: ConnectionDatabaseOptions): Database {
     // because an error in cloudflare read1DatabaseUrl is equal to  """"
     // we need to parse that and make it a string
     if (
-      opts.read1DatabaseUrl === "" ||
-      opts.read1DatabaseUrl?.toString() === '""' ||
-      opts.read1DatabaseUrl?.toString() === ""
+      opts.read1DatabaseUrl === undefined ||
+      opts.read1DatabaseUrl === null ||
+      opts.read1DatabaseUrl === ""
     ) {
       opts.read1DatabaseUrl = undefined
     }
     if (
-      opts.read2DatabaseUrl === "" ||
-      opts.read2DatabaseUrl?.toString() === '""' ||
-      opts.read2DatabaseUrl?.toString() === ""
+      opts.read2DatabaseUrl === undefined ||
+      opts.read2DatabaseUrl === null ||
+      opts.read2DatabaseUrl === ""
     ) {
       opts.read2DatabaseUrl = undefined
     }

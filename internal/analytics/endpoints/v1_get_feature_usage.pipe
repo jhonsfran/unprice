@@ -9,7 +9,7 @@ SQL >
         project_id,
         customer_id,
         feature_slug,
-        argMax(value_after, timestamp) AS value
+        argMax(value_after, tuple(timestamp, created_at)) AS value
     FROM
         unprice_entitlement_meter_facts
     WHERE

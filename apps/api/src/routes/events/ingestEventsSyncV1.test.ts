@@ -1,7 +1,6 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { Logger } from "@unprice/logs"
 import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
-import { UnPriceIngestionError } from "@unprice/services/ingestion"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -220,30 +219,19 @@ describe("ingestEventsSyncV1 route", () => {
     )
   })
 
-  it("maps audit payload conflicts to 409 conflict", async () => {
+  it("maps reporting enqueue failures to an infrastructure error", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
     const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
-    ingestFeatureSync.mockRejectedValueOnce(
-      new UnPriceIngestionError({
-        code: "INGESTION_AUDIT_PAYLOAD_CONFLICT",
-        message:
-          "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
-        context: {
-          idempotencyKeys: ["idem_123"],
-          shardIndex: 20,
-        },
-      })
-    )
+    ingestFeatureSync.mockRejectedValueOnce(new Error("reporting enqueue failed"))
 
     const response = await app.fetch(buildRequest(), env, executionCtx)
 
-    expect(response.status).toBe(409)
+    expect(response.status).toBe(500)
     await expect(response.json()).resolves.toEqual({
-      code: "CONFLICT",
-      message:
-        "idempotencyKey was already used with a different event payload; retry with the exact original event or use a new idempotencyKey",
+      code: "INTERNAL_SERVER_ERROR",
+      message: "reporting enqueue failed",
     })
   })
 })

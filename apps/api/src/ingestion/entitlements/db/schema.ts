@@ -6,23 +6,15 @@ import type {
 } from "@unprice/db/validators"
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
-export const meterFactsOutboxTable = sqliteTable("meter_facts_outbox", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  payload: text("payload").notNull(),
-  currency: text("currency").notNull(),
-})
-
-export const idempotencyKeysTable = sqliteTable(
-  "idempotency_keys",
+export const idempotencyKeyBatchesTable = sqliteTable(
+  "idempotency_key_batches",
   {
-    eventId: text("event_id").primaryKey(),
+    id: integer("id").primaryKey({ autoIncrement: true }),
     createdAt: integer("created_at").notNull(),
-    allowed: integer("allowed", { mode: "boolean" }).notNull(),
-    deniedReason: text("denied_reason"),
-    denyMessage: text("deny_message"),
+    entries: text("entries").notNull(),
   },
   (table) => ({
-    createdAtIdx: index("idx_idempotency_keys_created_at").on(table.createdAt),
+    createdAtIdx: index("idx_idempotency_key_batches_created_at").on(table.createdAt),
   })
 )
 
@@ -54,19 +46,23 @@ export const grantsTable = sqliteTable("grants", {
   addedAt: integer("added_at").notNull(),
 })
 
-export const grantWindowsTable = sqliteTable("grant_windows", {
-  bucketKey: text("bucket_key").primaryKey(),
-  grantId: text("grant_id").notNull(),
-  periodKey: text("period_key").notNull(),
-  periodStartAt: integer("period_start_at").notNull(),
-  periodEndAt: integer("period_end_at").notNull(),
-  consumedInCurrentWindow: real("consumed_in_current_window").notNull().default(0),
-  exhaustedAt: integer("exhausted_at"),
-})
+export const entitlementPeriodUsageTable = sqliteTable(
+  "entitlement_period_usage",
+  {
+    periodKey: text("period_key").primaryKey(),
+    periodStartAt: integer("period_start_at").notNull(),
+    periodEndAt: integer("period_end_at").notNull(),
+    grantStatesJson: text("grant_states_json").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => ({
+    periodEndAtIdx: index("idx_entitlement_period_usage_period_end_at").on(table.periodEndAt),
+  })
+)
 
 // Raw aggregation state for the meter engine. This is not entitlement usage
-// and it has no cadence reset; grant_windows is the source of truth for
-// entitlement-period consumption.
+// and it has no cadence reset; entitlement_period_usage is the source of
+// truth for entitlement-period consumption.
 export const meterStateTable = sqliteTable("meter_state", {
   meterKey: text("meter_key").primaryKey(),
   usage: real("usage").notNull().default(0),
@@ -109,11 +105,10 @@ export const walletReservationTable = sqliteTable("wallet_reservation", {
 })
 
 export const schema = {
-  meterFactsOutboxTable,
-  idempotencyKeysTable,
+  idempotencyKeyBatchesTable,
   entitlementConfigTable,
+  entitlementPeriodUsageTable,
   grantsTable,
-  grantWindowsTable,
   meterStateTable,
   walletReservationTable,
 }

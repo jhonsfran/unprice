@@ -11,6 +11,7 @@ patterns. Keep it cheap to load and useful.
 - Update an existing section instead of adding duplicate narrative.
 - Do not record secrets, customer data, or one-off local noise.
 - Architecture rule changes need an ADR link.
+- You need to use nvm use to install the proper node version of the project
 
 ## Cloudflare, API, And Ingestion
 
@@ -23,16 +24,19 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-08: `/v1/usage/get` returns raw usage/spend from Tinybird; Hono formats display money.
 - 2026-05-08: Keep Tinybird response parsers tolerant during endpoint rollouts; old cloud
   shapes can lag local code.
+- 2026-05-31: Tinybird `AggregateFunction` state migrations that change `argMax` version type
+  cannot direct-`CAST` old states; `FORWARD_QUERY` must `finalizeAggregation` the old value and
+  `initializeAggregation('argMaxState', value, new_version)` for the new state.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
   and `amount_after` for cumulative spend.
 - 2026-05-08: Sync ingest idempotency must re-enter entitlement apply replay, not synthesize a
   duplicate from audit `exists`.
 - 2026-05-08: API wallet-empty messages should use configured meter/event slugs, not derived
   storage keys.
-- 2026-05-09: `/v1/events/ingest/sync` must await strict `IngestionAuditDO.commit`; `waitUntil`
-  alone is not durable enough.
-- 2026-05-09: Strict audit payload conflicts are expected idempotency failures; map them to API
-  `409 CONFLICT`.
+- 2026-05-09: `/v1/events/ingest/sync` must await durable reporting enqueue; `waitUntil`
+  alone is not durable enough for ingestion evidence.
+- 2026-05-09: Audit payload drift is asynchronous evidence, not a sync-ingest `409`; group
+  `canonicalAuditId` and count distinct `payloadHash` values in the audit lake.
 - 2026-05-09: Keep sync ingest on the low-latency auth path with `Server-Timing`; do not add the
   API-key rate-limit binding.
 - 2026-05-09: Persist final wallet flush intent before external wallet I/O so recovery replays
@@ -52,9 +56,14 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-18: HTTP tRPC inside Next.js should enrich the enclosing Next wide event
   instead of emitting a second event; only standalone/RSC tRPC contexts should emit
   their own batched procedure event.
+- 2026-06-05: `cloudflare/wrangler-action` fails before deploy when a listed secret is
+  empty; build the secret list dynamically for optional Worker secrets such as
+  `DATABASE_READ1_URL` and `DATABASE_READ2_URL`.
+- 2026-05-25: Public API route allowlists must run before `init()` so scanner 404s do not
+  construct cache, DB, service, or log-drain context.
 - 2026-05-08: Test DO eviction/recovery with a new DO instance over the same fake storage.
-- 2026-05-11: For usage concurrency, test `EntitlementWindowDO` and `IngestionAuditDO`, not only
-  the service adapter.
+- 2026-05-11: For usage concurrency, test `EntitlementWindowDO` replay and reporting enqueue
+  retry paths, not only the service adapter.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do
@@ -72,10 +81,14 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-17: EntitlementWindowDO apply/verify hot paths should read only active
   `grant_windows` bucket keys; full-table grant-window scans multiply storage rows read under
   load.
-- 2026-05-17: IngestionAuditDO commit/publish paths should batch indexed key lookups and
-  published-at updates; per-entry SQL loops inflate DO wall time under queue batches.
-- 2026-05-18: Cloudflare SQLite-backed DO queries allow only 100 bound parameters; batch
-  `IngestionAuditDO` inserts by column count and remember update `SET` values also consume binds.
+- 2026-05-30: EntitlementWindowDO no longer uses a local fact outbox; post-apply commits must
+  still schedule lifecycle alarms so wallet final flush, idempotency cleanup, and retention wakeups
+  continue.
+- 2026-05-31: Ingestion hot paths enqueue append-only reporting envelopes after
+  `EntitlementWindowDO` apply; do not reintroduce `IngestionAuditDO.exists` or
+  `IngestionAuditDO.commit` into sync or async request handling.
+- 2026-05-31: `IngestionAuditDO` is retired; keep only the `deleted_classes` migration marker
+  in `apps/api/wrangler.jsonc`, and use reporting envelopes for audit/Pipeline/Tinybird delivery.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
 
@@ -218,6 +231,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-05-23: `pnpm --filter <package> test <path>` resolves test filters from the package
+  directory; use package-relative paths such as `src/ingestion/...`, not repo-root paths.
 - 2026-05-09: For `docs/plans/**`, use
   `pnpm biome check --no-errors-on-unmatched docs/plans/<file>.md` plus `git diff --check`.
 - 2026-05-09: `docs/plans/**` is gitignored; inspect with `git status --ignored` or force-add
@@ -234,6 +249,14 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-05-17: EntitlementWindowDO non-final flush retries must reuse persisted
   `pending_refill_amount`; do not recompute adaptive refill size for an existing
   `pending_flush_seq`.
+- 2026-05-29: EntitlementWindowDO async compaction must commit idempotency results and
+  fact outbox intent in the same durable SQLite transaction; never advance replay seals
+  without recoverable priced facts.
+- 2026-05-29: Compact-only ingestion DOs use batch tables as the replay source:
+  `idempotency_key_batches`, `meter_facts_outbox_batches`, and `ingestion_audit_batches`.
+  Do not reintroduce per-event DO tables or a DB-backed meter storage adapter.
+- 2026-05-29: Async ingestion must not ack when audit DO commit fails after entitlement apply;
+  throw so the queue retries against entitlement idempotency instead of losing audit intent.
 - 2026-05-17: EntitlementWindowDO wallet retries must persist the whole ledger intent
   (`pending_flush_seq`, `pending_flush_amount`, refill/final flags); one ledger idempotency
   key must never replay with a recomputed financial payload.

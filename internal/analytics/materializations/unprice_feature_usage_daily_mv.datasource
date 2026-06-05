@@ -7,9 +7,9 @@ SCHEMA >
     `customer_id` String,
     `feature_slug` LowCardinality(String),
     `period_key` String,
-    `value` AggregateFunction(argMax, Decimal64(4), Int64),
-    `amount_after` AggregateFunction(argMax, Int64, Int64),
-    `currency` AggregateFunction(argMax, String, Int64),
+    `value` AggregateFunction(argMax, Decimal64(4), Tuple(Int64, Int64)),
+    `amount_after` AggregateFunction(argMax, Int64, Tuple(Int64, Int64)),
+    `currency` AggregateFunction(argMax, String, Tuple(Int64, Int64))
 
 ENGINE AggregatingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(date)

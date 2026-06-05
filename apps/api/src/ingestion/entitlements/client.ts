@@ -12,6 +12,11 @@ export class CloudflareEntitlementWindowClient implements EntitlementWindowClien
     this.entitlementwindow = env.entitlementwindow
   }
 
+  // Keep the Durable Object key at entitlement scope, not period scope.
+  // This DO owns singleton wallet reservation/recovery state and accepts late
+  // events across grant periods. Adding periodKey to the object name would
+  // fragment reservation/idempotency state and strand live DO storage without
+  // improving current-period hot traffic.
   public getEntitlementWindowStub(params: {
     customerEntitlementId: string
     customerId: string

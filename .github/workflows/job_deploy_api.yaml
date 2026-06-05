@@ -77,6 +77,51 @@ jobs:
           npm i -g wrangler@4.67.0
           wrangler --version
 
+      - name: Select Wrangler secrets
+        id: wrangler-secrets
+        shell: bash
+        run: |
+          required_secrets=(
+            TINYBIRD_TOKEN
+            TINYBIRD_URL
+            AUTH_SECRET
+            CLOUDFLARE_ZONE_ID
+            CLOUDFLARE_CACHE_DOMAIN
+            CLOUDFLARE_API_TOKEN
+            CLOUDFLARE_ACCOUNT_ID
+            LAKEHOUSE_API_TOKEN
+            DATABASE_URL
+            ENCRYPTION_KEY
+            AXIOM_API_TOKEN
+            AXIOM_DATASET
+            UPSTASH_REDIS_REST_URL
+            UPSTASH_REDIS_REST_TOKEN
+            STRIPE_API_KEY
+            STRIPE_CONNECT_WEBHOOK_SECRET
+            UNPRICE_API_KEY
+            UNPRICE_API_URL
+          )
+
+          optional_secrets=(
+            DATABASE_READ1_URL
+            DATABASE_READ2_URL
+          )
+
+          {
+            echo "names<<EOF"
+            printf "%s\n" "${required_secrets[@]}"
+
+            for secret_name in "${optional_secrets[@]}"; do
+              if [ -n "${!secret_name:-}" ]; then
+                printf "%s\n" "$secret_name"
+              else
+                echo "Skipping optional Wrangler secret $secret_name because it is empty" >&2
+              fi
+            done
+
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Deploy with Wrangler
         uses: cloudflare/wrangler-action@v3.14.1
         with:
@@ -87,27 +132,7 @@ jobs:
           workingDirectory: "apps/api"
           accountId: ${{ env.CLOUDFLARE_ACCOUNT_ID }}
           # Pass secrets to Worker
-          secrets: |
-            TINYBIRD_TOKEN
-            TINYBIRD_URL
-            AUTH_SECRET
-            CLOUDFLARE_ZONE_ID
-            CLOUDFLARE_CACHE_DOMAIN
-            CLOUDFLARE_API_TOKEN
-            CLOUDFLARE_ACCOUNT_ID
-            LAKEHOUSE_API_TOKEN
-            DATABASE_URL
-            DATABASE_READ1_URL
-            DATABASE_READ2_URL
-            ENCRYPTION_KEY
-            AXIOM_API_TOKEN
-            AXIOM_DATASET
-            UPSTASH_REDIS_REST_URL
-            UPSTASH_REDIS_REST_TOKEN
-            STRIPE_API_KEY
-            STRIPE_CONNECT_WEBHOOK_SECRET
-            UNPRICE_API_KEY
-            UNPRICE_API_URL
+          secrets: ${{ steps.wrangler-secrets.outputs.names }}
           vars: |
             VERSION
             NODE_ENV

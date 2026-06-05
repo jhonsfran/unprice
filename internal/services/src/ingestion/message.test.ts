@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
+import type { IngestionEntitlement } from "./entitlement-context"
 import {
   buildIngestionWindowName,
   filterIngestionEntitlementsWithValidAggregationPayload,
   isIngestionEntitlementActiveAt,
 } from "./message"
-import type { IngestionEntitlement } from "./service"
 
 describe("ingestion entitlement message helpers", () => {
   const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)

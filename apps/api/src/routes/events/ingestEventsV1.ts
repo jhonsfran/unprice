@@ -99,7 +99,8 @@ export const registerIngestEventsV1 = (app: App) =>
     const logger = c.get("logger")
 
     // we shard the load in 2 queues for now, more than enough as we scale we add more
-    const availableQueues = [c.env.QUEUE_SHARD_0, c.env.QUEUE_SHARD_1]
+    // const availableQueues = [c.env.QUEUE_SHARD_0, c.env.QUEUE_SHARD_1]
+    const availableQueues = [c.env.QUEUE_SHARD_0] // only one queue for now
 
     // 1. auth for the request
     const key = await keyAuth(c)
@@ -173,16 +174,12 @@ export const registerIngestEventsV1 = (app: App) =>
     const selectedQueue =
       availableQueues[selectQueueShardIndex(customerId, availableQueues.length)]!
 
-    // This sends the message in background to avoid blocking the requests
-    c.executionCtx.waitUntil(
-      safeSendToQueue({
-        queue: selectedQueue,
-        message,
-        logger,
-      })
-    )
+    await safeSendToQueue({
+      queue: selectedQueue,
+      message,
+      logger,
+    })
 
-    // after proccessed return 202
     return c.json({ accepted: true as const }, HttpStatusCodes.ACCEPTED)
   })
 
@@ -206,13 +203,13 @@ export async function safeSendToQueue(params: {
   logger: Logger
   queue: Queue<IngestionQueueMessage>
   message: IngestionQueueMessage
-}): Promise<void> {
+}): Promise<{ accepted: true }> {
   const { logger, queue, message } = params
 
   for (let attempt = 0; attempt < SAFE_QUEUE_SEND_RETRIES; attempt++) {
     try {
       await queue.send(message)
-      return
+      return { accepted: true }
     } catch (error) {
       logger.warn("raw ingestion queue send failed", {
         attempt: attempt + 1,
@@ -230,11 +227,16 @@ export async function safeSendToQueue(params: {
     }
   }
 
-  logger.error("raw ingestion background send failed permanently", {
+  logger.error("raw ingestion queue send failed permanently", {
     projectId: message.projectId,
     customerId: message.customerId,
     eventId: message.id,
     idempotencyKey: message.idempotencyKey,
+  })
+
+  throw new UnpriceApiError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: "Failed to enqueue ingestion event",
   })
 }
 

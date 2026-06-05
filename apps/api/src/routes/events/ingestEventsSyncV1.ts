@@ -4,7 +4,7 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
-import { INGESTION_REJECTION_REASONS, UnPriceIngestionError } from "@unprice/services/ingestion"
+import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -158,16 +158,6 @@ async function ingestFeatureSync(params: {
       message,
     })
   } catch (error) {
-    if (
-      error instanceof UnPriceIngestionError &&
-      error.code === "INGESTION_AUDIT_PAYLOAD_CONFLICT"
-    ) {
-      throw new UnpriceApiError({
-        code: "CONFLICT",
-        message: error.message,
-      })
-    }
-
     throw toUnpriceApiError(error)
   }
 }
