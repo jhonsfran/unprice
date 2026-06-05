@@ -52,19 +52,6 @@ const nextConfig = {
     ],
     // instrumentationHook: process.env.NODE_ENV === "production",
   },
-  /**
-   * This is a workaround to allow us to use inside api a path alias
-   * TODO: remove when api is deployed as an app
-   */
-  webpack: (config) => {
-    config.resolve.alias = {
-      ...config.resolve.alias,
-      // "#": path.resolve(__dirname, "../../internal/trpc/src/"),
-      "@duckdb/duckdb-wasm/dist/duckdb-node.cjs": "@duckdb/duckdb-wasm/dist/duckdb-browser.cjs",
-      "@duckdb/duckdb-wasm/dist/duckdb-node": "@duckdb/duckdb-wasm/dist/duckdb-browser.mjs",
-    }
-    return config
-  },
   /** We already do linting and typechecking as separate tasks in CI */
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },

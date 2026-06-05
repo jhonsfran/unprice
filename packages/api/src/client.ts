@@ -507,6 +507,26 @@ export class Unprice {
 
   public get analytics() {
     return {
+      explainCharge: (
+        req: PostBody<"/v1/analytics/explain-charge">
+      ): Promise<ApiResult<PostResponse<"/v1/analytics/explain-charge">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/analytics/explain-charge", {
+            body: req,
+          })
+        )
+      },
+      ingestion: {
+        status: (
+          req: PostBody<"/v1/analytics/ingestion/status">
+        ): Promise<ApiResult<PostResponse<"/v1/analytics/ingestion/status">>> => {
+          return this.toResult(
+            this.openapi.POST("/v1/analytics/ingestion/status", {
+              body: req,
+            })
+          )
+        },
+      },
       usage: {
         get: (
           req: PostBody<"/v1/analytics/usage/get">

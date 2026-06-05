@@ -75,7 +75,7 @@ export interface paths {
     put?: never
     /**
      * get current feature status
-     * @description Resolve whether a feature is usable for a customer and, for usage features, return current usage, limit, and priced spend.
+     * @description Resolve whether a feature is usable for a customer. Usage features return current usage, limit, and priced spend; tier/package features return the subscribed quantity limit.
      */
     post: operations["entitlements.verify"]
     delete?: never
@@ -118,6 +118,26 @@ export interface paths {
      * @description Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.
      */
     post: operations["events.ingestSync"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/entitlements/status": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * inspect entitlement window operational status
+     * @description Returns a non-mutating operational status snapshot for a specific entitlement window durable object.
+     */
+    get: operations["events.entitlementWindowStatus"]
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -358,6 +378,46 @@ export interface paths {
      * @description Get subscription with the active phase for a customer
      */
     post: operations["subscriptions.get"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/analytics/explain-charge": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * explain charge
+     * @description Explain one invoice line using ledger metadata and rated meter facts.
+     */
+    post: operations["analytics.explainCharge"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  "/v1/analytics/ingestion/status": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * get ingestion status
+     * @description Get live ingestion status for a customer in a requested window.
+     */
+    post: operations["analytics.ingestion.status"]
     delete?: never
     options?: never
     head?: never
@@ -1665,12 +1725,12 @@ export interface operations {
               | "UNROUTABLE_EVENT"
               | "WALLET_EMPTY"
             /**
-             * @description Current usage in the active meter window
+             * @description Current usage in the active meter window. Present for usage features.
              * @example 42
              */
             usage?: number
             /**
-             * @description Configured limit for the active meter window
+             * @description Configured limit. For usage features this is the active meter-window limit; for tier/package features this is the subscribed quantity limit.
              * @example 100
              */
             limit?: number | null
@@ -2011,6 +2071,127 @@ export interface operations {
              * @example Limit exceeded for meter meter_123
              */
             message?: string
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "events.entitlementWindowStatus": {
+    parameters: {
+      query: {
+        entitlementId: string
+        customerId: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Entitlement window status */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            durableObjectId: string
+            outboxCount: number
+            nextAlarmAt: number | null
+            lastIdempotencyCleanupAt: number | null
+            walletReservation: {
+              reservationId: string | null
+              projectId: string | null
+              customerId: string | null
+              currency: string | null
+              reservationEndAt: number | null
+              consumedAmount: number
+              flushedAmount: number
+              unflushedAmount: number
+              allocationAmount: number
+              refillInFlight: boolean
+              flushSeq: number
+              pendingFlushSeq: number | null
+              pendingFlushFinal: boolean
+              pendingFlushAmount: number | null
+              pendingRefillAmount: number
+              lastEventAt: number | null
+              lastFlushedAt: number | null
+              deletionRequested: boolean
+              recoveryRequired: boolean
+            } | null
           }
         }
       }
@@ -4643,6 +4824,333 @@ export interface operations {
                 version: number
               }
             }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "analytics.explainCharge": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Explain charge request */
+    requestBody: {
+      content: {
+        "application/json": {
+          project_id?: string
+          invoice_id: string
+          entry_id: string
+          /** @default 100 */
+          limit: number
+          /** @default 0 */
+          offset: number
+        }
+      }
+    }
+    responses: {
+      /** @description Explain charge response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            invoice: {
+              id: string
+              statement_key: string
+              customer_id: string
+              currency: string
+            }
+            line: {
+              entry_id: string
+              billing_period_id: string
+              kind: string
+              amount: number
+              currency: string
+            }
+            scope: {
+              project_id: string
+              customer_id: string
+              feature_slug: string
+              period_key: string
+              customer_entitlement_id: string | null
+              feature_plan_version_id: string | null
+            }
+            summary: {
+              event_count: number
+              total_usage: number
+              total_amount: number
+              latest_amount_after: number
+              currency: string
+              amount_scale: number
+              first_event_at: number | null
+              last_event_at: number | null
+              multi_component_event_count: number
+            }
+            events: {
+              event_id: string
+              idempotency_key: string
+              customer_entitlement_id: string
+              grant_id: string
+              feature_plan_version_id: string | null
+              feature_slug: string
+              period_key: string
+              event_slug: string
+              aggregation_method: string
+              /** @description timestamp of the ingested event */
+              timestamp: number
+              /** @description timestamp of when the fact row was created */
+              created_at: number
+              delta: number
+              value_after: number
+              amount: number
+              amount_after: number
+              /** @enum {number} */
+              amount_scale: 8
+              currency: string
+              priced_at: number
+              tier_index: number | null
+              /** @enum {string|null} */
+              tier_mode: "volume" | "graduated"
+              pricing_component_count: number
+              /** @enum {string} */
+              source_type: "api_key" | "system" | "unknown"
+              source_id: string
+            }[]
+            answer: string
+            evidence: {
+              /** @enum {string} */
+              type: "ledger_line" | "billing_period" | "meter_fact"
+              id: string
+            }[]
+            pagination: {
+              limit: number
+              offset: number
+              has_more: boolean
+            }
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "analytics.ingestion.status": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Get ingestion status request */
+    requestBody: {
+      content: {
+        "application/json": {
+          customer_id: string
+          from_ts: number
+          to_ts: number
+          source_id?: string
+          event_slug?: string
+          /** @default 50 */
+          limit: number
+        }
+      }
+    }
+    responses: {
+      /** @description Get ingestion status response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            window: {
+              from: number
+              to: number
+            }
+            totals: {
+              processed: number
+              rejected: number
+              total: number
+            }
+            successRate: number
+            freshness: {
+              latestHandledAt: number | null
+              secondsSinceLatest: number | null
+            }
+            live: {
+              second: string
+              processed: number
+              rejected: number
+              total: number
+            }[]
+            rejections: {
+              rejectionReason: string | null
+              eventSlug: string
+              sourceId: string
+              sourceType: string
+              eventCount: number
+              lastSeenAt: number
+            }[]
+            recentEvents: {
+              eventId: string
+              canonicalAuditId: string
+              eventSlug: string
+              sourceType: string
+              sourceId: string
+              /** @enum {string} */
+              state: "processed" | "rejected"
+              rejectionReason: string | null
+              timestamp: number
+              receivedAt: number
+              handledAt: number
+            }[]
+            answer: string
           }
         }
       }
