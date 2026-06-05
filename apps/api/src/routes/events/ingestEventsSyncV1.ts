@@ -129,7 +129,15 @@ export const registerIngestEventsSyncV1 = (app: App) =>
       projectId,
       receivedAt,
       requestId,
+      source: {
+        environment: c.env.APP_ENV,
+        apiKeyId: key.id,
+        sourceType: "api_key",
+        sourceId: key.id,
+        sourceName: null,
+      },
       timestamp,
+      workspaceId: key.project.workspaceId,
     })
 
     startTime(c, "ingestFeatureSync")

@@ -27,6 +27,14 @@ describe("batch apply helpers", () => {
         slug: "tokens_used",
         timestamp: 100,
         properties: { amount: 1 },
+        source: {
+          workspaceId: "ws_123",
+          environment: "test",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       },
     })
   })
@@ -251,6 +259,14 @@ function createBatchInput(): ApplyBatchInput {
         idempotencyKey: "idem_123",
         now: 123,
         properties: { amount: 1 },
+        source: {
+          workspaceId: "ws_123",
+          environment: "test",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
         slug: "tokens_used",
         timestamp: 100,
       },

@@ -112,8 +112,14 @@ export const entitlementApplyMeterFactSchema = z
   .object({
     event_id: z.string(),
     idempotency_key: z.string(),
+    workspace_id: z.string(),
     project_id: z.string(),
     customer_id: z.string(),
+    environment: z.string(),
+    api_key_id: z.string().nullable().optional(),
+    source_type: z.enum(["api_key", "system", "unknown"]),
+    source_id: z.string(),
+    source_name: z.string().nullable().optional(),
     currency: z.string().length(3),
     customer_entitlement_id: z.string(),
     grant_id: z.string(),
@@ -145,6 +151,14 @@ const rawEventSchema = z.object({
   slug: z.string(),
   timestamp: z.number().finite(),
   properties: z.record(z.unknown()),
+  source: z.object({
+    workspaceId: z.string().min(1),
+    environment: z.string().min(1),
+    apiKeyId: z.string().nullable(),
+    sourceType: z.enum(["api_key", "system", "unknown"]),
+    sourceId: z.string().min(1),
+    sourceName: z.string().nullable(),
+  }),
 })
 
 const overageStrategySchema = z.enum(["none", "last-call", "always"] satisfies readonly [

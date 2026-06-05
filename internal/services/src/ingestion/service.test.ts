@@ -185,6 +185,7 @@ describe("IngestionService entitlement routing", () => {
       featureSlug: entitlement.featureSlug,
       message: {
         version: 1,
+        workspaceId: "ws_123",
         projectId: entitlement.projectId,
         customerId: entitlement.customerId,
         requestId: "req_123",
@@ -194,6 +195,13 @@ describe("IngestionService entitlement routing", () => {
         slug: "usage.recorded",
         timestamp: Date.UTC(2026, 2, 19),
         properties: { amount: 1 },
+        source: {
+          environment: "test",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       },
     })
 
@@ -248,6 +256,7 @@ describe("IngestionService entitlement routing", () => {
       featureSlug: entitlement.featureSlug,
       message: {
         version: 1,
+        workspaceId: "ws_123",
         projectId: entitlement.projectId,
         customerId: entitlement.customerId,
         requestId: "req_123",
@@ -257,6 +266,13 @@ describe("IngestionService entitlement routing", () => {
         slug: "usage.recorded",
         timestamp: Date.UTC(2026, 2, 19),
         properties: { amount: 1 },
+        source: {
+          environment: "test",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       },
     })
 
@@ -305,6 +321,7 @@ describe("IngestionService entitlement routing", () => {
         featureSlug: entitlement.featureSlug,
         message: {
           version: 1,
+          workspaceId: "ws_123",
           projectId: entitlement.projectId,
           customerId: entitlement.customerId,
           requestId: "req_123",
@@ -314,6 +331,13 @@ describe("IngestionService entitlement routing", () => {
           slug: "usage.recorded",
           timestamp: Date.UTC(2026, 2, 19),
           properties: { amount: 1 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       })
     ).rejects.toThrow("reporting unavailable")
@@ -554,6 +578,7 @@ describe("IngestionService entitlement routing", () => {
       featureSlug: entitlement.featureSlug,
       message: {
         version: 1,
+        workspaceId: "ws_123",
         projectId: entitlement.projectId,
         customerId: entitlement.customerId,
         requestId: "req_123",
@@ -563,6 +588,13 @@ describe("IngestionService entitlement routing", () => {
         slug: "usage.recorded",
         timestamp: Date.UTC(2026, 2, 19),
         properties: { amount: 1 },
+        source: {
+          environment: "test",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       },
     })
 
@@ -657,6 +689,7 @@ describe("IngestionService entitlement routing", () => {
       messages: [
         {
           version: 1,
+          workspaceId: "ws_123",
           projectId: eventsEntitlement.projectId,
           customerId: eventsEntitlement.customerId,
           requestId: "req_123",
@@ -666,6 +699,13 @@ describe("IngestionService entitlement routing", () => {
           slug: "completions",
           timestamp: Date.UTC(2026, 2, 19),
           properties: { events: 2, keys: 3 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       ],
     })
@@ -792,6 +832,7 @@ describe("IngestionService entitlement routing", () => {
       messages: [
         {
           version: 1,
+          workspaceId: "ws_123",
           projectId: entitlement.projectId,
           customerId: entitlement.customerId,
           requestId: "req_123",
@@ -801,6 +842,13 @@ describe("IngestionService entitlement routing", () => {
           slug: "ai.usage",
           timestamp: Date.UTC(2026, 2, 19),
           properties: { tokens: 1, requests: 1, images: 1 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       ],
     })
@@ -999,6 +1047,7 @@ describe("IngestionService entitlement routing", () => {
       messages: [
         {
           version: 1,
+          workspaceId: "ws_123",
           projectId: eventsEntitlement.projectId,
           customerId: eventsEntitlement.customerId,
           requestId: "req_123",
@@ -1008,6 +1057,13 @@ describe("IngestionService entitlement routing", () => {
           slug: "completions",
           timestamp: Date.UTC(2026, 2, 19),
           properties: { events: 2, keys: 3 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       ],
     })
@@ -1065,6 +1121,7 @@ describe("IngestionService entitlement routing", () => {
       messages: [
         {
           version: 1,
+          workspaceId: "ws_123",
           projectId: entitlement.projectId,
           customerId: entitlement.customerId,
           requestId: "req_123",
@@ -1074,6 +1131,13 @@ describe("IngestionService entitlement routing", () => {
           slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
           timestamp: Date.UTC(2026, 2, 19),
           properties: { amount: 1 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       ],
     })
@@ -1149,6 +1213,7 @@ describe("IngestionService entitlement routing", () => {
       messages: [
         {
           version: 1,
+          workspaceId: "ws_123",
           projectId: entitlement.projectId,
           customerId: entitlement.customerId,
           requestId: "req_first",
@@ -1158,9 +1223,17 @@ describe("IngestionService entitlement routing", () => {
           slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
           timestamp: Date.UTC(2026, 2, 19),
           properties: { amount: 1 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
         {
           version: 1,
+          workspaceId: "ws_123",
           projectId: entitlement.projectId,
           customerId: entitlement.customerId,
           requestId: "req_second",
@@ -1170,6 +1243,13 @@ describe("IngestionService entitlement routing", () => {
           slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
           timestamp: Date.UTC(2026, 2, 19) + 1,
           properties: { amount: 2 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       ],
     })
@@ -1228,6 +1308,7 @@ describe("IngestionService entitlement routing", () => {
 
     const messages = Array.from({ length: 101 }, (_, index) => ({
       version: 1 as const,
+      workspaceId: "ws_123",
       projectId: entitlement.projectId,
       customerId: entitlement.customerId,
       requestId: `req_${index}`,
@@ -1237,6 +1318,13 @@ describe("IngestionService entitlement routing", () => {
       slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
       timestamp: Date.UTC(2026, 2, 19) + index,
       properties: { amount: 1 },
+      source: {
+        environment: "test",
+        apiKeyId: "key_123",
+        sourceType: "api_key" as const,
+        sourceId: "key_123",
+        sourceName: null,
+      },
     }))
 
     const result = await service.processCustomerGroup({
@@ -1250,8 +1338,13 @@ describe("IngestionService entitlement routing", () => {
     expect(apply).not.toHaveBeenCalled()
     expect(applyBatch).toHaveBeenCalledTimes(2)
     expect(applyBatch.mock.calls.map(([input]) => input.events.length)).toEqual([100, 1])
-    expect(send).toHaveBeenCalledTimes(1)
-    expect((send.mock.calls[0]?.[0] as IngestionReportingEnvelope).auditRecords).toHaveLength(101)
+    expect(send).toHaveBeenCalledTimes(2)
+    expect(
+      send.mock.calls.reduce(
+        (count, [envelope]) => count + (envelope as IngestionReportingEnvelope).auditRecords.length,
+        0
+      )
+    ).toBe(101)
   })
 
   it("returns CUSTOMER_NOT_FOUND when verifying a missing customer", async () => {
@@ -1484,6 +1577,7 @@ describe("IngestionService entitlement routing", () => {
       messages: [
         {
           version: 1,
+          workspaceId: "ws_123",
           projectId: entitlement.projectId,
           customerId: entitlement.customerId,
           requestId: "req_123",
@@ -1493,6 +1587,13 @@ describe("IngestionService entitlement routing", () => {
           slug: "usage.recorded",
           timestamp: Date.UTC(2026, 2, 19),
           properties: { amount: 1 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       ],
     })
@@ -1536,6 +1637,7 @@ describe("IngestionService entitlement routing", () => {
       messages: [
         {
           version: 1,
+          workspaceId: "ws_123",
           projectId: entitlement.projectId,
           customerId: entitlement.customerId,
           requestId: "req_123",
@@ -1545,6 +1647,13 @@ describe("IngestionService entitlement routing", () => {
           slug: "usage.recorded",
           timestamp: SERVICE_NOW - INGESTION_MAX_EVENT_AGE_MS - 1,
           properties: { amount: 1 },
+          source: {
+            environment: "test",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       ],
     })
@@ -1595,8 +1704,14 @@ function createReportingAuditRecord(
     canonicalAuditId: "audit_123",
     payloadHash: "hash_123",
     idempotencyKey: "idem_123",
+    workspaceId: "ws_123",
     projectId: "proj_123",
     customerId: "cus_123",
+    environment: "test",
+    apiKeyId: "key_123",
+    sourceType: "api_key",
+    sourceId: "key_123",
+    sourceName: null,
     status: "processed",
     firstSeenAt: SERVICE_NOW,
     handledAt: SERVICE_NOW + 1,
@@ -1611,8 +1726,14 @@ function createReportingMeterFact(
   return {
     event_id: "evt_123",
     idempotency_key: "idem_123",
+    workspace_id: "ws_123",
     project_id: "proj_123",
     customer_id: "cus_123",
+    environment: "test",
+    api_key_id: "key_123",
+    source_type: "api_key",
+    source_id: "key_123",
+    source_name: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",
@@ -1761,6 +1882,7 @@ function createMessage(
 ): IngestionQueueMessage {
   return {
     version: 1,
+    workspaceId: "ws_123",
     projectId: entitlement.projectId,
     customerId: entitlement.customerId,
     requestId: "req_123",
@@ -1770,6 +1892,13 @@ function createMessage(
     slug: entitlement.meterConfig?.eventSlug ?? "usage.recorded",
     timestamp: Date.UTC(2026, 2, 19),
     properties: { amount: 1 },
+    source: {
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
+    },
     ...overrides,
   }
 }

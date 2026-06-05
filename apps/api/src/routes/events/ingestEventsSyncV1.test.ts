@@ -87,6 +87,14 @@ describe("ingestEventsSyncV1 route", () => {
         id: "evt_123",
         idempotencyKey: "idem_123",
         slug: "tokens_used",
+        workspaceId: "ws_123",
+        source: {
+          environment: "development",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       }),
     })
   })

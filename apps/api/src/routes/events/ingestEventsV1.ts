@@ -166,7 +166,15 @@ export const registerIngestEventsV1 = (app: App) =>
       projectId,
       receivedAt,
       requestId,
+      source: {
+        environment: c.env.APP_ENV,
+        apiKeyId: key.id,
+        sourceType: "api_key",
+        sourceId: key.id,
+        sourceName: null,
+      },
       timestamp,
+      workspaceId: key.project.workspaceId,
     })
 
     // shard by customerid to make sure the messages of specific customer go to the same queue
@@ -254,13 +262,17 @@ export function buildIngestionQueueMessage(params: {
   projectId: string
   receivedAt: number
   requestId: string
+  source: IngestionQueueMessage["source"]
   timestamp: number
+  workspaceId: string
 }): IngestionQueueMessage {
-  const { body, customerId, projectId, receivedAt, requestId, timestamp } = params
+  const { body, customerId, projectId, receivedAt, requestId, source, timestamp, workspaceId } =
+    params
   const eventId = body.id ?? generateEventId(receivedAt)
 
   return ingestionQueueMessageSchema.parse({
     version: 1,
+    workspaceId,
     projectId,
     customerId,
     requestId,
@@ -270,6 +282,7 @@ export function buildIngestionQueueMessage(params: {
     slug: body.eventSlug,
     timestamp,
     properties: body.properties,
+    source,
   })
 }
 

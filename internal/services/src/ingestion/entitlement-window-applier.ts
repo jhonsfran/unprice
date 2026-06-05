@@ -5,6 +5,10 @@ import { getMessageOutcomeKey } from "./fanout-outcomes"
 import type { EntitlementWindowState, IngestionRejectionReason } from "./interface"
 import type { IngestionQueueMessage } from "./message"
 
+type EntitlementWindowApplySource = IngestionQueueMessage["source"] & {
+  workspaceId: string
+}
+
 export type EntitlementWindowApplyResult = {
   allowed: boolean
   deniedReason?: Extract<
@@ -21,6 +25,7 @@ export type EntitlementWindowApplyBatchEvent = {
   idempotencyKey: string
   now: number
   properties: Record<string, unknown>
+  source: EntitlementWindowApplySource
   slug: string
   timestamp: number
 }
@@ -43,6 +48,7 @@ export type EntitlementWindowApplyInput = {
   event: {
     id: string
     properties: Record<string, unknown>
+    source: EntitlementWindowApplySource
     slug: string
     timestamp: number
   }
@@ -152,6 +158,7 @@ export class EntitlementWindowApplier {
         slug: message.slug,
         timestamp: message.timestamp,
         properties: message.properties,
+        source: buildEntitlementWindowApplySource(message),
         idempotencyKey: message.idempotencyKey,
         now: message.receivedAt,
       })),
@@ -194,6 +201,7 @@ export class EntitlementWindowApplier {
         slug: message.slug,
         timestamp: message.timestamp,
         properties: message.properties,
+        source: buildEntitlementWindowApplySource(message),
       },
       entitlement: applyEntitlement,
       idempotencyKey: message.idempotencyKey,
@@ -234,6 +242,7 @@ export class EntitlementWindowApplier {
           slug: message.slug,
           timestamp: message.timestamp,
           properties: message.properties,
+          source: buildEntitlementWindowApplySource(message),
         },
         entitlement: applyEntitlement,
         idempotencyKey: message.idempotencyKey,
@@ -287,4 +296,13 @@ function mapBatchResultsToMessages(
 
     return { ...result, idempotencyKey: message.idempotencyKey, correlationKey }
   })
+}
+
+function buildEntitlementWindowApplySource(
+  message: IngestionQueueMessage
+): EntitlementWindowApplySource {
+  return {
+    workspaceId: message.workspaceId,
+    ...message.source,
+  }
 }

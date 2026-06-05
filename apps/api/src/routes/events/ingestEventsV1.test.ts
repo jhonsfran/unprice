@@ -91,6 +91,7 @@ describe("ingestEventsV1 helpers", () => {
         queue: queue as Queue<IngestionQueueMessage>,
         message: {
           version: 1,
+          workspaceId: "ws_123",
           projectId: "proj_123",
           customerId: "cus_123",
           requestId: "req_123",
@@ -100,6 +101,13 @@ describe("ingestEventsV1 helpers", () => {
           slug: "tokens_used",
           timestamp: Date.now(),
           properties: {},
+          source: {
+            environment: "development",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       })
     ).rejects.toBeInstanceOf(UnpriceApiError)
@@ -138,6 +146,14 @@ describe("ingestEventsV1 route", () => {
         projectId: "proj_123",
         requestId: "req_123",
         receivedAt: requestBody.timestamp,
+        workspaceId: "ws_123",
+        source: {
+          environment: "development",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       })
     )
     expect(otherQueue.send).not.toHaveBeenCalled()

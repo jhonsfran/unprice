@@ -13,10 +13,24 @@ describe("lakehouse events registry", () => {
 
     expect(schema.source).toBe("events")
     expect(schema.firstVersion).toBe(1)
-    expect(schema.currentVersion).toBe(2)
-    expect(getLakehouseSourceCurrentVersion("events")).toBe(2)
+    expect(schema.currentVersion).toBe(3)
+    expect(getLakehouseSourceCurrentVersion("events")).toBe(3)
     expect(schema.fields.some((field) => field.name === "schema_version" && field.required)).toBe(
       true
+    )
+    expect(schema.fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "workspace_id",
+          required: false,
+          addedInVersion: 3,
+        }),
+        expect.objectContaining({
+          name: "source_id",
+          required: false,
+          addedInVersion: 3,
+        }),
+      ])
     )
   })
 
@@ -45,6 +59,12 @@ describe("lakehouse events registry", () => {
         id: "evt_123",
         project_id: "proj_123",
         customer_id: "cus_123",
+        workspace_id: "ws_123",
+        environment: "test",
+        api_key_id: "key_123",
+        source_type: "api_key",
+        source_id: "key_123",
+        source_name: null,
         request_id: "req_123",
         idempotency_key: "idem_123",
         slug: "tokens_used",
@@ -60,6 +80,8 @@ describe("lakehouse events registry", () => {
       expect.objectContaining({
         schema_version: 1,
         state: "processed",
+        source_id: "key_123",
+        workspace_id: "ws_123",
       })
     )
   })

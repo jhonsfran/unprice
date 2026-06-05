@@ -1598,6 +1598,7 @@ describe("EntitlementWindowDO", () => {
         event: {
           id: event.id,
           properties: event.properties,
+          source: event.source,
           slug: event.slug,
           timestamp: event.timestamp,
         },
@@ -6255,6 +6256,14 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
     event: {
       id: "evt_123",
       properties: { amount: 3 },
+      source: {
+        workspaceId: "ws_123",
+        environment: "test",
+        apiKeyId: "key_123",
+        sourceType: "api_key",
+        sourceId: "key_123",
+        sourceName: null,
+      },
       slug: "tokens_used",
       timestamp: BASE_NOW,
       ...((overrides.event as Record<string, unknown> | undefined) ?? {}),

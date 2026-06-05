@@ -26,6 +26,36 @@
       "required": true
     },
     {
+      "name": "workspace_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "environment",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "api_key_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "source_type",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "source_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "source_name",
+      "type": "string",
+      "required": false
+    },
+    {
       "name": "request_id",
       "type": "string",
       "required": true
@@ -69,6 +99,16 @@
       "name": "properties",
       "type": "json",
       "required": true
+    },
+    {
+      "name": "canonical_audit_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "payload_hash",
+      "type": "string",
+      "required": false
     }
   ]
 }

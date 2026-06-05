@@ -79,14 +79,26 @@ describe("ingestion reporting envelope builder", () => {
       handledAt: HANDLED_AT,
       firstSeenAt: message.receivedAt,
       idempotencyKey: message.idempotencyKey,
+      workspaceId: message.workspaceId,
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
       rejectionReason: "WALLET_EMPTY",
       status: "rejected",
     })
     expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
       event_date: "2026-03-19",
       id: "evt_rejected",
+      workspace_id: message.workspaceId,
       project_id: message.projectId,
       customer_id: message.customerId,
+      environment: "test",
+      api_key_id: "key_123",
+      source_type: "api_key",
+      source_id: "key_123",
+      source_name: null,
       state: "rejected",
       rejection_reason: "WALLET_EMPTY",
       canonical_audit_id: record.canonicalAuditId,
@@ -118,6 +130,7 @@ describe("ingestion reporting envelope builder", () => {
 function createMessage(overrides: Partial<IngestionQueueMessage> = {}): IngestionQueueMessage {
   return {
     version: 1,
+    workspaceId: "ws_123",
     projectId: "proj_123",
     customerId: "cus_123",
     requestId: "req_123",
@@ -127,6 +140,13 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
     slug: "usage.recorded",
     timestamp: TEST_NOW,
     properties: { amount: 1 },
+    source: {
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
+    },
     ...overrides,
   }
 }
@@ -137,8 +157,14 @@ function createMeterFact(
   return {
     event_id: "evt_123",
     idempotency_key: "idem_123",
+    workspace_id: "ws_123",
     project_id: "proj_123",
     customer_id: "cus_123",
+    environment: "test",
+    api_key_id: "key_123",
+    source_type: "api_key",
+    source_id: "key_123",
+    source_name: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",

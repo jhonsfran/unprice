@@ -3,6 +3,7 @@ import type { IngestionEntitlement } from "./entitlement-context"
 import {
   buildIngestionWindowName,
   filterIngestionEntitlementsWithValidAggregationPayload,
+  ingestionQueueMessageSchema,
   isIngestionEntitlementActiveAt,
 } from "./message"
 
@@ -51,6 +52,34 @@ describe("ingestion entitlement message helpers", () => {
         customerEntitlementId: "ce_123",
       })
     ).toBe("test:proj_123:cus_123:ce_123")
+  })
+
+  it("requires source identity on ingestion queue messages", () => {
+    expect(
+      ingestionQueueMessageSchema.parse({
+        version: 1,
+        workspaceId: "ws_1",
+        projectId: "proj_1",
+        customerId: "cus_1",
+        requestId: "req_1",
+        receivedAt: 1_000,
+        idempotencyKey: "idem_1",
+        id: "evt_1",
+        slug: "tokens.used",
+        timestamp: 900,
+        properties: { tokens: 42 },
+        source: {
+          environment: "development",
+          apiKeyId: "key_1",
+          sourceType: "api_key",
+          sourceId: "key_1",
+          sourceName: null,
+        },
+      })
+    ).toMatchObject({
+      workspaceId: "ws_1",
+      source: { sourceType: "api_key", sourceId: "key_1" },
+    })
   })
 
   it("rejects events outside the entitlement window", () => {

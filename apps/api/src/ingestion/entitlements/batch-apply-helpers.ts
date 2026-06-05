@@ -97,6 +97,7 @@ export function buildBatchEventApplyInput(
       slug: event.slug,
       timestamp: event.timestamp,
       properties: event.properties,
+      source: event.source,
     },
     idempotencyKey: event.idempotencyKey,
     now: event.now,
