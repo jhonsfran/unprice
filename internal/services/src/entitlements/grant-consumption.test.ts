@@ -691,6 +691,42 @@ describe("grant pricing helpers", () => {
     })
   })
 
+  it("explains exact graduated tier boundary usage as the next tier component", () => {
+    const priceConfig = {
+      tierMode: "graduated",
+      usageMode: "tier",
+      tiers: [
+        {
+          firstUnit: 1,
+          lastUnit: 10,
+          unitPrice: price("1.00", USD),
+          flatPrice: price("0.00", USD),
+        },
+        {
+          firstUnit: 11,
+          lastUnit: null,
+          unitPrice: price("2.00", USD),
+          flatPrice: price("0.00", USD),
+        },
+      ],
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaExplanation({
+        priceConfig,
+        usageBefore: 10,
+        usageAfter: 11,
+      })
+    ).toEqual({
+      amountMinor: 200_000_000,
+      usageBefore: 10,
+      usageAfter: 11,
+      tierMode: "graduated",
+      tierIndex: 1,
+      pricingComponentCount: 1,
+    })
+  })
+
   it("explains unit pricing without tier pointers", () => {
     const priceConfig = {
       usageMode: "unit",
