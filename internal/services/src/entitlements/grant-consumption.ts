@@ -8,6 +8,16 @@ import {
 import { diffLedgerMinor } from "@unprice/money"
 
 const GRANT_PRICING_FEATURE_TYPE = "usage" as const
+type GrantPricingFeatureType = "flat" | "package" | "tier" | "usage"
+
+export type UsagePriceDeltaExplanation = {
+  amountMinor: number
+  usageBefore: number
+  usageAfter: number
+  tierMode: "volume" | "graduated" | null
+  tierIndex: number | null
+  pricingComponentCount: number
+}
 
 export type GrantConsumptionGrant = {
   allowanceUnits: number | null
@@ -260,7 +270,7 @@ export function computeUsagePriceDeltaMinor(params: {
 
   const beforeResult = calculatePricePerFeature({
     quantity: usageBefore,
-    featureType: GRANT_PRICING_FEATURE_TYPE,
+    featureType: resolveGrantPricingFeatureType(params.priceConfig),
     config: params.priceConfig,
   })
 
@@ -270,7 +280,7 @@ export function computeUsagePriceDeltaMinor(params: {
 
   const afterResult = calculatePricePerFeature({
     quantity: usageAfter,
-    featureType: GRANT_PRICING_FEATURE_TYPE,
+    featureType: resolveGrantPricingFeatureType(params.priceConfig),
     config: params.priceConfig,
   })
 
@@ -279,6 +289,33 @@ export function computeUsagePriceDeltaMinor(params: {
   }
 
   return diffLedgerMinor(afterResult.val.totalPrice.dinero, beforeResult.val.totalPrice.dinero)
+}
+
+export function computeUsagePriceDeltaExplanation(params: {
+  priceConfig: ConfigFeatureVersionType
+  usageAfter: number
+  usageBefore: number
+}): UsagePriceDeltaExplanation {
+  const amountMinor = computeUsagePriceDeltaMinor(params)
+  const tierMode =
+    "usageMode" in params.priceConfig && params.priceConfig.usageMode === "tier"
+      ? (params.priceConfig.tierMode ?? null)
+      : "tierMode" in params.priceConfig
+        ? (params.priceConfig.tierMode ?? null)
+        : null
+
+  return {
+    amountMinor,
+    usageBefore: Math.max(0, params.usageBefore),
+    usageAfter: Math.max(0, params.usageAfter),
+    tierMode,
+    tierIndex: resolveTierIndex(params.priceConfig, Math.max(0, params.usageAfter)),
+    pricingComponentCount: resolvePricingComponentCount(
+      params.priceConfig,
+      params.usageBefore,
+      params.usageAfter
+    ),
+  }
 }
 
 export function computeMaxMarginalPriceMinor(priceConfig: ConfigFeatureVersionType): number {
@@ -298,6 +335,76 @@ export function computeMaxMarginalPriceMinor(priceConfig: ConfigFeatureVersionTy
   return maxMarginal
 }
 
+export function resolveTierIndex(
+  priceConfig: ConfigFeatureVersionType,
+  usage: number
+): number | null {
+  const tiers = "tiers" in priceConfig && Array.isArray(priceConfig.tiers) ? priceConfig.tiers : []
+  const normalizedUsage = Math.max(0, usage)
+
+  if (tiers.length === 0 || normalizedUsage === 0) {
+    return null
+  }
+
+  const index = tiers.findIndex(
+    (tier) =>
+      normalizedUsage >= tier.firstUnit &&
+      (tier.lastUnit === null || normalizedUsage <= tier.lastUnit)
+  )
+
+  if (index >= 0) {
+    return index
+  }
+
+  const firstTier = tiers[0]
+  if (firstTier && normalizedUsage > 0 && normalizedUsage < firstTier.firstUnit) {
+    return 0
+  }
+
+  return null
+}
+
+export function resolvePricingComponentCount(
+  priceConfig: ConfigFeatureVersionType,
+  usageBefore: number,
+  usageAfter: number
+): number {
+  const before = Math.max(0, usageBefore)
+  const after = Math.max(0, usageAfter)
+
+  if (before === after) {
+    return 0
+  }
+
+  const featureType = resolveGrantPricingFeatureType(priceConfig)
+  const tiers = "tiers" in priceConfig && Array.isArray(priceConfig.tiers) ? priceConfig.tiers : []
+
+  if (isPackagePricing(priceConfig)) {
+    return resolvePackageComponentCount(priceConfig, before, after)
+  }
+
+  if (featureType === "flat" || tiers.length === 0) {
+    return 1
+  }
+
+  const lower = Math.min(before, after)
+  const upper = Math.max(before, after)
+
+  if (resolveTierMode(priceConfig) === "volume") {
+    return new Set(
+      [resolveTierIndex(priceConfig, lower), resolveTierIndex(priceConfig, upper)].filter(
+        (index): index is number => index !== null
+      )
+    ).size
+  }
+
+  return tiers.filter((tier) => {
+    const tierStart = tier.firstUnit
+    const tierEnd = tier.lastUnit ?? Number.POSITIVE_INFINITY
+    return upper >= tierStart && lower < tierEnd
+  }).length
+}
+
 function probeMarginalPriceMinor(
   priceConfig: ConfigFeatureVersionType,
   usageBefore: number,
@@ -308,6 +415,53 @@ function probeMarginalPriceMinor(
   } catch {
     return 0
   }
+}
+
+function resolveGrantPricingFeatureType(
+  priceConfig: ConfigFeatureVersionType
+): GrantPricingFeatureType {
+  if ("usageMode" in priceConfig && priceConfig.usageMode) {
+    return GRANT_PRICING_FEATURE_TYPE
+  }
+
+  if ("tiers" in priceConfig && Array.isArray(priceConfig.tiers)) {
+    return "tier"
+  }
+
+  if ("units" in priceConfig && typeof priceConfig.units === "number") {
+    return "package"
+  }
+
+  return "flat"
+}
+
+function resolveTierMode(priceConfig: ConfigFeatureVersionType): "volume" | "graduated" | null {
+  if ("usageMode" in priceConfig && priceConfig.usageMode === "tier") {
+    return priceConfig.tierMode ?? null
+  }
+
+  return "tierMode" in priceConfig ? (priceConfig.tierMode ?? null) : null
+}
+
+function resolvePackageComponentCount(
+  priceConfig: ConfigFeatureVersionType,
+  usageBefore: number,
+  usageAfter: number
+): number {
+  const units = "units" in priceConfig ? priceConfig.units : null
+  if (typeof units !== "number" || units <= 0) {
+    return 1
+  }
+
+  return Math.abs(Math.ceil(usageAfter / units) - Math.ceil(usageBefore / units))
+}
+
+function isPackagePricing(priceConfig: ConfigFeatureVersionType): boolean {
+  if ("usageMode" in priceConfig && priceConfig.usageMode === "package") {
+    return true
+  }
+
+  return !("usageMode" in priceConfig) && "units" in priceConfig
 }
 
 function createEmptyGrantState(params: {

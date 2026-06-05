@@ -19,6 +19,7 @@ import {
   type MeterConfig,
   computeGrantPeriodBucket,
   computeMaxMarginalPriceMinor,
+  computeUsagePriceDeltaExplanation,
   computeUsagePriceDeltaMinor,
   consumeGrantsByPriority,
   resolveActiveGrants,
@@ -3511,6 +3512,9 @@ export class EntitlementWindowDO extends DurableObject {
       amount_after: pricedFact.amountAfterMinor,
       amount_scale: LEDGER_SCALE,
       priced_at: createdAt,
+      tier_index: pricedFact.tierIndex,
+      tier_mode: pricedFact.tierMode,
+      pricing_component_count: pricedFact.pricingComponentCount,
     }
   }
 
@@ -3571,26 +3575,29 @@ export class EntitlementWindowDO extends DurableObject {
       })
 
       for (const allocation of consumed.allocations) {
-        const amountMinor = computeUsagePriceDeltaMinor({
+        const deltaExplanation = computeUsagePriceDeltaExplanation({
           priceConfig: params.entitlement.featureConfig,
           usageAfter: allocation.usageAfter,
           usageBefore: allocation.usageBefore,
         })
-        const amountAfterMinor = computeUsagePriceDeltaMinor({
+        const amountAfterExplanation = computeUsagePriceDeltaExplanation({
           priceConfig: params.entitlement.featureConfig,
           usageAfter: allocation.usageAfter,
           usageBefore: 0,
         })
 
         pricedFacts.push({
-          amountAfterMinor,
-          amountMinor,
+          amountAfterMinor: amountAfterExplanation.amountMinor,
+          amountMinor: deltaExplanation.amountMinor,
           currency: allocation.grant.currencyCode,
           fact,
           featurePlanVersionId: params.entitlement.featurePlanVersionId,
           featureSlug: params.entitlement.featureSlug,
           grantId: allocation.grant.grantId,
           periodKey: allocation.periodKey,
+          pricingComponentCount: deltaExplanation.pricingComponentCount,
+          tierIndex: deltaExplanation.tierIndex,
+          tierMode: deltaExplanation.tierMode,
           usageAfter: allocation.usageAfter,
           usageBefore: allocation.usageBefore,
           units: allocation.units,
@@ -3629,26 +3636,29 @@ export class EntitlementWindowDO extends DurableObject {
 
     const usageAfter = Math.max(0, fact.valueAfter)
     const usageBefore = Math.max(0, fact.valueAfter - fact.delta)
-    const amountMinor = computeUsagePriceDeltaMinor({
+    const deltaExplanation = computeUsagePriceDeltaExplanation({
       priceConfig: entitlement.featureConfig,
       usageAfter,
       usageBefore,
     })
-    const amountAfterMinor = computeUsagePriceDeltaMinor({
+    const amountAfterExplanation = computeUsagePriceDeltaExplanation({
       priceConfig: entitlement.featureConfig,
       usageAfter,
       usageBefore: 0,
     })
 
     return {
-      amountAfterMinor,
-      amountMinor,
+      amountAfterMinor: amountAfterExplanation.amountMinor,
+      amountMinor: deltaExplanation.amountMinor,
       currency: grant.currencyCode,
       fact,
       featurePlanVersionId: entitlement.featurePlanVersionId,
       featureSlug: entitlement.featureSlug,
       grantId: grant.grantId,
       periodKey: bucket.periodKey,
+      pricingComponentCount: deltaExplanation.pricingComponentCount,
+      tierIndex: deltaExplanation.tierIndex,
+      tierMode: deltaExplanation.tierMode,
       usageAfter,
       usageBefore,
       units: fact.delta,

@@ -31,7 +31,10 @@ SCHEMA >
     `amount` Int64 `json:$.amount`,
     `amount_after` Int64 `json:$.amount_after`,
     `amount_scale` Int8 `json:$.amount_scale`,
-    `currency` LowCardinality(String) `json:$.currency`
+    `currency` LowCardinality(String) `json:$.currency`,
+    `tier_index` Nullable(Int16) `json:$.tier_index`,
+    `tier_mode` LowCardinality(Nullable(String)) `json:$.tier_mode`,
+    `pricing_component_count` UInt8 `json:$.pricing_component_count`
 
 ENGINE ReplacingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp, 'UTC'))

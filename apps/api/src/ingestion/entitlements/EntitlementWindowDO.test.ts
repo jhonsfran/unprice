@@ -364,6 +364,9 @@ describe("EntitlementWindowDO", () => {
     expect(payload.currency).toBe("USD")
     expect(payload.priced_at).toBe(BASE_NOW)
     expect(payload.feature_plan_version_id).toBe("fpv_123")
+    expect(payload.tier_index).toBeNull()
+    expect(payload.tier_mode).toBeNull()
+    expect(payload.pricing_component_count).toBe(1)
   })
 
   it("deduplicates concurrent apply calls by idempotency key during wallet bootstrap", async () => {
@@ -4800,6 +4803,9 @@ describe("EntitlementWindowDO", () => {
     expect(payload.amount).toBe(103_100_000)
     expect(payload.amount_after).toBe(103_100_000)
     expect(payload.value_after).toBe(31)
+    expect(payload.tier_index).toBe(1)
+    expect(payload.tier_mode).toBe("volume")
+    expect(payload.pricing_component_count).toBe(2)
   })
 
   it("requestDeletion sets the deletion flag and pulls the alarm in", async () => {
@@ -5055,6 +5061,97 @@ async function loadEntitlementWindowDO() {
       return diffLedgerMinor(afterResult.val.totalPrice.dinero, beforeResult.val.totalPrice.dinero)
     }
 
+    const resolveTierIndex = (
+      priceConfig: {
+        tiers?: Array<{ firstUnit: number; lastUnit: number | null }>
+      },
+      usage: number
+    ) => {
+      const tiers = priceConfig.tiers ?? []
+      const normalizedUsage = Math.max(0, usage)
+      if (tiers.length === 0 || normalizedUsage === 0) return null
+
+      const index = tiers.findIndex(
+        (tier) =>
+          normalizedUsage >= tier.firstUnit &&
+          (tier.lastUnit === null || normalizedUsage <= tier.lastUnit)
+      )
+      if (index >= 0) return index
+
+      const firstTier = tiers[0]
+      if (firstTier && normalizedUsage > 0 && normalizedUsage < firstTier.firstUnit) return 0
+      return null
+    }
+
+    const resolvePricingComponentCount = (
+      priceConfig: {
+        tiers?: Array<{ firstUnit: number; lastUnit: number | null }>
+        tierMode?: "volume" | "graduated"
+        usageMode?: string
+        units?: number
+      },
+      usageBefore: number,
+      usageAfter: number
+    ) => {
+      const before = Math.max(0, usageBefore)
+      const after = Math.max(0, usageAfter)
+      if (before === after) return 0
+
+      if (priceConfig.usageMode === "package" && typeof priceConfig.units === "number") {
+        return Math.abs(
+          Math.ceil(after / priceConfig.units) - Math.ceil(before / priceConfig.units)
+        )
+      }
+
+      const tiers = priceConfig.tiers ?? []
+      if (tiers.length === 0) return 1
+
+      if (priceConfig.tierMode === "volume") {
+        return new Set(
+          [resolveTierIndex(priceConfig, before), resolveTierIndex(priceConfig, after)].filter(
+            (index): index is number => index !== null
+          )
+        ).size
+      }
+
+      const lower = Math.min(before, after)
+      const upper = Math.max(before, after)
+      return tiers.filter((tier) => {
+        const tierEnd = tier.lastUnit ?? Number.POSITIVE_INFINITY
+        return upper >= tier.firstUnit && lower < tierEnd
+      }).length
+    }
+
+    const computeUsagePriceDeltaExplanation = (params: {
+      priceConfig: {
+        tierMode?: "volume" | "graduated"
+        usageMode?: string
+        tiers?: Array<{ firstUnit: number; lastUnit: number | null }>
+        units?: number
+      }
+      usageAfter: number
+      usageBefore: number
+    }) => {
+      const amountMinor = computeUsagePriceDeltaMinor(params)
+      const tierMode =
+        params.priceConfig.usageMode === "tier"
+          ? (params.priceConfig.tierMode ?? null)
+          : (params.priceConfig.tierMode ?? null)
+
+      return {
+        amountMinor,
+        usageBefore: Math.max(0, params.usageBefore),
+        usageAfter: Math.max(0, params.usageAfter),
+        tierMode,
+        tierIndex: resolveTierIndex(params.priceConfig, Math.max(0, params.usageAfter)),
+        pricingComponentCount: resolvePricingComponentCount(
+          params.priceConfig,
+          params.usageBefore,
+          params.usageAfter
+        ),
+      }
+    }
+
     const computeMaxMarginalPriceMinor = (priceConfig: {
       tiers?: Array<{ firstUnit?: number }>
     }) => {
@@ -5248,6 +5345,7 @@ async function loadEntitlementWindowDO() {
       MAX_EVENT_AGE_MS: TEST_INGESTION_MAX_EVENT_AGE_MS,
       computeGrantPeriodBucket,
       computeMaxMarginalPriceMinor,
+      computeUsagePriceDeltaExplanation,
       computeUsagePriceDeltaMinor,
       deriveMeterKey: (m: {
         eventId: string
@@ -5483,8 +5581,12 @@ function buildOutboxFact(index: number, now = BASE_NOW): Record<string, unknown>
     delta: 1,
     value_after: index,
     amount: 100_000_000,
+    amount_after: 100_000_000,
     amount_scale: 8,
     priced_at: now,
+    tier_index: null,
+    tier_mode: null,
+    pricing_component_count: 1,
   }
 }
 

@@ -7,6 +7,7 @@ import {
   type GrantConsumptionState,
   computeGrantPeriodBucket,
   computeMaxMarginalPriceMinor,
+  computeUsagePriceDeltaExplanation,
   computeUsagePriceDeltaMinor,
   consumeGrantsByPriority,
 } from "./grant-consumption"
@@ -580,5 +581,143 @@ describe("grant pricing helpers", () => {
         usageAfter: 9.81,
       })
     ).toBe(10_000)
+  })
+
+  it("explains volume tier pricing with the after tier and crossed components", () => {
+    const priceConfig = {
+      tierMode: "volume",
+      usageMode: "tier",
+      tiers: [
+        {
+          firstUnit: 1,
+          lastUnit: 30,
+          unitPrice: price("0.00", EUR),
+          flatPrice: price("0.00", EUR),
+        },
+        {
+          firstUnit: 31,
+          lastUnit: null,
+          unitPrice: price("0.001", EUR),
+          flatPrice: price("1.00", EUR),
+        },
+      ],
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaExplanation({
+        priceConfig,
+        usageBefore: 30,
+        usageAfter: 31,
+      })
+    ).toEqual({
+      amountMinor: 103_100_000,
+      usageBefore: 30,
+      usageAfter: 31,
+      tierMode: "volume",
+      tierIndex: 1,
+      pricingComponentCount: 2,
+    })
+  })
+
+  it("explains graduated tier pricing with each touched tier component", () => {
+    const priceConfig = {
+      tierMode: "graduated",
+      usageMode: "tier",
+      tiers: [
+        {
+          firstUnit: 1,
+          lastUnit: 10,
+          unitPrice: price("1.00", USD),
+          flatPrice: price("0.00", USD),
+        },
+        {
+          firstUnit: 11,
+          lastUnit: null,
+          unitPrice: price("2.00", USD),
+          flatPrice: price("0.00", USD),
+        },
+      ],
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaExplanation({
+        priceConfig,
+        usageBefore: 8,
+        usageAfter: 12,
+      })
+    ).toEqual({
+      amountMinor: 600_000_000,
+      usageBefore: 8,
+      usageAfter: 12,
+      tierMode: "graduated",
+      tierIndex: 1,
+      pricingComponentCount: 2,
+    })
+  })
+
+  it("explains unit pricing without tier pointers", () => {
+    const priceConfig = {
+      usageMode: "unit",
+      price: price("1.00"),
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaExplanation({
+        priceConfig,
+        usageBefore: 2,
+        usageAfter: 5,
+      })
+    ).toEqual({
+      amountMinor: 300_000_000,
+      usageBefore: 2,
+      usageAfter: 5,
+      tierMode: null,
+      tierIndex: null,
+      pricingComponentCount: 1,
+    })
+  })
+
+  it("explains package pricing by changed package count", () => {
+    const priceConfig = {
+      usageMode: "package",
+      units: 10,
+      price: price("5.00"),
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaExplanation({
+        priceConfig,
+        usageBefore: 9,
+        usageAfter: 21,
+      })
+    ).toEqual({
+      amountMinor: 1_000_000_000,
+      usageBefore: 9,
+      usageAfter: 21,
+      tierMode: null,
+      tierIndex: null,
+      pricingComponentCount: 2,
+    })
+  })
+
+  it("explains flat pricing without tier pointers", () => {
+    const priceConfig = {
+      price: price("10.00"),
+    } as ConfigFeatureVersionType
+
+    expect(
+      computeUsagePriceDeltaExplanation({
+        priceConfig,
+        usageBefore: 0,
+        usageAfter: 1,
+      })
+    ).toEqual({
+      amountMinor: 0,
+      usageBefore: 0,
+      usageAfter: 1,
+      tierMode: null,
+      tierIndex: null,
+      pricingComponentCount: 1,
+    })
   })
 })
