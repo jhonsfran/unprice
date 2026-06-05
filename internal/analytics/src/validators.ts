@@ -271,31 +271,35 @@ export const explainChargeSummaryQuerySchema = explainChargeQuerySchema.omit({
   offset: true,
 })
 
-export const explainChargeEventRowSchema = entitlementMeterFactSchemaV1.pick({
-  event_id: true,
-  idempotency_key: true,
-  customer_entitlement_id: true,
-  grant_id: true,
-  feature_plan_version_id: true,
-  feature_slug: true,
-  period_key: true,
-  event_slug: true,
-  aggregation_method: true,
-  timestamp: true,
-  created_at: true,
-  delta: true,
-  value_after: true,
-  amount: true,
-  amount_after: true,
-  amount_scale: true,
-  currency: true,
-  priced_at: true,
-  tier_index: true,
-  tier_mode: true,
-  pricing_component_count: true,
-  source_type: true,
-  source_id: true,
-})
+export const explainChargeEventRowSchema = entitlementMeterFactSchemaV1
+  .pick({
+    event_id: true,
+    idempotency_key: true,
+    customer_entitlement_id: true,
+    grant_id: true,
+    feature_plan_version_id: true,
+    feature_slug: true,
+    period_key: true,
+    event_slug: true,
+    aggregation_method: true,
+    timestamp: true,
+    created_at: true,
+    delta: true,
+    value_after: true,
+    amount: true,
+    amount_after: true,
+    amount_scale: true,
+    currency: true,
+    priced_at: true,
+    tier_index: true,
+    tier_mode: true,
+    pricing_component_count: true,
+    source_type: true,
+    source_id: true,
+  })
+  .extend({
+    feature_plan_version_id: z.string().nullable(),
+  })
 
 export const explainChargeSummaryRowSchema = z.object({
   project_id: z.string(),

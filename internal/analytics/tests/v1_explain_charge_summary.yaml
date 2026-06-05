@@ -3,7 +3,7 @@
   expected_http_status: 200
   parameters: project_id=proj_1&customer_id=cus_1&feature_slug=tokens&period_key=2025-12
   expected_result: |
-    {"project_id":"proj_1","customer_id":"cus_1","feature_slug":"tokens","period_key":"2025-12","currency":"USD","amount_scale":8,"event_count":2,"total_delta":150,"total_amount":375000000,"latest_amount_after":375000000,"first_event_at":4070908800000,"last_event_at":4070995200000,"multi_component_event_count":1}
+    {"project_id":"proj_1","customer_id":"cus_1","feature_slug":"tokens","period_key":"2025-12","currency":"USD","amount_scale":8,"event_count":3,"total_delta":170,"total_amount":425000000,"latest_amount_after":425000000,"first_event_at":4070908800000,"last_event_at":4070995200000,"multi_component_event_count":1}
 
 - name: explain_charge_summary_returns_empty_for_wrong_customer
   description: Returns no rows when the customer does not match the project-scoped
@@ -18,3 +18,17 @@
   expected_http_status: 200
   parameters: project_id=proj_missing&customer_id=cus_1&feature_slug=tokens&period_key=2025-12
   expected_result: ''
+
+- name: explain_charge_summary_filters_by_customer_entitlement_id
+  description: Summarizes only rows for the requested customer entitlement
+  expected_http_status: 200
+  parameters: project_id=proj_1&customer_id=cus_1&feature_slug=tokens&period_key=2025-12&customer_entitlement_id=ce_explain_addon
+  expected_result: |
+    {"project_id":"proj_1","customer_id":"cus_1","feature_slug":"tokens","period_key":"2025-12","currency":"USD","amount_scale":8,"event_count":1,"total_delta":20,"total_amount":50000000,"latest_amount_after":50000000,"first_event_at":4070952000000,"last_event_at":4070952000000,"multi_component_event_count":0}
+
+- name: explain_charge_summary_deduplicates_duplicate_deliveries
+  description: Summarizes one replacing fact per idempotency key
+  expected_http_status: 200
+  parameters: project_id=proj_1&customer_id=cus_1&feature_slug=tokens&period_key=2025-12&customer_entitlement_id=ce_explain
+  expected_result: |
+    {"project_id":"proj_1","customer_id":"cus_1","feature_slug":"tokens","period_key":"2025-12","currency":"USD","amount_scale":8,"event_count":2,"total_delta":150,"total_amount":375000000,"latest_amount_after":375000000,"first_event_at":4070908800000,"last_event_at":4070995200000,"multi_component_event_count":1}
