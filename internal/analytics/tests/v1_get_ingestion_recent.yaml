@@ -1,7 +1,8 @@
 
 - name: ingestion_recent_returns_status_rows
-  description: Returns recent ingestion status rows for a scoped customer
-  parameters: project_id=proj_1&customer_id=cus_1&limit=2
+  description: Returns deduped recent ingestion status rows for a scoped customer
+  parameters: project_id=proj_1&customer_id=cus_1&limit=10
   expected_result: |
     {"event_id":"evt_ing_003","canonical_audit_id":"audit_ing_003","customer_id":"cus_1","event_slug":"entitlement.checked","source_type":"system","source_id":"system","state":"rejected","rejection_reason":"customer_not_found","timestamp":4070908803000,"received_at":4070908803100,"handled_at":4070908803200}
-    {"event_id":"evt_ing_002","canonical_audit_id":"audit_ing_002","customer_id":"cus_1","event_slug":"usage.recorded","source_type":"api_key","source_id":"key_1","state":"rejected","rejection_reason":"missing_required_property","timestamp":4070908802000,"received_at":4070908802100,"handled_at":4070908802200}
+    {"event_id":"evt_ing_002_duplicate_delivery","canonical_audit_id":"audit_ing_002","customer_id":"cus_1","event_slug":"usage.recorded","source_type":"api_key","source_id":"key_1","state":"rejected","rejection_reason":"missing_required_property","timestamp":4070908802000,"received_at":4070908802100,"handled_at":4070908802200}
+    {"event_id":"evt_ing_001","canonical_audit_id":"audit_ing_001","customer_id":"cus_1","event_slug":"usage.recorded","source_type":"api_key","source_id":"key_1","state":"processed","rejection_reason":null,"timestamp":4070908801000,"received_at":4070908801100,"handled_at":4070908801200}

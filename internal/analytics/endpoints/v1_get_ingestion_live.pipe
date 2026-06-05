@@ -10,11 +10,23 @@ SQL >
       countIf(state = 'processed') AS processed,
       countIf(state = 'rejected') AS rejected,
       count() AS total
-    FROM unprice_ingestion_events
-    WHERE project_id = {{ String(project_id) }}
-      AND customer_id = {{ String(customer_id) }}
-      AND handled_at >= {{ Int64(from_ts) }}
-      AND handled_at < {{ Int64(to_ts) }}
+    FROM (
+      SELECT
+        project_id,
+        customer_id,
+        handled_at,
+        canonical_audit_id,
+        argMax(state, created_at) AS state,
+        argMax(source_id, created_at) AS source_id,
+        argMax(event_slug, created_at) AS event_slug
+      FROM unprice_ingestion_events
+      WHERE project_id = {{ String(project_id) }}
+        AND customer_id = {{ String(customer_id) }}
+        AND handled_at >= {{ Int64(from_ts) }}
+        AND handled_at < {{ Int64(to_ts) }}
+      GROUP BY project_id, customer_id, handled_at, canonical_audit_id
+    )
+    WHERE 1 = 1
       {% if defined(source_id) %} AND source_id = {{ String(source_id) }} {% end %}
       {% if defined(event_slug) %} AND event_slug = {{ String(event_slug) }} {% end %}
     GROUP BY second

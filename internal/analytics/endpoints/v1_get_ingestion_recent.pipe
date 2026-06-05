@@ -17,9 +17,25 @@ SQL >
       timestamp,
       received_at,
       handled_at
-    FROM unprice_ingestion_events
-    WHERE project_id = {{ String(project_id) }}
-      AND customer_id = {{ String(customer_id) }}
+    FROM (
+      SELECT
+        project_id,
+        customer_id,
+        handled_at,
+        canonical_audit_id,
+        argMax(event_id, created_at) AS event_id,
+        argMax(event_slug, created_at) AS event_slug,
+        argMax(source_type, created_at) AS source_type,
+        argMax(source_id, created_at) AS source_id,
+        argMax(state, created_at) AS state,
+        argMax(rejection_reason, created_at) AS rejection_reason,
+        argMax(timestamp, created_at) AS timestamp,
+        argMax(received_at, created_at) AS received_at
+      FROM unprice_ingestion_events
+      WHERE project_id = {{ String(project_id) }}
+        AND customer_id = {{ String(customer_id) }}
+      GROUP BY project_id, customer_id, handled_at, canonical_audit_id
+    )
     ORDER BY handled_at DESC
     LIMIT {{ Int32(limit, 50) }}
 

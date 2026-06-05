@@ -1,6 +1,11 @@
+import type { AnalyticsIngestionEvent } from "@unprice/analytics"
 import type { IngestionReportingEnvelope } from "@unprice/services/ingestion"
 import { describe, expect, it, vi } from "vitest"
-import { IngestionReportingConsumer, chunkMeterFactsForTinybird } from "./consumer"
+import {
+  IngestionReportingConsumer,
+  chunkIngestionEventsForTinybird,
+  chunkMeterFactsForTinybird,
+} from "./consumer"
 
 const TEST_NOW = Date.UTC(2026, 2, 20, 12, 0, 0)
 
@@ -126,6 +131,126 @@ describe("IngestionReportingConsumer", () => {
     expect(chunks).toEqual([[firstFact], [secondFact]])
   })
 
+  it("chunks ingestion status writes by count and acks after all chunks are sent", async () => {
+    const auditRecords = Array.from({ length: 5_001 }, (_, index) =>
+      createAuditRecord({
+        canonicalAuditId: `audit_${index}`,
+        idempotencyKey: `idem_${index}`,
+        auditPayloadJson: createAuditPayloadJson({
+          id: `evt_${index}`,
+          slug: "usage.recorded",
+          timestamp: TEST_NOW + index,
+        }),
+      })
+    )
+    const ack = vi.fn()
+    const ingestIngestionEvents = vi.fn().mockImplementation((chunk: unknown[]) =>
+      Promise.resolve({
+        quarantined_rows: 0,
+        successful_rows: chunk.length,
+      })
+    )
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents,
+      ingestMeterFacts: vi.fn().mockResolvedValue({
+        quarantined_rows: 0,
+        successful_rows: 0,
+      }),
+      logger: createLogger() as never,
+      publishAuditRecords: vi.fn().mockResolvedValue(undefined),
+    })
+
+    await consumer.consumeBatch({
+      messages: [
+        {
+          ack,
+          body: createEnvelope({ auditRecords }),
+          retry: vi.fn(),
+        },
+      ],
+    })
+
+    expect(ingestIngestionEvents).toHaveBeenCalledTimes(2)
+    expect(ingestIngestionEvents.mock.calls.map(([chunk]) => chunk.length)).toEqual([5_000, 1])
+    expect(ack).toHaveBeenCalledTimes(1)
+    expect(ingestIngestionEvents.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      ack.mock.invocationCallOrder[0] ?? 0
+    )
+  })
+
+  it("chunks ingestion status writes by NDJSON byte size before acking", async () => {
+    const largeSourceName = "x".repeat(3 * 1024 * 1024)
+    const auditRecords = [
+      createAuditRecord({
+        canonicalAuditId: "audit_large_1",
+        idempotencyKey: "idem_large_1",
+        sourceName: largeSourceName,
+        auditPayloadJson: createAuditPayloadJson({
+          id: "evt_large_1",
+          slug: "usage.recorded",
+          timestamp: TEST_NOW,
+        }),
+      }),
+      createAuditRecord({
+        canonicalAuditId: "audit_large_2",
+        idempotencyKey: "idem_large_2",
+        sourceName: largeSourceName,
+        auditPayloadJson: createAuditPayloadJson({
+          id: "evt_large_2",
+          slug: "usage.recorded",
+          timestamp: TEST_NOW + 1,
+        }),
+      }),
+    ]
+    const ack = vi.fn()
+    const ingestIngestionEvents = vi.fn().mockImplementation((chunk: unknown[]) =>
+      Promise.resolve({
+        quarantined_rows: 0,
+        successful_rows: chunk.length,
+      })
+    )
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents,
+      ingestMeterFacts: vi.fn().mockResolvedValue({
+        quarantined_rows: 0,
+        successful_rows: 0,
+      }),
+      logger: createLogger() as never,
+      publishAuditRecords: vi.fn().mockResolvedValue(undefined),
+    })
+
+    await consumer.consumeBatch({
+      messages: [
+        {
+          ack,
+          body: createEnvelope({ auditRecords }),
+          retry: vi.fn(),
+        },
+      ],
+    })
+
+    expect(ingestIngestionEvents).toHaveBeenCalledTimes(2)
+    expect(ingestIngestionEvents.mock.calls.map(([chunk]) => chunk.length)).toEqual([1, 1])
+    expect(ack).toHaveBeenCalledTimes(1)
+    expect(ingestIngestionEvents.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      ack.mock.invocationCallOrder[0] ?? 0
+    )
+  })
+
+  it("chunks ingestion status events by NDJSON byte size", () => {
+    const firstEvent = createIngestionEvent({ event_id: "evt_large_1" })
+    const secondEvent = createIngestionEvent({ event_id: "evt_large_2" })
+    const firstEventBytes = getNdjsonBytes(firstEvent)
+    const secondEventBytes = getNdjsonBytes(secondEvent)
+
+    const chunks = chunkIngestionEventsForTinybird([firstEvent, secondEvent], {
+      maxEventsPerRequest: 100,
+      maxNdjsonBytesPerRequest: Math.max(firstEventBytes, secondEventBytes),
+    })
+
+    expect(chunks).toEqual([[firstEvent], [secondEvent]])
+  })
+
   it("throws so Cloudflare retries the queue batch when Tinybird fails", async () => {
     const ack = vi.fn()
     const retry = vi.fn()
@@ -189,6 +314,72 @@ describe("IngestionReportingConsumer", () => {
     expect(ack).not.toHaveBeenCalled()
     expect(retry).not.toHaveBeenCalled()
   })
+
+  it("throws and does not ack when the audit payload is malformed JSON", async () => {
+    const ack = vi.fn()
+    const retry = vi.fn()
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents: vi.fn(),
+      ingestMeterFacts: vi.fn(),
+      logger: createLogger() as never,
+      publishAuditRecords: vi.fn(),
+    })
+
+    await expect(
+      consumer.consumeBatch({
+        messages: [
+          {
+            ack,
+            body: createEnvelope({
+              auditRecords: [createAuditRecord({ auditPayloadJson: "not-json" })],
+            }),
+            retry,
+          },
+        ],
+      })
+    ).rejects.toThrow()
+
+    expect(ack).not.toHaveBeenCalled()
+    expect(retry).not.toHaveBeenCalled()
+  })
+
+  for (const [field, invalidPayload] of [
+    ["id", { slug: "usage.recorded", timestamp: TEST_NOW }],
+    ["slug", { id: "evt_missing_slug", timestamp: TEST_NOW }],
+    ["timestamp", { id: "evt_missing_timestamp", slug: "usage.recorded" }],
+  ]) {
+    it(`throws and does not ack when the audit payload misses ${field}`, async () => {
+      const ack = vi.fn()
+      const retry = vi.fn()
+      const consumer = new IngestionReportingConsumer({
+        ingestIngestionEvents: vi.fn(),
+        ingestMeterFacts: vi.fn(),
+        logger: createLogger() as never,
+        publishAuditRecords: vi.fn(),
+      })
+
+      await expect(
+        consumer.consumeBatch({
+          messages: [
+            {
+              ack,
+              body: createEnvelope({
+                auditRecords: [
+                  createAuditRecord({
+                    auditPayloadJson: JSON.stringify(invalidPayload),
+                  }),
+                ],
+              }),
+              retry,
+            },
+          ],
+        })
+      ).rejects.toThrow()
+
+      expect(ack).not.toHaveBeenCalled()
+      expect(retry).not.toHaveBeenCalled()
+    })
+  }
 
   it("throws so Cloudflare retries the queue batch when Pipeline fails", async () => {
     const ack = vi.fn()
@@ -319,6 +510,59 @@ function createAuditRecord(
       canonical_audit_id: "audit_123",
       payload_hash: "hash_123",
     }),
+    ...overrides,
+  }
+}
+
+function createAuditPayloadJson(input: { id: string; slug: string; timestamp: number }): string {
+  return JSON.stringify({
+    event_date: "2026-03-20",
+    schema_version: 1,
+    id: input.id,
+    workspace_id: "ws_123",
+    project_id: "proj_123",
+    customer_id: "cus_123",
+    environment: "test",
+    api_key_id: "key_123",
+    source_type: "api_key",
+    source_id: "key_123",
+    source_name: null,
+    request_id: "req_123",
+    idempotency_key: "idem_123",
+    slug: input.slug,
+    timestamp: input.timestamp,
+    received_at: TEST_NOW,
+    handled_at: TEST_NOW + 1,
+    state: "processed",
+    properties: { amount: 1 },
+    canonical_audit_id: "audit_123",
+    payload_hash: "hash_123",
+  })
+}
+
+function createIngestionEvent(
+  overrides: Partial<AnalyticsIngestionEvent> = {}
+): AnalyticsIngestionEvent {
+  return {
+    event_id: "evt_123",
+    canonical_audit_id: "audit_123",
+    payload_hash: "hash_123",
+    workspace_id: "ws_123",
+    project_id: "proj_123",
+    customer_id: "cus_123",
+    environment: "test",
+    api_key_id: "key_123",
+    source_type: "api_key",
+    source_id: "key_123",
+    source_name: null,
+    event_slug: "usage.recorded",
+    idempotency_key: "idem_123",
+    state: "processed",
+    rejection_reason: null,
+    timestamp: TEST_NOW,
+    received_at: TEST_NOW,
+    handled_at: TEST_NOW + 1,
+    created_at: TEST_NOW + 2,
     ...overrides,
   }
 }

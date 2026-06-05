@@ -6,3 +6,17 @@
     {"second":"2099-01-01 00:00:01.000","processed":1,"rejected":0,"total":1}
     {"second":"2099-01-01 00:00:02.000","processed":0,"rejected":1,"total":1}
     {"second":"2099-01-01 00:00:03.000","processed":0,"rejected":1,"total":1}
+
+- name: ingestion_live_filters_by_source
+  description: Returns scoped counts for one ingestion source without duplicate delivery
+    inflation
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&source_id=key_1
+  expected_result: |
+    {"second":"2099-01-01 00:00:01.000","processed":1,"rejected":0,"total":1}
+    {"second":"2099-01-01 00:00:02.000","processed":0,"rejected":1,"total":1}
+
+- name: ingestion_live_filters_by_event_slug
+  description: Returns scoped counts for one event slug without wrong-project rows
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&event_slug=entitlement.checked
+  expected_result: |
+    {"second":"2099-01-01 00:00:03.000","processed":0,"rejected":1,"total":1}

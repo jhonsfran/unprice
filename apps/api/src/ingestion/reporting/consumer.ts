@@ -5,6 +5,7 @@ import {
   type IngestionReportingEnvelope,
   ingestionReportingEnvelopeSchema,
 } from "@unprice/services/ingestion"
+import { z } from "zod"
 import type { Env } from "~/env"
 import { type AuditRecordPublisher, createAuditRecordPublisher } from "./audit-record-publisher"
 import {
@@ -14,6 +15,16 @@ import {
 } from "./tinybird-meter-facts"
 
 export { chunkMeterFactsForTinybird } from "./tinybird-meter-facts"
+
+const TINYBIRD_MAX_INGESTION_EVENTS_PER_REQUEST = 5_000
+const TINYBIRD_MAX_INGESTION_EVENT_NDJSON_BYTES_PER_REQUEST = 5 * 1024 * 1024
+const textEncoder = new TextEncoder()
+
+const auditPayloadForIngestionEventSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  timestamp: z.number().int(),
+})
 
 export type IngestionReportingQueueBatchMessage = {
   ack: () => void
@@ -55,36 +66,13 @@ export class IngestionReportingConsumer {
     const auditRecords = envelopes.flatMap((envelope) => envelope.auditRecords)
     const meterFacts = envelopes.flatMap((envelope) => envelope.meterFacts)
     const tinybirdChunks = chunkMeterFactsForTinybird(meterFacts)
-    const ingestionEvents = auditRecords.map((record) => {
-      const payload = JSON.parse(record.auditPayloadJson) as Record<string, unknown>
-
-      return {
-        event_id: String(payload.id),
-        canonical_audit_id: record.canonicalAuditId,
-        payload_hash: record.payloadHash,
-        workspace_id: record.workspaceId,
-        project_id: record.projectId,
-        customer_id: record.customerId,
-        environment: record.environment,
-        api_key_id: record.apiKeyId,
-        source_type: record.sourceType,
-        source_id: record.sourceId,
-        source_name: record.sourceName,
-        event_slug: String(payload.slug),
-        idempotency_key: record.idempotencyKey,
-        state: record.status,
-        rejection_reason: record.rejectionReason ?? null,
-        timestamp: Number(payload.timestamp),
-        received_at: record.firstSeenAt,
-        handled_at: record.handledAt,
-        created_at: Date.now(),
-      }
-    })
+    const ingestionEvents = auditRecords.map((record) => buildIngestionEvent(record))
+    const ingestionEventChunks = chunkIngestionEventsForTinybird(ingestionEvents)
     const pipelineSendCount = auditRecords.length > 0 ? 1 : 0
 
     await this.publishAuditRecords(auditRecords)
     await publishMeterFactChunks(tinybirdChunks, this.ingestMeterFacts)
-    await publishIngestionEvents(ingestionEvents, this.ingestIngestionEvents)
+    await publishIngestionEventChunks(ingestionEventChunks, this.ingestIngestionEvents)
 
     for (const message of batch.messages) {
       message.ack()
@@ -96,6 +84,7 @@ export class IngestionReportingConsumer {
       reporting_meter_fact_count: meterFacts.length,
       reporting_pipeline_record_count: auditRecords.length,
       reporting_tinybird_request_count: tinybirdChunks.length,
+      reporting_ingestion_status_tinybird_request_count: ingestionEventChunks.length,
       meter_facts_per_tinybird_request:
         tinybirdChunks.length > 0 ? meterFacts.length / tinybirdChunks.length : 0,
       pipeline_records_per_pipeline_send:
@@ -184,22 +173,102 @@ export async function consumeIngestionReportingQueueBatch(
   }
 }
 
-async function publishIngestionEvents(
+export function chunkIngestionEventsForTinybird(
   events: AnalyticsIngestionEvent[],
+  limits: {
+    maxEventsPerRequest?: number
+    maxNdjsonBytesPerRequest?: number
+  } = {}
+): AnalyticsIngestionEvent[][] {
+  const maxEventsPerRequest =
+    limits.maxEventsPerRequest ?? TINYBIRD_MAX_INGESTION_EVENTS_PER_REQUEST
+  const maxNdjsonBytesPerRequest =
+    limits.maxNdjsonBytesPerRequest ?? TINYBIRD_MAX_INGESTION_EVENT_NDJSON_BYTES_PER_REQUEST
+
+  if (maxEventsPerRequest <= 0 || maxNdjsonBytesPerRequest <= 0) {
+    throw new Error("Tinybird ingestion event chunk limits must be greater than zero")
+  }
+
+  const chunks: AnalyticsIngestionEvent[][] = []
+  let currentChunk: AnalyticsIngestionEvent[] = []
+  let currentChunkBytes = 0
+
+  for (const event of events) {
+    const parsedEvent = ingestionEventSchemaV1.parse(event)
+    const eventBytes = ndjsonByteLength(parsedEvent)
+
+    if (eventBytes > maxNdjsonBytesPerRequest) {
+      throw new Error(
+        `Tinybird ingestion event exceeds NDJSON byte limit: ${maxNdjsonBytesPerRequest}`
+      )
+    }
+
+    const nextChunkWouldExceedCount = currentChunk.length >= maxEventsPerRequest
+    const nextChunkWouldExceedBytes =
+      currentChunk.length > 0 && currentChunkBytes + eventBytes > maxNdjsonBytesPerRequest
+
+    if (nextChunkWouldExceedCount || nextChunkWouldExceedBytes) {
+      chunks.push(currentChunk)
+      currentChunk = []
+      currentChunkBytes = 0
+    }
+
+    currentChunk.push(parsedEvent)
+    currentChunkBytes += eventBytes
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk)
+  }
+
+  return chunks
+}
+
+async function publishIngestionEventChunks(
+  chunks: AnalyticsIngestionEvent[][],
   ingestIngestionEvents: IngestionEventIngest
 ): Promise<void> {
-  if (events.length === 0) {
-    return
-  }
+  for (const chunk of chunks) {
+    const result = await ingestIngestionEvents(chunk)
+    const successful = result?.successful_rows ?? 0
+    const quarantined = result?.quarantined_rows ?? 0
 
-  const parsedEvents = events.map((event) => ingestionEventSchemaV1.parse(event))
-  const result = await ingestIngestionEvents(parsedEvents)
-  const successful = result?.successful_rows ?? 0
-  const quarantined = result?.quarantined_rows ?? 0
-
-  if (successful !== parsedEvents.length || quarantined !== 0) {
-    throw new Error(
-      `Tinybird ingestion events ingestion failed: expected=${parsedEvents.length} successful=${successful} quarantined=${quarantined}`
-    )
+    if (successful !== chunk.length || quarantined !== 0) {
+      throw new Error(
+        `Tinybird ingestion events ingestion failed: expected=${chunk.length} successful=${successful} quarantined=${quarantined}`
+      )
+    }
   }
+}
+
+function buildIngestionEvent(
+  record: IngestionReportingEnvelope["auditRecords"][number]
+): AnalyticsIngestionEvent {
+  const payload = auditPayloadForIngestionEventSchema.parse(JSON.parse(record.auditPayloadJson))
+
+  return {
+    event_id: payload.id,
+    canonical_audit_id: record.canonicalAuditId,
+    payload_hash: record.payloadHash,
+    workspace_id: record.workspaceId,
+    project_id: record.projectId,
+    customer_id: record.customerId,
+    environment: record.environment,
+    api_key_id: record.apiKeyId,
+    source_type: record.sourceType,
+    source_id: record.sourceId,
+    source_name: record.sourceName,
+    event_slug: payload.slug,
+    idempotency_key: record.idempotencyKey,
+    state: record.status,
+    rejection_reason: record.rejectionReason ?? null,
+    timestamp: payload.timestamp,
+    received_at: record.firstSeenAt,
+    handled_at: record.handledAt,
+    created_at: Date.now(),
+  }
+}
+
+function ndjsonByteLength(value: unknown): number {
+  return textEncoder.encode(`${JSON.stringify(value)}\n`).byteLength
 }
