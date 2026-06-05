@@ -1,0 +1,44 @@
+TOKEN "web-apps" READ
+
+TAGS "billing,explainability,ai"
+
+NODE explain_charge_events_node
+SQL >
+    %
+    SELECT
+      event_id,
+      idempotency_key,
+      customer_entitlement_id,
+      grant_id,
+      feature_plan_version_id,
+      feature_slug,
+      period_key,
+      event_slug,
+      aggregation_method,
+      timestamp,
+      created_at,
+      delta,
+      value_after,
+      amount,
+      amount_after,
+      amount_scale,
+      currency,
+      priced_at,
+      tier_index,
+      tier_mode,
+      pricing_component_count,
+      source_type,
+      source_id
+    FROM unprice_entitlement_meter_facts
+    WHERE project_id = {{ String(project_id) }}
+      AND customer_id = {{ String(customer_id) }}
+      AND feature_slug = {{ String(feature_slug) }}
+      AND period_key = {{ String(period_key) }}
+      {% if defined(customer_entitlement_id) %}
+        AND customer_entitlement_id = {{ String(customer_entitlement_id) }}
+      {% end %}
+    ORDER BY timestamp ASC, created_at ASC, event_id ASC
+    LIMIT {{ Int32(limit, 100) }}
+    OFFSET {{ Int32(offset, 0) }}
+
+TYPE endpoint

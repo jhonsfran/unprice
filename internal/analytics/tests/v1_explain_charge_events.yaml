@@ -1,0 +1,7 @@
+- name: explain_charge_events_returns_period_facts
+  description: Returns meter facts for the requested feature and period
+  expected_http_status: 200
+  parameters: project_id=proj_1&customer_id=cus_1&feature_slug=tokens&period_key=2025-12
+  expected_result: |
+    {"event_id":"evt_explain_001","idempotency_key":"idem_explain_001","customer_entitlement_id":"ce_explain","grant_id":"grant_explain","feature_plan_version_id":"fpv_explain","feature_slug":"tokens","period_key":"2025-12","event_slug":"tokens.used","aggregation_method":"sum","timestamp":4070908800000,"created_at":4070908800600,"delta":100,"value_after":100,"amount":250000000,"amount_after":250000000,"amount_scale":8,"currency":"USD","priced_at":4070908800700,"tier_index":0,"tier_mode":"graduated","pricing_component_count":1,"source_type":"api_key","source_id":"key_1"}
+    {"event_id":"evt_explain_002","idempotency_key":"idem_explain_002","customer_entitlement_id":"ce_explain","grant_id":"grant_explain","feature_plan_version_id":"fpv_explain","feature_slug":"tokens","period_key":"2025-12","event_slug":"tokens.used","aggregation_method":"sum","timestamp":4070995200000,"created_at":4070995200600,"delta":50,"value_after":150,"amount":125000000,"amount_after":375000000,"amount_scale":8,"currency":"USD","priced_at":4070995200700,"tier_index":1,"tier_mode":"graduated","pricing_component_count":2,"source_type":"api_key","source_id":"key_1"}

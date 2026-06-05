@@ -1,0 +1,32 @@
+TOKEN "web-apps" READ
+
+TAGS "billing,explainability,ai"
+
+NODE explain_charge_summary_node
+SQL >
+    %
+    SELECT
+      project_id,
+      customer_id,
+      feature_slug,
+      period_key,
+      currency,
+      amount_scale,
+      count() AS event_count,
+      sum(delta) AS total_delta,
+      sum(amount) AS total_amount,
+      max(amount_after) AS latest_amount_after,
+      min(timestamp) AS first_event_at,
+      max(timestamp) AS last_event_at,
+      countIf(pricing_component_count > 1) AS multi_component_event_count
+    FROM unprice_entitlement_meter_facts
+    WHERE project_id = {{ String(project_id) }}
+      AND customer_id = {{ String(customer_id) }}
+      AND feature_slug = {{ String(feature_slug) }}
+      AND period_key = {{ String(period_key) }}
+      {% if defined(customer_entitlement_id) %}
+        AND customer_entitlement_id = {{ String(customer_entitlement_id) }}
+      {% end %}
+    GROUP BY project_id, customer_id, feature_slug, period_key, currency, amount_scale
+
+TYPE endpoint

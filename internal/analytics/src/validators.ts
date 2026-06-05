@@ -256,6 +256,63 @@ export const featureUsagePeriodRowSchema = z.object({
   currency: z.string().length(3).optional(),
 })
 
+export const explainChargeQuerySchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string(),
+  feature_slug: z.string(),
+  period_key: z.string(),
+  customer_entitlement_id: z.string().optional(),
+  limit: z.number().int().min(1).max(500).default(100),
+  offset: z.number().int().min(0).default(0),
+})
+
+export const explainChargeSummaryQuerySchema = explainChargeQuerySchema.omit({
+  limit: true,
+  offset: true,
+})
+
+export const explainChargeEventRowSchema = entitlementMeterFactSchemaV1.pick({
+  event_id: true,
+  idempotency_key: true,
+  customer_entitlement_id: true,
+  grant_id: true,
+  feature_plan_version_id: true,
+  feature_slug: true,
+  period_key: true,
+  event_slug: true,
+  aggregation_method: true,
+  timestamp: true,
+  created_at: true,
+  delta: true,
+  value_after: true,
+  amount: true,
+  amount_after: true,
+  amount_scale: true,
+  currency: true,
+  priced_at: true,
+  tier_index: true,
+  tier_mode: true,
+  pricing_component_count: true,
+  source_type: true,
+  source_id: true,
+})
+
+export const explainChargeSummaryRowSchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string(),
+  feature_slug: z.string(),
+  period_key: z.string(),
+  currency: z.string().length(3),
+  amount_scale: z.literal(LEDGER_SCALE),
+  event_count: z.number().int().nonnegative(),
+  total_delta: z.number(),
+  total_amount: z.number().int(),
+  latest_amount_after: z.number().int(),
+  first_event_at: z.number().int(),
+  last_event_at: z.number().int(),
+  multi_component_event_count: z.number().int().nonnegative(),
+})
+
 export const usageSpendingResponseSchema = z.object({
   amount: z.string(),
   currency: z.string().length(3),
@@ -395,6 +452,8 @@ export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>
 export type AnalyticsEventAction = z.infer<typeof analyticsEventSchema>["action"]
 export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
 export type FeatureUsagePeriodRow = z.infer<typeof featureUsagePeriodRowSchema>
+export type ExplainChargeEventRow = z.infer<typeof explainChargeEventRowSchema>
+export type ExplainChargeSummaryRow = z.infer<typeof explainChargeSummaryRowSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>

@@ -1,0 +1,6 @@
+- name: explain_charge_summary_totals_period
+  description: Summarizes usage and amount for a feature period
+  expected_http_status: 200
+  parameters: project_id=proj_1&customer_id=cus_1&feature_slug=tokens&period_key=2025-12
+  expected_result: |
+    {"project_id":"proj_1","customer_id":"cus_1","feature_slug":"tokens","period_key":"2025-12","currency":"USD","amount_scale":8,"event_count":2,"total_delta":150,"total_amount":375000000,"latest_amount_after":375000000,"first_event_at":4070908800000,"last_event_at":4070995200000,"multi_component_event_count":1}

@@ -7,6 +7,10 @@ import {
   type AnalyticsEventAction,
   analyticsEventSchema,
   entitlementMeterFactSchemaV1,
+  explainChargeEventRowSchema,
+  explainChargeQuerySchema,
+  explainChargeSummaryQuerySchema,
+  explainChargeSummaryRowSchema,
   featureUsagePeriodRowSchema,
   ingestionEventSchemaV1,
   pageEventSchema,
@@ -248,6 +252,32 @@ export class Analytics {
         cache: "no-store",
         retries: 3,
         timeout: 5000, // 5 seconds
+      },
+    })
+  }
+
+  public get getExplainChargeEvents() {
+    return this.readClient.buildPipe({
+      pipe: "v1_explain_charge_events",
+      parameters: explainChargeQuerySchema,
+      data: explainChargeEventRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getExplainChargeSummary() {
+    return this.readClient.buildPipe({
+      pipe: "v1_explain_charge_summary",
+      parameters: explainChargeSummaryQuerySchema,
+      data: explainChargeSummaryRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
       },
     })
   }
