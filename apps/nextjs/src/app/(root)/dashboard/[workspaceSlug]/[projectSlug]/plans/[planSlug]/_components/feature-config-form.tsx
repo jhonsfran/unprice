@@ -3,7 +3,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { Info, Lock, Settings } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 import { DOCS_DOMAIN } from "@unprice/config"
 import {
@@ -20,7 +20,10 @@ import type {
   PlanVersionFeatureDragDrop,
   PlanVersionFeatureInsert,
 } from "@unprice/db/validators"
-import { planVersionFeatureInsertBaseSchema } from "@unprice/db/validators"
+import {
+  isResetCadenceAtMostBilling,
+  planVersionFeatureInsertBaseSchema,
+} from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { HelpCircle } from "@unprice/ui/icons"
@@ -143,8 +146,27 @@ export function FeatureConfigForm({
     },
   }
 
+  const formSchema = useMemo(
+    () =>
+      planVersionFeatureInsertBaseSchema.superRefine((data, ctx) => {
+        if (data.featureType !== "usage") return
+
+        if (
+          data.resetConfig &&
+          !isResetCadenceAtMostBilling(data.resetConfig, data.billingConfig)
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Reset cadence must be equal to or shorter than feature billing.",
+            path: ["resetConfig", "name"],
+          })
+        }
+      }),
+    []
+  )
+
   const form = useZodForm({
-    schema: planVersionFeatureInsertBaseSchema,
+    schema: formSchema,
     defaultValues: controlledDefaultValues as PlanVersionFeatureInsert,
   })
 

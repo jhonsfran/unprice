@@ -14,8 +14,8 @@ export const TIER_MODES_MAP = {
 export const FEATURE_TYPES_MAPS = {
   flat: {
     code: "flat",
-    label: "Pay monthly",
-    shortLabel: "Monthly",
+    label: "Fixed fee",
+    shortLabel: "Fixed",
     description: "Customer pays the same fixed price every billing period.",
   },
   tier: {
@@ -178,6 +178,15 @@ export const RESET_CONFIG: Record<
     resetInterval: "year",
     resetIntervalCount: 1,
     resetAnchorOptions: ["dayOfCreation", ...Array.from({ length: 12 }, (_, i) => i + 1)],
+    planType: "recurring",
+  },
+  "every-5-minutes": {
+    label: "Every 5 minutes",
+    description: "Reset every 5 minutes at the specified reset anchor",
+    resetInterval: "minute",
+    resetIntervalCount: 5,
+    resetAnchorOptions: ["dayOfCreation"],
+    dev: true,
     planType: "recurring",
   },
   "every-10-minutes": {

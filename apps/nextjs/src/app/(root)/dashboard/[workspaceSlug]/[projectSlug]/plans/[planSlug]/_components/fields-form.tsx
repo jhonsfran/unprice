@@ -5,7 +5,11 @@ import type { UseFormReturn } from "react-hook-form"
 import { useFieldArray } from "react-hook-form"
 
 import { BILLING_CONFIG, OVERAGE_STRATEGIES_MAP, RESET_CONFIG } from "@unprice/db/utils"
-import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
+import {
+  type Currency,
+  type PlanVersionFeatureInsert,
+  isResetCadenceAtMostBilling,
+} from "@unprice/db/validators"
 
 import { currencySymbol } from "@unprice/money"
 import { Button } from "@unprice/ui/button"
@@ -214,6 +218,8 @@ export function ResetConfigFeatureFormField({
   form: UseFormReturn<PlanVersionFeatureInsert>
   isDisabled?: boolean
 }) {
+  const billingConfig = form.watch("billingConfig")
+
   // filter dev option when node_env is production
   const options = Object.entries(RESET_CONFIG)
     .filter(([key]) => {
@@ -221,8 +227,21 @@ export function ResetConfigFeatureFormField({
         return RESET_CONFIG[key]?.dev !== true
       }
 
-      // deactivate yearly for now
-      return !["yearly", "onetime"].includes(key)
+      return key !== "onetime"
+    })
+    .filter(([key, value]) => {
+      if (!billingConfig) return true
+
+      return isResetCadenceAtMostBilling(
+        {
+          name: key,
+          resetInterval: value.resetInterval,
+          resetIntervalCount: value.resetIntervalCount,
+          resetAnchor: "dayOfCreation",
+          planType: value.planType,
+        },
+        billingConfig
+      )
     })
     .map(([key, value]) => ({
       label: value.label,
@@ -297,8 +316,7 @@ export function BillingConfigFeatureFormField({
         return BILLING_CONFIG[key]?.dev !== true
       }
 
-      // deactivate yearly for now
-      return !["yearly", "onetime"].includes(key)
+      return key !== "onetime"
     })
     .map(([key, value]) => ({
       label: value.label,
@@ -334,6 +352,34 @@ export function BillingConfigFeatureFormField({
                 form.setValue("billingConfig.billingIntervalCount", config.billingIntervalCount)
                 form.setValue("billingConfig.billingInterval", config.billingInterval)
                 form.setValue("billingConfig.name", value)
+
+                const matchingResetConfig = RESET_CONFIG[value]
+                if (!matchingResetConfig) return
+
+                form.setValue("resetConfig.planType", matchingResetConfig.planType, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+                form.setValue(
+                  "resetConfig.resetIntervalCount",
+                  matchingResetConfig.resetIntervalCount,
+                  {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  }
+                )
+                form.setValue("resetConfig.resetInterval", matchingResetConfig.resetInterval, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+                form.setValue("resetConfig.resetAnchor", "dayOfCreation", {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+                form.setValue("resetConfig.name", value, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
               }}
               value={field.value?.toString() ?? ""}
               disabled={isDisabled}

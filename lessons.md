@@ -15,6 +15,13 @@ patterns. Keep it cheap to load and useful.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-06-06: `bin/startup.dev` builds/deploys analytics with `tb --local`; use
+  `TB_VERSION_WARNING=0 tb --local --output=json info | jq -r ".local.token"` for the app token,
+  because `tb --local token copy "workspace admin token"` can return a static token rejected by
+  Tinybird Local API requests.
+- 2026-06-06: Local dev startup must override `DATABASE_READ1_URL` and `DATABASE_READ2_URL`
+  alongside `DATABASE_URL`; `apps/api/dev.sh` regenerates `.dev.vars` from non-empty parent env
+  values and otherwise preserves stale preview read-replica secrets.
 - 2026-05-09: Removing a Durable Object class needs `deleted_classes` in the affected
   `apps/api/wrangler.jsonc env.*` migration.
 - 2026-05-08: `entitlement/verify` stays compact: decision fields only, no internal
@@ -89,11 +96,19 @@ patterns. Keep it cheap to load and useful.
   `IngestionAuditDO.commit` into sync or async request handling.
 - 2026-05-31: `IngestionAuditDO` is retired; keep only the `deleted_classes` migration marker
   in `apps/api/wrangler.jsonc`, and use reporting envelopes for audit/Pipeline/Tinybird delivery.
+- 2026-06-05: Customer-visible ingestion analytics should project from reporting envelopes in
+  the reporting consumer; avoid parallel service-level status writes that can split evidence.
+- 2026-06-05: Lakehouse registry fields with `required: false` and `defaultValue: null` should
+  parse explicit `null`, because reporting payloads send nullable optional columns.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-06: Draft plan-version billing changes should cascade feature billing/reset cadences
+  unless `metadata.billingCadenceOverride` or `metadata.resetCadenceOverride` is true; missing
+  override flags mean the feature follows the plan. Usage feature billing may be shorter or longer
+  than plan billing; only reset cadence must be less than or equal to feature billing cadence.
 - 2026-05-06: `pay_in_advance` moves fixed fees to period start only; usage actuals invoice at
   period end.
 - 2026-05-06: Billing-period rating requires active entitlement grants; no grants intentionally

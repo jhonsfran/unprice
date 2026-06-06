@@ -42,14 +42,14 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
   const [, setActivePlanVersion] = useActivePlanVersion()
   const [, setActivePlan] = useActivePlan()
 
-  // Re-sync atoms when the plan version id changes (route navigation between versions).
+  // Re-sync atoms when navigating versions or when settings refresh the same version.
   useEffect(() => {
     setPlanFeaturesList(planFeatures)
     setActivePlanVersion(activePlanVersion)
     setActivePlan(plan)
-    // intentionally narrow deps — only react to id changes
+    // intentionally narrow deps — local feature edits update atoms directly
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planVersion.id])
+  }, [planVersion.id, planVersion.updatedAtM])
 
   const filteredFeatures =
     featuresList.filter((feature) =>
