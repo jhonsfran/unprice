@@ -108,6 +108,10 @@ export async function forecastUsage(
     observations: deltaObservations,
     horizonDays: input.horizonDays,
   })
+  const evidenceObservations = deltaObservations.filter(
+    (observation) => observation.hasActualObservation
+  )
+  const observedDays = evidenceObservations.length
 
   const output: ForecastUsageOutput = {
     answer: buildAnswer({
@@ -116,34 +120,32 @@ export async function forecastUsage(
       horizonDays: input.horizonDays,
       projectedUsage: projection.projectedUsage,
     }),
-    confidence: buildConfidence(deltaObservations.length),
+    confidence: buildConfidence(observedDays),
     freshness: {
       generatedAt,
       dataFrom: observationStart,
       dataTo: observationEnd,
     },
-    evidence: deltaObservations
-      .filter((observation) => observation.hasActualObservation)
-      .map((observation) => ({
-        type: "meter_fact",
-        id: buildEvidenceId({
-          projectId: input.projectId,
-          customerId: input.customerId,
-          featureSlug: input.featureSlug,
-          periodKey: input.periodKey,
-          dayKey: observation.dayKey,
-        }),
-        source: "tinybird",
-        timestamp: observation.end,
-      })),
-    warnings: buildWarnings(deltaObservations.length),
-    nextActions: buildNextActions(deltaObservations.length),
+    evidence: evidenceObservations.map((observation) => ({
+      type: "meter_fact",
+      id: buildEvidenceId({
+        projectId: input.projectId,
+        customerId: input.customerId,
+        featureSlug: input.featureSlug,
+        periodKey: input.periodKey,
+        dayKey: observation.dayKey,
+      }),
+      source: "tinybird",
+      timestamp: observation.end,
+    })),
+    warnings: buildWarnings(observedDays),
+    nextActions: buildNextActions(observedDays),
     project_id: input.projectId,
     customer_id: input.customerId,
     feature_slug: input.featureSlug,
     horizonDays: input.horizonDays,
     projectedUsage: projection.projectedUsage,
-    observedDays: deltaObservations.length,
+    observedDays,
     baselineUsage: projection.baselineUsage,
     trendPerDay: projection.trendPerDay,
     ...(input.periodKey ? { periodKey: input.periodKey } : {}),

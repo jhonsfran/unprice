@@ -86,7 +86,7 @@ describe("forecastUsage", () => {
     expect(result.val).toEqual(
       expect.objectContaining({
         projectedUsage: 20,
-        observedDays: 2,
+        observedDays: 1,
         baselineUsage: 5,
         trendPerDay: 10,
       })
@@ -128,6 +128,29 @@ describe("forecastUsage", () => {
       dataFrom: observationStart,
       dataTo: observationEnd,
     })
+  })
+
+  it("does not count synthetic carry-forward buckets as observed days", async () => {
+    const usageByDay = Array.from<number | null>({ length: 14 }).fill(null)
+    usageByDay[1] = 10
+    const { deps } = makeDeps({ usageByDay })
+
+    const result = await forecastUsage(deps, baseInput({ horizonDays: 1 }))
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toEqual(
+      expect.objectContaining({
+        confidence: "low",
+        observedDays: 0,
+        projectedUsage: 0,
+        evidence: [],
+        warnings: [
+          "This is a projection of incremental horizon usage from day-over-day cumulative usage deltas, not a prediction.",
+          "Fewer than five observed days were available, so confidence is low.",
+        ],
+        nextActions: ["Collect at least five days of usage before relying on the projection."],
+      })
+    )
   })
 
   it("includes period_key in Tinybird queries and stable evidence IDs when provided", async () => {
