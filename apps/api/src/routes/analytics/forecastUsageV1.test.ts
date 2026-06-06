@@ -48,7 +48,7 @@ afterEach(() => {
 
 describe("forecastUsageV1 route", () => {
   it("returns a structured usage projection from recent daily Tinybird aggregates", async () => {
-    const usageByDay = Array.from({ length: 14 }, (_, index) => 10 + index)
+    const usageByDay = Array.from({ length: 14 }, (_, index) => 10 * (index + 1))
     const { app, env, executionCtx, getFeaturesUsagePeriod } = createTestApp({ usageByDay })
 
     const response = await app.fetch(
@@ -65,29 +65,33 @@ describe("forecastUsageV1 route", () => {
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       answer:
-        "Projected 427 usage units for tokens over the next 14 days for customer cus_123. This is a projection, not a prediction.",
+        "Projected incremental usage of 140 units for tokens over the next 14 days for customer cus_123. This is a projection, not a prediction.",
       confidence: "high",
       freshness: {
         generatedAt: now,
         dataFrom: observationStart,
         dataTo: observationEnd,
       },
-      evidence: Array.from({ length: 14 }, (_, index) => ({
+      evidence: Array.from({ length: 13 }, (_, index) => ({
         type: "meter_fact",
-        id: `proj_123:cus_123:tokens:month:2026-06:${dayKey(observationStart + index * DAY_MS)}`,
+        id: `proj_123:cus_123:tokens:month:2026-06:${dayKey(
+          observationStart + (index + 1) * DAY_MS
+        )}`,
         source: "tinybird",
-        timestamp: observationStart + (index + 1) * DAY_MS,
+        timestamp: observationStart + (index + 2) * DAY_MS,
       })),
-      warnings: ["This is a projection based on recent aggregate usage, not a prediction."],
+      warnings: [
+        "This is a projection of incremental horizon usage from day-over-day cumulative usage deltas, not a prediction.",
+      ],
       nextActions: ["Compare this projection against entitlement limits and wallet runway."],
       project_id: "proj_123",
       customer_id: "cus_123",
       feature_slug: "tokens",
       horizonDays: 14,
-      projectedUsage: 427,
-      observedDays: 14,
-      baselineUsage: 16.5,
-      trendPerDay: 1,
+      projectedUsage: 140,
+      observedDays: 13,
+      baselineUsage: 10,
+      trendPerDay: 0,
       periodKey: "month:2026-06",
     })
     expect(getFeaturesUsagePeriod).toHaveBeenCalledTimes(14)
@@ -122,16 +126,16 @@ describe("forecastUsageV1 route", () => {
     expect(body).toEqual(
       expect.objectContaining({
         confidence: "low",
-        observedDays: 3,
+        observedDays: 2,
         horizonDays: 14,
         warnings: [
-          "This is a projection based on recent aggregate usage, not a prediction.",
+          "This is a projection of incremental horizon usage from day-over-day cumulative usage deltas, not a prediction.",
           "Fewer than five observed days were available, so confidence is low.",
         ],
         nextActions: ["Collect at least five days of usage before relying on the projection."],
       })
     )
-    expect(body.evidence).toHaveLength(3)
+    expect(body.evidence).toHaveLength(2)
     expect(getFeaturesUsagePeriod).toHaveBeenNthCalledWith(1, {
       project_id: "proj_123",
       customer_id: "cus_sparse",

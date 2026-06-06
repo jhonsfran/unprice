@@ -39,8 +39,8 @@ SQL >
         {% if defined(period_key) %} AND period_key = {{ String(period_key) }} {% end %}
         {% if defined(feature_slugs) %} AND feature_slug IN {{ Array(feature_slugs, 'String') }} {% end %}
         {% if defined(start) and defined(end) %}
-            AND date BETWEEN fromUnixTimestamp64Milli({{ Int64(start) }})
-            AND fromUnixTimestamp64Milli({{ Int64(end) }})
+            AND date >= fromUnixTimestamp64Milli({{ Int64(start) }})
+            AND date < fromUnixTimestamp64Milli({{ Int64(end) }})
         {% elif defined(interval_days) %}
             AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
         {% else %}

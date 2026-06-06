@@ -10,7 +10,7 @@ const observationStart = observationEnd - 14 * DAY_MS
 
 describe("forecastUsage", () => {
   it("projects usage from UTC day buckets without period_key", async () => {
-    const usageByDay = Array.from({ length: 14 }, (_, index) => 10 + index)
+    const usageByDay = Array.from({ length: 14 }, (_, index) => 10 * (index + 1))
     const { deps, analytics } = makeDeps({ usageByDay })
 
     const result = await forecastUsage(deps, baseInput({ horizonDays: 14 }))
@@ -18,29 +18,31 @@ describe("forecastUsage", () => {
     expect(result.err).toBeUndefined()
     expect(result.val).toEqual({
       answer:
-        "Projected 427 usage units for tokens over the next 14 days for customer cus_123. This is a projection, not a prediction.",
+        "Projected incremental usage of 140 units for tokens over the next 14 days for customer cus_123. This is a projection, not a prediction.",
       confidence: "high",
       freshness: {
         generatedAt: now,
         dataFrom: observationStart,
         dataTo: observationEnd,
       },
-      evidence: Array.from({ length: 14 }, (_, index) => ({
+      evidence: Array.from({ length: 13 }, (_, index) => ({
         type: "meter_fact",
-        id: `proj_123:cus_123:tokens:${dayKey(observationStart + index * DAY_MS)}`,
+        id: `proj_123:cus_123:tokens:${dayKey(observationStart + (index + 1) * DAY_MS)}`,
         source: "tinybird",
-        timestamp: observationStart + (index + 1) * DAY_MS,
+        timestamp: observationStart + (index + 2) * DAY_MS,
       })),
-      warnings: ["This is a projection based on recent aggregate usage, not a prediction."],
+      warnings: [
+        "This is a projection of incremental horizon usage from day-over-day cumulative usage deltas, not a prediction.",
+      ],
       nextActions: ["Compare this projection against entitlement limits and wallet runway."],
       project_id: "proj_123",
       customer_id: "cus_123",
       feature_slug: "tokens",
       horizonDays: 14,
-      projectedUsage: 427,
-      observedDays: 14,
-      baselineUsage: 16.5,
-      trendPerDay: 1,
+      projectedUsage: 140,
+      observedDays: 13,
+      baselineUsage: 10,
+      trendPerDay: 0,
     })
     expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledTimes(14)
     expect(analytics.getFeaturesUsagePeriod).toHaveBeenNthCalledWith(1, {
@@ -50,6 +52,26 @@ describe("forecastUsage", () => {
       start: observationStart,
       end: observationStart + DAY_MS,
     })
+  })
+
+  it("does not sum future cumulative levels as horizon usage", async () => {
+    const usageByDay = Array.from<number | null>({ length: 14 }).fill(null)
+    usageByDay[11] = 10
+    usageByDay[12] = 20
+    usageByDay[13] = 30
+    const { deps } = makeDeps({ usageByDay })
+
+    const result = await forecastUsage(deps, baseInput({ horizonDays: 3 }))
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toEqual(
+      expect.objectContaining({
+        projectedUsage: 30,
+        observedDays: 2,
+        baselineUsage: 10,
+        trendPerDay: 0,
+      })
+    )
   })
 
   it("uses the default horizon and returns low confidence for zero observed rows", async () => {
@@ -68,7 +90,7 @@ describe("forecastUsage", () => {
         trendPerDay: 0,
         evidence: [],
         warnings: [
-          "This is a projection based on recent aggregate usage, not a prediction.",
+          "This is a projection of incremental horizon usage from day-over-day cumulative usage deltas, not a prediction.",
           "Fewer than five observed days were available, so confidence is low.",
         ],
         nextActions: ["Collect at least five days of usage before relying on the projection."],
@@ -83,6 +105,7 @@ describe("forecastUsage", () => {
 
   it("includes period_key in Tinybird queries and stable evidence IDs when provided", async () => {
     const usageByDay = Array.from<number | null>({ length: 14 }).fill(null)
+    usageByDay[12] = 3
     usageByDay[13] = 7
     const { deps, analytics } = makeDeps({ usageByDay })
 
@@ -96,6 +119,7 @@ describe("forecastUsage", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val?.periodKey).toBe("month:2026-06")
+    expect(result.val?.projectedUsage).toBe(4)
     expect(result.val?.evidence).toEqual([
       {
         type: "meter_fact",

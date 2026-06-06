@@ -47,7 +47,11 @@ type ObservationWindow = {
 }
 
 type Observation = ObservationWindow & {
-  usage: number
+  cumulativeUsage: number
+}
+
+type DeltaObservation = ObservationWindow & {
+  usageDelta: number
 }
 
 export async function forecastUsage(
@@ -96,7 +100,11 @@ export async function forecastUsage(
     windows,
     featureSlug: input.featureSlug,
   })
-  const projection = projectUsage({ observations, horizonDays: input.horizonDays })
+  const deltaObservations = buildDeltaObservations(observations)
+  const projection = projectUsage({
+    observations: deltaObservations,
+    horizonDays: input.horizonDays,
+  })
 
   const output: ForecastUsageOutput = {
     answer: buildAnswer({
@@ -105,13 +113,13 @@ export async function forecastUsage(
       horizonDays: input.horizonDays,
       projectedUsage: projection.projectedUsage,
     }),
-    confidence: buildConfidence(observations.length),
+    confidence: buildConfidence(deltaObservations.length),
     freshness: {
       generatedAt,
       dataFrom: observationStart,
       dataTo: observationEnd,
     },
-    evidence: observations.map((observation) => ({
+    evidence: deltaObservations.map((observation) => ({
       type: "meter_fact",
       id: buildEvidenceId({
         projectId: input.projectId,
@@ -123,14 +131,14 @@ export async function forecastUsage(
       source: "tinybird",
       timestamp: observation.end,
     })),
-    warnings: buildWarnings(observations.length),
-    nextActions: buildNextActions(observations.length),
+    warnings: buildWarnings(deltaObservations.length),
+    nextActions: buildNextActions(deltaObservations.length),
     project_id: input.projectId,
     customer_id: input.customerId,
     feature_slug: input.featureSlug,
     horizonDays: input.horizonDays,
     projectedUsage: projection.projectedUsage,
-    observedDays: observations.length,
+    observedDays: deltaObservations.length,
     baselineUsage: projection.baselineUsage,
     trendPerDay: projection.trendPerDay,
     ...(input.periodKey ? { periodKey: input.periodKey } : {}),
@@ -180,7 +188,7 @@ function buildObservations({
     return [
       {
         ...window,
-        usage,
+        cumulativeUsage: usage,
       },
     ]
   })
@@ -191,11 +199,27 @@ function readUsage(row: FeatureUsagePeriodRow): number | null {
   return typeof usage === "number" && Number.isFinite(usage) ? usage : null
 }
 
+function buildDeltaObservations(observations: Observation[]): DeltaObservation[] {
+  return observations.flatMap((observation, index) => {
+    const previous = observations[index - 1]
+    if (!previous || observation.dayIndex - previous.dayIndex !== 1) {
+      return []
+    }
+
+    return [
+      {
+        ...observation,
+        usageDelta: Math.max(0, observation.cumulativeUsage - previous.cumulativeUsage),
+      },
+    ]
+  })
+}
+
 function projectUsage({
   observations,
   horizonDays,
 }: {
-  observations: Observation[]
+  observations: DeltaObservation[]
   horizonDays: number
 }): {
   projectedUsage: number
@@ -211,7 +235,7 @@ function projectUsage({
   }
 
   const baselineUsage =
-    observations.reduce((sum, observation) => sum + observation.usage, 0) / observations.length
+    observations.reduce((sum, observation) => sum + observation.usageDelta, 0) / observations.length
   const trendPerDay = linearSlope(observations)
   const intercept = baselineUsage - trendPerDay * mean(observations.map((row) => row.dayIndex))
   const firstFutureDayIndex = observations.at(-1)?.dayIndex ?? OBSERVATION_DAYS - 1
@@ -227,13 +251,13 @@ function projectUsage({
   }
 }
 
-function linearSlope(observations: Observation[]): number {
+function linearSlope(observations: DeltaObservation[]): number {
   if (observations.length < 2) {
     return 0
   }
 
   const meanX = mean(observations.map((row) => row.dayIndex))
-  const meanY = mean(observations.map((row) => row.usage))
+  const meanY = mean(observations.map((row) => row.usageDelta))
   const denominator = observations.reduce((sum, row) => sum + (row.dayIndex - meanX) ** 2, 0)
 
   if (denominator === 0) {
@@ -241,7 +265,7 @@ function linearSlope(observations: Observation[]): number {
   }
 
   return (
-    observations.reduce((sum, row) => sum + (row.dayIndex - meanX) * (row.usage - meanY), 0) /
+    observations.reduce((sum, row) => sum + (row.dayIndex - meanX) * (row.usageDelta - meanY), 0) /
     denominator
   )
 }
@@ -271,7 +295,9 @@ function buildConfidence(observedDays: number): ForecastUsageOutput["confidence"
 }
 
 function buildWarnings(observedDays: number): string[] {
-  const warnings = ["This is a projection based on recent aggregate usage, not a prediction."]
+  const warnings = [
+    "This is a projection of incremental horizon usage from day-over-day cumulative usage deltas, not a prediction.",
+  ]
 
   if (observedDays < 5) {
     warnings.push("Fewer than five observed days were available, so confidence is low.")
@@ -299,7 +325,7 @@ function buildAnswer({
   horizonDays: number
   projectedUsage: number
 }): string {
-  return `Projected ${projectedUsage} usage units for ${featureSlug} over the next ${horizonDays} days for customer ${customerId}. This is a projection, not a prediction.`
+  return `Projected incremental usage of ${projectedUsage} units for ${featureSlug} over the next ${horizonDays} days for customer ${customerId}. This is a projection, not a prediction.`
 }
 
 function buildEvidenceId({
