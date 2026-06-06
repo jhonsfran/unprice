@@ -65,10 +65,14 @@ export type EntitlementWindowStatus = {
   outboxCount: number
   walletReservation: {
     allocationAmount: number
+    billingPeriodId: string | null
     consumedAmount: number
     currency: string | null
+    cycleEndAt: number | null
+    cycleStartAt: number | null
     customerId: string | null
     deletionRequested: boolean
+    featurePlanVersionItemId: string | null
     flushedAmount: number
     flushSeq: number
     lastEventAt: number | null
@@ -82,6 +86,7 @@ export type EntitlementWindowStatus = {
     refillInFlight: boolean
     reservationEndAt: number | null
     reservationId: string | null
+    statementKey: string | null
     unflushedAmount: number
   } | null
 }

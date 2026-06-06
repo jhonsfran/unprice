@@ -137,12 +137,18 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
     const invoices = await db.execute<{
       id: string
       status: "draft"
-      total_amount: number
+      gross_amount: number
+
+      amount_due: number
+
+      amount_paid: number
+
+      amount_included: number
       statement_key: string
       statement_start_at_m: number
       statement_end_at_m: number
     }>(sql`
-      SELECT id, status, total_amount, statement_key, statement_start_at_m, statement_end_at_m
+      SELECT id, status, gross_amount, amount_due, amount_paid, amount_included, statement_key, statement_start_at_m, statement_end_at_m
       FROM unprice_invoices
       WHERE project_id = ${projectId}
         AND subscription_id = ${subscriptionId}
@@ -152,7 +158,13 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
       ...invoice,
       statement_end_at_m: Number(invoice.statement_end_at_m),
       statement_start_at_m: Number(invoice.statement_start_at_m),
-      total_amount: Number(invoice.total_amount),
+      gross_amount: Number(invoice.gross_amount),
+
+      amount_due: Number(invoice.amount_due),
+
+      amount_paid: Number(invoice.amount_paid),
+
+      amount_included: Number(invoice.amount_included),
     }))
     expect(invoiceRows).toEqual([
       expect.objectContaining({
@@ -160,7 +172,13 @@ describe("P0-A pay_in_arrear metered billing workflow", () => {
         statement_end_at_m: feb1,
         statement_key: statementKey,
         statement_start_at_m: jan1,
-        total_amount: 21_900_000_000,
+        gross_amount: 21_900_000_000,
+
+        amount_due: 21_900_000_000,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       }),
     ])
     const invoiceId = invoiceRows[0]?.id

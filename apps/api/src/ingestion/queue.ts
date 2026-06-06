@@ -14,6 +14,7 @@ export function createQueueServices(params: {
   logger: Logger
 }): Pick<ServiceContext, "entitlements"> & {
   cache: Pick<Cache, "ingestionPreparedGrantContext">
+  db: ReturnType<typeof createConnection>
 } {
   const db = createConnection({
     env: params.env.APP_ENV,
@@ -67,6 +68,7 @@ export function createQueueServices(params: {
 
   return {
     cache,
+    db,
     entitlements: svcCtx.entitlements,
   }
 }

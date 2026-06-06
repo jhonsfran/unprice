@@ -30,6 +30,8 @@ describe("Unprice client", () => {
     expectTypeOf<{
       invoice_id: string
       entry_id: string
+      limit: number
+      offset: number
     }>().toMatchTypeOf<
       paths["/v1/analytics/explain-charge"]["post"]["requestBody"]["content"]["application/json"]
     >()
@@ -45,6 +47,7 @@ describe("Unprice client", () => {
       customer_id: string
       from_ts: number
       to_ts: number
+      limit: number
     }>().toMatchTypeOf<
       paths["/v1/analytics/ingestion/status"]["post"]["requestBody"]["content"]["application/json"]
     >()
@@ -61,12 +64,11 @@ describe("Unprice client", () => {
     expectTypeOf<{
       customer_id: string
       feature_slug: string
+      horizon_days: number
     }>().toMatchTypeOf<
       paths["/v1/analytics/forecast-usage"]["post"]["requestBody"]["content"]["application/json"]
     >()
-    expectTypeOf<ExplainChargeEventRow["tier_mode"]>().toEqualTypeOf<
-      "volume" | "graduated" | null
-    >()
+    expectTypeOf<ExplainChargeEventRow["tier_mode"]>().toEqualTypeOf<unknown>()
   })
 
   it("exposes resource clients for every public API route", () => {
@@ -130,7 +132,10 @@ describe("Unprice client", () => {
             issue_date: 1,
             sent_at: 1,
             paid_at: 2,
-            total_amount: 100,
+            gross_amount: 100,
+            amount_due: 75,
+            amount_paid: 15,
+            amount_included: 10,
           },
           lines: [],
         })
@@ -141,6 +146,10 @@ describe("Unprice client", () => {
 
     expect(error).toBeUndefined()
     expect(result?.invoice.id).toBe("inv_123")
+    expect(result?.invoice.gross_amount).toBe(100)
+    expect(result?.invoice.amount_due).toBe(75)
+    expect(result?.invoice.amount_paid).toBe(15)
+    expect(result?.invoice.amount_included).toBe(10)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.method).toBe("GET")
     expect(requests[0]?.url).toBe("https://example.com/v1/invoices/inv_123")

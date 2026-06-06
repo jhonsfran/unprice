@@ -407,16 +407,16 @@ describe("DB-backed subscription phase changes", () => {
     })
     expect(billed.phasesProcessed).toBe(1)
 
-    const invoice = await db.execute<{ statement_key: string; total_amount: string }>(sql`
-      SELECT statement_key, total_amount
+    const invoice = await db.execute<{ statement_key: string; gross_amount: string }>(sql`
+      SELECT statement_key, gross_amount
       FROM unprice_invoices
       WHERE project_id = ${projectId}
         AND subscription_id = ${subscriptionId}
       ORDER BY created_at_m
     `)
     expect(invoice.rows).toHaveLength(1)
-    expect(Number(invoice.rows[0]!.total_amount)).toBeGreaterThan(1_000_000_000)
-    expect(Number(invoice.rows[0]!.total_amount)).toBeLessThan(9_900_000_000)
+    expect(Number(invoice.rows[0]!.gross_amount)).toBeGreaterThan(1_000_000_000)
+    expect(Number(invoice.rows[0]!.gross_amount)).toBeLessThan(9_900_000_000)
 
     const lines = await ledger.getInvoiceLines({
       projectId,

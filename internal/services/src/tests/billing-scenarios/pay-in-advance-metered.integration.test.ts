@@ -130,7 +130,13 @@ describe("P0-C pay_in_advance metered billing workflow", () => {
       expect.objectContaining({
         due_at_m: advanceDueAt,
         statement_key: startStatementKey,
-        total_amount: 9_900_000_000,
+        gross_amount: 9_900_000_000,
+
+        amount_due: 9_900_000_000,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       }),
     ])
 
@@ -160,14 +166,26 @@ describe("P0-C pay_in_advance metered billing workflow", () => {
         statement_end_at_m: feb1,
         statement_key: startStatementKey,
         statement_start_at_m: jan1,
-        total_amount: 9_900_000_000,
+        gross_amount: 9_900_000_000,
+
+        amount_due: 9_900_000_000,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       }),
       expect.objectContaining({
         due_at_m: usageDueAt,
         statement_end_at_m: feb1,
         statement_key: usageStatementKey,
         statement_start_at_m: jan1,
-        total_amount: 12_000_000_000,
+        gross_amount: 12_000_000_000,
+
+        amount_due: 12_000_000_000,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       }),
     ])
 
@@ -237,9 +255,15 @@ async function listInvoices() {
     statement_end_at_m: number
     statement_key: string
     statement_start_at_m: number
-    total_amount: number
+    gross_amount: number
+
+    amount_due: number
+
+    amount_paid: number
+
+    amount_included: number
   }>(sql`
-    SELECT due_at_m, statement_end_at_m, statement_key, statement_start_at_m, total_amount
+    SELECT due_at_m, statement_end_at_m, statement_key, statement_start_at_m, gross_amount, amount_due, amount_paid, amount_included
     FROM unprice_invoices
     WHERE project_id = ${projectId}
       AND subscription_id = ${subscriptionId}
@@ -252,7 +276,13 @@ async function listInvoices() {
     due_at_m: Number(invoice.due_at_m),
     statement_end_at_m: Number(invoice.statement_end_at_m),
     statement_start_at_m: Number(invoice.statement_start_at_m),
-    total_amount: Number(invoice.total_amount),
+    gross_amount: Number(invoice.gross_amount),
+
+    amount_due: Number(invoice.amount_due),
+
+    amount_paid: Number(invoice.amount_paid),
+
+    amount_included: Number(invoice.amount_included),
   }))
 }
 

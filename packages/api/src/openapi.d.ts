@@ -1530,6 +1530,10 @@ export interface operations {
                  * @default false
                  */
                 hidden: boolean
+                /** @description Whether this usage feature intentionally uses a billing cadence different from the parent plan. Default: false */
+                billingCadenceOverride?: boolean
+                /** @description Whether this usage feature intentionally uses a reset cadence different from its billing cadence. Default: false */
+                resetCadenceOverride?: boolean
               } | null
               order: number
               /**
@@ -2197,6 +2201,11 @@ export interface operations {
               customerId: string | null
               currency: string | null
               reservationEndAt: number | null
+              billingPeriodId: string | null
+              cycleEndAt: number | null
+              cycleStartAt: number | null
+              featurePlanVersionItemId: string | null
+              statementKey: string | null
               consumedAmount: number
               flushedAmount: number
               unflushedAmount: number
@@ -2443,7 +2452,10 @@ export interface operations {
               issue_date: number | null
               sent_at: number | null
               paid_at: number | null
-              total_amount: number
+              gross_amount: number
+              amount_due: number
+              amount_paid: number
+              amount_included: number
             }
             lines: {
               entry_id: string
@@ -2452,6 +2464,31 @@ export interface operations {
               description: string | null
               quantity: number | null
               amount: number
+              amount_due: number
+              amount_paid: number
+              amount_included: number
+              collectable: boolean
+              /** @enum {string} */
+              settlement_source:
+                | "provider"
+                | "credit_line"
+                | "cash_wallet"
+                | "plan_included"
+                | "trial"
+                | "promo"
+                | "manual"
+              /** @enum {string} */
+              settlement_status: "due" | "paid" | "included"
+              wallet_credit_id: string | null
+              /** @enum {string|null} */
+              wallet_credit_source:
+                | "promo"
+                | "plan_included"
+                | "trial"
+                | "manual"
+                | "credit_line"
+                | null
+              wallet_id: string | null
               /** @enum {string} */
               currency: "USD" | "EUR"
               /** Format: date-time */
@@ -3706,6 +3743,10 @@ export interface operations {
                    * @default false
                    */
                   hidden: boolean
+                  /** @description Whether this usage feature intentionally uses a billing cadence different from the parent plan. Default: false */
+                  billingCadenceOverride?: boolean
+                  /** @description Whether this usage feature intentionally uses a reset cadence different from its billing cadence. Default: false */
+                  resetCadenceOverride?: boolean
                 } | null
                 order: number
                 /**
@@ -4382,6 +4423,10 @@ export interface operations {
                    * @default false
                    */
                   hidden: boolean
+                  /** @description Whether this usage feature intentionally uses a billing cadence different from the parent plan. Default: false */
+                  billingCadenceOverride?: boolean
+                  /** @description Whether this usage feature intentionally uses a reset cadence different from its billing cadence. Default: false */
+                  resetCadenceOverride?: boolean
                 } | null
                 order: number
                 /**
@@ -4936,9 +4981,9 @@ export interface operations {
           invoice_id: string
           entry_id: string
           /** @default 100 */
-          limit?: number
+          limit: number
           /** @default 0 */
-          offset?: number
+          offset: number
         }
       }
     }
@@ -5005,8 +5050,7 @@ export interface operations {
               currency: string
               priced_at: number
               tier_index: number | null
-              /** @enum {string|null} */
-              tier_mode: "volume" | "graduated" | null
+              tier_mode: ("volume" | "graduated") | unknown | unknown
               pricing_component_count: number
               /** @enum {string} */
               source_type: "api_key" | "system" | "unknown"
@@ -5134,7 +5178,7 @@ export interface operations {
           feature_slug: string
           period_key?: string
           /** @default 14 */
-          horizon_days?: number
+          horizon_days: number
         }
       }
     }
@@ -5274,7 +5318,7 @@ export interface operations {
           source_id?: string
           event_slug?: string
           /** @default 50 */
-          limit?: number
+          limit: number
         }
       }
     }

@@ -63,6 +63,7 @@ interface FakeState {
     payloadHash: string
     result: Record<string, unknown>
   }>
+  replayWalletCommands: boolean
   balances: Record<string, number> // account name → minor units (scale 8)
   transfers: LedgerTransferRequest[] // every ledger call, in order
   transferBatches: number // count of `createTransfers` calls
@@ -77,6 +78,7 @@ function createState(): FakeState {
     reservations: [],
     fundingLegs: [],
     walletCommands: [],
+    replayWalletCommands: false,
     balances: {},
     transfers: [],
     transferBatches: 0,
@@ -126,7 +128,9 @@ function createDb(state: FakeState): Database {
         ),
       },
       walletCommandIdempotency: {
-        findFirst: vi.fn(async () => null),
+        findFirst: vi.fn(async () =>
+          state.replayWalletCommands ? (state.walletCommands[0] ?? null) : null
+        ),
       },
     },
     execute: vi.fn(async () => ({ rows: [] })),
@@ -963,6 +967,63 @@ describe("WalletService reservation capture, extend, and release", () => {
         invoice_visible: true,
       },
     ])
+  })
+
+  it("treats changed capture invoice context as a wallet idempotency conflict", async () => {
+    const { state, wallet } = buildService()
+    seedReservation(state, {
+      id: "res_capture_hash",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 2 * DOLLAR,
+      consumedAmount: 0,
+      fundingAllocations: [{ source: "purchased", amount: 2 * DOLLAR }],
+    })
+    state.balances[keys.reserved] = 2 * DOLLAR
+
+    const baseInput = {
+      projectId,
+      customerId,
+      currency: "USD" as const,
+      reservationId: "res_capture_hash",
+      flushSeq: 1,
+      amount: 2 * DOLLAR,
+      statementKey: "stmt_capture_hash",
+      billingPeriodId: "bp_1",
+      kind: "usage",
+      sourceId: "bp_1:item_1",
+      metadata: {
+        billing_period_id: "bp_1",
+        cycle_end_at: 2000,
+        cycle_start_at: 1000,
+        feature_plan_version_item_id: "item_1",
+        source_id: "bp_1:item_1",
+      },
+    }
+
+    const first = await wallet.captureReservationUsage(baseInput)
+    expect(first.err).toBeUndefined()
+    expect(first.val?.capturedAmount).toBe(2 * DOLLAR)
+
+    state.replayWalletCommands = true
+
+    const replay = await wallet.captureReservationUsage(baseInput)
+    expect(replay.err).toBeUndefined()
+    expect(replay.val?.capturedAmount).toBe(2 * DOLLAR)
+
+    const changed = await wallet.captureReservationUsage({
+      ...baseInput,
+      billingPeriodId: "bp_2",
+      sourceId: "bp_2:item_1",
+      metadata: {
+        ...baseInput.metadata,
+        billing_period_id: "bp_2",
+        source_id: "bp_2:item_1",
+      },
+    })
+
+    expect(changed.err?.message).toBe("WALLET_IDEMPOTENCY_CONFLICT")
   })
 
   it("rejects captures that exceed still-reserved funding legs", async () => {

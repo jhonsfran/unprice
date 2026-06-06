@@ -17,6 +17,7 @@ import { Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { fromLedgerMinor, toLedgerMinor } from "@unprice/money"
 
+import { mapWalletFundingToSettlement } from "../billing/invoice-settlement"
 import type { DbExecutor, Transaction } from "../deps"
 import {
   type LedgerGateway,
@@ -28,7 +29,6 @@ import {
 } from "../ledger"
 import { UnPriceLedgerError } from "../ledger"
 import { toErrorContext } from "../utils/log-context"
-import { mapWalletFundingToSettlement } from "../billing/invoice-settlement"
 import { UnPriceWalletError } from "./errors"
 
 type FundingAllocation = {
@@ -507,9 +507,13 @@ export class WalletService {
       command,
       currency: input.currency,
       customerId: input.customerId,
+      billingPeriodId: input.billingPeriodId ?? null,
       flushSeq: input.flushSeq,
+      kind: input.kind ?? null,
+      metadata: captureMetadata,
       projectId: input.projectId,
       reservationId: input.reservationId,
+      sourceId: input.sourceId ?? null,
       statementKey: input.statementKey,
     })
 
@@ -1007,7 +1011,7 @@ export class WalletService {
           )
 
         const output: ReleaseReservationOutput = {
-          releasedAmount: attribution.val.totalAmount,
+          releasedAmount: attribution.val.releasedAmount,
           restoredGrantedAmount: attribution.val.grantedAmount,
           refundedPurchasedAmount: attribution.val.purchasedAmount,
         }
@@ -1730,7 +1734,7 @@ export class WalletService {
 
   private computeReservationRelease(legs: EntitlementReservationFundingLeg[]): Result<
     {
-      totalAmount: number
+      releasedAmount: number
       grantedAmount: number
       purchasedAmount: number
       grantedByCredit: Map<string, { amount: number; grantSource: WalletCreditSource }>
@@ -1747,7 +1751,7 @@ export class WalletService {
       )
     }
 
-    let totalAmount = 0
+    let releasedAmount = 0
     let grantedAmount = 0
     let purchasedAmount = 0
     const grantedByCredit = new Map<string, { amount: number; grantSource: WalletCreditSource }>()
@@ -1774,7 +1778,7 @@ export class WalletService {
         id: leg.id,
         releasedAmount: leg.releasedAmount + stillReserved,
       })
-      totalAmount += stillReserved
+      releasedAmount += stillReserved
 
       if (leg.source === "purchased") {
         purchasedAmount += stillReserved
@@ -1810,7 +1814,7 @@ export class WalletService {
     }
 
     return Ok({
-      totalAmount,
+      releasedAmount,
       grantedAmount,
       purchasedAmount,
       grantedByCredit,

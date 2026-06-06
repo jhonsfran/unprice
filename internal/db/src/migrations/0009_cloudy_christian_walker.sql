@@ -1,0 +1,1 @@
+CREATE INDEX "billing_periods_ingestion_invoice_context_idx" ON "unprice_billing_periods" USING btree ("project_id","customer_id","subscription_item_id","status","cycle_start_at_m","cycle_end_at_m");

@@ -11,6 +11,7 @@ describe("ingestion entitlement message helpers", () => {
   const timestamp = Date.UTC(2026, 2, 19, 12, 0, 0)
 
   const entitlement = (overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement => ({
+    billingPeriods: [],
     creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
@@ -40,6 +41,7 @@ describe("ingestion entitlement message helpers", () => {
     overageStrategy: "none",
     projectId: "proj_123",
     resetConfig: null,
+    subscriptionItemId: null,
     ...overrides,
   })
 

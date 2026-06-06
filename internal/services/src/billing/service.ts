@@ -46,6 +46,15 @@ export interface InvoiceStatementLine {
   description: string | null
   quantity: number | null
   amount: number
+  amountDue: number
+  amountIncluded: number
+  amountPaid: number
+  collectable: boolean
+  settlementSource: InvoiceLine["settlementSource"]
+  settlementStatus: InvoiceLine["settlementStatus"]
+  walletCreditId: string | null
+  walletCreditSource: InvoiceLine["walletCreditSource"]
+  walletId: string | null
   currency: Currency
   createdAt: Date
 }
@@ -86,6 +95,9 @@ function providerInvoiceItemMetadata(line: InvoiceLine): Record<string, string> 
     subscription_id: String(meta.subscription_id ?? ""),
     subscription_item_id: String(meta.subscription_item_id ?? ""),
     kind: line.kind,
+    gross_amount: String(toLedgerMinor(line.amount)),
+    settlement_source: line.settlementSource,
+    settlement_status: line.settlementStatus,
   }
 }
 
@@ -339,13 +351,13 @@ export class BillingService {
             await machine.reportInvoiceFailure({ invoiceId, error: col.err.message })
             throw col.err
           }
-          const { totalAmount, status } = col.val
+          const { amountDue, status } = col.val
           if (status === "paid" || status === "void") {
             await machine.reportInvoiceSuccess({ invoiceId })
           } else if (status === "failed") {
             await machine.reportPaymentFailure({ invoiceId, error: "Payment failed" })
           }
-          return { total: totalAmount, status }
+          return { total: amountDue, status }
         },
       })
       return Ok(res)
@@ -798,6 +810,20 @@ export class BillingService {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
         }
 
+        if (statusPaymentProviderInvoice.val.status === "paid") {
+          const settled = await settlePrepaidInvoiceToWallet({
+            walletService: this.walletService,
+            invoice: updatedInvoice,
+          })
+          if (settled.err) {
+            return Err(
+              new UnPriceBillingError({
+                message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
+              })
+            )
+          }
+        }
+
         return Ok(updatedInvoice)
       }
 
@@ -1069,7 +1095,7 @@ export class BillingService {
           // provider finalization completed.
           let providerInvoiceId = lockedInvoiceData.invoicePaymentProviderId
           let providerInvoiceUrl = lockedInvoiceData.invoicePaymentProviderUrl
-          const skipProvider = lockedInvoiceData.totalAmount === 0
+          const skipProvider = lockedInvoiceData.amountDue === 0
 
           if (!skipProvider) {
             const upserted = await this._upsertPaymentProviderInvoice({
@@ -1205,7 +1231,7 @@ export class BillingService {
   /**
    * Invoice lines are projected from the ledger (see `LedgerGateway.getInvoiceLines`),
    * while this row is only the invoice header. Finalization here moves the
-   * invoice from `draft` to `unpaid` (or `void` when `totalAmount === 0`) and
+   * invoice from `draft` to `unpaid`, `paid`, or `void` and
    * stamps `issueDate`. Provider-side invoice creation runs separately in
    * `_upsertPaymentProviderInvoice` (called *before* this method by the
    * public `finalizeInvoice` wrapper) so a provider failure leaves the row
@@ -1225,7 +1251,12 @@ export class BillingService {
     const result = await this.db.transaction(async (tx) => {
       try {
         const txBillingRepo = new DrizzleBillingRepository(tx)
-        const statusInvoice = invoice.totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
+        const statusInvoice =
+          invoice.grossAmount === 0
+            ? ("void" as const)
+            : invoice.amountDue === 0
+              ? ("paid" as const)
+              : ("unpaid" as const)
 
         const updatedInvoice = await txBillingRepo.updateInvoice({
           invoiceId: invoice.id,
@@ -1323,12 +1354,11 @@ export class BillingService {
       return Err(new UnPriceBillingError({ message: linesResult.err.message }))
     }
 
-    const lines = linesResult.val.filter(
-      (line) => (line.metadata as Record<string, unknown> | null)?.billing_period_id != null
-    )
+    const lines = linesResult.val
+    const collectableLines = lines.filter((line) => line.collectable && line.amountDue > 0)
 
-    if (lines.length === 0) {
-      // Nothing to push. A non-zero `totalAmount` with no lines is a data
+    if (invoice.amountDue > 0 && collectableLines.length === 0) {
+      // Nothing to push. A non-zero `amountDue` with no collectable lines is a data
       // integrity error — surface it loudly rather than silently creating an
       // empty Stripe invoice.
       return Err(
@@ -1415,7 +1445,7 @@ export class BillingService {
       }
     }
 
-    for (const line of lines) {
+    for (const line of collectableLines) {
       const desiredItem = buildProviderInvoiceItemInput(providerInvoiceId, line)
       const existingItemKey = providerInvoiceItemKey(desiredItem.metadata)
       const existingItem = existingItemKey ? existingItems.get(existingItemKey) : undefined
@@ -1833,6 +1863,15 @@ export class BillingService {
           description: period.subscriptionItem.featurePlanVersion.feature.title,
           quantity: period.subscriptionItem.units ?? 0,
           amount: 0,
+          amountDue: 0,
+          amountIncluded: 0,
+          amountPaid: 0,
+          collectable: false,
+          settlementSource: period.type === "trial" ? "trial" : "provider",
+          settlementStatus: period.type === "trial" ? "included" : "due",
+          walletCreditId: null,
+          walletCreditSource: null,
+          walletId: null,
           currency,
           createdAt: new Date(period.invoiceAt),
         })
@@ -1846,6 +1885,15 @@ export class BillingService {
         description: line.description,
         quantity: line.quantity,
         amount: toLedgerMinor(line.amount),
+        amountDue: line.amountDue,
+        amountIncluded: line.amountIncluded,
+        amountPaid: line.amountPaid,
+        collectable: line.collectable,
+        settlementSource: line.settlementSource,
+        settlementStatus: line.settlementStatus,
+        walletCreditId: line.walletCreditId,
+        walletCreditSource: line.walletCreditSource,
+        walletId: line.walletId,
         currency: line.currency,
         createdAt: line.createdAt,
       })

@@ -2538,7 +2538,10 @@
                         "issue_date": { "type": "integer", "nullable": true },
                         "sent_at": { "type": "integer", "nullable": true },
                         "paid_at": { "type": "integer", "nullable": true },
-                        "total_amount": { "type": "integer", "minimum": 0 }
+                        "gross_amount": { "type": "integer", "minimum": 0 },
+                        "amount_due": { "type": "integer", "minimum": 0 },
+                        "amount_paid": { "type": "integer", "minimum": 0 },
+                        "amount_included": { "type": "integer", "minimum": 0 }
                       },
                       "required": [
                         "id",
@@ -2555,7 +2558,10 @@
                         "issue_date",
                         "sent_at",
                         "paid_at",
-                        "total_amount"
+                        "gross_amount",
+                        "amount_due",
+                        "amount_paid",
+                        "amount_included"
                       ]
                     },
                     "lines": {
@@ -2569,6 +2575,33 @@
                           "description": { "type": "string", "nullable": true },
                           "quantity": { "type": "number", "nullable": true },
                           "amount": { "type": "integer", "minimum": 0 },
+                          "amount_due": { "type": "integer", "minimum": 0 },
+                          "amount_paid": { "type": "integer", "minimum": 0 },
+                          "amount_included": { "type": "integer", "minimum": 0 },
+                          "collectable": { "type": "boolean" },
+                          "settlement_source": {
+                            "type": "string",
+                            "enum": [
+                              "provider",
+                              "credit_line",
+                              "cash_wallet",
+                              "plan_included",
+                              "trial",
+                              "promo",
+                              "manual"
+                            ]
+                          },
+                          "settlement_status": {
+                            "type": "string",
+                            "enum": ["due", "paid", "included"]
+                          },
+                          "wallet_credit_id": { "type": "string", "nullable": true },
+                          "wallet_credit_source": {
+                            "type": "string",
+                            "enum": ["promo", "plan_included", "trial", "manual", "credit_line"],
+                            "nullable": true
+                          },
+                          "wallet_id": { "type": "string", "nullable": true },
                           "currency": { "type": "string", "enum": ["USD", "EUR"] },
                           "created_at": { "type": "string", "format": "date-time" }
                         },
@@ -2579,6 +2612,15 @@
                           "description",
                           "quantity",
                           "amount",
+                          "amount_due",
+                          "amount_paid",
+                          "amount_included",
+                          "collectable",
+                          "settlement_source",
+                          "settlement_status",
+                          "wallet_credit_id",
+                          "wallet_credit_source",
+                          "wallet_id",
                           "currency",
                           "created_at"
                         ]

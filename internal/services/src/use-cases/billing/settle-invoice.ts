@@ -5,7 +5,7 @@ import type { UnPriceWalletError } from "../../wallet/errors"
 
 // Invoice settlement posts a single ledger transfer:
 //
-//   topup → receivable   (amount = invoice.totalAmount)
+//   topup → receivable   (amount = invoice.amountDue)
 //
 // This clears the receivable IOU that `invoiceSubscription` opened when it
 // debited `customer.*.receivable` at invoice creation. Behavior is identical
@@ -33,7 +33,7 @@ export async function settlePrepaidInvoiceToWallet({
   walletService: WalletService
   invoice: SubscriptionInvoice
 }): Promise<Result<void, UnPriceWalletError>> {
-  if (invoice.totalAmount <= 0) {
+  if (invoice.amountDue <= 0) {
     return Ok(undefined)
   }
 
@@ -43,7 +43,7 @@ export async function settlePrepaidInvoiceToWallet({
     projectId: invoice.projectId,
     customerId: invoice.customerId,
     currency,
-    paidAmount: invoice.totalAmount,
+    paidAmount: invoice.amountDue,
     idempotencyKey: `invoice_receivable:${invoice.id}`,
     metadata: {
       invoice_id: invoice.id,

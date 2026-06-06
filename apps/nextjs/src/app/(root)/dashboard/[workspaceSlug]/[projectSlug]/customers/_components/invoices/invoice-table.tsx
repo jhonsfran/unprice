@@ -2,6 +2,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
+import { Badge } from "@unprice/ui/badge"
 import { Separator } from "@unprice/ui/separator"
 import { Typography } from "@unprice/ui/typography"
 import { formatDate } from "~/lib/dates"
@@ -24,6 +25,7 @@ export function InvoiceTable({
             <TableRow className="bg-muted/50">
               <TableHead className="font-semibold">Description</TableHead>
               <TableHead className="font-semibold">Kind</TableHead>
+              <TableHead className="font-semibold">Settlement</TableHead>
               <TableHead className="text-right font-semibold">Qty</TableHead>
               <TableHead className="text-right font-semibold">Amount</TableHead>
             </TableRow>
@@ -31,7 +33,7 @@ export function InvoiceTable({
           <TableBody>
             {invoice.lines.length === 0 ? (
               <TableRow>
-                <TableCell className="space-y-2" colSpan={4}>
+                <TableCell className="space-y-2" colSpan={5}>
                   <Typography variant="h6" affects="removePaddingMargin">
                     No billable charges
                   </Typography>
@@ -67,6 +69,17 @@ export function InvoiceTable({
                     </span>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{line.kind}</TableCell>
+                  <TableCell>
+                    <Badge variant={line.settlementStatus === "due" ? "default" : "secondary"}>
+                      {line.settlementStatus === "due"
+                        ? line.settlementSource === "credit_line"
+                          ? "Due - Credit line"
+                          : "Due - Provider"
+                        : line.settlementStatus === "paid"
+                          ? "Paid - Cash wallet"
+                          : `Included - ${line.settlementSource.replace("_", " ")}`}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-right text-muted-foreground">
                     {line.quantity ?? "-"}
                   </TableCell>
@@ -83,8 +96,20 @@ export function InvoiceTable({
         <div className="ml-auto max-w-xs space-y-3">
           <Separator />
           <div className="flex justify-between text-base">
+            <span className="font-semibold">Gross:</span>
+            <span>{formatLedger(invoice.grossAmount)}</span>
+          </div>
+          <div className="flex justify-between text-base">
+            <span className="font-semibold">Paid:</span>
+            <span>{formatLedger(invoice.amountPaid)}</span>
+          </div>
+          <div className="flex justify-between text-base">
+            <span className="font-semibold">Included:</span>
+            <span>{formatLedger(invoice.amountIncluded)}</span>
+          </div>
+          <div className="flex justify-between text-base">
             <span className="font-semibold">Total Due:</span>
-            <span className="font-bold text-xl">{formatLedger(invoice.totalAmount)}</span>
+            <span className="font-bold text-xl">{formatLedger(invoice.amountDue)}</span>
           </div>
         </div>
       </div>

@@ -2,8 +2,11 @@ import { TRPCError } from "@trpc/server"
 import {
   currencySchema,
   customerSelectSchema,
+  invoiceSettlementSourceSchema,
+  invoiceSettlementStatusSchema,
   subscriptionInvoiceSelectSchema,
   subscriptionSelectSchema,
+  walletCreditSourceSchema,
 } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
@@ -15,6 +18,15 @@ const invoiceLineSchema = z.object({
   description: z.string().nullable(),
   quantity: z.number().nullable(),
   amount: z.number().int().nonnegative(),
+  amountDue: z.number().int().nonnegative(),
+  amountPaid: z.number().int().nonnegative(),
+  amountIncluded: z.number().int().nonnegative(),
+  collectable: z.boolean(),
+  settlementSource: invoiceSettlementSourceSchema,
+  settlementStatus: invoiceSettlementStatusSchema,
+  walletCreditId: z.string().nullable(),
+  walletCreditSource: walletCreditSourceSchema.nullable(),
+  walletId: z.string().nullable(),
   currency: currencySchema,
   createdAt: z.string().datetime(),
 })
@@ -30,6 +42,11 @@ const getInvoiceByIdOutputSchema = z.object({
 type InvoiceWithRelations = {
   projectId: string
   statementKey: string
+  currency: z.infer<typeof currencySchema>
+  grossAmount: number
+  amountDue: number
+  amountPaid: number
+  amountIncluded: number
   [key: string]: unknown
 }
 
@@ -84,6 +101,10 @@ export const getInvoiceById = protectedProjectProcedure
     return getInvoiceByIdOutputSchema.parse({
       invoice: {
         ...invoiceRow,
+        grossAmount: invoiceRow.grossAmount,
+        amountDue: invoiceRow.amountDue,
+        amountPaid: invoiceRow.amountPaid,
+        amountIncluded: invoiceRow.amountIncluded,
         lines: linesResult.val.map((line) => ({
           entryId: line.entryId,
           statementKey: line.statementKey,
@@ -91,6 +112,15 @@ export const getInvoiceById = protectedProjectProcedure
           description: line.description,
           quantity: line.quantity,
           amount: line.amount,
+          amountDue: line.amountDue,
+          amountPaid: line.amountPaid,
+          amountIncluded: line.amountIncluded,
+          collectable: line.collectable,
+          settlementSource: line.settlementSource,
+          settlementStatus: line.settlementStatus,
+          walletCreditId: line.walletCreditId,
+          walletCreditSource: line.walletCreditSource,
+          walletId: line.walletId,
           currency: line.currency,
           createdAt: line.createdAt.toISOString(),
         })),

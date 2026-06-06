@@ -1,3 +1,4 @@
+import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
 import { createStandaloneRequestLogger } from "@unprice/observability"
 import type { Cache } from "@unprice/services/cache"
@@ -16,6 +17,7 @@ export { IngestionService } from "@unprice/services/ingestion"
 
 type CreateIngestionServiceParams = {
   cache: Pick<Cache, "ingestionPreparedGrantContext">
+  db?: Database
   env: Pick<Env, "APP_ENV" | "entitlementwindow" | "INGESTION_REPORTING_QUEUE">
   entitlementService: EntitlementService
   logger: Logger
@@ -25,6 +27,7 @@ type CreateIngestionServiceParams = {
 export function createIngestionService(params: CreateIngestionServiceParams): IngestionService {
   return new IngestionService({
     cache: params.cache,
+    db: params.db,
     entitlementService: params.entitlementService,
     entitlementWindowClient: new CloudflareEntitlementWindowClient(params.env),
     reportingClient: new CloudflareReportingQueueClient(params.env),
@@ -65,6 +68,7 @@ export async function consumeIngestionBatch(
 
   const service = createIngestionService({
     cache: services.cache,
+    db: services.db,
     entitlementService: services.entitlements,
     logger,
     env,

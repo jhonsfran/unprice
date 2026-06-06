@@ -184,6 +184,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
 
     const ingestion = createIngestionService({
       cache,
+      db,
       entitlementService: svcCtx.entitlements,
       logger,
       env: c.env,

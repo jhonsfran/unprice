@@ -203,6 +203,7 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
 
 function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
+    billingPeriods: [],
     creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
@@ -232,6 +233,7 @@ function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): Inges
     overageStrategy: "none",
     projectId: "proj_123",
     resetConfig: null,
+    subscriptionItemId: null,
     ...overrides,
   }
 }

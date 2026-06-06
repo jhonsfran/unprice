@@ -179,7 +179,13 @@ async function runAdvanceCappedPropertyCase(usage: number) {
     expect.objectContaining({
       due_at_m: advanceDueAt,
       statement_key: startStatementKey,
-      total_amount: fixedAmount,
+      gross_amount: fixedAmount,
+
+      amount_due: fixedAmount,
+
+      amount_paid: 0,
+
+      amount_included: 0,
     }),
   ])
   await expectInvoiceLineAmounts(ledger, startStatementKey, [fixedAmount])
@@ -258,12 +264,24 @@ async function runAdvanceCappedPropertyCase(usage: number) {
     expect.objectContaining({
       due_at_m: advanceDueAt,
       statement_key: startStatementKey,
-      total_amount: fixedAmount,
+      gross_amount: fixedAmount,
+
+      amount_due: fixedAmount,
+
+      amount_paid: 0,
+
+      amount_included: 0,
     }),
     expect.objectContaining({
       due_at_m: usageDueAt,
       statement_key: usageStatementKey,
-      total_amount: expectedUsageAmount,
+      gross_amount: expectedUsageAmount,
+
+      amount_due: expectedUsageAmount,
+
+      amount_paid: 0,
+
+      amount_included: 0,
     }),
   ])
   await expectInvoiceLineAmounts(ledger, usageStatementKey, [expectedUsageAmount])
@@ -294,9 +312,15 @@ async function listInvoices() {
   const invoices = await db.execute<{
     due_at_m: number
     statement_key: string
-    total_amount: number
+    gross_amount: number
+
+    amount_due: number
+
+    amount_paid: number
+
+    amount_included: number
   }>(sql`
-    SELECT due_at_m, statement_key, total_amount
+    SELECT due_at_m, statement_key, gross_amount, amount_due, amount_paid, amount_included
     FROM unprice_invoices
     WHERE project_id = ${projectId}
       AND subscription_id = ${subscriptionId}
@@ -307,7 +331,13 @@ async function listInvoices() {
   return invoices.rows.map((invoice) => ({
     ...invoice,
     due_at_m: Number(invoice.due_at_m),
-    total_amount: Number(invoice.total_amount),
+    gross_amount: Number(invoice.gross_amount),
+
+    amount_due: Number(invoice.amount_due),
+
+    amount_paid: Number(invoice.amount_paid),
+
+    amount_included: Number(invoice.amount_included),
   }))
 }
 

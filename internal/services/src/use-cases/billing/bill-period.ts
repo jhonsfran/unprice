@@ -7,9 +7,9 @@ import { add, fromLedgerMinor, toLedgerMinor } from "@unprice/money"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { isNegative } from "dinero.js"
+import { summarizeInvoiceSettlementAmounts } from "../../billing/invoice-settlement"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { billingStrategyForInterval } from "../../billing/strategy"
-import { summarizeInvoiceSettlementAmounts } from "../../billing/invoice-settlement"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
 import { type InvoiceLine, type LedgerGateway, customerAccountKeys } from "../../ledger"
 import type { RatingService } from "../../rating/service"
@@ -157,7 +157,7 @@ export async function billPeriod({
         const ratedCharges = ratingResult.val
         const firstCharge = ratedCharges[0]
 
-        const totalAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
+        const grossChargeAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
           if (sum === null) return charge.price.totalPrice.dinero
           return add(sum, charge.price.totalPrice.dinero)
         }, null)
@@ -202,11 +202,11 @@ export async function billPeriod({
 
         // Trial / zero-amount periods don't post to the ledger — pgledger
         // rejects non-positive transfers and there's no receivable to record.
-        if (!totalAmount || isZero(totalAmount)) {
+        if (!grossChargeAmount || isZero(grossChargeAmount)) {
           continue
         }
 
-        if (isNegative(totalAmount)) {
+        if (isNegative(grossChargeAmount)) {
           // Negative period totals would require issuing credits from a grant
           // account, which isn't wired up at the ledger layer. Skip here and
           // let the wallet layer post credits against the customer account.
@@ -248,7 +248,7 @@ export async function billPeriod({
           (sum, line) => sum + toLedgerMinor(line.amount),
           0
         )
-        const collectableAmount = Math.max(0, toLedgerMinor(totalAmount) - coveredAmount)
+        const collectableAmount = Math.max(0, toLedgerMinor(grossChargeAmount) - coveredAmount)
 
         if (collectableAmount <= 0) {
           continue

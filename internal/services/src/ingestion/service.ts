@@ -1,3 +1,4 @@
+import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
 import type { EntitlementService } from "../entitlements/service"
@@ -32,6 +33,7 @@ export class IngestionService {
 
   constructor(opts: {
     cache: Pick<Cache, "ingestionPreparedGrantContext">
+    db?: Database
     entitlementService: EntitlementService
     entitlementWindowClient: EntitlementWindowClient
     fanoutWarningThreshold?: number
@@ -47,6 +49,7 @@ export class IngestionService {
     })
     const entitlementContext = new IngestionEntitlementContextLoader({
       cache: opts.cache,
+      db: opts.db,
       entitlementService: opts.entitlementService,
       logger: opts.logger,
     })

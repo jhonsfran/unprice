@@ -45,6 +45,11 @@ type MeterWindowRow = {
   // Identity + reservation columns; null/zero until activation sets them.
   projectId?: string | null
   customerId?: string | null
+  billingPeriodId?: string | null
+  cycleEndAt?: number | null
+  cycleStartAt?: number | null
+  featurePlanVersionItemId?: string | null
+  statementKey?: string | null
   reservationId?: string | null
   allocationAmount?: number
   consumedAmount?: number
@@ -96,6 +101,7 @@ type GrantRow = {
 }
 
 type EntitlementConfigRow = {
+  billingPeriods: unknown[]
   creditLinePolicy: string
   customerEntitlementId: string
   projectId: string
@@ -108,6 +114,7 @@ type EntitlementConfigRow = {
   meterConfig: unknown
   overageStrategy: string
   resetConfig: unknown
+  subscriptionItemId: string | null
   addedAt: number
   updatedAt: number
 }
@@ -123,6 +130,11 @@ const METER_WINDOW_KEYS = new Set<string>([
   "createdAt",
   "projectId",
   "customerId",
+  "billingPeriodId",
+  "cycleEndAt",
+  "cycleStartAt",
+  "featurePlanVersionItemId",
+  "statementKey",
   "reservationId",
   "allocationAmount",
   "consumedAmount",
@@ -173,6 +185,7 @@ const GRANT_KEYS = new Set<string>([
 ])
 
 const ENTITLEMENT_CONFIG_KEYS = new Set<string>([
+  "billingPeriods",
   "creditLinePolicy",
   "customerEntitlementId",
   "projectId",
@@ -185,6 +198,7 @@ const ENTITLEMENT_CONFIG_KEYS = new Set<string>([
   "meterConfig",
   "overageStrategy",
   "resetConfig",
+  "subscriptionItemId",
   "addedAt",
   "updatedAt",
 ])
@@ -243,6 +257,7 @@ const testState = {
   engineApply: vi.fn(),
   pricePerFeature: vi.fn(),
   flushReservation: vi.fn(),
+  captureReservationUsage: vi.fn(),
   // Lazy reservation bootstrap. Default returns a healthy reservation so
   // existing tests that don't care about the wallet path stay green; tests
   // that exercise WALLET_EMPTY override per-test.
@@ -294,6 +309,7 @@ describe("EntitlementWindowDO", () => {
     testState.engineApply.mockReset()
     testState.pricePerFeature.mockReset()
     testState.flushReservation.mockReset()
+    testState.captureReservationUsage.mockReset()
     testState.createReservation.mockReset()
     // Default: flush+refill settles with zero runway so tests that don't
     // opt into the wallet path stay identical to their pre-7.5 shape.
@@ -971,6 +987,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_limit",
       allocationAmount: 10 * 100_000_000,
       consumedAmount: 5 * 100_000_000,
@@ -1278,6 +1299,11 @@ describe("EntitlementWindowDO", () => {
     seedWalletReservation(db, {
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_batch",
       allocationAmount: 20 * 100_000_000,
       targetReservationAmount: 20 * 100_000_000,
@@ -1559,6 +1585,63 @@ describe("EntitlementWindowDO", () => {
       "entitlement apply_batch",
       expect.objectContaining({ mode: "sequential", outcome: "success" })
     )
+  })
+
+  it("does not stage optimized batch refill when reservation invoice context cannot refresh", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      billingPeriodId: null,
+      cycleEndAt: null,
+      cycleStartAt: null,
+      featurePlanVersionItemId: null,
+      statementKey: null,
+      reservationId: "res_batch_missing_context",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 2.5 * 100_000_000,
+      pendingFlushSeq: null,
+      refillInFlight: false,
+    })
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({ billingPeriods: [] })
+
+    await expect(
+      durableObject.applyBatch({
+        customerId: baseInput.customerId,
+        entitlement: baseInput.entitlement,
+        enforceLimit: false,
+        events: [
+          {
+            ...baseInput.event,
+            correlationKey: "missing_context",
+            id: "evt_batch_missing_context",
+            idempotencyKey: "idem_batch_missing_context",
+            now: BASE_NOW,
+            properties: { amount: 5 },
+            timestamp: BASE_NOW,
+          },
+        ],
+        grants: baseInput.grants,
+        projectId: baseInput.projectId,
+      })
+    ).rejects.toThrow("Missing billing period invoice context")
+
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
+      pendingFlushSeq: null,
+      refillInFlight: false,
+    })
+    expect(testState.captureReservationUsage).not.toHaveBeenCalled()
   })
 
   it("writes the same priced facts as sequential apply for representative async batches", async () => {
@@ -2312,6 +2395,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_verify_limit",
       allocationAmount: 10 * 100_000_000,
       consumedAmount: 10 * 100_000_000,
@@ -2366,6 +2454,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_verify_pending",
       allocationAmount: 10 * 100_000_000,
       consumedAmount: 10 * 100_000_000,
@@ -2778,6 +2871,27 @@ describe("EntitlementWindowDO", () => {
     )
   })
 
+  it("fails before wallet reservation side effects when invoice context is missing", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+
+    await expect(durableObject.apply(createApplyInput({ billingPeriods: [] }))).rejects.toThrow(
+      "Missing billing period invoice context"
+    )
+    expect(testState.createReservation).not.toHaveBeenCalled()
+    expect(readIdempotencyEntries(db).has("idem_123")).toBe(false)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
+  })
+
   it("denies when a partial bootstrap grant cannot cover the current event", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -2901,6 +3015,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 2 * 100_000_000,
       consumedAmount: 2 * 100_000_000,
@@ -2971,6 +3090,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 2 * 100_000_000,
       consumedAmount: 2 * 100_000_000 - 10,
@@ -3057,6 +3181,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_large_event",
       allocationAmount: 0,
       consumedAmount: 0,
@@ -3127,6 +3256,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -3156,6 +3290,104 @@ describe("EntitlementWindowDO", () => {
     expect(after.pendingFlushSeq).toBeNull()
   })
 
+  it("does not persist refill pending state when reservation invoice context is missing", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      billingPeriodId: null,
+      cycleEndAt: null,
+      cycleStartAt: null,
+      featurePlanVersionItemId: null,
+      statementKey: null,
+      reservationId: "res_missing_context",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 5000,
+      refillChunkAmount: 2.5 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await expect(durableObject.apply(createApplyInput({ billingPeriods: [] }))).rejects.toThrow(
+      "Missing billing period invoice context"
+    )
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.pendingFlushSeq).toBeNull()
+    expect(row.refillInFlight).toBe(false)
+    expect(testState.captureReservationUsage).not.toHaveBeenCalled()
+  })
+
+  it("refreshes missing invoice context on an active reservation before wallet spend", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: null,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      billingPeriodId: null,
+      cycleEndAt: null,
+      cycleStartAt: null,
+      featurePlanVersionItemId: null,
+      statementKey: null,
+      reservationId: "res_legacy_context",
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 0,
+      flushedAmount: 0,
+      refillThresholdBps: 0,
+      refillChunkAmount: 0,
+      refillInFlight: false,
+      flushSeq: 0,
+      pendingFlushSeq: null,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toMatchObject({ allowed: true })
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
+    })
+  })
+
   it("adapts the refill target upward after a sudden fast burn", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
@@ -3177,6 +3409,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_fast_burn",
       allocationAmount: 2 * 100_000_000,
       consumedAmount: 0,
@@ -3240,6 +3477,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 2 * 100_000_000,
       consumedAmount: 100_000_000, // $1 already consumed, $1 remaining
@@ -3283,6 +3525,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_negative_correction",
       allocationAmount: 10 * 100_000_000,
       consumedAmount: 10 * 100_000_000,
@@ -3353,6 +3600,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -3369,9 +3621,27 @@ describe("EntitlementWindowDO", () => {
     expect(result).toMatchObject({ allowed: true })
     await Promise.all(state.waitUntilPromises)
 
-    // Contract with WalletService: projectId/customerId/currency come from
-    // the persisted window, statementKey is "{reservationId}:{periodEndAt}",
-    // final=false (this is a mid-period flush).
+    // Contract with WalletService: capture uses the canonical invoice
+    // context persisted on the wallet reservation snapshot.
+    expect(testState.captureReservationUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        billingPeriodId: "bp_123",
+        kind: "usage",
+        reservationId: "res_abc",
+        statementKey: "stmt_123",
+        sourceId: "bp_123:item_123",
+        metadata: expect.objectContaining({
+          billing_period_id: "bp_123",
+          cycle_end_at: BASE_NOW + 60_000,
+          cycle_start_at: BASE_NOW - 60_000,
+          durable_object_id: "do_123",
+          feature_plan_version_item_id: "item_123",
+          flush_seq: 8,
+          reservation_id: "res_abc",
+          source_id: "bp_123:item_123",
+        }),
+      })
+    )
     expect(testState.flushReservation).toHaveBeenCalledTimes(1)
     expect(testState.flushReservation).toHaveBeenCalledWith({
       projectId: "proj_123",
@@ -3382,14 +3652,22 @@ describe("EntitlementWindowDO", () => {
       flushAmount: 5 * 100_000_000,
       refillChunkAmount: 10 * 100_000_000,
       effectiveAt: new Date(BASE_NOW),
-      statementKey: `res_abc:${BASE_NOW + 60_000}`,
+      statementKey: "stmt_123",
       final: false,
-      metadata: {
+      metadata: expect.objectContaining({
+        billing_period_id: "bp_123",
+        cycle_end_at: BASE_NOW + 60_000,
+        cycle_start_at: BASE_NOW - 60_000,
+        feature_plan_version_item_id: "item_123",
+        flush_seq: 8,
+        reservation_id: "res_abc",
         requestedBy: "durable_object",
         requestedById: "do_123",
         durableObjectId: "do_123",
-      },
-      sourceId: "do_123",
+        durable_object_id: "do_123",
+        source_id: "bp_123:item_123",
+      }),
+      sourceId: "bp_123:item_123",
     })
 
     const after = db.meterWindowRows.get(DEFAULT_METER_KEY)!
@@ -3434,6 +3712,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -3483,6 +3766,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -3533,6 +3821,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 3 * 100_000_000,
       consumedAmount: 100_000_000,
@@ -3609,6 +3902,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_pending_refill",
       allocationAmount: 10 * 100_000_000,
       consumedAmount: 5 * 100_000_000,
@@ -3685,6 +3983,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -3771,6 +4074,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 2 * 100_000_000,
@@ -3828,6 +4136,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 3 * 100_000_000,
       consumedAmount: 100_000_000,
@@ -3919,6 +4232,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: periodEndAt - 60_000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 2 * 100_000_000,
@@ -3928,6 +4246,7 @@ describe("EntitlementWindowDO", () => {
       refillInFlight: false,
       flushSeq: 3,
       pendingFlushSeq: null,
+      pendingFlushFinal: false,
       lastEventAt: periodEndAt - 1000,
       deletionRequested: false,
       recoveryRequired: false,
@@ -3944,7 +4263,17 @@ describe("EntitlementWindowDO", () => {
         flushAmount: 2 * 100_000_000,
         refillChunkAmount: 0,
         final: true,
-        statementKey: `res_abc:${periodEndAt}`,
+        statementKey: "stmt_123",
+        sourceId: "bp_123:item_123",
+        metadata: expect.objectContaining({
+          billing_period_id: "bp_123",
+          cycle_end_at: BASE_NOW + 60_000,
+          cycle_start_at: BASE_NOW - 60_000,
+          feature_plan_version_item_id: "item_123",
+          flush_seq: 4,
+          reservation_id: "res_abc",
+          source_id: "bp_123:item_123",
+        }),
       })
     )
 
@@ -3954,6 +4283,54 @@ describe("EntitlementWindowDO", () => {
     expect(row.flushSeq).toBe(4)
     expect(row.pendingFlushSeq).toBeNull()
     expect(state.deletedAll).toBe(false)
+  })
+
+  it("does not persist final pending state when reservation invoice context is missing", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.analyticsIngest.mockResolvedValue({ quarantined_rows: 0, successful_rows: 0 })
+
+    const periodEndAt = Date.now() - 1000
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt,
+      usage: 0,
+      updatedAt: null,
+      createdAt: periodEndAt - 60_000,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      billingPeriodId: null,
+      cycleEndAt: null,
+      cycleStartAt: null,
+      featurePlanVersionItemId: null,
+      statementKey: null,
+      reservationId: "res_missing_context",
+      allocationAmount: 5 * 100_000_000,
+      consumedAmount: 2 * 100_000_000,
+      flushedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 4 * 100_000_000,
+      refillInFlight: false,
+      flushSeq: 3,
+      pendingFlushSeq: null,
+      pendingFlushFinal: false,
+      lastEventAt: periodEndAt - 1000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.pendingFlushSeq).toBeNull()
+    expect(row.pendingFlushFinal).toBe(false)
+    expect(row.recoveryRequired).toBe(true)
+    expect(testState.captureReservationUsage).not.toHaveBeenCalled()
   })
 
   it("alarm runs a final flush when the DO has been inactive for more than 1h", async () => {
@@ -3983,6 +4360,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: now - 2 * 60 * 60 * 1000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -4035,6 +4417,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: now - 5 * 60_000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_dev",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -4077,6 +4464,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: now - 24 * 60 * 60 * 1000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -4117,6 +4509,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW - 24 * 60 * 60 * 1000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_fully_flushed",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 2 * 100_000_000,
@@ -4165,6 +4562,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: now - 2 * 60 * 60 * 1000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_prod_inactive",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -4219,6 +4621,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: now - 1000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 1 * 100_000_000,
@@ -4270,6 +4677,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: now - 1000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 1 * 100_000_000,
@@ -4318,6 +4730,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: now - 1000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 2 * 100_000_000,
@@ -4367,6 +4784,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: periodEndAt - 60_000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 0,
@@ -4411,6 +4833,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: periodEndAt - 60_000,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 5 * 100_000_000,
       consumedAmount: 2 * 100_000_000,
@@ -4528,6 +4955,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 10 * 100_000_000, // €10 — enough for a €1.031 hit
       consumedAmount: 0,
@@ -4600,6 +5032,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 10 * 100_000_000,
       // Flat fee was already deducted on the previous (boundary) event.
@@ -4669,6 +5106,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: "res_abc",
       allocationAmount: 10 * 100_000_000,
       consumedAmount: 0,
@@ -4757,6 +5199,11 @@ describe("EntitlementWindowDO", () => {
       createdAt: BASE_NOW,
       projectId: "proj_123",
       customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      statementKey: "stmt_123",
       reservationId: null,
     })
     db.grantWindowRows.set(`grant_123:onetime:${BASE_NOW - 60_000}`, {
@@ -4900,7 +5347,9 @@ async function loadEntitlementWindowDO() {
       public captureReservationUsage = vi.fn(
         async (input: {
           amount: number
+          billingPeriodId?: string
           flushSeq: number
+          kind?: string
           statementKey: string
           metadata?: Record<string, unknown>
           sourceId?: string
@@ -4912,6 +5361,7 @@ async function loadEntitlementWindowDO() {
             metadata: input.metadata,
             sourceId: input.sourceId,
           }
+          testState.captureReservationUsage(input)
           return { err: null, val: { capturedAmount: input.amount } }
         }
       )
@@ -4939,10 +5389,10 @@ async function loadEntitlementWindowDO() {
             flushAmount: capture?.amount ?? 0,
             refillChunkAmount: input.requestedAmount,
             effectiveAt: input.effectiveAt,
-            statementKey: input.statementKey,
+            statementKey: capture?.statementKey ?? input.statementKey,
             final: false,
-            metadata: input.metadata,
-            sourceId: input.sourceId,
+            metadata: capture?.metadata ?? input.metadata,
+            sourceId: capture?.sourceId ?? input.sourceId,
           })
           if (result.err) return result
           return {
@@ -4975,8 +5425,8 @@ async function loadEntitlementWindowDO() {
             refillChunkAmount: 0,
             statementKey: capture?.statementKey ?? "",
             final: true,
-            metadata: input.metadata,
-            sourceId: input.sourceId,
+            metadata: capture?.metadata ?? input.metadata,
+            sourceId: capture?.sourceId ?? input.sourceId,
           })
           if (result.err) return result
           return {
@@ -5465,6 +5915,11 @@ function seedWalletReservation(db: FakeDbState, overrides: Partial<MeterWindowRo
     createdAt: BASE_NOW,
     projectId: "proj_123",
     customerId: "cus_123",
+    billingPeriodId: "bp_123",
+    cycleEndAt: BASE_NOW + 60_000,
+    cycleStartAt: BASE_NOW - 60_000,
+    featurePlanVersionItemId: "item_123",
+    statementKey: "stmt_123",
     reservationId: "res_seeded",
     allocationAmount: 1_000_000_000,
     consumedAmount: 0,
@@ -5915,6 +6370,7 @@ function buildFakeDrizzle(state: FakeDbState) {
                 const key = String(value.customerEntitlementId)
                 if (state.entitlementConfigRows.has(key)) return
                 state.entitlementConfigRows.set(key, {
+                  billingPeriods: Array.isArray(value.billingPeriods) ? value.billingPeriods : [],
                   customerEntitlementId: key,
                   projectId: String(value.projectId),
                   customerId: String(value.customerId),
@@ -5926,6 +6382,8 @@ function buildFakeDrizzle(state: FakeDbState) {
                   meterConfig: value.meterConfig,
                   overageStrategy: String(value.overageStrategy),
                   resetConfig: value.resetConfig ?? null,
+                  subscriptionItemId:
+                    typeof value.subscriptionItemId === "string" ? value.subscriptionItemId : null,
                   addedAt: Number(value.addedAt),
                   updatedAt: Number(value.updatedAt),
                 })
@@ -6010,6 +6468,12 @@ function buildFakeDrizzle(state: FakeDbState) {
                   createdAt: Number(value.createdAt),
                   projectId: (value.projectId as string | null | undefined) ?? null,
                   customerId: (value.customerId as string | null | undefined) ?? null,
+                  billingPeriodId: (value.billingPeriodId as string | null | undefined) ?? null,
+                  cycleEndAt: value.cycleEndAt != null ? Number(value.cycleEndAt) : null,
+                  cycleStartAt: value.cycleStartAt != null ? Number(value.cycleStartAt) : null,
+                  featurePlanVersionItemId:
+                    (value.featurePlanVersionItemId as string | null | undefined) ?? null,
+                  statementKey: (value.statementKey as string | null | undefined) ?? null,
                 })
                 return
               }
@@ -6029,6 +6493,26 @@ function buildFakeDrizzle(state: FakeDbState) {
                   createdAt: existing?.createdAt ?? BASE_NOW,
                   projectId: (value.projectId as string | null | undefined) ?? null,
                   customerId: (value.customerId as string | null | undefined) ?? null,
+                  billingPeriodId:
+                    (value.billingPeriodId as string | null | undefined) ??
+                    existing?.billingPeriodId ??
+                    null,
+                  cycleEndAt:
+                    value.cycleEndAt != null
+                      ? Number(value.cycleEndAt)
+                      : (existing?.cycleEndAt ?? null),
+                  cycleStartAt:
+                    value.cycleStartAt != null
+                      ? Number(value.cycleStartAt)
+                      : (existing?.cycleStartAt ?? null),
+                  featurePlanVersionItemId:
+                    (value.featurePlanVersionItemId as string | null | undefined) ??
+                    existing?.featurePlanVersionItemId ??
+                    null,
+                  statementKey:
+                    (value.statementKey as string | null | undefined) ??
+                    existing?.statementKey ??
+                    null,
                   reservationId: existing?.reservationId ?? null,
                   allocationAmount: existing?.allocationAmount ?? 0,
                   consumedAmount: existing?.consumedAmount ?? 0,
@@ -6259,7 +6743,27 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
     "entitlementExpiresAt" in overrides
       ? (overrides.entitlementExpiresAt as number | null)
       : periodEndAt
+  const subscriptionItemId =
+    typeof overrides.subscriptionItemId === "string" ? overrides.subscriptionItemId : "item_123"
+  const billingPeriods = (overrides.billingPeriods as
+    | Array<{
+        billingPeriodId: string
+        cycleEndAt: number
+        cycleStartAt: number
+        featurePlanVersionItemId: string
+        statementKey: string
+      }>
+    | undefined) ?? [
+    {
+      billingPeriodId: "bp_123",
+      cycleEndAt: periodEndAt,
+      cycleStartAt: periodStartAt,
+      featurePlanVersionItemId: subscriptionItemId,
+      statementKey: "stmt_123",
+    },
+  ]
   const entitlement = {
+    billingPeriods,
     creditLinePolicy:
       typeof overrides.creditLinePolicy === "string" ? overrides.creditLinePolicy : "capped",
     customerEntitlementId,
@@ -6274,6 +6778,7 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
     overageStrategy,
     projectId,
     resetConfig: (overrides.resetConfig as Record<string, unknown> | null | undefined) ?? null,
+    subscriptionItemId,
     ...((overrides.entitlement as Record<string, unknown> | undefined) ?? {}),
   }
 

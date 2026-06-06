@@ -102,13 +102,13 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     size: 20,
   },
   {
-    accessorKey: "total",
+    accessorKey: "amountDue",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />,
     cell: ({ row }) => (
       <Badge>
         {formatMoney(
-          toDecimal(fromLedgerMinor(row.original.totalAmount, row.original.currency)),
+          toDecimal(fromLedgerMinor(row.original.amountDue, row.original.currency)),
           row.original.currency
         )}
       </Badge>

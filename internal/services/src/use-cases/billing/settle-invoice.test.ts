@@ -18,7 +18,10 @@ function makeInvoice(overrides: Partial<SubscriptionInvoice> = {}): Subscription
     paymentMethodId: "pm_1",
     collectionMethod: "charge_automatically",
     currency: "USD",
-    totalAmount: 50_000_000, // $50 at scale-8
+    grossAmount: 50_000_000,
+    amountDue: 50_000_000,
+    amountPaid: 0,
+    amountIncluded: 0,
     paidAt: Date.now(),
     whenToBill: "pay_in_advance",
     metadata: null,
@@ -41,7 +44,12 @@ describe("settlePrepaidInvoiceToWallet", () => {
 
   it("happy path: settles the receivable with correct params and idempotency key", async () => {
     const walletService = makeWalletService()
-    const invoice = makeInvoice()
+    const invoice = makeInvoice({
+      amountDue: 50_000_000,
+      amountIncluded: 10_000_000,
+      amountPaid: 5_000_000,
+      grossAmount: 65_000_000,
+    })
 
     const result = await settlePrepaidInvoiceToWallet({ walletService, invoice })
 
@@ -61,9 +69,13 @@ describe("settlePrepaidInvoiceToWallet", () => {
     })
   })
 
-  it("returns Ok immediately when totalAmount is 0 (trial / free invoice)", async () => {
+  it("returns Ok immediately when amountDue is 0 (trial / free invoice)", async () => {
     const walletService = makeWalletService()
-    const invoice = makeInvoice({ totalAmount: 0 })
+    const invoice = makeInvoice({
+      amountDue: 0,
+      grossAmount: 10_000_000,
+      amountIncluded: 10_000_000,
+    })
 
     const result = await settlePrepaidInvoiceToWallet({ walletService, invoice })
 
@@ -71,9 +83,9 @@ describe("settlePrepaidInvoiceToWallet", () => {
     expect(walletService.settleReceivable).not.toHaveBeenCalled()
   })
 
-  it("returns Ok immediately when totalAmount is negative", async () => {
+  it("returns Ok immediately when amountDue is negative", async () => {
     const walletService = makeWalletService()
-    const invoice = makeInvoice({ totalAmount: -100 })
+    const invoice = makeInvoice({ amountDue: -100 })
 
     const result = await settlePrepaidInvoiceToWallet({ walletService, invoice })
 

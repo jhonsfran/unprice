@@ -242,6 +242,15 @@ type ReservationBootstrapPlan = {
   sizing: InitialReservationDecision
 }
 
+type ReservationInvoiceContext = {
+  billingPeriodId: string
+  cycleEndAt: number
+  cycleStartAt: number
+  featurePlanVersionItemId: string
+  sourceId: string
+  statementKey: string
+}
+
 function createSingleApplyExecutionMetrics(): SingleApplyExecutionMetrics {
   return {
     duplicateCount: 0,
@@ -611,6 +620,14 @@ export class EntitlementWindowDO extends DurableObject {
 
     const eventInput = buildBatchEventApplyInput(input, event)
     const usesWalletReservation = input.entitlement.creditLinePolicy !== "uncapped"
+    if (usesWalletReservation && state.wallet?.reservationId) {
+      state.wallet = this.refreshWalletReservationInvoiceContextIfMissing(
+        this.db,
+        eventInput,
+        state.wallet
+      )
+    }
+
     const bootstrapHandled = await this.ensureOptimizedBatchWalletBootstrap({
       activeGrants,
       createdAt,
@@ -886,6 +903,10 @@ export class EntitlementWindowDO extends DurableObject {
 
       if (spendPlan.kind === "underfunded") {
         throw new EntitlementWindowBatchSequentialReplayRequired("wallet reservation underfunded")
+      }
+
+      if (spendPlan.refillStateUpdate) {
+        this.requireReservationInvoiceContext(wallet)
       }
 
       let nextWallet: NonNullable<WalletReservationSnapshot> = {
@@ -1654,7 +1675,11 @@ export class EntitlementWindowDO extends DurableObject {
     // Wallet check. Only engages when a reservation has been opened on
     // this window. Without a reservation the DO operates without local
     // allocation tracking or refill triggers.
-    const window = this.readWalletReservation(tx)
+    const window = this.refreshWalletReservationInvoiceContextIfMissing(
+      tx,
+      input,
+      this.readWalletReservation(tx)
+    )
     if (!usesWalletReservation || !window?.reservationId || pricedFacts.length === 0) {
       return { lastEventAtStamped: false, window }
     }
@@ -1847,6 +1872,10 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent.reservation_threshold_amount = spendPlan.thresholdAmount
     wideEvent.reservation_refill_requested_amount = spendPlan.refillAmount
 
+    if (spendPlan.refillStateUpdate) {
+      this.requireReservationInvoiceContext(window)
+    }
+
     // Synchronous SQLite write before any post-commit action. On replay the
     // idempotency row short-circuits above, so this only runs on the
     // first-success path.
@@ -1947,6 +1976,8 @@ export class EntitlementWindowDO extends DurableObject {
             currency: window.currency,
             reservationEndAt: window.reservationEndAt,
             billingPeriodId: window.billingPeriodId,
+            cycleEndAt: window.cycleEndAt,
+            cycleStartAt: window.cycleStartAt,
             featurePlanVersionItemId: window.featurePlanVersionItemId,
             statementKey: window.statementKey,
             consumedAmount: window.consumedAmount,
@@ -2604,6 +2635,7 @@ export class EntitlementWindowDO extends DurableObject {
     const { closeReason, isRecoveringPendingFinal, wideEvent, window } = params
     const walletService = this.getWalletService()
     const durableObjectId = this.ctx.id.toString()
+    const invoiceContext = this.requireReservationInvoiceContext(window)
     const flushIntent = this.persistFinalReservationFlushIntent({
       isRecoveringPendingFinal,
       wideEvent,
@@ -2612,6 +2644,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     const capture = await this.captureFinalReservationUsage({
       durableObjectId,
+      invoiceContext,
       isRecoveringPendingFinal,
       nextSeq: flushIntent.nextSeq,
       unflushed: flushIntent.unflushed,
@@ -2676,6 +2709,7 @@ export class EntitlementWindowDO extends DurableObject {
 
   private async captureFinalReservationUsage(params: {
     durableObjectId: string
+    invoiceContext: ReservationInvoiceContext
     isRecoveringPendingFinal: boolean
     nextSeq: number
     unflushed: number
@@ -2685,6 +2719,7 @@ export class EntitlementWindowDO extends DurableObject {
   }): Promise<ReservationCloseCaptureOutcome> {
     const {
       durableObjectId,
+      invoiceContext,
       isRecoveringPendingFinal,
       nextSeq,
       unflushed,
@@ -2699,16 +2734,15 @@ export class EntitlementWindowDO extends DurableObject {
       reservationId: window.reservationId,
       flushSeq: nextSeq,
       amount: unflushed,
-      billingPeriodId: window.billingPeriodId ?? undefined,
+      billingPeriodId: invoiceContext.billingPeriodId,
       kind: "usage",
-      statementKey: window.statementKey ?? `${window.reservationId}:${window.reservationEndAt ?? 0}`,
+      statementKey: invoiceContext.statementKey,
       metadata: {
-        billing_period_id: window.billingPeriodId,
-        feature_plan_version_item_id: window.featurePlanVersionItemId,
-        source_id:
-          window.billingPeriodId && window.featurePlanVersionItemId
-            ? `${window.billingPeriodId}:${window.featurePlanVersionItemId}`
-            : durableObjectId,
+        billing_period_id: invoiceContext.billingPeriodId,
+        cycle_end_at: invoiceContext.cycleEndAt,
+        cycle_start_at: invoiceContext.cycleStartAt,
+        feature_plan_version_item_id: invoiceContext.featurePlanVersionItemId,
+        source_id: invoiceContext.sourceId,
         requestedBy: "durable_object",
         requestedById: durableObjectId,
         durableObjectId,
@@ -2716,10 +2750,7 @@ export class EntitlementWindowDO extends DurableObject {
         reservation_id: window.reservationId,
         flush_seq: nextSeq,
       },
-      sourceId:
-        window.billingPeriodId && window.featurePlanVersionItemId
-          ? `${window.billingPeriodId}:${window.featurePlanVersionItemId}`
-          : durableObjectId,
+      sourceId: invoiceContext.sourceId,
     })
 
     if (!captureResult.err) {
@@ -3007,6 +3038,8 @@ export class EntitlementWindowDO extends DurableObject {
       currency: string
       reservationEndAt: number
       billingPeriodId?: string | null
+      cycleEndAt?: number | null
+      cycleStartAt?: number | null
       featurePlanVersionItemId?: string | null
       statementKey?: string | null
     }
@@ -3019,6 +3052,8 @@ export class EntitlementWindowDO extends DurableObject {
         currency: params.currency,
         reservationEndAt: params.reservationEndAt,
         billingPeriodId: params.billingPeriodId ?? null,
+        cycleEndAt: params.cycleEndAt ?? null,
+        cycleStartAt: params.cycleStartAt ?? null,
         featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
         statementKey: params.statementKey ?? null,
       })
@@ -3032,6 +3067,8 @@ export class EntitlementWindowDO extends DurableObject {
         currency: params.currency,
         reservationEndAt: params.reservationEndAt,
         billingPeriodId: params.billingPeriodId ?? null,
+        cycleEndAt: params.cycleEndAt ?? null,
+        cycleStartAt: params.cycleStartAt ?? null,
         featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
         statementKey: params.statementKey ?? null,
       })
@@ -3232,6 +3269,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     return {
+      billingPeriods: [],
       creditLinePolicy: "uncapped",
       customerEntitlementId: row.customerEntitlementId,
       projectId: row.projectId,
@@ -3245,6 +3283,7 @@ export class EntitlementWindowDO extends DurableObject {
       meterConfig: row.meterConfig,
       overageStrategy: row.overageStrategy,
       resetConfig: row.resetConfig ?? null,
+      subscriptionItemId: null,
     }
   }
 
@@ -3873,6 +3912,8 @@ export class EntitlementWindowDO extends DurableObject {
         currency: walletReservationTable.currency,
         reservationEndAt: walletReservationTable.reservationEndAt,
         billingPeriodId: walletReservationTable.billingPeriodId,
+        cycleEndAt: walletReservationTable.cycleEndAt,
+        cycleStartAt: walletReservationTable.cycleStartAt,
         featurePlanVersionItemId: walletReservationTable.featurePlanVersionItemId,
         statementKey: walletReservationTable.statementKey,
         reservationId: walletReservationTable.reservationId,
@@ -3907,6 +3948,8 @@ export class EntitlementWindowDO extends DurableObject {
       currency: String(row.currency ?? ""),
       reservationEndAt: row.reservationEndAt ?? null,
       billingPeriodId: row.billingPeriodId ?? null,
+      cycleEndAt: row.cycleEndAt ?? null,
+      cycleStartAt: row.cycleStartAt ?? null,
       featurePlanVersionItemId: row.featurePlanVersionItemId ?? null,
       statementKey: row.statementKey ?? null,
       reservationId: row.reservationId ?? null,
@@ -3990,6 +4033,7 @@ export class EntitlementWindowDO extends DurableObject {
       return null
     }
 
+    this.requireReservationInvoiceContext(readiness.window)
     this.persistReservationGrowthIntent(plan)
     await this.requestFlushAndRefill(plan.trigger)
 
@@ -4286,6 +4330,7 @@ export class EntitlementWindowDO extends DurableObject {
   }): Promise<number | null> {
     const { trigger, wideEvent, window } = params
     const durableObjectId = this.ctx.id.toString()
+    const invoiceContext = this.requireReservationInvoiceContext(window)
     const captureResult = await this.getWalletService().captureReservationUsage({
       projectId: window.projectId,
       customerId: window.customerId,
@@ -4293,16 +4338,15 @@ export class EntitlementWindowDO extends DurableObject {
       reservationId: window.reservationId,
       flushSeq: trigger.flushSeq,
       amount: trigger.flushAmount,
-      billingPeriodId: window.billingPeriodId ?? undefined,
+      billingPeriodId: invoiceContext.billingPeriodId,
       kind: "usage",
-      statementKey: window.statementKey ?? `${window.reservationId}:${window.reservationEndAt ?? 0}`,
+      statementKey: invoiceContext.statementKey,
       metadata: {
-        billing_period_id: window.billingPeriodId,
-        feature_plan_version_item_id: window.featurePlanVersionItemId,
-        source_id:
-          window.billingPeriodId && window.featurePlanVersionItemId
-            ? `${window.billingPeriodId}:${window.featurePlanVersionItemId}`
-            : durableObjectId,
+        billing_period_id: invoiceContext.billingPeriodId,
+        cycle_end_at: invoiceContext.cycleEndAt,
+        cycle_start_at: invoiceContext.cycleStartAt,
+        feature_plan_version_item_id: invoiceContext.featurePlanVersionItemId,
+        source_id: invoiceContext.sourceId,
         requestedBy: "durable_object",
         requestedById: durableObjectId,
         durableObjectId,
@@ -4310,10 +4354,7 @@ export class EntitlementWindowDO extends DurableObject {
         reservation_id: window.reservationId,
         flush_seq: trigger.flushSeq,
       },
-      sourceId:
-        window.billingPeriodId && window.featurePlanVersionItemId
-          ? `${window.billingPeriodId}:${window.featurePlanVersionItemId}`
-          : durableObjectId,
+      sourceId: invoiceContext.sourceId,
     })
 
     if (captureResult.err) {
@@ -4594,6 +4635,7 @@ export class EntitlementWindowDO extends DurableObject {
     })
     if (!plan) return null
 
+    const invoiceContext = this.resolveReservationInvoiceContext(input)
     const durableObjectId = this.ctx.id.toString()
     const result = await this.getWalletService().createReservation({
       projectId: input.projectId,
@@ -4636,6 +4678,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     this.persistBootstrapReservation({
       input,
+      invoiceContext,
       meter,
       plan,
       projectedCost,
@@ -4693,12 +4736,13 @@ export class EntitlementWindowDO extends DurableObject {
 
   private persistBootstrapReservation(params: {
     input: ApplyInput
+    invoiceContext: ReservationInvoiceContext
     meter: MeterIdentity
     plan: ReservationBootstrapPlan
     projectedCost: number
     reservation: CreateReservationOutput
   }): void {
-    const { input, meter, plan, projectedCost, reservation } = params
+    const { input, invoiceContext, meter, plan, projectedCost, reservation } = params
     this.ensureMeterState(this.db, {
       meterKey: meter.key,
       createdAt: Date.now(),
@@ -4708,9 +4752,11 @@ export class EntitlementWindowDO extends DurableObject {
       customerId: input.customerId,
       currency: meter.currency,
       reservationEndAt: plan.bucket.end,
-      billingPeriodId: null,
-      featurePlanVersionItemId: null,
-      statementKey: null,
+      billingPeriodId: invoiceContext.billingPeriodId,
+      cycleEndAt: invoiceContext.cycleEndAt,
+      cycleStartAt: invoiceContext.cycleStartAt,
+      featurePlanVersionItemId: invoiceContext.featurePlanVersionItemId,
+      statementKey: invoiceContext.statementKey,
     })
 
     // For a reused active reservation, only refresh the columns that
@@ -4749,6 +4795,109 @@ export class EntitlementWindowDO extends DurableObject {
           }
 
     this.db.update(walletReservationTable).set(reservationUpdate).run()
+  }
+
+  private resolveReservationInvoiceContext(input: ApplyInput): ReservationInvoiceContext {
+    const billingPeriod = input.entitlement.billingPeriods.find(
+      (period) =>
+        period.cycleStartAt <= input.event.timestamp && input.event.timestamp < period.cycleEndAt
+    )
+
+    if (!billingPeriod) {
+      throw new Error(
+        `Missing billing period invoice context for entitlement ${input.entitlement.customerEntitlementId} at ${input.event.timestamp}`
+      )
+    }
+
+    return {
+      billingPeriodId: billingPeriod.billingPeriodId,
+      cycleEndAt: billingPeriod.cycleEndAt,
+      cycleStartAt: billingPeriod.cycleStartAt,
+      featurePlanVersionItemId: billingPeriod.featurePlanVersionItemId,
+      sourceId: `${billingPeriod.billingPeriodId}:${billingPeriod.featurePlanVersionItemId}`,
+      statementKey: billingPeriod.statementKey,
+    }
+  }
+
+  private refreshWalletReservationInvoiceContextIfMissing(
+    tx: DrizzleSqliteDODatabase<typeof schema>,
+    input: ApplyInput,
+    window: WalletReservationSnapshot
+  ): WalletReservationSnapshot {
+    if (!window?.reservationId || !this.isReservationInvoiceContextMissing(window)) {
+      return window
+    }
+
+    const invoiceContext = this.resolveReservationInvoiceContext(input)
+    const patch = {
+      billingPeriodId: invoiceContext.billingPeriodId,
+      cycleEndAt: invoiceContext.cycleEndAt,
+      cycleStartAt: invoiceContext.cycleStartAt,
+      featurePlanVersionItemId: invoiceContext.featurePlanVersionItemId,
+      statementKey: invoiceContext.statementKey,
+    }
+
+    tx.update(walletReservationTable).set(patch).run()
+
+    return {
+      ...window,
+      ...patch,
+    }
+  }
+
+  private isReservationInvoiceContextMissing(
+    window: Pick<
+      NonNullable<WalletReservationSnapshot>,
+      | "billingPeriodId"
+      | "cycleEndAt"
+      | "cycleStartAt"
+      | "featurePlanVersionItemId"
+      | "statementKey"
+    >
+  ): boolean {
+    return (
+      !window.billingPeriodId ||
+      window.cycleEndAt === null ||
+      window.cycleStartAt === null ||
+      !window.featurePlanVersionItemId ||
+      !window.statementKey
+    )
+  }
+
+  private requireReservationInvoiceContext(
+    window: Pick<
+      NonNullable<WalletReservationSnapshot>,
+      | "billingPeriodId"
+      | "cycleEndAt"
+      | "cycleStartAt"
+      | "featurePlanVersionItemId"
+      | "reservationId"
+      | "statementKey"
+    >
+  ): ReservationInvoiceContext {
+    const { billingPeriodId, cycleEndAt, cycleStartAt, featurePlanVersionItemId, statementKey } =
+      window
+
+    if (
+      !billingPeriodId ||
+      cycleEndAt === null ||
+      cycleStartAt === null ||
+      !featurePlanVersionItemId ||
+      !statementKey
+    ) {
+      throw new Error(
+        `Wallet reservation ${window.reservationId} is missing billing invoice context`
+      )
+    }
+
+    return {
+      billingPeriodId,
+      cycleEndAt,
+      cycleStartAt,
+      featurePlanVersionItemId,
+      sourceId: `${billingPeriodId}:${featurePlanVersionItemId}`,
+      statementKey,
+    }
   }
 
   private computeProjectedCurrentEventCostMinor(

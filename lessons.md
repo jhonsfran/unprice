@@ -108,6 +108,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-06: Invoice headers store `grossAmount`, `amountDue`, `amountPaid`, and
+  `amountIncluded`; ledger lines remain the invoice source of truth, and
+  collectability comes from settlement metadata derived from wallet funding legs.
 - 2026-06-06: Plan publish should set `paymentMethodRequired` from any non-zero
   `charge_automatically` feature price path, not flat price alone; `createPhase`
   resolves the provider default before inserting a required payment method.

@@ -182,6 +182,17 @@ export const activeGrantSchema = z.object({
 })
 
 export const entitlementConfigSchema = z.object({
+  billingPeriods: z
+    .array(
+      z.object({
+        billingPeriodId: z.string().min(1),
+        cycleEndAt: z.number().finite(),
+        cycleStartAt: z.number().finite(),
+        featurePlanVersionItemId: z.string().min(1),
+        statementKey: z.string().min(1),
+      })
+    )
+    .default([]),
   creditLinePolicy: creditLinePolicySchema.default("uncapped"),
   customerEntitlementId: z.string().min(1),
   customerId: z.string().min(1),
@@ -195,6 +206,7 @@ export const entitlementConfigSchema = z.object({
   overageStrategy: overageStrategySchema,
   projectId: z.string().min(1),
   resetConfig: resetConfigSnapshotSchema.nullable().optional(),
+  subscriptionItemId: z.string().min(1).nullable().optional(),
 })
 
 export const applyInputSchema = z.object({
@@ -306,6 +318,8 @@ export const entitlementWindowStatusSchema = z.object({
       currency: z.string().nullable(),
       reservationEndAt: z.number().nullable(),
       billingPeriodId: z.string().nullable(),
+      cycleEndAt: z.number().nullable(),
+      cycleStartAt: z.number().nullable(),
       featurePlanVersionItemId: z.string().nullable(),
       statementKey: z.string().nullable(),
       consumedAmount: z.number().int(),
@@ -407,6 +421,8 @@ export type WalletReservationSnapshot = {
   currency: string
   reservationEndAt: number | null
   billingPeriodId: string | null
+  cycleEndAt: number | null
+  cycleStartAt: number | null
   featurePlanVersionItemId: string | null
   statementKey: string | null
   reservationId: string | null

@@ -109,7 +109,10 @@ function makeInvoice(overrides: Partial<SubscriptionInvoice> = {}): Subscription
     collectionMethod: "charge_automatically",
     invoicePaymentProviderId: "",
     invoicePaymentProviderUrl: "",
-    totalAmount: 1000,
+    grossAmount: 1000,
+    amountDue: 1000,
+    amountPaid: 0,
+    amountIncluded: 0,
     dueAt: 1_000,
     issueDate: null,
     metadata: null,
@@ -138,6 +141,15 @@ function makeLine(
     description: "API requests",
     quantity: 10,
     amount: dinero({ amount: 1000, currency: usd }),
+    amountDue: 1000,
+    amountIncluded: 0,
+    amountPaid: 0,
+    collectable: true,
+    settlementSource: "provider",
+    settlementStatus: "due",
+    walletCreditId: null,
+    walletCreditSource: null,
+    walletId: null,
     currency: "USD",
     createdAt: new Date(),
     metadata: meta,
@@ -336,7 +348,7 @@ describe("BillingService.finalizeInvoice", () => {
   })
 
   it("zero-amount invoice skips provider and transitions to void", async () => {
-    const invoice = makeInvoice({ totalAmount: 0 })
+    const invoice = makeInvoice({ grossAmount: 0, amountDue: 0 })
     const { billing, provider } = makeBillingService({ invoice, lines: [] })
 
     const result = await billing.finalizeInvoice({
@@ -354,6 +366,33 @@ describe("BillingService.finalizeInvoice", () => {
     expect(repoCalls.updateInvoice).toHaveLength(1)
     expect(repoCalls.updateInvoice[0]?.data).toMatchObject({
       status: "void",
+    })
+  })
+
+  it("paid or included invoice finalizes locally as paid without provider work", async () => {
+    const invoice = makeInvoice({
+      amountDue: 0,
+      amountIncluded: 1_000,
+      amountPaid: 0,
+      grossAmount: 1_000,
+    })
+    const { billing, provider } = makeBillingService({ invoice, lines: [] })
+
+    const result = await billing.finalizeInvoice({
+      projectId: "proj_1",
+      subscriptionId: "sub_1",
+      invoiceId: "inv_1",
+      now: 5_000,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.status).toBe("paid")
+    expect(provider.createInvoice).not.toHaveBeenCalled()
+    expect(provider.addInvoiceItem).not.toHaveBeenCalled()
+    expect(provider.finalizeInvoice).not.toHaveBeenCalled()
+    expect(repoCalls.updateInvoice).toHaveLength(1)
+    expect(repoCalls.updateInvoice[0]?.data).toMatchObject({
+      status: "paid",
     })
   })
 
@@ -698,7 +737,7 @@ describe("BillingService.finalizeInvoice", () => {
   })
 
   it("non-zero invoice with no ledger lines surfaces a data integrity error", async () => {
-    const invoice = makeInvoice({ totalAmount: 1000 })
+    const invoice = makeInvoice({ amountDue: 1000 })
     const { billing, provider } = makeBillingService({ invoice, lines: [] })
 
     const result = await billing.finalizeInvoice({

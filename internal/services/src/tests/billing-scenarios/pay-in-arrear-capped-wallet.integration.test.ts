@@ -5,13 +5,13 @@ import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { toLedgerMinor } from "@unprice/money"
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { classifyInvoiceLineSettlement } from "../../billing/invoice-settlement"
 import type { ServiceContext } from "../../context"
 import { GrantsManager } from "../../entitlements/grants"
 import { LedgerGateway } from "../../ledger"
 import { RatingService } from "../../rating/service"
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
-import { classifyInvoiceLineSettlement } from "../../billing/invoice-settlement"
 import {
   closeTestDatabaseConnection,
   createTestDatabaseConnection,

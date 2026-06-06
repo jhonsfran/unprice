@@ -528,7 +528,11 @@ export class Unprice {
       ): Promise<ApiResult<PostResponse<"/v1/analytics/explain-charge">>> => {
         return this.toResult(
           this.openapi.POST("/v1/analytics/explain-charge", {
-            body: req,
+            body: {
+              ...req,
+              limit: req.limit ?? 100,
+              offset: req.offset ?? 0,
+            },
           })
         )
       },
@@ -537,7 +541,10 @@ export class Unprice {
       ): Promise<ApiResult<PostResponse<"/v1/analytics/forecast-usage">>> => {
         return this.toResult(
           this.openapi.POST("/v1/analytics/forecast-usage", {
-            body: req,
+            body: {
+              ...req,
+              horizon_days: req.horizon_days ?? 14,
+            },
           })
         )
       },
@@ -547,7 +554,10 @@ export class Unprice {
         ): Promise<ApiResult<PostResponse<"/v1/analytics/ingestion/status">>> => {
           return this.toResult(
             this.openapi.POST("/v1/analytics/ingestion/status", {
-              body: req,
+              body: {
+                ...req,
+                limit: req.limit ?? 50,
+              },
             })
           )
         },

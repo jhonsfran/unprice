@@ -1,6 +1,12 @@
 import { createRoute } from "@hono/zod-openapi"
 import { invoices } from "@unprice/db/schema"
-import { currencySchema, invoiceStatusSchema } from "@unprice/db/validators"
+import {
+  currencySchema,
+  invoiceSettlementSourceSchema,
+  invoiceSettlementStatusSchema,
+  invoiceStatusSchema,
+  walletCreditSourceSchema,
+} from "@unprice/db/validators"
 import { toLedgerMinor } from "@unprice/money"
 import { and, eq } from "drizzle-orm"
 import { jsonContent } from "stoker/openapi/helpers"
@@ -28,7 +34,10 @@ const invoiceHeaderSchema = z.object({
   issue_date: z.number().int().nullable(),
   sent_at: z.number().int().nullable(),
   paid_at: z.number().int().nullable(),
-  total_amount: z.number().int().nonnegative(),
+  gross_amount: z.number().int().nonnegative(),
+  amount_due: z.number().int().nonnegative(),
+  amount_paid: z.number().int().nonnegative(),
+  amount_included: z.number().int().nonnegative(),
 })
 
 const invoiceLineSchema = z.object({
@@ -38,6 +47,15 @@ const invoiceLineSchema = z.object({
   description: z.string().nullable(),
   quantity: z.number().nullable(),
   amount: z.number().int().nonnegative(),
+  amount_due: z.number().int().nonnegative(),
+  amount_paid: z.number().int().nonnegative(),
+  amount_included: z.number().int().nonnegative(),
+  collectable: z.boolean(),
+  settlement_source: invoiceSettlementSourceSchema,
+  settlement_status: invoiceSettlementStatusSchema,
+  wallet_credit_id: z.string().nullable(),
+  wallet_credit_source: walletCreditSourceSchema.nullable(),
+  wallet_id: z.string().nullable(),
   currency: currencySchema,
   created_at: z.string().datetime(),
 })
@@ -119,7 +137,10 @@ export const registerGetInvoiceV1 = (app: App) =>
           issue_date: row.issueDate ?? null,
           sent_at: row.sentAt ?? null,
           paid_at: row.paidAt ?? null,
-          total_amount: row.totalAmount,
+          gross_amount: row.grossAmount,
+          amount_due: row.amountDue,
+          amount_paid: row.amountPaid,
+          amount_included: row.amountIncluded,
         },
         lines: lines.map((line) => ({
           entry_id: line.entryId,
@@ -128,6 +149,15 @@ export const registerGetInvoiceV1 = (app: App) =>
           description: line.description,
           quantity: line.quantity,
           amount: toLedgerMinor(line.amount),
+          amount_due: line.amountDue,
+          amount_paid: line.amountPaid,
+          amount_included: line.amountIncluded,
+          collectable: line.collectable,
+          settlement_source: line.settlementSource,
+          settlement_status: line.settlementStatus,
+          wallet_credit_id: line.walletCreditId,
+          wallet_credit_source: line.walletCreditSource,
+          wallet_id: line.walletId,
           currency: line.currency,
           created_at: line.createdAt.toISOString(),
         })),

@@ -1,11 +1,16 @@
 import { type Database, sql } from "@unprice/db"
 import { ledgerIdempotency } from "@unprice/db/schema"
-import type { Currency } from "@unprice/db/validators"
+import type { Currency, WalletCreditSource } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { type Dinero, toSnapshot } from "dinero.js"
 
 import type { Logger } from "@unprice/logs"
-import { fromLedgerAmount, toLedgerAmount } from "@unprice/money"
+import { fromLedgerAmount, toLedgerAmount, toLedgerMinor } from "@unprice/money"
+import {
+  type InvoiceSettlementSource,
+  type InvoiceSettlementStatus,
+  classifyInvoiceLineSettlement,
+} from "../billing/invoice-settlement"
 import type { DbExecutor } from "../deps"
 import {
   PLATFORM_FUNDING_KINDS,
@@ -105,6 +110,15 @@ export interface InvoiceLine {
   description: string | null
   quantity: number | null
   amount: Dinero<number>
+  amountDue: number
+  amountIncluded: number
+  amountPaid: number
+  collectable: boolean
+  settlementSource: InvoiceSettlementSource
+  settlementStatus: InvoiceSettlementStatus
+  walletCreditId: string | null
+  walletCreditSource: WalletCreditSource | null
+  walletId: string | null
   currency: Currency
   createdAt: Date
   metadata: Record<string, unknown> | null
@@ -605,7 +619,8 @@ export class LedgerGateway {
             AND i.statement_key         = ${opts.statementKey}
             AND e.amount                > 0
             AND a.name                  LIKE 'customer.%.consumed'
-            AND (e.metadata->>'kind') IS NOT NULL
+            AND e.metadata->>'kind' IS NOT NULL
+            AND COALESCE((e.metadata->>'invoice_visible')::boolean, true) = true
           ORDER BY e.created_at ASC, e.id ASC
         `
       )
@@ -942,17 +957,25 @@ export class LedgerGateway {
     statementKey: string
   ): InvoiceLine {
     const currency = asCurrency(row.currency)
-    const metadata = row.metadata ?? {}
+    const metadata = row.metadata
+    const amount = fromLedgerAmount(row.amount, currency)
+    const settlement = classifyInvoiceLineSettlement({
+      amount: toLedgerMinor(amount),
+      metadata,
+    })
+    const metadataFields = metadata ?? {}
     return {
       entryId: row.id,
       statementKey,
-      kind: String(metadata.kind ?? ""),
-      description: typeof metadata.description === "string" ? metadata.description : null,
-      quantity: this.parseQuantity(metadata.quantity),
-      amount: fromLedgerAmount(row.amount, currency),
+      kind: String(metadataFields.kind ?? ""),
+      description:
+        typeof metadataFields.description === "string" ? metadataFields.description : null,
+      quantity: this.parseQuantity(metadataFields.quantity),
+      amount,
+      ...settlement,
       currency,
       createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
-      metadata: row.metadata,
+      metadata,
     }
   }
 
