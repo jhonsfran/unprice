@@ -272,6 +272,7 @@ export async function explainCharge(
     customer_id: invoice.customerId,
     feature_slug: featureSlug,
     period_key: periodKey,
+    ...(singleScopedEntitlement ? { customer_entitlement_id: singleScopedEntitlement.id } : {}),
   }
 
   const analyticsResult = await wrapResult(

@@ -38,12 +38,14 @@ describe("explainCharge", () => {
       customer_id: "cus_1",
       feature_slug: "tokens",
       period_key: "onetime:1700000000000",
+      customer_entitlement_id: "ce_1",
     })
     expect(analytics.getExplainChargeEvents).toHaveBeenCalledWith({
       project_id: "proj_1",
       customer_id: "cus_1",
       feature_slug: "tokens",
       period_key: "onetime:1700000000000",
+      customer_entitlement_id: "ce_1",
       limit: 100,
       offset: 0,
     })
