@@ -183,7 +183,7 @@ export const entitlementMeterFactSchemaV1 = z.object({
   currency: z.string().length(3),
   priced_at: z.number().int(),
   tier_index: z.number().int().nullable(),
-  tier_mode: z.enum(["volume", "graduated"]).nullable(),
+  tier_mode: z.union([z.enum(["volume", "graduated"]), z.null()]),
   pricing_component_count: z.number().int().nonnegative(),
 })
 

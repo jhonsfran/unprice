@@ -4986,7 +4986,7 @@ export interface operations {
               priced_at: number
               tier_index: number | null
               /** @enum {string|null} */
-              tier_mode: "volume" | "graduated"
+              tier_mode: "volume" | "graduated" | null
               pricing_component_count: number
               /** @enum {string} */
               source_type: "api_key" | "system" | "unknown"

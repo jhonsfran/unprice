@@ -109,6 +109,18 @@ type PostResponse<TPath extends keyof paths, TStatus extends number = 200> = pat
   ? JsonResponse<TOperation, TStatus>
   : never
 
+type WithOptionalFields<TInput, TField extends keyof TInput> = Omit<TInput, TField> &
+  Partial<Pick<TInput, TField>>
+
+type ExplainChargeRequest = WithOptionalFields<
+  PostBody<"/v1/analytics/explain-charge">,
+  "limit" | "offset"
+>
+type IngestionStatusRequest = WithOptionalFields<
+  PostBody<"/v1/analytics/ingestion/status">,
+  "limit"
+>
+
 type GetResponse<TPath extends keyof paths, TStatus extends number = 200> = paths[TPath] extends {
   get: infer TOperation
 }
@@ -508,21 +520,21 @@ export class Unprice {
   public get analytics() {
     return {
       explainCharge: (
-        req: PostBody<"/v1/analytics/explain-charge">
+        req: ExplainChargeRequest
       ): Promise<ApiResult<PostResponse<"/v1/analytics/explain-charge">>> => {
         return this.toResult(
           this.openapi.POST("/v1/analytics/explain-charge", {
-            body: req,
+            body: req as PostBody<"/v1/analytics/explain-charge">,
           })
         )
       },
       ingestion: {
         status: (
-          req: PostBody<"/v1/analytics/ingestion/status">
+          req: IngestionStatusRequest
         ): Promise<ApiResult<PostResponse<"/v1/analytics/ingestion/status">>> => {
           return this.toResult(
             this.openapi.POST("/v1/analytics/ingestion/status", {
-              body: req,
+              body: req as PostBody<"/v1/analytics/ingestion/status">,
             })
           )
         },

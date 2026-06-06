@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import { Unprice } from "./client"
+import type { paths } from "./openapi"
 
 const createJsonResponse = (body: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(body), {
@@ -11,6 +12,34 @@ const createJsonResponse = (body: unknown, init?: ResponseInit) =>
   })
 
 describe("Unprice client", () => {
+  it("keeps analytics SDK contracts aligned with route defaults and nullable tier data", () => {
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      disableTelemetry: true,
+      retry: { attempts: 0 },
+    })
+
+    expectTypeOf(client.analytics.explainCharge).parameter(0).toMatchTypeOf<{
+      invoice_id: string
+      entry_id: string
+      project_id?: string
+      limit?: number
+      offset?: number
+    }>()
+    expectTypeOf(client.analytics.ingestion.status).parameter(0).toMatchTypeOf<{
+      customer_id: string
+      from_ts: number
+      to_ts: number
+      source_id?: string
+      event_slug?: string
+      limit?: number
+    }>()
+    expectTypeOf<ExplainChargeEventRow["tier_mode"]>().toEqualTypeOf<
+      "volume" | "graduated" | null
+    >()
+  })
+
   it("exposes resource clients for every public API route", () => {
     const client = new Unprice({
       token: "test-token",
@@ -282,3 +311,7 @@ describe("Unprice client", () => {
     expect(calls).toBe(2)
   })
 })
+
+type ExplainChargeResponse =
+  paths["/v1/analytics/explain-charge"]["post"]["responses"][200]["content"]["application/json"]
+type ExplainChargeEventRow = ExplainChargeResponse["events"][number]
