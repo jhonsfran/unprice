@@ -77,8 +77,8 @@ export const route = createRoute({
         project_id: z.string().optional(),
         invoice_id: z.string(),
         entry_id: z.string(),
-        limit: z.number().int().min(1).max(500).default(100),
-        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(500).optional().default(100),
+        offset: z.number().int().min(0).optional().default(0),
       }),
       "Explain charge request"
     ),
@@ -235,7 +235,13 @@ function buildEvidence(result: ExplainChargeOutput): ExplainChargeApiResponse["e
       : []),
     ...result.events.map((event) => ({
       type: "meter_fact" as const,
-      id: event.event_id,
+      id: [
+        result.scope.projectId,
+        result.scope.customerId,
+        event.customer_entitlement_id,
+        event.grant_id,
+        event.event_id,
+      ].join(":"),
       source: "tinybird" as const,
       timestamp: event.timestamp,
     })),

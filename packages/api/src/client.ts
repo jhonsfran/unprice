@@ -528,7 +528,7 @@ export class Unprice {
       ): Promise<ApiResult<PostResponse<"/v1/analytics/explain-charge">>> => {
         return this.toResult(
           this.openapi.POST("/v1/analytics/explain-charge", {
-            body: req as PostBody<"/v1/analytics/explain-charge">,
+            body: req,
           })
         )
       },
@@ -537,7 +537,7 @@ export class Unprice {
       ): Promise<ApiResult<PostResponse<"/v1/analytics/forecast-usage">>> => {
         return this.toResult(
           this.openapi.POST("/v1/analytics/forecast-usage", {
-            body: req as PostBody<"/v1/analytics/forecast-usage">,
+            body: req,
           })
         )
       },
@@ -547,7 +547,7 @@ export class Unprice {
         ): Promise<ApiResult<PostResponse<"/v1/analytics/ingestion/status">>> => {
           return this.toResult(
             this.openapi.POST("/v1/analytics/ingestion/status", {
-              body: req as PostBody<"/v1/analytics/ingestion/status">,
+              body: req,
             })
           )
         },

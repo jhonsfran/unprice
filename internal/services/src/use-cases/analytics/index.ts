@@ -8,5 +8,11 @@ export type {
   GetIngestionStatusInput,
   GetIngestionStatusOutput,
 } from "./get-ingestion-status"
+export {
+  forecastUsage,
+  forecastUsageInputSchema,
+  forecastUsageOutputSchema,
+} from "./forecast-usage"
+export type { ForecastUsageDeps, ForecastUsageInput, ForecastUsageOutput } from "./forecast-usage"
 export { aiAnswerEnvelopeSchema, aiEvidenceSchema } from "./ai-contracts"
 export type { AiAnswerEnvelope, AiEvidence } from "./ai-contracts"

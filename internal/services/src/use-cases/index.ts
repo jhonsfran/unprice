@@ -10,6 +10,16 @@ export type {
   GetIngestionStatusInput,
   GetIngestionStatusOutput,
 } from "./analytics/get-ingestion-status"
+export {
+  forecastUsage,
+  forecastUsageInputSchema,
+  forecastUsageOutputSchema,
+} from "./analytics/forecast-usage"
+export type {
+  ForecastUsageDeps,
+  ForecastUsageInput,
+  ForecastUsageOutput,
+} from "./analytics/forecast-usage"
 export { aiAnswerEnvelopeSchema, aiEvidenceSchema } from "./analytics/ai-contracts"
 export type { AiAnswerEnvelope, AiEvidence } from "./analytics/ai-contracts"
 export { activateSubscription } from "./billing/provision-period"

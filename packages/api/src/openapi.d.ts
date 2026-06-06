@@ -4936,9 +4936,9 @@ export interface operations {
           invoice_id: string
           entry_id: string
           /** @default 100 */
-          limit: number
+          limit?: number
           /** @default 0 */
-          offset: number
+          offset?: number
         }
       }
     }
@@ -5274,7 +5274,7 @@ export interface operations {
           source_id?: string
           event_slug?: string
           /** @default 50 */
-          limit: number
+          limit?: number
         }
       }
     }

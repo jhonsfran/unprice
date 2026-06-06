@@ -27,6 +27,12 @@ describe("Unprice client", () => {
       limit?: number
       offset?: number
     }>()
+    expectTypeOf<{
+      invoice_id: string
+      entry_id: string
+    }>().toMatchTypeOf<
+      paths["/v1/analytics/explain-charge"]["post"]["requestBody"]["content"]["application/json"]
+    >()
     expectTypeOf(client.analytics.ingestion.status).parameter(0).toMatchTypeOf<{
       customer_id: string
       from_ts: number
@@ -35,6 +41,13 @@ describe("Unprice client", () => {
       event_slug?: string
       limit?: number
     }>()
+    expectTypeOf<{
+      customer_id: string
+      from_ts: number
+      to_ts: number
+    }>().toMatchTypeOf<
+      paths["/v1/analytics/ingestion/status"]["post"]["requestBody"]["content"]["application/json"]
+    >()
     expectTypeOf(client.analytics.forecastUsage).parameter(0).toMatchTypeOf<{
       customer_id: string
       feature_slug: string

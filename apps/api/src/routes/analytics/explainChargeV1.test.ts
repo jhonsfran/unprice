@@ -145,7 +145,7 @@ describe("explainChargeV1 route", () => {
         },
         {
           type: "meter_fact",
-          id: "evt_1",
+          id: "proj_123:cus_1:ce_1:grant_1:evt_1",
           source: "tinybird",
           timestamp: 1_700_000_000_000,
         },
