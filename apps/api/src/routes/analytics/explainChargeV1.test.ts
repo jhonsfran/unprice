@@ -231,6 +231,33 @@ describe("explainChargeV1 route", () => {
       offset: 0,
     })
   })
+
+  it("does not ask for rated meter facts on a non-usage line", async () => {
+    useCaseMocks.explainCharge.mockResolvedValueOnce(Ok(makeNonUsageExplainChargeOutput()))
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        invoice_id: "inv_1",
+        entry_id: "entry_1",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        scope: expect.objectContaining({
+          period_key: "billing_period:bp_1",
+        }),
+        warnings: [
+          "This non-usage line is explained from ledger and billing-period evidence; no rated meter facts are expected.",
+        ],
+        nextActions: ["No immediate action required."],
+      })
+    )
+  })
 })
 
 function createTestApp() {
@@ -326,6 +353,33 @@ function makeExplainChargeOutput() {
       offset: 10,
       hasMore: false,
     },
+  }
+}
+
+function makeNonUsageExplainChargeOutput() {
+  return {
+    ...makeExplainChargeOutput(),
+    scope: {
+      projectId: "proj_123",
+      customerId: "cus_1",
+      featureSlug: "seats",
+      periodKey: "billing_period:bp_1",
+      customerEntitlementId: "ce_1",
+      featurePlanVersionId: "fpv_1",
+    },
+    summary: {
+      eventCount: 0,
+      totalUsage: 3,
+      totalAmount: 425_000_000,
+      latestAmountAfter: 425_000_000,
+      currency: "USD",
+      amountScale: 8,
+      firstEventAt: null,
+      lastEventAt: null,
+      multiComponentEventCount: 0,
+    },
+    events: [],
+    answer: "deterministic non-usage answer",
   }
 }
 

@@ -3,7 +3,14 @@ import { explainChargeEventRowSchema } from "@unprice/analytics"
 import { type Database, and, eq } from "@unprice/db"
 import { customerEntitlements } from "@unprice/db/schema"
 import { BaseError, Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
-import { LEDGER_SCALE, toLedgerMinor } from "@unprice/money"
+import {
+  type Dinero,
+  LEDGER_SCALE,
+  formatMoney,
+  fromLedgerMinor,
+  toDecimal,
+  toLedgerMinor,
+} from "@unprice/money"
 import { z } from "zod"
 import { computeGrantPeriodBucket } from "../../entitlements/grant-consumption"
 import type { UnPriceLedgerError } from "../../ledger"
@@ -67,6 +74,8 @@ export const explainChargeOutputSchema = z.object({
 
 export type ExplainChargeInput = z.infer<typeof explainChargeInputSchema>
 export type ExplainChargeOutput = z.infer<typeof explainChargeOutputSchema>
+type ExplainChargeSummary = ExplainChargeOutput["summary"]
+type ExplainChargeEvent = ExplainChargeOutput["events"][number]
 
 export type ExplainChargeDeps = {
   db: Database
@@ -245,19 +254,22 @@ export async function explainCharge(
   const singleScopedEntitlement =
     scopedEntitlements.length === 1 ? scopedEntitlements[0] : undefined
 
-  const periodKey = computeGrantPeriodBucket(
-    {
-      cadenceEffectiveAt: singleScopedEntitlement?.effectiveAt ?? billingPeriod.cycleStartAt,
-      cadenceExpiresAt: singleScopedEntitlement?.expiresAt ?? billingPeriod.cycleEndAt,
-      effectiveAt: billingPeriod.cycleStartAt,
-      expiresAt: billingPeriod.cycleEndAt,
-      grantId: "explain-charge",
-      resetConfig: featurePlanVersion.resetConfig,
-    },
-    billingPeriod.cycleStartAt
-  )?.periodKey
+  const isUsageFeature = featurePlanVersion.featureType === "usage"
+  const usagePeriodKey = isUsageFeature
+    ? computeGrantPeriodBucket(
+        {
+          cadenceEffectiveAt: singleScopedEntitlement?.effectiveAt ?? billingPeriod.cycleStartAt,
+          cadenceExpiresAt: singleScopedEntitlement?.expiresAt ?? billingPeriod.cycleEndAt,
+          effectiveAt: billingPeriod.cycleStartAt,
+          expiresAt: billingPeriod.cycleEndAt,
+          grantId: "explain-charge",
+          resetConfig: featurePlanVersion.resetConfig,
+        },
+        billingPeriod.cycleStartAt
+      )?.periodKey
+    : null
 
-  if (!periodKey) {
+  if (isUsageFeature && !usagePeriodKey) {
     return Err(
       new ExplainChargeError({
         code: "PERIOD_KEY_NOT_DERIVED",
@@ -267,68 +279,87 @@ export async function explainCharge(
     )
   }
 
-  const query = {
-    project_id: input.projectId,
-    customer_id: invoice.customerId,
-    feature_slug: featureSlug,
-    period_key: periodKey,
-    ...(singleScopedEntitlement ? { customer_entitlement_id: singleScopedEntitlement.id } : {}),
-  }
-
-  const analyticsResult = await wrapResult(
-    Promise.all([
-      deps.analytics.getExplainChargeSummary(query),
-      deps.analytics.getExplainChargeEvents({
-        ...query,
-        limit: input.limit,
-        offset: input.offset,
-      }),
-    ]),
-    (error) =>
-      new FetchError({
-        message: error.message,
-        retry: true,
-        context: {
-          url: "tinybird:v1_explain_charge",
-          method: "GET",
-          projectId: input.projectId,
-          invoiceId: input.invoiceId,
-          entryId: input.entryId,
-        },
-      })
-  )
-
-  if (analyticsResult.err) {
-    return Err(analyticsResult.err)
-  }
-
-  const [summaryResponse, eventsResponse] = analyticsResult.val
-  const summaryRow = summaryResponse.data.at(0)
-  const events = eventsResponse.data
+  const periodKey = usagePeriodKey ?? `billing_period:${billingPeriod.id}`
   const lineAmount = toLedgerMinor(line.amount)
-  const summary = summaryRow
-    ? {
-        eventCount: summaryRow.event_count,
-        totalUsage: summaryRow.total_delta,
-        totalAmount: summaryRow.total_amount,
-        latestAmountAfter: summaryRow.latest_amount_after,
-        currency: summaryRow.currency,
-        amountScale: summaryRow.amount_scale,
-        firstEventAt: summaryRow.first_event_at,
-        lastEventAt: summaryRow.last_event_at,
-        multiComponentEventCount: summaryRow.multi_component_event_count,
-      }
-    : {
-        eventCount: 0,
-        totalUsage: 0,
-        totalAmount: 0,
-        latestAmountAfter: 0,
-        currency: line.currency,
-        amountScale: LEDGER_SCALE,
-        firstEventAt: null,
-        lastEventAt: null,
-        multiComponentEventCount: 0,
-      }
+  let summary: ExplainChargeSummary
+  let events: ExplainChargeEvent[]
+
+  if (isUsageFeature) {
+    const query = {
+      project_id: input.projectId,
+      customer_id: invoice.customerId,
+      feature_slug: featureSlug,
+      period_key: periodKey,
+      ...(singleScopedEntitlement ? { customer_entitlement_id: singleScopedEntitlement.id } : {}),
+    }
+
+    const analyticsResult = await wrapResult(
+      Promise.all([
+        deps.analytics.getExplainChargeSummary(query),
+        deps.analytics.getExplainChargeEvents({
+          ...query,
+          limit: input.limit,
+          offset: input.offset,
+        }),
+      ]),
+      (error) =>
+        new FetchError({
+          message: error.message,
+          retry: true,
+          context: {
+            url: "tinybird:v1_explain_charge",
+            method: "GET",
+            projectId: input.projectId,
+            invoiceId: input.invoiceId,
+            entryId: input.entryId,
+          },
+        })
+    )
+
+    if (analyticsResult.err) {
+      return Err(analyticsResult.err)
+    }
+
+    const [summaryResponse, eventsResponse] = analyticsResult.val
+    const summaryRow = summaryResponse.data.at(0)
+    events = eventsResponse.data
+    summary = summaryRow
+      ? {
+          eventCount: summaryRow.event_count,
+          totalUsage: summaryRow.total_delta,
+          totalAmount: summaryRow.total_amount,
+          latestAmountAfter: summaryRow.latest_amount_after,
+          currency: summaryRow.currency,
+          amountScale: summaryRow.amount_scale,
+          firstEventAt: summaryRow.first_event_at,
+          lastEventAt: summaryRow.last_event_at,
+          multiComponentEventCount: summaryRow.multi_component_event_count,
+        }
+      : {
+          eventCount: 0,
+          totalUsage: 0,
+          totalAmount: 0,
+          latestAmountAfter: 0,
+          currency: line.currency,
+          amountScale: LEDGER_SCALE,
+          firstEventAt: null,
+          lastEventAt: null,
+          multiComponentEventCount: 0,
+        }
+  } else {
+    events = []
+    summary = {
+      eventCount: 0,
+      totalUsage: line.quantity ?? 0,
+      totalAmount: lineAmount,
+      latestAmountAfter: lineAmount,
+      currency: line.currency,
+      amountScale: LEDGER_SCALE,
+      firstEventAt: null,
+      lastEventAt: null,
+      multiComponentEventCount: 0,
+    }
+  }
 
   const output: ExplainChargeOutput = {
     invoice: {
@@ -359,8 +390,9 @@ export async function explainCharge(
       invoiceId: invoice.id,
       featureSlug,
       periodKey,
-      lineAmount,
-      lineCurrency: line.currency,
+      lineDisplayAmount: formatDineroAmount(line.amount),
+      billingPeriodId,
+      isUsageFeature,
       summary,
     }),
     evidence: [
@@ -388,17 +420,32 @@ function buildAnswer({
   invoiceId,
   featureSlug,
   periodKey,
-  lineAmount,
-  lineCurrency,
+  lineDisplayAmount,
+  billingPeriodId,
+  isUsageFeature,
   summary,
 }: {
   entryId: string
   invoiceId: string
   featureSlug: string
   periodKey: string
-  lineAmount: number
-  lineCurrency: string
+  lineDisplayAmount: string
+  billingPeriodId: string
+  isUsageFeature: boolean
   summary: ExplainChargeOutput["summary"]
 }): string {
-  return `Invoice line ${entryId} on invoice ${invoiceId} charged ${lineAmount} ${lineCurrency} for ${featureSlug} in period ${periodKey}. ${summary.eventCount} rated meter facts contributed ${summary.totalUsage} usage units and ${summary.totalAmount} ${summary.currency}.`
+  if (!isUsageFeature) {
+    return `Invoice line ${entryId} on invoice ${invoiceId} charged ${lineDisplayAmount} for ${featureSlug} in billing period ${billingPeriodId}. This is a non-usage charge, so no rated meter facts are expected.`
+  }
+
+  const summaryDisplayAmount = formatLedgerMinorAmount(summary.totalAmount, summary.currency)
+  return `Invoice line ${entryId} on invoice ${invoiceId} charged ${lineDisplayAmount} for ${featureSlug} in period ${periodKey}. ${summary.eventCount} rated meter facts contributed ${summary.totalUsage} usage units and ${summaryDisplayAmount}.`
+}
+
+function formatDineroAmount(amount: Dinero<number>): string {
+  return toDecimal(amount, ({ value, currency }) => formatMoney(value, currency.code))
+}
+
+function formatLedgerMinorAmount(amount: number, currency: string): string {
+  return formatDineroAmount(fromLedgerMinor(amount, currency))
 }

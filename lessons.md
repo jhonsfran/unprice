@@ -105,6 +105,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-06: `explainCharge` derives entitlement usage period keys and queries Tinybird only for
+  usage features; non-usage invoice lines use `billing_period:<id>` scope with ledger and billing
+  period evidence.
 - 2026-06-06: Draft plan-version billing changes should cascade feature billing/reset cadences
   unless `metadata.billingCadenceOverride` or `metadata.resetCadenceOverride` is true; missing
   override flags mean the feature follows the plan. Usage feature billing may be shorter or longer

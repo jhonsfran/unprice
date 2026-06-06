@@ -29,6 +29,8 @@ describe("explainCharge", () => {
     expect(result.val?.summary.eventCount).toBe(2)
     expect(result.val?.events).toHaveLength(2)
     expect(result.val?.pagination.hasMore).toBe(false)
+    expect(result.val?.answer).toContain("$4.25")
+    expect(result.val?.answer).not.toContain("425000000")
     expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_1" })
     expect(result.val?.evidence).toContainEqual({ type: "billing_period", id: "bp_1" })
     expect(result.val?.evidence).toContainEqual({ type: "meter_fact", id: "evt_1" })
@@ -92,6 +94,51 @@ describe("explainCharge", () => {
     expect(analytics.getExplainChargeEvents).toHaveBeenCalledWith(
       expect.not.objectContaining({ customer_entitlement_id: expect.any(String) })
     )
+  })
+
+  it("explains non-usage invoice lines without deriving a usage period key", async () => {
+    const { db, ledger, analytics } = makeDeps({
+      billingPeriod: billingPeriod({
+        subscriptionItem: {
+          featurePlanVersion: {
+            id: "fpv_flat",
+            featureType: "flat",
+            resetConfig: null,
+            feature: {
+              slug: "seats",
+            },
+          },
+        },
+      }),
+      lines: [
+        line({
+          description: "Seats",
+          quantity: 3,
+          metadata: {
+            kind: "subscription",
+            billing_period_id: "bp_1",
+          },
+        }),
+      ],
+    })
+
+    const result = await callDefault({ db, ledger, analytics })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.scope.featureSlug).toBe("seats")
+    expect(result.val?.scope.periodKey).toBe("billing_period:bp_1")
+    expect(result.val?.summary).toMatchObject({
+      eventCount: 0,
+      totalUsage: 3,
+      totalAmount: 425_000_000,
+      latestAmountAfter: 425_000_000,
+    })
+    expect(result.val?.events).toEqual([])
+    expect(result.val?.answer).toContain("$4.25")
+    expect(result.val?.answer).not.toContain("425000000")
+    expect(result.val?.answer).toContain("no rated meter facts are expected")
+    expect(analytics.getExplainChargeSummary).not.toHaveBeenCalled()
+    expect(analytics.getExplainChargeEvents).not.toHaveBeenCalled()
   })
 
   it("returns missing invoice as an expected error", async () => {
@@ -307,6 +354,7 @@ function billingPeriod(
     subscriptionItem: {
       featurePlanVersion: {
         id: string
+        featureType: string
         resetConfig: null
         feature: {
           slug: string
@@ -327,6 +375,7 @@ function billingPeriod(
     subscriptionItem: {
       featurePlanVersion: {
         id: "fpv_1",
+        featureType: "usage",
         resetConfig: null,
         feature: {
           slug: "tokens",

@@ -252,7 +252,11 @@ function buildWarnings(result: ExplainChargeOutput): string[] {
   const warnings: string[] = []
 
   if (result.summary.eventCount === 0) {
-    warnings.push("No rated meter facts were found for this invoice line.")
+    warnings.push(
+      isBillingPeriodScopedLine(result)
+        ? "This non-usage line is explained from ledger and billing-period evidence; no rated meter facts are expected."
+        : "No rated meter facts were found for this invoice line."
+    )
   }
 
   if (result.pagination.hasMore) {
@@ -264,6 +268,10 @@ function buildWarnings(result: ExplainChargeOutput): string[] {
 
 function buildNextActions(result: ExplainChargeOutput): string[] {
   if (result.summary.eventCount === 0) {
+    if (isBillingPeriodScopedLine(result)) {
+      return ["No immediate action required."]
+    }
+
     return ["Verify the billing period, feature slug, and period key for this invoice line."]
   }
 
@@ -272,6 +280,10 @@ function buildNextActions(result: ExplainChargeOutput): string[] {
   }
 
   return ["No immediate action required."]
+}
+
+function isBillingPeriodScopedLine(result: ExplainChargeOutput): boolean {
+  return result.scope.periodKey.startsWith("billing_period:")
 }
 
 function explainChargeErrorToApiError(error: unknown): UnpriceApiError {

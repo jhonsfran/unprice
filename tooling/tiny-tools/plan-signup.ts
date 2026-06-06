@@ -15,7 +15,7 @@ const BILLING_INTERVALS = ["month", "year", "week", "day", "minute", "onetime"] 
 const CURRENCIES = ["USD", "EUR"] as const
 const CREDIT_LINE_POLICIES = ["capped", "uncapped"] as const
 
-const UNPRICE_TOKEN = process.env.UNPRICE_TOKEN || ""
+const UNPRICE_TOKEN = process.env.UNPRICE_TOKEN || "unprice_dev_1234567890"
 const UNPRICE_API_URL = process.env.UNPRICE_API_URL || "http://localhost:8787"
 const PLAN_SLUG = process.env.PLAN_SLUG?.trim() || "free"
 const BILLING_INTERVAL = getOptionalEnvValue("BILLING_INTERVAL", BILLING_INTERVALS)
