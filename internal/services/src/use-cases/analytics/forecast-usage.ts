@@ -48,10 +48,12 @@ type ObservationWindow = {
 
 type Observation = ObservationWindow & {
   cumulativeUsage: number
+  hasActualObservation: boolean
 }
 
 type DeltaObservation = ObservationWindow & {
   usageDelta: number
+  hasActualObservation: boolean
 }
 
 export async function forecastUsage(
@@ -100,7 +102,8 @@ export async function forecastUsage(
     windows,
     featureSlug: input.featureSlug,
   })
-  const deltaObservations = buildDeltaObservations(observations)
+  const denseObservations = buildDenseObservations({ observations, windows })
+  const deltaObservations = buildDeltaObservations(denseObservations)
   const projection = projectUsage({
     observations: deltaObservations,
     horizonDays: input.horizonDays,
@@ -119,18 +122,20 @@ export async function forecastUsage(
       dataFrom: observationStart,
       dataTo: observationEnd,
     },
-    evidence: deltaObservations.map((observation) => ({
-      type: "meter_fact",
-      id: buildEvidenceId({
-        projectId: input.projectId,
-        customerId: input.customerId,
-        featureSlug: input.featureSlug,
-        periodKey: input.periodKey,
-        dayKey: observation.dayKey,
-      }),
-      source: "tinybird",
-      timestamp: observation.end,
-    })),
+    evidence: deltaObservations
+      .filter((observation) => observation.hasActualObservation)
+      .map((observation) => ({
+        type: "meter_fact",
+        id: buildEvidenceId({
+          projectId: input.projectId,
+          customerId: input.customerId,
+          featureSlug: input.featureSlug,
+          periodKey: input.periodKey,
+          dayKey: observation.dayKey,
+        }),
+        source: "tinybird",
+        timestamp: observation.end,
+      })),
     warnings: buildWarnings(deltaObservations.length),
     nextActions: buildNextActions(deltaObservations.length),
     project_id: input.projectId,
@@ -189,6 +194,7 @@ function buildObservations({
       {
         ...window,
         cumulativeUsage: usage,
+        hasActualObservation: true,
       },
     ]
   })
@@ -210,6 +216,39 @@ function buildDeltaObservations(observations: Observation[]): DeltaObservation[]
       {
         ...observation,
         usageDelta: Math.max(0, observation.cumulativeUsage - previous.cumulativeUsage),
+      },
+    ]
+  })
+}
+
+function buildDenseObservations({
+  observations,
+  windows,
+}: {
+  observations: Observation[]
+  windows: ObservationWindow[]
+}): Observation[] {
+  const observationsByDayIndex = new Map(
+    observations.map((observation) => [observation.dayIndex, observation])
+  )
+  let lastKnownCumulativeUsage: number | null = null
+
+  return windows.flatMap((window) => {
+    const observation = observationsByDayIndex.get(window.dayIndex)
+    if (observation) {
+      lastKnownCumulativeUsage = observation.cumulativeUsage
+      return [observation]
+    }
+
+    if (lastKnownCumulativeUsage === null) {
+      return []
+    }
+
+    return [
+      {
+        ...window,
+        cumulativeUsage: lastKnownCumulativeUsage,
+        hasActualObservation: false,
       },
     ]
   })

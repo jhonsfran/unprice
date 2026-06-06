@@ -74,6 +74,33 @@ describe("forecastUsage", () => {
     )
   })
 
+  it("carries cumulative usage across sparse days before computing deltas", async () => {
+    const usageByDay = Array.from<number | null>({ length: 14 }).fill(null)
+    usageByDay[11] = 10
+    usageByDay[13] = 20
+    const { deps } = makeDeps({ usageByDay })
+
+    const result = await forecastUsage(deps, baseInput({ horizonDays: 1 }))
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toEqual(
+      expect.objectContaining({
+        projectedUsage: 20,
+        observedDays: 2,
+        baselineUsage: 5,
+        trendPerDay: 10,
+      })
+    )
+    expect(result.val?.evidence).toEqual([
+      {
+        type: "meter_fact",
+        id: "proj_123:cus_123:tokens:2026-06-05",
+        source: "tinybird",
+        timestamp: observationEnd,
+      },
+    ])
+  })
+
   it("uses the default horizon and returns low confidence for zero observed rows", async () => {
     const { deps } = makeDeps({ usageByDay: Array.from<number | null>({ length: 14 }).fill(null) })
 
