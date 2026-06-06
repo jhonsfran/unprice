@@ -28,7 +28,6 @@ import { GrantsManager } from "../entitlements/grants"
 import type { EntitlementService } from "../entitlements/service"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
-import { getPaymentProviderCapabilities } from "../payment-provider/service"
 import type { RatingService } from "../rating/service"
 import { toErrorContext } from "../utils/log-context"
 import type { WalletService } from "../wallet"
@@ -947,22 +946,37 @@ export class SubscriptionService {
     //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
     // }
     const paymentProviderToUse = paymentProvider ?? versionData.paymentProvider
-    const providerCaps = getPaymentProviderCapabilities(paymentProviderToUse)
     const creditLinePolicyToUse = creditLinePolicy ?? "uncapped"
     const creditLineAmountToUse =
       creditLinePolicyToUse === "uncapped" ? null : (creditLineAmount ?? null)
+    let paymentMethodIdToUse = paymentMethodId ?? null
 
-    // skip payment method validation for providers without async payment confirmation
-    if (
-      paymentMethodRequired &&
-      providerCaps.asyncPaymentConfirmation &&
-      (!paymentMethodId || paymentMethodId === "")
-    ) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Payment method is required for this plan version",
+    if (paymentMethodRequired && (!paymentMethodIdToUse || paymentMethodIdToUse === "")) {
+      const { err: paymentMethodErr, val: paymentMethod } =
+        await this.customerService.validatePaymentMethod({
+          customerId: subscriptionWithPhases.customerId,
+          projectId,
+          paymentProvider: paymentProviderToUse,
+          requiredPaymentMethod: true,
         })
-      )
+
+      if (paymentMethodErr) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: paymentMethodErr.message,
+          })
+        )
+      }
+
+      paymentMethodIdToUse = paymentMethod.paymentMethodId
+
+      if (!paymentMethodIdToUse) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "Payment method is required for this plan version",
+          })
+        )
+      }
     }
 
     // check the subscription items configuration
@@ -1030,7 +1044,7 @@ export class SubscriptionService {
         projectId,
         planVersionId,
         subscriptionId,
-        paymentMethodId: paymentMethodId ?? null,
+        paymentMethodId: paymentMethodIdToUse,
         paymentProvider: paymentProviderToUse,
         creditLinePolicy: creditLinePolicyToUse,
         creditLineAmount: creditLineAmountToUse,

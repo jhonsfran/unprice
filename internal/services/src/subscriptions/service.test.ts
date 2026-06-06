@@ -9,7 +9,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     expect(DEFAULT_GRANT_PRIORITY.subscription).toBe(10)
   })
 
-  it("applies plan trial units even when no payment method id is present", async () => {
+  it("resolves the provider default payment method while applying plan trial units", async () => {
     const now = Date.parse("2026-05-02T12:00:00.000Z")
     const startAt = Date.parse("2026-05-03T12:00:00.000Z")
     const projectId = "proj_123"
@@ -70,6 +70,14 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       warn: vi.fn(),
       debug: vi.fn(),
     }
+    const customerService = {
+      validatePaymentMethod: vi.fn().mockResolvedValue(
+        Ok({
+          paymentMethodId: "pm_sandbox_default",
+          requiredPaymentMethod: true,
+        })
+      ),
+    }
     const service = new SubscriptionService({
       db,
       repo: repo as never,
@@ -78,7 +86,7 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       waitUntil: vi.fn(),
       cache: {} as never,
       metrics: {} as never,
-      customerService: {} as never,
+      customerService: customerService as never,
       entitlementService: {} as never,
       billingService: {} as never,
       ratingService: {} as never,
@@ -104,9 +112,15 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     })
 
     expect(result.err).toBeUndefined()
+    expect(customerService.validatePaymentMethod).toHaveBeenCalledWith({
+      customerId: "cus_123",
+      projectId,
+      paymentProvider: "sandbox",
+      requiredPaymentMethod: true,
+    })
     expect(insertPhase).toHaveBeenCalledWith(
       expect.objectContaining({
-        paymentMethodId: null,
+        paymentMethodId: "pm_sandbox_default",
         trialUnits: 15,
         trialEndsAt: Date.parse("2026-05-18T12:00:00.000Z"),
       })

@@ -1,9 +1,8 @@
 import { type Database, and, eq, inArray } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import { type PlanVersion, calculateFlatPricePlan } from "@unprice/db/validators"
+import { type PlanVersion, planVersionRequiresPaymentMethod } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { isZero } from "dinero.js"
 import type { ServiceContext } from "../../context"
 
 type PublishPlanVersionDeps = {
@@ -78,7 +77,7 @@ export async function publishPlanVersion(
     })
   }
 
-  const { err, val: totalPricePlan } = calculateFlatPricePlan({
+  const { err, val: paymentMethodRequired } = planVersionRequiresPaymentMethod({
     planVersion: planVersionData,
   })
 
@@ -87,8 +86,6 @@ export async function publishPlanVersion(
       state: "price_calculation_error",
     })
   }
-
-  const paymentMethodRequired = !isZero(totalPricePlan.dinero)
 
   if (paymentMethodRequired) {
     const { err: validatePaymentMethodErr } = await deps.services.customers.getPaymentProvider({

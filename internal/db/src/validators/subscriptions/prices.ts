@@ -30,6 +30,64 @@ const calculatePriceSchema = z.object({
 })
 
 const unitsSchema = z.coerce.number().min(0)
+type PlanVersionFeaturePricing = PlanVersionExtended["planFeatures"][number]
+
+function priceIsNonZero(price: z.infer<typeof dineroSchema>): boolean {
+  return !isZero(dinero(price.dinero))
+}
+
+function tiersHaveNonZeroPrice(tiers: z.infer<typeof tiersSchema>[]): boolean {
+  return tiers.some((tier) => priceIsNonZero(tier.unitPrice) || priceIsNonZero(tier.flatPrice))
+}
+
+function featureCanCreateCharge(feature: PlanVersionFeaturePricing): boolean {
+  switch (feature.featureType) {
+    case "flat": {
+      const config = configFlatSchema.parse(feature.config)
+      return priceIsNonZero(config.price)
+    }
+    case "tier": {
+      const config = configTierSchema.parse(feature.config)
+      return tiersHaveNonZeroPrice(config.tiers)
+    }
+    case "usage": {
+      const config = configUsageSchema.parse(feature.config)
+
+      if (config.usageMode === "tier") {
+        return tiersHaveNonZeroPrice(config.tiers ?? [])
+      }
+
+      return config.price ? priceIsNonZero(config.price) : false
+    }
+    case "package": {
+      const config = configPackageSchema.parse(feature.config)
+      return priceIsNonZero(config.price)
+    }
+  }
+}
+
+export const planVersionRequiresPaymentMethod = ({
+  planVersion,
+}: {
+  planVersion: Pick<PlanVersionExtended, "collectionMethod" | "planFeatures">
+}): Result<boolean, UnPriceCalculationError> => {
+  if (planVersion.collectionMethod !== "charge_automatically") {
+    return Ok(false)
+  }
+
+  try {
+    return Ok(planVersion.planFeatures.some(featureCanCreateCharge))
+  } catch (error) {
+    return Err(
+      new UnPriceCalculationError({
+        message:
+          error instanceof Error
+            ? error.message
+            : "Unable to evaluate plan payment method requirement",
+      })
+    )
+  }
+}
 
 function toDineroMultiplier(quantity: number): number | { amount: number; scale: number } {
   if (Number.isInteger(quantity)) {

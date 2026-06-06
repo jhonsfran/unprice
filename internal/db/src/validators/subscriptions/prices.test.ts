@@ -13,6 +13,7 @@ import {
   calculateTierPrice,
   calculateTotalPricePlan,
   calculateUnitPrice,
+  planVersionRequiresPaymentMethod,
 } from "./prices"
 
 describe("pricing calculators", () => {
@@ -461,6 +462,98 @@ describe("calculateFlatPricePlan", () => {
       expect(result.val.displayAmount).toBe("$50")
       expect(result.val.hasUsage).toBe(false)
     }
+  })
+})
+
+describe("planVersionRequiresPaymentMethod", () => {
+  const zeroPrice = {
+    dinero: {
+      amount: 0,
+      currency: { code: "EUR", base: 10, exponent: 2 },
+      scale: 2,
+    },
+    displayAmount: "0.00",
+  }
+  const fractionalCentPrice = {
+    dinero: {
+      amount: 1,
+      currency: { code: "EUR", base: 10, exponent: 2 },
+      scale: 3,
+    },
+    displayAmount: "0.001",
+  }
+
+  it("requires a payment method for automatically collected paid usage plans", () => {
+    const result = planVersionRequiresPaymentMethod({
+      planVersion: {
+        collectionMethod: "charge_automatically",
+        planFeatures: [
+          {
+            featureType: "flat",
+            config: { price: zeroPrice },
+          },
+          {
+            featureType: "usage",
+            config: {
+              usageMode: "unit",
+              units: 1,
+              price: fractionalCentPrice,
+            },
+          },
+        ] as PlanVersionExtended["planFeatures"],
+      },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toBe(true)
+  })
+
+  it("does not require a saved payment method for manual invoice collection", () => {
+    const result = planVersionRequiresPaymentMethod({
+      planVersion: {
+        collectionMethod: "send_invoice",
+        planFeatures: [
+          {
+            featureType: "usage",
+            config: {
+              usageMode: "unit",
+              units: 1,
+              price: fractionalCentPrice,
+            },
+          },
+        ] as PlanVersionExtended["planFeatures"],
+      },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toBe(false)
+  })
+
+  it("does not require a payment method when all automatic prices are zero", () => {
+    const result = planVersionRequiresPaymentMethod({
+      planVersion: {
+        collectionMethod: "charge_automatically",
+        planFeatures: [
+          {
+            featureType: "tier",
+            config: {
+              tierMode: "volume",
+              tiers: [
+                {
+                  unitPrice: zeroPrice,
+                  flatPrice: zeroPrice,
+                  firstUnit: 1,
+                  lastUnit: null,
+                },
+              ],
+            },
+          },
+        ] as PlanVersionExtended["planFeatures"],
+      },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toBe(false)
   })
 })
 

@@ -105,6 +105,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-06: Plan publish should set `paymentMethodRequired` from any non-zero
+  `charge_automatically` feature price path, not flat price alone; `createPhase`
+  resolves the provider default before inserting a required payment method.
 - 2026-06-06: `explainCharge` derives entitlement usage period keys and queries Tinybird only for
   usage features; non-usage invoice lines use `billing_period:<id>` scope with ledger and billing
   period evidence.
