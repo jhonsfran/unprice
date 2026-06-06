@@ -120,6 +120,10 @@ type IngestionStatusRequest = WithOptionalFields<
   PostBody<"/v1/analytics/ingestion/status">,
   "limit"
 >
+type ForecastUsageRequest = WithOptionalFields<
+  PostBody<"/v1/analytics/forecast-usage">,
+  "horizon_days"
+>
 
 type GetResponse<TPath extends keyof paths, TStatus extends number = 200> = paths[TPath] extends {
   get: infer TOperation
@@ -525,6 +529,15 @@ export class Unprice {
         return this.toResult(
           this.openapi.POST("/v1/analytics/explain-charge", {
             body: req as PostBody<"/v1/analytics/explain-charge">,
+          })
+        )
+      },
+      forecastUsage: (
+        req: ForecastUsageRequest
+      ): Promise<ApiResult<PostResponse<"/v1/analytics/forecast-usage">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/analytics/forecast-usage", {
+            body: req as PostBody<"/v1/analytics/forecast-usage">,
           })
         )
       },

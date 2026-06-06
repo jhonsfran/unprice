@@ -10,6 +10,8 @@ export type {
   GetIngestionStatusInput,
   GetIngestionStatusOutput,
 } from "./analytics/get-ingestion-status"
+export { aiAnswerEnvelopeSchema, aiEvidenceSchema } from "./analytics/ai-contracts"
+export type { AiAnswerEnvelope, AiEvidence } from "./analytics/ai-contracts"
 export { activateSubscription } from "./billing/provision-period"
 export {
   ExplainChargeError,

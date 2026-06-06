@@ -47,13 +47,17 @@ const verifiedKey = {
     },
   },
 }
+const now = 1_780_000_000_000
 
 beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(now)
   authMocks.keyAuth.mockResolvedValue(verifiedKey)
   useCaseMocks.explainCharge.mockResolvedValue(Ok(makeExplainChargeOutput()))
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.clearAllMocks()
 })
 
@@ -108,10 +112,46 @@ describe("explainChargeV1 route", () => {
       },
       events: [makeEvent()],
       answer: "deterministic answer",
+      confidence: "high",
+      freshness: {
+        generatedAt: now,
+        dataFrom: 1_700_000_000_000,
+        dataTo: 1_700_000_000_000,
+      },
       evidence: [
-        { type: "ledger_line", id: "entry_1" },
-        { type: "billing_period", id: "bp_1" },
+        {
+          type: "invoice",
+          id: "inv_1",
+          source: "postgres",
+          timestamp: null,
+        },
+        {
+          type: "ledger_line",
+          id: "entry_1",
+          source: "ledger",
+          timestamp: null,
+        },
+        {
+          type: "billing_period",
+          id: "bp_1",
+          source: "postgres",
+          timestamp: null,
+        },
+        {
+          type: "plan_version",
+          id: "fpv_1",
+          source: "postgres",
+          timestamp: null,
+        },
+        {
+          type: "meter_fact",
+          id: "evt_1",
+          source: "tinybird",
+          timestamp: 1_700_000_000_000,
+        },
       ],
+      warnings: [],
+      nextActions: ["No immediate action required."],
       pagination: {
         limit: 50,
         offset: 10,

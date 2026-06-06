@@ -134,6 +134,9 @@ describe("getIngestionStatusV1 route", () => {
       },
       successRate: 0.75,
       freshness: {
+        generatedAt: now,
+        dataFrom: fromTs,
+        dataTo: fromTs + 5_500,
         latestHandledAt: fromTs + 5_500,
         secondsSinceLatest: 1,
       },
@@ -177,6 +180,43 @@ describe("getIngestionStatusV1 route", () => {
       ],
       answer:
         "4 events were observed in the requested window for customer cus_123 (1780000000000 to 1780000010000). 3 were processed and 1 were rejected, for a 75% success rate.",
+      confidence: "high",
+      evidence: [
+        {
+          type: "ingestion_status",
+          id: "proj_123:cus_123:1780000000000:1780000010000",
+          source: "tinybird",
+          timestamp: fromTs + 5_500,
+        },
+        {
+          type: "ingestion_status",
+          id: "live:2026-06-05 12:00:00",
+          source: "tinybird",
+          timestamp: Date.parse("2026-06-05T12:00:00Z"),
+        },
+        {
+          type: "ingestion_status",
+          id: "live:2026-06-05 12:00:01",
+          source: "tinybird",
+          timestamp: Date.parse("2026-06-05T12:00:01Z"),
+        },
+        {
+          type: "ingestion_status",
+          id: "rejection:src_1:usage.recorded:missing_entitlement:1780000005000",
+          source: "tinybird",
+          timestamp: fromTs + 5_000,
+        },
+        {
+          type: "event",
+          id: "evt_1",
+          source: "tinybird",
+          timestamp: fromTs + 5_500,
+        },
+      ],
+      warnings: ["Some ingestion events were rejected in the requested window."],
+      nextActions: [
+        "Inspect rejected events and fix the reported rejection reasons: missing_entitlement",
+      ],
     })
     expect(getIngestionLive).toHaveBeenCalledWith({
       project_id: "proj_123",
@@ -241,6 +281,9 @@ describe("getIngestionStatusV1 route", () => {
       },
       successRate: 0,
       freshness: {
+        generatedAt: now,
+        dataFrom: fromTs,
+        dataTo: toTs,
         latestHandledAt: null,
         secondsSinceLatest: null,
       },
@@ -248,6 +291,17 @@ describe("getIngestionStatusV1 route", () => {
       rejections: [],
       recentEvents: [],
       answer: "No events were observed in the requested window for customer cus_empty.",
+      confidence: "low",
+      evidence: [
+        {
+          type: "ingestion_status",
+          id: "proj_123:cus_empty:1780000000000:1780000010000",
+          source: "tinybird",
+          timestamp: null,
+        },
+      ],
+      warnings: ["No ingestion events were observed in the requested window."],
+      nextActions: ["Verify the customer_id, source_id, event_slug, and time window."],
     })
     expect(body.answer).toContain("No events were observed in the requested window")
     expect(getIngestionRejections).toHaveBeenCalledWith({

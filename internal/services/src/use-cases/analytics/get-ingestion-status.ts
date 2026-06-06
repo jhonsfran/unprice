@@ -1,6 +1,7 @@
 import type { Analytics, IngestionLiveRow, IngestionRecentEventRow } from "@unprice/analytics"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import { z } from "zod"
+import { aiEvidenceSchema } from "./ai-contracts"
 
 export const getIngestionStatusWindowSchema = z
   .object({
@@ -34,6 +35,9 @@ export const getIngestionStatusOutputSchema = z.object({
   }),
   successRate: z.number(),
   freshness: z.object({
+    generatedAt: z.number().int(),
+    dataFrom: z.number().int().nullable(),
+    dataTo: z.number().int().nullable(),
     latestHandledAt: z.number().int().nullable(),
     secondsSinceLatest: z.number().nullable(),
   }),
@@ -70,6 +74,10 @@ export const getIngestionStatusOutputSchema = z.object({
     })
   ),
   answer: z.string(),
+  confidence: z.enum(["high", "medium", "low"]),
+  evidence: z.array(aiEvidenceSchema),
+  warnings: z.array(z.string()),
+  nextActions: z.array(z.string()),
 })
 
 export type GetIngestionStatusInput = z.infer<typeof getIngestionStatusInputSchema>
@@ -163,6 +171,9 @@ export async function getIngestionStatus(
     totals,
     successRate,
     freshness: {
+      generatedAt: now,
+      dataFrom: input.window.from,
+      dataTo: latestHandledAt ?? input.window.to,
       latestHandledAt,
       secondsSinceLatest:
         latestHandledAt === null ? null : Math.max(0, Math.floor((now - latestHandledAt) / 1000)),
@@ -176,6 +187,16 @@ export async function getIngestionStatus(
       totals,
       successRate,
     }),
+    confidence: totals.total > 0 ? "high" : "low",
+    evidence: buildEvidence({
+      input,
+      latestHandledAt,
+      live,
+      rejections,
+      recentEvents,
+    }),
+    warnings: buildWarnings({ totals }),
+    nextActions: buildNextActions({ totals, rejections }),
   }
 
   return Ok(getIngestionStatusOutputSchema.parse(output))
@@ -308,6 +329,88 @@ function maxNumber(values: number[]): number | null {
 function parseTinybirdSecond(second: string): number | null {
   const value = Date.parse(second.includes("T") ? second : `${second.replace(" ", "T")}Z`)
   return Number.isFinite(value) ? value : null
+}
+
+function buildEvidence({
+  input,
+  latestHandledAt,
+  live,
+  rejections,
+  recentEvents,
+}: {
+  input: GetIngestionStatusInput
+  latestHandledAt: number | null
+  live: GetIngestionStatusOutput["live"]
+  rejections: GetIngestionStatusOutput["rejections"]
+  recentEvents: GetIngestionStatusOutput["recentEvents"]
+}): GetIngestionStatusOutput["evidence"] {
+  return [
+    {
+      type: "ingestion_status",
+      id: `${input.projectId}:${input.customerId}:${input.window.from}:${input.window.to}`,
+      source: "tinybird",
+      timestamp: latestHandledAt,
+    },
+    ...live
+      .filter((row) => row.total > 0)
+      .map((row) => ({
+        type: "ingestion_status" as const,
+        id: `live:${row.second}`,
+        source: "tinybird" as const,
+        timestamp: parseTinybirdSecond(row.second),
+      })),
+    ...rejections.map((row) => ({
+      type: "ingestion_status" as const,
+      id: `rejection:${row.sourceId}:${row.eventSlug}:${row.rejectionReason ?? "unknown"}:${
+        row.lastSeenAt
+      }`,
+      source: "tinybird" as const,
+      timestamp: row.lastSeenAt,
+    })),
+    ...recentEvents.map((event) => ({
+      type: "event" as const,
+      id: event.eventId,
+      source: "tinybird" as const,
+      timestamp: event.handledAt,
+    })),
+  ]
+}
+
+function buildWarnings({
+  totals,
+}: {
+  totals: GetIngestionStatusOutput["totals"]
+}): string[] {
+  if (totals.total === 0) {
+    return ["No ingestion events were observed in the requested window."]
+  }
+
+  if (totals.rejected > 0) {
+    return ["Some ingestion events were rejected in the requested window."]
+  }
+
+  return []
+}
+
+function buildNextActions({
+  totals,
+  rejections,
+}: {
+  totals: GetIngestionStatusOutput["totals"]
+  rejections: GetIngestionStatusOutput["rejections"]
+}): string[] {
+  if (totals.total === 0) {
+    return ["Verify the customer_id, source_id, event_slug, and time window."]
+  }
+
+  if (totals.rejected > 0) {
+    const reasons = [...new Set(rejections.map((row) => row.rejectionReason).filter(Boolean))]
+    const suffix = reasons.length > 0 ? `: ${reasons.join(", ")}` : "."
+
+    return [`Inspect rejected events and fix the reported rejection reasons${suffix}`]
+  }
+
+  return ["No immediate action required."]
 }
 
 function buildAnswer({

@@ -70,6 +70,9 @@ describe("getIngestionStatus", () => {
     })
     expect(result.val?.successRate).toBe(2 / 3)
     expect(result.val?.freshness).toEqual({
+      generatedAt: 4_070_908_806_500,
+      dataFrom: fromTs,
+      dataTo: fromTs + 3_000,
       latestHandledAt: fromTs + 3_000,
       secondsSinceLatest: 3,
     })
@@ -95,6 +98,9 @@ describe("getIngestionStatus", () => {
       total: 2,
     })
     expect(result.val?.freshness).toEqual({
+      generatedAt: fromTs + 8_000,
+      dataFrom: fromTs,
+      dataTo: fromTs + 5_000,
       latestHandledAt: fromTs + 5_000,
       secondsSinceLatest: 3,
     })
@@ -187,6 +193,9 @@ describe("getIngestionStatus", () => {
     ])
     expect(result.val?.recentEvents.map((event) => event.eventId)).toEqual(["evt_match"])
     expect(result.val?.freshness).toEqual({
+      generatedAt: fromTs + 9_000,
+      dataFrom: fromTs,
+      dataTo: fromTs + 4_000,
       latestHandledAt: fromTs + 4_000,
       secondsSinceLatest: 5,
     })

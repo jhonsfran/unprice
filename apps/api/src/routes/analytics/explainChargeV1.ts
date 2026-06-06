@@ -1,6 +1,12 @@
 import { createRoute } from "@hono/zod-openapi"
 import { explainChargeEventRowSchema } from "@unprice/analytics"
-import { ExplainChargeError, explainCharge } from "@unprice/services/use-cases"
+import {
+  ExplainChargeError,
+  type ExplainChargeOutput,
+  aiAnswerEnvelopeSchema,
+  aiEvidenceSchema,
+  explainCharge,
+} from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
@@ -46,12 +52,11 @@ export const explainChargeApiResponseSchema = z.object({
   }),
   events: z.array(explainChargeEventRowSchema),
   answer: z.string(),
-  evidence: z.array(
-    z.object({
-      type: z.enum(["ledger_line", "billing_period", "meter_fact"]),
-      id: z.string(),
-    })
-  ),
+  confidence: aiAnswerEnvelopeSchema.shape.confidence,
+  freshness: aiAnswerEnvelopeSchema.shape.freshness,
+  evidence: z.array(aiEvidenceSchema),
+  warnings: aiAnswerEnvelopeSchema.shape.warnings,
+  nextActions: aiAnswerEnvelopeSchema.shape.nextActions,
   pagination: z.object({
     limit: z.number().int(),
     offset: z.number().int(),
@@ -162,7 +167,18 @@ export const registerExplainChargeV1 = (app: App) =>
       },
       events: result.val.events,
       answer: result.val.answer,
-      evidence: result.val.evidence,
+      confidence: buildConfidence({
+        eventCount: result.val.summary.eventCount,
+        eventsReturned: result.val.events.length,
+      }),
+      freshness: {
+        generatedAt: Date.now(),
+        dataFrom: result.val.summary.firstEventAt,
+        dataTo: result.val.summary.lastEventAt,
+      },
+      evidence: buildEvidence(result.val),
+      warnings: buildWarnings(result.val),
+      nextActions: buildNextActions(result.val),
       pagination: {
         limit: result.val.pagination.limit,
         offset: result.val.pagination.offset,
@@ -172,6 +188,85 @@ export const registerExplainChargeV1 = (app: App) =>
 
     return c.json(response, HttpStatusCodes.OK)
   })
+
+function buildConfidence({
+  eventCount,
+  eventsReturned,
+}: {
+  eventCount: number
+  eventsReturned: number
+}): ExplainChargeApiResponse["confidence"] {
+  if (eventCount > 0 || eventsReturned > 0) {
+    return "high"
+  }
+
+  return "medium"
+}
+
+function buildEvidence(result: ExplainChargeOutput): ExplainChargeApiResponse["evidence"] {
+  return [
+    {
+      type: "invoice" as const,
+      id: result.invoice.id,
+      source: "postgres" as const,
+      timestamp: null,
+    },
+    {
+      type: "ledger_line" as const,
+      id: result.line.entryId,
+      source: "ledger" as const,
+      timestamp: null,
+    },
+    {
+      type: "billing_period" as const,
+      id: result.line.billingPeriodId,
+      source: "postgres" as const,
+      timestamp: null,
+    },
+    ...(result.scope.featurePlanVersionId
+      ? [
+          {
+            type: "plan_version" as const,
+            id: result.scope.featurePlanVersionId,
+            source: "postgres" as const,
+            timestamp: null,
+          },
+        ]
+      : []),
+    ...result.events.map((event) => ({
+      type: "meter_fact" as const,
+      id: event.event_id,
+      source: "tinybird" as const,
+      timestamp: event.timestamp,
+    })),
+  ]
+}
+
+function buildWarnings(result: ExplainChargeOutput): string[] {
+  const warnings: string[] = []
+
+  if (result.summary.eventCount === 0) {
+    warnings.push("No rated meter facts were found for this invoice line.")
+  }
+
+  if (result.pagination.hasMore) {
+    warnings.push("Additional rated meter facts are available on later pages.")
+  }
+
+  return warnings
+}
+
+function buildNextActions(result: ExplainChargeOutput): string[] {
+  if (result.summary.eventCount === 0) {
+    return ["Verify the billing period, feature slug, and period key for this invoice line."]
+  }
+
+  if (result.pagination.hasMore) {
+    return ["Request the next page to inspect the remaining rated meter facts."]
+  }
+
+  return ["No immediate action required."]
+}
 
 function explainChargeErrorToApiError(error: unknown): UnpriceApiError {
   if (error instanceof ExplainChargeError) {
