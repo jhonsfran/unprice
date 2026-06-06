@@ -11,6 +11,7 @@ import { LedgerGateway } from "../../ledger"
 import { RatingService } from "../../rating/service"
 import { DrizzleSubscriptionRepository } from "../../subscriptions/repository.drizzle"
 import type { SubscriptionContext } from "../../subscriptions/types"
+import { classifyInvoiceLineSettlement } from "../../billing/invoice-settlement"
 import {
   closeTestDatabaseConnection,
   createTestDatabaseConnection,
@@ -41,7 +42,10 @@ const jan1 = Date.parse("2026-01-01T00:00:00.000Z")
 const feb1 = Date.parse("2026-02-01T00:00:00.000Z")
 const billableNow = feb1 + 60 * 60 * 1000
 const usageAmount = 12_000_000_000
+const fixedAmount = 9_900_000_000
 const invoiceAmount = 21_900_000_000
+const usageBillingPeriodId = "bp_test_arrear_capped_events_jan"
+const usageSubscriptionItemId = "item_test_arrear_capped_events"
 
 function createLogger(): Logger {
   return {
@@ -265,10 +269,139 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
 
     expect(firstRun.phasesProcessed).toBe(1)
     expect(secondRun.phasesProcessed).toBe(0)
-    await expectInvoice()
+    await expectInvoice({
+      amount_due: invoiceAmount,
+      amount_included: 0,
+      amount_paid: 0,
+      gross_amount: invoiceAmount,
+    })
     await expectInvoiceLineAmounts(ledger, [9_900_000_000, usageAmount])
     await expectReservationClosed(reservationId)
     await expectLedgerSources()
+    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+  })
+
+  it("P0-B treats plan-included wallet captures as included invoice usage", async () => {
+    const logger = createLogger()
+    const ledger = new LedgerGateway({ db, logger })
+    const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
+    const analytics = createAnalytics({ events: 1200 })
+    const rating = new RatingService({
+      logger,
+      analytics,
+      grantsManager: new GrantsManager({ db, logger }),
+    })
+    const repo = new DrizzleSubscriptionRepository(db)
+    const services = {
+      wallet,
+      ledger,
+      subscriptions: {},
+    } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
+
+    const activation = await activateSubscription(
+      { services, db, logger },
+      {
+        subscriptionId,
+        projectId,
+        periodStartAt: new Date(jan1),
+        periodEndAt: new Date(feb1),
+        idempotencyKey: "p0-b-plan-included-2026-01",
+        grants: [
+          {
+            amount: usageAmount,
+            reason: "Plan-included usage allowance",
+            source: "plan_included",
+          },
+        ],
+      }
+    )
+    expect(activation.err).toBeUndefined()
+
+    const reservation = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "EUR",
+      entitlementId: eventsEntitlementId,
+      requestedAmount: usageAmount,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      periodStartAt: new Date(jan1),
+      periodEndAt: new Date(feb1),
+      effectiveAt: new Date(jan1),
+      metadata: { owner: "p0-b-plan-included-integration" },
+      idempotencyKey: "reserve:p0-b-plan-included-2026-01:events",
+    })
+    expect(reservation.err).toBeUndefined()
+
+    const reservationId = reservation.val?.reservationId
+    expect(reservationId).toBeDefined()
+    if (!reservationId) return
+
+    const sourceId = `${usageBillingPeriodId}:${usageSubscriptionItemId}`
+    const capture = await wallet.captureReservationUsage({
+      projectId,
+      customerId,
+      currency: "EUR",
+      reservationId,
+      flushSeq: 1,
+      amount: usageAmount,
+      billingPeriodId: usageBillingPeriodId,
+      kind: "usage",
+      statementKey,
+      sourceId,
+      metadata: {
+        owner: "p0-b-plan-included-integration",
+        billing_period_id: usageBillingPeriodId,
+        feature_plan_version_item_id: usageSubscriptionItemId,
+        source_id: sourceId,
+      },
+    })
+    expect(capture.err).toBeUndefined()
+
+    const release = await wallet.releaseReservation({
+      projectId,
+      customerId,
+      currency: "EUR",
+      reservationId,
+      closeReason: "manual",
+      idempotencyKey: `release:${reservationId}:manual`,
+      metadata: {
+        owner: "p0-b-plan-included-integration",
+        source_id: sourceId,
+      },
+      sourceId,
+    })
+    expect(release.err).toBeUndefined()
+
+    const context = await loadSubscriptionContext()
+    const firstRun = await billPeriod({
+      context,
+      logger,
+      db,
+      repo,
+      ratingService: rating,
+      ledgerService: ledger,
+    })
+    const secondRun = await billPeriod({
+      context,
+      logger,
+      db,
+      repo,
+      ratingService: rating,
+      ledgerService: ledger,
+    })
+
+    expect(firstRun.phasesProcessed).toBe(1)
+    expect(secondRun.phasesProcessed).toBe(0)
+    await expectInvoice({
+      amount_due: fixedAmount,
+      amount_included: usageAmount,
+      amount_paid: 0,
+      gross_amount: fixedAmount + usageAmount,
+    })
+    await expectInvoiceLineAmounts(ledger, [fixedAmount, usageAmount])
+    await expectIncludedUsageLine(ledger)
+    await expectReservationClosed(reservationId)
     expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
   })
 })
@@ -288,14 +421,22 @@ async function expectWalletState(
   expect(state.val?.credits).toHaveLength(expected.creditCount)
 }
 
-async function expectInvoice() {
+async function expectInvoice(expected: {
+  amount_due: number
+  amount_included: number
+  amount_paid: number
+  gross_amount: number
+}) {
   const invoices = await db.execute<{
     id: string
     status: "draft"
-    total_amount: number
+    amount_due: number
+    amount_included: number
+    amount_paid: number
+    gross_amount: number
     statement_key: string
   }>(sql`
-    SELECT id, status, total_amount, statement_key
+    SELECT id, status, amount_due, amount_included, amount_paid, gross_amount, statement_key
     FROM unprice_invoices
     WHERE project_id = ${projectId}
       AND subscription_id = ${subscriptionId}
@@ -303,13 +444,16 @@ async function expectInvoice() {
   `)
   const invoiceRows = invoices.rows.map((invoice) => ({
     ...invoice,
-    total_amount: Number(invoice.total_amount),
+    amount_due: Number(invoice.amount_due),
+    amount_included: Number(invoice.amount_included),
+    amount_paid: Number(invoice.amount_paid),
+    gross_amount: Number(invoice.gross_amount),
   }))
   expect(invoiceRows).toEqual([
     expect.objectContaining({
       status: "draft",
       statement_key: statementKey,
-      total_amount: invoiceAmount,
+      ...expected,
     }),
   ])
 
@@ -333,6 +477,33 @@ async function expectInvoiceLineAmounts(ledger: LedgerGateway, expectedAmounts: 
   expect(
     (lines.val ?? []).map((line) => toLedgerMinor(line.amount)).sort((left, right) => left - right)
   ).toEqual(expectedAmounts)
+}
+
+async function expectIncludedUsageLine(ledger: LedgerGateway) {
+  const lines = await ledger.getInvoiceLines({ projectId, statementKey })
+  expect(lines.err).toBeUndefined()
+  const usageLine = (lines.val ?? []).find((line) => {
+    const metadata = line.metadata ?? {}
+    return (
+      metadata.billing_period_id === usageBillingPeriodId &&
+      metadata.feature_plan_version_item_id === usageSubscriptionItemId &&
+      metadata.kind === "usage"
+    )
+  })
+
+  expect(usageLine).toBeDefined()
+  if (!usageLine) return
+
+  expect({
+    ...classifyInvoiceLineSettlement({
+      amount: toLedgerMinor(usageLine.amount),
+      metadata: usageLine.metadata,
+    }),
+  }).toMatchObject({
+    collectable: false,
+    settlementSource: "plan_included",
+    settlementStatus: "included",
+  })
 }
 
 async function expectReservationClosed(reservationId: string) {
@@ -377,5 +548,5 @@ async function expectLedgerSources() {
     WHERE i.project_id = ${projectId}
       AND i.statement_key = ${statementKey}
   `)
-  expect(statementEntries.rows).toEqual([{ count: 4 }])
+  expect(statementEntries.rows).toEqual([{ count: 6 }])
 }

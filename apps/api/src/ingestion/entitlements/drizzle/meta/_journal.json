@@ -120,6 +120,13 @@
       "when": 1780151580001,
       "tag": "0017_luxuriant_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1780155180001,
+      "tag": "0018_wallet_invoice_metadata",
+      "breakpoints": true
     }
   ]
 }

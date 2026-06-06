@@ -81,6 +81,9 @@ export const walletReservationTable = sqliteTable("wallet_reservation", {
   customerId: text("customer_id"),
   currency: text("currency").notNull(),
   reservationEndAt: integer("reservation_end_at"),
+  billingPeriodId: text("billing_period_id"),
+  featurePlanVersionItemId: text("feature_plan_version_item_id"),
+  statementKey: text("statement_key"),
 
   reservationId: text("reservation_id"),
   allocationAmount: integer("allocation_amount").notNull().default(0),

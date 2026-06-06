@@ -1946,6 +1946,9 @@ export class EntitlementWindowDO extends DurableObject {
             customerId: window.customerId,
             currency: window.currency,
             reservationEndAt: window.reservationEndAt,
+            billingPeriodId: window.billingPeriodId,
+            featurePlanVersionItemId: window.featurePlanVersionItemId,
+            statementKey: window.statementKey,
             consumedAmount: window.consumedAmount,
             flushedAmount: window.flushedAmount,
             unflushedAmount: Math.max(0, window.consumedAmount - window.flushedAmount),
@@ -2696,13 +2699,27 @@ export class EntitlementWindowDO extends DurableObject {
       reservationId: window.reservationId,
       flushSeq: nextSeq,
       amount: unflushed,
-      statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
+      billingPeriodId: window.billingPeriodId ?? undefined,
+      kind: "usage",
+      statementKey: window.statementKey ?? `${window.reservationId}:${window.reservationEndAt ?? 0}`,
       metadata: {
+        billing_period_id: window.billingPeriodId,
+        feature_plan_version_item_id: window.featurePlanVersionItemId,
+        source_id:
+          window.billingPeriodId && window.featurePlanVersionItemId
+            ? `${window.billingPeriodId}:${window.featurePlanVersionItemId}`
+            : durableObjectId,
         requestedBy: "durable_object",
         requestedById: durableObjectId,
         durableObjectId,
+        durable_object_id: durableObjectId,
+        reservation_id: window.reservationId,
+        flush_seq: nextSeq,
       },
-      sourceId: durableObjectId,
+      sourceId:
+        window.billingPeriodId && window.featurePlanVersionItemId
+          ? `${window.billingPeriodId}:${window.featurePlanVersionItemId}`
+          : durableObjectId,
     })
 
     if (!captureResult.err) {
@@ -2989,6 +3006,9 @@ export class EntitlementWindowDO extends DurableObject {
       customerId: string
       currency: string
       reservationEndAt: number
+      billingPeriodId?: string | null
+      featurePlanVersionItemId?: string | null
+      statementKey?: string | null
     }
   ): void {
     tx.insert(walletReservationTable)
@@ -2998,6 +3018,9 @@ export class EntitlementWindowDO extends DurableObject {
         customerId: params.customerId,
         currency: params.currency,
         reservationEndAt: params.reservationEndAt,
+        billingPeriodId: params.billingPeriodId ?? null,
+        featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
+        statementKey: params.statementKey ?? null,
       })
       .onConflictDoNothing({ target: walletReservationTable.id })
       .run()
@@ -3008,6 +3031,9 @@ export class EntitlementWindowDO extends DurableObject {
         customerId: params.customerId,
         currency: params.currency,
         reservationEndAt: params.reservationEndAt,
+        billingPeriodId: params.billingPeriodId ?? null,
+        featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
+        statementKey: params.statementKey ?? null,
       })
       .run()
   }
@@ -3846,6 +3872,9 @@ export class EntitlementWindowDO extends DurableObject {
         customerId: walletReservationTable.customerId,
         currency: walletReservationTable.currency,
         reservationEndAt: walletReservationTable.reservationEndAt,
+        billingPeriodId: walletReservationTable.billingPeriodId,
+        featurePlanVersionItemId: walletReservationTable.featurePlanVersionItemId,
+        statementKey: walletReservationTable.statementKey,
         reservationId: walletReservationTable.reservationId,
         allocationAmount: walletReservationTable.allocationAmount,
         consumedAmount: walletReservationTable.consumedAmount,
@@ -3877,6 +3906,9 @@ export class EntitlementWindowDO extends DurableObject {
       customerId: row.customerId ?? null,
       currency: String(row.currency ?? ""),
       reservationEndAt: row.reservationEndAt ?? null,
+      billingPeriodId: row.billingPeriodId ?? null,
+      featurePlanVersionItemId: row.featurePlanVersionItemId ?? null,
+      statementKey: row.statementKey ?? null,
       reservationId: row.reservationId ?? null,
       allocationAmount: Number(row.allocationAmount ?? 0),
       consumedAmount: Number(row.consumedAmount ?? 0),
@@ -4261,13 +4293,27 @@ export class EntitlementWindowDO extends DurableObject {
       reservationId: window.reservationId,
       flushSeq: trigger.flushSeq,
       amount: trigger.flushAmount,
-      statementKey: `${window.reservationId}:${window.reservationEndAt ?? 0}`,
+      billingPeriodId: window.billingPeriodId ?? undefined,
+      kind: "usage",
+      statementKey: window.statementKey ?? `${window.reservationId}:${window.reservationEndAt ?? 0}`,
       metadata: {
+        billing_period_id: window.billingPeriodId,
+        feature_plan_version_item_id: window.featurePlanVersionItemId,
+        source_id:
+          window.billingPeriodId && window.featurePlanVersionItemId
+            ? `${window.billingPeriodId}:${window.featurePlanVersionItemId}`
+            : durableObjectId,
         requestedBy: "durable_object",
         requestedById: durableObjectId,
         durableObjectId,
+        durable_object_id: durableObjectId,
+        reservation_id: window.reservationId,
+        flush_seq: trigger.flushSeq,
       },
-      sourceId: durableObjectId,
+      sourceId:
+        window.billingPeriodId && window.featurePlanVersionItemId
+          ? `${window.billingPeriodId}:${window.featurePlanVersionItemId}`
+          : durableObjectId,
     })
 
     if (captureResult.err) {
@@ -4662,6 +4708,9 @@ export class EntitlementWindowDO extends DurableObject {
       customerId: input.customerId,
       currency: meter.currency,
       reservationEndAt: plan.bucket.end,
+      billingPeriodId: null,
+      featurePlanVersionItemId: null,
+      statementKey: null,
     })
 
     // For a reused active reservation, only refresh the columns that

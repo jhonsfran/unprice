@@ -28,6 +28,7 @@ import {
 } from "../ledger"
 import { UnPriceLedgerError } from "../ledger"
 import { toErrorContext } from "../utils/log-context"
+import { mapWalletFundingToSettlement } from "../billing/invoice-settlement"
 import { UnPriceWalletError } from "./errors"
 
 type FundingAllocation = {
@@ -35,6 +36,14 @@ type FundingAllocation = {
   amount: number
   walletCreditId?: string
   grantSource?: WalletCreditSource
+}
+
+type CapturedReservationFundingAllocation = {
+  amount: number
+  fundingLegId: string
+  grantSource: WalletCreditSource | null
+  source: "granted" | "purchased"
+  walletCreditId: string | null
 }
 
 export interface WalletDeps {
@@ -89,6 +98,8 @@ export interface CaptureReservationUsageInput {
   flushSeq: number
   amount: number
   statementKey: string
+  billingPeriodId?: string
+  kind?: string
   metadata?: Record<string, unknown>
   sourceId?: string
 }
@@ -545,25 +556,76 @@ export class WalletService {
           })
           if (captured.err) return captured
 
-          const transferResult = await this.ledger.createTransfer(
+          const groupedAllocations = new Map<
+            string,
             {
-              projectId: input.projectId,
-              fromAccount: keys.reserved,
-              toAccount: keys.consumed,
-              amount: fromLedgerMinor(input.amount, input.currency),
-              source: { type: "wallet_capture_usage", id: idempotencyKey },
-              metadata: {
-                ...(captureMetadata ?? {}),
-                flow: "capture",
-                ...(input.sourceId ? { source_id: input.sourceId } : {}),
-                reservation_id: input.reservationId,
-                flush_seq: input.flushSeq,
-                idempotency_key: idempotencyKey,
+              allocation: CapturedReservationFundingAllocation
+              amount: number
+              settlement: ReturnType<typeof mapWalletFundingToSettlement>
+            }
+          >()
+
+          for (const allocation of captured.val) {
+            const settlement =
+              allocation.source === "purchased"
+                ? mapWalletFundingToSettlement({ source: "purchased", grantSource: null })
+                : mapWalletFundingToSettlement({
+                    source: "granted",
+                    grantSource: allocation.grantSource,
+                  })
+            const groupKey = `${settlement.settlementSource}:${allocation.walletCreditId ?? "wallet"}`
+            const existing = groupedAllocations.get(groupKey)
+            if (existing) {
+              existing.amount += allocation.amount
+              continue
+            }
+            groupedAllocations.set(groupKey, {
+              allocation,
+              amount: allocation.amount,
+              settlement,
+            })
+          }
+
+          for (const [groupKey, group] of groupedAllocations) {
+            const { allocation, settlement } = group
+            const sourceId = `capture:${input.reservationId}:${input.flushSeq}:${groupKey}`
+            const invoiceMetadata =
+              settlement.invoiceVisibleCapture && input.billingPeriodId
+                ? {
+                    billing_period_id: input.billingPeriodId,
+                    invoice_visible: true,
+                    kind: input.kind ?? "usage",
+                    statement_key: input.statementKey,
+                    ...(input.sourceId ? { source_id: input.sourceId } : {}),
+                  }
+                : { invoice_visible: false }
+
+            const transferResult = await this.ledger.createTransfer(
+              {
+                projectId: input.projectId,
+                fromAccount: keys.reserved,
+                toAccount: keys.consumed,
+                amount: fromLedgerMinor(group.amount, input.currency),
+                source: { type: "wallet_capture_usage", id: sourceId },
+                statementKey: input.statementKey,
+                metadata: {
+                  ...(captureMetadata ?? {}),
+                  ...invoiceMetadata,
+                  collectable: settlement.collectable,
+                  flow: "capture",
+                  flush_seq: input.flushSeq,
+                  idempotency_key: sourceId,
+                  reservation_id: input.reservationId,
+                  settlement_source: settlement.settlementSource,
+                  settlement_status: settlement.settlementStatus,
+                  wallet_credit_id: allocation.walletCreditId,
+                  wallet_credit_source: allocation.grantSource,
+                },
               },
-            },
-            tx
-          )
-          if (transferResult.err) throw this.wrapLedgerError(transferResult.err)
+              tx
+            )
+            if (transferResult.err) throw this.wrapLedgerError(transferResult.err)
+          }
         }
 
         const output: CaptureReservationUsageOutput = { capturedAmount: input.amount }
@@ -1611,7 +1673,7 @@ export class WalletService {
   private async captureFundingLegs(
     tx: Transaction,
     input: { projectId: string; reservationId: string; amount: number }
-  ): Promise<Result<void, UnPriceWalletError>> {
+  ): Promise<Result<CapturedReservationFundingAllocation[], UnPriceWalletError>> {
     const legs = await this.readFundingLegs(tx, input)
     if (legs.length === 0 && input.amount > 0) {
       return Err(
@@ -1637,12 +1699,20 @@ export class WalletService {
     }
 
     let remaining = input.amount
+    const allocations: CapturedReservationFundingAllocation[] = []
     for (const leg of legs) {
       if (remaining <= 0) break
       const stillReserved = this.stillReservedAmount(leg)
       if (stillReserved <= 0) continue
 
       const capturedNow = Math.min(remaining, stillReserved)
+      allocations.push({
+        amount: capturedNow,
+        fundingLegId: leg.id,
+        grantSource: leg.grantSource,
+        source: leg.source,
+        walletCreditId: leg.walletCreditId,
+      })
       await tx
         .update(entitlementReservationFundingLegs)
         .set({ capturedAmount: leg.capturedAmount + capturedNow })
@@ -1655,7 +1725,7 @@ export class WalletService {
       remaining -= capturedNow
     }
 
-    return Ok(undefined)
+    return Ok(allocations)
   }
 
   private computeReservationRelease(legs: EntitlementReservationFundingLeg[]): Result<

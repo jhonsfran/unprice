@@ -305,6 +305,9 @@ export const entitlementWindowStatusSchema = z.object({
       customerId: z.string().nullable(),
       currency: z.string().nullable(),
       reservationEndAt: z.number().nullable(),
+      billingPeriodId: z.string().nullable(),
+      featurePlanVersionItemId: z.string().nullable(),
+      statementKey: z.string().nullable(),
       consumedAmount: z.number().int(),
       flushedAmount: z.number().int(),
       unflushedAmount: z.number().int(),
@@ -403,6 +406,9 @@ export type WalletReservationSnapshot = {
   customerId: string | null
   currency: string
   reservationEndAt: number | null
+  billingPeriodId: string | null
+  featurePlanVersionItemId: string | null
+  statementKey: string | null
   reservationId: string | null
   allocationAmount: number
   consumedAmount: number
