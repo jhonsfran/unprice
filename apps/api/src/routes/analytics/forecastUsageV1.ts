@@ -18,7 +18,7 @@ export const forecastUsageApiRequestSchema = z.object({
   customer_id: z.string(),
   feature_slug: z.string(),
   period_key: z.string().optional(),
-  horizon_days: z.number().int().min(1).max(31).default(14),
+  horizon_days: z.number().int().min(1).max(31).optional().default(14),
 })
 
 export const forecastUsageApiResponseSchema = aiAnswerEnvelopeSchema.extend({

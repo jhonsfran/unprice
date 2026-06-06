@@ -5134,7 +5134,7 @@ export interface operations {
           feature_slug: string
           period_key?: string
           /** @default 14 */
-          horizon_days: number
+          horizon_days?: number
         }
       }
     }

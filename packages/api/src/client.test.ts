@@ -41,6 +41,16 @@ describe("Unprice client", () => {
       period_key?: string
       horizon_days?: number
     }>()
+    expectTypeOf<{
+      customer_id: string
+      feature_slug: string
+    }>().toMatchTypeOf<Parameters<typeof client.analytics.forecastUsage>[0]>()
+    expectTypeOf<{
+      customer_id: string
+      feature_slug: string
+    }>().toMatchTypeOf<
+      paths["/v1/analytics/forecast-usage"]["post"]["requestBody"]["content"]["application/json"]
+    >()
     expectTypeOf<ExplainChargeEventRow["tier_mode"]>().toEqualTypeOf<
       "volume" | "graduated" | null
     >()
