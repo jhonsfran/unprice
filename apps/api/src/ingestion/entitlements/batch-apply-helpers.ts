@@ -38,6 +38,7 @@ type WalletReservationRefillDecisionState = {
 
 type WalletReservationRefillPlan = {
   flushAmount: number
+  flushQuantity: number
   refillAmount: number
   refillDecision: ReturnType<typeof computeRefillDecision>
   refillStateUpdate: WalletReservationRefillStateUpdate | null
@@ -58,6 +59,7 @@ export type WalletReservationSpendPlan =
       currentRemaining: number
       effectiveCostAmount: number
       flushAmount: number
+      flushQuantity: number
       kind: "funded"
       refillAmount: number
       refillStateUpdate: WalletReservationRefillStateUpdate | null
@@ -71,6 +73,7 @@ export type WalletReservationSpendPlan =
 
 export type WalletReservationSpendStateUpdate = {
   consumedAmount: number
+  consumedQuantity: number
   lastEventAt: number
   lastRateSampledAtMs: number | null
   maxEventCostAmount: number
@@ -80,6 +83,7 @@ export type WalletReservationSpendStateUpdate = {
 
 export type WalletReservationRefillStateUpdate = {
   pendingFlushAmount: number
+  pendingFlushQuantity: number
   pendingFlushFinal: false
   pendingFlushSeq: number
   pendingRefillAmount: number
@@ -124,9 +128,10 @@ export function planWalletReservationSpend(params: {
   eventTimestamp: number
   policy: ReservationPolicy
   totalCost: number
+  totalUnits: number
   window: OpenWalletReservationSnapshot
 }): WalletReservationSpendPlan {
-  const { createdAt, entitlement, eventTimestamp, policy, totalCost, window } = params
+  const { createdAt, entitlement, eventTimestamp, policy, totalCost, totalUnits, window } = params
   const spendCost = computeWalletReservationSpendCost({ totalCost, window })
 
   if (spendCost.effectiveCostAmount > spendCost.currentRemaining) {
@@ -140,11 +145,13 @@ export function planWalletReservationSpend(params: {
   }
 
   const nextConsumedAmount = window.consumedAmount + spendCost.effectiveCostAmount
+  const nextConsumedQuantity = window.consumedQuantity + Math.max(0, totalUnits)
   const refillPlan = planWalletReservationRefill({
     createdAt,
     entitlement,
     eventTimestamp,
     nextConsumedAmount,
+    nextConsumedQuantity,
     policy,
     totalCost,
     window,
@@ -155,6 +162,7 @@ export function planWalletReservationSpend(params: {
     currentRemaining: spendCost.currentRemaining,
     effectiveCostAmount: spendCost.effectiveCostAmount,
     flushAmount: refillPlan.flushAmount,
+    flushQuantity: refillPlan.flushQuantity,
     kind: "funded",
     refillAmount: refillPlan.refillAmount,
     refillStateUpdate: refillPlan.refillStateUpdate,
@@ -165,6 +173,7 @@ export function planWalletReservationSpend(params: {
     totalCost,
     walletStateUpdate: {
       consumedAmount: nextConsumedAmount,
+      consumedQuantity: nextConsumedQuantity,
       targetReservationAmount: refillPlan.refillDecision.targetReservationAmount,
       spendEwmaAmount: refillPlan.spendVelocity.spendEwmaAmount,
       lastRateSampledAtMs: refillPlan.spendVelocity.lastRateSampledAtMs,
@@ -194,18 +203,29 @@ function planWalletReservationRefill(params: {
   entitlement: Pick<EntitlementConfigInput, "featureConfig">
   eventTimestamp: number
   nextConsumedAmount: number
+  nextConsumedQuantity: number
   policy: ReservationPolicy
   totalCost: number
   window: OpenWalletReservationSnapshot
 }): WalletReservationRefillPlan {
-  const { createdAt, entitlement, eventTimestamp, nextConsumedAmount, policy, totalCost, window } =
-    params
+  const {
+    createdAt,
+    entitlement,
+    eventTimestamp,
+    nextConsumedAmount,
+    nextConsumedQuantity,
+    policy,
+    totalCost,
+    window,
+  } = params
   const flushAmount = Math.max(0, nextConsumedAmount - window.flushedAmount)
+  const flushQuantity = Math.max(0, nextConsumedQuantity - window.flushedQuantity)
   const hasPendingNonFinalFlush = hasPendingNonFinalReservationFlush(window)
   const { refillDecision, spendVelocity } = resolveWalletReservationRefillDecisionState({
     createdAt,
     entitlement,
     flushAmount,
+    flushQuantity,
     hasPendingNonFinalFlush,
     nextConsumedAmount,
     policy,
@@ -214,6 +234,7 @@ function planWalletReservationRefill(params: {
   })
   const refillStateUpdate = createWalletReservationRefillStateUpdate({
     flushAmount,
+    flushQuantity,
     hasPendingNonFinalFlush,
     refillDecision,
     window,
@@ -221,6 +242,7 @@ function planWalletReservationRefill(params: {
 
   return {
     flushAmount,
+    flushQuantity,
     refillAmount: refillDecision.refillAmount,
     refillDecision,
     refillStateUpdate,
@@ -242,6 +264,7 @@ function resolveWalletReservationRefillDecisionState(params: {
   createdAt: number
   entitlement: Pick<EntitlementConfigInput, "featureConfig">
   flushAmount: number
+  flushQuantity: number
   hasPendingNonFinalFlush: boolean
   nextConsumedAmount: number
   policy: ReservationPolicy
@@ -334,11 +357,12 @@ function computeWalletReservationRefillDecision(params: {
 
 function createWalletReservationRefillStateUpdate(params: {
   flushAmount: number
+  flushQuantity: number
   hasPendingNonFinalFlush: boolean
   refillDecision: ReturnType<typeof computeRefillDecision>
   window: OpenWalletReservationSnapshot
 }): WalletReservationRefillStateUpdate | null {
-  const { flushAmount, hasPendingNonFinalFlush, refillDecision, window } = params
+  const { flushAmount, flushQuantity, hasPendingNonFinalFlush, refillDecision, window } = params
   if (
     window.refillInFlight ||
     (!hasPendingNonFinalFlush && (!refillDecision.needsRefill || refillDecision.refillAmount <= 0))
@@ -350,6 +374,9 @@ function createWalletReservationRefillStateUpdate(params: {
   const pendingFlushAmount = hasPendingNonFinalFlush
     ? (window.pendingFlushAmount ?? flushAmount)
     : flushAmount
+  const pendingFlushQuantity = hasPendingNonFinalFlush
+    ? (window.pendingFlushQuantity ?? flushQuantity)
+    : flushQuantity
   const refillAmount = hasPendingNonFinalFlush
     ? window.pendingRefillAmount
     : refillDecision.refillAmount
@@ -359,6 +386,7 @@ function createWalletReservationRefillStateUpdate(params: {
     pendingFlushSeq: nextSeq,
     pendingFlushFinal: false,
     pendingFlushAmount,
+    pendingFlushQuantity,
     pendingRefillAmount: refillAmount,
   }
 }
@@ -374,6 +402,7 @@ function createWalletReservationRefillTrigger(
   return {
     flushSeq: refillStateUpdate.pendingFlushSeq,
     flushAmount: refillStateUpdate.pendingFlushAmount,
+    flushQuantity: refillStateUpdate.pendingFlushQuantity,
     refillAmount: refillStateUpdate.pendingRefillAmount,
     effectiveAt: eventTimestamp,
   }

@@ -100,6 +100,7 @@ export type ApplyInnerOptions = {
 export type RefillTrigger = {
   flushSeq: number
   flushAmount: number
+  flushQuantity: number
   refillAmount: number
   effectiveAt: number
 }
@@ -321,16 +322,21 @@ export const entitlementWindowStatusSchema = z.object({
       cycleEndAt: z.number().nullable(),
       cycleStartAt: z.number().nullable(),
       featurePlanVersionItemId: z.string().nullable(),
+      featureSlug: z.string().nullable(),
       statementKey: z.string().nullable(),
       consumedAmount: z.number().int(),
       flushedAmount: z.number().int(),
       unflushedAmount: z.number().int(),
+      consumedQuantity: z.number(),
+      flushedQuantity: z.number(),
+      unflushedQuantity: z.number(),
       allocationAmount: z.number().int(),
       refillInFlight: z.boolean(),
       flushSeq: z.number().int(),
       pendingFlushSeq: z.number().int().nullable(),
       pendingFlushFinal: z.boolean(),
       pendingFlushAmount: z.number().int().nullable(),
+      pendingFlushQuantity: z.number().nullable(),
       pendingRefillAmount: z.number().int(),
       lastEventAt: z.number().nullable(),
       lastFlushedAt: z.number().nullable(),
@@ -424,11 +430,14 @@ export type WalletReservationSnapshot = {
   cycleEndAt: number | null
   cycleStartAt: number | null
   featurePlanVersionItemId: string | null
+  featureSlug: string | null
   statementKey: string | null
   reservationId: string | null
   allocationAmount: number
   consumedAmount: number
   flushedAmount: number
+  consumedQuantity: number
+  flushedQuantity: number
   refillThresholdBps: number
   refillChunkAmount: number
   targetReservationAmount: number
@@ -437,6 +446,7 @@ export type WalletReservationSnapshot = {
   maxEventCostAmount: number
   pendingRefillAmount: number
   pendingFlushAmount: number | null
+  pendingFlushQuantity: number | null
   refillInFlight: boolean
   flushSeq: number
   pendingFlushSeq: number | null

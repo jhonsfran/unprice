@@ -82,7 +82,10 @@ export interface InsertPhaseInput {
 export interface UpdatePhaseInput {
   phaseId: string
   data: Partial<
-    Pick<SubscriptionPhase, "startAt" | "endAt" | "creditLinePolicy" | "creditLineAmount">
+    Pick<
+      SubscriptionPhase,
+      "startAt" | "endAt" | "paymentMethodId" | "creditLinePolicy" | "creditLineAmount"
+    >
   >
 }
 

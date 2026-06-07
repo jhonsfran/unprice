@@ -121,7 +121,11 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
     )
 
     const currentPaymentMethodId = form.getValues("paymentMethodId" as FieldPath<TFieldValues>)
-    if (!currentPaymentMethodId) {
+    const hasCurrentPaymentMethod =
+      typeof currentPaymentMethodId === "string" &&
+      (data?.paymentMethods.some((method) => method.id === currentPaymentMethodId) ?? false)
+
+    if (!hasCurrentPaymentMethod) {
       form.setValue(
         "paymentMethodId" as FieldPath<TFieldValues>,
         defaultPaymentMethod.id as PathValue<TFieldValues, FieldPath<TFieldValues>>,

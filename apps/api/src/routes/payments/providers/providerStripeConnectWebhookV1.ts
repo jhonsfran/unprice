@@ -191,11 +191,12 @@ export const registerProviderStripeConnectWebhookV1 = (app: App) =>
       )
     }
 
-    const { customer, subscription, wallet } = c.get("services")
+    const { billing, customer, subscription, wallet } = c.get("services")
 
     const { err, val } = await processWebhookEvent(
       {
         services: {
+          billing,
           customers: customer,
           subscriptions: subscription,
           wallet,

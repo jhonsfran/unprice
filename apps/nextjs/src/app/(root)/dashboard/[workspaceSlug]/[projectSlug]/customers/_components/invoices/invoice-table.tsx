@@ -1,11 +1,15 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@unprice/ui/table"
 
-import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Separator } from "@unprice/ui/separator"
 import { Typography } from "@unprice/ui/typography"
 import { formatDate } from "~/lib/dates"
+import {
+  formatInvoiceCurrencyMinor,
+  formatInvoiceMoney,
+  toInvoiceCurrencyMinor,
+} from "./format-invoice-money"
 
 export function InvoiceTable({
   invoice,
@@ -14,8 +18,56 @@ export function InvoiceTable({
   workspaceSlug: string
   projectSlug: string
 }) {
-  const formatLedger = (amount: number) =>
-    formatMoney(toDecimal(fromLedgerMinor(amount, invoice.currency)), invoice.currency)
+  const formatLedger = (amount: number) => formatInvoiceMoney(amount, invoice.currency)
+  const displayedTotals =
+    invoice.lines.length > 0
+      ? invoice.lines.reduce(
+          (totals, line) => ({
+            grossAmount: totals.grossAmount + toInvoiceCurrencyMinor(line.amount, invoice.currency),
+            amountPaid:
+              totals.amountPaid + toInvoiceCurrencyMinor(line.amountPaid, invoice.currency),
+            amountIncluded:
+              totals.amountIncluded + toInvoiceCurrencyMinor(line.amountIncluded, invoice.currency),
+            amountDue: totals.amountDue + toInvoiceCurrencyMinor(line.amountDue, invoice.currency),
+          }),
+          {
+            grossAmount: 0,
+            amountPaid: 0,
+            amountIncluded: 0,
+            amountDue: 0,
+          }
+        )
+      : {
+          grossAmount: toInvoiceCurrencyMinor(invoice.grossAmount, invoice.currency),
+          amountPaid: toInvoiceCurrencyMinor(invoice.amountPaid, invoice.currency),
+          amountIncluded: toInvoiceCurrencyMinor(invoice.amountIncluded, invoice.currency),
+          amountDue: toInvoiceCurrencyMinor(invoice.amountDue, invoice.currency),
+        }
+  const formatDisplayedTotal = (amount: number) =>
+    formatInvoiceCurrencyMinor(amount, invoice.currency)
+  const getLineStatus = (line: (typeof invoice.lines)[number]) => {
+    if (line.amount === 0 && !line.collectable) {
+      return "No charge"
+    }
+
+    if (line.settlementStatus === "due") {
+      return "Due"
+    }
+
+    if (line.settlementStatus === "paid") {
+      return "Paid"
+    }
+
+    return "Included"
+  }
+
+  const getLineStatusVariant = (line: (typeof invoice.lines)[number]) => {
+    if (line.settlementStatus === "due") {
+      return "default"
+    }
+
+    return "secondary"
+  }
 
   return (
     <div className="mb-8">
@@ -24,8 +76,7 @@ export function InvoiceTable({
           <TableHeader>
             <TableRow className="bg-muted/50">
               <TableHead className="font-semibold">Description</TableHead>
-              <TableHead className="font-semibold">Kind</TableHead>
-              <TableHead className="font-semibold">Settlement</TableHead>
+              <TableHead className="font-semibold">Status</TableHead>
               <TableHead className="text-right font-semibold">Qty</TableHead>
               <TableHead className="text-right font-semibold">Amount</TableHead>
             </TableRow>
@@ -33,7 +84,7 @@ export function InvoiceTable({
           <TableBody>
             {invoice.lines.length === 0 ? (
               <TableRow>
-                <TableCell className="space-y-2" colSpan={5}>
+                <TableCell className="space-y-2" colSpan={4}>
                   <Typography variant="h6" affects="removePaddingMargin">
                     No billable charges
                   </Typography>
@@ -68,17 +119,8 @@ export function InvoiceTable({
                       )}
                     </span>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{line.kind}</TableCell>
                   <TableCell>
-                    <Badge variant={line.settlementStatus === "due" ? "default" : "secondary"}>
-                      {line.settlementStatus === "due"
-                        ? line.settlementSource === "credit_line"
-                          ? "Due - Credit line"
-                          : "Due - Provider"
-                        : line.settlementStatus === "paid"
-                          ? "Paid - Cash wallet"
-                          : `Included - ${line.settlementSource.replace("_", " ")}`}
-                    </Badge>
+                    <Badge variant={getLineStatusVariant(line)}>{getLineStatus(line)}</Badge>
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">
                     {line.quantity ?? "-"}
@@ -97,19 +139,21 @@ export function InvoiceTable({
           <Separator />
           <div className="flex justify-between text-base">
             <span className="font-semibold">Gross:</span>
-            <span>{formatLedger(invoice.grossAmount)}</span>
+            <span>{formatDisplayedTotal(displayedTotals.grossAmount)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Paid:</span>
-            <span>{formatLedger(invoice.amountPaid)}</span>
+            <span>{formatDisplayedTotal(displayedTotals.amountPaid)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Included:</span>
-            <span>{formatLedger(invoice.amountIncluded)}</span>
+            <span>{formatDisplayedTotal(displayedTotals.amountIncluded)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Total Due:</span>
-            <span className="font-bold text-xl">{formatLedger(invoice.amountDue)}</span>
+            <span className="font-bold text-xl">
+              {formatDisplayedTotal(displayedTotals.amountDue)}
+            </span>
           </div>
         </div>
       </div>

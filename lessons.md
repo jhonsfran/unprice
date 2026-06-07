@@ -108,12 +108,30 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-07: Customer-facing invoice money should quantize ledger-scale amounts through
+  `formatAmountForProvider` before display; keep sub-cent precision internal.
 - 2026-06-06: Invoice headers store `grossAmount`, `amountDue`, `amountPaid`, and
   `amountIncluded`; ledger lines remain the invoice source of truth, and
   collectability comes from settlement metadata derived from wallet funding legs.
 - 2026-06-06: Plan publish should set `paymentMethodRequired` from any non-zero
   `charge_automatically` feature price path, not flat price alone; `createPhase`
   resolves the provider default before inserting a required payment method.
+- 2026-06-07: `createPhase` status decisions must use the resolved/stamped
+  `paymentMethodIdToUse`; sandbox defaults can be discovered during phase creation and should
+  not park direct signup in `pending_payment`.
+- 2026-06-07: Wallet-backed usage invoices should project wallet capture ledger lines; do not
+  re-rate capped wallet captures through Tinybird during BILL or they can zero/duplicate invoices.
+- 2026-06-07: Wallet capture ledger metadata must include `feature_slug` and `quantity`; invoice
+  read models should consume ledger-projected descriptions/quantities instead of looking up usage
+  feature labels from billing periods.
+- 2026-06-07: Subscription phase edits must persist `paymentMethodId` in `updatePhase`; the
+  Next.js phase form should not reset a selected payment method from plan-version defaults.
+- 2026-06-07: Transaction-backed phase creation must materialize billing periods after the outer
+  transaction commits and before wallet activation; async `waitUntil` period generation can race
+  immediate usage ingestion and leave EntitlementWindowDO without invoice context.
+- 2026-06-07: When signup or provider-completion use cases materialize billing periods, wire
+  `billing` through API route service bags and `apps/api/src/hono/env.ts`; missing adapter wiring
+  can return signup `success=false` with a hidden `generateBillingPeriods` error.
 - 2026-06-06: `explainCharge` derives entitlement usage period keys and queries Tinybird only for
   usage features; non-usage invoice lines use `billing_period:<id>` scope with ledger and billing
   period evidence.

@@ -17,7 +17,7 @@ import { settlePrepaidInvoiceToWallet } from "../billing/settle-invoice"
 import { completeProviderSignUp } from "./complete-provider-sign-up"
 
 type ProcessWebhookEventDeps = {
-  services: Pick<ServiceContext, "customers" | "subscriptions" | "wallet">
+  services: Pick<ServiceContext, "customers" | "subscriptions" | "wallet" | "billing">
   db: Database
   logger: Logger
   analytics: Analytics
@@ -238,6 +238,7 @@ async function applyWebhookEvent({
     const completed = await completeProviderSignUp(
       {
         services: {
+          billing: deps.services.billing,
           customers: deps.services.customers,
           subscriptions: deps.services.subscriptions,
         },

@@ -378,7 +378,7 @@ describe("LedgerGateway", () => {
                 id: "entry-2",
                 amount: "2.50000000",
                 created_at: new Date("2024-02-02"),
-                metadata: { kind: "usage", description: "API calls", quantity: 250 },
+                metadata: { kind: "usage", feature_slug: "api_calls", quantity: 250 },
                 currency: "USD",
               },
             ],
@@ -402,6 +402,7 @@ describe("LedgerGateway", () => {
       expect(result.val![0]!.quantity).toBe(1)
       expect(result.val![0]!.statementKey).toBe("stmt-abc")
       expect(result.val![1]!.kind).toBe("usage")
+      expect(result.val![1]!.description).toBe("api_calls")
       expect(result.val![1]!.quantity).toBe(250)
     })
 

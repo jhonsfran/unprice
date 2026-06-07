@@ -68,7 +68,7 @@ export function mapWalletFundingToSettlement(
   if (input.grantSource === "credit_line") {
     return {
       collectable: true,
-      invoiceVisibleCapture: false,
+      invoiceVisibleCapture: true,
       settlementSource: "credit_line",
       settlementStatus: "due",
     }

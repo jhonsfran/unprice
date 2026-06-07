@@ -1120,7 +1120,7 @@ export class SubscriptionService {
         const isAdvancePending =
           versionStrategy?.billPhaseTrigger === "period_start" &&
           paymentMethodRequired &&
-          (!paymentMethodId || paymentMethodId === "")
+          (!paymentMethodIdToUse || paymentMethodIdToUse === "")
         const status =
           trialUnitsToUse > 0 ? "trialing" : isAdvancePending ? "pending_payment" : "active"
         await txRepo.updateSubscription({
@@ -1175,24 +1175,21 @@ export class SubscriptionService {
       return Ok(phase)
     })
 
-    // generate the billing periods for the new phase on background
-    // this can fail but background jobs can retry
-    this.waitUntil(
-      // TODO: report the event to analytics with more context
-      // this.analytics.trackEvent({
-      //   event: "subscription.phase.created",
-      //   properties: {
-      //     subscriptionId,
-      //   },
-      // })
-      !["test"].includes(env.NODE_ENV)
-        ? this.billingService.generateBillingPeriods({
-            subscriptionId,
-            projectId,
-            now: Date.now(), // get the periods until the current date
-          })
-        : Promise.resolve(undefined)
-    )
+    if (!result.err && !db && env.NODE_ENV !== "test") {
+      const periodsResult = await this.billingService.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now: Date.now(),
+      })
+
+      if (periodsResult.err) {
+        this.logger.warn("subscription phase billing period generation failed", {
+          subscriptionId,
+          projectId,
+          error: periodsResult.err,
+        })
+      }
+    }
 
     return result
   }
@@ -1313,6 +1310,8 @@ export class SubscriptionService {
     const creditLinePolicyToUse = phaseToUpdate.creditLinePolicy ?? "uncapped"
     const creditLineAmountToUse =
       creditLinePolicyToUse === "uncapped" ? null : (phaseToUpdate.creditLineAmount ?? null)
+    const paymentMethodIdToUse =
+      input.paymentMethodId === undefined ? phaseToUpdate.paymentMethodId : input.paymentMethodId
 
     // update the phase with the new dates
     const phase = {
@@ -1341,6 +1340,7 @@ export class SubscriptionService {
         data: {
           startAt: startAt,
           endAt: endAtToUse ?? null,
+          paymentMethodId: paymentMethodIdToUse,
           creditLinePolicy: creditLinePolicyToUse,
           creditLineAmount: creditLineAmountToUse,
         },
@@ -1422,16 +1422,20 @@ export class SubscriptionService {
       return Ok(subscriptionPhase)
     })
 
-    if (!result.err) {
-      this.waitUntil(
-        env.NODE_ENV !== "test"
-          ? this.billingService.generateBillingPeriods({
-              subscriptionId,
-              projectId,
-              now: Date.now(),
-            })
-          : Promise.resolve(undefined)
-      )
+    if (!result.err && !db && env.NODE_ENV !== "test") {
+      const periodsResult = await this.billingService.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now: Date.now(),
+      })
+
+      if (periodsResult.err) {
+        this.logger.warn("subscription phase billing period generation failed", {
+          subscriptionId,
+          projectId,
+          error: periodsResult.err,
+        })
+      }
     }
 
     return result

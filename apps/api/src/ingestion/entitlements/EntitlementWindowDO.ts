@@ -219,10 +219,11 @@ type SingleApplyWalletSpendOutcome = {
 type ReservationCloseFlushIntent = {
   nextSeq: number
   unflushed: number
+  unflushedQuantity: number
 }
 
 type ReservationCloseCaptureOutcome =
-  | { kind: "captured"; capturedAmount: number }
+  | { kind: "captured"; capturedAmount: number; capturedQuantity: number }
   | { kind: "done"; result: CloseReservationResult }
 
 type ReservationCloseReleaseOutcome =
@@ -247,6 +248,7 @@ type ReservationInvoiceContext = {
   cycleEndAt: number
   cycleStartAt: number
   featurePlanVersionItemId: string
+  featureSlug: string
   sourceId: string
   statementKey: string
 }
@@ -345,8 +347,7 @@ export class EntitlementWindowDO extends DurableObject {
       // idempotency key `flush:{reservationId}:{flushSeq}`, so a duplicate
       // call after a successful commit is a no-op. Newer events accepted
       // after the pending seq was created must wait for the next seq, so
-      // replays use the persisted pending amount. NULL means a pre-migration
-      // row did not have the field yet, so we fall back to the old derivation.
+      // replays use the persisted pending amount and quantity.
       const window = this.readWalletReservation(this.db)
       if (
         window?.reservationId &&
@@ -356,8 +357,13 @@ export class EntitlementWindowDO extends DurableObject {
         window.pendingFlushSeq !== undefined &&
         window.pendingFlushSeq > window.flushSeq
       ) {
-        const flushAmount =
-          window.pendingFlushAmount ?? Math.max(0, window.consumedAmount - window.flushedAmount)
+        if (window.pendingFlushAmount === null || window.pendingFlushQuantity === null) {
+          throw new Error(
+            `Wallet reservation ${window.reservationId} is missing pending flush metadata`
+          )
+        }
+        const flushAmount = window.pendingFlushAmount
+        const flushQuantity = window.pendingFlushQuantity
         if (window.pendingFlushFinal) {
           this.ctx.waitUntil(
             this.closeReservation({ closeReason: "manual", recoverPendingFinal: true })
@@ -370,6 +376,7 @@ export class EntitlementWindowDO extends DurableObject {
             this.requestFlushAndRefill({
               flushSeq: window.pendingFlushSeq,
               flushAmount,
+              flushQuantity,
               refillAmount: window.pendingRefillAmount,
               effectiveAt: Date.now(),
             })
@@ -892,12 +899,14 @@ export class EntitlementWindowDO extends DurableObject {
 
     if (usesWalletReservation && wallet?.reservationId && pricedFacts.length > 0) {
       const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+      const totalUnits = this.sumPositivePricedFactUnits(pricedFacts)
       const spendPlan = planWalletReservationSpend({
         createdAt,
         entitlement: setup.entitlement,
         eventTimestamp: event.timestamp,
         policy: this.reservationPolicy(),
         totalCost,
+        totalUnits,
         window: { ...wallet, reservationId: wallet.reservationId },
       })
 
@@ -1028,6 +1037,7 @@ export class EntitlementWindowDO extends DurableObject {
         tx.update(walletReservationTable)
           .set({
             consumedAmount: params.wallet.consumedAmount,
+            consumedQuantity: params.wallet.consumedQuantity,
             targetReservationAmount: params.wallet.targetReservationAmount,
             spendEwmaAmount: params.wallet.spendEwmaAmount,
             lastRateSampledAtMs: params.wallet.lastRateSampledAtMs,
@@ -1036,6 +1046,7 @@ export class EntitlementWindowDO extends DurableObject {
             pendingFlushSeq: params.wallet.pendingFlushSeq,
             pendingFlushFinal: params.wallet.pendingFlushFinal,
             pendingFlushAmount: params.wallet.pendingFlushAmount,
+            pendingFlushQuantity: params.wallet.pendingFlushQuantity,
             pendingRefillAmount: params.wallet.pendingRefillAmount,
             lastEventAt: params.wallet.lastEventAt,
           })
@@ -1843,12 +1854,14 @@ export class EntitlementWindowDO extends DurableObject {
     // Pricing has already run through Dinero and was normalized into
     // ledger-scale integers. Mixed currencies are rejected at grant sync.
     const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+    const totalUnits = this.sumPositivePricedFactUnits(pricedFacts)
     const spendPlan = planWalletReservationSpend({
       createdAt,
       entitlement,
       eventTimestamp: input.event.timestamp,
       policy: this.reservationPolicy(),
       totalCost,
+      totalUnits,
       window,
     })
 
@@ -1893,6 +1906,10 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     return { refillTrigger, totalCost, walletReservationWriteCount }
+  }
+
+  private sumPositivePricedFactUnits(pricedFacts: PricedFact[]): number {
+    return pricedFacts.reduce((sum, fact) => sum + Math.max(0, fact.units), 0)
   }
 
   public async getEnforcementState(
@@ -1979,16 +1996,21 @@ export class EntitlementWindowDO extends DurableObject {
             cycleEndAt: window.cycleEndAt,
             cycleStartAt: window.cycleStartAt,
             featurePlanVersionItemId: window.featurePlanVersionItemId,
+            featureSlug: window.featureSlug,
             statementKey: window.statementKey,
             consumedAmount: window.consumedAmount,
             flushedAmount: window.flushedAmount,
             unflushedAmount: Math.max(0, window.consumedAmount - window.flushedAmount),
+            consumedQuantity: window.consumedQuantity,
+            flushedQuantity: window.flushedQuantity,
+            unflushedQuantity: Math.max(0, window.consumedQuantity - window.flushedQuantity),
             allocationAmount: window.allocationAmount,
             refillInFlight: window.refillInFlight,
             flushSeq: window.flushSeq,
             pendingFlushSeq: window.pendingFlushSeq,
             pendingFlushFinal: window.pendingFlushFinal,
             pendingFlushAmount: window.pendingFlushAmount,
+            pendingFlushQuantity: window.pendingFlushQuantity,
             pendingRefillAmount: window.pendingRefillAmount,
             lastEventAt: window.lastEventAt,
             lastFlushedAt: window.lastFlushedAt,
@@ -2326,6 +2348,10 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     const unflushed = Math.max(0, postFlushWindow.consumedAmount - postFlushWindow.flushedAmount)
+    const unflushedQuantity = Math.max(
+      0,
+      postFlushWindow.consumedQuantity - postFlushWindow.flushedQuantity
+    )
     const elapsedSinceLastFlush =
       postFlushWindow.lastFlushedAt !== null
         ? now - postFlushWindow.lastFlushedAt
@@ -2345,6 +2371,7 @@ export class EntitlementWindowDO extends DurableObject {
     })
     wideEvent.time_flush_seq = nextSeq
     wideEvent.time_flush_amount = unflushed
+    wideEvent.time_flush_quantity = unflushedQuantity
     this.db
       .update(walletReservationTable)
       .set({
@@ -2352,6 +2379,7 @@ export class EntitlementWindowDO extends DurableObject {
         pendingFlushSeq: nextSeq,
         pendingFlushFinal: false,
         pendingFlushAmount: unflushed,
+        pendingFlushQuantity: unflushedQuantity,
         pendingRefillAmount: 0,
         spendEwmaAmount: spendVelocity.spendEwmaAmount,
         lastRateSampledAtMs: spendVelocity.lastRateSampledAtMs,
@@ -2360,6 +2388,7 @@ export class EntitlementWindowDO extends DurableObject {
     await this.requestFlushAndRefill({
       flushSeq: nextSeq,
       flushAmount: unflushed,
+      flushQuantity: unflushedQuantity,
       // Time-driven flush is purely about ledger freshness — don't top up
       // allocation here. The DO's own refill trigger handles that when the
       // threshold is actually crossed.
@@ -2648,6 +2677,7 @@ export class EntitlementWindowDO extends DurableObject {
       isRecoveringPendingFinal,
       nextSeq: flushIntent.nextSeq,
       unflushed: flushIntent.unflushed,
+      unflushedQuantity: flushIntent.unflushedQuantity,
       walletService,
       wideEvent,
       window,
@@ -2685,12 +2715,23 @@ export class EntitlementWindowDO extends DurableObject {
   }): ReservationCloseFlushIntent {
     const { isRecoveringPendingFinal, wideEvent, window } = params
     const derivedUnflushed = Math.max(0, window.consumedAmount - window.flushedAmount)
-    const unflushed = isRecoveringPendingFinal
-      ? (window.pendingFlushAmount ?? derivedUnflushed)
-      : derivedUnflushed
+    const derivedUnflushedQuantity = Math.max(0, window.consumedQuantity - window.flushedQuantity)
+    if (
+      isRecoveringPendingFinal &&
+      (window.pendingFlushAmount === null || window.pendingFlushQuantity === null)
+    ) {
+      throw new Error(
+        `Wallet reservation ${window.reservationId} is missing pending final flush metadata`
+      )
+    }
+    const unflushed = isRecoveringPendingFinal ? window.pendingFlushAmount! : derivedUnflushed
+    const unflushedQuantity = isRecoveringPendingFinal
+      ? window.pendingFlushQuantity!
+      : derivedUnflushedQuantity
     const nextSeq = isRecoveringPendingFinal ? window.pendingFlushSeq! : window.flushSeq + 1
     wideEvent.flush_seq = nextSeq
     wideEvent.flush_amount = unflushed
+    wideEvent.flush_quantity = unflushedQuantity
     wideEvent.recovering_pending_final = isRecoveringPendingFinal
 
     this.db
@@ -2699,12 +2740,13 @@ export class EntitlementWindowDO extends DurableObject {
         pendingFlushSeq: nextSeq,
         pendingFlushFinal: true,
         pendingFlushAmount: unflushed,
+        pendingFlushQuantity: unflushedQuantity,
         pendingRefillAmount: 0,
         refillInFlight: true,
       })
       .run()
 
-    return { nextSeq, unflushed }
+    return { nextSeq, unflushed, unflushedQuantity }
   }
 
   private async captureFinalReservationUsage(params: {
@@ -2713,6 +2755,7 @@ export class EntitlementWindowDO extends DurableObject {
     isRecoveringPendingFinal: boolean
     nextSeq: number
     unflushed: number
+    unflushedQuantity: number
     walletService: WalletService
     wideEvent: Record<string, unknown>
     window: ClosableWalletReservationSnapshot
@@ -2723,6 +2766,7 @@ export class EntitlementWindowDO extends DurableObject {
       isRecoveringPendingFinal,
       nextSeq,
       unflushed,
+      unflushedQuantity,
       walletService,
       wideEvent,
       window,
@@ -2742,6 +2786,8 @@ export class EntitlementWindowDO extends DurableObject {
         cycle_end_at: invoiceContext.cycleEndAt,
         cycle_start_at: invoiceContext.cycleStartAt,
         feature_plan_version_item_id: invoiceContext.featurePlanVersionItemId,
+        feature_slug: invoiceContext.featureSlug,
+        quantity: unflushedQuantity,
         source_id: invoiceContext.sourceId,
         requestedBy: "durable_object",
         requestedById: durableObjectId,
@@ -2754,7 +2800,11 @@ export class EntitlementWindowDO extends DurableObject {
     })
 
     if (!captureResult.err) {
-      return { kind: "captured", capturedAmount: captureResult.val.capturedAmount }
+      return {
+        kind: "captured",
+        capturedAmount: captureResult.val.capturedAmount,
+        capturedQuantity: unflushedQuantity,
+      }
     }
 
     if (
@@ -2861,10 +2911,12 @@ export class EntitlementWindowDO extends DurableObject {
       .set({
         reservationId: null,
         flushedAmount: window.flushedAmount + capture.capturedAmount,
+        flushedQuantity: window.flushedQuantity + capture.capturedQuantity,
         flushSeq: nextSeq,
         pendingFlushSeq: null,
         pendingFlushFinal: false,
         pendingFlushAmount: null,
+        pendingFlushQuantity: null,
         pendingRefillAmount: 0,
         refillInFlight: false,
         lastFlushedAt: Date.now(),
@@ -2872,6 +2924,7 @@ export class EntitlementWindowDO extends DurableObject {
       .run()
 
     wideEvent.flushed_amount = capture.capturedAmount
+    wideEvent.flushed_quantity = capture.capturedQuantity
     wideEvent.flushed_after = window.flushedAmount + capture.capturedAmount
     wideEvent.released_amount = release.releasedAmount
     wideEvent.restored_granted_amount = release.restoredGrantedAmount
@@ -2967,10 +3020,12 @@ export class EntitlementWindowDO extends DurableObject {
       .set({
         reservationId: null,
         flushedAmount: Math.max(window.flushedAmount, window.consumedAmount),
+        flushedQuantity: Math.max(window.flushedQuantity, window.consumedQuantity),
         flushSeq: nextSeq,
         pendingFlushSeq: null,
         pendingFlushFinal: false,
         pendingFlushAmount: null,
+        pendingFlushQuantity: null,
         pendingRefillAmount: 0,
         refillInFlight: false,
         lastFlushedAt: Date.now(),
@@ -2978,6 +3033,7 @@ export class EntitlementWindowDO extends DurableObject {
       .run()
 
     wideEvent.flushed_amount = Math.max(0, window.consumedAmount - window.flushedAmount)
+    wideEvent.flushed_quantity = Math.max(0, window.consumedQuantity - window.flushedQuantity)
     wideEvent.flushed_after = Math.max(window.flushedAmount, window.consumedAmount)
     wideEvent.outcome = "already_reconciled"
     return { ok: true, outcome: "already_reconciled" }
@@ -3041,6 +3097,7 @@ export class EntitlementWindowDO extends DurableObject {
       cycleEndAt?: number | null
       cycleStartAt?: number | null
       featurePlanVersionItemId?: string | null
+      featureSlug?: string | null
       statementKey?: string | null
     }
   ): void {
@@ -3055,6 +3112,7 @@ export class EntitlementWindowDO extends DurableObject {
         cycleEndAt: params.cycleEndAt ?? null,
         cycleStartAt: params.cycleStartAt ?? null,
         featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
+        featureSlug: params.featureSlug ?? null,
         statementKey: params.statementKey ?? null,
       })
       .onConflictDoNothing({ target: walletReservationTable.id })
@@ -3070,6 +3128,7 @@ export class EntitlementWindowDO extends DurableObject {
         cycleEndAt: params.cycleEndAt ?? null,
         cycleStartAt: params.cycleStartAt ?? null,
         featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
+        featureSlug: params.featureSlug ?? null,
         statementKey: params.statementKey ?? null,
       })
       .run()
@@ -3915,11 +3974,14 @@ export class EntitlementWindowDO extends DurableObject {
         cycleEndAt: walletReservationTable.cycleEndAt,
         cycleStartAt: walletReservationTable.cycleStartAt,
         featurePlanVersionItemId: walletReservationTable.featurePlanVersionItemId,
+        featureSlug: walletReservationTable.featureSlug,
         statementKey: walletReservationTable.statementKey,
         reservationId: walletReservationTable.reservationId,
         allocationAmount: walletReservationTable.allocationAmount,
         consumedAmount: walletReservationTable.consumedAmount,
         flushedAmount: walletReservationTable.flushedAmount,
+        consumedQuantity: walletReservationTable.consumedQuantity,
+        flushedQuantity: walletReservationTable.flushedQuantity,
         refillThresholdBps: walletReservationTable.refillThresholdBps,
         refillChunkAmount: walletReservationTable.refillChunkAmount,
         targetReservationAmount: walletReservationTable.targetReservationAmount,
@@ -3928,6 +3990,7 @@ export class EntitlementWindowDO extends DurableObject {
         maxEventCostAmount: walletReservationTable.maxEventCostAmount,
         pendingRefillAmount: walletReservationTable.pendingRefillAmount,
         pendingFlushAmount: walletReservationTable.pendingFlushAmount,
+        pendingFlushQuantity: walletReservationTable.pendingFlushQuantity,
         refillInFlight: walletReservationTable.refillInFlight,
         flushSeq: walletReservationTable.flushSeq,
         pendingFlushSeq: walletReservationTable.pendingFlushSeq,
@@ -3951,11 +4014,14 @@ export class EntitlementWindowDO extends DurableObject {
       cycleEndAt: row.cycleEndAt ?? null,
       cycleStartAt: row.cycleStartAt ?? null,
       featurePlanVersionItemId: row.featurePlanVersionItemId ?? null,
+      featureSlug: row.featureSlug ?? null,
       statementKey: row.statementKey ?? null,
       reservationId: row.reservationId ?? null,
       allocationAmount: Number(row.allocationAmount ?? 0),
       consumedAmount: Number(row.consumedAmount ?? 0),
       flushedAmount: Number(row.flushedAmount ?? 0),
+      consumedQuantity: Number(row.consumedQuantity ?? 0),
+      flushedQuantity: Number(row.flushedQuantity ?? 0),
       refillThresholdBps: Number(row.refillThresholdBps ?? 0),
       refillChunkAmount: Number(row.refillChunkAmount ?? 0),
       targetReservationAmount: Number(row.targetReservationAmount ?? 0),
@@ -3967,6 +4033,10 @@ export class EntitlementWindowDO extends DurableObject {
         row.pendingFlushAmount === null || row.pendingFlushAmount === undefined
           ? null
           : Number(row.pendingFlushAmount),
+      pendingFlushQuantity:
+        row.pendingFlushQuantity === null || row.pendingFlushQuantity === undefined
+          ? null
+          : Number(row.pendingFlushQuantity),
       refillInFlight: Boolean(row.refillInFlight),
       flushSeq: Number(row.flushSeq ?? 0),
       pendingFlushSeq: row.pendingFlushSeq ?? null,
@@ -4096,6 +4166,7 @@ export class EntitlementWindowDO extends DurableObject {
     const { currentRemaining, eventCostAmount, eventTimestamp, window } = params
     const flushSeq = window.flushSeq + 1
     const flushAmount = Math.max(0, window.consumedAmount - window.flushedAmount)
+    const flushQuantity = Math.max(0, window.consumedQuantity - window.flushedQuantity)
     const spendVelocity =
       flushAmount > 0
         ? updateSpendVelocity({
@@ -4139,6 +4210,7 @@ export class EntitlementWindowDO extends DurableObject {
       trigger: {
         flushSeq,
         flushAmount,
+        flushQuantity,
         refillAmount,
         effectiveAt: eventTimestamp,
       },
@@ -4154,6 +4226,7 @@ export class EntitlementWindowDO extends DurableObject {
         pendingFlushSeq: trigger.flushSeq,
         pendingFlushFinal: false,
         pendingFlushAmount: trigger.flushAmount,
+        pendingFlushQuantity: trigger.flushQuantity,
         pendingRefillAmount: trigger.refillAmount,
         targetReservationAmount: refillDecision.targetReservationAmount,
         spendEwmaAmount: spendVelocity.spendEwmaAmount,
@@ -4183,6 +4256,7 @@ export class EntitlementWindowDO extends DurableObject {
         baseFields: {
           flush_seq: trigger.flushSeq,
           flush_amount: trigger.flushAmount,
+          flush_quantity: trigger.flushQuantity,
           reservation_refill_requested_amount: trigger.refillAmount,
         },
       },
@@ -4254,6 +4328,7 @@ export class EntitlementWindowDO extends DurableObject {
       operation: "flush_refill",
       flush_seq: trigger.flushSeq,
       flush_amount: trigger.flushAmount,
+      flush_quantity: trigger.flushQuantity,
       reservation_refill_requested_amount: trigger.refillAmount,
       reservation_id: window?.reservationId ?? null,
       project_id: window?.projectId ?? null,
@@ -4303,10 +4378,12 @@ export class EntitlementWindowDO extends DurableObject {
       .set({
         allocationAmount: window.allocationAmount + grantedAmount,
         flushedAmount: window.flushedAmount + capturedAmount,
+        flushedQuantity: window.flushedQuantity + trigger.flushQuantity,
         flushSeq: trigger.flushSeq,
         pendingFlushSeq: null,
         pendingFlushFinal: false,
         pendingFlushAmount: null,
+        pendingFlushQuantity: null,
         pendingRefillAmount: 0,
         refillInFlight: false,
         lastFlushedAt: Date.now(),
@@ -4318,6 +4395,7 @@ export class EntitlementWindowDO extends DurableObject {
       trigger.refillAmount > 0 && grantedAmount < trigger.refillAmount
     wideEvent.granted_amount = grantedAmount
     wideEvent.flushed_amount = capturedAmount
+    wideEvent.flushed_quantity = trigger.flushQuantity
     wideEvent.allocation_after = window.allocationAmount + grantedAmount
     wideEvent.flushed_after = window.flushedAmount + capturedAmount
     wideEvent.outcome = "success"
@@ -4346,6 +4424,8 @@ export class EntitlementWindowDO extends DurableObject {
         cycle_end_at: invoiceContext.cycleEndAt,
         cycle_start_at: invoiceContext.cycleStartAt,
         feature_plan_version_item_id: invoiceContext.featurePlanVersionItemId,
+        feature_slug: invoiceContext.featureSlug,
+        quantity: trigger.flushQuantity,
         source_id: invoiceContext.sourceId,
         requestedBy: "durable_object",
         requestedById: durableObjectId,
@@ -4756,6 +4836,7 @@ export class EntitlementWindowDO extends DurableObject {
       cycleEndAt: invoiceContext.cycleEndAt,
       cycleStartAt: invoiceContext.cycleStartAt,
       featurePlanVersionItemId: invoiceContext.featurePlanVersionItemId,
+      featureSlug: invoiceContext.featureSlug,
       statementKey: invoiceContext.statementKey,
     })
 
@@ -4780,10 +4861,13 @@ export class EntitlementWindowDO extends DurableObject {
             allocationAmount: reservation.allocationAmount,
             consumedAmount: 0,
             flushedAmount: 0,
+            consumedQuantity: 0,
+            flushedQuantity: 0,
             flushSeq: 0,
             pendingFlushSeq: null,
             pendingFlushFinal: false,
             pendingFlushAmount: null,
+            pendingFlushQuantity: null,
             pendingRefillAmount: 0,
             refillThresholdBps: plan.policy.refillThresholdBps,
             refillChunkAmount: 0,
@@ -4814,6 +4898,7 @@ export class EntitlementWindowDO extends DurableObject {
       cycleEndAt: billingPeriod.cycleEndAt,
       cycleStartAt: billingPeriod.cycleStartAt,
       featurePlanVersionItemId: billingPeriod.featurePlanVersionItemId,
+      featureSlug: input.entitlement.featureSlug,
       sourceId: `${billingPeriod.billingPeriodId}:${billingPeriod.featurePlanVersionItemId}`,
       statementKey: billingPeriod.statementKey,
     }
@@ -4834,6 +4919,7 @@ export class EntitlementWindowDO extends DurableObject {
       cycleEndAt: invoiceContext.cycleEndAt,
       cycleStartAt: invoiceContext.cycleStartAt,
       featurePlanVersionItemId: invoiceContext.featurePlanVersionItemId,
+      featureSlug: invoiceContext.featureSlug,
       statementKey: invoiceContext.statementKey,
     }
 
@@ -4852,6 +4938,7 @@ export class EntitlementWindowDO extends DurableObject {
       | "cycleEndAt"
       | "cycleStartAt"
       | "featurePlanVersionItemId"
+      | "featureSlug"
       | "statementKey"
     >
   ): boolean {
@@ -4860,6 +4947,7 @@ export class EntitlementWindowDO extends DurableObject {
       window.cycleEndAt === null ||
       window.cycleStartAt === null ||
       !window.featurePlanVersionItemId ||
+      !window.featureSlug ||
       !window.statementKey
     )
   }
@@ -4871,18 +4959,26 @@ export class EntitlementWindowDO extends DurableObject {
       | "cycleEndAt"
       | "cycleStartAt"
       | "featurePlanVersionItemId"
+      | "featureSlug"
       | "reservationId"
       | "statementKey"
     >
   ): ReservationInvoiceContext {
-    const { billingPeriodId, cycleEndAt, cycleStartAt, featurePlanVersionItemId, statementKey } =
-      window
+    const {
+      billingPeriodId,
+      cycleEndAt,
+      cycleStartAt,
+      featurePlanVersionItemId,
+      featureSlug,
+      statementKey,
+    } = window
 
     if (
       !billingPeriodId ||
       cycleEndAt === null ||
       cycleStartAt === null ||
       !featurePlanVersionItemId ||
+      !featureSlug ||
       !statementKey
     ) {
       throw new Error(
@@ -4895,6 +4991,7 @@ export class EntitlementWindowDO extends DurableObject {
       cycleEndAt,
       cycleStartAt,
       featurePlanVersionItemId,
+      featureSlug,
       sourceId: `${billingPeriodId}:${featurePlanVersionItemId}`,
       statementKey,
     }

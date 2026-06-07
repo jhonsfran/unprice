@@ -134,6 +134,38 @@ export async function billPeriod({
           )
         }
 
+        const featurePlanVersionItemId = period.subscriptionItem.id
+        const walletSettlementForItem = await ledgerService.getInvoiceLines(
+          {
+            projectId: phase.projectId,
+            statementKey: periodItemGroup.statementKey,
+          },
+          tx
+        )
+
+        if (walletSettlementForItem.err) {
+          logger.error(walletSettlementForItem.err, {
+            billingPeriodId: period.id,
+            phaseId: phase.id,
+            statementKey: periodItemGroup.statementKey,
+            context: "Error while loading wallet settlement lines before ledger posting",
+          })
+          throw walletSettlementForItem.err
+        }
+
+        const existingWalletCapturesForItem = walletSettlementForItem.val.filter((line) => {
+          const metadata = line.metadata ?? {}
+          return (
+            metadata.billing_period_id === period.id &&
+            metadata.feature_plan_version_item_id === featurePlanVersionItemId &&
+            metadata.flow === "capture"
+          )
+        })
+
+        if (existingWalletCapturesForItem.length > 0) {
+          continue
+        }
+
         const ratingResult = await ratingService.rateBillingPeriod({
           projectId: period.projectId,
           customerId: period.customerId,
@@ -177,7 +209,6 @@ export async function billPeriod({
               : 1
         const sourceType = "subscription_billing_period_charge_v1"
         const sourceId = `${period.id}:${period.subscriptionItemId}`
-        const featurePlanVersionItemId = period.subscriptionItem.id
         const kind =
           period.type === "trial"
             ? "trial"
@@ -215,24 +246,6 @@ export async function billPeriod({
             phaseId: phase.id,
           })
           continue
-        }
-
-        const walletSettlementForItem = await ledgerService.getInvoiceLines(
-          {
-            projectId: phase.projectId,
-            statementKey: periodItemGroup.statementKey,
-          },
-          tx
-        )
-
-        if (walletSettlementForItem.err) {
-          logger.error(walletSettlementForItem.err, {
-            billingPeriodId: period.id,
-            phaseId: phase.id,
-            statementKey: periodItemGroup.statementKey,
-            context: "Error while loading wallet settlement lines before ledger posting",
-          })
-          throw walletSettlementForItem.err
         }
 
         const paidOrIncludedForItem = walletSettlementForItem.val.filter((line) => {

@@ -402,7 +402,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     await expectInvoiceLineAmounts(ledger, [fixedAmount, usageAmount])
     await expectIncludedUsageLine(ledger)
     await expectReservationClosed(reservationId)
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
 })
 

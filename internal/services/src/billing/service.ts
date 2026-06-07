@@ -57,6 +57,7 @@ export interface InvoiceStatementLine {
   walletId: string | null
   currency: Currency
   createdAt: Date
+  metadata: Record<string, unknown> | null
 }
 
 type BillingPeriodStatementRow = {
@@ -66,6 +67,7 @@ type BillingPeriodStatementRow = {
   invoiceAt: number
   cycleStartAt: number
   subscriptionItem: {
+    id: string
     units: number | null
     featurePlanVersion: {
       featureType: string
@@ -121,6 +123,78 @@ function providerInvoiceItemKey(metadata: Record<string, unknown> | undefined): 
   }
 
   return `${billingPeriodId}:${subscriptionId}:${subscriptionItemId}:${kind}`
+}
+
+function readMetadataString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key]
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function invoiceLineGroupKey(line: InvoiceStatementLine): string {
+  const metadata = line.metadata ?? {}
+  const billingPeriodId = readMetadataString(metadata, "billing_period_id")
+  const itemId =
+    readMetadataString(metadata, "feature_plan_version_item_id") ??
+    readMetadataString(metadata, "subscription_item_id")
+
+  if (!billingPeriodId || !itemId) {
+    return line.entryId
+  }
+
+  return [
+    billingPeriodId,
+    itemId,
+    line.kind,
+    line.settlementSource,
+    line.settlementStatus,
+    line.collectable ? "collectable" : "non_collectable",
+  ].join(":")
+}
+
+function mergeNullableString(left: string | null, right: string | null): string | null {
+  if (left === right) return left
+  if (!left) return right
+  if (!right) return left
+  return null
+}
+
+function mergeNullableNumber(left: number | null, right: number | null): number | null {
+  if (left === null || right === null) return null
+  return left + right
+}
+
+function groupInvoiceStatementLines(lines: InvoiceStatementLine[]): InvoiceStatementLine[] {
+  const grouped = new Map<string, InvoiceStatementLine>()
+
+  for (const line of lines) {
+    const key = invoiceLineGroupKey(line)
+    const existing = grouped.get(key)
+
+    if (!existing) {
+      grouped.set(key, line)
+      continue
+    }
+
+    grouped.set(key, {
+      ...existing,
+      entryId: `group:${key}`,
+      description: existing.description ?? line.description,
+      quantity: mergeNullableNumber(existing.quantity, line.quantity),
+      amount: existing.amount + line.amount,
+      amountDue: existing.amountDue + line.amountDue,
+      amountIncluded: existing.amountIncluded + line.amountIncluded,
+      amountPaid: existing.amountPaid + line.amountPaid,
+      walletCreditId: mergeNullableString(existing.walletCreditId, line.walletCreditId),
+      walletCreditSource:
+        existing.walletCreditSource === line.walletCreditSource
+          ? existing.walletCreditSource
+          : null,
+      walletId: mergeNullableString(existing.walletId, line.walletId),
+      createdAt: existing.createdAt <= line.createdAt ? existing.createdAt : line.createdAt,
+    })
+  }
+
+  return [...grouped.values()]
 }
 
 function buildProviderInvoiceItemInput(
@@ -1852,6 +1926,7 @@ export class BillingService {
         and(eq(period.projectId, projectId), eq(period.invoiceId, invoiceId)),
       orderBy: (period, { asc }) => [asc(period.cycleStartAt), asc(period.id)],
     })) as BillingPeriodStatementRow[]
+    const periodById = new Map(periods.map((period) => [period.id, period]))
 
     const zeroLines = periods
       .filter((period) => !billedPeriodIds.has(period.id))
@@ -1874,16 +1949,28 @@ export class BillingService {
           walletId: null,
           currency,
           createdAt: new Date(period.invoiceAt),
+          metadata: null,
         })
       )
 
-    const projectedLedgerLines = ledgerLines.map(
-      (line): InvoiceStatementLine => ({
+    const projectedLedgerLines = ledgerLines.map((line): InvoiceStatementLine => {
+      const metadata = (line.metadata as Record<string, unknown> | null) ?? null
+      const billingPeriodId =
+        metadata && typeof metadata.billing_period_id === "string"
+          ? metadata.billing_period_id
+          : null
+      const period = billingPeriodId ? periodById.get(billingPeriodId) : null
+
+      return {
         entryId: line.entryId,
         statementKey: line.statementKey,
         kind: line.kind,
-        description: line.description,
-        quantity: line.quantity,
+        description: line.description ?? line.kind,
+        quantity:
+          line.quantity ??
+          (period?.subscriptionItem.featurePlanVersion.featureType === "usage"
+            ? null
+            : (period?.subscriptionItem.units ?? null)),
         amount: toLedgerMinor(line.amount),
         amountDue: line.amountDue,
         amountIncluded: line.amountIncluded,
@@ -1896,10 +1983,11 @@ export class BillingService {
         walletId: line.walletId,
         currency: line.currency,
         createdAt: line.createdAt,
-      })
-    )
+        metadata,
+      }
+    })
 
-    return Ok([...projectedLedgerLines, ...zeroLines])
+    return Ok([...groupInvoiceStatementLines(projectedLedgerLines), ...zeroLines])
   }
 
   /**

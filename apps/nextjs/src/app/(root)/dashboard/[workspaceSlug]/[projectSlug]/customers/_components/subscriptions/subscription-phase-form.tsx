@@ -129,6 +129,9 @@ export function SubscriptionPhaseForm({
   const selectedPlanVersion = planVersions?.planVersions.find(
     (version) => version.id === selectedPlanVersionId
   )
+  const selectedPlanVersionPaymentMethodRequired = selectedPlanVersion?.paymentMethodRequired
+  const selectedPlanVersionPaymentProvider = selectedPlanVersion?.paymentProvider
+  const selectedPlanVersionTrialUnits = selectedPlanVersion?.trialUnits
   const selectedCurrency = selectedPlanVersion?.currency ?? "USD"
   const creditLinePolicy = form.watch("creditLinePolicy")
   const isCreditLinePolicyDisabled = editMode || !selectedPlanVersion
@@ -139,17 +142,22 @@ export function SubscriptionPhaseForm({
       })
     : "days"
 
-  // when plan is selected set payment method required to true
+  // when plan is selected set defaults controlled by the plan version
   useEffect(() => {
-    if (selectedPlanVersion) {
-      form.setValue("paymentMethodRequired", selectedPlanVersion.paymentMethodRequired)
-      form.setValue("paymentProvider", selectedPlanVersion.paymentProvider)
-      form.setValue("paymentMethodId", defaultValues.paymentMethodId)
-      form.setValue("trialUnits", selectedPlanVersion.trialUnits)
-      form.setValue("creditLinePolicy", form.getValues("creditLinePolicy") ?? "uncapped")
-      form.setValue("creditLineAmount", form.getValues("creditLineAmount") ?? null)
-    }
-  }, [selectedPlanVersion, defaultValues.paymentMethodId, form])
+    if (!selectedPlanVersionId || !selectedPlanVersionPaymentProvider) return
+
+    form.setValue("paymentMethodRequired", selectedPlanVersionPaymentMethodRequired ?? false)
+    form.setValue("paymentProvider", selectedPlanVersionPaymentProvider)
+    form.setValue("trialUnits", selectedPlanVersionTrialUnits ?? 0)
+    form.setValue("creditLinePolicy", form.getValues("creditLinePolicy") ?? "uncapped")
+    form.setValue("creditLineAmount", form.getValues("creditLineAmount") ?? null)
+  }, [
+    selectedPlanVersionId,
+    selectedPlanVersionPaymentMethodRequired,
+    selectedPlanVersionPaymentProvider,
+    selectedPlanVersionTrialUnits,
+    form,
+  ])
 
   return (
     <Form {...form}>

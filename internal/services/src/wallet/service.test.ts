@@ -956,7 +956,7 @@ describe("WalletService reservation capture, extend, and release", () => {
         settlement_source: "credit_line",
         settlement_status: "due",
         collectable: true,
-        invoice_visible: false,
+        invoice_visible: true,
         wallet_credit_id: "wcr_credit",
         wallet_credit_source: "credit_line",
       },

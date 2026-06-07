@@ -187,15 +187,17 @@ if [ "$MODE_ID" = "dev" ]; then
     ((attempt++))
   done
 
-  TB_LOCAL_BRANCH=$(git branch --show-current | sed 's/[\/-]/_/g')
-  echo "Using Tinybird local branch: $TB_LOCAL_BRANCH"
+  # TB_LOCAL_BRANCH=$(git branch --show-current | sed 's/[\/-]/_/g')
+  # echo "Using Tinybird local branch: $TB_LOCAL_BRANCH"
 
   tb --local build
   tb --local deploy
 
   # Local runtime admin token so the app can query the Tinybird Local API.
-  TB_VERSION_WARNING=0 tb --local token copy "workspace admin token"
-  TB_TOKEN=$(TB_VERSION_WARNING=0 tb --local --output=json info | jq -r ".local.token")
+  TB_TOKEN="$(
+    TB_VERSION_WARNING=0 tb --local token ls --match "web-apps" \
+      | awk -F'token: ' '/token: / {print $2; exit}'
+  )"
 
   echo "Using Tinybird token for branch: $TB_LOCAL_BRANCH"
 

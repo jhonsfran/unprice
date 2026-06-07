@@ -138,6 +138,7 @@ describe("batch apply helpers", () => {
       eventTimestamp: 100,
       policy: DEFAULT_RESERVATION_POLICY,
       totalCost: 20,
+      totalUnits: 2,
       window: createOpenWalletReservation({ allocationAmount: 10 }),
     })
 
@@ -156,10 +157,13 @@ describe("batch apply helpers", () => {
       eventTimestamp: 900,
       policy: { ...DEFAULT_RESERVATION_POLICY, refillThresholdBps: 9000 },
       totalCost: 15,
+      totalUnits: 3,
       window: createOpenWalletReservation({
         allocationAmount: 100,
         consumedAmount: 80,
+        consumedQuantity: 8,
         flushedAmount: 70,
+        flushedQuantity: 7,
         flushSeq: 3,
       }),
     })
@@ -169,10 +173,12 @@ describe("batch apply helpers", () => {
       kind: "funded",
       walletStateUpdate: {
         consumedAmount: 95,
+        consumedQuantity: 11,
         lastEventAt: 1_000,
       },
       refillStateUpdate: {
         pendingFlushAmount: 25,
+        pendingFlushQuantity: 4,
         pendingFlushFinal: false,
         pendingFlushSeq: 4,
         refillInFlight: true,
@@ -180,6 +186,7 @@ describe("batch apply helpers", () => {
       refillTrigger: {
         effectiveAt: 900,
         flushAmount: 25,
+        flushQuantity: 4,
         flushSeq: 4,
       },
     })
@@ -191,17 +198,25 @@ function createOpenWalletReservation(
 ): NonNullable<WalletReservationSnapshot> & { reservationId: string } {
   return {
     allocationAmount: 100,
+    billingPeriodId: "bp_123",
     consumedAmount: 0,
+    consumedQuantity: 0,
     currency: "USD",
     customerId: "cus_123",
+    cycleEndAt: null,
+    cycleStartAt: null,
     deletionRequested: false,
+    featurePlanVersionItemId: "item_123",
+    featureSlug: "api_calls",
     flushedAmount: 0,
+    flushedQuantity: 0,
     flushSeq: 0,
     lastEventAt: null,
     lastFlushedAt: null,
     lastRateSampledAtMs: null,
     maxEventCostAmount: 0,
     pendingFlushAmount: null,
+    pendingFlushQuantity: null,
     pendingFlushFinal: false,
     pendingFlushSeq: null,
     pendingRefillAmount: 0,
@@ -213,6 +228,7 @@ function createOpenWalletReservation(
     reservationEndAt: null,
     reservationId: "res_123",
     spendEwmaAmount: 0,
+    statementKey: "stmt_123",
     targetReservationAmount: 100,
     ...overrides,
   }

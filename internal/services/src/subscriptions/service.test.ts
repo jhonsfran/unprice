@@ -127,6 +127,218 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     )
   })
 
+  it("activates a sandbox pay-in-advance phase after resolving its default payment method", async () => {
+    const now = Date.parse("2026-05-02T12:00:00.000Z")
+    const projectId = "proj_123"
+    const customerId = "cus_123"
+    const subscriptionId = "sub_123"
+    const phaseId = "phase_123"
+    const featurePlanVersionId = "fpv_123"
+    const subscriptionItemId = "item_123"
+    const insertPhase = vi.fn().mockResolvedValue({
+      id: phaseId,
+      projectId,
+      subscriptionId,
+      planVersionId: "version_123",
+      paymentMethodId: "pm_sandbox_default",
+      paymentProvider: "sandbox",
+      trialEndsAt: null,
+      trialUnits: 0,
+      startAt: now,
+      endAt: null,
+      metadata: null,
+      billingAnchor: 1,
+    })
+    const insertItems = vi.fn().mockResolvedValue(undefined)
+    const updateSubscription = vi.fn().mockResolvedValue({ id: subscriptionId })
+    const grantReturning = vi.fn().mockResolvedValue([
+      {
+        id: "grant_123",
+        projectId,
+        customerEntitlementId: "ce_123",
+        type: "subscription",
+        priority: 10,
+        allowanceUnits: 3,
+        effectiveAt: now,
+        expiresAt: null,
+        metadata: null,
+        createdAtM: now,
+        updatedAtM: now,
+      },
+    ])
+    const grantOnConflictDoNothing = vi.fn().mockReturnValue({ returning: grantReturning })
+    const grantValues = vi.fn().mockReturnValue({ onConflictDoNothing: grantOnConflictDoNothing })
+    const txDb = {
+      insert: vi.fn().mockReturnValue({ values: grantValues }),
+    } as unknown as Database
+    const db = {
+      query: {
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "version_123",
+            status: "published",
+            active: true,
+            paymentMethodRequired: true,
+            paymentProvider: "sandbox",
+            trialUnits: 0,
+            whenToBill: "pay_in_advance",
+            billingConfig: {
+              name: "monthly",
+              billingInterval: "month",
+              billingIntervalCount: 1,
+              planType: "recurring",
+              billingAnchor: "dayOfCreation",
+            },
+            plan: { slug: "pro" },
+            planFeatures: [
+              {
+                id: featurePlanVersionId,
+                feature: { id: "feature_123" },
+                limit: 3,
+                metadata: { overageStrategy: "none" },
+              },
+            ],
+          }),
+        },
+      },
+    } as unknown as Database
+    const repo = {
+      findSubscriptionWithPhases: vi.fn().mockResolvedValue({
+        id: subscriptionId,
+        projectId,
+        customerId,
+        active: true,
+        status: "active",
+        phases: [],
+      }),
+      withTransaction: vi.fn(
+        async (callback: (txRepo: unknown, txDb?: Database) => Promise<unknown>) =>
+          callback(
+            {
+              insertPhase,
+              insertItems,
+              updateSubscription,
+            },
+            txDb
+          )
+      ),
+    }
+    let createdEntitlement:
+      | {
+          id: string
+          projectId: string
+          customerId: string
+          featurePlanVersionId: string
+          subscriptionId: string | null
+          subscriptionPhaseId: string | null
+          subscriptionItemId: string | null
+          effectiveAt: number
+          expiresAt: number | null
+          overageStrategy: "none"
+          metadata: null
+          createdAtM: number
+          updatedAtM: number
+        }
+      | undefined
+    const getPhaseOwnedEntitlements = vi
+      .fn()
+      .mockResolvedValueOnce(Ok([]))
+      .mockImplementation(async () => Ok(createdEntitlement ? [createdEntitlement] : []))
+    const createCustomerEntitlement = vi.fn().mockImplementation(async ({ entitlement }) => {
+      createdEntitlement = {
+        id: entitlement.id ?? "ce_123",
+        projectId: entitlement.projectId,
+        customerId: entitlement.customerId,
+        featurePlanVersionId: entitlement.featurePlanVersionId,
+        subscriptionId: entitlement.subscriptionId ?? null,
+        subscriptionPhaseId: entitlement.subscriptionPhaseId ?? null,
+        subscriptionItemId: entitlement.subscriptionItemId ?? subscriptionItemId,
+        effectiveAt: entitlement.effectiveAt,
+        expiresAt: entitlement.expiresAt ?? null,
+        overageStrategy: entitlement.overageStrategy ?? "none",
+        metadata: null,
+        createdAtM: now,
+        updatedAtM: now,
+      }
+
+      return Ok(createdEntitlement)
+    })
+    const updateAccessControlList = vi.fn().mockResolvedValue(undefined)
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      void promise
+    })
+    const logger = {
+      set: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    }
+    const service = new SubscriptionService({
+      db,
+      repo: repo as never,
+      logger: logger as never,
+      analytics: {} as never,
+      waitUntil,
+      cache: {} as never,
+      metrics: {} as never,
+      customerService: {
+        validatePaymentMethod: vi.fn().mockResolvedValue(
+          Ok({
+            paymentMethodId: "pm_sandbox_default",
+            requiredPaymentMethod: true,
+          })
+        ),
+        updateAccessControlList,
+      } as never,
+      entitlementService: {
+        getPhaseOwnedEntitlements,
+        createCustomerEntitlement,
+      } as never,
+      billingService: {} as never,
+      ratingService: {} as never,
+      ledgerService: {} as never,
+    })
+
+    const result = await service.createPhase({
+      input: {
+        subscriptionId,
+        planVersionId: "version_123",
+        startAt: now,
+        config: [
+          {
+            featurePlanId: featurePlanVersionId,
+            units: 3,
+            featureSlug: "api-requests",
+          },
+        ],
+      } as never,
+      projectId,
+      db,
+      now,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(insertPhase).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentMethodId: "pm_sandbox_default",
+      })
+    )
+    expect(updateSubscription).toHaveBeenCalledWith({
+      subscriptionId,
+      projectId,
+      data: expect.objectContaining({
+        active: true,
+        status: "active",
+      }),
+    })
+    expect(updateAccessControlList).toHaveBeenCalledWith({
+      customerId,
+      projectId,
+      updates: { subscriptionStatus: "active" },
+    })
+  })
+
   it("syncs new phase entitlements on the same transaction as the phase write", async () => {
     const now = Date.parse("2026-05-02T12:00:00.000Z")
     const projectId = "proj_123"
@@ -430,8 +642,113 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
       data: {
         startAt,
         endAt,
+        paymentMethodId: null,
         creditLinePolicy: "capped",
         creditLineAmount: storedCreditLineAmount,
+      },
+    })
+  })
+
+  it("updates the payment method when updating a phase", async () => {
+    const now = Date.parse("2026-05-02T12:00:00.000Z")
+    const projectId = "proj_123"
+    const customerId = "cus_123"
+    const subscriptionId = "sub_123"
+    const phaseId = "phase_123"
+    const startAt = now - 1000
+    const endAt = now + 86_400_000
+    const storedPhase = {
+      id: phaseId,
+      projectId,
+      subscriptionId,
+      planVersionId: "version_123",
+      paymentProvider: "sandbox",
+      paymentMethodId: "pm_old",
+      creditLinePolicy: "uncapped",
+      creditLineAmount: null,
+      trialEndsAt: null,
+      trialUnits: 0,
+      startAt,
+      endAt: null,
+      metadata: null,
+      billingAnchor: 1,
+      items: [],
+      createdAtM: startAt,
+      updatedAtM: startAt,
+    }
+    const updatePhase = vi.fn().mockImplementation(async ({ data }) => ({
+      ...storedPhase,
+      ...data,
+      updatedAtM: now,
+    }))
+    const db = {} as Database
+    const repo = {
+      findSubscriptionWithPhases: vi.fn().mockResolvedValue({
+        id: subscriptionId,
+        projectId,
+        customerId,
+        active: true,
+        status: "active",
+        phases: [storedPhase],
+      }),
+      withTransaction: vi.fn(async (callback) =>
+        callback(
+          {
+            updatePhase,
+          },
+          db
+        )
+      ),
+    }
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      void promise
+    })
+    const getPhaseOwnedEntitlements = vi.fn().mockResolvedValue(Ok([]))
+    const logger = {
+      set: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    }
+    const service = new SubscriptionService({
+      db,
+      repo: repo as never,
+      logger: logger as never,
+      analytics: {} as never,
+      waitUntil,
+      cache: {} as never,
+      metrics: {} as never,
+      customerService: {} as never,
+      entitlementService: {
+        getPhaseOwnedEntitlements,
+      } as never,
+      billingService: {} as never,
+      ratingService: {} as never,
+      ledgerService: {} as never,
+    })
+
+    const result = await service.updatePhase({
+      input: {
+        ...storedPhase,
+        paymentMethodId: "pm_new",
+        endAt,
+      } as never,
+      subscriptionId,
+      projectId,
+      db,
+      now,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(updatePhase).toHaveBeenCalledWith({
+      phaseId,
+      data: {
+        startAt,
+        endAt,
+        paymentMethodId: "pm_new",
+        creditLinePolicy: "uncapped",
+        creditLineAmount: null,
       },
     })
   })

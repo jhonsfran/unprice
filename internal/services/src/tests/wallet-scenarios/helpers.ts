@@ -12,7 +12,9 @@ export interface TestFlushReservationInput {
   refillChunkAmount: number
   statementKey: string
   final: boolean
+  billingPeriodId?: string
   closeReason?: ReservationCloseReason
+  kind?: string
   metadata?: Record<string, unknown>
   sourceId?: string
   effectiveAt?: Date
@@ -36,6 +38,8 @@ export async function flushReservationForTest(
     flushSeq: input.flushSeq,
     amount: input.flushAmount,
     statementKey: input.statementKey,
+    ...(input.billingPeriodId ? { billingPeriodId: input.billingPeriodId } : {}),
+    ...(input.kind ? { kind: input.kind } : {}),
     metadata: input.metadata,
     sourceId: input.sourceId,
   })

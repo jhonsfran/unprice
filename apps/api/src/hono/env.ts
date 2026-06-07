@@ -3,6 +3,7 @@ import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
 import type { ApiKeysService } from "@unprice/services/apikey"
+import type { BillingService } from "@unprice/services/billing"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { EntitlementService } from "@unprice/services/entitlements"
@@ -29,6 +30,7 @@ export type DomainServiceContext = {
   apikey: ApiKeysService
   ledger: LedgerGateway
   wallet: WalletService
+  billing: BillingService
 }
 
 /**

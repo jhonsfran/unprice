@@ -964,12 +964,17 @@ export class LedgerGateway {
       metadata,
     })
     const metadataFields = metadata ?? {}
+    const description =
+      typeof metadataFields.description === "string"
+        ? metadataFields.description
+        : typeof metadataFields.feature_slug === "string"
+          ? metadataFields.feature_slug
+          : null
     return {
       entryId: row.id,
       statementKey,
       kind: String(metadataFields.kind ?? ""),
-      description:
-        typeof metadataFields.description === "string" ? metadataFields.description : null,
+      description,
       quantity: this.parseQuantity(metadataFields.quantity),
       amount,
       ...settlement,

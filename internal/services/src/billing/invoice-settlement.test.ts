@@ -21,7 +21,7 @@ describe("invoice settlement", () => {
     expect(mapWalletFundingToSettlement({ source: "granted", grantSource: "credit_line" })).toEqual(
       {
         collectable: true,
-        invoiceVisibleCapture: false,
+        invoiceVisibleCapture: true,
         settlementSource: "credit_line",
         settlementStatus: "due",
       }

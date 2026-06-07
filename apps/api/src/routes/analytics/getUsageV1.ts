@@ -14,6 +14,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
+import { serializeError } from "~/errors/log"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 
@@ -99,6 +100,7 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
     const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
     const analytics = c.get("analytics")
     const cache = c.get("cache")
+    const logger = c.get("logger")
 
     // validate the request
     const key = await keyAuth(c)
@@ -131,6 +133,23 @@ export const registerGetAnalyticsUsageV1 = (app: App) =>
           end,
         })
         .then((res) => res.data)
+        .catch((error) => {
+          const serializedError = serializeError(error)
+
+          logger.error("analytics usage tinybird query failed", {
+            error: serializedError,
+            error_message: serializedError.message,
+            pipe: "v1_get_feature_usage_period",
+            project_id: projectID,
+            customer_id: customerId,
+            range,
+            start,
+            end,
+            request_id: c.get("requestId"),
+          })
+
+          throw error
+        })
 
       return (rows ?? []).map((row) => formatUsageResponse(row, defaultCurrency))
     })

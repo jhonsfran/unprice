@@ -134,6 +134,13 @@
       "when": 1780158780001,
       "tag": "0019_wallet_invoice_cycle",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1780162380001,
+      "tag": "0020_wallet_invoice_usage_metadata",
+      "breakpoints": true
     }
   ]
 }

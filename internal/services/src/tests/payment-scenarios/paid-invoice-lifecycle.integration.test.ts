@@ -613,6 +613,7 @@ async function processProviderWebhook({
     return await processWebhookEvent(
       {
         services: {
+          billing: services.billing,
           customers: customerServiceFor(provider),
           subscriptions: services.subscriptions,
           wallet,
@@ -784,6 +785,7 @@ describe("paid invoice lifecycle integration", () => {
       const paidWebhook = await processWebhookEvent(
         {
           services: {
+            billing: services.billing,
             customers: customerServiceFor(provider),
             subscriptions: services.subscriptions,
             wallet: services.wallet,
@@ -813,6 +815,7 @@ describe("paid invoice lifecycle integration", () => {
       const replay = await processWebhookEvent(
         {
           services: {
+            billing: services.billing,
             customers: customerServiceFor(provider),
             subscriptions: services.subscriptions,
             wallet: services.wallet,
@@ -1000,6 +1003,7 @@ describe("paid invoice lifecycle integration", () => {
       const firstAttempt = await processWebhookEvent(
         {
           services: {
+            billing: services.billing,
             customers: customerServiceFor(provider),
             subscriptions: services.subscriptions,
             wallet: flakyWallet,
@@ -1049,6 +1053,7 @@ describe("paid invoice lifecycle integration", () => {
       const retry = await processWebhookEvent(
         {
           services: {
+            billing: services.billing,
             customers: customerServiceFor(provider),
             subscriptions: services.subscriptions,
             wallet: flakyWallet,

@@ -114,7 +114,7 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const analytics = createAnalytics({ events: 1200 })
+    const analytics = createAnalytics({ events: 0 })
     const rating = new RatingService({
       logger,
       analytics,
@@ -218,9 +218,16 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
       refillChunkAmount: 0,
       statementKey: usageStatementKey,
       final: true,
+      billingPeriodId: "bp_test_advance_capped_events_jan",
+      kind: "usage",
       effectiveAt: new Date(feb1),
       sourceId: "bp_test_advance_capped_events_jan:item_test_advance_capped_events",
-      metadata: { owner: "p0-d-integration" },
+      metadata: {
+        description: "Events",
+        feature_plan_version_item_id: "item_test_advance_capped_events",
+        owner: "p0-d-integration",
+        quantity: 1200,
+      },
     })
     expect(flush.err).toBeUndefined()
     await expectWalletState(wallet, {
@@ -276,7 +283,7 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     await expectInvoiceLineAmounts(ledger, usageStatementKey, [usageAmount])
     await expectReservationClosed(reservationId)
     await expectLedgerSources()
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
 })
 
@@ -369,7 +376,7 @@ async function expectLedgerSources() {
     ORDER BY source_type
   `)
   expect(sources.rows).toEqual([
-    { count: 2, source_type: "subscription_billing_period_charge_v1" },
+    { count: 1, source_type: "subscription_billing_period_charge_v1" },
     { count: 1, source_type: "wallet_adjust" },
     { count: 1, source_type: "wallet_capture_usage" },
     { count: 1, source_type: "wallet_reserve_granted" },

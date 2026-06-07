@@ -17,6 +17,7 @@ import m0016 from "./0016_clean_nekra.sql"
 import m0017 from "./0017_luxuriant_legion.sql"
 import m0018 from "./0018_wallet_invoice_metadata.sql"
 import m0019 from "./0019_wallet_invoice_cycle.sql"
+import m0020 from "./0020_wallet_invoice_usage_metadata.sql"
 import journal from "./meta/_journal.json"
 
 export default {
@@ -41,5 +42,6 @@ export default {
     m0017,
     m0018,
     m0019,
+    m0020,
   },
 }

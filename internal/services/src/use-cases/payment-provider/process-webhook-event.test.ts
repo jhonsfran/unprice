@@ -192,6 +192,7 @@ describe("processWebhookEvent", () => {
       services: {
         customers: customers as unknown as never,
         subscriptions: subscriptions as unknown as never,
+        billing: { generateBillingPeriods: vi.fn() } as never,
         wallet: wallet as unknown as never,
       },
       db,

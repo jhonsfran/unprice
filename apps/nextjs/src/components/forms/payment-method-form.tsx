@@ -23,6 +23,7 @@ export function PaymentMethodButton({
   onProviderSessionStarted?: () => void
 }) {
   const trpc = useTRPC()
+  const isSandbox = paymentProvider === "sandbox"
 
   const createSession = useMutation(
     trpc.customers.createPaymentMethod.mutationOptions({
@@ -46,6 +47,11 @@ export function PaymentMethodButton({
       size="sm"
       className="w-56"
       onClick={() => {
+        if (isSandbox) {
+          onProviderSessionStarted?.()
+          return
+        }
+
         createSession.mutate({
           paymentProvider: paymentProvider,
           customerId,
@@ -53,10 +59,16 @@ export function PaymentMethodButton({
           cancelUrl,
         })
       }}
-      isSubmitting={createSession.isPending}
-      isDisabled={!customerId || createSession.isPending || isRefreshing}
-      isLoading={createSession.isPending}
-      label={hasPaymentMethods ? "Billing Portal" : "Add Payment Method"}
+      isSubmitting={!isSandbox && createSession.isPending}
+      isDisabled={!customerId || (!isSandbox && createSession.isPending) || isRefreshing}
+      isLoading={!isSandbox && createSession.isPending}
+      label={
+        hasPaymentMethods
+          ? "Billing Portal"
+          : isSandbox
+            ? "Use Sandbox Method"
+            : "Add Payment Method"
+      }
     />
   )
 }
