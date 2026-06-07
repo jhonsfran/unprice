@@ -14,6 +14,11 @@ SQL >
       event_id,
       feature_slug,
       period_key,
+      {% if defined(period_key) %}
+        period_key AS scope_key,
+      {% else %}
+        concat('window:', toString({{ Int64(start) }}), ':', toString({{ Int64(end) }})) AS scope_key,
+      {% end %}
       currency,
       amount_scale,
       timestamp,
@@ -26,7 +31,13 @@ SQL >
     WHERE project_id = {{ String(project_id) }}
       AND customer_id = {{ String(customer_id) }}
       AND feature_slug = {{ String(feature_slug) }}
-      AND period_key = {{ String(period_key) }}
+      {% if defined(period_key) %}
+        AND period_key = {{ String(period_key) }}
+      {% end %}
+      {% if defined(start) and defined(end) %}
+        AND timestamp >= {{ Int64(start) }}
+        AND timestamp < {{ Int64(end) }}
+      {% end %}
       {% if defined(customer_entitlement_id) %}
         AND customer_entitlement_id = {{ String(customer_entitlement_id) }}
       {% end %}
@@ -40,7 +51,7 @@ SQL >
       project_id,
       customer_id,
       feature_slug,
-      period_key,
+      scope_key,
       currency,
       amount_scale,
       count() AS event_count,
@@ -50,7 +61,7 @@ SQL >
       max(timestamp) AS last_event_at,
       countIf(pricing_component_count > 1) AS multi_component_event_count
     FROM deduped_explain_charge_summary_node
-    GROUP BY project_id, customer_id, feature_slug, period_key, currency, amount_scale
+    GROUP BY project_id, customer_id, feature_slug, scope_key, currency, amount_scale
 
 NODE explain_charge_latest_allocations_node
 SQL >
@@ -59,14 +70,14 @@ SQL >
       project_id,
       customer_id,
       feature_slug,
-      period_key,
+      scope_key,
       currency,
       amount_scale,
       customer_entitlement_id,
       grant_id,
       argMax(amount_after, tuple(timestamp, created_at, event_id, idempotency_key)) AS latest_amount_after
     FROM deduped_explain_charge_summary_node
-    GROUP BY project_id, customer_id, feature_slug, period_key, currency, amount_scale, customer_entitlement_id, grant_id
+    GROUP BY project_id, customer_id, feature_slug, scope_key, currency, amount_scale, customer_entitlement_id, grant_id
 
 NODE explain_charge_latest_total_node
 SQL >
@@ -75,12 +86,12 @@ SQL >
       project_id,
       customer_id,
       feature_slug,
-      period_key,
+      scope_key,
       currency,
       amount_scale,
       sum(latest_amount_after) AS latest_amount_after
     FROM explain_charge_latest_allocations_node
-    GROUP BY project_id, customer_id, feature_slug, period_key, currency, amount_scale
+    GROUP BY project_id, customer_id, feature_slug, scope_key, currency, amount_scale
 
 NODE explain_charge_summary_node
 SQL >
@@ -89,7 +100,7 @@ SQL >
       aggregates.project_id,
       aggregates.customer_id,
       aggregates.feature_slug,
-      aggregates.period_key,
+      aggregates.scope_key AS period_key,
       aggregates.currency,
       aggregates.amount_scale,
       aggregates.event_count,
@@ -104,7 +115,7 @@ SQL >
       ON aggregates.project_id = latest.project_id
       AND aggregates.customer_id = latest.customer_id
       AND aggregates.feature_slug = latest.feature_slug
-      AND aggregates.period_key = latest.period_key
+      AND aggregates.scope_key = latest.scope_key
       AND aggregates.currency = latest.currency
       AND aggregates.amount_scale = latest.amount_scale
 

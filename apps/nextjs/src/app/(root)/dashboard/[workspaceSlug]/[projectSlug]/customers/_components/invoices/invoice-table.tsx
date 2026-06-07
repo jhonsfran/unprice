@@ -5,6 +5,7 @@ import { Badge } from "@unprice/ui/badge"
 import { Separator } from "@unprice/ui/separator"
 import { Typography } from "@unprice/ui/typography"
 import { formatDate } from "~/lib/dates"
+import { ExplainChargeSheet } from "./explain-charge-sheet"
 import { formatInvoiceMoney } from "./format-invoice-money"
 
 export function InvoiceTable({
@@ -49,12 +50,13 @@ export function InvoiceTable({
               <TableHead className="font-semibold">Status</TableHead>
               <TableHead className="text-right font-semibold">Qty</TableHead>
               <TableHead className="text-right font-semibold">Amount</TableHead>
+              <TableHead className="w-8" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {invoice.lines.length === 0 ? (
               <TableRow>
-                <TableCell className="space-y-2" colSpan={4}>
+                <TableCell className="space-y-2" colSpan={5}>
                   <Typography variant="h6" affects="removePaddingMargin">
                     No billable charges
                   </Typography>
@@ -97,6 +99,9 @@ export function InvoiceTable({
                   </TableCell>
                   <TableCell className="text-right font-medium">
                     {formatLedger(line.amount)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <ExplainChargeSheet invoice={invoice} line={line} />
                   </TableCell>
                 </TableRow>
               ))

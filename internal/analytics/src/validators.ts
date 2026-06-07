@@ -256,20 +256,49 @@ export const featureUsagePeriodRowSchema = z.object({
   currency: z.string().length(3).optional(),
 })
 
-export const explainChargeQuerySchema = z.object({
+const explainChargeBaseQuerySchema = z.object({
   project_id: z.string(),
   customer_id: z.string(),
   feature_slug: z.string(),
-  period_key: z.string(),
+  period_key: z.string().optional(),
+  start: z.number().int().optional(),
+  end: z.number().int().optional(),
   customer_entitlement_id: z.string().optional(),
   limit: z.number().int().min(1).max(500).default(100),
   offset: z.number().int().min(0).default(0),
 })
 
-export const explainChargeSummaryQuerySchema = explainChargeQuerySchema.omit({
-  limit: true,
-  offset: true,
-})
+function validateExplainChargeQuery(
+  query: { period_key?: string; start?: number; end?: number },
+  ctx: z.RefinementCtx
+) {
+  const hasWindow = query.start !== undefined || query.end !== undefined
+
+  if (!query.period_key && !hasWindow) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "period_key or start/end must be provided",
+    })
+  }
+
+  if (hasWindow && (query.start === undefined || query.end === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "start and end must be provided together",
+    })
+  }
+}
+
+export const explainChargeQuerySchema = explainChargeBaseQuerySchema.superRefine(
+  validateExplainChargeQuery
+)
+
+export const explainChargeSummaryQuerySchema = explainChargeBaseQuerySchema
+  .omit({
+    limit: true,
+    offset: true,
+  })
+  .superRefine(validateExplainChargeQuery)
 
 export const explainChargeEventRowSchema = entitlementMeterFactSchemaV1
   .pick({

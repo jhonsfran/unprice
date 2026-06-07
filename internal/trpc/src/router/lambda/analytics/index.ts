@@ -1,4 +1,5 @@
 import { createTRPCRouter } from "#trpc"
+import { explainCharge } from "./explainCharge"
 import { getBrowserVisits } from "./getBrowserVisits"
 import { getCountryVisits } from "./getCountryVisits"
 import { getLatestEvents } from "./getLatestEvents"
@@ -12,6 +13,7 @@ import { getRealtimeTicket } from "./getRealtimeTicket"
 import { getUsage } from "./getUsage"
 
 export const analyticsRouter = createTRPCRouter({
+  explainCharge: explainCharge,
   getUsage: getUsage,
   getProjectUsage: getProjectUsage,
   getBrowserVisits: getBrowserVisits,

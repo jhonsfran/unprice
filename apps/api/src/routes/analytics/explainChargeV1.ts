@@ -50,6 +50,19 @@ export const explainChargeApiResponseSchema = z.object({
     last_event_at: z.number().int().nullable(),
     multi_component_event_count: z.number().int(),
   }),
+  pricing: z.object({
+    feature_type: z.string(),
+    usage_mode: z.string().nullable(),
+    tier_mode: z.string().nullable(),
+    unit_of_measure: z.string(),
+    description: z.string(),
+    rows: z.array(
+      z.object({
+        label: z.string(),
+        value: z.string(),
+      })
+    ),
+  }),
   events: z.array(explainChargeEventRowSchema),
   answer: z.string(),
   confidence: aiAnswerEnvelopeSchema.shape.confidence,
@@ -164,6 +177,14 @@ export const registerExplainChargeV1 = (app: App) =>
         first_event_at: result.val.summary.firstEventAt,
         last_event_at: result.val.summary.lastEventAt,
         multi_component_event_count: result.val.summary.multiComponentEventCount,
+      },
+      pricing: {
+        feature_type: result.val.pricing.featureType,
+        usage_mode: result.val.pricing.usageMode,
+        tier_mode: result.val.pricing.tierMode,
+        unit_of_measure: result.val.pricing.unitOfMeasure,
+        description: result.val.pricing.description,
+        rows: result.val.pricing.rows,
       },
       events: result.val.events,
       answer: result.val.answer,

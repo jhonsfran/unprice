@@ -31,6 +31,15 @@ describe("explainCharge", () => {
     expect(result.val?.pagination.hasMore).toBe(false)
     expect(result.val?.answer).toContain("$4.25")
     expect(result.val?.answer).not.toContain("425000000")
+    expect(result.val?.answer).not.toContain("entry_1")
+    expect(result.val?.answer).not.toContain("inv_1")
+    expect(result.val?.answer).not.toContain("onetime:")
+    expect(result.val?.pricing).toMatchObject({
+      featureType: "usage",
+      usageMode: "unit",
+      description: "Unit pricing: 0.01 USD per token",
+      rows: [{ label: "Unit price", value: "0.01 USD / token" }],
+    })
     expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_1" })
     expect(result.val?.evidence).toContainEqual({ type: "billing_period", id: "bp_1" })
     expect(result.val?.evidence).toContainEqual({ type: "meter_fact", id: "evt_1" })
@@ -47,6 +56,105 @@ describe("explainCharge", () => {
       customer_id: "cus_1",
       feature_slug: "tokens",
       period_key: "onetime:1700000000000",
+      customer_entitlement_id: "ce_1",
+      limit: 100,
+      offset: 0,
+    })
+  })
+
+  it("explains grouped invoice statement rows", async () => {
+    const groupEntryId = "group:bp_1:si_1:subscription:provider:due:collectable"
+    const { db, ledger, analytics } = makeDeps({
+      summaryRows: [summaryRow({ event_count: 2, total_delta: 999, total_amount: 999 })],
+      lines: [
+        line({
+          entryId: "entry_1",
+          quantity: 100,
+          amount: dinero({ amount: 250_000_000, currency: currencies.USD, scale: 8 }),
+          metadata: {
+            kind: "subscription",
+            billing_period_id: "bp_1",
+            subscription_item_id: "si_1",
+          },
+        }),
+        line({
+          entryId: "entry_2",
+          quantity: 50,
+          amount: dinero({ amount: 175_000_000, currency: currencies.USD, scale: 8 }),
+          metadata: {
+            kind: "subscription",
+            billing_period_id: "bp_1",
+            subscription_item_id: "si_1",
+          },
+        }),
+      ],
+    })
+
+    const result = await explainCharge(
+      { db, ledger, analytics },
+      {
+        projectId: "proj_1",
+        invoiceId: "inv_1",
+        entryId: groupEntryId,
+        limit: 100,
+        offset: 0,
+      }
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.line.entryId).toBe(groupEntryId)
+    expect(result.val?.line.amount).toBe(425_000_000)
+    expect(result.val?.summary.totalAmount).toBe(425_000_000)
+    expect(result.val?.summary.totalUsage).toBe(150)
+    expect(result.val?.answer).toContain("$4.25")
+    expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_1" })
+    expect(result.val?.evidence).toContainEqual({ type: "ledger_line", id: "entry_2" })
+    expect(analytics.getExplainChargeSummary).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      feature_slug: "tokens",
+      period_key: "onetime:1700000000000",
+      customer_entitlement_id: "ce_1",
+    })
+  })
+
+  it("uses the billing window for rated facts when a usage period key cannot be derived", async () => {
+    const { db, ledger, analytics } = makeDeps({
+      entitlements: [entitlement({ effectiveAt: 1, expiresAt: 2 })],
+      lines: [
+        line({
+          quantity: 517,
+          amount: dinero({ amount: 517_000_000, currency: currencies.USD, scale: 8 }),
+        }),
+      ],
+    })
+
+    const result = await callDefault({ db, ledger, analytics })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.scope.periodKey).toBe("billing_period:bp_1")
+    expect(result.val?.summary).toMatchObject({
+      eventCount: 2,
+      totalUsage: 517,
+      totalAmount: 517_000_000,
+      latestAmountAfter: 517_000_000,
+    })
+    expect(result.val?.events).toHaveLength(2)
+    expect(result.val?.answer).toContain("$5.17")
+    expect(analytics.getExplainChargeSummary).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      feature_slug: "tokens",
+      start: 1_700_000_000_000,
+      end: 1_702_592_000_000,
+      customer_entitlement_id: "ce_1",
+    })
+    expect(analytics.getExplainChargeEvents).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      feature_slug: "tokens",
+      start: 1_700_000_000_000,
+      end: 1_702_592_000_000,
       customer_entitlement_id: "ce_1",
       limit: 100,
       offset: 0,
@@ -103,6 +211,10 @@ describe("explainCharge", () => {
           featurePlanVersion: {
             id: "fpv_flat",
             featureType: "flat",
+            unitOfMeasure: "seats",
+            config: {
+              price: configuredPrice("2.00"),
+            },
             resetConfig: null,
             feature: {
               slug: "seats",
@@ -137,6 +249,10 @@ describe("explainCharge", () => {
     expect(result.val?.answer).toContain("$4.25")
     expect(result.val?.answer).not.toContain("425000000")
     expect(result.val?.answer).toContain("no rated meter facts are expected")
+    expect(result.val?.pricing).toMatchObject({
+      featureType: "flat",
+      description: "Fixed price: 2.00 USD",
+    })
     expect(analytics.getExplainChargeSummary).not.toHaveBeenCalled()
     expect(analytics.getExplainChargeEvents).not.toHaveBeenCalled()
   })
@@ -355,6 +471,8 @@ function billingPeriod(
       featurePlanVersion: {
         id: string
         featureType: string
+        unitOfMeasure: string
+        config: unknown
         resetConfig: null
         feature: {
           slug: string
@@ -376,6 +494,11 @@ function billingPeriod(
       featurePlanVersion: {
         id: "fpv_1",
         featureType: "usage",
+        unitOfMeasure: "tokens",
+        config: {
+          usageMode: "unit",
+          price: configuredPrice("0.01"),
+        },
         resetConfig: null,
         feature: {
           slug: "tokens",
@@ -401,6 +524,18 @@ function entitlement(
   }
 }
 
+function configuredPrice(displayAmount: string, currency = currencies.USD) {
+  const scale = displayAmount.split(".")[1]?.length ?? currency.exponent
+  return {
+    displayAmount,
+    dinero: dinero({
+      amount: Math.round(Number(displayAmount) * 10 ** scale),
+      currency,
+      scale,
+    }).toJSON(),
+  }
+}
+
 function line(
   overrides: Partial<{
     entryId: string
@@ -408,6 +543,13 @@ function line(
     kind: string
     description: string
     quantity: number
+    amount: ReturnType<typeof dinero>
+    amountDue: number
+    amountIncluded: number
+    amountPaid: number
+    collectable: boolean
+    settlementSource: "provider" | "wallet" | "trial"
+    settlementStatus: "due" | "paid" | "included"
     metadata: Record<string, unknown>
   }> = {}
 ) {
@@ -418,6 +560,15 @@ function line(
     description: "Tokens",
     quantity: 150,
     amount: dinero({ amount: 425_000_000, currency: currencies.USD, scale: 8 }),
+    amountDue: 425_000_000,
+    amountIncluded: 0,
+    amountPaid: 0,
+    collectable: true,
+    settlementSource: "provider" as const,
+    settlementStatus: "due" as const,
+    walletCreditId: null,
+    walletCreditSource: null,
+    walletId: null,
     currency: "USD",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
     metadata: {
