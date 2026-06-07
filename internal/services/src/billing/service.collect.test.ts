@@ -331,6 +331,41 @@ describe("BillingService._collectInvoicePayment", () => {
     expect(repoCalls.updateInvoice).toHaveLength(0)
   })
 
+  it("unpaid invoice whose collectable amount rounds to zero is voided before provider collection", async () => {
+    const invoice = makeInvoice({
+      status: "unpaid",
+      currency: "EUR",
+      grossAmount: 10_000,
+      amountDue: 10_000,
+    })
+    const provider = makeProviderService({
+      getStatusInvoice: vi.fn(),
+      collectPayment: vi.fn(),
+      sendInvoice: vi.fn(),
+    } as unknown as Partial<PaymentProviderService>)
+    const { billing, customerService } = makeBillingService({ invoice, paymentProvider: provider })
+
+    const result = await collectInvoicePayment(billing, {
+      invoiceId: "inv_1",
+      projectId: "proj_1",
+      now: 5_000,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toMatchObject({ status: "void" })
+    expect(customerService.getPaymentProvider).not.toHaveBeenCalled()
+    expect(provider.getStatusInvoice).not.toHaveBeenCalled()
+    expect(provider.collectPayment).not.toHaveBeenCalled()
+    expect(provider.sendInvoice).not.toHaveBeenCalled()
+    expect(repoCalls.updateInvoice).toHaveLength(1)
+    expect(repoCalls.updateInvoice[0]?.data).toMatchObject({
+      status: "void",
+      metadata: expect.objectContaining({
+        reason: "invoice_voided",
+      }),
+    })
+  })
+
   it("failed invoice rejected — cannot collect failed", async () => {
     const invoice = makeInvoice({ status: "failed" })
     const { billing } = makeBillingService({ invoice })

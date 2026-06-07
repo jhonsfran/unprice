@@ -108,6 +108,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-08: Invoice finalization collectability should use the provider/display
+  currency-minor amount; if a tiny positive ledger-scale total rounds to zero,
+  skip provider work and void the invoice.
 - 2026-06-08: Project dashboard revenue should use invoice-visible ledger credits into
   `customer.*.consumed`; do not estimate it from plan prices or raw payment/top-up funding
   accounts.

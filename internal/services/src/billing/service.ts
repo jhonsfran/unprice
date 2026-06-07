@@ -205,6 +205,29 @@ function toProviderCurrencyMinor(amount: number, currency: Currency): number {
   return toCurrencyMinor(fromLedgerMinor(amount, currency))
 }
 
+function invoiceHasProviderCollectableAmount(
+  invoice: Pick<SubscriptionInvoice, "amountDue" | "currency">
+): boolean {
+  return invoice.amountDue > 0 && toProviderCurrencyMinor(invoice.amountDue, invoice.currency) > 0
+}
+
+function finalizedInvoiceStatus(
+  invoice: Pick<SubscriptionInvoice, "grossAmount" | "amountDue" | "currency">
+): InvoiceStatus {
+  if (
+    invoice.grossAmount === 0 ||
+    (invoice.amountDue > 0 && !invoiceHasProviderCollectableAmount(invoice))
+  ) {
+    return "void"
+  }
+
+  if (invoice.amountDue === 0) {
+    return "paid"
+  }
+
+  return "unpaid"
+}
+
 function allocateProviderInvoiceLineItems(
   lines: InvoiceLine[],
   invoice: Pick<SubscriptionInvoice, "amountDue" | "currency">
@@ -806,6 +829,32 @@ export class BillingService {
       return Ok(invoice)
     }
 
+    const localTerminalStatus = finalizedInvoiceStatus(invoice)
+    if (localTerminalStatus !== "unpaid") {
+      const updatedInvoice = await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId,
+        data: {
+          status: localTerminalStatus,
+          metadata: {
+            ...(invoice.metadata ?? {}),
+            reason: localTerminalStatus === "void" ? "invoice_voided" : "payment_received",
+            note:
+              localTerminalStatus === "void"
+                ? "Invoice voided because its collectable amount rounds to zero"
+                : "Invoice marked paid because no amount is due",
+          },
+          updatedAtM: now,
+        },
+      })
+
+      if (!updatedInvoice) {
+        return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+      }
+
+      return Ok(updatedInvoice)
+    }
+
     // validate if the invoice is failed
     if (invoice.status === "failed") {
       // meaning the invoice is past due and we cannot collect the payment with 3 attempts
@@ -1222,7 +1271,7 @@ export class BillingService {
           // provider finalization completed.
           let providerInvoiceId = lockedInvoiceData.invoicePaymentProviderId
           let providerInvoiceUrl = lockedInvoiceData.invoicePaymentProviderUrl
-          const skipProvider = lockedInvoiceData.amountDue === 0
+          const skipProvider = !invoiceHasProviderCollectableAmount(lockedInvoiceData)
 
           if (!skipProvider) {
             const upserted = await this._upsertPaymentProviderInvoice({
@@ -1378,12 +1427,7 @@ export class BillingService {
     const result = await this.db.transaction(async (tx) => {
       try {
         const txBillingRepo = new DrizzleBillingRepository(tx)
-        const statusInvoice =
-          invoice.grossAmount === 0
-            ? ("void" as const)
-            : invoice.amountDue === 0
-              ? ("paid" as const)
-              : ("unpaid" as const)
+        const statusInvoice = finalizedInvoiceStatus(invoice)
 
         const updatedInvoice = await txBillingRepo.updateInvoice({
           invoiceId: invoice.id,
