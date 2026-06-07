@@ -5,11 +5,7 @@ import { Badge } from "@unprice/ui/badge"
 import { Separator } from "@unprice/ui/separator"
 import { Typography } from "@unprice/ui/typography"
 import { formatDate } from "~/lib/dates"
-import {
-  formatInvoiceCurrencyMinor,
-  formatInvoiceMoney,
-  toInvoiceCurrencyMinor,
-} from "./format-invoice-money"
+import { formatInvoiceMoney } from "./format-invoice-money"
 
 export function InvoiceTable({
   invoice,
@@ -19,32 +15,6 @@ export function InvoiceTable({
   projectSlug: string
 }) {
   const formatLedger = (amount: number) => formatInvoiceMoney(amount, invoice.currency)
-  const displayedTotals =
-    invoice.lines.length > 0
-      ? invoice.lines.reduce(
-          (totals, line) => ({
-            grossAmount: totals.grossAmount + toInvoiceCurrencyMinor(line.amount, invoice.currency),
-            amountPaid:
-              totals.amountPaid + toInvoiceCurrencyMinor(line.amountPaid, invoice.currency),
-            amountIncluded:
-              totals.amountIncluded + toInvoiceCurrencyMinor(line.amountIncluded, invoice.currency),
-            amountDue: totals.amountDue + toInvoiceCurrencyMinor(line.amountDue, invoice.currency),
-          }),
-          {
-            grossAmount: 0,
-            amountPaid: 0,
-            amountIncluded: 0,
-            amountDue: 0,
-          }
-        )
-      : {
-          grossAmount: toInvoiceCurrencyMinor(invoice.grossAmount, invoice.currency),
-          amountPaid: toInvoiceCurrencyMinor(invoice.amountPaid, invoice.currency),
-          amountIncluded: toInvoiceCurrencyMinor(invoice.amountIncluded, invoice.currency),
-          amountDue: toInvoiceCurrencyMinor(invoice.amountDue, invoice.currency),
-        }
-  const formatDisplayedTotal = (amount: number) =>
-    formatInvoiceCurrencyMinor(amount, invoice.currency)
   const getLineStatus = (line: (typeof invoice.lines)[number]) => {
     if (line.amount === 0 && !line.collectable) {
       return "No charge"
@@ -139,21 +109,19 @@ export function InvoiceTable({
           <Separator />
           <div className="flex justify-between text-base">
             <span className="font-semibold">Gross:</span>
-            <span>{formatDisplayedTotal(displayedTotals.grossAmount)}</span>
+            <span>{formatLedger(invoice.grossAmount)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Paid:</span>
-            <span>{formatDisplayedTotal(displayedTotals.amountPaid)}</span>
+            <span>{formatLedger(invoice.amountPaid)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Included:</span>
-            <span>{formatDisplayedTotal(displayedTotals.amountIncluded)}</span>
+            <span>{formatLedger(invoice.amountIncluded)}</span>
           </div>
           <div className="flex justify-between text-base">
             <span className="font-semibold">Total Due:</span>
-            <span className="font-bold text-xl">
-              {formatDisplayedTotal(displayedTotals.amountDue)}
-            </span>
+            <span className="font-bold text-xl">{formatLedger(invoice.amountDue)}</span>
           </div>
         </div>
       </div>

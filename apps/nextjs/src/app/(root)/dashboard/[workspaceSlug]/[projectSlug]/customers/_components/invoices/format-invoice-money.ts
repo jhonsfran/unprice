@@ -1,18 +1,16 @@
 import {
-  formatAmountForProvider,
   formatMoney,
   fromCurrencyMinor,
   fromLedgerMinor,
+  toCurrencyMinor,
   toDecimal,
 } from "@unprice/money"
 
-export function toInvoiceCurrencyMinor(amount: number, currency: string): number {
-  const { amount: currencyMinorAmount } = formatAmountForProvider(fromLedgerMinor(amount, currency))
-
-  return currencyMinorAmount
+function toInvoiceCurrencyMinor(amount: number, currency: string): number {
+  return toCurrencyMinor(fromLedgerMinor(amount, currency))
 }
 
-export function formatInvoiceCurrencyMinor(amount: number, currency: string): string {
+function formatInvoiceCurrencyMinor(amount: number, currency: string): string {
   return formatMoney(toDecimal(fromCurrencyMinor(amount, currency)), currency)
 }
 

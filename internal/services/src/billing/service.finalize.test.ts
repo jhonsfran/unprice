@@ -83,6 +83,7 @@ vi.mock("./repository.drizzle", () => ({
 }))
 
 const usd = dineroCurrencies.USD
+const eur = dineroCurrencies.EUR
 
 function makeCustomer(): Customer {
   return {
@@ -109,8 +110,8 @@ function makeInvoice(overrides: Partial<SubscriptionInvoice> = {}): Subscription
     collectionMethod: "charge_automatically",
     invoicePaymentProviderId: "",
     invoicePaymentProviderUrl: "",
-    grossAmount: 1000,
-    amountDue: 1000,
+    grossAmount: 1_000_000_000,
+    amountDue: 1_000_000_000,
     amountPaid: 0,
     amountIncluded: 0,
     dueAt: 1_000,
@@ -141,7 +142,7 @@ function makeLine(
     description: "API requests",
     quantity: 10,
     amount: dinero({ amount: 1000, currency: usd }),
-    amountDue: 1000,
+    amountDue: 1_000_000_000,
     amountIncluded: 0,
     amountPaid: 0,
     collectable: true,
@@ -290,10 +291,12 @@ describe("BillingService.finalizeInvoice", () => {
       makeLine({
         entryId: "ple_1",
         amount: dinero({ amount: 600_000_000, currency: usd, scale: 8 }),
+        amountDue: 600_000_000,
       }),
       makeLine({
         entryId: "ple_2",
         amount: dinero({ amount: 400_000_000, currency: usd, scale: 8 }),
+        amountDue: 400_000_000,
       }),
     ]
     const invoice = makeInvoice()
@@ -347,6 +350,107 @@ describe("BillingService.finalizeInvoice", () => {
     })
   })
 
+  it("sends provider line items whose minor-unit sum equals the ledger-summed invoice total rounded once", async () => {
+    const lines = [
+      makeLine({
+        entryId: "ple_events",
+        amount: dinero({ amount: 51_700_000, currency: eur, scale: 8 }),
+        amountDue: 51_700_000,
+        currency: "EUR",
+        metaExtras: { subscription_item_id: "item_events" },
+      }),
+      makeLine({
+        entryId: "ple_customers",
+        amount: dinero({ amount: 600_000_000, currency: eur, scale: 8 }),
+        amountDue: 600_000_000,
+        currency: "EUR",
+        metaExtras: { subscription_item_id: "item_customers" },
+      }),
+      makeLine({
+        entryId: "ple_pages",
+        amount: dinero({ amount: 55_700_000, currency: eur, scale: 8 }),
+        amountDue: 55_700_000,
+        currency: "EUR",
+        metaExtras: { subscription_item_id: "item_pages" },
+      }),
+      makeLine({
+        entryId: "ple_plans",
+        amount: dinero({ amount: 100_000, currency: eur, scale: 8 }),
+        amountDue: 100_000,
+        currency: "EUR",
+        metaExtras: { subscription_item_id: "item_plans" },
+      }),
+    ]
+    const invoice = makeInvoice({
+      currency: "EUR",
+      grossAmount: 707_500_000,
+      amountDue: 707_500_000,
+    })
+    const { billing, provider } = makeBillingService({ invoice, lines })
+
+    const result = await billing.finalizeInvoice({
+      projectId: "proj_1",
+      subscriptionId: "sub_1",
+      invoiceId: "inv_1",
+      now: 5_000,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(provider.addInvoiceItem).toHaveBeenCalledTimes(4)
+    expect(provider.addInvoiceItem).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ totalAmount: 52 })
+    )
+    expect(provider.addInvoiceItem).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ totalAmount: 600 })
+    )
+    expect(provider.addInvoiceItem).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ totalAmount: 56 })
+    )
+    expect(provider.addInvoiceItem).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({ totalAmount: 0 })
+    )
+
+    const providerTotal = vi
+      .mocked(provider.addInvoiceItem)
+      .mock.calls.reduce((total, [input]) => total + input.totalAmount, 0)
+    expect(providerTotal).toBe(708)
+  })
+
+  it("distributes provider rounding residue so item totals match the rounded invoice total", async () => {
+    const lines = [0, 1, 2].map((index) =>
+      makeLine({
+        entryId: `ple_half_${index}`,
+        amount: dinero({ amount: 500_000, currency: eur, scale: 8 }),
+        amountDue: 500_000,
+        currency: "EUR",
+        metaExtras: { subscription_item_id: `item_half_${index}` },
+      })
+    )
+    const invoice = makeInvoice({
+      currency: "EUR",
+      grossAmount: 1_500_000,
+      amountDue: 1_500_000,
+    })
+    const { billing, provider } = makeBillingService({ invoice, lines })
+
+    const result = await billing.finalizeInvoice({
+      projectId: "proj_1",
+      subscriptionId: "sub_1",
+      invoiceId: "inv_1",
+      now: 5_000,
+    })
+
+    expect(result.err).toBeUndefined()
+    const providerTotal = vi
+      .mocked(provider.addInvoiceItem)
+      .mock.calls.reduce((total, [input]) => total + input.totalAmount, 0)
+    expect(providerTotal).toBe(2)
+  })
+
   it("zero-amount invoice skips provider and transitions to void", async () => {
     const invoice = makeInvoice({ grossAmount: 0, amountDue: 0 })
     const { billing, provider } = makeBillingService({ invoice, lines: [] })
@@ -372,9 +476,9 @@ describe("BillingService.finalizeInvoice", () => {
   it("paid or included invoice finalizes locally as paid without provider work", async () => {
     const invoice = makeInvoice({
       amountDue: 0,
-      amountIncluded: 1_000,
+      amountIncluded: 1_000_000_000,
       amountPaid: 0,
-      grossAmount: 1_000,
+      grossAmount: 1_000_000_000,
     })
     const { billing, provider } = makeBillingService({ invoice, lines: [] })
 

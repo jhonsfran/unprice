@@ -109,7 +109,10 @@ patterns. Keep it cheap to load and useful.
 ## Billing, Wallets, And Invoices
 
 - 2026-06-07: Customer-facing invoice money should quantize ledger-scale amounts through
-  `formatAmountForProvider` before display; keep sub-cent precision internal.
+  `toCurrencyMinor` before display; keep sub-cent precision internal.
+- 2026-06-07: Provider invoice items must allocate currency-minor rounding from the
+  ledger-summed invoice header total; do not independently round each line and let
+  provider totals drift.
 - 2026-06-06: Invoice headers store `grossAmount`, `amountDue`, `amountPaid`, and
   `amountIncluded`; ledger lines remain the invoice source of truth, and
   collectability comes from settlement metadata derived from wallet funding legs.

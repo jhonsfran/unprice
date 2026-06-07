@@ -13,7 +13,7 @@ import {
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { formatAmountForProvider, toLedgerMinor } from "@unprice/money"
+import { fromLedgerMinor, toCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { addDays } from "date-fns"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
@@ -80,6 +80,10 @@ type BillingPeriodStatementRow = {
 }
 
 type ProviderInvoiceItem = PaymentProviderInvoice["items"][number]
+type ProviderInvoiceLineItem = {
+  line: InvoiceLine
+  totalAmount: number
+}
 
 function normalizeProviderTimestamp(timestamp: number | undefined, fallback: number): number {
   if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
@@ -197,12 +201,59 @@ function groupInvoiceStatementLines(lines: InvoiceStatementLine[]): InvoiceState
   return [...grouped.values()]
 }
 
-function buildProviderInvoiceItemInput(
-  providerInvoiceId: string,
+function toProviderCurrencyMinor(amount: number, currency: Currency): number {
+  return toCurrencyMinor(fromLedgerMinor(amount, currency))
+}
+
+function allocateProviderInvoiceLineItems(
+  lines: InvoiceLine[],
+  invoice: Pick<SubscriptionInvoice, "amountDue" | "currency">
+): ProviderInvoiceLineItem[] {
+  const targetTotal = toProviderCurrencyMinor(invoice.amountDue, invoice.currency)
+  const items = lines.map((line) => ({
+    line,
+    totalAmount: toProviderCurrencyMinor(line.amountDue, line.currency),
+  }))
+  let delta = targetTotal - items.reduce((total, item) => total + item.totalAmount, 0)
+
+  if (delta === 0 || items.length === 0) {
+    return items
+  }
+
+  // Provider APIs only accept integer currency minor units per item. Keep the
+  // invoice total canonical by assigning any rounding residue to stable line
+  // order after the first pass.
+  for (let i = 0; delta !== 0; i = (i + 1) % items.length) {
+    const step = delta > 0 ? 1 : -1
+    const item = items[i]
+
+    if (!item) {
+      continue
+    }
+
+    const nextAmount = item.totalAmount + step
+
+    if (nextAmount < 0) {
+      continue
+    }
+
+    item.totalAmount = nextAmount
+    delta -= step
+  }
+
+  return items
+}
+
+function buildProviderInvoiceItemInput({
+  providerInvoiceId,
+  line,
+  totalAmount,
+}: {
+  providerInvoiceId: string
   line: InvoiceLine
-): AddInvoiceItemOpts {
+  totalAmount: number
+}): AddInvoiceItemOpts {
   const meta = (line.metadata as Record<string, unknown> | null) ?? {}
-  const totalMinor = formatAmountForProvider(line.amount).amount
   const cycleStart = meta.cycle_start_at as number | undefined
   const cycleEnd = meta.cycle_end_at as number | undefined
   const prorationFactor = meta.proration_factor as number | undefined
@@ -212,7 +263,7 @@ function buildProviderInvoiceItemInput(
     name: line.description ?? "Subscription charge",
     description: line.description ?? undefined,
     isProrated: typeof prorationFactor === "number" && prorationFactor !== 1,
-    totalAmount: totalMinor,
+    totalAmount,
     quantity: line.quantity ?? 1,
     currency: line.currency,
     period:
@@ -223,11 +274,13 @@ function buildProviderInvoiceItemInput(
   }
 }
 
-function providerItemMatchesLine(item: ProviderInvoiceItem, line: InvoiceLine): boolean {
-  const totalMinor = formatAmountForProvider(line.amount).amount
-
+function providerItemMatchesLine(
+  item: ProviderInvoiceItem,
+  desiredItem: ProviderInvoiceLineItem
+): boolean {
+  const { line, totalAmount } = desiredItem
   return (
-    item.amount === totalMinor &&
+    item.amount === totalAmount &&
     item.currency === line.currency &&
     item.quantity === (line.quantity ?? 1)
   )
@@ -1519,8 +1572,12 @@ export class BillingService {
       }
     }
 
-    for (const line of collectableLines) {
-      const desiredItem = buildProviderInvoiceItemInput(providerInvoiceId, line)
+    for (const allocatedItem of allocateProviderInvoiceLineItems(collectableLines, invoice)) {
+      const desiredItem = buildProviderInvoiceItemInput({
+        providerInvoiceId,
+        line: allocatedItem.line,
+        totalAmount: allocatedItem.totalAmount,
+      })
       const existingItemKey = providerInvoiceItemKey(desiredItem.metadata)
       const existingItem = existingItemKey ? existingItems.get(existingItemKey) : undefined
 
@@ -1530,7 +1587,7 @@ export class BillingService {
           existingItems.delete(existingItemKey)
         }
 
-        if (providerItemMatchesLine(existingItem, line)) {
+        if (providerItemMatchesLine(existingItem, allocatedItem)) {
           continue
         }
 

@@ -10,6 +10,7 @@ import {
   fromCurrencyMinor,
   fromLedgerAmount,
   fromLedgerMinor,
+  toCurrencyMinor,
   toDecimal,
   toLedgerAmount,
   toLedgerMinor,
@@ -145,6 +146,14 @@ describe("money", () => {
 
     it("rejects unsafe integer inputs", () => {
       expect(() => fromCurrencyMinor(Number.MAX_SAFE_INTEGER + 1, "USD")).toThrow(/safe integer/)
+    })
+  })
+
+  describe("toCurrencyMinor", () => {
+    it("rounds precise values to currency minor units with half-up rounding", () => {
+      expect(toCurrencyMinor(dinero({ amount: 51_700_000, currency: EUR, scale: 8 }))).toBe(52)
+      expect(toCurrencyMinor(dinero({ amount: 100_000, currency: EUR, scale: 8 }))).toBe(0)
+      expect(toCurrencyMinor(dinero({ amount: 707_500_000, currency: EUR, scale: 8 }))).toBe(708)
     })
   })
 
