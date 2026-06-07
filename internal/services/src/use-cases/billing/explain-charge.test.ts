@@ -161,6 +161,73 @@ describe("explainCharge", () => {
     })
   })
 
+  it("uses the persisted usage reset cadence to query rated fact period keys", async () => {
+    const cycleStartAt = Date.UTC(2026, 5, 7, 22, 15, 25)
+    const cycleEndAt = Date.UTC(2026, 5, 7, 22, 20, 25)
+    const entitlementEffectiveAt = Date.UTC(2026, 5, 7, 22, 14, 25, 128)
+    const { db, ledger, analytics } = makeDeps({
+      billingPeriod: billingPeriod({
+        cycleStartAt,
+        cycleEndAt,
+        subscriptionItem: {
+          featurePlanVersion: {
+            id: "fpv_1",
+            featureType: "usage",
+            unitOfMeasure: "events",
+            config: {
+              usageMode: "unit",
+              price: configuredPrice("0.001"),
+            },
+            billingConfig: {
+              name: "every-5-minutes",
+              billingInterval: "minute",
+              billingIntervalCount: 5,
+              billingAnchor: "dayOfCreation",
+              planType: "recurring",
+            },
+            resetConfig: {
+              name: "every-5-minutes",
+              resetInterval: "minute",
+              resetIntervalCount: 5,
+              resetAnchor: "dayOfCreation",
+              planType: "recurring",
+            },
+            feature: {
+              slug: "events",
+            },
+          },
+        },
+      }),
+      entitlements: [
+        entitlement({
+          effectiveAt: entitlementEffectiveAt,
+          expiresAt: cycleEndAt,
+        }),
+      ],
+    })
+
+    const result = await callDefault({ db, ledger, analytics })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.scope.periodKey).toBe(`minute:${cycleStartAt}`)
+    expect(analytics.getExplainChargeSummary).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      feature_slug: "events",
+      period_key: `minute:${cycleStartAt}`,
+      customer_entitlement_id: "ce_1",
+    })
+    expect(analytics.getExplainChargeEvents).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      feature_slug: "events",
+      period_key: `minute:${cycleStartAt}`,
+      customer_entitlement_id: "ce_1",
+      limit: 100,
+      offset: 0,
+    })
+  })
+
   it("does not filter Tinybird to one entitlement when multiple entitlements are in scope", async () => {
     const { db, ledger, analytics } = makeDeps({
       entitlements: [entitlement({ id: "ce_1" }), entitlement({ id: "ce_2" })],
@@ -215,6 +282,7 @@ describe("explainCharge", () => {
             config: {
               price: configuredPrice("2.00"),
             },
+            billingConfig: billingConfig(),
             resetConfig: null,
             feature: {
               slug: "seats",
@@ -473,7 +541,14 @@ function billingPeriod(
         featureType: string
         unitOfMeasure: string
         config: unknown
-        resetConfig: null
+        billingConfig: ReturnType<typeof billingConfig>
+        resetConfig: null | {
+          name: string
+          resetInterval: string
+          resetIntervalCount: number
+          resetAnchor: string
+          planType: string
+        }
         feature: {
           slug: string
         }
@@ -499,6 +574,7 @@ function billingPeriod(
           usageMode: "unit",
           price: configuredPrice("0.01"),
         },
+        billingConfig: billingConfig(),
         resetConfig: null,
         feature: {
           slug: "tokens",
@@ -506,6 +582,16 @@ function billingPeriod(
       },
     },
     ...overrides,
+  }
+}
+
+function billingConfig() {
+  return {
+    name: "one-time",
+    billingInterval: "onetime",
+    billingIntervalCount: 1,
+    billingAnchor: "dayOfCreation",
+    planType: "onetime",
   }
 }
 

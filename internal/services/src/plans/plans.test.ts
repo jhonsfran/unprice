@@ -60,6 +60,22 @@ const every5MinutesBillingConfig = {
   planType: "recurring",
 } satisfies BillingConfig
 
+const every15MinutesResetConfig = {
+  name: "every-15-minutes",
+  resetInterval: "minute",
+  resetIntervalCount: 15,
+  resetAnchor: "dayOfCreation",
+  planType: "recurring",
+} satisfies ResetConfig
+
+const every5MinutesResetConfig = {
+  name: "every-5-minutes",
+  resetInterval: "minute",
+  resetIntervalCount: 5,
+  resetAnchor: "dayOfCreation",
+  planType: "recurring",
+} satisfies ResetConfig
+
 const yearlyBillingConfig = {
   name: "yearly",
   billingInterval: "year",
@@ -71,6 +87,14 @@ const yearlyBillingConfig = {
 const monthlyResetConfig = {
   name: "monthly",
   resetInterval: "month",
+  resetIntervalCount: 1,
+  resetAnchor: "dayOfCreation",
+  planType: "recurring",
+} satisfies ResetConfig
+
+const yearlyResetConfig = {
+  name: "yearly",
+  resetInterval: "year",
   resetIntervalCount: 1,
   resetAnchor: "dayOfCreation",
   planType: "recurring",
@@ -320,12 +344,12 @@ describe("PlanService plan version billing defaults", () => {
     const featureUpdates = updatedValues.slice(0, -1)
     const versionUpdate = updatedValues.at(-1)
 
-    expect(featureUpdates).toHaveLength(2)
+    expect(featureUpdates).toHaveLength(3)
     expect(featureUpdates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           billingConfig: every15MinutesBillingConfig,
-          resetConfig: null,
+          resetConfig: every15MinutesResetConfig,
           metadata: expect.objectContaining({
             billingCadenceOverride: false,
             resetCadenceOverride: false,
@@ -333,6 +357,9 @@ describe("PlanService plan version billing defaults", () => {
         }),
         expect.objectContaining({
           billingConfig: every15MinutesBillingConfig,
+        }),
+        expect.objectContaining({
+          resetConfig: yearlyResetConfig,
         }),
       ])
     )
@@ -417,6 +444,7 @@ describe("PlanService plan version billing defaults", () => {
   })
 
   it("allows usage feature billing cadence shorter than the plan billing cadence", async () => {
+    let insertedValues: Record<string, unknown> | undefined
     const db = {
       query: {
         versions: {
@@ -443,9 +471,12 @@ describe("PlanService plan version billing defaults", () => {
       transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
         callback({
           insert: vi.fn(() => ({
-            values: vi.fn(() => ({
-              returning: vi.fn().mockResolvedValue([{ id: "fpv_123" }]),
-            })),
+            values: vi.fn((values: Record<string, unknown>) => {
+              insertedValues = values
+              return {
+                returning: vi.fn().mockResolvedValue([{ id: "fpv_123" }]),
+              }
+            }),
           })),
           query: {
             planVersionFeatures: {
@@ -456,7 +487,7 @@ describe("PlanService plan version billing defaults", () => {
                 featureId: "feature_usage",
                 featureType: "usage",
                 billingConfig: every5MinutesBillingConfig,
-                resetConfig: null,
+                resetConfig: every5MinutesResetConfig,
                 metadata: {
                   billingCadenceOverride: true,
                   resetCadenceOverride: false,
@@ -499,6 +530,14 @@ describe("PlanService plan version billing defaults", () => {
     expect(val.planVersionFeature.metadata).toMatchObject({
       billingCadenceOverride: true,
       resetCadenceOverride: false,
+    })
+    expect(insertedValues).toMatchObject({
+      billingConfig: every5MinutesBillingConfig,
+      resetConfig: every5MinutesResetConfig,
+      metadata: expect.objectContaining({
+        billingCadenceOverride: true,
+        resetCadenceOverride: false,
+      }),
     })
   })
 

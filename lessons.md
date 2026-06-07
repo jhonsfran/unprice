@@ -111,6 +111,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-08: Invoice finalization collectability should use the provider/display
   currency-minor amount; if a tiny positive ledger-scale total rounds to zero,
   skip provider work and void the invoice.
+- 2026-06-08: Usage plan-version features should persist an explicit reset cadence;
+  when reset follows billing, derive and store it from feature `billingConfig` while keeping
+  `metadata.resetCadenceOverride=false`, so rating/explainability read the same period keys.
 - 2026-06-08: Project dashboard revenue should use invoice-visible ledger credits into
   `customer.*.consumed`; do not estimate it from plan prices or raw payment/top-up funding
   accounts.

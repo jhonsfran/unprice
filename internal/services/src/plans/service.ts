@@ -56,15 +56,47 @@ function resetConfigFollowsBillingConfig(
   )
 }
 
-function normalizeResetConfigForBilling(
-  resetConfig: ResetConfig | null | undefined,
+function resetConfigsMatch(
+  left: ResetConfig | null | undefined,
+  right: ResetConfig | null | undefined
+): boolean {
+  if (!left || !right) {
+    return left === right
+  }
+
+  return (
+    left.name === right.name &&
+    left.resetInterval === right.resetInterval &&
+    left.resetIntervalCount === right.resetIntervalCount &&
+    left.resetAnchor === right.resetAnchor &&
+    left.planType === right.planType
+  )
+}
+
+function resetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
+  return {
+    name: billingConfig.name,
+    resetInterval: billingConfig.billingInterval,
+    resetIntervalCount: billingConfig.billingIntervalCount,
+    resetAnchor: billingConfig.billingAnchor,
+    planType: billingConfig.planType,
+  }
+}
+
+function resolveResetConfigForFeature({
+  featureType,
+  resetConfig,
+  billingConfig,
+}: {
+  featureType: PlanVersionFeature["featureType"]
+  resetConfig: ResetConfig | null | undefined
   billingConfig: BillingConfig
-): ResetConfig | null {
-  if (!resetConfig || resetConfigFollowsBillingConfig(resetConfig, billingConfig)) {
+}): ResetConfig | null {
+  if (featureType !== "usage") {
     return null
   }
 
-  return resetConfig
+  return resetConfig ?? resetConfigFromBillingConfig(billingConfig)
 }
 
 function featureMetadataWithCadenceFlags({
@@ -84,7 +116,10 @@ function featureMetadataWithCadenceFlags({
 
   nextMetadata.billingCadenceOverride =
     featureType === "usage" && !billingConfigsMatch(featureBillingConfig, planBillingConfig)
-  nextMetadata.resetCadenceOverride = featureType === "usage" && resetConfig !== null
+  nextMetadata.resetCadenceOverride =
+    featureType === "usage" &&
+    resetConfig !== null &&
+    !resetConfigFollowsBillingConfig(resetConfig, featureBillingConfig)
 
   return nextMetadata
 }
@@ -1582,13 +1617,16 @@ export class PlanService {
                 feature.resetConfig !== null &&
                 isResetCadenceAtMostBilling(feature.resetConfig, nextBillingConfig)
               const shouldSyncReset = !canPreserveReset
-              const nextResetConfig = shouldSyncReset ? null : feature.resetConfig
+              const nextResetConfig =
+                shouldSyncReset && feature.featureType === "usage"
+                  ? resetConfigFromBillingConfig(nextBillingConfig)
+                  : feature.resetConfig
 
               if (shouldSyncBilling && !billingConfigsMatch(feature.billingConfig, billingConfig)) {
                 update.billingConfig = nextBillingConfig
               }
 
-              if (shouldSyncReset && feature.resetConfig !== null) {
+              if (!resetConfigsMatch(feature.resetConfig, nextResetConfig)) {
                 update.resetConfig = nextResetConfig
               }
 
@@ -2062,7 +2100,11 @@ export class PlanService {
 
     const billingConfigCreate =
       featureType === "usage" ? billingConfig : planVersionData.billingConfig
-    const resetConfigCreate = normalizeResetConfigForBilling(resetConfig, billingConfigCreate)
+    const resetConfigCreate = resolveResetConfigForFeature({
+      featureType,
+      resetConfig,
+      billingConfig: billingConfigCreate,
+    })
     const metadataCreate = featureMetadataWithCadenceFlags({
       metadata,
       featureType,
@@ -2269,10 +2311,18 @@ export class PlanService {
       featureTypeUpdate === "usage"
         ? (billingConfig ?? existingPlanVersionFeature.billingConfig)
         : planVersionData.billingConfig
-    const resetConfigUpdate =
-      resetConfig !== undefined
-        ? normalizeResetConfigForBilling(resetConfig, billingConfigUpdate)
-        : existingPlanVersionFeature.resetConfig
+    const shouldPreserveExistingReset =
+      resetConfig === undefined &&
+      existingPlanVersionFeature.metadata?.resetCadenceOverride === true &&
+      existingPlanVersionFeature.resetConfig !== null &&
+      isResetCadenceAtMostBilling(existingPlanVersionFeature.resetConfig, billingConfigUpdate)
+    const resetConfigUpdate = shouldPreserveExistingReset
+      ? existingPlanVersionFeature.resetConfig
+      : resolveResetConfigForFeature({
+          featureType: featureTypeUpdate,
+          resetConfig,
+          billingConfig: billingConfigUpdate,
+        })
     const metadataUpdate = featureMetadataWithCadenceFlags({
       metadata: {
         ...(existingPlanVersionFeature.metadata ?? {}),
@@ -2348,7 +2398,7 @@ export class PlanService {
             ...(billingConfigUpdate && {
               billingConfig: billingConfigUpdate,
             }),
-            ...(resetConfig !== undefined && { resetConfig: resetConfigUpdate }),
+            ...(featureTypeUpdate === "usage" && { resetConfig: resetConfigUpdate }),
             ...(type && { type }),
             updatedAtM: Date.now(),
           })

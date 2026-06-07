@@ -148,7 +148,10 @@ function ExplainChargeContent({
                 : `${explanation.events.length} shown`
             }
           />
-          <ScrollArea className="h-[420px] rounded-md border">
+          <ScrollArea
+            className="hide-scrollbar h-[420px] rounded-md border [&_[data-radix-scroll-area-scrollbar]]:hidden"
+            hideScrollBar
+          >
             {explanation.events.map((event) => (
               <div
                 className="grid grid-cols-[1fr_auto] gap-3 border-b px-3 py-2 text-sm last:border-b-0"
