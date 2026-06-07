@@ -195,6 +195,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-18: EntitlementWindowDO alarm scheduling should use flush cadence only when
   `consumedAmount > flushedAmount`; fully flushed live reservations should wake on lifecycle
   deadlines, not stale `lastFlushedAt`.
+- 2026-06-08: EntitlementWindowDO time-based wallet flushes with `pendingRefillAmount=0` are
+  capture-only; do not call reservation extension for a zero-amount refill or alarms can keep
+  retrying flush/refill work.
 - 2026-05-17: Reservation release and grant expiration are separate financial events: release
   restores unused reserved funds to customer buckets; only grant expiration returns available
   grant balance to platform funding.

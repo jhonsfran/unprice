@@ -4575,6 +4575,54 @@ describe("EntitlementWindowDO", () => {
     expect(state.alarmAt).toBe(BASE_NOW + 60 * 60 * 1000)
   })
 
+  it("time-based wallet flush captures usage without requesting a zero-amount refill", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    seedWalletReservation(db, {
+      reservationId: "res_time_flush",
+      reservationEndAt: BASE_NOW + 2 * 60 * 60 * 1000,
+      periodEndAt: BASE_NOW + 2 * 60 * 60 * 1000,
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 595_600_000,
+      flushedAmount: 0,
+      consumedQuantity: 12,
+      flushedQuantity: 0,
+      flushSeq: 2,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: BASE_NOW - 10 * 60_000,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    await durableObject.alarm()
+
+    expect(testState.captureReservationUsage).toHaveBeenCalledTimes(1)
+    expect(testState.captureReservationUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amount: 595_600_000,
+        billingPeriodId: "bp_123",
+        flushSeq: 3,
+        kind: "usage",
+        reservationId: "res_time_flush",
+        statementKey: "stmt_123",
+      })
+    )
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+
+    const row = db.meterWindowRows.get(DEFAULT_METER_KEY)!
+    expect(row.allocationAmount).toBe(10 * 100_000_000)
+    expect(row.flushedAmount).toBe(595_600_000)
+    expect(row.flushedQuantity).toBe(12)
+    expect(row.flushSeq).toBe(3)
+    expect(row.pendingFlushSeq).toBeNull()
+    expect(row.pendingFlushAmount).toBeNull()
+    expect(row.pendingRefillAmount).toBe(0)
+    expect(row.refillInFlight).toBe(false)
+    expect(state.alarmAt).toBe(BASE_NOW + 60 * 60 * 1000)
+  })
+
   it("alarm runs a final flush after 1h of inactivity in deployed environments", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()

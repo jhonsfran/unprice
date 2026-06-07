@@ -4288,11 +4288,14 @@ export class EntitlementWindowDO extends DurableObject {
         return
       }
 
-      const grantedAmount = await this.extendFlushRefillReservation({
-        trigger,
-        wideEvent,
-        window: flushWindow,
-      })
+      const grantedAmount =
+        trigger.refillAmount > 0
+          ? await this.extendFlushRefillReservation({
+              trigger,
+              wideEvent,
+              window: flushWindow,
+            })
+          : 0
       if (grantedAmount === null) {
         return
       }
