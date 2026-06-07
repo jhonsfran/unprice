@@ -55,18 +55,19 @@ export interface ServiceContext {
  */
 export function createServiceContext(deps: ServiceDeps): ServiceContext {
   // 1. Leaf services (no service deps)
+  const ledger = new LedgerGateway({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
   const analytics = new AnalyticsService({
     db: deps.db,
     logger: deps.logger,
     analytics: deps.analytics,
+    ledgerGateway: ledger,
   })
 
   const paymentProviderResolver = new PaymentProviderResolver({
-    db: deps.db,
-    logger: deps.logger,
-  })
-
-  const ledger = new LedgerGateway({
     db: deps.db,
     logger: deps.logger,
   })

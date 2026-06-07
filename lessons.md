@@ -108,6 +108,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-08: Project dashboard revenue should use invoice-visible ledger credits into
+  `customer.*.consumed`; do not estimate it from plan prices or raw payment/top-up funding
+  accounts.
 - 2026-06-07: Customer-facing invoice money should quantize ledger-scale amounts through
   `toCurrencyMinor` before display; keep sub-cent precision internal.
 - 2026-06-07: Provider invoice items must allocate currency-minor rounding from the
