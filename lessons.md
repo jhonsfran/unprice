@@ -198,6 +198,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-08: EntitlementWindowDO time-based wallet flushes with `pendingRefillAmount=0` are
   capture-only; do not call reservation extension for a zero-amount refill or alarms can keep
   retrying flush/refill work.
+- 2026-06-08: Wallet capture usage transfers are statement-keyed; capped-wallet statement tests
+  should assert transfer source types, not raw pgledger debit/credit entry counts.
 - 2026-05-17: Reservation release and grant expiration are separate financial events: release
   restores unused reserved funds to customer buckets; only grant expiration returns available
   grant balance to platform funding.

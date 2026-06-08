@@ -400,12 +400,16 @@ async function expectLedgerSources() {
     { count: 1, source_type: "wallet_reserve_granted" },
   ])
 
-  const statementEntries = await db.execute<{ count: number }>(sql`
-    SELECT COUNT(*)::int AS count
-    FROM unprice_ledger_idempotency i
-    JOIN pgledger_entries_view e ON e.transfer_id = i.transfer_id
-    WHERE i.project_id = ${projectId}
-      AND i.statement_key = ${statementKey}
+  const statementSources = await db.execute<{ source_type: string; count: number }>(sql`
+    SELECT source_type, COUNT(*)::int AS count
+    FROM unprice_ledger_idempotency
+    WHERE project_id = ${projectId}
+      AND statement_key = ${statementKey}
+    GROUP BY source_type
+    ORDER BY source_type
   `)
-  expect(statementEntries.rows).toEqual([{ count: 4 }])
+  expect(statementSources.rows).toEqual([
+    { count: 2, source_type: "subscription_billing_period_charge_v1" },
+    { count: 1, source_type: "wallet_capture_usage" },
+  ])
 }
