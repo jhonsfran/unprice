@@ -4,6 +4,7 @@ import type { Logger } from "@unprice/logs"
 import type { CustomerService } from "../customers/service"
 import type { LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
+import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import type { WalletService } from "../wallet"
 import { SubscriptionMachine } from "./machine"
 import type { SubscriptionRepository } from "./repository"
@@ -42,6 +43,7 @@ export async function withLockedMachine<T>(args: {
   ratingService: RatingService
   ledgerService: LedgerGateway
   walletService?: WalletService
+  reservationFlushGateway?: BillingReservationFlushGateway
   setLockContext?: (context: {
     resource?: string
     action?: string
@@ -68,6 +70,7 @@ export async function withLockedMachine<T>(args: {
     ratingService,
     ledgerService,
     walletService,
+    reservationFlushGateway,
     setLockContext,
   } = args
 
@@ -134,6 +137,7 @@ export async function withLockedMachine<T>(args: {
       ratingService,
       ledgerService,
       walletService,
+      reservationFlushGateway,
       db,
       repo,
       dryRun,

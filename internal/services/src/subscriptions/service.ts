@@ -29,6 +29,7 @@ import type { EntitlementService } from "../entitlements/service"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
 import type { RatingService } from "../rating/service"
+import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import { toErrorContext } from "../utils/log-context"
 import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
@@ -83,6 +84,7 @@ export class SubscriptionService {
   private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService | undefined
+  private readonly reservationFlushGateway: BillingReservationFlushGateway | undefined
 
   constructor({
     db,
@@ -98,6 +100,7 @@ export class SubscriptionService {
     ratingService,
     ledgerService,
     walletService,
+    reservationFlushGateway,
   }: {
     db: Database
     repo: SubscriptionRepository
@@ -113,6 +116,7 @@ export class SubscriptionService {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
+    reservationFlushGateway?: BillingReservationFlushGateway
   }) {
     this.db = db
     this.repo = repo
@@ -126,6 +130,7 @@ export class SubscriptionService {
     this.ratingService = ratingService
     this.ledgerService = ledgerService
     this.walletService = walletService
+    this.reservationFlushGateway = reservationFlushGateway
   }
 
   private setLockContext(context: {
@@ -1801,6 +1806,7 @@ export class SubscriptionService {
         ratingService: this.ratingService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,
+        reservationFlushGateway: this.reservationFlushGateway,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })

@@ -25,6 +25,7 @@ import {
   type ActivateSubscriptionDeps,
   activateSubscription,
 } from "../use-cases/billing/provision-period"
+import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import type { WalletService } from "../wallet"
 import sendCustomerNotification, { logTransition, updateSubscription } from "./actions"
 import {
@@ -76,6 +77,7 @@ export class SubscriptionMachine {
   private ratingService: RatingService
   private ledgerService: LedgerGateway
   private walletService: WalletService | null
+  private reservationFlushGateway: BillingReservationFlushGateway | undefined
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
   // Serializes event sends to this actor to avoid concurrent transitions/races.
@@ -93,6 +95,7 @@ export class SubscriptionMachine {
     ratingService,
     ledgerService,
     walletService,
+    reservationFlushGateway,
     now,
     db,
     repo,
@@ -105,6 +108,7 @@ export class SubscriptionMachine {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
+    reservationFlushGateway?: BillingReservationFlushGateway
     now: number
     db: Database
     repo: SubscriptionRepository
@@ -121,6 +125,7 @@ export class SubscriptionMachine {
     // skip the `activating` state via a guard; once every caller passes
     // walletService this can become required. See `shouldActivate`.
     this.walletService = walletService ?? null
+    this.reservationFlushGateway = reservationFlushGateway
     this.db = db
     this.repo = repo
     this.machine = this.createMachineSubscription()
@@ -178,6 +183,7 @@ export class SubscriptionMachine {
               repo: SubscriptionRepository
               ratingService: RatingService
               ledgerService: LedgerGateway
+              reservationFlushGateway?: BillingReservationFlushGateway
             }
           }) => {
             const result = await invoiceSubscription({
@@ -187,6 +193,7 @@ export class SubscriptionMachine {
               repo: input.repo,
               ratingService: input.ratingService,
               ledgerService: input.ledgerService,
+              reservationFlushGateway: input.reservationFlushGateway,
             })
 
             return result
@@ -547,6 +554,7 @@ export class SubscriptionMachine {
               repo: this.repo,
               ratingService: this.ratingService,
               ledgerService: this.ledgerService,
+              reservationFlushGateway: this.reservationFlushGateway,
             }),
             onDone: {
               target: "activating",
@@ -1044,6 +1052,7 @@ export class SubscriptionMachine {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
+    reservationFlushGateway?: BillingReservationFlushGateway
     now: number
     db: Database
     repo: SubscriptionRepository
