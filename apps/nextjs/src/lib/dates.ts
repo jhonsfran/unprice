@@ -22,7 +22,7 @@ export function manipulateDate(
   const addOneDayToDate = date?.to ? addDays(new Date(date.to), 1).getTime() - 1 : null
 
   return {
-    from: date?.from?.getTime() ?? undefined,
-    to: isToDateMidnight ? addOneDayToDate : (date?.to?.getTime() ?? undefined),
+    from: date?.from?.getTime() ?? null,
+    to: isToDateMidnight ? addOneDayToDate : (date?.to?.getTime() ?? null),
   }
 }
