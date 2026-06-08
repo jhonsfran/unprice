@@ -17,7 +17,7 @@ patterns. Keep it cheap to load and useful.
 
 - 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,
   `drizzle/migrations.js`, and `drizzle/meta/_journal.json` updated together; otherwise existing
-  DOs can type-check but fail at runtime on missing columns.
+  DOs can type-check but fail at runtime on missing columns. Never create migrations manually, always use pnpm run db:check:ingestion:migrations for the api.
 - 2026-06-06: `bin/startup.dev` builds/deploys analytics with `tb --local`; use
   `TB_VERSION_WARNING=0 tb --local --output=json info | jq -r ".local.token"` for the app token,
   because `tb --local token copy "workspace admin token"` can return a static token rejected by

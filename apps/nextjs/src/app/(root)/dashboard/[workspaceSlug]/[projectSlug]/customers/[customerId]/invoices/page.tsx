@@ -4,6 +4,7 @@ import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Typography } from "@unprice/ui/typography"
 import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
+import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
@@ -11,24 +12,27 @@ import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
+import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
 import { columns as invoicesColumns } from "../../_components/invoices/table-invoices/columns"
 
-export default async function CustomerPage({
-  params,
-}: {
+export default async function CustomerPage(props: {
   params: {
     workspaceSlug: string
     projectSlug: string
     customerId: string
   }
+  searchParams: SearchParams
 }) {
+  const { params, searchParams } = props
   const { workspaceSlug, projectSlug, customerId } = params
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
+  const filters = dataTableParams(searchParams)
 
-  const { customer } = await api.customers.getInvoices({
+  const { customer, invoices, pageCount } = await api.customers.getInvoices({
     customerId,
+    ...filters,
   })
 
   if (!customer) {
@@ -99,13 +103,14 @@ export default async function CustomerPage({
           }
         >
           <DataTable
+            pageCount={pageCount}
             columns={invoicesColumns}
-            data={customer.invoices}
+            data={invoices}
             filterOptions={{
               filterBy: "id",
               filterColumns: true,
               filterDateRange: true,
-              filterServerSide: false,
+              filterServerSide: true,
               filterSelectors: {
                 status: INVOICE_STATUS.map((value) => ({
                   value: value,

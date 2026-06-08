@@ -1,12 +1,6 @@
 "use client"
 
-import type {
-  ColumnDef,
-  ColumnFiltersState,
-  PaginationState,
-  SortingState,
-  VisibilityState,
-} from "@tanstack/react-table"
+import type { ColumnDef, VisibilityState } from "@tanstack/react-table"
 import {
   flexRender,
   getCoreRowModel,
@@ -23,7 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@unprice/ui/utils"
 
 import { AlertTriangle } from "lucide-react"
-import { useFilterDataTable } from "~/hooks/use-filter-datatable"
+import { useDataTableUrlState } from "~/hooks/use-data-table-url-state"
 import { EmptyPlaceholder } from "../empty-placeholder"
 import { DataTablePagination } from "./data-table-pagination"
 import { DataTableToolbar } from "./data-table-toolbar"
@@ -61,29 +55,24 @@ export function DataTable<TData, TValue>({
   pageCount,
   error,
 }: DataTableProps<TData, TValue>) {
-  const [filters] = useFilterDataTable()
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
-  const [sorting, setSorting] = React.useState<SortingState>([])
 
   // if pageCount is provided, we assume server-side pagination
   // otherwise, we assume client-side pagination done by the library
   const isServerSidePagination = !!pageCount
 
-  // Handle server-side pagination
-  const [page, setPagination] = React.useState<PaginationState>({
-    pageIndex: filters.page - 1,
-    pageSize: filters.page_size ?? 10,
+  const {
+    pagination,
+    sorting,
+    columnFilters,
+    onPaginationChange,
+    onSortingChange,
+    onColumnFiltersChange,
+  } = useDataTableUrlState({
+    searchColumnId: filterOptions?.filterBy,
+    serverSide: isServerSidePagination,
   })
-
-  const pagination = React.useMemo(
-    () => ({
-      pageIndex: page.pageIndex,
-      pageSize: page.pageSize,
-    }),
-    [page.pageIndex, page.pageSize]
-  )
 
   const table = useReactTable({
     data,
@@ -91,7 +80,7 @@ export function DataTable<TData, TValue>({
     ...(isServerSidePagination && { pageCount }),
     state: {
       sorting,
-      ...(isServerSidePagination && { pagination }),
+      pagination,
       columnVisibility,
       rowSelection,
       columnFilters,
@@ -99,9 +88,10 @@ export function DataTable<TData, TValue>({
     },
     enableRowSelection: true,
     onRowSelectionChange: setRowSelection,
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
+    onSortingChange,
+    onColumnFiltersChange,
     onColumnVisibilityChange: setColumnVisibility,
+    onPaginationChange,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
@@ -110,7 +100,6 @@ export function DataTable<TData, TValue>({
     getFacetedUniqueValues: getFacetedUniqueValues(),
     ...(isServerSidePagination && {
       manualPagination: true,
-      onPaginationChange: setPagination,
     }),
   })
 
@@ -189,7 +178,7 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
-      <DataTablePagination table={table} serverSidePagination={isServerSidePagination} />
+      <DataTablePagination table={table} />
     </div>
   )
 }

@@ -1,1 +1,0 @@
-ALTER TABLE `meter_pricing` DROP COLUMN `pinned_plan_version_id`;

@@ -15,8 +15,7 @@ import { SuperLink } from "~/components/super-link"
 import { formatInvoiceMoney } from "../format-invoice-money"
 import { DataTableRowActions } from "./data-table-row-actions"
 
-type InvoiceCustomer =
-  RouterOutputs["customers"]["getSubscriptions"]["customer"]["invoices"][number]
+type InvoiceCustomer = RouterOutputs["customers"]["getInvoices"]["invoices"][number]
 
 export const columns: ColumnDef<InvoiceCustomer>[] = [
   {

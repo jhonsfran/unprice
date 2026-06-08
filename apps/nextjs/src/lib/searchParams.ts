@@ -1,5 +1,50 @@
 import { DEFAULT_INTERVAL, INTERVAL_KEYS } from "@unprice/analytics"
-import { createLoader, parseAsInteger, parseAsString, parseAsStringEnum } from "nuqs/server"
+import {
+  createLoader,
+  parseAsInteger,
+  parseAsJson,
+  parseAsString,
+  parseAsStringEnum,
+} from "nuqs/server"
+
+export type DataTableFilterValue = boolean | number | string
+export type DataTableFilterParams = Record<string, DataTableFilterValue[]>
+
+function parseDataTableFilterParams(value: unknown): DataTableFilterParams | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null
+  }
+
+  const filters: DataTableFilterParams = {}
+
+  for (const [key, rawValues] of Object.entries(value)) {
+    if (
+      !Array.isArray(rawValues) ||
+      rawValues.some(
+        (rawValue) =>
+          typeof rawValue !== "boolean" &&
+          typeof rawValue !== "number" &&
+          typeof rawValue !== "string"
+      )
+    ) {
+      return null
+    }
+
+    const values = rawValues.filter((rawValue) => {
+      if (typeof rawValue === "string") {
+        return rawValue.length > 0
+      }
+
+      return true
+    })
+
+    if (values.length > 0) {
+      filters[key] = values
+    }
+  }
+
+  return filters
+}
 
 export const filtersDataTableParsers = {
   page: parseAsInteger.withDefault(1),
@@ -7,6 +52,8 @@ export const filtersDataTableParsers = {
   to: parseAsInteger,
   from: parseAsInteger,
   search: parseAsString,
+  sort: parseAsString,
+  filters: parseAsJson(parseDataTableFilterParams).withDefault({}),
   intervalDays: parseAsInteger.withDefault(7),
 }
 
