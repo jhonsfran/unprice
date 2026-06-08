@@ -16,6 +16,8 @@ import { ProjectService } from "./projects/service"
 import { RatingService } from "./rating/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
+import { SdkBillingReservationFlushGateway } from "./use-cases/billing/reservation-flush-gateway"
+import { unprice } from "./utils/unprice"
 import { WalletService } from "./wallet"
 import { WorkspaceService } from "./workspaces/service"
 
@@ -193,6 +195,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     ratingService: rating,
     ledgerService: ledger,
     walletService: wallet,
+    reservationFlushGateway: new SdkBillingReservationFlushGateway(unprice),
   })
 
   return {
