@@ -24,6 +24,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/billing/reservations/flush-for-invoicing": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * flush wallet reservation usage before invoicing
+     * @description Flushes unflushed consumed usage from active wallet reservations into the ledger for invoicing. Called by the billing service before invoice materialization.
+     */
+    post: operations["billing.reservations.flushForInvoicing"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/customers/sign-up": {
     parameters: {
       query?: never
@@ -753,6 +773,125 @@ export interface operations {
         }
         content: {
           "application/json": Record<string, never>
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "billing.reservations.flushForInvoicing": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Flush reservation request */
+    requestBody: {
+      content: {
+        "application/json": {
+          /**
+           * @description Customer id
+           * @example cus_123
+           */
+          customerId: string
+          /**
+           * @description Subscription id
+           * @example sub_123
+           */
+          subscriptionId: string
+          /**
+           * @description Subscription phase id
+           * @example phase_123
+           */
+          subscriptionPhaseId: string
+          /** @description Statement key for the billing period */
+          statementKey: string
+        }
+      }
+    }
+    responses: {
+      /** @description Flush result */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            ok: boolean
+            flushed: number
+            skipped: number
+          }
         }
       }
       /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
@@ -2205,16 +2344,21 @@ export interface operations {
               cycleEndAt: number | null
               cycleStartAt: number | null
               featurePlanVersionItemId: string | null
+              featureSlug: string | null
               statementKey: string | null
               consumedAmount: number
               flushedAmount: number
               unflushedAmount: number
+              consumedQuantity: number
+              flushedQuantity: number
+              unflushedQuantity: number
               allocationAmount: number
               refillInFlight: boolean
               flushSeq: number
               pendingFlushSeq: number | null
               pendingFlushFinal: boolean
               pendingFlushAmount: number | null
+              pendingFlushQuantity: number | null
               pendingRefillAmount: number
               lastEventAt: number | null
               lastFlushedAt: number | null
@@ -2481,13 +2625,7 @@ export interface operations {
               settlement_status: "due" | "paid" | "included"
               wallet_credit_id: string | null
               /** @enum {string|null} */
-              wallet_credit_source:
-                | "promo"
-                | "plan_included"
-                | "trial"
-                | "manual"
-                | "credit_line"
-                | null
+              wallet_credit_source: "promo" | "plan_included" | "trial" | "manual" | "credit_line"
               wallet_id: string | null
               /** @enum {string} */
               currency: "USD" | "EUR"
@@ -5026,6 +5164,17 @@ export interface operations {
               first_event_at: number | null
               last_event_at: number | null
               multi_component_event_count: number
+            }
+            pricing: {
+              feature_type: string
+              usage_mode: string | null
+              tier_mode: string | null
+              unit_of_measure: string
+              description: string
+              rows: {
+                label: string
+                value: string
+              }[]
             }
             events: {
               event_id: string
