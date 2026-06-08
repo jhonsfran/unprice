@@ -88,6 +88,8 @@ import {
   EntitlementWindowReservationUnderfundedError,
   type EntitlementWindowStatus,
   EntitlementWindowWalletEmptyError,
+  type FlushReservationForInvoicingInput,
+  type FlushReservationForInvoicingResult,
   type MeterIdentity,
   type PricedFact,
   type RefillTrigger,
@@ -2579,6 +2581,136 @@ export class EntitlementWindowDO extends DurableObject {
     // Pull the alarm in: don't wait for the next natural FLUSH_INTERVAL_MS
     // tick if one isn't already imminent.
     await this.scheduleAlarm(Date.now())
+  }
+
+  // Public RPC: flush unflushed consumed usage for invoicing without closing
+  // the reservation. The billing endpoint calls this before BILL materializes
+  // an invoice, so the ledger reflects captured usage up to this moment.
+  // The reservation stays open so new events continue being tracked.
+  public async flushReservationForInvoicing(
+    input: FlushReservationForInvoicingInput
+  ): Promise<FlushReservationForInvoicingResult> {
+    return runDoOperation(
+      {
+        requestId: this.ctx.id.toString(),
+        service: "entitlementwindow",
+        operation: "flush_reservation_for_invoicing",
+        waitUntil: (p) => this.ctx.waitUntil(p),
+      },
+      async () => this.flushReservationForInvoicingInner(input)
+    )
+  }
+
+  private async flushReservationForInvoicingInner(
+    input: FlushReservationForInvoicingInput
+  ): Promise<FlushReservationForInvoicingResult> {
+    const startTime = Date.now()
+    const window = this.readWalletReservation(this.db)
+    const wideEvent: Record<string, unknown> = {
+      operation: "flush_reservation_for_invoicing",
+      statement_key: input.statementKey,
+      billing_period_ids: input.billingPeriodIds,
+      reservation_id: window?.reservationId ?? null,
+      project_id: window?.projectId ?? null,
+      customer_id: window?.customerId ?? null,
+      consumed_amount: window?.consumedAmount ?? null,
+      flushed_amount: window?.flushedAmount ?? null,
+    }
+
+    try {
+      if (!window?.reservationId) {
+        wideEvent.outcome = "no_reservation"
+        return { ok: true, outcome: "no_reservation" }
+      }
+
+      if (window.recoveryRequired) {
+        wideEvent.outcome = "recovery_required"
+        return { ok: false, outcome: "recovery_required" }
+      }
+
+      // Verify the reservation belongs to this statement or billing period group.
+      const ownsStatement =
+        window.statementKey === input.statementKey ||
+        (window.billingPeriodId !== null && input.billingPeriodIds.includes(window.billingPeriodId))
+
+      if (!ownsStatement) {
+        wideEvent.outcome = "statement_mismatch"
+        const errorMessage = `Reservation ${window.reservationId} belongs to statement ${window.statementKey ?? "unknown"}`
+        wideEvent.error_message = errorMessage
+        return { ok: false, outcome: "statement_mismatch", errorMessage }
+      }
+
+      if (this.hasPendingWalletFlush(window)) {
+        wideEvent.outcome = "deferred"
+        return {
+          ok: false,
+          outcome: "deferred",
+          errorMessage: "Reservation already has a pending wallet flush",
+        }
+      }
+
+      const flushAmount = Math.max(0, window.consumedAmount - window.flushedAmount)
+      const flushQuantity = Math.max(0, window.consumedQuantity - window.flushedQuantity)
+      if (flushAmount <= 0) {
+        wideEvent.outcome = "no_unflushed_usage"
+        return { ok: true, outcome: "no_unflushed_usage" }
+      }
+
+      const flushSeq = window.flushSeq + 1
+      wideEvent.flush_seq = flushSeq
+      wideEvent.flush_amount = flushAmount
+      wideEvent.flush_quantity = flushQuantity
+
+      this.db
+        .update(walletReservationTable)
+        .set({
+          refillInFlight: true,
+          pendingFlushSeq: flushSeq,
+          pendingFlushFinal: false,
+          pendingFlushAmount: flushAmount,
+          pendingFlushQuantity: flushQuantity,
+          pendingRefillAmount: 0,
+        })
+        .run()
+
+      await this.requestFlushAndRefill({
+        flushSeq,
+        flushAmount,
+        flushQuantity,
+        refillAmount: 0,
+        effectiveAt: Date.now(),
+      })
+
+      const after = this.readWalletReservation(this.db)
+      if (after?.pendingFlushSeq !== null || after?.flushSeq !== flushSeq) {
+        wideEvent.outcome = "wallet_error"
+        return {
+          ok: false,
+          outcome: "wallet_error",
+          errorMessage: "Reservation flush did not complete",
+        }
+      }
+
+      wideEvent.outcome = "flushed"
+      return { ok: true, outcome: "flushed" }
+    } catch (error) {
+      this.logger.error(error, {
+        context: "flush_reservation_for_invoicing threw unexpectedly",
+        flushSeq: window ? window.flushSeq + 1 : null,
+        reservationId: window?.reservationId ?? null,
+      })
+      wideEvent.outcome = "wallet_error"
+      wideEvent.error_type = error instanceof Error ? error.name : "unknown"
+      wideEvent.error_message = error instanceof Error ? error.message : String(error)
+      return {
+        ok: false,
+        outcome: "wallet_error",
+        errorMessage: error instanceof Error ? error.message : String(error),
+      }
+    } finally {
+      wideEvent.duration_ms = Date.now() - startTime
+      this.logger.info("entitlement flush_reservation_for_invoicing", wideEvent)
+    }
   }
 
   // Close a live reservation: capture the unflushed consumed tail, then

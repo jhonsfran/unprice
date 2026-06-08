@@ -91,6 +91,24 @@ export type EntitlementWindowStatus = {
   } | null
 }
 
+export type FlushReservationForInvoicingInput = {
+  statementKey: string
+  billingPeriodIds: string[]
+}
+
+export type FlushReservationForInvoicingResult = {
+  ok: boolean
+  outcome:
+    | "deferred"
+    | "flushed"
+    | "no_reservation"
+    | "no_unflushed_usage"
+    | "recovery_required"
+    | "statement_mismatch"
+    | "wallet_error"
+  errorMessage?: string
+}
+
 export type EntitlementWindowController = {
   apply: (input: EntitlementWindowApplyInput) => Promise<EntitlementWindowApplyResult>
   applyBatch?: (input: {
@@ -103,6 +121,9 @@ export type EntitlementWindowController = {
   }) => Promise<{ results: EntitlementWindowApplyBatchResult[] }>
   getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
   getStatus?: () => Promise<EntitlementWindowStatus>
+  flushReservationForInvoicing?: (
+    input: FlushReservationForInvoicingInput
+  ) => Promise<FlushReservationForInvoicingResult>
 }
 
 export interface EntitlementWindowClient {

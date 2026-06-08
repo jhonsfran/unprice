@@ -401,6 +401,24 @@ export type CloseReservationOptions = {
   recoverPendingFinal?: boolean
 }
 
+export type FlushReservationForInvoicingInput = {
+  statementKey: string
+  billingPeriodIds: string[]
+}
+
+export type FlushReservationForInvoicingResult = {
+  ok: boolean
+  outcome:
+    | "deferred"
+    | "flushed"
+    | "no_reservation"
+    | "no_unflushed_usage"
+    | "recovery_required"
+    | "statement_mismatch"
+    | "wallet_error"
+  errorMessage?: string
+}
+
 export type EnforcementStateResult = {
   isLimitReached: boolean
   limit: number | null

@@ -5377,6 +5377,155 @@ describe("EntitlementWindowDO", () => {
     // so the earlier alarm takes effect.
     expect(state.alarmAt).toBeLessThanOrEqual(Date.now() + 30_000)
   })
+
+  it("flushes a matching reservation for invoicing without closing it", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      reservationEndAt: BASE_NOW + 60_000,
+      usage: 6,
+      updatedAt: BASE_NOW,
+      createdAt: BASE_NOW,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      billingPeriodId: "bp_123",
+      cycleEndAt: BASE_NOW + 60_000,
+      cycleStartAt: BASE_NOW - 60_000,
+      featurePlanVersionItemId: "item_123",
+      featureSlug: "api_calls",
+      statementKey: "stmt_123",
+      reservationId: "res_invoice",
+      allocationAmount: 10 * 100_000_000,
+      consumedAmount: 5 * 100_000_000,
+      flushedAmount: 2 * 100_000_000,
+      consumedQuantity: 5,
+      flushedQuantity: 2,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      targetReservationAmount: 10 * 100_000_000,
+      spendEwmaAmount: 0,
+      lastRateSampledAtMs: null,
+      maxEventCostAmount: 100_000_000,
+      pendingRefillAmount: 0,
+      pendingFlushAmount: null,
+      pendingFlushQuantity: null,
+      refillInFlight: false,
+      flushSeq: 2,
+      pendingFlushSeq: null,
+      pendingFlushFinal: false,
+      lastEventAt: BASE_NOW,
+      lastFlushedAt: BASE_NOW - 30_000,
+      deletionRequested: false,
+      recoveryRequired: false,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.flushReservationForInvoicing({
+      statementKey: "stmt_123",
+      billingPeriodIds: ["bp_123"],
+    })
+
+    expect(result).toMatchObject({ ok: true, outcome: "flushed" })
+    expect(testState.captureReservationUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservationId: "res_invoice",
+        flushSeq: 3,
+        amount: 3 * 100_000_000,
+        kind: "usage",
+        statementKey: "stmt_123",
+      })
+    )
+    // refillAmount: 0 means no extension is requested
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toMatchObject({
+      reservationId: "res_invoice",
+      flushedAmount: 5 * 100_000_000,
+      pendingFlushFinal: false,
+    })
+  })
+
+  it("returns no_reservation when no wallet reservation exists", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    // Seed a meter window without a reservationId
+    db.meterWindowRows.set(DEFAULT_METER_KEY, {
+      meterKey: DEFAULT_METER_KEY,
+      currency: "USD",
+      priceConfig: DEFAULT_PRICE_CONFIG,
+      periodEndAt: BASE_NOW + 60_000,
+      usage: 0,
+      updatedAt: BASE_NOW,
+      createdAt: BASE_NOW,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.flushReservationForInvoicing({
+      statementKey: "stmt_123",
+      billingPeriodIds: ["bp_123"],
+    })
+
+    expect(result).toMatchObject({ ok: true, outcome: "no_reservation" })
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+  })
+
+  it("returns statement_mismatch when reservation belongs to a different statement", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    seedWalletReservation(db, {
+      reservationId: "res_other",
+      statementKey: "stmt_other",
+      billingPeriodId: "bp_other",
+      consumedAmount: 3 * 100_000_000,
+      flushedAmount: 0,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.flushReservationForInvoicing({
+      statementKey: "stmt_123",
+      billingPeriodIds: ["bp_123"],
+    })
+
+    expect(result).toMatchObject({ ok: false, outcome: "statement_mismatch" })
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+  })
+
+  it("returns no_unflushed_usage when consumed equals flushed", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+
+    seedWalletReservation(db, {
+      reservationId: "res_noop",
+      statementKey: "stmt_123",
+      consumedAmount: 5 * 100_000_000,
+      flushedAmount: 5 * 100_000_000,
+      consumedQuantity: 5,
+      flushedQuantity: 5,
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const result = await durableObject.flushReservationForInvoicing({
+      statementKey: "stmt_123",
+      billingPeriodIds: ["bp_123"],
+    })
+
+    expect(result).toMatchObject({ ok: true, outcome: "no_unflushed_usage" })
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+  })
 })
 
 const createConnectionSpy = vi.fn()
