@@ -645,4 +645,37 @@ export class Unprice {
       },
     }
   }
+
+  public get billing() {
+    return {
+      reservations: {
+        flushForInvoicing: (req: {
+          customerId: string
+          subscriptionId: string
+          subscriptionPhaseId: string
+          statementKey: string
+        }): Promise<ApiResult<{ ok: boolean; flushed: number; skipped: number }>> => {
+          const request = new Request(
+            `${this.baseUrl}/v1/billing/reservations/flush-for-invoicing`,
+            {
+              method: "POST",
+              headers: {
+                ...this.getHeaders(),
+                "content-type": "application/json",
+              },
+              body: JSON.stringify(req),
+            }
+          )
+          return this.toResult(
+            this.fetchWithRetry(request).then(async (response) => {
+              if (!response.ok) {
+                return { error: await response.json(), response } as never
+              }
+              return { data: await response.json(), response }
+            })
+          )
+        },
+      },
+    }
+  }
 }

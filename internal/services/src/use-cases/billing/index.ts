@@ -46,3 +46,8 @@ export {
 export type { ExplainChargeDeps, ExplainChargeInput, ExplainChargeOutput } from "./explain-charge"
 export { renewPeriod } from "./renew-period"
 export { settlePrepaidInvoiceToWallet } from "./settle-invoice"
+export {
+  createNoopBillingReservationFlushGateway,
+  SdkBillingReservationFlushGateway,
+} from "./reservation-flush-gateway"
+export type { BillingReservationFlushGateway } from "./reservation-flush-gateway"

@@ -100,6 +100,7 @@ describe("Unprice client", () => {
     expect(typeof client.wallet.balance).toBe("function")
     expect(typeof client.wallet.creditBalance).toBe("function")
     expect(typeof client.wallet.get).toBe("function")
+    expect(typeof client.billing.reservations.flushForInvoicing).toBe("function")
     expect("getPlanVersion" in client.plans).toBe(false)
     expect("getEntitlements" in client.customers).toBe(false)
     expect("usage" in client).toBe(false)
@@ -348,6 +349,34 @@ describe("Unprice client", () => {
     expect(error).toBeUndefined()
     expect(result?.accepted).toBe(true)
     expect(calls).toBe(2)
+  })
+
+  it("posts invoicing reservation flush requests", async () => {
+    const requests: Request[] = []
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://api.test",
+      disableTelemetry: true,
+      retry: { attempts: 0 },
+      fetch: async (request) => {
+        requests.push(request.clone())
+        return createJsonResponse({ ok: true, flushed: 1, skipped: 0 })
+      },
+    })
+
+    const { result, error } = await client.billing.reservations.flushForInvoicing({
+      customerId: "cus_123",
+      subscriptionId: "sub_123",
+      subscriptionPhaseId: "phase_123",
+      statementKey: "stmt_123",
+    })
+
+    expect(error).toBeUndefined()
+    expect(result).toEqual({ ok: true, flushed: 1, skipped: 0 })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.url).toBe("https://api.test/v1/billing/reservations/flush-for-invoicing")
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
   })
 })
 
