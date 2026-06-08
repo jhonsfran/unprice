@@ -84,6 +84,12 @@ jobs:
           ts: "true"
           python: "false"
 
+      - name: Build API client
+        run: pnpm build --filter='./packages/api'
+        env:
+          UNPRICE_API_KEY: ""
+          NODE_ENV: test
+
       - name: Run services integration tests
         run: pnpm --filter @unprice/services test:integration
         env:
