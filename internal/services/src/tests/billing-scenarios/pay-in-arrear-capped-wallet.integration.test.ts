@@ -404,6 +404,93 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     await expectReservationClosed(reservationId)
     expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
+
+  it("P0-B calls reservationFlushGateway before invoicing when provided", async () => {
+    const logger = createLogger()
+    const ledger = new LedgerGateway({ db, logger })
+    const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
+    const analytics = createAnalytics({ events: 1200 })
+    const rating = new RatingService({
+      logger,
+      analytics,
+      grantsManager: new GrantsManager({ db, logger }),
+    })
+    const repo = new DrizzleSubscriptionRepository(db)
+    const services = {
+      wallet,
+      ledger,
+      subscriptions: {},
+    } as unknown as Pick<ServiceContext, "wallet" | "ledger" | "subscriptions">
+
+    // Activate and create reservation
+    await activateSubscription(
+      { services, db, logger },
+      {
+        subscriptionId,
+        projectId,
+        periodStartAt: new Date(jan1),
+        periodEndAt: new Date(feb1),
+        idempotencyKey: "p0-b-flush-gateway-2026-01",
+        grants: [{ amount: usageAmount, reason: "Period usage allowance", source: "credit_line" }],
+      }
+    )
+
+    const reservation = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "EUR",
+      entitlementId: eventsEntitlementId,
+      requestedAmount: usageAmount,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 0,
+      periodStartAt: new Date(jan1),
+      periodEndAt: new Date(feb1),
+      effectiveAt: new Date(jan1),
+      metadata: { owner: "p0-b-flush-gateway-integration" },
+      idempotencyKey: "reserve:p0-b-flush-gateway-2026-01:events",
+    })
+    expect(reservation.err).toBeUndefined()
+    const reservationId = reservation.val?.reservationId
+    expect(reservationId).toBeDefined()
+    if (!reservationId) return
+
+    // Simulate the flush that the gateway would trigger (capture + close)
+    await flushReservationForTest(wallet, {
+      projectId,
+      customerId,
+      currency: "EUR",
+      reservationId,
+      flushSeq: 1,
+      flushAmount: usageAmount,
+      refillChunkAmount: 0,
+      statementKey,
+      final: true,
+      effectiveAt: new Date(feb1),
+      sourceId: `${usageBillingPeriodId}:${usageSubscriptionItemId}`,
+      metadata: { owner: "p0-b-flush-gateway-integration" },
+    })
+
+    // Use a fake gateway that confirms it was called
+    const reservationFlushGateway = {
+      flushForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+    }
+
+    const context = await loadSubscriptionContext()
+    const result = await billPeriod({
+      context,
+      logger,
+      db,
+      repo,
+      ratingService: rating,
+      ledgerService: ledger,
+      reservationFlushGateway,
+    })
+
+    expect(result.phasesProcessed).toBe(1)
+    expect(reservationFlushGateway.flushForInvoicing).toHaveBeenCalledWith(
+      expect.objectContaining({ statementKey })
+    )
+  })
 })
 
 async function expectWalletState(
