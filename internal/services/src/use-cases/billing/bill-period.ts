@@ -15,6 +15,7 @@ import { type InvoiceLine, type LedgerGateway, customerAccountKeys } from "../..
 import type { RatingService } from "../../rating/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
 import type { SubscriptionContext } from "../../subscriptions/types"
+import type { BillingReservationFlushGateway } from "./reservation-flush-gateway"
 
 /**
  * BILL phase. Materializes pending billing periods into ledger entries +
@@ -40,6 +41,7 @@ export async function billPeriod({
   repo,
   ratingService,
   ledgerService,
+  reservationFlushGateway,
 }: {
   context: SubscriptionContext
   logger: Logger
@@ -47,6 +49,7 @@ export async function billPeriod({
   repo: SubscriptionRepository
   ratingService: RatingService
   ledgerService: LedgerGateway
+  reservationFlushGateway?: BillingReservationFlushGateway
 }): Promise<
   Partial<SubscriptionContext> & {
     phasesProcessed: number
@@ -73,6 +76,27 @@ export async function billPeriod({
 
     if (!phase || !phase.planVersion || !phase.subscription) {
       continue
+    }
+
+    // Flush wallet reservation usage into the ledger before invoicing.
+    // This ensures the invoice reflects all consumed usage up to this moment.
+    if (reservationFlushGateway) {
+      const flush = await reservationFlushGateway.flushForInvoicing({
+        customerId: phase.subscription.customerId,
+        subscriptionId: periodItemGroup.subscriptionId,
+        subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
+        statementKey: periodItemGroup.statementKey,
+      })
+
+      if (flush.err) {
+        logger.warn("Blocking invoicing until wallet reservation usage flushes", {
+          projectId: periodItemGroup.projectId,
+          subscriptionId: periodItemGroup.subscriptionId,
+          statementKey: periodItemGroup.statementKey,
+          error: flush.err.message,
+        })
+        throw flush.err
+      }
     }
 
     // Serialize concurrent re-runs for the same statement and wrap the entire

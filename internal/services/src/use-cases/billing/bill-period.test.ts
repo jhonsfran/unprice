@@ -1,6 +1,6 @@
 import type { Database } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
-import { Err, Ok } from "@unprice/error"
+import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { dinero } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
@@ -589,6 +589,71 @@ describe("billPeriod", () => {
     expect(result.phasesProcessed).toBe(2)
     // Only the second group triggers billing work
     expect(repo.findPhaseForBilling).toHaveBeenCalledTimes(2)
+    expect(txRepoInstance.createInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("blocks invoicing when reservation flush gateway fails", async () => {
+    const db = makeDb()
+    const ratingService = makeRatingService()
+    const ledgerService = makeLedgerService()
+    const repo = makeRepo()
+    const logger = makeLogger()
+    const reservationFlushGateway = {
+      flushForInvoicing: vi.fn().mockResolvedValue(
+        Err(
+          new FetchError({
+            message: "reservation flush deferred",
+            retry: true,
+            context: { url: "/v1/billing/reservations/flush-for-invoicing", method: "POST" },
+          })
+        )
+      ),
+    }
+
+    await expect(
+      billPeriod({
+        context: makeContext(),
+        logger,
+        db,
+        repo,
+        ratingService,
+        ledgerService,
+        reservationFlushGateway,
+      })
+    ).rejects.toThrow("reservation flush deferred")
+
+    // Rating and ledger should not have been reached
+    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
+    expect(ledgerService.createTransfer).not.toHaveBeenCalled()
+  })
+
+  it("proceeds with invoicing when reservation flush gateway succeeds", async () => {
+    const db = makeDb()
+    const ratingService = makeRatingService()
+    const ledgerService = makeLedgerService()
+    const repo = makeRepo()
+    const logger = makeLogger()
+    const reservationFlushGateway = {
+      flushForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+    }
+
+    const result = await billPeriod({
+      context: makeContext(),
+      logger,
+      db,
+      repo,
+      ratingService,
+      ledgerService,
+      reservationFlushGateway,
+    })
+
+    expect(result.phasesProcessed).toBe(1)
+    expect(reservationFlushGateway.flushForInvoicing).toHaveBeenCalledWith({
+      customerId: "cust_1",
+      subscriptionId: "sub_1",
+      subscriptionPhaseId: "phase_1",
+      statementKey: "stmt_2026_04",
+    })
     expect(txRepoInstance.createInvoice).toHaveBeenCalledTimes(1)
   })
 })
