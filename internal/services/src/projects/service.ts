@@ -13,6 +13,7 @@ import type { Logger } from "@unprice/logs"
 import type { ProjectFeatureCache } from "../cache"
 import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
+import { upsertManagedSandboxProviderConfig } from "../payment-provider/sandbox-config"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
 import { UnPriceProjectError } from "./errors"
@@ -397,22 +398,39 @@ export class ProjectService {
     const projectSlug = createSlug()
 
     const { val, err } = await wrapResult(
-      this.db
-        .insert(schema.projects)
-        .values({
-          id: projectId,
-          workspaceId,
-          name,
-          slug: projectSlug,
-          url,
-          defaultCurrency,
-          timezone,
-          isMain: false,
-          isInternal: workspaceIsInternal,
-          contactEmail: contactEmail ?? "",
+      this.db.transaction(async (tx) => {
+        const project = await tx
+          .insert(schema.projects)
+          .values({
+            id: projectId,
+            workspaceId,
+            name,
+            slug: projectSlug,
+            url,
+            defaultCurrency,
+            timezone,
+            isMain: false,
+            isInternal: workspaceIsInternal,
+            contactEmail: contactEmail ?? "",
+          })
+          .returning()
+          .then((rows) => rows[0] ?? null)
+
+        if (!project) {
+          return null
+        }
+
+        const sandboxConfig = await upsertManagedSandboxProviderConfig({
+          db: tx,
+          projectId,
         })
-        .returning()
-        .then((rows) => rows[0] ?? null),
+
+        if (sandboxConfig.err) {
+          throw sandboxConfig.err
+        }
+
+        return project
+      }),
       (error) =>
         new FetchError({
           message: `error creating project record: ${error.message}`,

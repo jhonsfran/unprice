@@ -14,6 +14,41 @@ function createMockLogger(): Logger {
 }
 
 describe("SandboxPaymentProvider", () => {
+  it("does not expose hosted invoice URLs", async () => {
+    const provider = new SandboxPaymentProvider({
+      logger: createMockLogger(),
+    })
+
+    const created = await provider.createInvoice({
+      currency: "USD",
+      customerName: "Sandbox Customer",
+      email: "sandbox@example.com",
+      collectionMethod: "charge_automatically",
+      description: "Sandbox invoice",
+    })
+
+    expect(created.err).toBeUndefined()
+    expect(created.val?.invoiceUrl).toBe("")
+
+    const invoiceId = created.val?.invoiceId ?? "sandbox_invoice"
+    const updated = await provider.updateInvoice({
+      invoiceId,
+      collectionMethod: "charge_automatically",
+      description: "Sandbox invoice",
+    })
+    const collected = await provider.collectPayment({
+      invoiceId,
+      paymentMethodId: "pm_sandbox_default",
+    })
+    const status = await provider.getStatusInvoice({ invoiceId })
+    const invoice = await provider.getInvoice({ invoiceId })
+
+    expect(updated.val?.invoiceUrl).toBe("")
+    expect(collected.val?.invoiceUrl).toBe("")
+    expect(status.val?.invoiceUrl).toBe("")
+    expect(invoice.val?.invoiceUrl).toBe("")
+  })
+
   it("rejects every webhook when no secret is configured", async () => {
     const provider = new SandboxPaymentProvider({
       logger: createMockLogger(),

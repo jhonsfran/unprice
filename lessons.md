@@ -12,6 +12,8 @@ patterns. Keep it cheap to load and useful.
 - Do not record secrets, customer data, or one-off local noise.
 - Architecture rule changes need an ADR link.
 - You need to use nvm use to install the proper node version of the project
+- Before adding a helper, utility, or repeated row shape, search the repo for an established
+  pattern first; reuse or extract the canonical path instead of duplicating logic.
 
 ## Cloudflare, API, And Ingestion
 
@@ -63,6 +65,9 @@ patterns. Keep it cheap to load and useful.
   pretty development logger handle console output.
 - 2026-05-18: API Axiom drain flushes should be batched through scheduled `waitUntil`;
   reserve immediate flushes for errors, thrown DO operations, and slow requests.
+- 2026-06-08: EntitlementWindowDO batch diagnostics that must be queried in Axiom need a
+  first-class drain event; constructor-scoped DO logger entries can be absent from top-level
+  Axiom rows, leaving only the outer `runDoOperation` wrapper fields.
 - 2026-05-18: HTTP tRPC inside Next.js should enrich the enclosing Next wide event
   instead of emitting a second event; only standalone/RSC tRPC contexts should emit
   their own batched procedure event.
@@ -108,6 +113,12 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-08: Sandbox payment-provider invoice methods should return an empty hosted invoice URL;
+  the dashboard must keep sandbox invoice viewing inside Unprice instead of opening placeholder
+  external origins.
+- 2026-06-08: Project creation must seed an active managed sandbox payment-provider config in the
+  same transaction; plan-version publish should log provider validation failures with normalized
+  error context before returning `payment_provider_error`.
 - 2026-06-08: Invoice finalization collectability should use the provider/display
   currency-minor amount; if a tiny positive ledger-scale total rounds to zero,
   skip provider work and void the invoice.
@@ -360,3 +371,6 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `billingInterval: "minute"` with `billingIntervalCount: 60`.
 - 2026-05-11: Deterministic DB fixture ids must stay within the shared cuid column length
   (`varchar(36)`); Drizzle catches shape drift, but length constraints still fail at runtime.
+- 2026-06-08: Durable Object diagnostics that must be queried in Axiom should go through
+  `createDoLogger` as first-class drain events; request-scoped wrapper rows alone can hide inner
+  fields such as `mode`, fallback `reason`, and `error`.

@@ -91,7 +91,7 @@ describe("@unprice/observability", () => {
 
   it("sharedSamplingConfig returns correct config for production", () => {
     const config = sharedSamplingConfig("production")
-    expect(config.rates?.info).toBe(10)
+    expect(config.rates?.info).toBe(1)
     expect(config.rates?.debug).toBe(0)
     expect(config.rates?.error).toBe(100)
   })

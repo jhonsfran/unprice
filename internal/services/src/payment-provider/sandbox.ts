@@ -54,6 +54,7 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
   private readonly logger: Logger
   private providerCustomerId?: string | null
   private readonly webhookSecret?: string
+  private readonly invoiceUrl = ""
 
   constructor(opts: {
     logger: Logger
@@ -134,7 +135,7 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
     const invoiceId = newId("invoice")
     return Ok({
       invoiceId,
-      invoiceUrl: `https://example.com/sandbox/invoice/${invoiceId}`,
+      invoiceUrl: this.invoiceUrl,
       status: "open",
       total: 0,
       items: [],
@@ -147,7 +148,7 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
     this.logger.info("Sandbox: updateInvoice", opts as unknown as Record<string, unknown>)
     return Ok({
       invoiceId: opts.invoiceId,
-      invoiceUrl: `https://example.com/sandbox/invoice/${opts.invoiceId}`,
+      invoiceUrl: this.invoiceUrl,
       status: "open",
       total: 0,
       items: [],
@@ -181,7 +182,7 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
     return Ok({
       invoiceId: opts.invoiceId,
       status: "paid",
-      invoiceUrl: `https://example.com/sandbox/invoice/${opts.invoiceId}`,
+      invoiceUrl: this.invoiceUrl,
     })
   }
 
@@ -193,7 +194,7 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
       status: "paid",
       invoiceId: opts.invoiceId,
       paidAt: Math.floor(Date.now() / 1000),
-      invoiceUrl: `https://example.com/sandbox/invoice/${opts.invoiceId}`,
+      invoiceUrl: this.invoiceUrl,
       paymentAttempts: [
         {
           status: "succeeded",
@@ -209,7 +210,7 @@ export class SandboxPaymentProvider implements PaymentProviderInterface {
     this.logger.info("Sandbox: getInvoice", opts as unknown as Record<string, unknown>)
     return Ok({
       invoiceId: opts.invoiceId,
-      invoiceUrl: `https://example.com/sandbox/invoice/${opts.invoiceId}`,
+      invoiceUrl: this.invoiceUrl,
       status: "paid",
       total: 1000,
       items: [

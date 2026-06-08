@@ -83,7 +83,17 @@ export function InvoiceActions({ invoice }: { invoice: SubscriptionInvoice }) {
         } else if (["void"].includes(invoice.status)) {
           toast.success("Invoice is already voided, no link available")
         } else if (["paid"].includes(invoice.status)) {
-          window.open(invoice.invoicePaymentProviderUrl ?? "", "_blank")
+          if (invoice.paymentProvider === "sandbox") {
+            toast.success("Sandbox invoices are available in Unprice only")
+            return
+          }
+
+          if (!invoice.invoicePaymentProviderUrl) {
+            toast.error("No hosted invoice link is available")
+            return
+          }
+
+          window.open(invoice.invoicePaymentProviderUrl, "_blank")
         } else {
           toast.error("Invoice is in an unknown status")
         }

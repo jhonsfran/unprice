@@ -437,14 +437,18 @@ export class EntitlementWindowDO extends DurableObject {
             }
 
             mode = "sequential"
-            this.logger.info("entitlement apply_batch falling back to sequential per-event apply", {
+            const fallbackEvent = {
               operation: "apply_batch",
               project_id: input.projectId,
               customer_id: input.customerId,
               customer_entitlement_id: input.entitlement.customerEntitlementId,
               event_count: input.events.length,
               reason: error.message,
-            })
+            }
+            this.logger.info(
+              "entitlement apply_batch falling back to sequential per-event apply",
+              fallbackEvent
+            )
 
             const sequential = await this.applyBatchSequential(input)
             metrics = sequential.metrics
@@ -462,7 +466,7 @@ export class EntitlementWindowDO extends DurableObject {
             return acc
           }, {})
 
-          this.logger.info("entitlement apply_batch", {
+          const batchEvent = {
             operation: "apply_batch",
             project_id: input.projectId,
             customer_id: input.customerId,
@@ -478,7 +482,9 @@ export class EntitlementWindowDO extends DurableObject {
             outcome: thrown ? "error" : "success",
             error_type: thrown instanceof Error ? thrown.name : undefined,
             error_message: thrown instanceof Error ? thrown.message : undefined,
-          })
+          }
+
+          this.logger.info("entitlement apply_batch", batchEvent)
         }
       }
     )

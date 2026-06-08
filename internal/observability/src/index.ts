@@ -45,12 +45,12 @@ export function sharedSamplingConfig(environment?: string): SamplingConfig {
   const isDev = environment === "development"
   return {
     rates: {
-      info: isDev ? 100 : 10,
+      info: isDev ? 100 : 1, // 1% in non dev, 100% in dev
       warn: 100,
       error: 100,
       debug: isDev ? 100 : 0,
     },
-    keep: [{ status: 400 }, { duration: 1000 }],
+    keep: [{ status: 400 }, { duration: 700 }], // 700ms slow request threshold
   }
 }
 
