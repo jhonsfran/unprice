@@ -1379,13 +1379,17 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent.duration_ms = Date.now() - startTime
 
     if (result) {
+      this.clearSingleApplyErrorFields(wideEvent)
       wideEvent.allowed = result.allowed
       wideEvent.denied_reason = result.deniedReason ?? null
       if (!result.allowed) {
         wideEvent.deny_message = result.message ?? null
+      } else {
+        delete wideEvent.deny_message
       }
       wideEvent.outcome = result.allowed ? "success" : "denied"
     } else if (thrown) {
+      this.clearSingleApplyDenialFields(wideEvent)
       wideEvent.outcome = "error"
       wideEvent.error_type = thrown instanceof Error ? thrown.name : "unknown"
       wideEvent.error_message = thrown instanceof Error ? thrown.message : String(thrown)
@@ -1394,6 +1398,22 @@ export class EntitlementWindowDO extends DurableObject {
     if (emitLog) {
       this.logger.info("entitlement apply", wideEvent)
     }
+  }
+
+  private clearSingleApplyErrorFields(wideEvent: Record<string, unknown>): void {
+    delete wideEvent.error
+    delete wideEvent.error_type
+    delete wideEvent.error_message
+    delete wideEvent["error.type"]
+    delete wideEvent["error.message"]
+    delete wideEvent["error.name"]
+    delete wideEvent["error.stack"]
+  }
+
+  private clearSingleApplyDenialFields(wideEvent: Record<string, unknown>): void {
+    delete wideEvent.allowed
+    delete wideEvent.denied_reason
+    delete wideEvent.deny_message
   }
 
   private async executeSingleApplyWithWalletRecovery(params: {

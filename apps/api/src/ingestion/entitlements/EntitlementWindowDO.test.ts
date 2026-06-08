@@ -2833,6 +2833,7 @@ describe("EntitlementWindowDO", () => {
       allowed: false,
       deniedReason: "WALLET_EMPTY",
     })
+    expect(testState.logger.error).not.toHaveBeenCalled()
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply",
       expect.objectContaining({
@@ -2840,6 +2841,15 @@ describe("EntitlementWindowDO", () => {
         deny_message: "Wallet has no available balance to back the reservation",
       })
     )
+    const applyLogPayload = testState.logger.info.mock.calls.find(
+      ([message]) => message === "entitlement apply"
+    )?.[1] as Record<string, unknown> | undefined
+    expect(applyLogPayload).toBeDefined()
+    if (!applyLogPayload) throw new Error("missing entitlement apply log payload")
+    expect(applyLogPayload).not.toHaveProperty("error")
+    expect(applyLogPayload).not.toHaveProperty("error_type")
+    expect(applyLogPayload).not.toHaveProperty("error_message")
+    expect(Object.prototype.hasOwnProperty.call(applyLogPayload, "error.message")).toBe(false)
   })
 
   it("throws lazy bootstrap wallet errors without caching a WALLET_EMPTY denial", async () => {
@@ -2879,6 +2889,13 @@ describe("EntitlementWindowDO", () => {
         bootstrap_outcome: "error",
         outcome: "error",
         error_message: "WALLET_LEDGER_FAILED",
+      })
+    )
+    expect(testState.logger.info).not.toHaveBeenCalledWith(
+      "entitlement apply",
+      expect.objectContaining({
+        outcome: "denied",
+        denied_reason: "WALLET_EMPTY",
       })
     )
   })

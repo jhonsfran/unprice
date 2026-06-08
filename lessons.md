@@ -211,6 +211,11 @@ patterns. Keep it cheap to load and useful.
   retrying flush/refill work.
 - 2026-06-08: Wallet capture usage transfers are statement-keyed; capped-wallet statement tests
   should assert transfer source types, not raw pgledger debit/credit entry counts.
+- 2026-06-08: API error mapping must treat `UnPriceWalletError("WALLET_LEDGER_FAILED")` as an
+  infrastructure 500; only `WALLET_EMPTY` is a business ingestion denial.
+- 2026-06-09: EntitlementWindowDO apply logs must keep wallet-empty denial fields and wallet
+  service error fields mutually exclusive; stale `error_message` values in Axiom can misclassify
+  operational underfunding as ledger failure.
 - 2026-05-17: Reservation release and grant expiration are separate financial events: release
   restores unused reserved funds to customer buckets; only grant expiration returns available
   grant balance to platform funding.
