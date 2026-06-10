@@ -71,13 +71,6 @@ export class EntitlementWindowReservationUnderfundedError extends Error {
   }
 }
 
-export class EntitlementWindowBatchSequentialReplayRequired extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = EntitlementWindowBatchSequentialReplayRequired.name
-  }
-}
-
 export type DeniedReason = Extract<
   IngestionRejectionReason,
   "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"

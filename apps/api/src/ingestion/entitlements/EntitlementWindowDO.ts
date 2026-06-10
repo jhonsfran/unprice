@@ -87,7 +87,6 @@ import {
   type EntitlementCreditLinePolicy,
   EntitlementWindowBatchReservationBootstrapRequired,
   EntitlementWindowBatchReservationUnderfundedError,
-  EntitlementWindowBatchSequentialReplayRequired,
   EntitlementWindowLimitExceededError,
   EntitlementWindowReservationUnderfundedError,
   type EntitlementWindowStatus,
@@ -477,24 +476,6 @@ export class EntitlementWindowDO extends DurableObject {
               return { results: retry.results }
             }
 
-            if (error instanceof EntitlementWindowBatchSequentialReplayRequired) {
-              const sequential = await this.applyBatchSequential(input)
-              metrics = sequential.metrics
-              results.push(...sequential.results)
-              this.logger.info(
-                "entitlement apply_batch falling back to sequential per-event apply",
-                {
-                  operation: "apply_batch",
-                  project_id: input.projectId,
-                  customer_id: input.customerId,
-                  customer_entitlement_id: input.entitlement.customerEntitlementId,
-                  event_count: input.events.length,
-                  reason: error.message,
-                }
-              )
-              return { results: sequential.results }
-            }
-
             throw error
           }
         } catch (error) {
@@ -530,27 +511,6 @@ export class EntitlementWindowDO extends DurableObject {
         }
       }
     )
-  }
-
-  private async applyBatchSequential(input: ApplyBatchInput): Promise<ApplyBatchInternalResult> {
-    const results: ApplyBatchResultRow[] = []
-    const metrics = createApplyBatchMetrics()
-
-    for (const event of input.events) {
-      const { correlationKey, idempotencyKey, now, ...rawEvent } = event
-      const result = await this.applyInner(
-        {
-          ...input,
-          event: rawEvent,
-          idempotencyKey,
-          now,
-        },
-        { emitLog: false }
-      )
-      results.push({ ...result, correlationKey, idempotencyKey })
-    }
-
-    return { results, metrics }
   }
 
   private prepareOptimizedBatch(

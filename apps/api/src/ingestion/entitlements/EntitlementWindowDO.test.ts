@@ -1411,10 +1411,6 @@ describe("EntitlementWindowDO", () => {
     expect(db.idempotencyBatchRows).toHaveLength(1)
     expect(db.outboxBatchRows).toHaveLength(0)
     expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
-    expect(testState.logger.info).not.toHaveBeenCalledWith(
-      "entitlement apply_batch falling back to sequential per-event apply",
-      expect.anything()
-    )
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
       expect.objectContaining({
@@ -1490,10 +1486,6 @@ describe("EntitlementWindowDO", () => {
         final: true,
         reservationId: "res_limit_batch",
       })
-    )
-    expect(testState.logger.info).not.toHaveBeenCalledWith(
-      "entitlement apply_batch falling back to sequential per-event apply",
-      expect.anything()
     )
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
@@ -1580,10 +1572,6 @@ describe("EntitlementWindowDO", () => {
     expect(db.idempotencyBatchRows).toHaveLength(1)
     expect(db.outboxBatchRows).toHaveLength(0)
     expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
-    expect(testState.logger.info).not.toHaveBeenCalledWith(
-      "entitlement apply_batch falling back to sequential per-event apply",
-      expect.anything()
-    )
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
       expect.objectContaining({
