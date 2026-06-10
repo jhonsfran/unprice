@@ -1300,6 +1300,68 @@ describe("EntitlementWindowDO", () => {
     )
   })
 
+  it("keeps compact write shape after optimized reservation growth retry", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_compact_retry",
+      allocationAmount: 50_000_000,
+      targetReservationAmount: 50_000_000,
+      maxEventCostAmount: 100_000_000,
+    })
+    testState.flushReservation.mockResolvedValue({
+      err: null,
+      val: {
+        grantedAmount: 2_000_000_000,
+        flushedAmount: 0,
+        refundedAmount: 0,
+      },
+    })
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const index = Number(String((event as { id: string }).id).replace("evt_retry_", ""))
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter: index + 1 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const events = Array.from({ length: 10 }, (_, index) => ({
+      ...baseInput.event,
+      correlationKey: `retry_${index}`,
+      id: `evt_retry_${index}`,
+      idempotencyKey: `idem_retry_${index}`,
+      now: BASE_NOW + index,
+      properties: { amount: 1 },
+      timestamp: BASE_NOW + index,
+    }))
+
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events,
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toHaveLength(10)
+    expect(db.idempotencyBatchRows).toHaveLength(1)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(10)
+    expect(db.writeCounts.idempotencyBatchRows).toBe(1)
+    expect(db.writeCounts.walletRows).toBeLessThanOrEqual(3)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        reservation_action: "refilled",
+        idempotency_insert_count: 1,
+        idempotency_event_count: 10,
+      })
+    )
+  })
+
   it("preserves wallet consumption while compacting an already-funded async batch", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
