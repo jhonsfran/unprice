@@ -17,26 +17,19 @@ export const getProjectUsage = protectedProjectProcedure
     })
   )
   .query(async (opts) => {
-    const customerId = opts.input.customerId || opts.ctx.project.workspace.unPriceCustomerId
+    const customerId = opts.input.customerId
     const range = opts.input.range
     const projectId = opts.ctx.project.id
 
-    if (!customerId) {
-      return {
-        usage: [],
-        error: "Customer ID is required",
-      }
-    }
-
     const { result, error } = await unprice.analytics.usage.get({
-      customer_id: customerId,
+      ...(customerId ? { customer_id: customerId } : {}),
       project_id: projectId,
       range,
     })
 
     if (error || !result) {
       opts.ctx.logger.error(error?.message ?? "Failed to fetch analytics project usage", {
-        customer_id: customerId,
+        ...(customerId ? { customer_id: customerId } : {}),
         project_id: projectId,
         range,
       })
