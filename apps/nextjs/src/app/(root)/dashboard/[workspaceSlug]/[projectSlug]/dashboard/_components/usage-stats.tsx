@@ -11,7 +11,7 @@ import {
 } from "@unprice/ui/chart"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
-import { BarChart3, CalendarRange, Layers3, TriangleAlert } from "lucide-react"
+import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
@@ -24,6 +24,75 @@ const usageChartConfig = {
   usage: { label: "Usage", color: "var(--chart-4)" },
 } satisfies ChartConfig
 
+type UsageSpending = {
+  amount: string
+  currency: string
+  display_amount: string
+}
+
+type UsageRowWithSpending = {
+  feature_slug: string
+  usage: number
+  spending?: UsageSpending
+}
+
+type SpendingSummary = {
+  currency: string
+  amount: number
+  displayAmount: string
+}
+
+function parseSpendingAmount(row: UsageRowWithSpending): number {
+  const amount = Number(row.spending?.amount ?? 0)
+  return Number.isFinite(amount) ? amount : 0
+}
+
+// Local browser-locale formatter for summed numeric amounts in client components.
+// Differs from @unprice/money's formatMoney which formats string amounts server-side.
+function formatCurrencyAmount(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 2,
+    }).format(amount)
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`
+  }
+}
+
+function summarizeSpending(rows: UsageRowWithSpending[]): SpendingSummary[] {
+  const totalsByCurrency = new Map<string, number>()
+
+  for (const row of rows) {
+    const currency = row.spending?.currency
+
+    if (!currency) {
+      continue
+    }
+
+    totalsByCurrency.set(currency, (totalsByCurrency.get(currency) ?? 0) + parseSpendingAmount(row))
+  }
+
+  return [...totalsByCurrency.entries()].map(([currency, amount]) => ({
+    currency,
+    amount,
+    displayAmount: formatCurrencyAmount(amount, currency),
+  }))
+}
+
+function formatSpendingSummary(summary: SpendingSummary[]): string {
+  if (summary.length === 0) {
+    return "No spend"
+  }
+
+  return summary.map((item) => item.displayAmount).join(" + ")
+}
+
+function formatFeatureSpending(row: UsageRowWithSpending): string {
+  return row.spending?.display_amount ?? "No spend"
+}
+
 export function UsageStatsSkeleton() {
   return (
     <Card className="overflow-hidden border-muted/60">
@@ -32,8 +101,8 @@ export function UsageStatsSkeleton() {
         <CardDescription>Loading usage metrics for this project...</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6 pt-4 pb-6">
-        <div className="grid gap-3 md:grid-cols-3">
-          {["features", "total", "interval"].map((item) => (
+        <div className="grid gap-3 md:grid-cols-4">
+          {["features", "total", "spend", "interval"].map((item) => (
             <Card key={`usage-metric-skeleton-${item}`} className="border-muted/60">
               <CardContent className="space-y-2 px-4 py-3">
                 <Skeleton className="h-3 w-28" />
@@ -147,9 +216,12 @@ export function UsageStats() {
   }
 
   const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.usage, 0)
+  const spendingSummary = summarizeSpending(sortedUsage)
+  const consumedAmountLabel = formatSpendingSummary(spendingSummary)
   const chartData = sortedUsage.map((row) => ({
     feature: row.feature_slug,
     usage: row.usage,
+    spending: formatFeatureSpending(row),
   }))
   const chartHeight = Math.min(Math.max(chartData.length * 52, 280), 560)
 
@@ -168,7 +240,7 @@ export function UsageStats() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6 pb-6">
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-4">
           <Card className="overflow-hidden border-muted/60 bg-gradient-to-br from-background to-muted/20">
             <CardContent className="px-4 py-3">
               <div className="mb-2 flex items-center justify-between">
@@ -190,6 +262,16 @@ export function UsageStats() {
               <p className="font-semibold text-xl">
                 <NumberTicker value={totalLatestUsage} withFormatter={true} />
               </p>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden border-muted/60 bg-gradient-to-br from-background to-muted/20">
+            <CardContent className="px-4 py-3">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-muted-foreground text-xs">Consumed amount</p>
+                <Coins className="h-4 w-4 text-muted-foreground" />
+              </div>
+              <p className="truncate font-semibold text-xl">{consumedAmountLabel}</p>
             </CardContent>
           </Card>
 
@@ -277,6 +359,32 @@ export function UsageStats() {
               </Bar>
             </BarChart>
           </ChartContainer>
+        </div>
+
+        <div className="overflow-hidden rounded-md border border-border/60">
+          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 bg-muted/40 px-4 py-2.5">
+            <p className="text-muted-foreground text-xs uppercase">Feature</p>
+            <p className="text-right text-muted-foreground text-xs uppercase">Usage</p>
+            <p className="text-right text-muted-foreground text-xs uppercase">Consumed</p>
+          </div>
+
+          <div className="divide-y divide-border">
+            {chartData.map((row) => (
+              <div
+                key={row.feature}
+                className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 px-4 py-3"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="truncate font-medium text-sm">{row.feature}</span>
+                </div>
+                <span className="font-mono text-muted-foreground text-sm tabular-nums">
+                  {nFormatter(row.usage)}
+                </span>
+                <span className="font-mono text-sm tabular-nums">{row.spending}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </CardContent>
     </Card>
