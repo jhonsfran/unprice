@@ -85,6 +85,7 @@ import {
   type EntitlementApplyMeterFact,
   type EntitlementConfigInput,
   type EntitlementCreditLinePolicy,
+  EntitlementWindowBatchReservationBootstrapRequired,
   EntitlementWindowBatchReservationUnderfundedError,
   EntitlementWindowBatchSequentialReplayRequired,
   EntitlementWindowLimitExceededError,
@@ -435,6 +436,32 @@ export class EntitlementWindowDO extends DurableObject {
             results.push(...optimized.results)
             return { results: optimized.results }
           } catch (error) {
+            if (error instanceof EntitlementWindowBatchReservationBootstrapRequired) {
+              const eventInput = buildBatchEventApplyInput(input, error.params.event)
+              const setup = this.prepareOptimizedBatch(
+                input,
+                Date.now(),
+                unique(input.events.map((event) => event.idempotencyKey))
+              )
+              const activeGrants = resolveActiveGrants(setup.grants, error.params.event.timestamp)
+              const denial = await this.bootstrapReservationForProjectedCost({
+                activeGrants,
+                input: eventInput,
+                meter: setup.meter,
+                projectedCost: error.params.projectedCost,
+              })
+
+              if (denial) {
+                throw new Error(`Batch reservation bootstrap denied: ${denial.deniedReason}`)
+              }
+
+              reservationAction = "bootstrapped"
+              const retry = await this.applyBatchOptimized(input)
+              metrics = retry.metrics
+              results.push(...retry.results)
+              return { results: retry.results }
+            }
+
             if (error instanceof EntitlementWindowBatchReservationUnderfundedError) {
               const growth = await this.growReservationForBatchHeadroom(error.params)
               if (growth?.kind !== "refilled" && growth?.kind !== "already_funded") {
@@ -825,9 +852,20 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     if (this.hasOptimizedBatchStagedMutations(state)) {
-      throw new EntitlementWindowBatchSequentialReplayRequired(
-        "wallet bootstrap after staged batch mutations"
-      )
+      const projectedCost = this.computeProjectedBatchEventCostMinor({
+        activeGrants,
+        entitlement: eventInput.entitlement,
+        event: eventInput.event,
+        eventTimestamp: event.timestamp,
+        grantStates: state.grantStates,
+        meter: setup.meter,
+        meterState: state.meterState,
+      })
+
+      throw new EntitlementWindowBatchReservationBootstrapRequired({
+        event,
+        projectedCost,
+      })
     }
 
     const projectedCost = this.computeProjectedBatchEventCostMinor({

@@ -1354,7 +1354,7 @@ describe("EntitlementWindowDO", () => {
     expect(readIdempotencyMeterFacts(db)).toHaveLength(5)
   })
 
-  it("falls back to sequential batch replay when wallet bootstrap is needed after staged events", async () => {
+  it("retries optimized batch after lazy wallet bootstrap", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1408,19 +1408,17 @@ describe("EntitlementWindowDO", () => {
       expect.objectContaining({ allowed: true, correlationKey: "paid" }),
     ])
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
-    expect(db.idempotencyBatchRows).toHaveLength(2)
+    expect(db.idempotencyBatchRows).toHaveLength(1)
     expect(db.outboxBatchRows).toHaveLength(0)
     expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
-    expect(testState.logger.info).toHaveBeenCalledWith(
+    expect(testState.logger.info).not.toHaveBeenCalledWith(
       "entitlement apply_batch falling back to sequential per-event apply",
-      expect.objectContaining({
-        reason: "wallet bootstrap after staged batch mutations",
-      })
+      expect.anything()
     )
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
       expect.objectContaining({
-        reservation_action: "none",
+        reservation_action: "bootstrapped",
         processed_count: 2,
         outcome: "success",
       })
