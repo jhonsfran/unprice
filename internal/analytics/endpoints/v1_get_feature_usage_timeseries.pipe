@@ -1,0 +1,50 @@
+TOKEN "web-apps" READ
+
+TAGS "usage, billing, timeseries"
+
+NODE feature_usage_timeseries_node
+SQL >
+    %
+    SELECT
+        date,
+        feature_slug,
+        toFloat64(argMaxMerge(value)) as usage,
+        argMaxMerge(amount_after) as amount_after,
+        argMaxMerge(currency) as currency
+    FROM
+    {% if defined(interval_days) %}
+        {% if Int32(interval_days) > 180 %}
+            unprice_feature_usage_monthly_mv
+        {% elif Int32(interval_days) > 7 %}
+            unprice_feature_usage_daily_mv
+        {% else %}
+            unprice_feature_usage_hourly_mv
+        {% end %}
+    {% elif defined(start) and defined(end) %}
+        {% set diff_days = (Int64(end) - Int64(start)) / 86400000 %}
+        {% if diff_days > 180 %}
+            unprice_feature_usage_monthly_mv
+        {% elif diff_days > 7 %}
+            unprice_feature_usage_daily_mv
+        {% else %}
+            unprice_feature_usage_hourly_mv
+        {% end %}
+    {% else %}
+        unprice_feature_usage_hourly_mv
+    {% end %}
+    WHERE
+        project_id = {{ String(project_id) }}
+        {% if defined(customer_id) %} AND customer_id = {{ String(customer_id) }} {% end %}
+        {% if defined(feature_slugs) %} AND feature_slug IN {{ Array(feature_slugs, 'String') }} {% end %}
+        {% if defined(start) and defined(end) %}
+            AND date >= fromUnixTimestamp64Milli({{ Int64(start) }})
+            AND date < fromUnixTimestamp64Milli({{ Int64(end) }})
+        {% elif defined(interval_days) %}
+            AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
+        {% else %}
+            AND date >= toStartOfDay(today() - 7)
+        {% end %}
+    GROUP BY date, project_id, feature_slug
+    ORDER BY date ASC
+
+TYPE endpoint

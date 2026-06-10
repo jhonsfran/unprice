@@ -2,6 +2,7 @@
 
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { nFormatter } from "@unprice/db/utils"
+import { formatMoney } from "@unprice/money"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import {
   type ChartConfig,
@@ -12,7 +13,7 @@ import {
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
 import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert } from "lucide-react"
-import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useIntervalFilter } from "~/hooks/use-filter"
@@ -23,6 +24,73 @@ import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 const usageChartConfig = {
   usage: { label: "Usage", color: "var(--chart-4)" },
 } satisfies ChartConfig
+
+const TIMESERIES_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+]
+
+type TimeseriesPoint = {
+  date: number
+  dateLabel: string
+  [feature: string]: string | number
+}
+
+function buildTimeseriesData(
+  rows: { date: number; feature_slug: string; usage?: number }[],
+  dateFormat: string
+): { data: TimeseriesPoint[]; features: string[] } {
+  const featureSet = new Set<string>()
+  const pointsByDate = new Map<number, TimeseriesPoint>()
+
+  for (const row of rows) {
+    featureSet.add(row.feature_slug)
+
+    let point = pointsByDate.get(row.date)
+
+    if (!point) {
+      point = {
+        date: row.date,
+        dateLabel: formatDateLabel(row.date, dateFormat),
+      }
+      pointsByDate.set(row.date, point)
+    }
+
+    point[row.feature_slug] = row.usage ?? 0
+  }
+
+  const features = [...featureSet].sort()
+  const data = [...pointsByDate.values()].sort((a, b) => a.date - b.date)
+
+  // Fill missing feature values with 0
+  for (const point of data) {
+    for (const feature of features) {
+      if (!(feature in point)) {
+        point[feature] = 0
+      }
+    }
+  }
+
+  return { data, features }
+}
+
+function formatDateLabel(timestamp: number, format: string): string {
+  const date = new Date(timestamp)
+
+  if (format.includes("hh:mm")) {
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
 
 type UsageSpending = {
   amount: string
@@ -47,20 +115,6 @@ function parseSpendingAmount(row: UsageRowWithSpending): number {
   return Number.isFinite(amount) ? amount : 0
 }
 
-// Local browser-locale formatter for summed numeric amounts in client components.
-// Differs from @unprice/money's formatMoney which formats string amounts server-side.
-function formatCurrencyAmount(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount)
-  } catch {
-    return `${amount.toFixed(2)} ${currency}`
-  }
-}
-
 function summarizeSpending(rows: UsageRowWithSpending[]): SpendingSummary[] {
   const totalsByCurrency = new Map<string, number>()
 
@@ -77,7 +131,7 @@ function summarizeSpending(rows: UsageRowWithSpending[]): SpendingSummary[] {
   return [...totalsByCurrency.entries()].map(([currency, amount]) => ({
     currency,
     amount,
-    displayAmount: formatCurrencyAmount(amount, currency),
+    displayAmount: formatMoney(amount.toString(), currency),
   }))
 }
 
@@ -184,6 +238,20 @@ export function UsageStats() {
     )
   )
 
+  const { data: timeseriesData } = useSuspenseQuery(
+    trpc.analytics.getProjectUsageTimeseries.queryOptions(
+      {
+        range: intervalFilter.name,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+        staleTime: isNearRealtime ? 45 * 1000 : 5 * 60 * 1000,
+        refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
+        refetchOnWindowFocus: false,
+      }
+    )
+  )
+
   useQueryInvalidation({
     paramKey: intervalFilter.name,
     dataUpdatedAt: usageUpdatedAt,
@@ -224,6 +292,17 @@ export function UsageStats() {
     spending: formatFeatureSpending(row),
   }))
   const chartHeight = Math.min(Math.max(chartData.length * 52, 280), 560)
+
+  const { data: timeseriesChartData, features: timeseriesFeatures } = buildTimeseriesData(
+    timeseriesData.timeseries ?? [],
+    intervalFilter.dateFormat
+  )
+  const timeseriesConfig = Object.fromEntries(
+    timeseriesFeatures.map((feature, i) => [
+      feature,
+      { label: feature, color: TIMESERIES_COLORS[i % TIMESERIES_COLORS.length] },
+    ])
+  ) satisfies ChartConfig
 
   return (
     <Card className="overflow-hidden border-muted/60">
@@ -285,6 +364,62 @@ export function UsageStats() {
             </CardContent>
           </Card>
         </div>
+
+        {timeseriesChartData.length > 0 && (
+          <div className="overflow-hidden rounded-md border border-border/60 p-3 sm:p-4">
+            <p className="mb-3 text-muted-foreground text-xs uppercase">Usage over time</p>
+            <ChartContainer config={timeseriesConfig} className="h-[200px] w-full">
+              <AreaChart
+                accessibilityLayer
+                data={timeseriesChartData}
+                margin={{ left: 8, right: 8, top: 6, bottom: 6 }}
+              >
+                <CartesianGrid vertical={false} className="stroke-muted" />
+                <XAxis
+                  dataKey="dateLabel"
+                  axisLine={false}
+                  tickLine={false}
+                  tickMargin={10}
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                />
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tickMargin={10}
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  tickFormatter={(value) => nFormatter(Number(value))}
+                />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      indicator="line"
+                      formatter={(value, name) => (
+                        <>
+                          <span>{String(name)}</span>
+                          <span className="ml-auto font-medium font-mono text-foreground tabular-nums">
+                            {nFormatter(Number(value))}
+                          </span>
+                        </>
+                      )}
+                    />
+                  }
+                />
+                {timeseriesFeatures.map((feature, i) => (
+                  <Area
+                    key={feature}
+                    type="monotone"
+                    dataKey={feature}
+                    stackId="usage"
+                    fill={TIMESERIES_COLORS[i % TIMESERIES_COLORS.length]}
+                    fillOpacity={0.15}
+                    stroke={TIMESERIES_COLORS[i % TIMESERIES_COLORS.length]}
+                    strokeWidth={2}
+                  />
+                ))}
+              </AreaChart>
+            </ChartContainer>
+          </div>
+        )}
 
         <div className="overflow-hidden rounded-md border border-border/60 p-3 sm:p-4">
           <ChartContainer
@@ -362,7 +497,7 @@ export function UsageStats() {
         </div>
 
         <div className="overflow-hidden rounded-md border border-border/60">
-          <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 bg-muted/40 px-4 py-2.5">
+          <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem] items-center gap-4 bg-muted/40 px-4 py-2.5">
             <p className="text-muted-foreground text-xs uppercase">Feature</p>
             <p className="text-right text-muted-foreground text-xs uppercase">Usage</p>
             <p className="text-right text-muted-foreground text-xs uppercase">Consumed</p>
@@ -372,16 +507,16 @@ export function UsageStats() {
             {chartData.map((row) => (
               <div
                 key={row.feature}
-                className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-4 px-4 py-3"
+                className="grid grid-cols-[minmax(0,1fr)_6rem_7rem] items-center gap-4 px-4 py-3"
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="truncate font-medium text-sm">{row.feature}</span>
                 </div>
-                <span className="font-mono text-muted-foreground text-sm tabular-nums">
+                <span className="text-right font-mono text-muted-foreground text-sm tabular-nums">
                   {nFormatter(row.usage)}
                 </span>
-                <span className="font-mono text-sm tabular-nums">{row.spending}</span>
+                <span className="text-right font-mono text-sm tabular-nums">{row.spending}</span>
               </div>
             ))}
           </div>

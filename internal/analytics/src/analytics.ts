@@ -12,6 +12,7 @@ import {
   explainChargeSummaryQuerySchema,
   explainChargeSummaryRowSchema,
   featureUsagePeriodRowSchema,
+  featureUsageTimeseriesRowSchema,
   ingestionEventSchemaV1,
   ingestionLiveQuerySchema,
   ingestionLiveRowSchema,
@@ -258,6 +259,40 @@ export class Analytics {
         cache: "no-store",
         retries: 3,
         timeout: 5000, // 5 seconds
+      },
+    })
+  }
+
+  public get getFeaturesUsageTimeseries() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_feature_usage_timeseries",
+      parameters: z
+        .object({
+          project_id: z.string(),
+          customer_id: z.string().optional(),
+          interval_days: z.number().optional(),
+          start: z.number().optional(),
+          end: z.number().optional(),
+          feature_slugs: z.array(z.string()).optional(),
+        })
+        .superRefine((params, ctx) => {
+          const hasStart = typeof params.start !== "undefined"
+          const hasEnd = typeof params.end !== "undefined"
+
+          if (hasStart !== hasEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "start and end must be provided together",
+            })
+          }
+        }),
+      data: z.object({
+        ...featureUsageTimeseriesRowSchema.shape,
+      }),
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
       },
     })
   }

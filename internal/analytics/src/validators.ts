@@ -256,6 +256,16 @@ export const featureUsagePeriodRowSchema = z.object({
   currency: z.string().length(3).optional(),
 })
 
+export const featureUsageTimeseriesRowSchema = z.object({
+  date: datetimeToUnixMilli,
+  feature_slug: z.string(),
+  usage: z.number().optional(),
+  amount_after: z.number().int().optional(),
+  currency: z.string().length(3).optional(),
+})
+
+export type FeatureUsageTimeseriesRow = z.infer<typeof featureUsageTimeseriesRowSchema>
+
 const explainChargeBaseQuerySchema = z.object({
   project_id: z.string(),
   customer_id: z.string(),
