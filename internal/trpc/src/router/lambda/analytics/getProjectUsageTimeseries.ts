@@ -23,8 +23,9 @@ export const getProjectUsageTimeseries = protectedProjectProcedure
     const range = opts.input.range
     const projectId = opts.ctx.project.id
     const { start, end } = prepareInterval(range)
+    const cacheKey = `${projectId}:${range}`
 
-    try {
+    const { err, val: cached } = await opts.ctx.cache.getUsageTimeseries.swr(cacheKey, async () => {
       const data = await withTimeout(
         opts.ctx.analytics.getFeaturesUsageTimeseries({
           project_id: projectId,
@@ -35,20 +36,21 @@ export const getProjectUsageTimeseries = protectedProjectProcedure
         "getProjectUsageTimeseries analytics request timeout"
       )
 
-      return { timeseries: data.data ?? [] }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error"
+      return data.data ?? []
+    })
 
+    if (err) {
       opts.ctx.logger.error(err, {
         context: "getProjectUsageTimeseries failed",
         project_id: projectId,
         range,
-        isTimeout: errorMessage.includes("timeout"),
       })
 
       return {
         timeseries: [],
-        error: errorMessage,
+        error: err instanceof Error ? err.message : "Failed to fetch usage timeseries",
       }
     }
+
+    return { timeseries: cached ?? [] }
   })

@@ -1,4 +1,5 @@
 import type {
+  FeatureUsageTimeseriesRow,
   PageBrowserVisits,
   PageCountryVisits,
   PageOverview,
@@ -63,6 +64,7 @@ export type CacheNamespaces = {
   getPlansStats: Stats | null
   getOverviewStats: Stats | null
   getUsage: Usage | null
+  getUsageTimeseries: FeatureUsageTimeseriesRow[] | null
   getCurrentUsage: CurrentUsage | null
   ingestionPreparedGrantContext: PreparedCustomerGrantContext
 }
