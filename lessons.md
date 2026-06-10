@@ -110,6 +110,9 @@ patterns. Keep it cheap to load and useful.
   parse explicit `null`, because reporting payloads send nullable optional columns.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
+- 2026-06-10: EntitlementWindowDO batch wallet retries must discard in-memory staged plans before
+  awaiting wallet I/O; reread SQLite and retry optimized so reservation fixes do not turn into
+  per-event sequential writes.
 
 ## Billing, Wallets, And Invoices
 
