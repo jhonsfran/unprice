@@ -474,3 +474,35 @@ export type WalletReservationSnapshot = {
   deletionRequested: boolean
   recoveryRequired: boolean
 } | null
+
+export class EntitlementWindowBatchReservationUnderfundedError extends Error {
+  constructor(
+    public readonly params: {
+      eventId: string
+      eventTimestamp: number
+      meterKey: string
+      meterSlug: string
+      reservationId: string
+      persistedConsumedAmount: number
+      stagedConsumedAmount: number
+      effectiveCostAmount: number
+      currentRemainingAmount: number
+      targetReservationAmount: number
+    }
+  ) {
+    super(`Batch reservation underfunded for meter ${params.meterSlug}`)
+    this.name = EntitlementWindowBatchReservationUnderfundedError.name
+  }
+}
+
+export class EntitlementWindowBatchReservationBootstrapRequired extends Error {
+  constructor(
+    public readonly params: {
+      event: ApplyBatchInput["events"][number]
+      projectedCost: number
+    }
+  ) {
+    super("wallet bootstrap required before optimized batch commit")
+    this.name = EntitlementWindowBatchReservationBootstrapRequired.name
+  }
+}
