@@ -160,6 +160,7 @@ type OptimizedBatchProcessingState = {
   meterState: MeterStateDraft
   metrics: ApplyBatchMetrics
   refillTrigger: RefillTrigger | null
+  reservationCloseReason: ReservationCloseReason | null
   results: ApplyBatchResultRow[]
   stagedResultsByKey: Map<string, BatchIdempotencyEntry>
   touchedGrantStates: Map<string, GrantConsumptionState>
@@ -176,6 +177,7 @@ function createOptimizedBatchProcessingState(
     meterState: { ...setup.meterState },
     metrics: createApplyBatchMetrics(),
     refillTrigger: null,
+    reservationCloseReason: null,
     results: [],
     stagedResultsByKey: new Map<string, BatchIdempotencyEntry>(),
     touchedGrantStates: new Map<string, GrantConsumptionState>(),
@@ -624,6 +626,10 @@ export class EntitlementWindowDO extends DurableObject {
       this.ctx.waitUntil(this.requestFlushAndRefill(state.refillTrigger))
     }
 
+    if (state.reservationCloseReason) {
+      this.ctx.waitUntil(this.closeReservation({ closeReason: state.reservationCloseReason }))
+    }
+
     return { results: state.results, metrics: state.metrics }
   }
 
@@ -763,14 +769,8 @@ export class EntitlementWindowDO extends DurableObject {
         throw error
       }
 
-      if (
-        usesWalletReservation &&
-        state.wallet?.reservationId &&
-        this.hasOptimizedBatchStagedMutations(state)
-      ) {
-        throw new EntitlementWindowBatchSequentialReplayRequired(
-          "wallet reservation close after staged batch mutations"
-        )
+      if (usesWalletReservation && state.wallet?.reservationId) {
+        state.reservationCloseReason = "limit_reached"
       }
 
       this.stageOptimizedBatchDeniedResult({
@@ -780,7 +780,6 @@ export class EntitlementWindowDO extends DurableObject {
         event,
         state,
       })
-      this.ctx.waitUntil(this.closeReservation({ closeReason: "limit_reached" }))
       return null
     }
 

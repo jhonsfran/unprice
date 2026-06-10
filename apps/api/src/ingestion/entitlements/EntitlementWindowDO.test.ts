@@ -1425,7 +1425,7 @@ describe("EntitlementWindowDO", () => {
     )
   })
 
-  it("falls back to sequential batch replay before closing a reservation for a staged limit denial", async () => {
+  it("keeps optimized batch compact and closes reservation after staged limit denial", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1481,24 +1481,23 @@ describe("EntitlementWindowDO", () => {
         deniedReason: "LIMIT_EXCEEDED",
       }),
     ])
+    expect(db.idempotencyBatchRows).toHaveLength(1)
     expect(readOutboxPayloads(db)).toHaveLength(1)
-    expect(readIdempotencyEntries(db).size).toBe(2)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(1)
+    await Promise.all(state.waitUntilPromises)
     expect(testState.flushReservation).toHaveBeenCalledWith(
       expect.objectContaining({
         final: true,
         reservationId: "res_limit_batch",
       })
     )
-    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
-    expect(testState.logger.info).toHaveBeenCalledWith(
+    expect(testState.logger.info).not.toHaveBeenCalledWith(
       "entitlement apply_batch falling back to sequential per-event apply",
-      expect.objectContaining({
-        reason: "wallet reservation close after staged batch mutations",
-      })
+      expect.anything()
     )
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
-      expect.objectContaining({ reservation_action: "none", outcome: "success" })
+      expect.objectContaining({ outcome: "success" })
     )
   })
 
