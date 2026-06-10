@@ -2,6 +2,8 @@ import { DEFAULT_RESERVATION_POLICY } from "@unprice/services/wallet/reservation
 import { describe, expect, it } from "vitest"
 import {
   buildBatchEventApplyInput,
+  computeBatchReservationHeadroom,
+  computeBatchReservationRefillAmount,
   createAllowedBatchOutcome,
   createCachedBatchResult,
   createDeniedBatchOutcome,
@@ -190,6 +192,52 @@ describe("batch apply helpers", () => {
         flushSeq: 4,
       },
     })
+  })
+
+  it("computes required headroom from staged wallet consumption plus current event cost", () => {
+    const result = computeBatchReservationHeadroom({
+      persistedConsumedAmount: 100,
+      stagedConsumedAmount: 350,
+      currentEventEffectiveCostAmount: 200,
+    })
+
+    expect(result).toEqual({
+      stagedDeltaAmount: 250,
+      requiredHeadroomAmount: 450,
+    })
+  })
+
+  it("computes zero refill when current remaining already covers required batch headroom", () => {
+    const refillAmount = computeBatchReservationRefillAmount({
+      currentRemainingAmount: 500,
+      requiredHeadroomAmount: 450,
+      targetReservationAmount: 700,
+      maxOutstandingAmount: 1_000,
+    })
+
+    expect(refillAmount).toBe(0)
+  })
+
+  it("computes a top-up that covers the required batch headroom and target runway", () => {
+    const refillAmount = computeBatchReservationRefillAmount({
+      currentRemainingAmount: 100,
+      requiredHeadroomAmount: 450,
+      targetReservationAmount: 700,
+      maxOutstandingAmount: 1_000,
+    })
+
+    expect(refillAmount).toBe(600)
+  })
+
+  it("caps the batch refill amount by max outstanding amount", () => {
+    const refillAmount = computeBatchReservationRefillAmount({
+      currentRemainingAmount: 100,
+      requiredHeadroomAmount: 900,
+      targetReservationAmount: 1_500,
+      maxOutstandingAmount: 1_000,
+    })
+
+    expect(refillAmount).toBe(900)
   })
 })
 

@@ -507,3 +507,40 @@ function nonEmptyMeterFacts(
 ): BatchIdempotencyEntry["meterFacts"] | undefined {
   return facts && facts.length > 0 ? facts : undefined
 }
+
+export function computeBatchReservationHeadroom(params: {
+  persistedConsumedAmount: number
+  stagedConsumedAmount: number
+  currentEventEffectiveCostAmount: number
+}): {
+  stagedDeltaAmount: number
+  requiredHeadroomAmount: number
+} {
+  const stagedDeltaAmount = Math.max(
+    0,
+    params.stagedConsumedAmount - params.persistedConsumedAmount
+  )
+
+  return {
+    stagedDeltaAmount,
+    requiredHeadroomAmount: stagedDeltaAmount + Math.max(0, params.currentEventEffectiveCostAmount),
+  }
+}
+
+export function computeBatchReservationRefillAmount(params: {
+  currentRemainingAmount: number
+  requiredHeadroomAmount: number
+  targetReservationAmount: number
+  maxOutstandingAmount: number
+}): number {
+  if (params.currentRemainingAmount >= params.requiredHeadroomAmount) {
+    return 0
+  }
+
+  const desiredRemainingAmount = Math.min(
+    Math.max(params.requiredHeadroomAmount, params.targetReservationAmount),
+    params.maxOutstandingAmount
+  )
+
+  return Math.max(0, desiredRemainingAmount - Math.max(0, params.currentRemainingAmount))
+}
