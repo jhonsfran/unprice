@@ -1142,7 +1142,7 @@ describe("EntitlementWindowDO", () => {
       "entitlement apply_batch",
       expect.objectContaining({
         event_count: 2,
-        mode: "optimized",
+        reservation_action: "none",
         processed_count: 2,
         allowed_count: 2,
         denied_count: 0,
@@ -1420,7 +1420,7 @@ describe("EntitlementWindowDO", () => {
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
       expect.objectContaining({
-        mode: "sequential",
+        reservation_action: "none",
         processed_count: 2,
         outcome: "success",
       })
@@ -1500,11 +1500,11 @@ describe("EntitlementWindowDO", () => {
     )
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
-      expect.objectContaining({ mode: "sequential", outcome: "success" })
+      expect.objectContaining({ reservation_action: "none", outcome: "success" })
     )
   })
 
-  it("falls back to sequential batch replay when staged wallet consumption is underfunded", async () => {
+  it("retries optimized batch after growing an underfunded wallet reservation", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -1573,27 +1573,26 @@ describe("EntitlementWindowDO", () => {
     expect(testState.flushReservation).toHaveBeenCalledWith(
       expect.objectContaining({
         final: false,
-        flushAmount: 100_000_000,
+        flushAmount: 0,
         reservationId: "res_underfunded_batch",
       })
     )
     const wallet = db.meterWindowRows.get(DEFAULT_METER_KEY)
     expect(wallet?.consumedAmount).toBe(1_100_000_000)
     expect(wallet?.allocationAmount).toBeGreaterThanOrEqual(2_500_000_000)
-    expect(wallet?.flushedAmount).toBeGreaterThanOrEqual(100_000_000)
-    expect(wallet?.flushSeq).toBeGreaterThanOrEqual(1)
-    expect(db.idempotencyBatchRows).toHaveLength(2)
+    expect(db.idempotencyBatchRows).toHaveLength(1)
     expect(db.outboxBatchRows).toHaveLength(0)
     expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
-    expect(testState.logger.info).toHaveBeenCalledWith(
+    expect(testState.logger.info).not.toHaveBeenCalledWith(
       "entitlement apply_batch falling back to sequential per-event apply",
-      expect.objectContaining({
-        reason: "wallet reservation underfunded",
-      })
+      expect.anything()
     )
     expect(testState.logger.info).toHaveBeenCalledWith(
       "entitlement apply_batch",
-      expect.objectContaining({ mode: "sequential", outcome: "success" })
+      expect.objectContaining({
+        reservation_action: "refilled",
+        outcome: "success",
+      })
     )
   })
 

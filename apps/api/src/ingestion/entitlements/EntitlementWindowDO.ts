@@ -48,6 +48,8 @@ import type { Env } from "~/env"
 import { createDoLogger, runDoOperation } from "~/observability"
 import {
   buildBatchEventApplyInput,
+  computeBatchReservationHeadroom,
+  computeBatchReservationRefillAmount,
   createAllowedBatchOutcome,
   createCachedBatchResult,
   createDeniedBatchOutcome,
@@ -83,6 +85,7 @@ import {
   type EntitlementApplyMeterFact,
   type EntitlementConfigInput,
   type EntitlementCreditLinePolicy,
+  EntitlementWindowBatchReservationUnderfundedError,
   EntitlementWindowBatchSequentialReplayRequired,
   EntitlementWindowLimitExceededError,
   EntitlementWindowReservationUnderfundedError,
@@ -419,7 +422,7 @@ export class EntitlementWindowDO extends DurableObject {
         const input = applyBatchInputSchema.parse(rawInput)
         const results: ApplyBatchResultRow[] = []
         let metrics = createApplyBatchMetrics()
-        let mode: "optimized" | "sequential" = "optimized"
+        let reservationAction: "none" | "refilled" | "bootstrapped" = "none"
         let thrown: unknown
 
         try {
@@ -432,28 +435,38 @@ export class EntitlementWindowDO extends DurableObject {
             results.push(...optimized.results)
             return { results: optimized.results }
           } catch (error) {
-            if (!(error instanceof EntitlementWindowBatchSequentialReplayRequired)) {
-              throw error
+            if (error instanceof EntitlementWindowBatchReservationUnderfundedError) {
+              const growth = await this.growReservationForBatchHeadroom(error.params)
+              if (growth?.kind !== "refilled" && growth?.kind !== "already_funded") {
+                throw error
+              }
+
+              reservationAction = growth.kind === "refilled" ? "refilled" : "none"
+              const retry = await this.applyBatchOptimized(input)
+              metrics = retry.metrics
+              results.push(...retry.results)
+              return { results: retry.results }
             }
 
-            mode = "sequential"
-            const fallbackEvent = {
-              operation: "apply_batch",
-              project_id: input.projectId,
-              customer_id: input.customerId,
-              customer_entitlement_id: input.entitlement.customerEntitlementId,
-              event_count: input.events.length,
-              reason: error.message,
+            if (error instanceof EntitlementWindowBatchSequentialReplayRequired) {
+              const sequential = await this.applyBatchSequential(input)
+              metrics = sequential.metrics
+              results.push(...sequential.results)
+              this.logger.info(
+                "entitlement apply_batch falling back to sequential per-event apply",
+                {
+                  operation: "apply_batch",
+                  project_id: input.projectId,
+                  customer_id: input.customerId,
+                  customer_entitlement_id: input.entitlement.customerEntitlementId,
+                  event_count: input.events.length,
+                  reason: error.message,
+                }
+              )
+              return { results: sequential.results }
             }
-            this.logger.info(
-              "entitlement apply_batch falling back to sequential per-event apply",
-              fallbackEvent
-            )
 
-            const sequential = await this.applyBatchSequential(input)
-            metrics = sequential.metrics
-            results.push(...sequential.results)
-            return { results: sequential.results }
+            throw error
           }
         } catch (error) {
           thrown = error
@@ -472,7 +485,7 @@ export class EntitlementWindowDO extends DurableObject {
             customer_id: input.customerId,
             customer_entitlement_id: input.entitlement.customerEntitlementId,
             event_count: input.events.length,
-            mode,
+            reservation_action: reservationAction,
             processed_count: results.length,
             allowed_count: results.filter((result) => result.allowed).length,
             denied_count: results.filter((result) => !result.allowed).length,
@@ -919,7 +932,19 @@ export class EntitlementWindowDO extends DurableObject {
       })
 
       if (spendPlan.kind === "underfunded") {
-        throw new EntitlementWindowBatchSequentialReplayRequired("wallet reservation underfunded")
+        const persistedConsumedAmount = setup.wallet?.consumedAmount ?? 0
+        throw new EntitlementWindowBatchReservationUnderfundedError({
+          eventId: event.id,
+          eventTimestamp: event.timestamp,
+          meterKey: setup.meter.key,
+          meterSlug: setup.meter.config.eventSlug,
+          reservationId: wallet.reservationId,
+          persistedConsumedAmount,
+          stagedConsumedAmount: wallet.consumedAmount,
+          effectiveCostAmount: spendPlan.effectiveCostAmount,
+          currentRemainingAmount: spendPlan.currentRemaining,
+          targetReservationAmount: wallet.targetReservationAmount,
+        })
       }
 
       if (spendPlan.refillStateUpdate) {
@@ -4266,6 +4291,72 @@ export class EntitlementWindowDO extends DurableObject {
     await this.requestFlushAndRefill(plan.trigger)
 
     return { kind: "refilled", trigger: plan.trigger }
+  }
+
+  private async growReservationForBatchHeadroom(
+    params: EntitlementWindowBatchReservationUnderfundedError["params"]
+  ): Promise<ReservationGrowthResult | null> {
+    const readiness = this.resolveReservationGrowthReadiness({
+      eventId: params.eventId,
+      eventTimestamp: params.eventTimestamp,
+      meterKey: params.meterKey,
+      meterSlug: params.meterSlug,
+      reservationId: params.reservationId,
+      cost: params.effectiveCostAmount,
+      remaining: params.currentRemainingAmount,
+    })
+    if (readiness.kind === "already_funded") {
+      return { kind: "already_funded" }
+    }
+    if (readiness.kind === "unavailable") {
+      return null
+    }
+
+    const headroom = computeBatchReservationHeadroom({
+      persistedConsumedAmount: params.persistedConsumedAmount,
+      stagedConsumedAmount: params.stagedConsumedAmount,
+      currentEventEffectiveCostAmount: params.effectiveCostAmount,
+    })
+    const refillAmount = computeBatchReservationRefillAmount({
+      currentRemainingAmount: readiness.currentRemaining,
+      requiredHeadroomAmount: headroom.requiredHeadroomAmount,
+      targetReservationAmount: params.targetReservationAmount,
+      maxOutstandingAmount: this.reservationPolicy().maxOutstandingAmount,
+    })
+    if (refillAmount <= 0) {
+      return null
+    }
+
+    const flushSeq = readiness.window.flushSeq + 1
+    const trigger: RefillTrigger = {
+      flushSeq,
+      flushAmount: Math.max(0, readiness.window.consumedAmount - readiness.window.flushedAmount),
+      flushQuantity: Math.max(
+        0,
+        readiness.window.consumedQuantity - readiness.window.flushedQuantity
+      ),
+      refillAmount,
+      effectiveAt: params.eventTimestamp,
+    }
+
+    this.requireReservationInvoiceContext(readiness.window)
+    // Persist minimal flush/refill intent without full refill decision state.
+    // The batch retry path does not recompute spend velocity or target reservation
+    // since the headroom helpers already sized the refill amount.
+    this.db
+      .update(walletReservationTable)
+      .set({
+        refillInFlight: true,
+        pendingFlushSeq: trigger.flushSeq,
+        pendingFlushFinal: false,
+        pendingFlushAmount: trigger.flushAmount,
+        pendingFlushQuantity: trigger.flushQuantity,
+        pendingRefillAmount: trigger.refillAmount,
+      })
+      .run()
+    await this.requestFlushAndRefill(trigger)
+
+    return { kind: "refilled", trigger }
   }
 
   private resolveReservationGrowthReadiness(
