@@ -13,17 +13,13 @@ import {
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
 import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert } from "lucide-react"
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
-
-const usageChartConfig = {
-  usage: { label: "Usage", color: "var(--chart-4)" },
-} satisfies ChartConfig
 
 const TIMESERIES_COLORS = [
   "var(--chart-1)",
@@ -267,6 +263,21 @@ export function UsageStats() {
     ],
   })
 
+  useQueryInvalidation({
+    paramKey: intervalFilter.name,
+    dataUpdatedAt: usageUpdatedAt,
+    isFetching: isUsageFetching,
+    getQueryKey: (param) => [
+      ["analytics", "getProjectUsageTimeseries"],
+      {
+        input: {
+          range: param,
+        },
+        type: "query",
+      },
+    ],
+  })
+
   if (usage.error) {
     return <UsageStatsErrorState error={usage.error} />
   }
@@ -286,12 +297,7 @@ export function UsageStats() {
   const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.usage, 0)
   const spendingSummary = summarizeSpending(sortedUsage)
   const consumedAmountLabel = formatSpendingSummary(spendingSummary)
-  const chartData = sortedUsage.map((row) => ({
-    feature: row.feature_slug,
-    usage: row.usage,
-    spending: formatFeatureSpending(row),
-  }))
-  const chartHeight = Math.min(Math.max(chartData.length * 52, 280), 560)
+  const maxFeatureUsage = sortedUsage[0]?.usage ?? 1
 
   const { data: timeseriesChartData, features: timeseriesFeatures } = buildTimeseriesData(
     timeseriesData.timeseries ?? [],
@@ -421,81 +427,6 @@ export function UsageStats() {
           </div>
         )}
 
-        <div className="overflow-hidden rounded-md border border-border/60 p-3 sm:p-4">
-          <ChartContainer
-            config={usageChartConfig}
-            className="w-full"
-            style={{ height: `${chartHeight}px` }}
-          >
-            <BarChart
-              accessibilityLayer
-              data={chartData}
-              layout="vertical"
-              margin={{
-                left: 8,
-                right: 44,
-                top: 6,
-                bottom: 6,
-              }}
-              barCategoryGap="24%"
-            >
-              <CartesianGrid horizontal={false} className="stroke-muted" />
-              <YAxis
-                dataKey="feature"
-                type="category"
-                width={160}
-                axisLine={false}
-                tickLine={false}
-                tickMargin={10}
-                tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
-                tickFormatter={(value: string) =>
-                  value.length > 20 ? `${value.slice(0, 20)}...` : value
-                }
-              />
-              <XAxis
-                dataKey="usage"
-                type="number"
-                axisLine={false}
-                tickLine={false}
-                tickMargin={10}
-                tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
-                tickFormatter={(value) => nFormatter(Number(value))}
-              />
-              <ChartTooltip
-                cursor={false}
-                content={
-                  <ChartTooltipContent
-                    indicator="dot"
-                    formatter={(value, name) => {
-                      if (typeof value !== "number") {
-                        return value
-                      }
-
-                      return (
-                        <>
-                          <span>{String(name)}</span>
-                          <span className="ml-auto font-medium font-mono text-foreground tabular-nums">
-                            {nFormatter(value)}
-                          </span>
-                        </>
-                      )
-                    }}
-                  />
-                }
-              />
-              <Bar dataKey="usage" radius={[0, 8, 8, 0]} fill="var(--color-usage)" maxBarSize={30}>
-                <LabelList
-                  dataKey="usage"
-                  position="right"
-                  offset={8}
-                  className="fill-foreground font-mono text-xs"
-                  formatter={(value: number) => nFormatter(value)}
-                />
-              </Bar>
-            </BarChart>
-          </ChartContainer>
-        </div>
-
         <div className="overflow-hidden rounded-md border border-border/60">
           <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem] items-center gap-4 bg-muted/40 px-4 py-2.5">
             <p className="text-muted-foreground text-xs uppercase">Feature</p>
@@ -504,21 +435,35 @@ export function UsageStats() {
           </div>
 
           <div className="divide-y divide-border">
-            {chartData.map((row) => (
-              <div
-                key={row.feature}
-                className="grid grid-cols-[minmax(0,1fr)_6rem_7rem] items-center gap-4 px-4 py-3"
-              >
-                <div className="flex min-w-0 items-center gap-2">
-                  <BarChart3 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate font-medium text-sm">{row.feature}</span>
+            {sortedUsage.map((row) => {
+              const usagePercent = maxFeatureUsage > 0 ? (row.usage / maxFeatureUsage) * 100 : 0
+
+              return (
+                <div
+                  key={row.feature_slug}
+                  className="grid grid-cols-[minmax(0,1fr)_6rem_7rem] items-center gap-4 px-4 py-3"
+                >
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <div className="flex items-center gap-2">
+                      <BarChart3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="truncate font-medium text-sm">{row.feature_slug}</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                      <div
+                        className="h-full rounded-full bg-primary/60 transition-all"
+                        style={{ width: `${usagePercent}%` }}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-right font-mono text-muted-foreground text-sm tabular-nums">
+                    {nFormatter(row.usage)}
+                  </span>
+                  <span className="text-right font-mono text-sm tabular-nums">
+                    {formatFeatureSpending(row)}
+                  </span>
                 </div>
-                <span className="text-right font-mono text-muted-foreground text-sm tabular-nums">
-                  {nFormatter(row.usage)}
-                </span>
-                <span className="text-right font-mono text-sm tabular-nums">{row.spending}</span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </CardContent>
