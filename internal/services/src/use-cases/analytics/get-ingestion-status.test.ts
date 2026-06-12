@@ -200,6 +200,58 @@ describe("getIngestionStatus", () => {
       secondsSinceLatest: 5,
     })
   })
+
+  it("queries project-wide ingestion status when customerId is omitted", async () => {
+    const { deps, analytics } = makeDeps({
+      now: () => fromTs + 9_000,
+      liveRows: [
+        {
+          second: "2099-01-01 00:00:04.000",
+          processed: 1,
+          rejected: 0,
+          total: 1,
+        },
+      ],
+      recentRows: [
+        recentEvent({
+          event_id: "evt_project",
+          customer_id: "cus_2",
+          handled_at: fromTs + 4_000,
+        }),
+      ],
+    })
+
+    const result = await getIngestionStatus(deps, {
+      ...baseInput(),
+      customerId: undefined,
+      filter: {
+        state: "processed",
+      },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(analytics.getIngestionLive).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      from_ts: fromTs,
+      to_ts: toTs,
+      state: "processed",
+    })
+    expect(analytics.getIngestionRecent).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      from_ts: fromTs,
+      to_ts: toTs,
+      state: "processed",
+      limit: 50,
+    })
+    expect(result.val?.recentEvents).toEqual([
+      expect.objectContaining({
+        eventId: "evt_project",
+        customerId: "cus_2",
+        state: "processed",
+      }),
+    ])
+    expect(result.val?.answer).toContain("project proj_1")
+  })
 })
 
 function baseInput(overrides: Partial<GetIngestionStatusInput> = {}): GetIngestionStatusInput {

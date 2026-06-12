@@ -15,12 +15,13 @@ export const getIngestionStatusWindowSchema = z
 
 export const getIngestionStatusInputSchema = z.object({
   projectId: z.string(),
-  customerId: z.string(),
+  customerId: z.string().optional(),
   window: getIngestionStatusWindowSchema,
   filter: z
     .object({
       sourceId: z.string().optional(),
       eventSlug: z.string().optional(),
+      state: z.enum(["processed", "rejected"]).optional(),
     })
     .default({}),
   limit: z.number().int().min(1).max(100).default(50),
@@ -63,6 +64,7 @@ export const getIngestionStatusOutputSchema = z.object({
     z.object({
       eventId: z.string(),
       canonicalAuditId: z.string(),
+      customerId: z.string(),
       eventSlug: z.string(),
       sourceType: z.string(),
       sourceId: z.string(),
@@ -103,7 +105,7 @@ export async function getIngestionStatus(
   const input = getIngestionStatusInputSchema.parse(rawInput)
   const baseWindowQuery = {
     project_id: input.projectId,
-    customer_id: input.customerId,
+    ...(input.customerId ? { customer_id: input.customerId } : {}),
     from_ts: input.window.from,
     to_ts: input.window.to,
   }
@@ -145,17 +147,20 @@ export async function getIngestionStatus(
 
   const [liveResponse, rejectionsResponse, recentResponse] = analyticsResult.val
   const live = (liveResponse.data ?? []).map(mapLiveRow)
-  const rejections = (rejectionsResponse.data ?? [])
-    .filter((row) => matchesFilter(row, input.filter))
-    .slice(0, input.limit)
-    .map((row) => ({
-      rejectionReason: row.rejection_reason,
-      eventSlug: row.event_slug,
-      sourceId: row.source_id,
-      sourceType: row.source_type,
-      eventCount: row.event_count,
-      lastSeenAt: row.last_seen_at,
-    }))
+  const rejections =
+    input.filter.state === "processed"
+      ? []
+      : (rejectionsResponse.data ?? [])
+          .filter((row) => matchesFilter({ ...row, state: "rejected" }, input.filter))
+          .slice(0, input.limit)
+          .map((row) => ({
+            rejectionReason: row.rejection_reason,
+            eventSlug: row.event_slug,
+            sourceId: row.source_id,
+            sourceType: row.source_type,
+            eventCount: row.event_count,
+            lastSeenAt: row.last_seen_at,
+          }))
   const recentEvents = (recentResponse.data ?? [])
     .filter((row) => isInWindow(row.handled_at, input.window))
     .filter((row) => matchesFilter(row, input.filter))
@@ -182,6 +187,7 @@ export async function getIngestionStatus(
     rejections,
     recentEvents,
     answer: buildAnswer({
+      projectId: input.projectId,
       customerId: input.customerId,
       window: input.window,
       totals,
@@ -217,6 +223,7 @@ function mapRecentEventRow(
   return {
     eventId: row.event_id,
     canonicalAuditId: row.canonical_audit_id,
+    customerId: row.customer_id,
     eventSlug: row.event_slug,
     sourceType: row.source_type,
     sourceId: row.source_id,
@@ -229,7 +236,7 @@ function mapRecentEventRow(
 }
 
 function matchesFilter(
-  row: { source_id: string; event_slug: string },
+  row: { source_id: string; event_slug: string; state?: "processed" | "rejected" },
   filter: IngestionStatusFilter
 ): boolean {
   if (filter.sourceId && row.source_id !== filter.sourceId) {
@@ -240,16 +247,22 @@ function matchesFilter(
     return false
   }
 
+  if (filter.state && row.state && row.state !== filter.state) {
+    return false
+  }
+
   return true
 }
 
 function toTinybirdFilter(filter: IngestionStatusFilter): {
   source_id?: string
   event_slug?: string
+  state?: "processed" | "rejected"
 } {
   return {
     ...(filter.sourceId ? { source_id: filter.sourceId } : {}),
     ...(filter.eventSlug ? { event_slug: filter.eventSlug } : {}),
+    ...(filter.state ? { state: filter.state } : {}),
   }
 }
 
@@ -347,7 +360,7 @@ function buildEvidence({
   return [
     {
       type: "ingestion_status",
-      id: `${input.projectId}:${input.customerId}:${input.window.from}:${input.window.to}`,
+      id: `${input.projectId}:${input.customerId ?? "all-customers"}:${input.window.from}:${input.window.to}`,
       source: "tinybird",
       timestamp: latestHandledAt,
     },
@@ -414,21 +427,25 @@ function buildNextActions({
 }
 
 function buildAnswer({
+  projectId,
   customerId,
   window,
   totals,
   successRate,
 }: {
-  customerId: string
+  projectId: string
+  customerId?: string
   window: GetIngestionStatusInput["window"]
   totals: GetIngestionStatusOutput["totals"]
   successRate: number
 }): string {
+  const scope = customerId ? `customer ${customerId}` : `project ${projectId}`
+
   if (totals.total === 0) {
-    return `No events were observed in the requested window for customer ${customerId}.`
+    return `No events were observed in the requested window for ${scope}.`
   }
 
   const successPercent = Math.round(successRate * 10_000) / 100
 
-  return `${totals.total} events were observed in the requested window for customer ${customerId} (${window.from} to ${window.to}). ${totals.processed} were processed and ${totals.rejected} were rejected, for a ${successPercent}% success rate.`
+  return `${totals.total} events were observed in the requested window for ${scope} (${window.from} to ${window.to}). ${totals.processed} were processed and ${totals.rejected} were rejected, for a ${successPercent}% success rate.`
 }

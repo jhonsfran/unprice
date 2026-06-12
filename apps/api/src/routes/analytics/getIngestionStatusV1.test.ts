@@ -168,6 +168,7 @@ describe("getIngestionStatusV1 route", () => {
         {
           eventId: "evt_1",
           canonicalAuditId: "audit_1",
+          customerId: "cus_123",
           eventSlug: "usage.recorded",
           sourceType: "api_key",
           sourceId: "src_1",
@@ -354,6 +355,62 @@ describe("getIngestionStatusV1 route", () => {
       })
     )
   })
+
+  it("returns project-wide ingestion status when customer_id is omitted", async () => {
+    const { app, env, executionCtx, getIngestionLive, getIngestionRecent } = createTestApp({
+      liveRows: [
+        {
+          second: "2026-06-05 12:00:00",
+          processed: 1,
+          rejected: 0,
+          total: 1,
+        },
+      ],
+      recentRows: [
+        makeRecentEvent({
+          event_id: "evt_project",
+          customer_id: "cus_456",
+          state: "processed",
+          handled_at: fromTs + 5_500,
+        }),
+      ],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        from_ts: fromTs,
+        to_ts: toTs,
+        state: "processed",
+        limit: 5,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.recentEvents).toEqual([
+      expect.objectContaining({
+        eventId: "evt_project",
+        customerId: "cus_456",
+        state: "processed",
+      }),
+    ])
+    expect(body.answer).toContain("project proj_123")
+    expect(getIngestionLive).toHaveBeenCalledWith({
+      project_id: "proj_123",
+      from_ts: fromTs,
+      to_ts: toTs,
+      state: "processed",
+    })
+    expect(getIngestionRecent).toHaveBeenCalledWith({
+      project_id: "proj_123",
+      from_ts: fromTs,
+      to_ts: toTs,
+      state: "processed",
+      limit: 5,
+    })
+  })
 })
 
 function createTestApp(
@@ -429,6 +486,7 @@ function makeRecentEvent(overrides: Record<string, unknown> = {}) {
   return {
     event_id: "evt_1",
     canonical_audit_id: "audit_1",
+    customer_id: "cus_123",
     event_slug: "usage.recorded",
     source_type: "api_key",
     source_id: "src_1",

@@ -12,11 +12,12 @@ const tags = ["analytics"]
 
 export const getIngestionStatusApiRequestSchema = z
   .object({
-    customer_id: z.string(),
+    customer_id: z.string().optional(),
     from_ts: z.number().int(),
     to_ts: z.number().int(),
     source_id: z.string().optional(),
     event_slug: z.string().optional(),
+    state: z.enum(["processed", "rejected"]).optional(),
     limit: z.number().int().min(1).max(100).optional().default(50),
   })
   .refine((input) => input.from_ts < input.to_ts, {
@@ -28,7 +29,7 @@ export const route = createRoute({
   path: "/v1/analytics/ingestion/status",
   operationId: "analytics.ingestion.status",
   summary: "get ingestion status",
-  description: "Get live ingestion status for a customer in a requested window.",
+  description: "Get live ingestion status for a project or customer in a requested window.",
   method: "post",
   tags,
   request: {
@@ -58,6 +59,7 @@ export const registerGetIngestionStatusV1 = (app: App) =>
       to_ts: toTs,
       source_id: sourceId,
       event_slug: eventSlug,
+      state,
       limit,
     } = c.req.valid("json")
     const key = await keyAuth(c)
@@ -76,6 +78,7 @@ export const registerGetIngestionStatusV1 = (app: App) =>
         filter: {
           sourceId,
           eventSlug,
+          state,
         },
         limit,
       }
