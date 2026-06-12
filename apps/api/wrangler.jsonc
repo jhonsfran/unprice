@@ -39,6 +39,10 @@
           {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-prod"
+          },
+          {
+            "binding": "INGESTION_REPORTING_DLQ",
+            "queue": "unprice-api-ingestion-reporting-dlq-prod"
           }
         ],
         "consumers": [
@@ -61,7 +65,7 @@
             "max_batch_size": 100,
             "max_batch_timeout": 30,
             "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
+            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-prod"
           }
         ]
       },
@@ -158,6 +162,10 @@
           {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-preview"
+          },
+          {
+            "binding": "INGESTION_REPORTING_DLQ",
+            "queue": "unprice-api-ingestion-reporting-dlq-preview"
           }
         ],
         "consumers": [
@@ -180,7 +188,7 @@
             "max_batch_size": 100,
             "max_batch_timeout": 30,
             "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
+            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-preview"
           }
         ]
       },
@@ -265,6 +273,10 @@
           {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-dev"
+          },
+          {
+            "binding": "INGESTION_REPORTING_DLQ",
+            "queue": "unprice-api-ingestion-reporting-dlq-dev"
           }
         ],
         "consumers": [
@@ -287,7 +299,7 @@
             "max_batch_size": 100,
             "max_batch_timeout": 5, // to avoid wait in dev
             "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
+            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-dev"
           }
         ]
       },

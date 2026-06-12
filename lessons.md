@@ -122,6 +122,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-12: EntitlementWindowDO optimized batch wallet growth that hits
   `maxOutstandingAmount` is exhausted headroom; stage `WALLET_EMPTY` for that event instead of
   throwing so async ingestion can ack the rest of the customer batch.
+- 2026-06-13: Raw ingestion and reporting queues must not share a DLQ; replay should be an
+  authenticated admin/UI workflow, not a local operator script.
 - 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
   (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
   timestamp.
