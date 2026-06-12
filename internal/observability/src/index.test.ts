@@ -4,6 +4,7 @@ import {
   createStandaloneRequestLogger,
   createUnpriceDrain,
   initObservability,
+  normalizeAxiomEvent,
   sharedSamplingConfig,
 } from "./index"
 
@@ -117,5 +118,60 @@ describe("@unprice/observability", () => {
     logger.error(new Error("test error"))
     logger.error("string error")
     logger.error({ message: "object error" })
+  })
+
+  it("normalizes request aliases into flat snake_case fields before Axiom ingest", () => {
+    const event = normalizeAxiomEvent({
+      requestId: "req_123",
+      method: "POST",
+      path: "/v1/events/ingest",
+      status: 202,
+      duration: 31,
+      rejectionReason: "wallet_empty",
+      request: {
+        id: "req_123",
+        route: "/v1/events/ingest",
+        parent_id: "req_parent",
+      },
+    })
+
+    expect(event).toEqual({
+      request_id: "req_123",
+      request_method: "POST",
+      request_path: "/v1/events/ingest",
+      request_status: 202,
+      request_duration: 31,
+      rejection_reason: "wallet_empty",
+      request_route: "/v1/events/ingest",
+      request_parent_id: "req_parent",
+    })
+    expect(event).not.toHaveProperty("requestId")
+    expect(event).not.toHaveProperty("request")
+    expect(event).not.toHaveProperty("method")
+    expect(event).not.toHaveProperty("path")
+    expect(event).not.toHaveProperty("status")
+    expect(event).not.toHaveProperty("duration")
+  })
+
+  it("keeps canonical flat fields when aliases disagree", () => {
+    const event = normalizeAxiomEvent({
+      requestId: "req_alias",
+      request_id: "req_canonical",
+      projectId: "proj_alias",
+      project_id: "proj_canonical",
+      userId: "user_alias",
+      request: {
+        id: "req_nested",
+      },
+      business: {
+        project_id: "proj_nested",
+      },
+    })
+
+    expect(event).toEqual({
+      request_id: "req_canonical",
+      project_id: "proj_canonical",
+      user_id: "user_alias",
+    })
   })
 })

@@ -1,4 +1,13 @@
-import { Activity, Calculator, Key, LayoutDashboard, Link, Settings, Users } from "lucide-react"
+import {
+  Activity,
+  Calculator,
+  Key,
+  LayoutDashboard,
+  Link,
+  Settings,
+  Sticker,
+  Users,
+} from "lucide-react"
 import type { DashboardRoute, Shortcut } from "~/types"
 
 export const PROJECT_NAV: DashboardRoute[] = [
@@ -20,12 +29,12 @@ export const PROJECT_NAV: DashboardRoute[] = [
     isNew: true,
     featureSlug: "plans",
   },
-  // {
-  //   name: "Pages",
-  //   icon: Sticker,
-  //   href: "/pages",
-  //   featureSlug: "pages",
-  // },
+  {
+    name: "Pages",
+    icon: Sticker,
+    href: "/pages",
+    featureSlug: "pages",
+  },
   {
     name: "Api Keys",
     href: "/apikeys",

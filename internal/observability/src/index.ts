@@ -37,6 +37,31 @@ type DrainOptions = {
 
 type SamplingConfig = NonNullable<LoggerConfig["sampling"]>
 
+type AxiomEvent = Record<string, unknown>
+
+const REQUEST_ALIASES = {
+  requestId: "request_id",
+  method: "request_method",
+  path: "request_path",
+  route: "request_route",
+  status: "request_status",
+  duration: "request_duration",
+} as const
+
+const BUSINESS_ALIASES = {
+  customerId: "customer_id",
+  featureSlug: "feature_slug",
+  projectId: "project_id",
+  unpriceCustomerId: "unprice_customer_id",
+  userId: "user_id",
+  workspaceId: "workspace_id",
+} as const
+
+const TOP_LEVEL_ALIASES = {
+  ...REQUEST_ALIASES,
+  ...BUSINESS_ALIASES,
+} as const
+
 // ============================================
 // Shared sampling config
 // ============================================
@@ -85,7 +110,7 @@ function createAxiomFetchDrain(opts: {
       const response = await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(batch.map((ctx) => ctx.event)),
+        body: JSON.stringify(batch.map((ctx) => normalizeAxiomEvent(ctx.event))),
         signal: controller.signal,
       })
 
@@ -97,6 +122,71 @@ function createAxiomFetchDrain(opts: {
       clearTimeout(timeout)
     }
   }
+}
+
+export function normalizeAxiomEvent(event: AxiomEvent): AxiomEvent {
+  const normalized: AxiomEvent = {}
+
+  for (const [key, value] of Object.entries(event)) {
+    if (isPlainRecord(value) || key in TOP_LEVEL_ALIASES) {
+      continue
+    }
+
+    setIfAbsent(normalized, toSnakeCase(key), value)
+  }
+
+  for (const [key, value] of Object.entries(event)) {
+    const normalizedKey = TOP_LEVEL_ALIASES[key as keyof typeof TOP_LEVEL_ALIASES] ?? toSnakeCase(key)
+
+    if (isPlainRecord(value)) {
+      flattenAxiomFields(normalized, getNamespacePrefix(normalizedKey), value)
+      continue
+    }
+
+    setIfAbsent(normalized, normalizedKey, value)
+  }
+
+  return normalized
+}
+
+function getNamespacePrefix(key: string): string {
+  return key === "business" ? "" : key
+}
+
+function flattenAxiomFields(
+  target: AxiomEvent,
+  prefix: string,
+  fields: Record<string, unknown>
+): void {
+  for (const [key, value] of Object.entries(fields)) {
+    const fieldKey = [prefix, toSnakeCase(key)].filter(Boolean).join("_")
+
+    if (isPlainRecord(value)) {
+      flattenAxiomFields(target, fieldKey, value)
+      continue
+    }
+
+    setIfAbsent(target, fieldKey, value)
+  }
+}
+
+function setIfAbsent(target: AxiomEvent, key: string, value: unknown): void {
+  if (target[key] === undefined && value !== undefined) {
+    target[key] = value
+  }
+}
+
+function toSnakeCase(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s.-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "")
+    .toLowerCase()
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Object.prototype.toString.call(value) === "[object Object]"
 }
 
 // ============================================
