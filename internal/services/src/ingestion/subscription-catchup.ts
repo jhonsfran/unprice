@@ -6,12 +6,12 @@ import type { IngestionQueueMessage } from "./message"
 
 export type IngestionSubscriptionCatchUpService = Pick<
   SubscriptionService,
-  "activateWallet" | "getSubscriptionData" | "renewSubscription"
+  "activateWallet" | "getSubscriptionData" | "materializeBillingPeriods" | "renewSubscription"
 >
 
 export type IngestionSubscriptionCatchUpResult = {
   changed: boolean
-  renewedSubscriptionIds: string[]
+  caughtUpSubscriptionIds: string[]
 }
 
 export class IngestionSubscriptionCatchUp {
@@ -36,7 +36,7 @@ export class IngestionSubscriptionCatchUp {
     projectId: string
   }): Promise<IngestionSubscriptionCatchUpResult> {
     if (params.messages.length === 0) {
-      return { changed: false, renewedSubscriptionIds: [] }
+      return { changed: false, caughtUpSubscriptionIds: [] }
     }
 
     const eventAt = latestMessageTimestamp(params.messages)
@@ -47,34 +47,34 @@ export class IngestionSubscriptionCatchUp {
     })
 
     if (subscriptionIds.length === 0) {
-      return { changed: false, renewedSubscriptionIds: [] }
+      return { changed: false, caughtUpSubscriptionIds: [] }
     }
 
-    const renewedSubscriptionIds: string[] = []
+    const caughtUpSubscriptionIds: string[] = []
 
     for (const subscriptionId of subscriptionIds) {
-      const renewed = await this.catchUpSubscription({
+      const caughtUp = await this.catchUpSubscription({
         eventAt,
         projectId: params.projectId,
         subscriptionId,
       })
 
-      if (renewed) {
-        renewedSubscriptionIds.push(subscriptionId)
+      if (caughtUp) {
+        caughtUpSubscriptionIds.push(subscriptionId)
       }
     }
 
-    if (renewedSubscriptionIds.length > 0) {
+    if (caughtUpSubscriptionIds.length > 0) {
       this.logger.info("raw ingestion subscription catch-up", {
         projectId: params.projectId,
         customerId: params.customerId,
-        renewed_subscription_count: renewedSubscriptionIds.length,
+        caught_up_subscription_count: caughtUpSubscriptionIds.length,
       })
     }
 
     return {
-      changed: renewedSubscriptionIds.length > 0,
-      renewedSubscriptionIds,
+      changed: caughtUpSubscriptionIds.length > 0,
+      caughtUpSubscriptionIds,
     }
   }
 
@@ -118,6 +118,20 @@ export class IngestionSubscriptionCatchUp {
       }
 
       if (!subscriptionNeedsRenewal(subscription, params.eventAt)) {
+        if (subscriptionCanMaterializeBillingPeriods(subscription)) {
+          const result = await this.subscriptions.materializeBillingPeriods({
+            subscriptionId: params.subscriptionId,
+            projectId: params.projectId,
+            now: params.eventAt,
+          })
+
+          if (result.err) {
+            throw result.err
+          }
+
+          return true
+        }
+
         return changed
       }
 
@@ -187,17 +201,23 @@ function hasBillingPeriodCovering(entitlement: IngestionEntitlement, eventAt: nu
 }
 
 function subscriptionNeedsRenewal(subscription: Subscription | null, eventAt: number): boolean {
-  if (!subscription?.active) {
-    return false
-  }
-
-  if (subscription.status !== "active" && subscription.status !== "trialing") {
+  if (!subscriptionCanMaterializeBillingPeriods(subscription)) {
     return false
   }
 
   const renewAt = subscription.renewAt ?? subscription.currentCycleEndAt
 
   return typeof renewAt === "number" && eventAt >= renewAt
+}
+
+function subscriptionCanMaterializeBillingPeriods(
+  subscription: Subscription | null
+): subscription is Subscription {
+  if (!subscription?.active) {
+    return false
+  }
+
+  return subscription.status === "active" || subscription.status === "trialing"
 }
 
 function latestMessageTimestamp(messages: IngestionQueueMessage[]): number {

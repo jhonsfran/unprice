@@ -25,7 +25,7 @@ type CreateIngestionServiceParams = {
   now?: () => number
   subscriptionService?: Pick<
     SubscriptionService,
-    "activateWallet" | "getSubscriptionData" | "renewSubscription"
+    "activateWallet" | "getSubscriptionData" | "materializeBillingPeriods" | "renewSubscription"
   >
 }
 

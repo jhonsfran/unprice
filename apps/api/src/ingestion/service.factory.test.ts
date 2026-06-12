@@ -34,6 +34,7 @@ describe("createIngestionService", () => {
       subscriptionService: {
         activateWallet: vi.fn(),
         getSubscriptionData: vi.fn(),
+        materializeBillingPeriods: vi.fn(),
         renewSubscription: vi.fn(),
       } as never,
     })

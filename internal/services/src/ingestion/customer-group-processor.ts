@@ -29,7 +29,7 @@ type SubscriptionCatchUpProcessor = {
     customerId: string
     messages: IngestionQueueMessage[]
     projectId: string
-  }): Promise<{ changed: boolean; renewedSubscriptionIds: string[] }>
+  }): Promise<{ changed: boolean; caughtUpSubscriptionIds: string[] }>
 }
 
 export class IngestionCustomerGroupProcessor {

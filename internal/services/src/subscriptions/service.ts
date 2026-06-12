@@ -1697,6 +1697,22 @@ export class SubscriptionService {
     return this.repo.findSubscription({ subscriptionId, projectId })
   }
 
+  public materializeBillingPeriods({
+    subscriptionId,
+    projectId,
+    now = Date.now(),
+  }: {
+    subscriptionId: string
+    projectId: string
+    now?: number
+  }): ReturnType<BillingService["generateBillingPeriods"]> {
+    return this.billingService.generateBillingPeriods({
+      subscriptionId,
+      projectId,
+      now,
+    })
+  }
+
   public async getSubscriptionById({
     subscriptionId,
   }: {

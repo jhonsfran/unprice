@@ -63,6 +63,9 @@ patterns. Keep it cheap to load and useful.
   `type: metric` for `LogdrainMetrics` payloads.
 - 2026-05-18: In `APP_ENV=development`, do not attach a custom drain; let evlog's built-in
   pretty development logger handle console output.
+- 2026-06-12: When `openlogs tail <service>` has no registered command stream, inspect the raw
+  per-service files directly under `.openlogs`, for example `.api.<timestamp>.raw.log` and
+  `.nextjs.<timestamp>.raw.log`. Also you can use openlogs tail -n 100 to get the latest logs.
 - 2026-05-18: API Axiom drain flushes should be batched through scheduled `waitUntil`;
   reserve immediate flushes for errors, thrown DO operations, and slow requests.
 - 2026-06-08: EntitlementWindowDO batch diagnostics that must be queried in Axiom need a
@@ -116,6 +119,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-12: EntitlementWindowDO batch wallet growth readiness must compare reservation runway
   against staged batch headroom, not only the current event cost; post-refill wallet-empty denials
   must be staged before mutating the optimized batch draft.
+- 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
+  (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
+  timestamp.
 
 ## Billing, Wallets, And Invoices
 
@@ -163,6 +169,9 @@ patterns. Keep it cheap to load and useful.
   `generateBillingPeriods` will reacquire the same lock and park the subscription in
   `pending_activation`. Ingestion catch-up must retry `activateWallet` for subscriptions already
   parked there instead of fanning out to EntitlementWindowDO with stale billing context.
+- 2026-06-12: Ingestion catch-up must materialize per-item billing periods for active/trialing
+  subscriptions even when the subscription cycle is not due for renewal; usage feature cadences can
+  be shorter than the subscription cycle and still need invoice context before DO fanout.
 - 2026-06-07: When signup or provider-completion use cases materialize billing periods, wire
   `billing` through API route service bags and `apps/api/src/hono/env.ts`; missing adapter wiring
   can return signup `success=false` with a hidden `generateBillingPeriods` error.

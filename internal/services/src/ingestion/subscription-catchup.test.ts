@@ -34,7 +34,7 @@ describe("IngestionSubscriptionCatchUp", () => {
 
     expect(result).toEqual({
       changed: true,
-      renewedSubscriptionIds: ["sub_123"],
+      caughtUpSubscriptionIds: ["sub_123"],
     })
     expect(getSubscriptionData).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
@@ -75,11 +75,52 @@ describe("IngestionSubscriptionCatchUp", () => {
 
     expect(result).toEqual({
       changed: false,
-      renewedSubscriptionIds: [],
+      caughtUpSubscriptionIds: [],
     })
     expect(getSubscriptionData).not.toHaveBeenCalled()
     expect(renewSubscription).not.toHaveBeenCalled()
     expect(activateWallet).not.toHaveBeenCalled()
+  })
+
+  it("materializes billing periods when an active subscription is not due for renewal", async () => {
+    const materializeBillingPeriods = vi
+      .fn()
+      .mockResolvedValue({ val: { cyclesCreated: 2, phasesProcessed: 1 } })
+    const renewSubscription = vi.fn()
+    const getSubscriptionData = vi.fn().mockResolvedValue(
+      createSubscription({
+        currentCycleEndAt: TEST_NOW + 60_000,
+        renewAt: TEST_NOW + 60_000,
+      })
+    )
+    const catchUp = createCatchUp({
+      getSubscriptionData,
+      materializeBillingPeriods,
+      renewSubscription,
+    })
+
+    const result = await catchUp.catchUpForPreparedGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [createMessage()],
+      candidateEntitlements: [
+        createEntitlement({
+          subscriptionId: "sub_123",
+          billingPeriods: [],
+        }),
+      ],
+    })
+
+    expect(result).toEqual({
+      changed: true,
+      caughtUpSubscriptionIds: ["sub_123"],
+    })
+    expect(materializeBillingPeriods).toHaveBeenCalledWith({
+      subscriptionId: "sub_123",
+      projectId: "proj_123",
+      now: TEST_NOW,
+    })
+    expect(renewSubscription).not.toHaveBeenCalled()
   })
 
   it("activates subscriptions parked in pending_activation before fanout", async () => {
@@ -103,7 +144,7 @@ describe("IngestionSubscriptionCatchUp", () => {
 
     expect(result).toEqual({
       changed: true,
-      renewedSubscriptionIds: ["sub_123"],
+      caughtUpSubscriptionIds: ["sub_123"],
     })
     expect(activateWallet).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
@@ -134,6 +175,30 @@ describe("IngestionSubscriptionCatchUp", () => {
     ).rejects.toThrow("SUBSCRIPTION_BUSY")
   })
 
+  it("propagates billing period materialization failures so the queue message can retry", async () => {
+    const renewSubscription = vi.fn()
+    const catchUp = createCatchUp({
+      getSubscriptionData: vi.fn().mockResolvedValue(
+        createSubscription({
+          currentCycleEndAt: TEST_NOW + 60_000,
+          renewAt: TEST_NOW + 60_000,
+        })
+      ),
+      materializeBillingPeriods: vi.fn().mockResolvedValue({ err: new Error("SUBSCRIPTION_BUSY") }),
+      renewSubscription,
+    })
+
+    await expect(
+      catchUp.catchUpForPreparedGroup({
+        customerId: "cus_123",
+        projectId: "proj_123",
+        messages: [createMessage()],
+        candidateEntitlements: [createEntitlement({ subscriptionId: "sub_123" })],
+      })
+    ).rejects.toThrow("SUBSCRIPTION_BUSY")
+    expect(renewSubscription).not.toHaveBeenCalled()
+  })
+
   it("treats pending activation after renewal as retryable instead of continuing to fanout", async () => {
     const catchUp = createCatchUp({
       getSubscriptionData: vi.fn().mockResolvedValue(
@@ -159,6 +224,7 @@ describe("IngestionSubscriptionCatchUp", () => {
 function createCatchUp(overrides: {
   activateWallet?: ReturnType<typeof vi.fn>
   getSubscriptionData: ReturnType<typeof vi.fn>
+  materializeBillingPeriods?: ReturnType<typeof vi.fn>
   renewSubscription: ReturnType<typeof vi.fn>
 }) {
   return new IngestionSubscriptionCatchUp({
@@ -166,6 +232,7 @@ function createCatchUp(overrides: {
     subscriptions: {
       activateWallet: overrides.activateWallet ?? vi.fn(),
       getSubscriptionData: overrides.getSubscriptionData,
+      materializeBillingPeriods: overrides.materializeBillingPeriods ?? vi.fn(),
       renewSubscription: overrides.renewSubscription,
     } as unknown as IngestionSubscriptionCatchUpService,
   })

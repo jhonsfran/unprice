@@ -44,7 +44,7 @@ export class IngestionService {
     now?: () => number
     subscriptions?: Pick<
       SubscriptionService,
-      "activateWallet" | "getSubscriptionData" | "renewSubscription"
+      "activateWallet" | "getSubscriptionData" | "materializeBillingPeriods" | "renewSubscription"
     >
   }) {
     const now = opts.now ?? (() => Date.now())
