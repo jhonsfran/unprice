@@ -16,6 +16,7 @@ import {
 
 import { UnPriceMachineError } from "./errors"
 
+import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import { GrantsManager } from "../entitlements/grants"
 import type { LedgerGateway } from "../ledger"
@@ -77,6 +78,7 @@ export class SubscriptionMachine {
   private ratingService: RatingService
   private ledgerService: LedgerGateway
   private walletService: WalletService | null
+  private billingService: Pick<BillingService, "generateBillingPeriods">
   private reservationFlushGateway: BillingReservationFlushGateway | undefined
   // biome-ignore lint/suspicious/noExplicitAny: <explanation>
   private machine: any
@@ -96,6 +98,7 @@ export class SubscriptionMachine {
     ledgerService,
     walletService,
     reservationFlushGateway,
+    billingService,
     now,
     db,
     repo,
@@ -109,6 +112,7 @@ export class SubscriptionMachine {
     ledgerService: LedgerGateway
     walletService?: WalletService
     reservationFlushGateway?: BillingReservationFlushGateway
+    billingService: Pick<BillingService, "generateBillingPeriods">
     now: number
     db: Database
     repo: SubscriptionRepository
@@ -125,6 +129,7 @@ export class SubscriptionMachine {
     // skip the `activating` state via a guard; once every caller passes
     // walletService this can become required. See `shouldActivate`.
     this.walletService = walletService ?? null
+    this.billingService = billingService
     this.reservationFlushGateway = reservationFlushGateway
     this.db = db
     this.repo = repo
@@ -208,9 +213,20 @@ export class SubscriptionMachine {
               db: Database
               walletService: WalletService | null
               ledgerService: LedgerGateway
+              billingService: Pick<BillingService, "generateBillingPeriods">
               logger: Logger
             }
           }) => {
+            const periodsResult = await input.billingService.generateBillingPeriods({
+              subscriptionId: input.context.subscriptionId,
+              projectId: input.context.projectId,
+              now: input.context.now,
+            })
+
+            if (periodsResult.err) {
+              throw periodsResult.err
+            }
+
             // If wallet is not wired in for this machine instance, the
             // activating state is a no-op pass-through. Callers that need
             // wallet activation wire walletService through
@@ -650,6 +666,7 @@ export class SubscriptionMachine {
               db: this.db,
               walletService: this.walletService,
               ledgerService: this.ledgerService,
+              billingService: this.billingService,
               logger: this.logger,
             }),
             onDone: {
@@ -1053,6 +1070,7 @@ export class SubscriptionMachine {
     ledgerService: LedgerGateway
     walletService?: WalletService
     reservationFlushGateway?: BillingReservationFlushGateway
+    billingService: Pick<BillingService, "generateBillingPeriods">
     now: number
     db: Database
     repo: SubscriptionRepository

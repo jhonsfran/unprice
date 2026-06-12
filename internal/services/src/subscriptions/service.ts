@@ -1806,6 +1806,7 @@ export class SubscriptionService {
         ratingService: this.ratingService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,
+        billingService: this.billingService,
         reservationFlushGateway: this.reservationFlushGateway,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),

@@ -1,7 +1,9 @@
 import type { Analytics } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
+import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import type { LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
@@ -162,6 +164,11 @@ describe("withLockedMachine", () => {
 function createDeps(projectId: string, subscriptionId: string, db: Database) {
   return {
     analytics: {} as Analytics,
+    billingService: {
+      generateBillingPeriods: vi
+        .fn()
+        .mockResolvedValue(Ok({ cyclesCreated: 0, phasesProcessed: 0 })),
+    } as Pick<BillingService, "generateBillingPeriods">,
     customer: {} as CustomerService,
     db,
     ledgerService: {} as LedgerGateway,
