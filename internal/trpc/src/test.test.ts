@@ -13,4 +13,13 @@ describe("analytics router", () => {
     expect(source).toContain("analyticsRouter")
     expect(source).not.toContain(deletedProcedureName)
   })
+
+  it("registers project ingestion status analytics procedure", () => {
+    const source = readFileSync(
+      path.resolve(__dirname, "router/lambda/analytics/index.ts"),
+      "utf-8"
+    )
+
+    expect(source).toContain("getIngestionStatus")
+  })
 })
