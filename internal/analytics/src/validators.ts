@@ -266,6 +266,15 @@ export const featureUsageTimeseriesRowSchema = z.object({
 
 export type FeatureUsageTimeseriesRow = z.infer<typeof featureUsageTimeseriesRowSchema>
 
+export const topConsumerRowSchema = z.object({
+  customer_id: z.string(),
+  total_usage: z.number().optional(),
+  total_amount_after: z.number().int().optional(),
+  currency: z.string().length(3).optional(),
+})
+
+export type TopConsumerRow = z.infer<typeof topConsumerRowSchema>
+
 const explainChargeBaseQuerySchema = z.object({
   project_id: z.string(),
   customer_id: z.string(),

@@ -22,6 +22,7 @@ import {
   ingestionRejectionsQuerySchema,
   pageEventSchema,
   schemaPlanClick,
+  topConsumerRowSchema,
 } from "./validators"
 
 export class Analytics {
@@ -288,6 +289,39 @@ export class Analytics {
         }),
       data: z.object({
         ...featureUsageTimeseriesRowSchema.shape,
+      }),
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getTopConsumers() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_top_consumers",
+      parameters: z
+        .object({
+          project_id: z.string(),
+          interval_days: z.number().optional(),
+          start: z.number().optional(),
+          end: z.number().optional(),
+          limit: z.number().optional(),
+        })
+        .superRefine((params, ctx) => {
+          const hasStart = typeof params.start !== "undefined"
+          const hasEnd = typeof params.end !== "undefined"
+
+          if (hasStart !== hasEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "start and end must be provided together",
+            })
+          }
+        }),
+      data: z.object({
+        ...topConsumerRowSchema.shape,
       }),
       opts: {
         cache: "no-store",

@@ -12,7 +12,9 @@ import {
 } from "@unprice/ui/chart"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
-import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert } from "lucide-react"
+import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert, Users } from "lucide-react"
+import Link from "next/link"
+import { useParams } from "next/navigation"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
@@ -214,6 +216,7 @@ function UsageStatsEmptyState({ intervalLabel }: { intervalLabel: string }) {
 export function UsageStats() {
   const [intervalFilter] = useIntervalFilter()
   const trpc = useTRPC()
+  const params = useParams<{ workspaceSlug: string; projectSlug: string }>()
   const isNearRealtime = intervalFilter.intervalDays === 1
 
   const {
@@ -238,6 +241,21 @@ export function UsageStats() {
     trpc.analytics.getProjectUsageTimeseries.queryOptions(
       {
         range: intervalFilter.name,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+        staleTime: isNearRealtime ? 45 * 1000 : 5 * 60 * 1000,
+        refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
+        refetchOnWindowFocus: false,
+      }
+    )
+  )
+
+  const { data: topConsumersData } = useSuspenseQuery(
+    trpc.analytics.getTopConsumers.queryOptions(
+      {
+        range: intervalFilter.name,
+        limit: 5,
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
@@ -466,6 +484,41 @@ export function UsageStats() {
             })}
           </div>
         </div>
+
+        {topConsumersData.consumers.length > 0 && (
+          <div className="overflow-hidden rounded-md border border-border/60">
+            <div className="flex items-center gap-2 bg-muted/40 px-4 py-2.5">
+              <Users className="h-3.5 w-3.5 text-muted-foreground" />
+              <p className="text-muted-foreground text-xs uppercase">Top consumers</p>
+            </div>
+
+            <div className="divide-y divide-border">
+              {topConsumersData.consumers.map((consumer, index) => (
+                <Link
+                  key={consumer.customerId}
+                  href={`/${params.workspaceSlug}/${params.projectSlug}/customers/${consumer.customerId}`}
+                  className="grid grid-cols-[auto_minmax(0,1fr)_6rem_7rem] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
+                >
+                  <span className="font-mono text-muted-foreground text-xs tabular-nums">
+                    {index + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-medium text-sm">{consumer.name}</p>
+                    <p className="truncate text-muted-foreground text-xs">{consumer.email}</p>
+                  </div>
+                  <span className="text-right font-mono text-muted-foreground text-sm tabular-nums">
+                    {nFormatter(consumer.totalUsage)}
+                  </span>
+                  <span className="text-right font-mono text-sm tabular-nums">
+                    {consumer.currency
+                      ? formatMoney(consumer.totalSpending.toString(), consumer.currency)
+                      : "No spend"}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

@@ -42,6 +42,15 @@ export type WorkspaceGuardCache = {
 
 export type CustomersProjectCache = Pick<Customer, "id" | "name" | "email" | "projectId" | "isMain">
 
+export type TopConsumerCacheEntry = {
+  customerId: string
+  email: string
+  name: string
+  totalUsage: number
+  totalSpending: number
+  currency?: string
+}
+
 export type CacheNamespaces = {
   apiKeyByHash: ApiKeyExtended | null
   customersProject: CustomersProjectCache[] | null
@@ -65,6 +74,7 @@ export type CacheNamespaces = {
   getOverviewStats: Stats | null
   getUsage: Usage | null
   getUsageTimeseries: FeatureUsageTimeseriesRow[] | null
+  getTopConsumers: TopConsumerCacheEntry[] | null
   getCurrentUsage: CurrentUsage | null
   ingestionPreparedGrantContext: PreparedCustomerGrantContext
 }
