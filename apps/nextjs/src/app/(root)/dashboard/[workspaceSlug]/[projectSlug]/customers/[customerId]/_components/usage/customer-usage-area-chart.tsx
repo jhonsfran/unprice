@@ -1,7 +1,12 @@
 "use client"
 
 import { nFormatter } from "@unprice/db/utils"
-import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@unprice/ui/chart"
+import {
+  type ChartConfig,
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "@unprice/ui/chart"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 type TimeseriesPoint = {
@@ -35,11 +40,7 @@ export function CustomerUsageAreaChart({
     <div className="overflow-hidden rounded-lg border border-border p-4">
       <p className="mb-3 text-muted-foreground text-xs uppercase">Usage over time</p>
       <ChartContainer config={config} className="h-[240px] w-full">
-        <AreaChart
-          accessibilityLayer
-          data={data}
-          margin={{ left: 8, right: 8, top: 8, bottom: 8 }}
-        >
+        <AreaChart accessibilityLayer data={data} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
           <CartesianGrid vertical={false} className="stroke-muted" />
           <XAxis
             dataKey="dateLabel"

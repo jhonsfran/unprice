@@ -23,7 +23,10 @@ type CreateIngestionServiceParams = {
   entitlementService: EntitlementService
   logger: Logger
   now?: () => number
-  subscriptionService?: Pick<SubscriptionService, "getSubscriptionData" | "renewSubscription">
+  subscriptionService?: Pick<
+    SubscriptionService,
+    "activateWallet" | "getSubscriptionData" | "renewSubscription"
+  >
 }
 
 export function createIngestionService(params: CreateIngestionServiceParams): IngestionService {

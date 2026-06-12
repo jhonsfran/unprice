@@ -28,6 +28,10 @@ EVENTS=1000
 pnpm --filter @unprice/k6 baseline
 ```
 
+This command builds `baseline.js` and runs k6 through Docker with `tooling/k6/.env`.
+Run it only from a trusted local shell that has Docker access and a non-production
+test token/customer using the required variables from the setup section.
+
 `EVENTS=1000` means at least 1000 `/v1/events/ingest` calls. If the customer has multiple distinct
 usage event slugs, the run sends `EVENTS * eventSlugCount` async usage events.
 

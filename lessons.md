@@ -113,6 +113,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-10: EntitlementWindowDO batch wallet retries must discard in-memory staged plans before
   awaiting wallet I/O; reread SQLite and retry optimized so reservation fixes do not turn into
   per-event sequential writes.
+- 2026-06-12: EntitlementWindowDO batch wallet growth readiness must compare reservation runway
+  against staged batch headroom, not only the current event cost; post-refill wallet-empty denials
+  must be staged before mutating the optimized batch draft.
 
 ## Billing, Wallets, And Invoices
 
@@ -155,6 +158,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-07: Transaction-backed phase creation must materialize billing periods after the outer
   transaction commits and before wallet activation; async `waitUntil` period generation can race
   immediate usage ingestion and leave EntitlementWindowDO without invoice context.
+- 2026-06-12: Subscription machine activation already runs under the subscription lock during
+  renewals; call billing-period materialization with `lock: false` from that actor, or
+  `generateBillingPeriods` will reacquire the same lock and park the subscription in
+  `pending_activation`. Ingestion catch-up must retry `activateWallet` for subscriptions already
+  parked there instead of fanning out to EntitlementWindowDO with stale billing context.
 - 2026-06-07: When signup or provider-completion use cases materialize billing periods, wire
   `billing` through API route service bags and `apps/api/src/hono/env.ts`; missing adapter wiring
   can return signup `success=false` with a hidden `generateBillingPeriods` error.

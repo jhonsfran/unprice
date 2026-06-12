@@ -2,199 +2,264 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make async usage ingestion recover from delayed subscription renewals by invoking the canonical subscription lifecycle before Durable Object fanout.
+**Goal:** Make queued usage ingestion recover when a subscription renewal job has not run before usage arrives for the next billing cycle.
 
-**Architecture:** Ingestion should detect that a subscription-backed usage event is beyond the subscription's funded cycle, call the subscription machine to catch up under the existing subscription lock, then reload entitlement/billing context. Billing-period generation and wallet grant issuance belong to the subscription lifecycle, not the ingestion context loader.
+**Architecture:** Keep ingestion entitlement context read-only. Put billing-period materialization and wallet grant issuance inside the subscription lifecycle, then let queued ingestion call the subscription machine for a bounded catch-up under the existing subscription lock. After catch-up, reload entitlement context before Durable Object fanout.
 
 **Tech Stack:** TypeScript, Vitest, pnpm workspace, Cloudflare queue ingestion, XState subscription machine, Drizzle/Postgres services.
 
 ---
 
+## Current State
+
+- Ingestion-side billing-period materialization has already been deleted. Do not re-add it to `internal/services/src/ingestion/entitlement-context.ts`.
+- `IngestionEntitlement` still needs `subscriptionId` so ingestion can identify which subscription may need catch-up.
+- Queue service wiring currently exposes entitlements to ingestion, but not subscriptions.
+
 ## File Structure
 
 - Modify `internal/services/src/subscriptions/machine.ts`
-  - Wire `BillingService` into the `activating` actor and call `generateBillingPeriods` from the lifecycle owner.
+  - Add `billingService.generateBillingPeriods` to the `activating` actor.
+- Modify `internal/services/src/subscriptions/withLockedMachine.ts`
+  - Pass `billingService` into `SubscriptionMachine.create`.
 - Modify `internal/services/src/subscriptions/service.ts`
-  - Pass `billingService` into `withLockedMachine` / `SubscriptionMachine.create`.
+  - Pass the existing `this.billingService` into locked machine runs.
 - Modify `internal/services/src/subscriptions/machine.test.ts`
-  - Prove activation/renewal materializes billing periods and still issues wallet grants.
-- Create `internal/services/src/ingestion/subscription-catchup.ts`
-  - Small ingestion helper that finds stale subscription ids from prepared usage entitlements and calls `subscriptions.renewSubscription`.
-- Create `internal/services/src/ingestion/subscription-catchup.test.ts`
-  - Unit tests for stale detection, bounded renewal, and no-op behavior.
-- Modify `internal/services/src/ingestion/customer-group-processor.ts`
-  - Run catch-up after the first read-only context load and reload context if catch-up changed lifecycle state.
-- Modify `internal/services/src/ingestion/service.ts`
-  - Wire the catch-up helper with `services.subscriptions`.
-- Modify `apps/api/src/ingestion/service.ts`, `apps/api/src/ingestion/queue.ts`, `apps/api/src/middleware/init.ts`
-  - Replace billing-only wiring with subscription lifecycle wiring.
+  - Prove activation after renewal materializes billing periods.
 - Modify `internal/services/src/ingestion/entitlement-context.ts`
-  - Remove `materializeBillingPeriods` and `BillingService` dependency; context loading stays read-only.
+  - Preserve `subscriptionId` on prepared ingestion entitlements.
 - Modify `internal/services/src/ingestion/entitlement-context.test.ts`
-  - Replace materialization tests with read-only billing-context tests.
-- Modify `internal/services/src/ingestion/sync-processor.ts`
-  - Remove `materializeBillingPeriods: true`; sync verify/report behavior remains read-only unless explicitly changed later.
+  - Prove `subscriptionId` is mapped from customer entitlements.
+- Create `internal/services/src/ingestion/subscription-catchup.ts`
+  - Detect subscription-backed usage messages without a covering billing period and call `renewSubscription`.
+- Create `internal/services/src/ingestion/subscription-catchup.test.ts`
+  - Prove catch-up renews only when needed and propagates lock/race failures.
+- Modify `internal/services/src/ingestion/customer-group-processor.ts`
+  - Run catch-up after the first context load and reload context when catch-up changed lifecycle state.
+- Modify `internal/services/src/ingestion/customer-group-processor.test.ts`
+  - Prove context is reloaded before processing after catch-up.
+- Modify `internal/services/src/ingestion/service.ts`
+  - Construct the catch-up helper when subscriptions are provided.
+- Modify `apps/api/src/ingestion/service.ts`
+  - Require `subscriptionService` from API composition and pass it to `IngestionService`.
+- Modify `apps/api/src/ingestion/queue.ts`
+  - Return `subscriptions` from queue service wiring.
+- Modify `apps/api/src/middleware/init.ts`
+  - Pass `svcCtx.subscriptions` into `createIngestionService`.
+- Modify `apps/api/src/ingestion/service.factory.test.ts`
+  - Pass a fake subscription service into the factory test.
 - Modify `lessons.md`
-  - Replace the temporary ingestion materialization lesson with the lifecycle catch-up rule.
+  - Add the lifecycle catch-up rule under billing, wallets, and invoices.
 
-## Task 1: Move Billing-Period Materialization Into Subscription Lifecycle
+## Task 1: Lifecycle Owns Billing-Period Materialization
 
 **Files:**
+- Modify: `internal/services/src/subscriptions/machine.test.ts`
 - Modify: `internal/services/src/subscriptions/machine.ts`
+- Modify: `internal/services/src/subscriptions/withLockedMachine.ts`
 - Modify: `internal/services/src/subscriptions/service.ts`
-- Test: `internal/services/src/subscriptions/machine.test.ts`
 
 - [ ] **Step 1: Write the failing lifecycle test**
 
-Add a test in `internal/services/src/subscriptions/machine.test.ts` proving the `activating` actor generates billing periods during renewal/activation. Use the existing machine test fixtures and add this assertion shape:
-
-```ts
-it("materializes billing periods during activation after renewal", async () => {
-  const generateBillingPeriods = vi.fn().mockResolvedValue(
-    Ok({
-      cyclesCreated: 1,
-      phasesProcessed: 1,
-    })
-  )
-
-  const machine = createMachine({
-    billingService: {
-      generateBillingPeriods,
-    },
-    now: Date.UTC(2026, 5, 12, 13, 49, 10),
-    subscription: createSubscription({
-      id: "sub_usage",
-      status: "active",
-      active: true,
-      currentCycleStartAt: Date.UTC(2026, 5, 12, 9, 30, 12),
-      currentCycleEndAt: Date.UTC(2026, 5, 12, 9, 45, 12),
-      renewAt: Date.UTC(2026, 5, 12, 9, 30, 12),
-    }),
-    phase: createPhase({
-      creditLinePolicy: "capped",
-      creditLineAmount: 10_000_000_000,
-    }),
-  })
-
-  const result = await machine.renew()
-
-  expect(result.err).toBeUndefined()
-  expect(generateBillingPeriods).toHaveBeenCalledWith({
-    projectId: "proj_123",
-    subscriptionId: "sub_usage",
-    now: Date.UTC(2026, 5, 12, 13, 49, 10),
-  })
-})
-```
-
-- [ ] **Step 2: Run the failing test**
-
-Run:
-
-```bash
-pnpm --filter @unprice/services exec vitest run src/subscriptions/machine.test.ts -t "materializes billing periods during activation after renewal"
-```
-
-Expected: FAIL because `billingService` is not wired into `SubscriptionMachine` and `generateBillingPeriods` is not called by activation.
-
-- [ ] **Step 3: Wire billing into the machine**
-
-In `internal/services/src/subscriptions/machine.ts`, import `BillingService`:
+In `internal/services/src/subscriptions/machine.test.ts`, add this import:
 
 ```ts
 import type { BillingService } from "../billing/service"
 ```
 
-Add the private field and constructor parameter:
+Update the local `createMachine` helper input:
 
 ```ts
-private billingService: Pick<BillingService, "generateBillingPeriods">
+  const createMachine = async (input: {
+    subscriptionId: string
+    projectId: string
+    now?: number
+    db?: Database
+    walletService?: WalletService
+    billingService?: Pick<BillingService, "generateBillingPeriods">
+  }) =>
+    SubscriptionMachine.create({
+      subscriptionId: input.subscriptionId,
+      projectId: input.projectId,
+      analytics: mockAnalytics,
+      logger: mockLogger,
+      now: input.now ?? Date.now(),
+      customer: mockCustomerService,
+      ratingService: mockRatingService,
+      ledgerService: mockLedgerService,
+      walletService: input.walletService,
+      billingService:
+        input.billingService ??
+        ({
+          generateBillingPeriods: vi.fn().mockResolvedValue(
+            Ok({
+              cyclesCreated: 0,
+              phasesProcessed: 0,
+            })
+          ),
+        } as Pick<BillingService, "generateBillingPeriods">),
+      db: input.db ?? mockDb,
+      repo: new DrizzleSubscriptionRepository(input.db ?? mockDb),
+    })
+```
+
+Add this test near the other renewal tests:
+
+```ts
+  it("materializes billing periods when activation runs after renewal", async () => {
+    const { sub, now } = buildMockSubscription({
+      status: "active",
+      autoRenew: true,
+      trialEnded: true,
+      whenToBill: "pay_in_advance",
+    })
+    sub.currentCycleEndAt = now - 1_000
+    sub.renewAt = now - 1_000
+    sub.phases[0]!.currentCycleEndAt = now - 1_000
+    sub.phases[0]!.renewAt = now - 1_000
+    setupDbMocks(sub)
+
+    const generateBillingPeriods = vi.fn().mockResolvedValue(
+      Ok({
+        cyclesCreated: 1,
+        phasesProcessed: 1,
+      })
+    )
+
+    const created = await createMachine({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+      now,
+      billingService: { generateBillingPeriods },
+    })
+    expect(created.err).toBeUndefined()
+    if (created.err) return
+
+    const machine = created.val
+    const result = await machine.renew()
+
+    expect(result.err).toBeUndefined()
+    expect(generateBillingPeriods).toHaveBeenCalledWith({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+      now,
+    })
+
+    await machine.shutdown()
+  })
+```
+
+- [ ] **Step 2: Run the failing lifecycle test**
+
+Run:
+
+```bash
+pnpm --filter @unprice/services exec vitest run src/subscriptions/machine.test.ts -t "materializes billing periods when activation runs after renewal"
+```
+
+Expected: FAIL because `SubscriptionMachine.create` does not accept `billingService` yet and the activating actor does not call `generateBillingPeriods`.
+
+- [ ] **Step 3: Add billing service to the machine**
+
+In `internal/services/src/subscriptions/machine.ts`, add this import:
+
+```ts
+import type { BillingService } from "../billing/service"
+```
+
+Add the private field:
+
+```ts
+  private billingService: Pick<BillingService, "generateBillingPeriods">
+```
+
+Add `billingService` to the constructor destructuring and parameter type:
+
+```ts
+    billingService,
 ```
 
 ```ts
-billingService,
-```
-
-```ts
-billingService: Pick<BillingService, "generateBillingPeriods">
+    billingService: Pick<BillingService, "generateBillingPeriods">
 ```
 
 Assign it in the constructor:
 
 ```ts
-this.billingService = billingService
+    this.billingService = billingService
 ```
 
-Pass it into the `activateSubscription` actor input:
+Add `billingService` to `SubscriptionMachine.create` payload:
 
 ```ts
-input: ({ context }) => ({
-  context,
-  db: this.db,
-  walletService: this.walletService,
-  ledgerService: this.ledgerService,
-  billingService: this.billingService,
-  logger: this.logger,
-}),
+    billingService: Pick<BillingService, "generateBillingPeriods">
 ```
 
-Extend the actor input type:
+- [ ] **Step 4: Materialize periods inside activation**
+
+In the `activateSubscription` actor input type in `internal/services/src/subscriptions/machine.ts`, add:
 
 ```ts
-billingService: Pick<BillingService, "generateBillingPeriods">
+              billingService: Pick<BillingService, "generateBillingPeriods">
 ```
 
-- [ ] **Step 4: Generate billing periods inside activation**
-
-In the `activateSubscription` actor in `internal/services/src/subscriptions/machine.ts`, after the `activateSubscription(deps, ...)` call succeeds, add:
+Pass the field into the actor input:
 
 ```ts
-const periodsResult = await input.billingService.generateBillingPeriods({
-  subscriptionId: input.context.subscriptionId,
-  projectId: input.context.projectId,
-  now: input.context.now,
-})
-
-if (periodsResult.err) {
-  throw periodsResult.err
-}
+            input: ({ context }) => ({
+              context,
+              db: this.db,
+              walletService: this.walletService,
+              ledgerService: this.ledgerService,
+              billingService: this.billingService,
+              logger: this.logger,
+            }),
 ```
 
-Keep the returned actor payload unchanged:
+At the top of the `activateSubscription` actor body, before the `walletService` no-op branch, add:
 
 ```ts
-return {
-  skipped: false as const,
-  grantsIssued: result.val.grantsIssued,
-}
+            const periodsResult = await input.billingService.generateBillingPeriods({
+              subscriptionId: input.context.subscriptionId,
+              projectId: input.context.projectId,
+              now: input.context.now,
+            })
+
+            if (periodsResult.err) {
+              throw periodsResult.err
+            }
 ```
 
-- [ ] **Step 5: Pass billing from SubscriptionService**
+- [ ] **Step 5: Pass billing through locked machine runs**
 
-In `internal/services/src/subscriptions/service.ts`, update the `withLockedMachine` call in `withSubscriptionMachine`:
+In `internal/services/src/subscriptions/withLockedMachine.ts`, add:
 
 ```ts
-return await withLockedMachine({
-  ...args,
-  db: this.db,
-  repo: this.repo,
-  logger: this.logger,
-  analytics: this.analytics,
-  customer: this.customerService,
-  ratingService: this.ratingService,
-  ledgerService: this.ledgerService,
-  walletService: this.walletService,
-  billingService: this.billingService,
-  reservationFlushGateway: this.reservationFlushGateway,
-  setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
-    this.setLockContext(ctx),
-})
+import type { BillingService } from "../billing/service"
 ```
 
-Update `withLockedMachine` / `SubscriptionMachine.create` types in `internal/services/src/subscriptions/machine.ts` to require:
+Add the argument type:
 
 ```ts
-billingService: Pick<BillingService, "generateBillingPeriods">
+  billingService: Pick<BillingService, "generateBillingPeriods">
+```
+
+Destructure it:
+
+```ts
+    billingService,
+```
+
+Pass it into `SubscriptionMachine.create`:
+
+```ts
+      billingService,
+```
+
+In `internal/services/src/subscriptions/service.ts`, pass the existing service field into `withLockedMachine`:
+
+```ts
+        billingService: this.billingService,
 ```
 
 - [ ] **Step 6: Run the lifecycle test**
@@ -202,7 +267,7 @@ billingService: Pick<BillingService, "generateBillingPeriods">
 Run:
 
 ```bash
-pnpm --filter @unprice/services exec vitest run src/subscriptions/machine.test.ts -t "materializes billing periods during activation after renewal"
+pnpm --filter @unprice/services exec vitest run src/subscriptions/machine.test.ts -t "materializes billing periods when activation runs after renewal"
 ```
 
 Expected: PASS.
@@ -210,142 +275,257 @@ Expected: PASS.
 - [ ] **Step 7: Commit lifecycle ownership**
 
 ```bash
-git add internal/services/src/subscriptions/machine.ts internal/services/src/subscriptions/service.ts internal/services/src/subscriptions/machine.test.ts
+git add internal/services/src/subscriptions/machine.ts internal/services/src/subscriptions/withLockedMachine.ts internal/services/src/subscriptions/service.ts internal/services/src/subscriptions/machine.test.ts
 git commit -m "fix: materialize billing periods during subscription activation"
 ```
 
-## Task 2: Add Ingestion Subscription Catch-Up Helper
+## Task 2: Preserve Subscription Identity In Ingestion Context
+
+**Files:**
+- Modify: `internal/services/src/ingestion/entitlement-context.test.ts`
+- Modify: `internal/services/src/ingestion/entitlement-context.ts`
+
+- [ ] **Step 1: Write the failing mapper assertion**
+
+In `internal/services/src/ingestion/entitlement-context.test.ts`, update the mapper test setup:
+
+```ts
+    const entitlement = createEntitlement({
+      subscriptionId: "sub_123",
+      subscriptionItemId: "si_123",
+      grants: [
+        {
+          allowanceUnits: null,
+          effectiveAt: TEST_NOW - 1_000,
+          expiresAt: TEST_NOW + 1_000,
+          grantId: "grant_unlimited",
+          priority: 20,
+        },
+      ],
+    })
+```
+
+Update the expected object in that test:
+
+```ts
+      subscriptionId: "sub_123",
+      subscriptionItemId: "si_123",
+```
+
+- [ ] **Step 2: Run the failing mapper test**
+
+Run:
+
+```bash
+pnpm --filter @unprice/services exec vitest run src/ingestion/entitlement-context.test.ts -t "maps customer entitlement records into ingestion entitlements"
+```
+
+Expected: FAIL because `toIngestionEntitlement` does not expose `subscriptionId`.
+
+- [ ] **Step 3: Add subscription id to prepared entitlements**
+
+In `internal/services/src/ingestion/entitlement-context.ts`, add this optional field to `IngestionEntitlement`:
+
+```ts
+  subscriptionId?: string | null
+```
+
+In `toIngestionEntitlement`, add:
+
+```ts
+    subscriptionId: entitlement.subscriptionId,
+```
+
+In `internal/services/src/ingestion/entitlement-context.test.ts`, update the test factory record mapping:
+
+```ts
+    subscriptionId: entitlement.subscriptionId ?? null,
+    subscriptionItemId: entitlement.subscriptionItemId,
+```
+
+- [ ] **Step 4: Run the mapper test**
+
+Run:
+
+```bash
+pnpm --filter @unprice/services exec vitest run src/ingestion/entitlement-context.test.ts -t "maps customer entitlement records into ingestion entitlements"
+```
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit subscription identity mapping**
+
+```bash
+git add internal/services/src/ingestion/entitlement-context.ts internal/services/src/ingestion/entitlement-context.test.ts
+git commit -m "fix: preserve subscription id in ingestion context"
+```
+
+## Task 3: Add Subscription Catch-Up Helper
 
 **Files:**
 - Create: `internal/services/src/ingestion/subscription-catchup.ts`
 - Create: `internal/services/src/ingestion/subscription-catchup.test.ts`
 
-- [ ] **Step 1: Write stale-subscription tests**
+- [ ] **Step 1: Add the helper tests**
 
 Create `internal/services/src/ingestion/subscription-catchup.test.ts`:
 
 ```ts
-import { Ok } from "@unprice/error"
+import type { Subscription } from "@unprice/db/validators"
 import { describe, expect, it, vi } from "vitest"
 import type { IngestionEntitlement } from "./entitlement-context"
-import { IngestionSubscriptionCatchup } from "./subscription-catchup"
+import type { IngestionQueueMessage } from "./message"
+import {
+  IngestionSubscriptionCatchUp,
+  type IngestionSubscriptionCatchUpService,
+} from "./subscription-catchup"
 
-const EVENT_TIME = Date.UTC(2026, 5, 12, 13, 49, 10)
+const TEST_NOW = Date.UTC(2026, 5, 12, 13, 49, 10)
 
-describe("IngestionSubscriptionCatchup", () => {
-  it("renews stale subscription-backed usage entitlements once", async () => {
-    const renewSubscription = vi.fn().mockResolvedValue(Ok({ status: "active" }))
-    const getSubscriptionData = vi.fn().mockResolvedValue({
-      id: "sub_123",
+describe("IngestionSubscriptionCatchUp", () => {
+  it("renews a subscription-backed usage entitlement when no billing period covers the event", async () => {
+    const renewSubscription = vi.fn().mockResolvedValue({ val: { status: "active" } })
+    const getSubscriptionData = vi.fn().mockResolvedValue(
+      createSubscription({
+        currentCycleEndAt: TEST_NOW - 1_000,
+        renewAt: TEST_NOW - 1_000,
+      })
+    )
+    const catchUp = createCatchUp({ getSubscriptionData, renewSubscription })
+
+    const result = await catchUp.catchUpForPreparedGroup({
+      customerId: "cus_123",
       projectId: "proj_123",
-      currentCycleEndAt: EVENT_TIME - 1,
-      status: "active",
-      active: true,
-    })
-    const catchup = new IngestionSubscriptionCatchup({
-      subscriptions: {
-        getSubscriptionData,
-        renewSubscription,
-      },
-    })
-
-    const result = await catchup.catchUp({
-      entitlements: [
-        createUsageEntitlement({
+      messages: [createMessage()],
+      candidateEntitlements: [
+        createEntitlement({
           subscriptionId: "sub_123",
+          billingPeriods: [],
         }),
       ],
-      projectId: "proj_123",
-      timestamp: EVENT_TIME,
     })
 
-    expect(result).toEqual({ didCatchUp: true, subscriptionIds: ["sub_123"] })
-    expect(renewSubscription).toHaveBeenCalledWith({
-      projectId: "proj_123",
+    expect(result).toEqual({
+      changed: true,
+      renewedSubscriptionIds: ["sub_123"],
+    })
+    expect(getSubscriptionData).toHaveBeenCalledWith({
       subscriptionId: "sub_123",
-      now: EVENT_TIME,
+      projectId: "proj_123",
+    })
+    expect(renewSubscription).toHaveBeenCalledWith({
+      subscriptionId: "sub_123",
+      projectId: "proj_123",
+      now: TEST_NOW,
     })
   })
 
-  it("does not renew subscriptions that already cover the event timestamp", async () => {
-    const renewSubscription = vi.fn()
-    const getSubscriptionData = vi.fn().mockResolvedValue({
-      id: "sub_123",
-      projectId: "proj_123",
-      currentCycleEndAt: EVENT_TIME + 60_000,
-      status: "active",
-      active: true,
-    })
-    const catchup = new IngestionSubscriptionCatchup({
-      subscriptions: {
-        getSubscriptionData,
-        renewSubscription,
-      },
-    })
-
-    const result = await catchup.catchUp({
-      entitlements: [
-        createUsageEntitlement({
-          subscriptionId: "sub_123",
-        }),
-      ],
-      projectId: "proj_123",
-      timestamp: EVENT_TIME,
-    })
-
-    expect(result).toEqual({ didCatchUp: false, subscriptionIds: [] })
-    expect(renewSubscription).not.toHaveBeenCalled()
-  })
-
-  it("ignores non-usage and customer-level entitlements", async () => {
-    const renewSubscription = vi.fn()
+  it("does not load subscriptions when a billing period already covers the event", async () => {
     const getSubscriptionData = vi.fn()
-    const catchup = new IngestionSubscriptionCatchup({
-      subscriptions: {
-        getSubscriptionData,
-        renewSubscription,
-      },
-    })
+    const renewSubscription = vi.fn()
+    const catchUp = createCatchUp({ getSubscriptionData, renewSubscription })
 
-    const result = await catchup.catchUp({
-      entitlements: [
-        createUsageEntitlement({
-          featureType: "feature",
+    const result = await catchUp.catchUpForPreparedGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [createMessage()],
+      candidateEntitlements: [
+        createEntitlement({
           subscriptionId: "sub_123",
-        }),
-        createUsageEntitlement({
-          subscriptionId: null,
+          billingPeriods: [
+            {
+              billingPeriodId: "bp_123",
+              cycleStartAt: TEST_NOW - 1_000,
+              cycleEndAt: TEST_NOW + 1_000,
+              featurePlanVersionItemId: "si_123",
+              statementKey: "sub_123:2026-06",
+            },
+          ],
         }),
       ],
-      projectId: "proj_123",
-      timestamp: EVENT_TIME,
     })
 
-    expect(result).toEqual({ didCatchUp: false, subscriptionIds: [] })
+    expect(result).toEqual({
+      changed: false,
+      renewedSubscriptionIds: [],
+    })
     expect(getSubscriptionData).not.toHaveBeenCalled()
     expect(renewSubscription).not.toHaveBeenCalled()
   })
+
+  it("propagates subscription lock failures so the queue message can retry", async () => {
+    const catchUp = createCatchUp({
+      getSubscriptionData: vi.fn().mockResolvedValue(
+        createSubscription({
+          currentCycleEndAt: TEST_NOW - 1_000,
+          renewAt: TEST_NOW - 1_000,
+        })
+      ),
+      renewSubscription: vi.fn().mockResolvedValue({ err: new Error("SUBSCRIPTION_BUSY") }),
+    })
+
+    await expect(
+      catchUp.catchUpForPreparedGroup({
+        customerId: "cus_123",
+        projectId: "proj_123",
+        messages: [createMessage()],
+        candidateEntitlements: [createEntitlement({ subscriptionId: "sub_123" })],
+      })
+    ).rejects.toThrow("SUBSCRIPTION_BUSY")
+  })
 })
 
-function createUsageEntitlement(
-  overrides: Partial<IngestionEntitlement> = {}
-): IngestionEntitlement {
+function createCatchUp(overrides: {
+  getSubscriptionData: ReturnType<typeof vi.fn>
+  renewSubscription: ReturnType<typeof vi.fn>
+}) {
+  return new IngestionSubscriptionCatchUp({
+    logger: { info: vi.fn() },
+    subscriptions: overrides as unknown as IngestionSubscriptionCatchUpService,
+  })
+}
+
+function createMessage(overrides: Partial<IngestionQueueMessage> = {}): IngestionQueueMessage {
+  return {
+    version: 1,
+    workspaceId: "ws_123",
+    projectId: "proj_123",
+    customerId: "cus_123",
+    requestId: "req_123",
+    receivedAt: TEST_NOW,
+    idempotencyKey: "idem_123",
+    id: "evt_123",
+    slug: "usage.recorded",
+    timestamp: TEST_NOW,
+    properties: { amount: 1 },
+    source: {
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
+    },
+    ...overrides,
+  }
+}
+
+function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
     billingPeriods: [],
     creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
-    effectiveAt: EVENT_TIME - 1_000,
+    effectiveAt: TEST_NOW - 1_000,
     expiresAt: null,
     featureConfig: {
       usageMode: "unit",
       price: {
         dinero: {
-          amount: 1,
+          amount: 0,
           currency: { code: "USD", base: 10, exponent: 2 },
           scale: 2,
         },
-        displayAmount: "0.01",
+        displayAmount: "0.00",
       },
     },
     featurePlanVersionId: "fpv_123",
@@ -366,6 +546,19 @@ function createUsageEntitlement(
     ...overrides,
   }
 }
+
+function createSubscription(overrides: Partial<Subscription> = {}): Subscription {
+  return {
+    id: "sub_123",
+    projectId: "proj_123",
+    customerId: "cus_123",
+    active: true,
+    status: "active",
+    currentCycleEndAt: TEST_NOW - 1_000,
+    renewAt: TEST_NOW - 1_000,
+    ...overrides,
+  } as Subscription
+}
 ```
 
 - [ ] **Step 2: Run the failing helper tests**
@@ -378,102 +571,185 @@ pnpm --filter @unprice/services exec vitest run src/ingestion/subscription-catch
 
 Expected: FAIL because `subscription-catchup.ts` does not exist.
 
-- [ ] **Step 3: Implement the helper**
+- [ ] **Step 3: Create the catch-up helper**
 
 Create `internal/services/src/ingestion/subscription-catchup.ts`:
 
 ```ts
 import type { Subscription } from "@unprice/db/validators"
-import type { Result } from "@unprice/error"
-import type { ServiceContext } from "../context"
-import type { UnPriceSubscriptionError } from "../subscriptions/errors"
+import type { Logger } from "@unprice/logs"
+import type { SubscriptionService } from "../subscriptions/service"
 import type { IngestionCandidateEntitlements, IngestionEntitlement } from "./entitlement-context"
+import type { IngestionQueueMessage } from "./message"
 
-type SubscriptionCatchupService = Pick<
-  ServiceContext["subscriptions"],
+export type IngestionSubscriptionCatchUpService = Pick<
+  SubscriptionService,
   "getSubscriptionData" | "renewSubscription"
 >
 
-export type IngestionSubscriptionCatchupResult = {
-  didCatchUp: boolean
-  subscriptionIds: string[]
+export type IngestionSubscriptionCatchUpResult = {
+  changed: boolean
+  renewedSubscriptionIds: string[]
 }
 
-export class IngestionSubscriptionCatchup {
-  private readonly subscriptions: SubscriptionCatchupService
+export class IngestionSubscriptionCatchUp {
+  private readonly logger: Pick<Logger, "info">
+  private readonly maxRenewalsPerSubscription: number
+  private readonly subscriptions: IngestionSubscriptionCatchUpService
 
-  constructor(opts: { subscriptions: SubscriptionCatchupService }) {
+  constructor(opts: {
+    logger: Pick<Logger, "info">
+    maxRenewalsPerSubscription?: number
+    subscriptions: IngestionSubscriptionCatchUpService
+  }) {
+    this.logger = opts.logger
+    this.maxRenewalsPerSubscription = opts.maxRenewalsPerSubscription ?? 3
     this.subscriptions = opts.subscriptions
   }
 
-  public async catchUp(params: {
-    entitlements: IngestionCandidateEntitlements
+  public async catchUpForPreparedGroup(params: {
+    candidateEntitlements: IngestionCandidateEntitlements
+    customerId: string
+    messages: IngestionQueueMessage[]
     projectId: string
-    timestamp: number
-  }): Promise<IngestionSubscriptionCatchupResult> {
-    const subscriptionIds = resolveUsageSubscriptionIds(params.entitlements)
-    const caughtUp: string[] = []
+  }): Promise<IngestionSubscriptionCatchUpResult> {
+    if (params.messages.length === 0) {
+      return { changed: false, renewedSubscriptionIds: [] }
+    }
+
+    const eventAt = latestMessageTimestamp(params.messages)
+    const subscriptionIds = collectSubscriptionIdsNeedingCatchUp({
+      candidateEntitlements: params.candidateEntitlements,
+      eventAt,
+      messages: params.messages,
+    })
+
+    if (subscriptionIds.length === 0) {
+      return { changed: false, renewedSubscriptionIds: [] }
+    }
+
+    const renewedSubscriptionIds: string[] = []
 
     for (const subscriptionId of subscriptionIds) {
-      const subscription = await this.subscriptions.getSubscriptionData({
+      const renewed = await this.catchUpSubscription({
+        eventAt,
+        projectId: params.projectId,
         subscriptionId,
+      })
+
+      if (renewed) {
+        renewedSubscriptionIds.push(subscriptionId)
+      }
+    }
+
+    if (renewedSubscriptionIds.length > 0) {
+      this.logger.info("raw ingestion subscription catch-up", {
+        projectId: params.projectId,
+        customerId: params.customerId,
+        renewed_subscription_count: renewedSubscriptionIds.length,
+      })
+    }
+
+    return {
+      changed: renewedSubscriptionIds.length > 0,
+      renewedSubscriptionIds,
+    }
+  }
+
+  private async catchUpSubscription(params: {
+    eventAt: number
+    projectId: string
+    subscriptionId: string
+  }): Promise<boolean> {
+    let changed = false
+
+    for (let attempt = 0; attempt < this.maxRenewalsPerSubscription; attempt++) {
+      const subscription = await this.subscriptions.getSubscriptionData({
+        subscriptionId: params.subscriptionId,
         projectId: params.projectId,
       })
 
-      if (!shouldRenewForUsage(subscription, params.timestamp)) {
-        continue
+      if (!subscriptionNeedsRenewal(subscription, params.eventAt)) {
+        return changed
       }
 
       const result = await this.subscriptions.renewSubscription({
-        subscriptionId,
+        subscriptionId: params.subscriptionId,
         projectId: params.projectId,
-        now: params.timestamp,
+        now: params.eventAt,
       })
 
       if (result.err) {
         throw result.err
       }
 
-      caughtUp.push(subscriptionId)
+      changed = true
     }
 
-    return {
-      didCatchUp: caughtUp.length > 0,
-      subscriptionIds: caughtUp,
-    }
+    return changed
   }
 }
 
-function resolveUsageSubscriptionIds(entitlements: IngestionCandidateEntitlements): string[] {
-  return [
-    ...new Set(
-      entitlements
-        .filter(isSubscriptionBackedUsageEntitlement)
-        .map((entitlement) => entitlement.subscriptionId)
-    ),
-  ]
+function collectSubscriptionIdsNeedingCatchUp(params: {
+  candidateEntitlements: IngestionCandidateEntitlements
+  eventAt: number
+  messages: IngestionQueueMessage[]
+}): string[] {
+  const eventSlugs = new Set(params.messages.map((message) => message.slug))
+  const subscriptionIds = new Set<string>()
+
+  for (const entitlement of params.candidateEntitlements) {
+    if (!isRelevantUsageEntitlement(entitlement, eventSlugs)) {
+      continue
+    }
+
+    if (hasBillingPeriodCovering(entitlement, params.eventAt)) {
+      continue
+    }
+
+    if (typeof entitlement.subscriptionId === "string" && entitlement.subscriptionId.length > 0) {
+      subscriptionIds.add(entitlement.subscriptionId)
+    }
+  }
+
+  return [...subscriptionIds]
 }
 
-function isSubscriptionBackedUsageEntitlement(
-  entitlement: IngestionEntitlement
-): entitlement is IngestionEntitlement & { subscriptionId: string } {
-  return entitlement.featureType === "usage" && typeof entitlement.subscriptionId === "string"
-}
-
-function shouldRenewForUsage(
-  subscription: Subscription | null,
-  timestamp: number
-): subscription is Subscription {
-  return Boolean(
-    subscription &&
-      subscription.active &&
-      subscription.status === "active" &&
-      subscription.currentCycleEndAt <= timestamp
+function isRelevantUsageEntitlement(
+  entitlement: IngestionEntitlement,
+  eventSlugs: Set<string>
+): boolean {
+  return (
+    entitlement.featureType === "usage" &&
+    entitlement.meterConfig !== null &&
+    eventSlugs.has(entitlement.meterConfig.eventSlug)
   )
 }
-```
 
-Remove unused imports if TypeScript reports them after implementation.
+function hasBillingPeriodCovering(entitlement: IngestionEntitlement, eventAt: number): boolean {
+  return entitlement.billingPeriods.some(
+    (period) => period.cycleStartAt <= eventAt && eventAt < period.cycleEndAt
+  )
+}
+
+function subscriptionNeedsRenewal(subscription: Subscription | null, eventAt: number): boolean {
+  if (!subscription?.active) {
+    return false
+  }
+
+  if (subscription.status !== "active" && subscription.status !== "trialing") {
+    return false
+  }
+
+  const renewAt = subscription.renewAt ?? subscription.currentCycleEndAt
+
+  return typeof renewAt === "number" && eventAt >= renewAt
+}
+
+function latestMessageTimestamp(messages: IngestionQueueMessage[]): number {
+  return messages.reduce((latest, message) => Math.max(latest, message.timestamp), 0)
+}
+```
 
 - [ ] **Step 4: Run the helper tests**
 
@@ -489,78 +765,99 @@ Expected: PASS.
 
 ```bash
 git add internal/services/src/ingestion/subscription-catchup.ts internal/services/src/ingestion/subscription-catchup.test.ts
-git commit -m "feat: add ingestion subscription catchup"
+git commit -m "feat: add ingestion subscription catch-up helper"
 ```
 
-## Task 3: Use Catch-Up Before EntitlementWindowDO Fanout
+## Task 4: Wire Catch-Up Into Queue Processing
 
 **Files:**
-- Modify: `internal/services/src/ingestion/customer-group-processor.ts`
 - Modify: `internal/services/src/ingestion/customer-group-processor.test.ts`
+- Modify: `internal/services/src/ingestion/customer-group-processor.ts`
 - Modify: `internal/services/src/ingestion/service.ts`
 - Modify: `apps/api/src/ingestion/service.ts`
 - Modify: `apps/api/src/ingestion/queue.ts`
 - Modify: `apps/api/src/middleware/init.ts`
+- Modify: `apps/api/src/ingestion/service.factory.test.ts`
 
-- [ ] **Step 1: Write the customer-group processor test**
+- [ ] **Step 1: Add the processor reload test**
 
-Add this test to `internal/services/src/ingestion/customer-group-processor.test.ts`:
+In `internal/services/src/ingestion/customer-group-processor.test.ts`, add this test:
 
 ```ts
-it("catches up stale subscriptions and reloads prepared context before fanout", async () => {
-  const freshMessage = createMessage({ timestamp: TEST_NOW })
-  const catchUp = vi.fn().mockResolvedValue({
-    didCatchUp: true,
-    subscriptionIds: ["sub_123"],
-  })
-  const prepareCustomerMessageGroup = vi
-    .fn()
-    .mockResolvedValueOnce({
-      candidateEntitlements: [{ customerEntitlementId: "ce_stale", subscriptionId: "sub_123" }],
-      messages: [freshMessage],
+  it("reloads prepared context after subscription catch-up changes lifecycle state", async () => {
+    const message = createMessage()
+    const firstPreparedGroup = {
+      candidateEntitlements: [
+        {
+          customerEntitlementId: "ce_before",
+          featureType: "usage",
+          meterConfig: { eventSlug: "usage.recorded" },
+          billingPeriods: [],
+          subscriptionId: "sub_123",
+        } as never,
+      ],
+      messages: [message],
+    }
+    const secondPreparedGroup = {
+      candidateEntitlements: [{ customerEntitlementId: "ce_after" } as never],
+      messages: [message],
+    }
+    const prepareCustomerMessageGroup = vi
+      .fn()
+      .mockResolvedValueOnce(firstPreparedGroup)
+      .mockResolvedValueOnce(secondPreparedGroup)
+    const catchUpForPreparedGroup = vi.fn().mockResolvedValue({
+      changed: true,
+      renewedSubscriptionIds: ["sub_123"],
     })
-    .mockResolvedValueOnce({
-      candidateEntitlements: [{ customerEntitlementId: "ce_fresh", subscriptionId: "sub_123" }],
-      messages: [freshMessage],
-    })
-  const preparedProcess = vi.fn().mockResolvedValue([
-    {
-      message: freshMessage,
-      outcome: { state: "processed" },
-    },
-  ])
-  const processor = createProcessor({
-    preparedProcess,
-    prepareCustomerMessageGroup,
-    subscriptionCatchup: { catchUp },
-  })
+    const preparedProcess = vi.fn().mockResolvedValue([
+      {
+        message,
+        outcome: { state: "processed" },
+      },
+    ])
 
-  await processor.processCustomerGroup({
-    customerId: "cus_123",
-    projectId: "proj_123",
-    messages: [freshMessage],
-  })
-
-  expect(catchUp).toHaveBeenCalledWith({
-    entitlements: [{ customerEntitlementId: "ce_stale", subscriptionId: "sub_123" }],
-    projectId: "proj_123",
-    timestamp: TEST_NOW,
-  })
-  expect(prepareCustomerMessageGroup).toHaveBeenCalledTimes(2)
-  expect(preparedProcess).toHaveBeenCalledWith(
-    expect.objectContaining({
-      candidateEntitlements: [{ customerEntitlementId: "ce_fresh", subscriptionId: "sub_123" }],
+    const processor = createProcessor({
+      preparedProcess,
+      prepareCustomerMessageGroup,
+      subscriptionCatchUp: { catchUpForPreparedGroup },
     })
-  )
-})
+
+    await processor.processCustomerGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [message],
+    })
+
+    expect(catchUpForPreparedGroup).toHaveBeenCalledWith({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [message],
+      candidateEntitlements: firstPreparedGroup.candidateEntitlements,
+    })
+    expect(prepareCustomerMessageGroup).toHaveBeenCalledTimes(2)
+    expect(preparedProcess).toHaveBeenCalledWith({
+      candidateEntitlements: secondPreparedGroup.candidateEntitlements,
+      customerId: "cus_123",
+      messages: [message],
+      projectId: "proj_123",
+      rejectionReason: undefined,
+    })
+  })
 ```
 
-Update the `createProcessor` helper type to accept:
+Update the local `createProcessor` helper override type:
 
 ```ts
-subscriptionCatchup?: {
-  catchUp: ReturnType<typeof vi.fn>
-}
+    subscriptionCatchUp?: {
+      catchUpForPreparedGroup: ReturnType<typeof vi.fn>
+    }
+```
+
+Pass it into `new IngestionCustomerGroupProcessor`:
+
+```ts
+    subscriptionCatchUp: overrides.subscriptionCatchUp,
 ```
 
 - [ ] **Step 2: Run the failing processor test**
@@ -568,306 +865,193 @@ subscriptionCatchup?: {
 Run:
 
 ```bash
-pnpm --filter @unprice/services exec vitest run src/ingestion/customer-group-processor.test.ts -t "catches up stale subscriptions"
+pnpm --filter @unprice/services exec vitest run src/ingestion/customer-group-processor.test.ts -t "reloads prepared context after subscription catch-up changes lifecycle state"
 ```
 
-Expected: FAIL because `IngestionCustomerGroupProcessor` does not accept or call `subscriptionCatchup`.
+Expected: FAIL because `IngestionCustomerGroupProcessor` does not accept or call `subscriptionCatchUp`.
 
-- [ ] **Step 3: Add catch-up to the processor**
+- [ ] **Step 3: Add catch-up to the customer group processor**
 
-In `internal/services/src/ingestion/customer-group-processor.ts`, add:
+In `internal/services/src/ingestion/customer-group-processor.ts`, add this type:
 
 ```ts
-type SubscriptionCatchup = {
-  catchUp(params: {
-    entitlements: PreparedCustomerMessageGroup["candidateEntitlements"]
+type SubscriptionCatchUpProcessor = {
+  catchUpForPreparedGroup(params: {
+    candidateEntitlements: PreparedCustomerMessageGroup["candidateEntitlements"]
+    customerId: string
+    messages: IngestionQueueMessage[]
     projectId: string
-    timestamp: number
-  }): Promise<{ didCatchUp: boolean; subscriptionIds: string[] }>
+  }): Promise<{ changed: boolean; renewedSubscriptionIds: string[] }>
 }
 ```
 
-Add a field:
+Add the private field:
 
 ```ts
-private readonly subscriptionCatchup: SubscriptionCatchup | null
+  private readonly subscriptionCatchUp: SubscriptionCatchUpProcessor | undefined
 ```
 
-Add it to constructor opts:
+Add the constructor option:
 
 ```ts
-subscriptionCatchup?: SubscriptionCatchup
+    subscriptionCatchUp?: SubscriptionCatchUpProcessor
 ```
 
 Assign it:
 
 ```ts
-this.subscriptionCatchup = opts.subscriptionCatchup ?? null
+    this.subscriptionCatchUp = opts.subscriptionCatchUp
 ```
 
-Replace the single `preparedGroup` load in `processCustomerGroup` with:
+Change the first prepared group assignment in `processCustomerGroup` from `const` to `let`:
 
 ```ts
-let preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
-  customerId,
-  messages: freshMessages,
-  projectId,
-})
-
-const latestFreshMessage = freshMessages.at(-1)
-if (this.subscriptionCatchup && latestFreshMessage) {
-  const catchup = await this.subscriptionCatchup.catchUp({
-    entitlements: preparedGroup.candidateEntitlements,
-    projectId,
-    timestamp: latestFreshMessage.timestamp,
-  })
-
-  if (catchup.didCatchUp) {
-    preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
-      customerId,
-      messages: freshMessages,
-      projectId,
-    })
-  }
-}
+      let preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
+        customerId,
+        messages: freshMessages,
+        projectId,
+      })
 ```
 
-- [ ] **Step 4: Wire the helper in IngestionService**
+After the first customer-not-found return block and before `processFreshPreparedMessages`, add:
 
-In `internal/services/src/ingestion/service.ts`, import:
+```ts
+      const catchUpResult = await this.subscriptionCatchUp?.catchUpForPreparedGroup({
+        customerId,
+        projectId,
+        messages: preparedGroup.messages,
+        candidateEntitlements: preparedGroup.candidateEntitlements,
+      })
+
+      if (catchUpResult?.changed) {
+        preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
+          customerId,
+          messages: freshMessages,
+          projectId,
+        })
+      }
+```
+
+- [ ] **Step 4: Wire the helper in the services package**
+
+In `internal/services/src/ingestion/service.ts`, add:
 
 ```ts
 import type { SubscriptionService } from "../subscriptions/service"
-import { IngestionSubscriptionCatchup } from "./subscription-catchup"
+import { IngestionSubscriptionCatchUp } from "./subscription-catchup"
 ```
 
-Change constructor opts from billing-only to subscription lifecycle:
+Add the constructor option:
 
 ```ts
-subscriptions?: Pick<SubscriptionService, "getSubscriptionData" | "renewSubscription">
+    subscriptions?: Pick<SubscriptionService, "getSubscriptionData" | "renewSubscription">
 ```
 
-Construct:
+Before creating `IngestionCustomerGroupProcessor`, add:
 
 ```ts
-const subscriptionCatchup = opts.subscriptions
-  ? new IngestionSubscriptionCatchup({ subscriptions: opts.subscriptions })
-  : null
+    const subscriptionCatchUp = opts.subscriptions
+      ? new IngestionSubscriptionCatchUp({
+          logger: opts.logger,
+          subscriptions: opts.subscriptions,
+        })
+      : undefined
 ```
 
-Pass it into `IngestionCustomerGroupProcessor`:
+Pass it into the processor:
 
 ```ts
-this.customerGroupProcessor = new IngestionCustomerGroupProcessor({
-  entitlementContext,
-  logger: opts.logger,
-  messageOutcomes,
-  preparedMessageProcessor,
-  reportingDispatcher,
-  subscriptionCatchup: subscriptionCatchup ?? undefined,
-})
+      subscriptionCatchUp,
 ```
 
-- [ ] **Step 5: Update API ingestion wiring**
+- [ ] **Step 5: Wire subscriptions in API ingestion composition**
 
-In `apps/api/src/ingestion/service.ts`, `apps/api/src/ingestion/queue.ts`, and `apps/api/src/middleware/init.ts`, replace the `billingService` / `svcCtx.billing` ingestion option with:
+In `apps/api/src/ingestion/service.ts`, add:
 
 ```ts
-subscriptions: svcCtx.subscriptions,
+import type { SubscriptionService } from "@unprice/services/subscriptions"
 ```
 
-Keep existing `db`, `cache`, `entitlementService`, `entitlementWindowClient`, `reportingClient`, `logger`, and `now` wiring unchanged.
+Add this field to `CreateIngestionServiceParams`:
 
-- [ ] **Step 6: Run processor and service tests**
+```ts
+  subscriptionService: Pick<SubscriptionService, "getSubscriptionData" | "renewSubscription">
+```
+
+Pass it into `new IngestionService`:
+
+```ts
+    subscriptions: params.subscriptionService,
+```
+
+In `consumeIngestionBatch`, pass:
+
+```ts
+    subscriptionService: services.subscriptions,
+```
+
+In `apps/api/src/ingestion/queue.ts`, update the return type:
+
+```ts
+}): Pick<ServiceContext, "entitlements" | "subscriptions"> & {
+```
+
+Return subscriptions:
+
+```ts
+    subscriptions: svcCtx.subscriptions,
+```
+
+In `apps/api/src/middleware/init.ts`, pass:
+
+```ts
+      subscriptionService: svcCtx.subscriptions,
+```
+
+In `apps/api/src/ingestion/service.factory.test.ts`, pass:
+
+```ts
+      subscriptionService: {
+        getSubscriptionData: vi.fn(),
+        renewSubscription: vi.fn(),
+      } as never,
+```
+
+- [ ] **Step 6: Run the focused wiring tests**
 
 Run:
 
 ```bash
-pnpm --filter @unprice/services exec vitest run src/ingestion/customer-group-processor.test.ts src/ingestion/subscription-catchup.test.ts
-pnpm --filter @unprice/services exec vitest run src/ingestion/service.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Commit ingestion catch-up wiring**
-
-```bash
-git add internal/services/src/ingestion/customer-group-processor.ts internal/services/src/ingestion/customer-group-processor.test.ts internal/services/src/ingestion/service.ts apps/api/src/ingestion/service.ts apps/api/src/ingestion/queue.ts apps/api/src/middleware/init.ts
-git commit -m "fix: catch up subscriptions before usage fanout"
-```
-
-## Task 4: Remove Ingestion Billing-Only Materialization
-
-**Files:**
-- Modify: `internal/services/src/ingestion/entitlement-context.ts`
-- Modify: `internal/services/src/ingestion/entitlement-context.test.ts`
-- Modify: `internal/services/src/ingestion/sync-processor.ts`
-- Modify: `lessons.md`
-
-- [ ] **Step 1: Replace entitlement-context tests**
-
-In `internal/services/src/ingestion/entitlement-context.test.ts`, delete the test named:
-
-```ts
-it("materializes missing billing period context for subscription-backed usage ingestion", async () => {
-```
-
-Keep the read-only test and rename it to:
-
-```ts
-it("leaves missing billing period context empty for read-only context loads", async () => {
-```
-
-The assertion stays:
-
-```ts
-expect(result.candidateEntitlements[0]?.billingPeriods).toEqual([])
-```
-
-- [ ] **Step 2: Run the focused context test**
-
-Run:
-
-```bash
-pnpm --filter @unprice/services exec vitest run src/ingestion/entitlement-context.test.ts -t "leaves missing billing period context empty"
-```
-
-Expected: PASS before implementation, because this confirms the desired read-only behavior is already observable.
-
-- [ ] **Step 3: Remove materialization code**
-
-In `internal/services/src/ingestion/entitlement-context.ts`, remove these imports:
-
-```ts
-import type { BillingService } from "../billing/service"
-```
-
-Remove `materializeBillingPeriods?: boolean` from `CustomerGrantContextReader` and `prepareCustomerGrantContext` params.
-
-Remove:
-
-```ts
-type BillingPeriodMaterializer = Pick<BillingService, "generateBillingPeriods">
-private readonly billingService: BillingPeriodMaterializer | null
-```
-
-Remove `billingService` from the constructor opts and assignment.
-
-In `prepareCustomerMessageGroup`, call:
-
-```ts
-const preparedContext = await this.prepareCustomerGrantContext({
-  customerId,
-  projectId,
-  ...contextWindow,
-})
-```
-
-In `withFreshBillingPeriodContexts`, replace the body with:
-
-```ts
-const billingPeriodsByItemId = await this.loadBillingPeriodContexts({
-  customerId: params.customerId,
-  entitlements: context.candidateEntitlements,
-  endAt: params.endAt,
-  projectId: params.projectId,
-  startAt: params.startAt,
-})
-
-return this.attachBillingPeriodContexts(context, billingPeriodsByItemId)
-```
-
-Delete:
-
-```ts
-resolveSubscriptionsMissingBillingPeriodCoverage
-materializeBillingPeriods
-hasBillingPeriodCoveringTimestamp
-```
-
-Only delete `hasBillingPeriodCoveringTimestamp` if no remaining code uses it.
-
-- [ ] **Step 4: Remove sync materialization flag**
-
-In `internal/services/src/ingestion/sync-processor.ts`, replace:
-
-```ts
-materializeBillingPeriods: true,
-```
-
-with no property. The call should pass only:
-
-```ts
-customerId: message.customerId,
-projectId: message.projectId,
-startAt: message.timestamp,
-endAt: message.timestamp,
-```
-
-- [ ] **Step 5: Update the lesson**
-
-In `lessons.md`, replace the existing `2026-06-12` ingestion billing lesson with:
-
-```md
-- 2026-06-12: Subscription-backed usage ingestion should call the subscription lifecycle catch-up path before DO fanout when the event timestamp is beyond the subscription cycle; billing-period materialization and capped credit-line grants belong inside the subscription machine, while verify/context loads stay read-only.
-```
-
-- [ ] **Step 6: Run context tests**
-
-Run:
-
-```bash
-pnpm --filter @unprice/services exec vitest run src/ingestion/entitlement-context.test.ts src/ingestion/sync-processor.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 7: Commit the removal**
-
-```bash
-git add internal/services/src/ingestion/entitlement-context.ts internal/services/src/ingestion/entitlement-context.test.ts internal/services/src/ingestion/sync-processor.ts lessons.md
-git commit -m "refactor: keep ingestion context loads read only"
-```
-
-## Task 5: Final Verification
-
-**Files:**
-- Verify: `internal/services/src/ingestion/**`
-- Verify: `internal/services/src/subscriptions/**`
-- Verify: `apps/api/src/ingestion/**`
-
-- [ ] **Step 1: Run targeted service tests**
-
-Run:
-
-```bash
-pnpm --filter @unprice/services exec vitest run src/ingestion/entitlement-context.test.ts src/ingestion/customer-group-processor.test.ts src/ingestion/subscription-catchup.test.ts src/ingestion/service.test.ts src/subscriptions/machine.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 2: Run typechecks**
-
-Run:
-
-```bash
-pnpm --filter @unprice/services typecheck
-pnpm --filter api type-check
-```
-
-Expected: PASS.
-
-- [ ] **Step 3: Run API ingestion factory tests**
-
-Run:
-
-```bash
+pnpm --filter @unprice/services exec vitest run src/ingestion/subscription-catchup.test.ts src/ingestion/customer-group-processor.test.ts src/ingestion/entitlement-context.test.ts
 pnpm --filter api test src/ingestion/service.factory.test.ts
 ```
 
 Expected: PASS.
 
-- [ ] **Step 4: Run repository validation**
+- [ ] **Step 7: Commit queue catch-up wiring**
+
+```bash
+git add internal/services/src/ingestion/customer-group-processor.ts internal/services/src/ingestion/customer-group-processor.test.ts internal/services/src/ingestion/service.ts apps/api/src/ingestion/service.ts apps/api/src/ingestion/queue.ts apps/api/src/middleware/init.ts apps/api/src/ingestion/service.factory.test.ts
+git commit -m "fix: catch up subscription renewals before usage fanout"
+```
+
+## Task 5: Verify And Record The Repo Lesson
+
+**Files:**
+- Modify: `lessons.md`
+
+- [ ] **Step 1: Run focused service and API tests**
+
+Run:
+
+```bash
+pnpm --filter @unprice/services exec vitest run src/subscriptions/machine.test.ts src/ingestion/entitlement-context.test.ts src/ingestion/subscription-catchup.test.ts src/ingestion/customer-group-processor.test.ts
+pnpm --filter api test src/ingestion/service.factory.test.ts
+```
+
+Expected: PASS.
+
+- [ ] **Step 2: Run full validation**
 
 Run:
 
@@ -877,30 +1061,20 @@ pnpm validate
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit verification-only fixes**
+- [ ] **Step 3: Add the lesson**
 
-If verification required small test or type fixes, commit them:
+In `lessons.md`, under the billing, wallets, and invoices section, add:
 
-```bash
-git add internal/services/src apps/api/src lessons.md
-git commit -m "test: verify ingestion subscription catchup"
+```md
+### 2026-06-12: Queued usage ingestion may catch up subscription renewals, but entitlement context stays read-only.
+
+- Billing-period generation and wallet grant issuance belong to the subscription lifecycle. If queued ingestion sees subscription-backed usage past the funded billing window, call the subscription machine under its existing lock, then reload entitlement context before fanout.
+- Do not add billing-period writes to `internal/services/src/ingestion/entitlement-context.ts`; that loader reads/cachees entitlements and billing contexts only.
 ```
 
-Skip this commit when there are no additional changes after Task 4.
+- [ ] **Step 4: Commit verification notes**
 
-## Self-Review
-
-Spec coverage:
-- Replace billing-period materialization in ingestion: Task 4.
-- Use canonical subscription machine catch-up before usage fanout: Tasks 1-3.
-- Avoid DO-owned renewal or wallet logic: Task 3 keeps catch-up in services before DO fanout.
-- Keep verify/context loads read-only: Task 4.
-- Check performance/latency risk: catch-up runs only when a subscription cycle is stale and only in queue processing.
-
-Placeholder scan:
-- No task contains open-ended implementation text without code or exact commands.
-
-Type consistency:
-- `IngestionSubscriptionCatchup.catchUp` returns `{ didCatchUp, subscriptionIds }` in every task.
-- Ingestion wiring consistently uses `subscriptions`, not `billingService`.
-- Lifecycle materialization consistently uses `billingService.generateBillingPeriods`.
+```bash
+git add lessons.md
+git commit -m "docs: record ingestion subscription catch-up rule"
+```

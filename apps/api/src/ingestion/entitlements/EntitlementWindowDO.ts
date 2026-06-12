@@ -167,6 +167,30 @@ type OptimizedBatchProcessingState = {
   walletDirty: boolean
 }
 
+type OptimizedBatchOptions = {
+  refillAttemptedEventIds: ReadonlySet<string>
+  walletDiagnostics?: OptimizedBatchWalletDiagnostics
+}
+
+type OptimizedBatchWalletRetryOutcome = "already_funded" | "refilled" | "unavailable"
+
+type OptimizedBatchWalletDiagnostics = {
+  emptyAfterRefillEventIds: string[]
+  emptyAfterRefillLastRemainingAmount: number | null
+  emptyAfterRefillLastRequiredAmount: number | null
+  retryCount: number
+  retryEventIds: string[]
+  retryLastCurrentRemainingAmount: number | null
+  retryLastEffectiveCostAmount: number | null
+  retryLastMeterKey: string | null
+  retryLastMeterSlug: string | null
+  retryLastPersistedConsumedAmount: number | null
+  retryLastRequiredHeadroomAmount: number | null
+  retryLastReservationId: string | null
+  retryLastStagedConsumedAmount: number | null
+  retryOutcomes: OptimizedBatchWalletRetryOutcome[]
+}
+
 function createOptimizedBatchProcessingState(
   setup: OptimizedBatchSetup
 ): OptimizedBatchProcessingState {
@@ -183,6 +207,78 @@ function createOptimizedBatchProcessingState(
     wallet: setup.wallet ? { ...setup.wallet } : null,
     walletDirty: false,
   }
+}
+
+function createOptimizedBatchWalletDiagnostics(): OptimizedBatchWalletDiagnostics {
+  return {
+    emptyAfterRefillEventIds: [],
+    emptyAfterRefillLastRemainingAmount: null,
+    emptyAfterRefillLastRequiredAmount: null,
+    retryCount: 0,
+    retryEventIds: [],
+    retryLastCurrentRemainingAmount: null,
+    retryLastEffectiveCostAmount: null,
+    retryLastMeterKey: null,
+    retryLastMeterSlug: null,
+    retryLastPersistedConsumedAmount: null,
+    retryLastRequiredHeadroomAmount: null,
+    retryLastReservationId: null,
+    retryLastStagedConsumedAmount: null,
+    retryOutcomes: [],
+  }
+}
+
+function batchWalletDiagnosticsLogFields(diagnostics: OptimizedBatchWalletDiagnostics) {
+  return {
+    batch_wallet_underfunded_retry_count: diagnostics.retryCount,
+    batch_wallet_underfunded_event_ids: diagnostics.retryEventIds,
+    batch_wallet_underfunded_refill_outcomes: diagnostics.retryOutcomes,
+    batch_wallet_underfunded_last_event_id:
+      diagnostics.retryEventIds[diagnostics.retryEventIds.length - 1] ?? null,
+    batch_wallet_underfunded_last_meter_key: diagnostics.retryLastMeterKey,
+    batch_wallet_underfunded_last_meter_slug: diagnostics.retryLastMeterSlug,
+    batch_wallet_underfunded_last_reservation_id: diagnostics.retryLastReservationId,
+    batch_wallet_underfunded_last_persisted_consumed_amount:
+      diagnostics.retryLastPersistedConsumedAmount,
+    batch_wallet_underfunded_last_staged_consumed_amount: diagnostics.retryLastStagedConsumedAmount,
+    batch_wallet_underfunded_last_effective_cost_amount: diagnostics.retryLastEffectiveCostAmount,
+    batch_wallet_underfunded_last_required_headroom_amount:
+      diagnostics.retryLastRequiredHeadroomAmount,
+    batch_wallet_underfunded_last_remaining_amount: diagnostics.retryLastCurrentRemainingAmount,
+    batch_wallet_empty_after_refill_count: diagnostics.emptyAfterRefillEventIds.length,
+    batch_wallet_empty_after_refill_event_ids: diagnostics.emptyAfterRefillEventIds,
+    batch_wallet_empty_after_refill_last_event_id:
+      diagnostics.emptyAfterRefillEventIds[diagnostics.emptyAfterRefillEventIds.length - 1] ?? null,
+    batch_wallet_empty_after_refill_last_required_amount:
+      diagnostics.emptyAfterRefillLastRequiredAmount,
+    batch_wallet_empty_after_refill_last_remaining_amount:
+      diagnostics.emptyAfterRefillLastRemainingAmount,
+  }
+}
+
+function recordBatchWalletUnderfundedRetry(params: {
+  diagnostics: OptimizedBatchWalletDiagnostics
+  error: EntitlementWindowBatchReservationUnderfundedError
+  outcome: OptimizedBatchWalletRetryOutcome
+}): void {
+  const { diagnostics, error, outcome } = params
+  const headroom = computeBatchReservationHeadroom({
+    persistedConsumedAmount: error.params.persistedConsumedAmount,
+    stagedConsumedAmount: error.params.stagedConsumedAmount,
+    currentEventEffectiveCostAmount: error.params.effectiveCostAmount,
+  })
+
+  diagnostics.retryCount++
+  diagnostics.retryEventIds.push(error.params.eventId)
+  diagnostics.retryOutcomes.push(outcome)
+  diagnostics.retryLastCurrentRemainingAmount = error.params.currentRemainingAmount
+  diagnostics.retryLastEffectiveCostAmount = error.params.effectiveCostAmount
+  diagnostics.retryLastMeterKey = error.params.meterKey
+  diagnostics.retryLastMeterSlug = error.params.meterSlug
+  diagnostics.retryLastPersistedConsumedAmount = error.params.persistedConsumedAmount
+  diagnostics.retryLastRequiredHeadroomAmount = headroom.requiredHeadroomAmount
+  diagnostics.retryLastReservationId = error.params.reservationId
+  diagnostics.retryLastStagedConsumedAmount = error.params.stagedConsumedAmount
 }
 
 type SingleApplyExecutionMetrics = {
@@ -424,6 +520,7 @@ export class EntitlementWindowDO extends DurableObject {
         const input = applyBatchInputSchema.parse(rawInput)
         const results: ApplyBatchResultRow[] = []
         let metrics = createApplyBatchMetrics()
+        const walletDiagnostics = createOptimizedBatchWalletDiagnostics()
         let reservationAction: "none" | "refilled" | "bootstrapped" = "none"
         let thrown: unknown
 
@@ -464,16 +561,43 @@ export class EntitlementWindowDO extends DurableObject {
             }
 
             if (error instanceof EntitlementWindowBatchReservationUnderfundedError) {
-              const growth = await this.growReservationForBatchHeadroom(error.params)
-              if (growth?.kind !== "refilled" && growth?.kind !== "already_funded") {
-                throw error
+              const refillAttemptedEventIds = new Set<string>()
+              let underfundedError = error
+
+              for (let attempt = 0; attempt < input.events.length; attempt++) {
+                const growth = await this.growReservationForBatchHeadroom(underfundedError.params)
+                const growthOutcome = growth?.kind ?? "unavailable"
+                recordBatchWalletUnderfundedRetry({
+                  diagnostics: walletDiagnostics,
+                  error: underfundedError,
+                  outcome: growthOutcome,
+                })
+                if (growth?.kind !== "refilled" && growth?.kind !== "already_funded") {
+                  throw underfundedError
+                }
+
+                if (growth.kind === "refilled") {
+                  reservationAction = "refilled"
+                  refillAttemptedEventIds.add(underfundedError.params.eventId)
+                }
+
+                try {
+                  const retry = await this.applyBatchOptimized(input, {
+                    refillAttemptedEventIds,
+                    walletDiagnostics,
+                  })
+                  metrics = retry.metrics
+                  results.push(...retry.results)
+                  return { results: retry.results }
+                } catch (retryError) {
+                  if (!(retryError instanceof EntitlementWindowBatchReservationUnderfundedError)) {
+                    throw retryError
+                  }
+                  underfundedError = retryError
+                }
               }
 
-              reservationAction = growth.kind === "refilled" ? "refilled" : "none"
-              const retry = await this.applyBatchOptimized(input)
-              metrics = retry.metrics
-              results.push(...retry.results)
-              return { results: retry.results }
+              throw underfundedError
             }
 
             throw error
@@ -500,6 +624,7 @@ export class EntitlementWindowDO extends DurableObject {
             allowed_count: results.filter((result) => result.allowed).length,
             denied_count: results.filter((result) => !result.allowed).length,
             ...metrics,
+            ...batchWalletDiagnosticsLogFields(walletDiagnostics),
             denied_by_reason: deniedByReason,
             duration_ms: Date.now() - startTime,
             outcome: thrown ? "error" : "success",
@@ -553,7 +678,10 @@ export class EntitlementWindowDO extends DurableObject {
     })
   }
 
-  private async applyBatchOptimized(input: ApplyBatchInput): Promise<ApplyBatchInternalResult> {
+  private async applyBatchOptimized(
+    input: ApplyBatchInput,
+    options: OptimizedBatchOptions = { refillAttemptedEventIds: new Set() }
+  ): Promise<ApplyBatchInternalResult> {
     const createdAt = Date.now()
     const idempotencyKeys = unique(input.events.map((event) => event.idempotencyKey))
     const setup = this.prepareOptimizedBatch(input, createdAt, idempotencyKeys)
@@ -564,6 +692,7 @@ export class EntitlementWindowDO extends DurableObject {
         createdAt,
         event,
         input,
+        options,
         setup,
         state,
       })
@@ -597,10 +726,11 @@ export class EntitlementWindowDO extends DurableObject {
     createdAt: number
     event: ApplyBatchInput["events"][number]
     input: ApplyBatchInput
+    options: OptimizedBatchOptions
     setup: OptimizedBatchSetup
     state: OptimizedBatchProcessingState
   }): Promise<void> {
-    const { createdAt, event, input, setup, state } = params
+    const { createdAt, event, input, options, setup, state } = params
     const activeGrants = resolveActiveGrants(setup.grants, event.timestamp)
 
     if (activeGrants.length === 0) {
@@ -659,6 +789,21 @@ export class EntitlementWindowDO extends DurableObject {
       usesWalletReservation,
     })
     if (bootstrapHandled) {
+      return
+    }
+
+    const walletHeadroomHandled = this.ensureOptimizedBatchWalletHeadroom({
+      activeGrants,
+      createdAt,
+      diagnostics: options.walletDiagnostics,
+      event,
+      eventInput,
+      refillAttempted: options.refillAttemptedEventIds.has(event.id),
+      setup,
+      state,
+      usesWalletReservation,
+    })
+    if (walletHeadroomHandled) {
       return
     }
 
@@ -861,6 +1006,71 @@ export class EntitlementWindowDO extends DurableObject {
 
     state.wallet = this.readWalletReservation(this.db)
     return false
+  }
+
+  private ensureOptimizedBatchWalletHeadroom(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    diagnostics?: OptimizedBatchWalletDiagnostics
+    event: ApplyBatchInput["events"][number]
+    eventInput: ApplyInput
+    refillAttempted: boolean
+    setup: OptimizedBatchSetup
+    state: OptimizedBatchProcessingState
+    usesWalletReservation: boolean
+  }): boolean {
+    const {
+      activeGrants,
+      createdAt,
+      diagnostics,
+      event,
+      eventInput,
+      refillAttempted,
+      setup,
+      state,
+      usesWalletReservation,
+    } = params
+    const wallet = state.wallet
+
+    if (!usesWalletReservation || !wallet?.reservationId || !refillAttempted) {
+      return false
+    }
+
+    const projectedCost = this.computeProjectedBatchEventCostMinor({
+      activeGrants,
+      entitlement: eventInput.entitlement,
+      event: eventInput.event,
+      eventTimestamp: event.timestamp,
+      grantStates: state.grantStates,
+      meter: setup.meter,
+      meterState: state.meterState,
+    })
+    if (projectedCost <= 0) {
+      return false
+    }
+
+    const currentRemaining = Math.max(0, wallet.allocationAmount - wallet.consumedAmount)
+    if (projectedCost <= currentRemaining) {
+      return false
+    }
+
+    diagnostics?.emptyAfterRefillEventIds.push(event.id)
+    if (diagnostics) {
+      diagnostics.emptyAfterRefillLastRemainingAmount = currentRemaining
+      diagnostics.emptyAfterRefillLastRequiredAmount = projectedCost
+    }
+
+    state.reservationCloseReason = "wallet_empty"
+    state.wallet = { ...wallet, lastEventAt: createdAt }
+    state.walletDirty = true
+    this.stageOptimizedBatchDeniedResult({
+      createdAt,
+      deniedReason: "WALLET_EMPTY",
+      message: `Wallet empty for meter ${setup.meter.config.eventSlug} (reservation ${wallet.reservationId})`,
+      event,
+      state,
+    })
+    return true
   }
 
   private applyOptimizedBatchMeterEvent(params: {
@@ -4293,13 +4503,18 @@ export class EntitlementWindowDO extends DurableObject {
   private async growReservationForBatchHeadroom(
     params: EntitlementWindowBatchReservationUnderfundedError["params"]
   ): Promise<ReservationGrowthResult | null> {
+    const headroom = computeBatchReservationHeadroom({
+      persistedConsumedAmount: params.persistedConsumedAmount,
+      stagedConsumedAmount: params.stagedConsumedAmount,
+      currentEventEffectiveCostAmount: params.effectiveCostAmount,
+    })
     const readiness = this.resolveReservationGrowthReadiness({
       eventId: params.eventId,
       eventTimestamp: params.eventTimestamp,
       meterKey: params.meterKey,
       meterSlug: params.meterSlug,
       reservationId: params.reservationId,
-      cost: params.effectiveCostAmount,
+      cost: headroom.requiredHeadroomAmount,
       remaining: params.currentRemainingAmount,
     })
     if (readiness.kind === "already_funded") {
@@ -4309,11 +4524,6 @@ export class EntitlementWindowDO extends DurableObject {
       return null
     }
 
-    const headroom = computeBatchReservationHeadroom({
-      persistedConsumedAmount: params.persistedConsumedAmount,
-      stagedConsumedAmount: params.stagedConsumedAmount,
-      currentEventEffectiveCostAmount: params.effectiveCostAmount,
-    })
     const refillAmount = computeBatchReservationRefillAmount({
       currentRemainingAmount: readiness.currentRemaining,
       requiredHeadroomAmount: headroom.requiredHeadroomAmount,

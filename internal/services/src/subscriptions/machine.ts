@@ -221,6 +221,7 @@ export class SubscriptionMachine {
               subscriptionId: input.context.subscriptionId,
               projectId: input.context.projectId,
               now: input.context.now,
+              lock: false,
             })
 
             if (periodsResult.err) {

@@ -433,19 +433,21 @@ export class BillingService {
     now = Date.now(),
     db,
     dryRun = false,
+    lock,
   }: {
     subscriptionId: string
     projectId: string
     now?: number
     db?: Database
     dryRun?: boolean
+    lock?: boolean
   }): Promise<Result<{ cyclesCreated: number; phasesProcessed: number }, UnPriceBillingError>> {
     try {
       const status = await this.withSubscriptionMachine({
         subscriptionId,
         projectId,
         now,
-        lock: !dryRun, // Skip lock for dry run
+        lock: lock ?? !dryRun, // Skip lock for dry run and for callers already inside the subscription lock.
         db,
         dryRun,
         run: async () => {

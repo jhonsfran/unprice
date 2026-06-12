@@ -42,7 +42,10 @@ export class IngestionService {
     reportingClient?: IngestionReportingQueueClient
     logger: Logger
     now?: () => number
-    subscriptions?: Pick<SubscriptionService, "getSubscriptionData" | "renewSubscription">
+    subscriptions?: Pick<
+      SubscriptionService,
+      "activateWallet" | "getSubscriptionData" | "renewSubscription"
+    >
   }) {
     const now = opts.now ?? (() => Date.now())
     const entitlementWindowApplier = new EntitlementWindowApplier(opts.entitlementWindowClient)

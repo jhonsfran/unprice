@@ -1128,6 +1128,7 @@ describe("SubscriptionMachine - comprehensive", () => {
       subscriptionId: sub.id,
       projectId: sub.projectId,
       now,
+      lock: false,
     })
 
     await machine.shutdown()

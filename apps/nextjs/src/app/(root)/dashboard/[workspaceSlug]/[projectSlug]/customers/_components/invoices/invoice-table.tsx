@@ -8,8 +8,7 @@ import { formatDate } from "~/lib/dates"
 import { ExplainChargeSheet } from "./explain-charge-sheet"
 import { formatInvoiceMoney } from "./format-invoice-money"
 
-type InvoiceLine =
-  RouterOutputs["customers"]["getInvoiceById"]["invoice"]["lines"][number]
+type InvoiceLine = RouterOutputs["customers"]["getInvoiceById"]["invoice"]["lines"][number]
 
 const getLineStatus = (line: InvoiceLine) => {
   if (line.amount === 0 && !line.collectable) {

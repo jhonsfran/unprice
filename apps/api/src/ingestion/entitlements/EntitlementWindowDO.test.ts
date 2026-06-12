@@ -1414,6 +1414,13 @@ describe("EntitlementWindowDO", () => {
     expect(db.writeCounts.idempotencyBatchRows).toBe(1)
     expect(db.writeCounts.outboxBatchRows).toBe(0)
     expect(readIdempotencyMeterFacts(db)).toHaveLength(5)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        batch_wallet_empty_after_refill_count: 0,
+        batch_wallet_underfunded_retry_count: 0,
+      })
+    )
   })
 
   it("retries optimized batch after lazy wallet bootstrap", async () => {
@@ -1639,6 +1646,382 @@ describe("EntitlementWindowDO", () => {
       expect.objectContaining({
         reservation_action: "refilled",
         outcome: "success",
+      })
+    )
+  })
+
+  it("grows optimized batch when staged spend makes the reservation underfunded", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_staged_batch_headroom",
+      allocationAmount: 5 * 100_000_000,
+      targetReservationAmount: 5 * 100_000_000,
+      maxEventCostAmount: 100_000_000,
+    })
+    testState.flushReservation.mockImplementation(
+      async (input: { flushAmount: number; refillChunkAmount: number }) => ({
+        err: null,
+        val: {
+          grantedAmount: input.refillChunkAmount,
+          flushedAmount: input.flushAmount,
+          refundedAmount: 0,
+        },
+      })
+    )
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const amount = Number((event as { properties: { amount: number } }).properties.amount)
+      const valueAfter = (event as { id: string }).id === "evt_staged_second" ? 6 : 3
+      const facts = [{ delta: amount, meterKey: DEFAULT_METER_KEY, valueAfter }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "first",
+          id: "evt_staged_first",
+          idempotencyKey: "idem_staged_first",
+          now: BASE_NOW,
+          properties: { amount: 3 },
+          timestamp: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "second",
+          id: "evt_staged_second",
+          idempotencyKey: "idem_staged_second",
+          now: BASE_NOW + 1,
+          properties: { amount: 3 },
+          timestamp: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "first" }),
+      expect.objectContaining({ allowed: true, correlationKey: "second" }),
+    ])
+    expect(testState.flushReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        final: false,
+        flushAmount: 0,
+        reservationId: "res_staged_batch_headroom",
+      })
+    )
+    expect(testState.flushReservation.mock.calls[0]?.[0].refillChunkAmount).toBeGreaterThan(0)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.allocationAmount).toBeGreaterThan(
+      5 * 100_000_000
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(6 * 100_000_000)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        batch_wallet_empty_after_refill_count: 0,
+        batch_wallet_underfunded_event_ids: ["evt_staged_second"],
+        batch_wallet_underfunded_last_event_id: "evt_staged_second",
+        batch_wallet_underfunded_last_meter_slug: "tokens_used",
+        batch_wallet_underfunded_last_remaining_amount: 200_000_000,
+        batch_wallet_underfunded_last_required_headroom_amount: 600_000_000,
+        batch_wallet_underfunded_refill_outcomes: ["refilled"],
+        batch_wallet_underfunded_retry_count: 1,
+        reservation_action: "refilled",
+      })
+    )
+  })
+
+  it("denies optimized batch with WALLET_EMPTY when sync refill cannot fund the event", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_batch_empty",
+      allocationAmount: 2 * 100_000_000,
+      consumedAmount: 2 * 100_000_000 - 10,
+      targetReservationAmount: 10 * 100_000_000,
+      maxEventCostAmount: 100_000_000,
+    })
+    testState.flushReservation.mockImplementation(
+      async (input: { final: boolean; flushAmount: number }) => ({
+        err: null,
+        val: {
+          grantedAmount: 0,
+          flushedAmount: input.flushAmount,
+          refundedAmount: input.final ? 10 : 0,
+        },
+      })
+    )
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "wallet_empty",
+          id: "evt_batch_empty",
+          idempotencyKey: "idem_batch_empty",
+          now: BASE_NOW,
+          properties: { amount: 3 },
+          timestamp: BASE_NOW,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      {
+        allowed: false,
+        correlationKey: "wallet_empty",
+        deniedReason: "WALLET_EMPTY",
+        idempotencyKey: "idem_batch_empty",
+        message: "Wallet empty for meter tokens_used (reservation res_batch_empty)",
+      },
+    ])
+    expect(readIdempotencyEntry(db, "idem_batch_empty")).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(0)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        final: false,
+        flushAmount: 2 * 100_000_000 - 10,
+        reservationId: "res_batch_empty",
+      })
+    )
+    await Promise.all(state.waitUntilPromises)
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        final: true,
+        flushAmount: 0,
+        reservationId: "res_batch_empty",
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        batch_wallet_empty_after_refill_count: 1,
+        batch_wallet_empty_after_refill_event_ids: ["evt_batch_empty"],
+        batch_wallet_empty_after_refill_last_event_id: "evt_batch_empty",
+        batch_wallet_empty_after_refill_last_remaining_amount: 10,
+        batch_wallet_empty_after_refill_last_required_amount: 300_000_000,
+        batch_wallet_underfunded_event_ids: ["evt_batch_empty"],
+        batch_wallet_underfunded_refill_outcomes: ["refilled"],
+        batch_wallet_underfunded_retry_count: 1,
+        denied_by_reason: { WALLET_EMPTY: 1 },
+      })
+    )
+  })
+
+  it("denies optimized batch with WALLET_EMPTY when sync refill is partial and still insufficient", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_batch_partial_empty",
+      allocationAmount: 2 * 100_000_000,
+      consumedAmount: 2 * 100_000_000 - 10,
+      targetReservationAmount: 10 * 100_000_000,
+      maxEventCostAmount: 100_000_000,
+    })
+    testState.flushReservation.mockImplementation(
+      async (input: { final: boolean; flushAmount: number }) => ({
+        err: null,
+        val: {
+          grantedAmount: input.final ? 0 : 100_000_000,
+          flushedAmount: input.flushAmount,
+          refundedAmount: input.final ? 10 : 0,
+        },
+      })
+    )
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "partial_wallet_empty",
+          id: "evt_batch_partial_empty",
+          idempotencyKey: "idem_batch_partial_empty",
+          now: BASE_NOW,
+          properties: { amount: 3 },
+          timestamp: BASE_NOW,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        allowed: false,
+        correlationKey: "partial_wallet_empty",
+        deniedReason: "WALLET_EMPTY",
+        idempotencyKey: "idem_batch_partial_empty",
+      }),
+    ])
+    expect(readIdempotencyEntry(db, "idem_batch_partial_empty")).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(0)
+    expect(readOutboxPayloads(db)).toHaveLength(0)
+    await Promise.all(state.waitUntilPromises)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBeNull()
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement flush_refill",
+      expect.objectContaining({
+        reservation_refill_partial: true,
+        reservation_refill_granted_amount: 100_000_000,
+      })
+    )
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        batch_wallet_empty_after_refill_count: 1,
+        batch_wallet_empty_after_refill_event_ids: ["evt_batch_partial_empty"],
+        batch_wallet_empty_after_refill_last_remaining_amount: 100_000_010,
+        batch_wallet_empty_after_refill_last_required_amount: 300_000_000,
+        batch_wallet_underfunded_event_ids: ["evt_batch_partial_empty"],
+        batch_wallet_underfunded_refill_outcomes: ["refilled"],
+        batch_wallet_underfunded_retry_count: 1,
+        denied_by_reason: { WALLET_EMPTY: 1 },
+      })
+    )
+  })
+
+  it("bounds optimized batch retries when multiple later events need reservation growth", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_batch_multi_grow",
+      allocationAmount: 2 * 100_000_000,
+      targetReservationAmount: 2 * 100_000_000,
+      maxEventCostAmount: 100_000_000,
+    })
+    testState.flushReservation.mockImplementation(async (input: { flushAmount: number }) => ({
+      err: null,
+      val: {
+        grantedAmount: 2 * 100_000_000,
+        flushedAmount: input.flushAmount,
+        refundedAmount: 0,
+      },
+    }))
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const eventId = (event as { id: string }).id
+      const valueAfter = eventId === "evt_multi_first" ? 2 : eventId === "evt_multi_second" ? 4 : 6
+      const facts = [{ delta: 2, meterKey: DEFAULT_METER_KEY, valueAfter }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "first",
+          id: "evt_multi_first",
+          idempotencyKey: "idem_multi_first",
+          now: BASE_NOW,
+          properties: { amount: 2 },
+          timestamp: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "second",
+          id: "evt_multi_second",
+          idempotencyKey: "idem_multi_second",
+          now: BASE_NOW + 1,
+          properties: { amount: 2 },
+          timestamp: BASE_NOW + 1,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "third",
+          id: "evt_multi_third",
+          idempotencyKey: "idem_multi_third",
+          now: BASE_NOW + 2,
+          properties: { amount: 2 },
+          timestamp: BASE_NOW + 2,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "first" }),
+      expect.objectContaining({ allowed: true, correlationKey: "second" }),
+      expect.objectContaining({ allowed: true, correlationKey: "third" }),
+    ])
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        final: false,
+        reservationId: "res_batch_multi_grow",
+      })
+    )
+    expect(testState.flushReservation).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        final: false,
+        reservationId: "res_batch_multi_grow",
+      })
+    )
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.consumedAmount).toBe(6 * 100_000_000)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(3)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        batch_wallet_empty_after_refill_count: 0,
+        batch_wallet_underfunded_event_ids: ["evt_multi_second", "evt_multi_third"],
+        batch_wallet_underfunded_refill_outcomes: ["refilled", "refilled"],
+        batch_wallet_underfunded_retry_count: 2,
+        reservation_action: "refilled",
       })
     )
   })

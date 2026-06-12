@@ -1861,7 +1861,7 @@ export class SubscriptionService {
         subscriptionId,
         projectId,
         now,
-        lock: false,
+        lock: true,
         run: async (machine) => {
           const result = await machine.activate()
           if (result.err) throw result.err

@@ -6,7 +6,7 @@ import type { IngestionQueueMessage } from "./message"
 
 export type IngestionSubscriptionCatchUpService = Pick<
   SubscriptionService,
-  "getSubscriptionData" | "renewSubscription"
+  "activateWallet" | "getSubscriptionData" | "renewSubscription"
 >
 
 export type IngestionSubscriptionCatchUpResult = {
@@ -91,6 +91,32 @@ export class IngestionSubscriptionCatchUp {
         projectId: params.projectId,
       })
 
+      if (subscription?.status === "pending_activation") {
+        const result = await this.subscriptions.activateWallet({
+          subscriptionId: params.subscriptionId,
+          projectId: params.projectId,
+          now: params.eventAt,
+        })
+
+        if (result === null) {
+          throw new Error(
+            `Subscription catch-up cannot activate ${params.subscriptionId}; wallet service is unavailable`
+          )
+        }
+
+        if (result.err) {
+          throw result.err
+        }
+
+        if (result.val.status === "pending_activation") {
+          throw new Error(
+            `Subscription catch-up did not return active status for ${params.subscriptionId}; got pending_activation`
+          )
+        }
+
+        return true
+      }
+
       if (!subscriptionNeedsRenewal(subscription, params.eventAt)) {
         return changed
       }
@@ -103,6 +129,12 @@ export class IngestionSubscriptionCatchUp {
 
       if (result.err) {
         throw result.err
+      }
+
+      if (result.val.status === "pending_activation") {
+        throw new Error(
+          `Subscription catch-up did not return active status for ${params.subscriptionId}; got pending_activation`
+        )
       }
 
       changed = true

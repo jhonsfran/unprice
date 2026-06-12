@@ -32,6 +32,7 @@ describe("createIngestionService", () => {
       } as unknown as Logger,
       env,
       subscriptionService: {
+        activateWallet: vi.fn(),
         getSubscriptionData: vi.fn(),
         renewSubscription: vi.fn(),
       } as never,

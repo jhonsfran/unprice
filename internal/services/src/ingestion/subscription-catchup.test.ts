@@ -50,7 +50,8 @@ describe("IngestionSubscriptionCatchUp", () => {
   it("does not load subscriptions when a billing period already covers the event", async () => {
     const getSubscriptionData = vi.fn()
     const renewSubscription = vi.fn()
-    const catchUp = createCatchUp({ getSubscriptionData, renewSubscription })
+    const activateWallet = vi.fn()
+    const catchUp = createCatchUp({ activateWallet, getSubscriptionData, renewSubscription })
 
     const result = await catchUp.catchUpForPreparedGroup({
       customerId: "cus_123",
@@ -78,6 +79,38 @@ describe("IngestionSubscriptionCatchUp", () => {
     })
     expect(getSubscriptionData).not.toHaveBeenCalled()
     expect(renewSubscription).not.toHaveBeenCalled()
+    expect(activateWallet).not.toHaveBeenCalled()
+  })
+
+  it("activates subscriptions parked in pending_activation before fanout", async () => {
+    const activateWallet = vi.fn().mockResolvedValue({ val: { status: "active" } })
+    const renewSubscription = vi.fn()
+    const getSubscriptionData = vi.fn().mockResolvedValue(
+      createSubscription({
+        status: "pending_activation",
+        currentCycleEndAt: TEST_NOW + 60_000,
+        renewAt: TEST_NOW + 60_000,
+      })
+    )
+    const catchUp = createCatchUp({ activateWallet, getSubscriptionData, renewSubscription })
+
+    const result = await catchUp.catchUpForPreparedGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [createMessage()],
+      candidateEntitlements: [createEntitlement({ subscriptionId: "sub_123" })],
+    })
+
+    expect(result).toEqual({
+      changed: true,
+      renewedSubscriptionIds: ["sub_123"],
+    })
+    expect(activateWallet).toHaveBeenCalledWith({
+      subscriptionId: "sub_123",
+      projectId: "proj_123",
+      now: TEST_NOW,
+    })
+    expect(renewSubscription).not.toHaveBeenCalled()
   })
 
   it("propagates subscription lock failures so the queue message can retry", async () => {
@@ -100,15 +133,41 @@ describe("IngestionSubscriptionCatchUp", () => {
       })
     ).rejects.toThrow("SUBSCRIPTION_BUSY")
   })
+
+  it("treats pending activation after renewal as retryable instead of continuing to fanout", async () => {
+    const catchUp = createCatchUp({
+      getSubscriptionData: vi.fn().mockResolvedValue(
+        createSubscription({
+          currentCycleEndAt: TEST_NOW - 1_000,
+          renewAt: TEST_NOW - 1_000,
+        })
+      ),
+      renewSubscription: vi.fn().mockResolvedValue({ val: { status: "pending_activation" } }),
+    })
+
+    await expect(
+      catchUp.catchUpForPreparedGroup({
+        customerId: "cus_123",
+        projectId: "proj_123",
+        messages: [createMessage()],
+        candidateEntitlements: [createEntitlement({ subscriptionId: "sub_123" })],
+      })
+    ).rejects.toThrow("Subscription catch-up did not return active status")
+  })
 })
 
 function createCatchUp(overrides: {
+  activateWallet?: ReturnType<typeof vi.fn>
   getSubscriptionData: ReturnType<typeof vi.fn>
   renewSubscription: ReturnType<typeof vi.fn>
 }) {
   return new IngestionSubscriptionCatchUp({
     logger: { info: vi.fn() },
-    subscriptions: overrides as unknown as IngestionSubscriptionCatchUpService,
+    subscriptions: {
+      activateWallet: overrides.activateWallet ?? vi.fn(),
+      getSubscriptionData: overrides.getSubscriptionData,
+      renewSubscription: overrides.renewSubscription,
+    } as unknown as IngestionSubscriptionCatchUpService,
   })
 }
 
