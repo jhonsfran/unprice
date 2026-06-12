@@ -367,25 +367,30 @@ export const explainChargeSummaryRowSchema = z.object({
 
 export const ingestionStatusWindowQuerySchema = z.object({
   project_id: z.string(),
-  customer_id: z.string(),
+  customer_id: z.string().optional(),
   from_ts: z.number().int(),
   to_ts: z.number().int(),
 })
 
+export const ingestionStateFilterSchema = z.enum(["processed", "rejected"])
+
 export const ingestionLiveQuerySchema = ingestionStatusWindowQuerySchema.extend({
   source_id: z.string().optional(),
   event_slug: z.string().optional(),
+  state: ingestionStateFilterSchema.optional(),
 })
 
 export const ingestionRejectionsQuerySchema = ingestionStatusWindowQuerySchema.extend({
   source_id: z.string().optional(),
   event_slug: z.string().optional(),
+  state: ingestionStateFilterSchema.optional(),
   limit: z.number().int().min(1).max(100).default(50),
 })
 
 export const ingestionRecentQuerySchema = ingestionStatusWindowQuerySchema.extend({
   source_id: z.string().optional(),
   event_slug: z.string().optional(),
+  state: ingestionStateFilterSchema.optional(),
   limit: z.number().int().min(1).max(100).default(50),
 })
 
@@ -409,6 +414,7 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
   .pick({
     event_id: true,
     canonical_audit_id: true,
+    customer_id: true,
     event_slug: true,
     source_type: true,
     source_id: true,

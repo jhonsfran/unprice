@@ -262,6 +262,7 @@ function recentEvent(overrides: Partial<IngestionRecentEventRow> = {}): Ingestio
   return {
     event_id: "evt_1",
     canonical_audit_id: "audit_1",
+    customer_id: "cus_1",
     event_slug: "usage.recorded",
     source_type: "api_key",
     source_id: "src_1",

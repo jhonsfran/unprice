@@ -5,3 +5,10 @@
   expected_result: |
     {"rejection_reason":"customer_not_found","event_slug":"entitlement.checked","source_id":"system","source_type":"system","event_count":1,"last_seen_at":4070908803200}
     {"rejection_reason":"missing_required_property","event_slug":"usage.recorded","source_id":"key_1","source_type":"api_key","event_count":1,"last_seen_at":4070908802200}
+
+- name: ingestion_rejections_project_wide
+  description: Returns rejection groups across customers when customer_id is omitted
+  parameters: project_id=proj_1&from_ts=4070908800000&to_ts=4070995200000
+  expected_result: |
+    {"rejection_reason":"customer_not_found","event_slug":"entitlement.checked","source_id":"system","source_type":"system","event_count":1,"last_seen_at":4070908803200}
+    {"rejection_reason":"missing_required_property","event_slug":"usage.recorded","source_id":"key_1","source_type":"api_key","event_count":1,"last_seen_at":4070908802200}
