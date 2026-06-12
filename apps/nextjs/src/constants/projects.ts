@@ -1,11 +1,19 @@
-import { Dashboard } from "@unprice/ui/icons"
-import { Activity, Calculator, Key, Link, Settings, Sticker, Users } from "lucide-react"
+import {
+  Activity,
+  Calculator,
+  Key,
+  LayoutDashboard,
+  Link,
+  Settings,
+  Sticker,
+  Users,
+} from "lucide-react"
 import type { DashboardRoute, Shortcut } from "~/types"
 
 export const PROJECT_NAV: DashboardRoute[] = [
   {
     name: "Overview",
-    icon: Dashboard,
+    icon: LayoutDashboard,
     href: "/dashboard",
   },
   {

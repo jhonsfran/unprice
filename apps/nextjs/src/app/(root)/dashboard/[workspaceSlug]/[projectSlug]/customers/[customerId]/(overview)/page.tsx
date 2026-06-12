@@ -101,7 +101,7 @@ export default async function CustomerUsagePage({
 
       <HydrateClient>
         <Suspense fallback={<CustomerMetricsPanelSkeleton />}>
-          <CustomerMetricsPanel customerId={customerId} />
+          <CustomerMetricsPanel customerId={customerId} invoiceCount={customer.invoices.length} />
         </Suspense>
       </HydrateClient>
     </DashboardShell>

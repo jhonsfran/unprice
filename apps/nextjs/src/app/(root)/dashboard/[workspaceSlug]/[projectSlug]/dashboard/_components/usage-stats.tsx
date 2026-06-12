@@ -13,11 +13,11 @@ import {
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
 import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert, Users } from "lucide-react"
-import Link from "next/link"
 import { useParams } from "next/navigation"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
+import { SuperLink } from "~/components/super-link"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
@@ -526,7 +526,7 @@ export function UsageStats() {
 
             <div className="divide-y divide-border">
               {topConsumersData.consumers.map((consumer, index) => (
-                <Link
+                <SuperLink
                   key={consumer.customerId}
                   href={`/${params.workspaceSlug}/${params.projectSlug}/customers/${consumer.customerId}`}
                   className="grid grid-cols-[auto_minmax(0,1fr)_6rem_7rem] items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
@@ -544,7 +544,7 @@ export function UsageStats() {
                   <span className="text-right font-mono text-sm tabular-nums">
                     {consumer.displaySpending}
                   </span>
-                </Link>
+                </SuperLink>
               ))}
             </div>
           </div>

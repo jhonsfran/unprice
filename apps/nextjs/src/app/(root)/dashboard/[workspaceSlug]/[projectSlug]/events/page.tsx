@@ -14,11 +14,31 @@ export default async function ProjectEventsPage(_props: {
   return (
     <DashboardShell
       header={
-        <HeaderTab title="Events" description="Recent ingestion events and processing outcomes" />
+        <HeaderTab
+          title="Events"
+          description="Ingestion events and processing outcomes — refreshes every 15s"
+        />
       }
     >
       <HydrateClient>
-        <Suspense fallback={<div className="h-[420px] rounded-md border" />}>
+        <Suspense
+          fallback={
+            <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div
+                    key={`skeleton-${
+                      // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton
+                      i
+                    }`}
+                    className="h-[100px] animate-pulse rounded-lg border bg-muted/20"
+                  />
+                ))}
+              </div>
+              <div className="h-[520px] animate-pulse rounded-md border bg-muted/10" />
+            </div>
+          }
+        >
           <IngestionEventsPanel />
         </Suspense>
       </HydrateClient>

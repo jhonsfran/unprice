@@ -13,7 +13,7 @@ import {
   ChartTooltipContent,
 } from "@unprice/ui/chart"
 import { Skeleton } from "@unprice/ui/skeleton"
-import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert } from "lucide-react"
+import { BarChart3, Coins, Layers3, ReceiptText, TriangleAlert } from "lucide-react"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
@@ -24,6 +24,7 @@ import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 
 type CustomerMetricsPanelProps = {
   customerId: string
+  invoiceCount: number
 }
 
 type UsageRow = RouterOutputs["analytics"]["getProjectUsage"]["usage"][number]
@@ -151,7 +152,7 @@ export function CustomerMetricsPanelSkeleton() {
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid gap-4 md:grid-cols-4">
-          {["features", "usage", "spend", "interval"].map((item) => (
+          {["features", "usage", "spend", "invoices"].map((item) => (
             <div key={`customer-usage-skeleton-${item}`} className="rounded-lg border p-4">
               <Skeleton className="h-4 w-28" />
               <Skeleton className="mt-3 h-8 w-20" />
@@ -225,7 +226,7 @@ function CustomerMetricsEmptyState({ intervalLabel }: { intervalLabel: string })
   )
 }
 
-export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) {
+export function CustomerMetricsPanel({ customerId, invoiceCount }: CustomerMetricsPanelProps) {
   const [intervalFilter] = useIntervalFilter()
   const trpc = useTRPC()
   const isNearRealtime = intervalFilter.intervalDays === 1
@@ -373,12 +374,10 @@ export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) 
 
           <div className="rounded-lg border border-border bg-card p-4">
             <div className="flex items-center justify-between">
-              <p className="text-muted-foreground text-sm">Selected interval</p>
-              <CalendarRange className="h-4 w-4 text-muted-foreground" />
+              <p className="text-muted-foreground text-sm">Number of invoices</p>
+              <ReceiptText className="h-4 w-4 text-muted-foreground" />
             </div>
-            <p className="mt-1 font-semibold text-foreground text-xl capitalize">
-              {intervalFilter.label}
-            </p>
+            <p className="mt-1 font-semibold text-2xl text-foreground">{invoiceCount}</p>
           </div>
         </div>
 

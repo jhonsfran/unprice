@@ -38,7 +38,8 @@
     "bump-versions": "pnpm changeset version && pnpm install",
     "release": "pnpm build && pnpm changeset publish",
     "prepare": "husky",
-    "preinstall": "npx only-allow pnpm"
+    "preinstall": "npx only-allow pnpm",
+    "doctor": "npx react-doctor@latest"
   },
   "dependencies": {
     "@biomejs/biome": "1.9.4",

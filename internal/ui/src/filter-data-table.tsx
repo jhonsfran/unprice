@@ -16,7 +16,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { CalendarDays, Search, SlidersHorizontal, X } from "lucide-react"
+import { CalendarDays, Search, X } from "lucide-react"
 import * as React from "react"
 import type { DateRange } from "react-day-picker"
 import { Badge } from "./badge"
@@ -50,6 +50,12 @@ export type FilterDataTableFilter =
       value?: DateRange
       onChange?: (range: DateRange | undefined) => void
       defaultOpen?: boolean
+      /** Earliest selectable date */
+      fromDate?: Date
+      /** Latest selectable date (defaults to today to block future) */
+      toDate?: Date
+      /** Number of months to display */
+      numberOfMonths?: number
     }
 
 export interface FilterDataTableProps<TData, TValue> {
@@ -62,6 +68,7 @@ export interface FilterDataTableProps<TData, TValue> {
   emptyDescription?: string
   getRowClassName?: (row: TData) => string | undefined
   toolbarActions?: React.ReactNode
+  initialColumnVisibility?: VisibilityState
 }
 
 export function FilterDataTable<TData, TValue>({
@@ -74,10 +81,13 @@ export function FilterDataTable<TData, TValue>({
   emptyDescription = "There are no rows for the selected filters.",
   getRowClassName,
   toolbarActions,
+  initialColumnVisibility,
 }: FilterDataTableProps<TData, TValue>) {
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [sorting, setSorting] = React.useState<SortingState>([])
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(
+    initialColumnVisibility ?? {}
+  )
   const [rowSelection, setRowSelection] = React.useState({})
 
   const table = useReactTable({
@@ -109,8 +119,8 @@ export function FilterDataTable<TData, TValue>({
     <div className="overflow-hidden rounded-md border bg-background">
       <div className="grid min-h-[520px] md:grid-cols-[260px_minmax(0,1fr)]">
         <aside className="border-border border-b bg-muted/30 md:border-r md:border-b-0">
-          <div className="border-b px-4 py-3 font-medium text-sm">Filters</div>
-          <div className="space-y-1 p-2">
+          <div className="flex h-14 items-center border-b px-4 font-medium text-sm">Filters</div>
+          <div className="space-y-1 p-2 [&>*:last-child]:border-b-0">
             {filters.map((filter) =>
               filter.type === "checkbox" ? (
                 <CheckboxFilter key={filter.id} table={table} filter={filter} />
@@ -121,7 +131,7 @@ export function FilterDataTable<TData, TValue>({
           </div>
         </aside>
         <section className="min-w-0">
-          <div className="flex items-center gap-2 border-b p-2">
+          <div className="flex h-14 items-center gap-2 border-b px-2">
             {searchColumn && table.getColumn(searchColumn) ? (
               <div className="relative min-w-0 flex-1">
                 <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
@@ -136,21 +146,9 @@ export function FilterDataTable<TData, TValue>({
               </div>
             ) : null}
             {toolbarActions}
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={() => {
-                table.resetColumnFilters()
-                table.resetSorting()
-              }}
-              aria-label="Reset table filters"
-            >
-              <SlidersHorizontal className="size-4" />
-            </Button>
           </div>
           <div className="overflow-auto">
-            <Table>
+            <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
               <TableHeader>
                 {table.getHeaderGroups().map((headerGroup) => (
                   <TableRow key={headerGroup.id}>
@@ -276,7 +274,10 @@ function DateFilter({ filter }: { filter: Extract<FilterDataTableFilter, { type:
             mode="range"
             selected={filter.value}
             onSelect={filter.onChange}
-            numberOfMonths={2}
+            numberOfMonths={filter.numberOfMonths ?? 2}
+            fromDate={filter.fromDate}
+            toDate={filter.toDate}
+            disabled={filter.toDate ? { after: filter.toDate } : undefined}
           />
         </PopoverContent>
       </Popover>
