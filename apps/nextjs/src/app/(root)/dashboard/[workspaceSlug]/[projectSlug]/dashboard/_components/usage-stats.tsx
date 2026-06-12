@@ -255,7 +255,7 @@ export function UsageStats() {
     trpc.analytics.getTopConsumers.queryOptions(
       {
         range: intervalFilter.name,
-        limit: 5,
+        limit: 10,
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
@@ -290,6 +290,22 @@ export function UsageStats() {
       {
         input: {
           range: param,
+        },
+        type: "query",
+      },
+    ],
+  })
+
+  useQueryInvalidation({
+    paramKey: intervalFilter.name,
+    dataUpdatedAt: usageUpdatedAt,
+    isFetching: isUsageFetching,
+    getQueryKey: (param) => [
+      ["analytics", "getTopConsumers"],
+      {
+        input: {
+          range: param,
+          limit: 10,
         },
         type: "query",
       },
@@ -487,9 +503,11 @@ export function UsageStats() {
 
         {topConsumersData.consumers.length > 0 && (
           <div className="overflow-hidden rounded-md border border-border/60">
-            <div className="flex items-center gap-2 bg-muted/40 px-4 py-2.5">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)_6rem_7rem] items-center gap-3 bg-muted/40 px-4 py-2.5">
               <Users className="h-3.5 w-3.5 text-muted-foreground" />
               <p className="text-muted-foreground text-xs uppercase">Top consumers</p>
+              <p className="text-right text-muted-foreground text-xs uppercase">Usage</p>
+              <p className="text-right text-muted-foreground text-xs uppercase">Consumed</p>
             </div>
 
             <div className="divide-y divide-border">
@@ -510,9 +528,7 @@ export function UsageStats() {
                     {nFormatter(consumer.totalUsage)}
                   </span>
                   <span className="text-right font-mono text-sm tabular-nums">
-                    {consumer.currency
-                      ? formatMoney(consumer.totalSpending.toString(), consumer.currency)
-                      : "No spend"}
+                    {consumer.displaySpending}
                   </span>
                 </Link>
               ))}

@@ -1,6 +1,8 @@
 import { analyticsIntervalSchema, prepareInterval } from "@unprice/analytics"
 import { inArray } from "@unprice/db"
 import { customers } from "@unprice/db/schema"
+import type { Currency } from "@unprice/db/validators"
+import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 import { TIMEOUTS, withTimeout } from "#utils/timeout"
@@ -10,8 +12,7 @@ const topConsumerOutputSchema = z.object({
   email: z.string(),
   name: z.string(),
   totalUsage: z.number(),
-  totalSpending: z.number(),
-  currency: z.string().optional(),
+  displaySpending: z.string(),
 })
 
 export type TopConsumerOutput = z.infer<typeof topConsumerOutputSchema>
@@ -71,13 +72,16 @@ export const getTopConsumers = protectedProjectProcedure
             return null
           }
 
+          const currency = (row.currency ?? "USD") as Currency
+          const rawAmount = row.total_amount_after ?? 0
+          const decimalAmount = toDecimal(fromLedgerMinor(rawAmount, currency))
+
           return {
             customerId: row.customer_id,
             email: customer.email,
             name: customer.name,
             totalUsage: row.total_usage ?? 0,
-            totalSpending: row.total_amount_after ?? 0,
-            currency: row.currency ?? undefined,
+            displaySpending: formatMoney(decimalAmount, currency),
           }
         })
         .filter((r): r is NonNullable<typeof r> => r !== null)

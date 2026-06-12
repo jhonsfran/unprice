@@ -47,8 +47,7 @@ export type TopConsumerCacheEntry = {
   email: string
   name: string
   totalUsage: number
-  totalSpending: number
-  currency?: string
+  displaySpending: string
 }
 
 export type CacheNamespaces = {
