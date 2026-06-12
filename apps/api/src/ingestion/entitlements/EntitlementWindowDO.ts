@@ -7,7 +7,7 @@ import type {
   ResetConfig,
 } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
-import { LEDGER_SCALE } from "@unprice/money"
+import { LEDGER_SCALE, formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import {
   AsyncMeterAggregationEngine,
   DO_IDEMPOTENCY_TTL_MS,
@@ -172,7 +172,13 @@ type OptimizedBatchOptions = {
   walletDiagnostics?: OptimizedBatchWalletDiagnostics
 }
 
-type OptimizedBatchWalletRetryOutcome = "already_funded" | "refilled" | "unavailable"
+type OptimizedBatchWalletRetryOutcome =
+  | "already_funded"
+  | "refilled"
+  | "max_outstanding_reached"
+  | "unavailable"
+
+type BatchReservationGrowthResult = ReservationGrowthResult | { kind: "max_outstanding_reached" }
 
 type OptimizedBatchWalletDiagnostics = {
   emptyAfterRefillEventIds: string[]
@@ -228,8 +234,11 @@ function createOptimizedBatchWalletDiagnostics(): OptimizedBatchWalletDiagnostic
   }
 }
 
-function batchWalletDiagnosticsLogFields(diagnostics: OptimizedBatchWalletDiagnostics) {
-  return {
+function batchWalletDiagnosticsLogFields(
+  diagnostics: OptimizedBatchWalletDiagnostics,
+  currency: string | null
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = {
     batch_wallet_underfunded_retry_count: diagnostics.retryCount,
     batch_wallet_underfunded_event_ids: diagnostics.retryEventIds,
     batch_wallet_underfunded_refill_outcomes: diagnostics.retryOutcomes,
@@ -254,6 +263,53 @@ function batchWalletDiagnosticsLogFields(diagnostics: OptimizedBatchWalletDiagno
     batch_wallet_empty_after_refill_last_remaining_amount:
       diagnostics.emptyAfterRefillLastRemainingAmount,
   }
+
+  addLedgerAmountDisplayFields(fields, currency, [
+    "batch_wallet_underfunded_last_persisted_consumed_amount",
+    "batch_wallet_underfunded_last_staged_consumed_amount",
+    "batch_wallet_underfunded_last_effective_cost_amount",
+    "batch_wallet_underfunded_last_required_headroom_amount",
+    "batch_wallet_underfunded_last_remaining_amount",
+    "batch_wallet_empty_after_refill_last_required_amount",
+    "batch_wallet_empty_after_refill_last_remaining_amount",
+  ])
+
+  return fields
+}
+
+function addLedgerAmountDisplayFields(
+  fields: Record<string, unknown>,
+  currency: string | null | undefined,
+  amountFieldNames: string[]
+): void {
+  for (const fieldName of amountFieldNames) {
+    const display = formatLedgerMinorForLog(fields[fieldName], currency)
+    if (display !== null) {
+      fields[`${fieldName}_display`] = display
+    }
+  }
+}
+
+function formatLedgerMinorForLog(
+  value: unknown,
+  currency: string | null | undefined
+): string | null {
+  if (!currency || typeof value !== "number" || !Number.isFinite(value)) {
+    return null
+  }
+
+  try {
+    return toDecimal(fromLedgerMinor(value, currency), ({ value: amount, currency: resolved }) =>
+      formatMoney(amount, resolved.code)
+    )
+  } catch {
+    return null
+  }
+}
+
+function readLogCurrency(fields: Record<string, unknown>): string | null {
+  const currency = fields.currency
+  return typeof currency === "string" && currency.length > 0 ? currency : null
 }
 
 function recordBatchWalletUnderfundedRetry(params: {
@@ -521,6 +577,7 @@ export class EntitlementWindowDO extends DurableObject {
         const results: ApplyBatchResultRow[] = []
         let metrics = createApplyBatchMetrics()
         const walletDiagnostics = createOptimizedBatchWalletDiagnostics()
+        const currency = extractCurrencyCodeFromFeatureConfig(input.entitlement.featureConfig)
         let reservationAction: "none" | "refilled" | "bootstrapped" = "none"
         let thrown: unknown
 
@@ -572,12 +629,19 @@ export class EntitlementWindowDO extends DurableObject {
                   error: underfundedError,
                   outcome: growthOutcome,
                 })
-                if (growth?.kind !== "refilled" && growth?.kind !== "already_funded") {
+                if (
+                  growth?.kind !== "refilled" &&
+                  growth?.kind !== "already_funded" &&
+                  growth?.kind !== "max_outstanding_reached"
+                ) {
                   throw underfundedError
                 }
 
                 if (growth.kind === "refilled") {
                   reservationAction = "refilled"
+                }
+
+                if (growth.kind === "refilled" || growth.kind === "max_outstanding_reached") {
                   refillAttemptedEventIds.add(underfundedError.params.eventId)
                 }
 
@@ -618,13 +682,14 @@ export class EntitlementWindowDO extends DurableObject {
             project_id: input.projectId,
             customer_id: input.customerId,
             customer_entitlement_id: input.entitlement.customerEntitlementId,
+            currency,
             event_count: input.events.length,
             reservation_action: reservationAction,
             processed_count: results.length,
             allowed_count: results.filter((result) => result.allowed).length,
             denied_count: results.filter((result) => !result.allowed).length,
             ...metrics,
-            ...batchWalletDiagnosticsLogFields(walletDiagnostics),
+            ...batchWalletDiagnosticsLogFields(walletDiagnostics, currency),
             denied_by_reason: deniedByReason,
             duration_ms: Date.now() - startTime,
             outcome: thrown ? "error" : "success",
@@ -1571,6 +1636,7 @@ export class EntitlementWindowDO extends DurableObject {
       grant_count: activeGrants.length,
       synced_grant_count: input.grants.length,
       meter_key: meter.key,
+      currency: meter.currency,
       aggregation_method: meter.config.aggregationMethod,
       enforce_limit: input.enforceLimit,
       credit_line_policy: creditLinePolicy,
@@ -1609,6 +1675,22 @@ export class EntitlementWindowDO extends DurableObject {
       wideEvent.refill_flush_amount = trigger.flushAmount
     }
     wideEvent.duration_ms = Date.now() - startTime
+
+    addLedgerAmountDisplayFields(wideEvent, readLogCurrency(wideEvent), [
+      "cost_minor",
+      "reservation_refill_requested_amount",
+      "refill_flush_amount",
+      "sync_refill_cost_minor",
+      "sync_refill_remaining_minor",
+      "sync_refill_flush_amount",
+      "sync_refill_requested_amount",
+      "wallet_raw_cost_minor",
+      "wallet_effective_cost_minor",
+      "wallet_clamped_negative_minor",
+      "reservation_remaining_amount",
+      "reservation_target_amount",
+      "reservation_threshold_amount",
+    ])
 
     if (result) {
       this.clearSingleApplyErrorFields(wideEvent)
@@ -2871,6 +2953,7 @@ export class EntitlementWindowDO extends DurableObject {
       reservation_id: window?.reservationId ?? null,
       project_id: window?.projectId ?? null,
       customer_id: window?.customerId ?? null,
+      currency: window?.currency ?? null,
       consumed_amount: window?.consumedAmount ?? null,
       flushed_amount: window?.flushedAmount ?? null,
     }
@@ -2967,6 +3050,11 @@ export class EntitlementWindowDO extends DurableObject {
       }
     } finally {
       wideEvent.duration_ms = Date.now() - startTime
+      addLedgerAmountDisplayFields(wideEvent, readLogCurrency(wideEvent), [
+        "consumed_amount",
+        "flushed_amount",
+        "flush_amount",
+      ])
       this.logger.info("entitlement flush_reservation_for_invoicing", wideEvent)
     }
   }
@@ -3041,6 +3129,13 @@ export class EntitlementWindowDO extends DurableObject {
       }
     } finally {
       wideEvent.duration_ms = Date.now() - startTime
+      addLedgerAmountDisplayFields(wideEvent, readLogCurrency(wideEvent), [
+        "flushed_amount",
+        "flushed_after",
+        "released_amount",
+        "restored_granted_amount",
+        "refunded_purchased_amount",
+      ])
       this.logger.info("entitlement close_reservation", wideEvent)
     }
   }
@@ -3320,6 +3415,13 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent.restored_granted_amount = release.restoredGrantedAmount
     wideEvent.refunded_purchased_amount = release.refundedPurchasedAmount
     wideEvent.outcome = "success"
+    addLedgerAmountDisplayFields(wideEvent, window.currency, [
+      "flushed_amount",
+      "flushed_after",
+      "released_amount",
+      "restored_granted_amount",
+      "refunded_purchased_amount",
+    ])
     return { ok: true, outcome: "success" }
   }
 
@@ -3426,6 +3528,7 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent.flushed_quantity = Math.max(0, window.consumedQuantity - window.flushedQuantity)
     wideEvent.flushed_after = Math.max(window.flushedAmount, window.consumedAmount)
     wideEvent.outcome = "already_reconciled"
+    addLedgerAmountDisplayFields(wideEvent, window.currency, ["flushed_amount", "flushed_after"])
     return { ok: true, outcome: "already_reconciled" }
   }
 
@@ -4502,7 +4605,7 @@ export class EntitlementWindowDO extends DurableObject {
 
   private async growReservationForBatchHeadroom(
     params: EntitlementWindowBatchReservationUnderfundedError["params"]
-  ): Promise<ReservationGrowthResult | null> {
+  ): Promise<BatchReservationGrowthResult | null> {
     const headroom = computeBatchReservationHeadroom({
       persistedConsumedAmount: params.persistedConsumedAmount,
       stagedConsumedAmount: params.stagedConsumedAmount,
@@ -4531,7 +4634,7 @@ export class EntitlementWindowDO extends DurableObject {
       maxOutstandingAmount: this.reservationPolicy().maxOutstandingAmount,
     })
     if (refillAmount <= 0) {
-      return null
+      return { kind: "max_outstanding_reached" }
     }
 
     const flushSeq = readiness.window.flushSeq + 1
@@ -4783,7 +4886,7 @@ export class EntitlementWindowDO extends DurableObject {
     window: WalletReservationSnapshot
   }): Record<string, unknown> {
     const { trigger, window } = params
-    return {
+    const wideEvent: Record<string, unknown> = {
       operation: "flush_refill",
       flush_seq: trigger.flushSeq,
       flush_amount: trigger.flushAmount,
@@ -4797,6 +4900,14 @@ export class EntitlementWindowDO extends DurableObject {
       consumed_before: window?.consumedAmount ?? null,
       flushed_before: window?.flushedAmount ?? null,
     }
+    addLedgerAmountDisplayFields(wideEvent, window?.currency, [
+      "flush_amount",
+      "reservation_refill_requested_amount",
+      "allocation_before",
+      "consumed_before",
+      "flushed_before",
+    ])
+    return wideEvent
   }
 
   private resolveFlushRefillWindow(params: {
@@ -4858,6 +4969,13 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent.allocation_after = window.allocationAmount + grantedAmount
     wideEvent.flushed_after = window.flushedAmount + capturedAmount
     wideEvent.outcome = "success"
+    addLedgerAmountDisplayFields(wideEvent, window.currency, [
+      "reservation_refill_granted_amount",
+      "granted_amount",
+      "flushed_amount",
+      "allocation_after",
+      "flushed_after",
+    ])
   }
 
   private async captureFlushRefillUsage(params: {
@@ -5203,15 +5321,21 @@ export class EntitlementWindowDO extends DurableObject {
     })
 
     if (result.err) {
-      this.logger.error(result.err, {
+      const errorFields: Record<string, unknown> = {
         context: "lazy reservation bootstrap failed",
         customer_id: input.customerId,
         project_id: input.projectId,
         customer_entitlement_id: input.entitlement.customerEntitlementId,
+        currency: meter.currency,
         reservation_idempotency_key: plan.idempotencyKey,
         requested_amount: plan.sizing.requestedAmount,
         projected_cost_minor: projectedCost,
-      })
+      }
+      addLedgerAmountDisplayFields(errorFields, meter.currency, [
+        "requested_amount",
+        "projected_cost_minor",
+      ])
+      this.logger.error(result.err, errorFields)
       throw result.err
     }
 

@@ -1927,6 +1927,94 @@ describe("EntitlementWindowDO", () => {
     )
   })
 
+  it("denies optimized batch with WALLET_EMPTY when batch headroom exceeds max outstanding", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_batch_max_outstanding",
+      allocationAmount: 30 * 100_000_000,
+      targetReservationAmount: 30 * 100_000_000,
+      maxEventCostAmount: 10 * 100_000_000,
+    })
+    testState.flushReservation.mockImplementation(async (input: { flushAmount: number }) => ({
+      err: null,
+      val: {
+        grantedAmount: 0,
+        flushedAmount: input.flushAmount,
+        refundedAmount: 0,
+      },
+    }))
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const index = Number(String((event as { id: string }).id).replace("evt_batch_cap_", ""))
+      const valueAfter = (index + 1) * 10
+      const facts = [{ delta: 10, meterKey: DEFAULT_METER_KEY, valueAfter }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: false,
+      events: Array.from({ length: 4 }, (_, index) => ({
+        ...baseInput.event,
+        correlationKey: `cap_${index}`,
+        id: `evt_batch_cap_${index}`,
+        idempotencyKey: `idem_batch_cap_${index}`,
+        now: BASE_NOW + index,
+        properties: { amount: 10 },
+        timestamp: BASE_NOW + index,
+      })),
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "cap_0" }),
+      expect.objectContaining({ allowed: true, correlationKey: "cap_1" }),
+      expect.objectContaining({ allowed: true, correlationKey: "cap_2" }),
+      expect.objectContaining({
+        allowed: false,
+        correlationKey: "cap_3",
+        deniedReason: "WALLET_EMPTY",
+        idempotencyKey: "idem_batch_cap_3",
+      }),
+    ])
+    expect(readIdempotencyEntry(db, "idem_batch_cap_3")).toMatchObject({
+      allowed: false,
+      deniedReason: "WALLET_EMPTY",
+    })
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(3)
+    expect(db.outboxBatchRows).toHaveLength(0)
+    await Promise.all(state.waitUntilPromises)
+    expect(testState.logger.info).toHaveBeenCalledWith(
+      "entitlement apply_batch",
+      expect.objectContaining({
+        batch_wallet_empty_after_refill_count: 1,
+        batch_wallet_empty_after_refill_event_ids: ["evt_batch_cap_3"],
+        batch_wallet_empty_after_refill_last_remaining_amount: 0,
+        batch_wallet_empty_after_refill_last_remaining_amount_display: "$0",
+        batch_wallet_empty_after_refill_last_required_amount: 1_000_000_000,
+        batch_wallet_empty_after_refill_last_required_amount_display: "$10",
+        batch_wallet_underfunded_event_ids: ["evt_batch_cap_3"],
+        batch_wallet_underfunded_last_effective_cost_amount_display: "$10",
+        batch_wallet_underfunded_last_remaining_amount_display: "$0",
+        batch_wallet_underfunded_last_required_headroom_amount: 4_000_000_000,
+        batch_wallet_underfunded_last_required_headroom_amount_display: "$40",
+        batch_wallet_underfunded_last_staged_consumed_amount_display: "$30",
+        batch_wallet_underfunded_refill_outcomes: ["max_outstanding_reached"],
+        batch_wallet_underfunded_retry_count: 1,
+        currency: "USD",
+        denied_by_reason: { WALLET_EMPTY: 1 },
+        outcome: "success",
+      })
+    )
+  })
+
   it("bounds optimized batch retries when multiple later events need reservation growth", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()

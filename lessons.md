@@ -119,6 +119,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-12: EntitlementWindowDO batch wallet growth readiness must compare reservation runway
   against staged batch headroom, not only the current event cost; post-refill wallet-empty denials
   must be staged before mutating the optimized batch draft.
+- 2026-06-12: EntitlementWindowDO optimized batch wallet growth that hits
+  `maxOutstandingAmount` is exhausted headroom; stage `WALLET_EMPTY` for that event instead of
+  throwing so async ingestion can ack the rest of the customer batch.
 - 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
   (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
   timestamp.
@@ -327,6 +330,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## UI And Dashboard
 
+- 2026-06-12: Dashboard client components that use `useSuspenseQuery` for protected tRPC data
+  must have matching RSC `trpc/server` prefetches; otherwise server render can fall back to the
+  app React Query HTTP link without browser cookies and log `User not found in session`.
 - 2026-05-07: After provider payment-method setup, bypass `customerPaymentMethods` cache and poll
   before showing an empty state.
 - 2026-05-07: Keep subscription creation drafts open while provider setup runs; refetch with
