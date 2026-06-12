@@ -74,7 +74,9 @@ export const getTopConsumers = protectedProjectProcedure
 
           const currency = (row.currency ?? "USD") as Currency
           const rawAmount = row.total_amount_after ?? 0
-          const decimalAmount = toDecimal(fromLedgerMinor(rawAmount, currency))
+          const decimalAmount = Number.parseFloat(
+            toDecimal(fromLedgerMinor(rawAmount, currency))
+          ).toFixed(2)
 
           return {
             customerId: row.customer_id,

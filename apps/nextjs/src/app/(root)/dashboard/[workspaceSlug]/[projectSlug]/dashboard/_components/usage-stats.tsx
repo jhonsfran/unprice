@@ -113,6 +113,16 @@ function parseSpendingAmount(row: UsageRowWithSpending): number {
   return Number.isFinite(amount) ? amount : 0
 }
 
+function roundToTwoDecimals(value: string): string {
+  const num = Number.parseFloat(value)
+
+  if (!Number.isFinite(num)) {
+    return value
+  }
+
+  return num.toFixed(2)
+}
+
 function summarizeSpending(rows: UsageRowWithSpending[]): SpendingSummary[] {
   const totalsByCurrency = new Map<string, number>()
 
@@ -129,7 +139,7 @@ function summarizeSpending(rows: UsageRowWithSpending[]): SpendingSummary[] {
   return [...totalsByCurrency.entries()].map(([currency, amount]) => ({
     currency,
     amount,
-    displayAmount: formatMoney(amount.toString(), currency),
+    displayAmount: formatMoney(roundToTwoDecimals(amount.toString()), currency),
   }))
 }
 
@@ -142,7 +152,11 @@ function formatSpendingSummary(summary: SpendingSummary[]): string {
 }
 
 function formatFeatureSpending(row: UsageRowWithSpending): string {
-  return row.spending?.display_amount ?? "No spend"
+  if (!row.spending) {
+    return "No spend"
+  }
+
+  return formatMoney(roundToTwoDecimals(row.spending.amount), row.spending.currency)
 }
 
 export function UsageStatsSkeleton() {
@@ -230,7 +244,7 @@ export function UsageStats() {
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
-        staleTime: isNearRealtime ? 45 * 1000 : 5 * 60 * 1000,
+        staleTime: isNearRealtime ? 30 * 1000 : 0,
         refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
         refetchOnWindowFocus: false,
       }
@@ -244,7 +258,7 @@ export function UsageStats() {
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
-        staleTime: isNearRealtime ? 45 * 1000 : 5 * 60 * 1000,
+        staleTime: isNearRealtime ? 30 * 1000 : 0,
         refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
         refetchOnWindowFocus: false,
       }
@@ -259,7 +273,7 @@ export function UsageStats() {
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
-        staleTime: isNearRealtime ? 45 * 1000 : 5 * 60 * 1000,
+        staleTime: isNearRealtime ? 30 * 1000 : 0,
         refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
         refetchOnWindowFocus: false,
       }
