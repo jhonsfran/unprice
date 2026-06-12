@@ -23,12 +23,22 @@ type PreparedMessageProcessor = {
   }): Promise<MessageOutcome[]>
 }
 
+type SubscriptionCatchUpProcessor = {
+  catchUpForPreparedGroup(params: {
+    candidateEntitlements: PreparedCustomerMessageGroup["candidateEntitlements"]
+    customerId: string
+    messages: IngestionQueueMessage[]
+    projectId: string
+  }): Promise<{ changed: boolean; renewedSubscriptionIds: string[] }>
+}
+
 export class IngestionCustomerGroupProcessor {
   private readonly entitlementContext: CustomerMessageGroupPreparer
   private readonly logger: Pick<Logger, "error" | "info">
   private readonly messageOutcomes: IngestionMessageOutcomes
   private readonly preparedMessageProcessor: PreparedMessageProcessor
   private readonly reportingDispatcher: IngestionReportingOutcomeDispatcher
+  private readonly subscriptionCatchUp: SubscriptionCatchUpProcessor | undefined
 
   constructor(opts: {
     entitlementContext: CustomerMessageGroupPreparer
@@ -36,12 +46,14 @@ export class IngestionCustomerGroupProcessor {
     messageOutcomes: IngestionMessageOutcomes
     preparedMessageProcessor: PreparedMessageProcessor
     reportingDispatcher: IngestionReportingOutcomeDispatcher
+    subscriptionCatchUp?: SubscriptionCatchUpProcessor
   }) {
     this.entitlementContext = opts.entitlementContext
     this.logger = opts.logger
     this.messageOutcomes = opts.messageOutcomes
     this.preparedMessageProcessor = opts.preparedMessageProcessor
     this.reportingDispatcher = opts.reportingDispatcher
+    this.subscriptionCatchUp = opts.subscriptionCatchUp
   }
 
   public async processCustomerGroup(params: {
@@ -67,7 +79,7 @@ export class IngestionCustomerGroupProcessor {
         return mapOutcomesToAckResults(tooOldOutcomes)
       }
 
-      const preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
+      let preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
         customerId,
         messages: freshMessages,
         projectId,
@@ -84,6 +96,21 @@ export class IngestionCustomerGroupProcessor {
           ...mapOutcomesToAckResults(customerNotFoundOutcomes),
           ...mapOutcomesToAckResults(tooOldOutcomes),
         ]
+      }
+
+      const catchUpResult = await this.subscriptionCatchUp?.catchUpForPreparedGroup({
+        customerId,
+        projectId,
+        messages: preparedGroup.messages,
+        candidateEntitlements: preparedGroup.candidateEntitlements,
+      })
+
+      if (catchUpResult?.changed) {
+        preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
+          customerId,
+          messages: freshMessages,
+          projectId,
+        })
       }
 
       const freshOutcomes = await this.processFreshPreparedMessages({

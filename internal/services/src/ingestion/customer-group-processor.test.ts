@@ -155,6 +155,67 @@ describe("IngestionCustomerGroupProcessor", () => {
     )
   })
 
+  it("reloads prepared context after subscription catch-up changes lifecycle state", async () => {
+    const message = createMessage()
+    const firstPreparedGroup = {
+      candidateEntitlements: [
+        {
+          customerEntitlementId: "ce_before",
+          featureType: "usage",
+          meterConfig: { eventSlug: "usage.recorded" },
+          billingPeriods: [],
+          subscriptionId: "sub_123",
+        } as never,
+      ],
+      messages: [message],
+    }
+    const secondPreparedGroup = {
+      candidateEntitlements: [{ customerEntitlementId: "ce_after" } as never],
+      messages: [message],
+    }
+    const prepareCustomerMessageGroup = vi
+      .fn()
+      .mockResolvedValueOnce(firstPreparedGroup)
+      .mockResolvedValueOnce(secondPreparedGroup)
+    const catchUpForPreparedGroup = vi.fn().mockResolvedValue({
+      changed: true,
+      renewedSubscriptionIds: ["sub_123"],
+    })
+    const preparedProcess = vi.fn().mockResolvedValue([
+      {
+        message,
+        outcome: { state: "processed" },
+      },
+    ])
+
+    const processor = createProcessor({
+      preparedProcess,
+      prepareCustomerMessageGroup,
+      subscriptionCatchUp: { catchUpForPreparedGroup },
+    })
+
+    await processor.processCustomerGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [message],
+    })
+
+    expect(catchUpForPreparedGroup).toHaveBeenCalledWith({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [message],
+      candidateEntitlements: firstPreparedGroup.candidateEntitlements,
+    })
+    expect(prepareCustomerMessageGroup).toHaveBeenCalledTimes(2)
+    expect(preparedProcess).toHaveBeenCalledWith({
+      candidateEntitlements: secondPreparedGroup.candidateEntitlements,
+      customerId: "cus_123",
+      messages: [message],
+      projectId: "proj_123",
+      rejectionReason: undefined,
+    })
+  })
+
   it("returns retry results for the sorted group when processing fails", async () => {
     const logger = createLogger()
     const olderMessage = createMessage({
@@ -225,6 +286,9 @@ function createProcessor(
         }
     preparedProcess?: ReturnType<typeof vi.fn>
     prepareCustomerMessageGroup?: ReturnType<typeof vi.fn>
+    subscriptionCatchUp?: {
+      catchUpForPreparedGroup: ReturnType<typeof vi.fn>
+    }
   } = {}
 ) {
   const logger = overrides.logger ?? createLogger()
@@ -253,6 +317,7 @@ function createProcessor(
     reportingDispatcher: {
       enqueueOutcomes: overrides.enqueueOutcomes ?? vi.fn().mockResolvedValue(undefined),
     },
+    subscriptionCatchUp: overrides.subscriptionCatchUp,
   })
 }
 

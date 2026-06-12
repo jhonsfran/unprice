@@ -2,6 +2,7 @@ import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache/service"
 import type { EntitlementService } from "../entitlements/service"
+import type { SubscriptionService } from "../subscriptions/service"
 import { IngestionCustomerGroupProcessor } from "./customer-group-processor"
 import { IngestionEntitlementContextLoader } from "./entitlement-context"
 import { IngestionEntitlementRouter } from "./entitlement-routing"
@@ -20,6 +21,7 @@ import { IngestionMessageOutcomes } from "./message-outcomes"
 import { IngestionPreparedMessageProcessor } from "./prepared-message-processor"
 import type { IngestionReportingQueueClient } from "./reporting"
 import { IngestionReportingDispatcher } from "./reporting-dispatcher"
+import { IngestionSubscriptionCatchUp } from "./subscription-catchup"
 import { IngestionSyncProcessor } from "./sync-processor"
 
 const noopReportingClient: IngestionReportingQueueClient = {
@@ -40,6 +42,7 @@ export class IngestionService {
     reportingClient?: IngestionReportingQueueClient
     logger: Logger
     now?: () => number
+    subscriptions?: Pick<SubscriptionService, "getSubscriptionData" | "renewSubscription">
   }) {
     const now = opts.now ?? (() => Date.now())
     const entitlementWindowApplier = new EntitlementWindowApplier(opts.entitlementWindowClient)
@@ -81,12 +84,19 @@ export class IngestionService {
       now,
       reportingDispatcher,
     })
+    const subscriptionCatchUp = opts.subscriptions
+      ? new IngestionSubscriptionCatchUp({
+          logger: opts.logger,
+          subscriptions: opts.subscriptions,
+        })
+      : undefined
     this.customerGroupProcessor = new IngestionCustomerGroupProcessor({
       entitlementContext,
       logger: opts.logger,
       messageOutcomes,
       preparedMessageProcessor,
       reportingDispatcher,
+      subscriptionCatchUp,
     })
   }
 

@@ -12,7 +12,7 @@ export function createQueueServices(params: {
   env: Env
   executionCtx: ExecutionContext
   logger: Logger
-}): Pick<ServiceContext, "entitlements"> & {
+}): Pick<ServiceContext, "entitlements" | "subscriptions"> & {
   cache: Pick<Cache, "ingestionPreparedGrantContext">
   db: ReturnType<typeof createConnection>
 } {
@@ -70,5 +70,6 @@ export function createQueueServices(params: {
     cache,
     db,
     entitlements: svcCtx.entitlements,
+    subscriptions: svcCtx.subscriptions,
   }
 }

@@ -8,6 +8,7 @@ import {
   type IngestionQueueMessage,
   IngestionService,
 } from "@unprice/services/ingestion"
+import type { SubscriptionService } from "@unprice/services/subscriptions"
 import type { Env } from "~/env"
 import { CloudflareEntitlementWindowClient } from "./entitlements/client"
 import { createQueueServices } from "./queue"
@@ -22,6 +23,7 @@ type CreateIngestionServiceParams = {
   entitlementService: EntitlementService
   logger: Logger
   now?: () => number
+  subscriptionService?: Pick<SubscriptionService, "getSubscriptionData" | "renewSubscription">
 }
 
 export function createIngestionService(params: CreateIngestionServiceParams): IngestionService {
@@ -33,6 +35,7 @@ export function createIngestionService(params: CreateIngestionServiceParams): In
     reportingClient: new CloudflareReportingQueueClient(params.env),
     logger: params.logger,
     now: params.now,
+    subscriptions: params.subscriptionService,
   })
 }
 
@@ -70,6 +73,7 @@ export async function consumeIngestionBatch(
     cache: services.cache,
     db: services.db,
     entitlementService: services.entitlements,
+    subscriptionService: services.subscriptions,
     logger,
     env,
   })

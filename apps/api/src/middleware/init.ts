@@ -186,6 +186,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
       cache,
       db,
       entitlementService: svcCtx.entitlements,
+      subscriptionService: svcCtx.subscriptions,
       logger,
       env: c.env,
     })

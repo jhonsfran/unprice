@@ -31,6 +31,10 @@ describe("createIngestionService", () => {
         debug: vi.fn(),
       } as unknown as Logger,
       env,
+      subscriptionService: {
+        getSubscriptionData: vi.fn(),
+        renewSubscription: vi.fn(),
+      } as never,
     })
 
     const rawService = service as unknown as {
