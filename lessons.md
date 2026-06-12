@@ -255,6 +255,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-11: Reference billing model has no grant expiry; add expiry support before expiry
   golden cases.
 
+### 2026-06-12: Queued usage ingestion may catch up subscription renewals, but entitlement context stays read-only.
+
+- Billing-period generation and wallet grant issuance belong to the subscription lifecycle. If queued ingestion sees subscription-backed usage past the funded billing window, call the subscription machine under its existing lock, then reload entitlement context before fanout.
+- Do not add billing-period writes to `internal/services/src/ingestion/entitlement-context.ts`; that loader reads/caches entitlements and billing contexts only.
+
 Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md).
 
 ## API SDK And Public Contracts
