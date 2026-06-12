@@ -50,6 +50,7 @@ export type IngestionEntitlement = {
   overageStrategy: OverageStrategy
   projectId: string
   resetConfig: ResetConfig | null
+  subscriptionId?: string | null
   subscriptionItemId: string | null
 }
 
@@ -359,6 +360,7 @@ export function toIngestionEntitlement(
     resetConfig:
       entitlement.featurePlanVersion.resetConfig ??
       toResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig),
+    subscriptionId: entitlement.subscriptionId,
     subscriptionItemId: entitlement.subscriptionItemId,
   }
 }

@@ -33,6 +33,8 @@ describe("IngestionEntitlementContextLoader", () => {
 
   it("maps customer entitlement records into ingestion entitlements", () => {
     const entitlement = createEntitlement({
+      subscriptionId: "sub_123",
+      subscriptionItemId: "si_123",
       grants: [
         {
           allowanceUnits: null,
@@ -67,7 +69,8 @@ describe("IngestionEntitlementContextLoader", () => {
           priority: 20,
         },
       ],
-      subscriptionItemId: null,
+      subscriptionId: "sub_123",
+      subscriptionItemId: "si_123",
     })
   })
 
@@ -306,9 +309,9 @@ function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
     projectId: entitlement.projectId,
     customerId: entitlement.customerId,
     featurePlanVersionId: entitlement.featurePlanVersionId,
-    subscriptionId: null,
+    subscriptionId: entitlement.subscriptionId ?? null,
     subscriptionPhaseId: null,
-    subscriptionItemId: null,
+    subscriptionItemId: entitlement.subscriptionItemId,
     effectiveAt: entitlement.effectiveAt,
     expiresAt: entitlement.expiresAt,
     overageStrategy: entitlement.overageStrategy,
