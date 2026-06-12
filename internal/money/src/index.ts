@@ -194,17 +194,26 @@ export function calculatePercentage(price: Dinero<number>, percentage: number): 
   return multiply(price, { amount: Math.round(rest), scale })
 }
 
+type FormatMoneyOptions = {
+  maximumFractionDigits?: number
+  minimumFractionDigits?: number
+}
+
 /**
  * Format a decimal string as a localized currency string for display.
  * Rendering-only — never feed the result back into a pricing calculation.
  */
-export function formatMoney(amount: string, currencyCode = "USD"): string {
+export function formatMoney(
+  amount: string,
+  currencyCode = "USD",
+  options: FormatMoneyOptions = {}
+): string {
   const userLocale = currencyCode === "USD" ? "en-US" : "es-ES"
   return new Intl.NumberFormat(userLocale, {
     style: "currency",
     currency: currencyCode,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
+    minimumFractionDigits: options.minimumFractionDigits ?? 0,
+    maximumFractionDigits: options.maximumFractionDigits ?? 3,
   }).format(Number.parseFloat(amount))
 }
 

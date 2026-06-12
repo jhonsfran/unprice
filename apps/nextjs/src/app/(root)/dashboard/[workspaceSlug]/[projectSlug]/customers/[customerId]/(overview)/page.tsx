@@ -4,7 +4,6 @@ import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
-import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
@@ -53,6 +52,15 @@ export default async function CustomerUsagePage({
         ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
+    trpc.analytics.getProjectUsageTimeseries.queryOptions(
+      {
+        customerId,
+        range: filter.intervalFilter,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+      }
+    ),
   ])
 
   return (
@@ -77,23 +85,19 @@ export default async function CustomerUsagePage({
         />
       }
     >
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <TabNavigation>
-          <div className="flex items-center">
-            <TabNavigationLink asChild active>
-              <SuperLink href={`${baseUrl}`}>Overview</SuperLink>
-            </TabNavigationLink>
-            <TabNavigationLink asChild>
-              <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
-            </TabNavigationLink>
-            <TabNavigationLink asChild>
-              <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
-            </TabNavigationLink>
-          </div>
-        </TabNavigation>
-
-        <IntervalFilter className="md:ml-auto" />
-      </div>
+      <TabNavigation>
+        <div className="flex items-center">
+          <TabNavigationLink asChild active>
+            <SuperLink href={`${baseUrl}`}>Overview</SuperLink>
+          </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
+          </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
+          </TabNavigationLink>
+        </div>
+      </TabNavigation>
 
       <HydrateClient>
         <Suspense fallback={<CustomerMetricsPanelSkeleton />}>

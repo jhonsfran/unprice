@@ -14,7 +14,8 @@ import {
 } from "@unprice/ui/chart"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert } from "lucide-react"
-import { Bar, BarChart, LabelList, XAxis, YAxis } from "recharts"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
@@ -26,18 +27,31 @@ type CustomerMetricsPanelProps = {
 }
 
 type UsageRow = RouterOutputs["analytics"]["getProjectUsage"]["usage"][number]
+type TimeseriesRow = RouterOutputs["analytics"]["getProjectUsageTimeseries"]["timeseries"][number]
 
 type SpendingSummary = {
   currency: string
   displayAmount: string
 }
 
-const chartConfig = {
-  usage: {
-    label: "Usage",
-    color: "var(--chart-4)",
-  },
-} satisfies ChartConfig
+type TimeseriesPoint = {
+  date: number
+  dateLabel: string
+  [feature: string]: string | number
+}
+
+const MONEY_DISPLAY_OPTIONS = {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+}
+
+const TIMESERIES_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+]
 
 function formatUsage(value: number): string {
   return nFormatter(value, { digits: 1 })
@@ -60,7 +74,7 @@ function summarizeSpending(rows: UsageRow[]): SpendingSummary[] {
 
   return [...totalsByCurrency.entries()].map(([currency, amount]) => ({
     currency,
-    displayAmount: formatMoney(amount.toString(), currency),
+    displayAmount: formatMoney(amount.toString(), currency, MONEY_DISPLAY_OPTIONS),
   }))
 }
 
@@ -73,7 +87,59 @@ function formatSpendingSummary(summary: SpendingSummary[]): string {
 }
 
 function formatFeatureSpending(row: UsageRow): string {
-  return row.spending.display_amount
+  return formatMoney(row.spending.amount, row.spending.currency, MONEY_DISPLAY_OPTIONS)
+}
+
+function formatDateLabel(timestamp: number, format: string): string {
+  const date = new Date(timestamp)
+
+  if (format.includes("hh:mm")) {
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+  }
+
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+}
+
+function buildTimeseriesData(
+  rows: TimeseriesRow[],
+  dateFormat: string
+): { data: TimeseriesPoint[]; features: string[] } {
+  const featureSet = new Set<string>()
+  const pointsByDate = new Map<number, TimeseriesPoint>()
+
+  for (const row of rows) {
+    featureSet.add(row.feature_slug)
+
+    let point = pointsByDate.get(row.date)
+
+    if (!point) {
+      point = {
+        date: row.date,
+        dateLabel: formatDateLabel(row.date, dateFormat),
+      }
+      pointsByDate.set(row.date, point)
+    }
+
+    point[row.feature_slug] = row.usage ?? 0
+  }
+
+  const features = [...featureSet].sort()
+  const data = [...pointsByDate.values()].sort((a, b) => a.date - b.date)
+
+  for (const point of data) {
+    for (const feature of features) {
+      if (!(feature in point)) {
+        point[feature] = 0
+      }
+    }
+  }
+
+  return { data, features }
 }
 
 export function CustomerMetricsPanelSkeleton() {
@@ -114,9 +180,12 @@ export function CustomerMetricsPanelSkeleton() {
 function CustomerMetricsErrorState({ error }: { error: string }) {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Customer usage</CardTitle>
-        <CardDescription>Usage analytics could not be loaded right now.</CardDescription>
+      <CardHeader className="gap-4 md:flex-row md:items-start md:justify-between md:space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle>Customer usage</CardTitle>
+          <CardDescription>Usage analytics could not be loaded right now.</CardDescription>
+        </div>
+        <IntervalFilter className="md:ml-auto" />
       </CardHeader>
       <CardContent>
         <EmptyPlaceholder className="h-[220px] w-auto border border-dashed">
@@ -134,9 +203,12 @@ function CustomerMetricsErrorState({ error }: { error: string }) {
 function CustomerMetricsEmptyState({ intervalLabel }: { intervalLabel: string }) {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Customer usage</CardTitle>
-        <CardDescription>Usage for this customer in the {intervalLabel}.</CardDescription>
+      <CardHeader className="gap-4 md:flex-row md:items-start md:justify-between md:space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle>Customer usage</CardTitle>
+          <CardDescription>Usage for this customer in the {intervalLabel}.</CardDescription>
+        </div>
+        <IntervalFilter className="md:ml-auto" />
       </CardHeader>
       <CardContent>
         <EmptyPlaceholder className="h-[220px] w-auto border border-dashed">
@@ -177,6 +249,25 @@ export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) 
     )
   )
 
+  const {
+    data: timeseriesData,
+    dataUpdatedAt: timeseriesUpdatedAt,
+    isFetching: isTimeseriesFetching,
+  } = useSuspenseQuery(
+    trpc.analytics.getProjectUsageTimeseries.queryOptions(
+      {
+        customerId,
+        range: intervalFilter.name,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+        staleTime: isNearRealtime ? 30 * 1000 : 0,
+        refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
+        refetchOnWindowFocus: false,
+      }
+    )
+  )
+
   useQueryInvalidation({
     paramKey: intervalFilter.name,
     dataUpdatedAt,
@@ -193,8 +284,24 @@ export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) 
     ],
   })
 
-  if (usage.error) {
-    return <CustomerMetricsErrorState error={usage.error} />
+  useQueryInvalidation({
+    paramKey: intervalFilter.name,
+    dataUpdatedAt: timeseriesUpdatedAt,
+    isFetching: isTimeseriesFetching,
+    getQueryKey: (param) => [
+      ["analytics", "getProjectUsageTimeseries"],
+      {
+        input: {
+          customerId,
+          range: param,
+        },
+        type: "query",
+      },
+    ],
+  })
+
+  if (usage.error || timeseriesData.error) {
+    return <CustomerMetricsErrorState error={usage.error ?? timeseriesData.error ?? ""} />
   }
 
   const sortedUsage = [...usage.usage].sort((a, b) => {
@@ -205,25 +312,33 @@ export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) 
     return a.feature_slug.localeCompare(b.feature_slug)
   })
 
-  if (sortedUsage.length === 0) {
+  const { data: timeseriesChartData, features: timeseriesFeatures } = buildTimeseriesData(
+    timeseriesData.timeseries ?? [],
+    intervalFilter.dateFormat
+  )
+
+  if (sortedUsage.length === 0 && timeseriesChartData.length === 0) {
     return <CustomerMetricsEmptyState intervalLabel={intervalFilter.label} />
   }
 
   const totalLatestUsage = sortedUsage.reduce((sum, row) => sum + row.usage, 0)
   const spendingSummary = summarizeSpending(sortedUsage)
   const consumedAmountLabel = formatSpendingSummary(spendingSummary)
-  const chartData = sortedUsage.map((row) => ({
-    feature: row.feature_slug,
-    usage: row.usage,
-    fill: "var(--color-usage)",
-  }))
-  const chartHeight = Math.max(220, Math.min(chartData.length * 58, 420))
+  const timeseriesConfig = Object.fromEntries(
+    timeseriesFeatures.map((feature, i) => [
+      feature,
+      { label: feature, color: TIMESERIES_COLORS[i % TIMESERIES_COLORS.length] },
+    ])
+  ) satisfies ChartConfig
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Customer usage</CardTitle>
-        <CardDescription>Usage for this customer in the {intervalFilter.label}.</CardDescription>
+      <CardHeader className="gap-4 md:flex-row md:items-start md:justify-between md:space-y-0">
+        <div className="space-y-1.5">
+          <CardTitle>Customer usage</CardTitle>
+          <CardDescription>Usage for this customer in the {intervalFilter.label}.</CardDescription>
+        </div>
+        <IntervalFilter className="md:ml-auto" />
       </CardHeader>
 
       <CardContent className="space-y-6">
@@ -267,52 +382,61 @@ export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) 
           </div>
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-border p-4">
-          <p className="mb-3 text-muted-foreground text-xs uppercase">Usage by feature</p>
-          <ChartContainer config={chartConfig} height={chartHeight} className="w-full">
-            <BarChart
-              accessibilityLayer
-              data={chartData}
-              layout="vertical"
-              margin={{ left: 8, right: 42, top: 8, bottom: 8 }}
-            >
-              <XAxis type="number" hide />
-              <YAxis
-                dataKey="feature"
-                type="category"
-                axisLine={false}
-                tickLine={false}
-                tickMargin={10}
-                width={120}
-                tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
-              />
-              <ChartTooltip
-                cursor={false}
-                content={
-                  <ChartTooltipContent
-                    formatter={(value, name) => (
-                      <>
-                        <span>{String(name)}</span>
-                        <span className="ml-auto font-medium font-mono text-foreground tabular-nums">
-                          {formatUsage(Number(value))}
-                        </span>
-                      </>
-                    )}
-                  />
-                }
-              />
-              <Bar dataKey="usage" radius={4} fill="var(--color-usage)" maxBarSize={28}>
-                <LabelList
-                  dataKey="usage"
-                  position="right"
-                  offset={8}
-                  className="fill-foreground font-mono text-xs"
-                  formatter={(value: number) => formatUsage(value)}
+        {timeseriesChartData.length > 0 && (
+          <div className="overflow-hidden rounded-lg border border-border p-4">
+            <p className="mb-3 text-muted-foreground text-xs uppercase">Usage over time</p>
+            <ChartContainer config={timeseriesConfig} className="h-[240px] w-full">
+              <AreaChart
+                accessibilityLayer
+                data={timeseriesChartData}
+                margin={{ left: 8, right: 8, top: 8, bottom: 8 }}
+              >
+                <CartesianGrid vertical={false} className="stroke-muted" />
+                <XAxis
+                  dataKey="dateLabel"
+                  axisLine={false}
+                  tickLine={false}
+                  tickMargin={10}
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                 />
-              </Bar>
-            </BarChart>
-          </ChartContainer>
-        </div>
+                <YAxis
+                  axisLine={false}
+                  tickLine={false}
+                  tickMargin={10}
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+                  tickFormatter={(value) => formatUsage(Number(value))}
+                />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      indicator="line"
+                      formatter={(value, name) => (
+                        <>
+                          <span>{String(name)}</span>
+                          <span className="ml-auto font-medium font-mono text-foreground tabular-nums">
+                            {formatUsage(Number(value))}
+                          </span>
+                        </>
+                      )}
+                    />
+                  }
+                />
+                {timeseriesFeatures.map((feature, i) => (
+                  <Area
+                    key={feature}
+                    type="monotone"
+                    dataKey={feature}
+                    stackId="usage"
+                    fill={TIMESERIES_COLORS[i % TIMESERIES_COLORS.length]}
+                    fillOpacity={0.15}
+                    stroke={TIMESERIES_COLORS[i % TIMESERIES_COLORS.length]}
+                    strokeWidth={2}
+                  />
+                ))}
+              </AreaChart>
+            </ChartContainer>
+          </div>
+        )}
 
         <div className="overflow-hidden rounded-lg border border-border">
           <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem] items-center gap-4 bg-muted/40 px-4 py-2.5">
