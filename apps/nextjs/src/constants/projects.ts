@@ -78,9 +78,9 @@ export const PROJECT_SHORTCUTS: Shortcut[] = [
     featureSlug: "customers",
   },
   {
-    name: "All Customers",
-    href: "customers",
+    name: "Events",
+    href: "events",
     icon: Link,
-    featureSlug: "customers",
+    featureSlug: "events",
   },
 ]

@@ -8,6 +8,33 @@ import { formatDate } from "~/lib/dates"
 import { ExplainChargeSheet } from "./explain-charge-sheet"
 import { formatInvoiceMoney } from "./format-invoice-money"
 
+type InvoiceLine =
+  RouterOutputs["customers"]["getInvoiceById"]["invoice"]["lines"][number]
+
+const getLineStatus = (line: InvoiceLine) => {
+  if (line.amount === 0 && !line.collectable) {
+    return "No charge"
+  }
+
+  if (line.settlementStatus === "due") {
+    return "Due"
+  }
+
+  if (line.settlementStatus === "paid") {
+    return "Paid"
+  }
+
+  return "Included"
+}
+
+const getLineStatusVariant = (line: InvoiceLine) => {
+  if (line.settlementStatus === "due") {
+    return "default"
+  }
+
+  return "secondary"
+}
+
 export function InvoiceTable({
   invoice,
 }: {
@@ -16,29 +43,6 @@ export function InvoiceTable({
   projectSlug: string
 }) {
   const formatLedger = (amount: number) => formatInvoiceMoney(amount, invoice.currency)
-  const getLineStatus = (line: (typeof invoice.lines)[number]) => {
-    if (line.amount === 0 && !line.collectable) {
-      return "No charge"
-    }
-
-    if (line.settlementStatus === "due") {
-      return "Due"
-    }
-
-    if (line.settlementStatus === "paid") {
-      return "Paid"
-    }
-
-    return "Included"
-  }
-
-  const getLineStatusVariant = (line: (typeof invoice.lines)[number]) => {
-    if (line.settlementStatus === "due") {
-      return "default"
-    }
-
-    return "secondary"
-  }
 
   return (
     <div className="mb-8">

@@ -46,9 +46,15 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
   const projectSlug = useParams().projectSlug as string
   const searchParams = useSearchParams()
   const customerId = form.watch("customerId" as FieldPath<TFieldValues>) as string | undefined
-  const [isConfirmingPaymentMethod, setIsConfirmingPaymentMethod] = useState(false)
+
+  // Derive whether the user just returned from the payment-provider redirect
+  const paymentSetup = searchParams.get("paymentSetup")
+  const returnedProvider = searchParams.get("provider")
+  const isReturningFromSetup =
+    paymentSetup === "success" && returnedProvider === paymentProvider && !!customerId
+
+  const [isConfirmingPaymentMethod, setIsConfirmingPaymentMethod] = useState(isReturningFromSetup)
   const [confirmationTimedOut, setConfirmationTimedOut] = useState(false)
-  const [handledSetupReturn, setHandledSetupReturn] = useState<string | null>(null)
 
   const subscriptionReturnUrl = `${APP_DOMAIN}/${workspaceSlug}/${projectSlug}/customers/subscriptions/new?customerId=${customerId ?? ""}&provider=${paymentProvider}`
   const successUrl = `${subscriptionReturnUrl}&paymentSetup=success`
@@ -90,23 +96,6 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
 
     return () => window.clearTimeout(timeout)
   }, [isConfirmingPaymentMethod])
-
-  useEffect(() => {
-    const paymentSetup = searchParams.get("paymentSetup")
-    const returnedProvider = searchParams.get("provider")
-    const setupReturnKey = `${paymentSetup}:${returnedProvider}:${customerId}`
-
-    if (
-      paymentSetup === "success" &&
-      customerId &&
-      returnedProvider === paymentProvider &&
-      handledSetupReturn !== setupReturnKey
-    ) {
-      setHandledSetupReturn(setupReturnKey)
-      setConfirmationTimedOut(false)
-      setIsConfirmingPaymentMethod(true)
-    }
-  }, [customerId, handledSetupReturn, paymentProvider, searchParams])
 
   useEffect(() => {
     const defaultPaymentMethod = data?.paymentMethods.at(0)

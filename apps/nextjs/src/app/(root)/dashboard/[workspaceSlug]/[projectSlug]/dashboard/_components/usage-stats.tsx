@@ -4,17 +4,12 @@ import { useSuspenseQuery } from "@tanstack/react-query"
 import { nFormatter } from "@unprice/db/utils"
 import { formatMoney } from "@unprice/money"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@unprice/ui/chart"
+import { type ChartConfig } from "@unprice/ui/chart"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
 import { BarChart3, CalendarRange, Coins, Layers3, TriangleAlert, Users } from "lucide-react"
+import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { SuperLink } from "~/components/super-link"
@@ -22,6 +17,11 @@ import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
+
+const UsageAreaChart = dynamic(
+  () => import("./usage-area-chart").then((mod) => ({ default: mod.UsageAreaChart })),
+  { ssr: false, loading: () => <Skeleton className="h-[200px] w-full rounded-md" /> }
+)
 
 const TIMESERIES_COLORS = [
   "var(--chart-1)",
@@ -420,59 +420,11 @@ export function UsageStats() {
         </div>
 
         {timeseriesChartData.length > 0 && (
-          <div className="overflow-hidden rounded-md border border-border/60 p-3 sm:p-4">
-            <p className="mb-3 text-muted-foreground text-xs uppercase">Usage over time</p>
-            <ChartContainer config={timeseriesConfig} className="h-[200px] w-full">
-              <AreaChart
-                accessibilityLayer
-                data={timeseriesChartData}
-                margin={{ left: 8, right: 8, top: 6, bottom: 6 }}
-              >
-                <CartesianGrid vertical={false} className="stroke-muted" />
-                <XAxis
-                  dataKey="dateLabel"
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={10}
-                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={10}
-                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                  tickFormatter={(value) => nFormatter(Number(value))}
-                />
-                <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      indicator="line"
-                      formatter={(value, name) => (
-                        <>
-                          <span>{String(name)}</span>
-                          <span className="ml-auto font-medium font-mono text-foreground tabular-nums">
-                            {nFormatter(Number(value))}
-                          </span>
-                        </>
-                      )}
-                    />
-                  }
-                />
-                {timeseriesFeatures.map((feature, i) => (
-                  <Area
-                    key={feature}
-                    type="monotone"
-                    dataKey={feature}
-                    stackId="usage"
-                    fill={TIMESERIES_COLORS[i % TIMESERIES_COLORS.length]}
-                    fillOpacity={0.15}
-                    stroke={TIMESERIES_COLORS[i % TIMESERIES_COLORS.length]}
-                    strokeWidth={2}
-                  />
-                ))}
-              </AreaChart>
-            </ChartContainer>
-          </div>
+          <UsageAreaChart
+            data={timeseriesChartData}
+            features={timeseriesFeatures}
+            config={timeseriesConfig}
+          />
         )}
 
         <div className="overflow-hidden rounded-md border border-border/60">

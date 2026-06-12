@@ -6,21 +6,24 @@ import { formatMoney } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@unprice/ui/chart"
+import type { ChartConfig } from "@unprice/ui/chart"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { BarChart3, Coins, Layers3, ReceiptText, TriangleAlert } from "lucide-react"
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
+import dynamic from "next/dynamic"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
+
+const CustomerUsageAreaChart = dynamic(
+  () =>
+    import("./customer-usage-area-chart").then((mod) => ({
+      default: mod.CustomerUsageAreaChart,
+    })),
+  { ssr: false, loading: () => <Skeleton className="h-[240px] w-full rounded-lg" /> }
+)
 
 type CustomerMetricsPanelProps = {
   customerId: string
@@ -382,59 +385,11 @@ export function CustomerMetricsPanel({ customerId, invoiceCount }: CustomerMetri
         </div>
 
         {timeseriesChartData.length > 0 && (
-          <div className="overflow-hidden rounded-lg border border-border p-4">
-            <p className="mb-3 text-muted-foreground text-xs uppercase">Usage over time</p>
-            <ChartContainer config={timeseriesConfig} className="h-[240px] w-full">
-              <AreaChart
-                accessibilityLayer
-                data={timeseriesChartData}
-                margin={{ left: 8, right: 8, top: 8, bottom: 8 }}
-              >
-                <CartesianGrid vertical={false} className="stroke-muted" />
-                <XAxis
-                  dataKey="dateLabel"
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={10}
-                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={10}
-                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-                  tickFormatter={(value) => formatUsage(Number(value))}
-                />
-                <ChartTooltip
-                  content={
-                    <ChartTooltipContent
-                      indicator="line"
-                      formatter={(value, name) => (
-                        <>
-                          <span>{String(name)}</span>
-                          <span className="ml-auto font-medium font-mono text-foreground tabular-nums">
-                            {formatUsage(Number(value))}
-                          </span>
-                        </>
-                      )}
-                    />
-                  }
-                />
-                {timeseriesFeatures.map((feature, i) => (
-                  <Area
-                    key={feature}
-                    type="monotone"
-                    dataKey={feature}
-                    stackId="usage"
-                    fill={TIMESERIES_COLORS[i % TIMESERIES_COLORS.length]}
-                    fillOpacity={0.15}
-                    stroke={TIMESERIES_COLORS[i % TIMESERIES_COLORS.length]}
-                    strokeWidth={2}
-                  />
-                ))}
-              </AreaChart>
-            </ChartContainer>
-          </div>
+          <CustomerUsageAreaChart
+            data={timeseriesChartData}
+            features={timeseriesFeatures}
+            config={timeseriesConfig}
+          />
         )}
 
         <div className="overflow-hidden rounded-lg border border-border">
