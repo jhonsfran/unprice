@@ -136,7 +136,8 @@ export function normalizeAxiomEvent(event: AxiomEvent): AxiomEvent {
   }
 
   for (const [key, value] of Object.entries(event)) {
-    const normalizedKey = TOP_LEVEL_ALIASES[key as keyof typeof TOP_LEVEL_ALIASES] ?? toSnakeCase(key)
+    const normalizedKey =
+      TOP_LEVEL_ALIASES[key as keyof typeof TOP_LEVEL_ALIASES] ?? toSnakeCase(key)
 
     if (isPlainRecord(value)) {
       flattenAxiomFields(normalized, getNamespacePrefix(normalizedKey), value)
