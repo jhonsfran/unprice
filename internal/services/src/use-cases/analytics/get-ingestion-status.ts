@@ -13,10 +13,16 @@ export const getIngestionStatusWindowSchema = z
     path: ["to"],
   })
 
+export const getIngestionStatusCursorSchema = z.object({
+  handledAt: z.number().int(),
+  canonicalAuditId: z.string(),
+})
+
 export const getIngestionStatusInputSchema = z.object({
   projectId: z.string(),
   customerId: z.string().optional(),
   window: getIngestionStatusWindowSchema,
+  cursor: getIngestionStatusCursorSchema.nullish(),
   filter: z
     .object({
       sourceId: z.string().optional(),
@@ -75,6 +81,7 @@ export const getIngestionStatusOutputSchema = z.object({
       handledAt: z.number().int(),
     })
   ),
+  nextCursor: getIngestionStatusCursorSchema.nullable(),
   answer: z.string(),
   confidence: z.enum(["high", "medium", "low"]),
   evidence: z.array(aiEvidenceSchema),
@@ -84,6 +91,7 @@ export const getIngestionStatusOutputSchema = z.object({
 
 export type GetIngestionStatusInput = z.infer<typeof getIngestionStatusInputSchema>
 export type GetIngestionStatusOutput = z.infer<typeof getIngestionStatusOutputSchema>
+type IngestionStatusCursor = z.infer<typeof getIngestionStatusCursorSchema>
 
 export type GetIngestionStatusAnalytics = Pick<
   Analytics,
@@ -125,7 +133,8 @@ export async function getIngestionStatus(
       deps.analytics.getIngestionRecent({
         ...baseWindowQuery,
         ...filterQuery,
-        limit: input.limit,
+        ...toTinybirdCursor(input.cursor),
+        limit: input.limit + 1,
       }),
     ]),
     (error) =>
@@ -161,11 +170,11 @@ export async function getIngestionStatus(
             eventCount: row.event_count,
             lastSeenAt: row.last_seen_at,
           }))
-  const recentEvents = (recentResponse.data ?? [])
+  const recentRows = (recentResponse.data ?? [])
     .filter((row) => isInWindow(row.handled_at, input.window))
     .filter((row) => matchesFilter(row, input.filter))
-    .slice(0, input.limit)
-    .map(mapRecentEventRow)
+  const recentEvents = recentRows.slice(0, input.limit).map(mapRecentEventRow)
+  const nextCursor = getNextCursor(recentRows, input.limit)
   const totals = deriveTotals({ live, rejections, recentEvents })
   const successRate = totals.total === 0 ? 0 : totals.processed / totals.total
   const latestHandledAt = getLatestHandledAt({ recentEvents, live, rejections })
@@ -186,6 +195,7 @@ export async function getIngestionStatus(
     live,
     rejections,
     recentEvents,
+    nextCursor,
     answer: buildAnswer({
       projectId: input.projectId,
       customerId: input.customerId,
@@ -235,6 +245,25 @@ function mapRecentEventRow(
   }
 }
 
+function toCursor(row: IngestionRecentEventRow): IngestionStatusCursor {
+  return {
+    handledAt: row.handled_at,
+    canonicalAuditId: row.canonical_audit_id,
+  }
+}
+
+function getNextCursor(
+  rows: IngestionRecentEventRow[],
+  limit: number
+): IngestionStatusCursor | null {
+  if (rows.length <= limit) {
+    return null
+  }
+
+  const lastVisibleRow = rows[limit - 1]
+  return lastVisibleRow ? toCursor(lastVisibleRow) : null
+}
+
 function matchesFilter(
   row: { source_id: string; event_slug: string; state?: "processed" | "rejected" },
   filter: IngestionStatusFilter
@@ -263,6 +292,20 @@ function toTinybirdFilter(filter: IngestionStatusFilter): {
     ...(filter.sourceId ? { source_id: filter.sourceId } : {}),
     ...(filter.eventSlug ? { event_slug: filter.eventSlug } : {}),
     ...(filter.state ? { state: filter.state } : {}),
+  }
+}
+
+function toTinybirdCursor(cursor: IngestionStatusCursor | null | undefined): {
+  cursor_handled_at?: number
+  cursor_canonical_audit_id?: string
+} {
+  if (!cursor) {
+    return {}
+  }
+
+  return {
+    cursor_handled_at: cursor.handledAt,
+    cursor_canonical_audit_id: cursor.canonicalAuditId,
   }
 }
 

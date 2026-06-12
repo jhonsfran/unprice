@@ -2,6 +2,7 @@ export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
 export {
   getIngestionStatus,
+  getIngestionStatusCursorSchema,
   getIngestionStatusInputSchema,
   getIngestionStatusOutputSchema,
 } from "./analytics/get-ingestion-status"

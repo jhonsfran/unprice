@@ -16,7 +16,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { CalendarDays, Search, X } from "lucide-react"
+import { CalendarDays, Loader2, Search, X } from "lucide-react"
 import * as React from "react"
 import type { DateRange } from "react-day-picker"
 import { Badge } from "./badge"
@@ -69,6 +69,9 @@ export interface FilterDataTableProps<TData, TValue> {
   getRowClassName?: (row: TData) => string | undefined
   toolbarActions?: React.ReactNode
   initialColumnVisibility?: VisibilityState
+  hasMore?: boolean
+  isLoadingMore?: boolean
+  onLoadMore?: () => void | Promise<void>
 }
 
 export function FilterDataTable<TData, TValue>({
@@ -82,6 +85,9 @@ export function FilterDataTable<TData, TValue>({
   getRowClassName,
   toolbarActions,
   initialColumnVisibility,
+  hasMore = false,
+  isLoadingMore = false,
+  onLoadMore,
 }: FilterDataTableProps<TData, TValue>) {
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [sorting, setSorting] = React.useState<SortingState>([])
@@ -114,6 +120,36 @@ export function FilterDataTable<TData, TValue>({
     searchColumn && table.getColumn(searchColumn)
       ? String(table.getColumn(searchColumn)?.getFilterValue() ?? "")
       : ""
+  const loadMoreRef = React.useRef<HTMLDivElement | null>(null)
+  const loadMoreRequestedRef = React.useRef(false)
+  const canLoadMore = Boolean(hasMore && onLoadMore)
+
+  React.useEffect(() => {
+    const target = loadMoreRef.current
+    if (!target || !canLoadMore || isLoadingMore) {
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (!entry?.isIntersecting || loadMoreRequestedRef.current) {
+          return
+        }
+
+        loadMoreRequestedRef.current = true
+        void Promise.resolve(onLoadMore?.()).finally(() => {
+          loadMoreRequestedRef.current = false
+        })
+      },
+      {
+        rootMargin: "240px",
+      }
+    )
+
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [canLoadMore, isLoadingMore, onLoadMore])
 
   return (
     <div className="overflow-hidden rounded-md border bg-background">
@@ -203,6 +239,33 @@ export function FilterDataTable<TData, TValue>({
                 )}
               </TableBody>
             </Table>
+            {canLoadMore ? (
+              <div
+                ref={loadMoreRef}
+                className="flex items-center justify-center border-t bg-background/80 px-4 py-3"
+              >
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-2 text-muted-foreground text-xs"
+                  disabled={isLoadingMore}
+                  onClick={() => {
+                    if (loadMoreRequestedRef.current) {
+                      return
+                    }
+
+                    loadMoreRequestedRef.current = true
+                    void Promise.resolve(onLoadMore?.()).finally(() => {
+                      loadMoreRequestedRef.current = false
+                    })
+                  }}
+                >
+                  {isLoadingMore ? <Loader2 className="size-3 animate-spin" /> : null}
+                  {isLoadingMore ? "Loading more" : "Load more"}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </section>
       </div>

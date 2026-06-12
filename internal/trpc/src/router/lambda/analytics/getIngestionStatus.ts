@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import {
+  getIngestionStatusCursorSchema,
   getIngestionStatusOutputSchema,
   getIngestionStatus as getIngestionStatusUseCase,
 } from "@unprice/services/use-cases"
@@ -19,6 +20,7 @@ export const getIngestionStatus = protectedProjectProcedure
           message: "window.to must be greater than window.from",
           path: ["to"],
         }),
+      cursor: getIngestionStatusCursorSchema.nullish(),
       filter: z
         .object({
           sourceId: z.string().optional(),
@@ -27,7 +29,7 @@ export const getIngestionStatus = protectedProjectProcedure
         })
         .optional()
         .default({}),
-      limit: z.number().int().min(1).max(100).optional().default(100),
+      limit: z.number().int().min(1).max(100).optional().default(50),
     })
   )
   .output(getIngestionStatusOutputSchema)
@@ -40,6 +42,7 @@ export const getIngestionStatus = protectedProjectProcedure
         projectId: opts.ctx.project.id,
         customerId: opts.input.customerId,
         window: opts.input.window,
+        cursor: opts.input.cursor,
         filter: opts.input.filter,
         limit: opts.input.limit,
       }

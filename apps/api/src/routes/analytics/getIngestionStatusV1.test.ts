@@ -179,6 +179,7 @@ describe("getIngestionStatusV1 route", () => {
           handledAt: fromTs + 5_500,
         },
       ],
+      nextCursor: null,
       answer:
         "4 events were observed in the requested window for customer cus_123 (1780000000000 to 1780000010000). 3 were processed and 1 were rejected, for a 75% success rate.",
       confidence: "high",
@@ -243,7 +244,7 @@ describe("getIngestionStatusV1 route", () => {
       to_ts: toTs,
       source_id: "src_1",
       event_slug: "usage.recorded",
-      limit: 2,
+      limit: 3,
     })
   })
 
@@ -291,6 +292,7 @@ describe("getIngestionStatusV1 route", () => {
       live: [],
       rejections: [],
       recentEvents: [],
+      nextCursor: null,
       answer: "No events were observed in the requested window for customer cus_empty.",
       confidence: "low",
       evidence: [
@@ -381,6 +383,10 @@ describe("getIngestionStatusV1 route", () => {
         from_ts: fromTs,
         to_ts: toTs,
         state: "processed",
+        cursor: {
+          handledAt: fromTs + 8_000,
+          canonicalAuditId: "audit_cursor",
+        },
         limit: 5,
       }),
       env,
@@ -408,7 +414,9 @@ describe("getIngestionStatusV1 route", () => {
       from_ts: fromTs,
       to_ts: toTs,
       state: "processed",
-      limit: 5,
+      cursor_handled_at: fromTs + 8_000,
+      cursor_canonical_audit_id: "audit_cursor",
+      limit: 6,
     })
   })
 })

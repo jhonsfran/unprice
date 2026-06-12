@@ -179,7 +179,7 @@ describe("getIngestionStatus", () => {
       to_ts: toTs,
       source_id: "src_1",
       event_slug: "usage.recorded",
-      limit: 5,
+      limit: 6,
     })
     expect(result.val?.rejections).toEqual([
       {
@@ -241,7 +241,7 @@ describe("getIngestionStatus", () => {
       from_ts: fromTs,
       to_ts: toTs,
       state: "processed",
-      limit: 50,
+      limit: 51,
     })
     expect(result.val?.recentEvents).toEqual([
       expect.objectContaining({
@@ -251,6 +251,53 @@ describe("getIngestionStatus", () => {
       }),
     ])
     expect(result.val?.answer).toContain("project proj_1")
+  })
+
+  it("returns a composite cursor and passes it to Tinybird for the next page", async () => {
+    const { deps, analytics } = makeDeps({
+      recentRows: [
+        recentEvent({
+          event_id: "evt_1",
+          canonical_audit_id: "audit_c",
+          handled_at: fromTs + 3_000,
+        }),
+        recentEvent({
+          event_id: "evt_2",
+          canonical_audit_id: "audit_b",
+          handled_at: fromTs + 2_000,
+        }),
+        recentEvent({
+          event_id: "evt_3",
+          canonical_audit_id: "audit_a",
+          handled_at: fromTs + 1_000,
+        }),
+      ],
+    })
+
+    const result = await getIngestionStatus(deps, {
+      ...baseInput(),
+      cursor: {
+        handledAt: fromTs + 4_000,
+        canonicalAuditId: "audit_cursor",
+      },
+      limit: 2,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(analytics.getIngestionRecent).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      from_ts: fromTs,
+      to_ts: toTs,
+      cursor_handled_at: fromTs + 4_000,
+      cursor_canonical_audit_id: "audit_cursor",
+      limit: 3,
+    })
+    expect(result.val?.recentEvents.map((event) => event.eventId)).toEqual(["evt_1", "evt_2"])
+    expect(result.val?.nextCursor).toEqual({
+      handledAt: fromTs + 2_000,
+      canonicalAuditId: "audit_b",
+    })
   })
 })
 

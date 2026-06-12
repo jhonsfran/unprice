@@ -42,7 +42,18 @@ SQL >
       {% if defined(source_id) %} AND source_id = {{ String(source_id) }} {% end %}
       {% if defined(event_slug) %} AND event_slug = {{ String(event_slug) }} {% end %}
       {% if defined(state) %} AND state = {{ String(state) }} {% end %}
-    ORDER BY handled_at DESC
+      {% if defined(cursor_handled_at) %}
+        AND (
+          handled_at < {{ Int64(cursor_handled_at) }}
+          {% if defined(cursor_canonical_audit_id) %}
+            OR (
+              handled_at = {{ Int64(cursor_handled_at) }}
+              AND canonical_audit_id < {{ String(cursor_canonical_audit_id) }}
+            )
+          {% end %}
+        )
+      {% end %}
+    ORDER BY handled_at DESC, canonical_audit_id DESC
     LIMIT {{ Int32(limit, 50) }}
 
 TYPE endpoint

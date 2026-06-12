@@ -1,22 +1,25 @@
 "use client"
 
-import { useQuery } from "@tanstack/react-query"
+import { useInfiniteQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { FilterDataTable } from "@unprice/ui/filter-data-table"
 import { Activity, CheckCircle2, XCircle } from "lucide-react"
 import { useParams } from "next/navigation"
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { useFilterDataTable } from "~/hooks/use-filter-datatable"
 import { manipulateDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
 import {
+  type IngestionEventRow,
+  type IngestionStatus,
   buildIngestionEventsColumns,
   buildIngestionEventsFilters,
 } from "./ingestion-events-table-schema"
 
 const DEFAULT_WINDOW_MS = 60 * 60 * 1000
+const EVENTS_PAGE_SIZE = 50
 
 function resolveWindow(from: number | null, to: number | null): { from: number; to: number } {
   const now = Date.now()
@@ -48,20 +51,32 @@ export function IngestionEventsPanel() {
     [filters.from, filters.to]
   )
 
-  const query = useQuery(
-    trpc.analytics.getIngestionStatus.queryOptions(
+  const query = useInfiniteQuery(
+    trpc.analytics.getIngestionStatus.infiniteQueryOptions(
       {
         window,
-        limit: 100,
+        limit: EVENTS_PAGE_SIZE,
       },
       {
+        initialCursor: null,
+        getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
         refetchInterval: 15 * 1000,
         refetchOnWindowFocus: true,
       }
     )
   )
 
-  const rows = query.data?.recentEvents ?? []
+  const pages = query.data?.pages ?? []
+  const rows = useMemo(() => flattenUniqueEvents(pages), [pages])
+  const firstPage = pages[0]
+  const { fetchNextPage, hasNextPage, isFetchingNextPage } = query
+  const handleLoadMore = useCallback(() => {
+    if (!hasNextPage || isFetchingNextPage) {
+      return Promise.resolve()
+    }
+
+    return fetchNextPage().then(() => undefined)
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage])
 
   const today = useMemo(() => new Date(), [])
   const oneMonthAgo = useMemo(() => {
@@ -96,9 +111,9 @@ export function IngestionEventsPanel() {
     [dateRange, rows, setFilters, today, oneMonthAgo]
   )
 
-  const processed = query.data?.totals.processed ?? 0
-  const rejected = query.data?.totals.rejected ?? 0
-  const total = query.data?.totals.total ?? 0
+  const processed = firstPage?.totals.processed ?? 0
+  const rejected = firstPage?.totals.rejected ?? 0
+  const total = firstPage?.totals.total ?? 0
 
   const windowLabel = useMemo(() => {
     const diffMs = window.to - window.from
@@ -166,7 +181,28 @@ export function IngestionEventsPanel() {
           rejectionReason: false,
           eventId: false,
         }}
+        hasMore={hasNextPage}
+        isLoadingMore={isFetchingNextPage}
+        onLoadMore={handleLoadMore}
       />
     </div>
   )
+}
+
+function flattenUniqueEvents(pages: IngestionStatus[]): IngestionEventRow[] {
+  const seen = new Set<string>()
+  const events: IngestionEventRow[] = []
+
+  for (const page of pages) {
+    for (const event of page.recentEvents) {
+      if (seen.has(event.canonicalAuditId)) {
+        continue
+      }
+
+      seen.add(event.canonicalAuditId)
+      events.push(event)
+    }
+  }
+
+  return events
 }

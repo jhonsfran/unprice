@@ -1,5 +1,9 @@
 import { createRoute } from "@hono/zod-openapi"
-import { getIngestionStatus, getIngestionStatusOutputSchema } from "@unprice/services/use-cases"
+import {
+  getIngestionStatus,
+  getIngestionStatusCursorSchema,
+  getIngestionStatusOutputSchema,
+} from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
@@ -15,6 +19,7 @@ export const getIngestionStatusApiRequestSchema = z
     customer_id: z.string().optional(),
     from_ts: z.number().int(),
     to_ts: z.number().int(),
+    cursor: getIngestionStatusCursorSchema.nullish(),
     source_id: z.string().optional(),
     event_slug: z.string().optional(),
     state: z.enum(["processed", "rejected"]).optional(),
@@ -57,6 +62,7 @@ export const registerGetIngestionStatusV1 = (app: App) =>
       customer_id: customerId,
       from_ts: fromTs,
       to_ts: toTs,
+      cursor,
       source_id: sourceId,
       event_slug: eventSlug,
       state,
@@ -75,6 +81,7 @@ export const registerGetIngestionStatusV1 = (app: App) =>
           from: fromTs,
           to: toTs,
         },
+        cursor,
         filter: {
           sourceId,
           eventSlug,

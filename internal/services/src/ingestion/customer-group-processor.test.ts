@@ -179,7 +179,7 @@ describe("IngestionCustomerGroupProcessor", () => {
       .mockResolvedValueOnce(secondPreparedGroup)
     const catchUpForPreparedGroup = vi.fn().mockResolvedValue({
       changed: true,
-      renewedSubscriptionIds: ["sub_123"],
+      caughtUpSubscriptionIds: ["sub_123"],
     })
     const preparedProcess = vi.fn().mockResolvedValue([
       {

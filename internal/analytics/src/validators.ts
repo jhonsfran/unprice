@@ -391,7 +391,9 @@ export const ingestionRecentQuerySchema = ingestionStatusWindowQuerySchema.exten
   source_id: z.string().optional(),
   event_slug: z.string().optional(),
   state: ingestionStateFilterSchema.optional(),
-  limit: z.number().int().min(1).max(100).default(50),
+  cursor_handled_at: z.number().int().optional(),
+  cursor_canonical_audit_id: z.string().optional(),
+  limit: z.number().int().min(1).max(101).default(50),
 })
 
 export const ingestionLiveRowSchema = z.object({

@@ -1,5 +1,6 @@
 export {
   getIngestionStatus,
+  getIngestionStatusCursorSchema,
   getIngestionStatusInputSchema,
   getIngestionStatusOutputSchema,
 } from "./get-ingestion-status"
