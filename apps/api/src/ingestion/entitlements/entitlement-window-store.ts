@@ -3,8 +3,13 @@ import type { GrantConsumptionState, MeterConfig } from "@unprice/services/entit
 import { DO_IDEMPOTENCY_TTL_MS, computeGrantPeriodBucket } from "@unprice/services/entitlements"
 import { asc, desc, eq, inArray, lt } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
+import type { z } from "zod"
 import { idempotencyEntryToApplyResult } from "./batch-apply-helpers"
-import { APPLY_BATCH_SIZE_LIMIT, IDEMPOTENCY_CLEANUP_BATCH_SIZE, WALLET_RESERVATION_ROW_ID } from "./constants"
+import {
+  APPLY_BATCH_SIZE_LIMIT,
+  IDEMPOTENCY_CLEANUP_BATCH_SIZE,
+  WALLET_RESERVATION_ROW_ID,
+} from "./constants"
 import type {
   ActiveGrantInput,
   ApplyGrantInput,
@@ -13,20 +18,22 @@ import type {
   EntitlementConfigInput,
   WalletReservationSnapshot,
 } from "./contracts"
-import { batchIdempotencyEntryListSchema, compactGrantConsumptionStateListSchema } from "./contracts"
+import {
+  batchIdempotencyEntryListSchema,
+  compactGrantConsumptionStateListSchema,
+} from "./contracts"
 import {
   entitlementConfigTable,
   entitlementPeriodUsageTable,
   grantsTable,
   idempotencyKeyBatchesTable,
   meterStateTable,
-  schema,
+  type schema,
   walletReservationTable,
 } from "./db/schema"
 import { extractCurrencyCodeFromFeatureConfig } from "./meter-helpers"
 import type { MeterStateDraft } from "./meter-state-adapter"
 import { jsonEquals, minNullableExpiry, unique } from "./utils"
-import type { z } from "zod"
 
 // ---------------------------------------------------------------------------
 // Public pure helpers
@@ -284,9 +291,7 @@ export class EntitlementWindowStore {
     }
   }
 
-  readEntitlementConfig(
-    tx: DrizzleSqliteDODatabase<typeof schema>
-  ): EntitlementConfigInput | null {
+  readEntitlementConfig(tx: DrizzleSqliteDODatabase<typeof schema>): EntitlementConfigInput | null {
     const row = tx
       .select({
         customerEntitlementId: entitlementConfigTable.customerEntitlementId,
@@ -472,7 +477,11 @@ export class EntitlementWindowStore {
 
       for (const row of rows) {
         states.push(
-          ...parseCompactGrantStates(row.grantStatesJson, compactGrantConsumptionStateListSchema, this.logger)
+          ...parseCompactGrantStates(
+            row.grantStatesJson,
+            compactGrantConsumptionStateListSchema,
+            this.logger
+          )
         )
       }
     }
@@ -555,7 +564,11 @@ export class EntitlementWindowStore {
         .get()
 
       const mergedStates = existing
-        ? parseCompactGrantStates(existing.grantStatesJson, compactGrantConsumptionStateListSchema, this.logger)
+        ? parseCompactGrantStates(
+            existing.grantStatesJson,
+            compactGrantConsumptionStateListSchema,
+            this.logger
+          )
         : []
       for (const state of periodStates) {
         replaceGrantConsumptionState(mergedStates, state)
@@ -622,9 +635,7 @@ export class EntitlementWindowStore {
     return lifecycleEnds.length > 0 ? Math.max(...lifecycleEnds) : null
   }
 
-  readWalletReservation(
-    tx: DrizzleSqliteDODatabase<typeof schema>
-  ): WalletReservationSnapshot {
+  readWalletReservation(tx: DrizzleSqliteDODatabase<typeof schema>): WalletReservationSnapshot {
     const row = tx
       .select({
         projectId: walletReservationTable.projectId,

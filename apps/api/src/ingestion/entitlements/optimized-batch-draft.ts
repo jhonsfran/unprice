@@ -1,4 +1,5 @@
 import type { GrantConsumptionState } from "@unprice/services/entitlements"
+import type { ReservationCloseReason } from "@unprice/services/wallet"
 import type {
   ApplyBatchMetrics,
   ApplyBatchResultRow,
@@ -6,7 +7,6 @@ import type {
   RefillTrigger,
   WalletReservationSnapshot,
 } from "./contracts"
-import type { ReservationCloseReason } from "@unprice/services/wallet"
 import { createApplyBatchMetrics } from "./contracts"
 import type { MeterStateDraft } from "./meter-state-adapter"
 import { unique } from "./utils"

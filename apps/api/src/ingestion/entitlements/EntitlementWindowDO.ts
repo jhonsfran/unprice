@@ -1,9 +1,6 @@
 import { DurableObject } from "cloudflare:workers"
 import { createConnection } from "@unprice/db"
-import type {
-  Currency,
-  OverageStrategy,
-} from "@unprice/db/validators"
+import type { Currency, OverageStrategy } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { LEDGER_SCALE, formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import {
@@ -38,7 +35,7 @@ import {
   computeSyncGrowRefillAmount,
   updateSpendVelocity,
 } from "@unprice/services/wallet/reservation-sizing"
-import { desc, eq, inArray } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import type { Env } from "~/env"
@@ -50,26 +47,14 @@ import {
   createAllowedBatchOutcome,
   createCachedBatchResult,
   createDeniedBatchOutcome,
-  idempotencyEntryToApplyResult,
   planWalletReservationSpend,
 } from "./batch-apply-helpers"
-import { EntitlementWindowStore, replaceGrantConsumptionState } from "./entitlement-window-store"
-import {
-  type OptimizedBatchDraft,
-  type OptimizedBatchWriteMetrics,
-  createOptimizedBatchDraft,
-} from "./optimized-batch-draft"
-import {
-  FLUSH_INTERVAL_MS,
-  IDEMPOTENCY_CLEANUP_INTERVAL_MS,
-} from "./constants"
+import { FLUSH_INTERVAL_MS, IDEMPOTENCY_CLEANUP_INTERVAL_MS } from "./constants"
 import {
   type ActiveGrantInput,
   type ApplyBatchInput,
   type ApplyBatchInternalResult,
-  type ApplyBatchMetrics,
   type ApplyBatchResultRow,
-  type ApplyGrantInput,
   type ApplyInnerOptions,
   type ApplyInput,
   type ApplyResult,
@@ -101,29 +86,27 @@ import {
   createApplyBatchMetrics,
   enforcementStateInputSchema,
 } from "./contracts"
-import {
-  meterStateTable,
-  schema,
-  walletReservationTable,
-} from "./db/schema"
+import { meterStateTable, schema, walletReservationTable } from "./db/schema"
 import migrations from "./drizzle/migrations"
+import { EntitlementWindowStore, replaceGrantConsumptionState } from "./entitlement-window-store"
 import {
   extractCurrencyCodeFromFeatureConfig,
   readNumericEventField,
   resolveMeterIdentity,
 } from "./meter-helpers"
+import { InMemoryMeterStorageAdapter, type MeterStateDraft } from "./meter-state-adapter"
+import {
+  type OptimizedBatchDraft,
+  type OptimizedBatchWriteMetrics,
+  createOptimizedBatchDraft,
+} from "./optimized-batch-draft"
+import { inactivityThresholdMs, maxFlushIntervalMs, unique } from "./utils"
 import {
   type ReservationInvoiceContext,
   hasPendingWalletFlush,
   isReservationInvoiceContextMissing,
   requireReservationInvoiceContext,
 } from "./wallet-reservation-flow"
-import { InMemoryMeterStorageAdapter, type MeterStateDraft } from "./meter-state-adapter"
-import {
-  inactivityThresholdMs,
-  maxFlushIntervalMs,
-  unique,
-} from "./utils"
 
 export { entitlementWindowStatusSchema } from "./contracts"
 export type { EntitlementWindowStatus } from "./contracts"
@@ -2032,7 +2015,11 @@ export class EntitlementWindowDO extends DurableObject {
           activeGrants,
           facts: pendingFacts,
           overageStrategy,
-          states: this.store.readGrantStatesForActiveGrants(tx, activeGrants, input.event.timestamp),
+          states: this.store.readGrantStatesForActiveGrants(
+            tx,
+            activeGrants,
+            input.event.timestamp
+          ),
           entitlement,
           timestamp: input.event.timestamp,
         })
@@ -3844,10 +3831,7 @@ export class EntitlementWindowDO extends DurableObject {
     )
   }
 
-  private isCleanupComplete(
-    window: WalletReservationSnapshot,
-    outboxCount: number
-  ): boolean {
+  private isCleanupComplete(window: WalletReservationSnapshot, outboxCount: number): boolean {
     return (
       outboxCount === 0 &&
       !window?.reservationId &&

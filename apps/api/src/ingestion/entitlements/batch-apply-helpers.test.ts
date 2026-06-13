@@ -10,7 +10,7 @@ import {
   idempotencyEntryToApplyResult,
   planWalletReservationSpend,
 } from "./batch-apply-helpers"
-import type { ApplyBatchInput, BatchIdempotencyEntry, WalletReservationSnapshot } from "./contracts"
+import type { ApplyBatchInput, WalletReservationSnapshot } from "./contracts"
 
 describe("batch apply helpers", () => {
   it("builds a single-event apply input from a batch event", () => {
