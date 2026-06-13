@@ -43,7 +43,7 @@ export const AnimatedListDemo = ({ className }: { className?: string }) => {
     <div className={cn("relative flex h-[500px] w-full flex-col overflow-hidden p-2", className)}>
       <AnimatedList>
         {notifications.map((item, idx) => (
-          <Notification {...item} key={`${idx}-${item.name}`} />
+          <Notification key={`${idx}-${item.name}`} {...item} />
         ))}
       </AnimatedList>
 

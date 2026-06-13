@@ -44,23 +44,22 @@ export function NumberTicker({
     }
   }, [motionValue, isInView, delay, value, direction, startValue])
 
-  useEffect(
-    () =>
-      springValue.on("change", (latest: number) => {
-        if (ref.current) {
-          const formattedValue = withFormatter
-            ? isTime
-              ? nFormatterTime(latest, { digits: decimalPlaces })
-              : nFormatter(latest, { digits: decimalPlaces })
-            : Intl.NumberFormat("en-US", {
-                minimumFractionDigits: decimalPlaces,
-                maximumFractionDigits: decimalPlaces,
-              }).format(Number(latest.toFixed(decimalPlaces)))
-          ref.current.textContent = formattedValue
-        }
-      }),
-    [springValue, decimalPlaces]
-  )
+  useEffect(() => {
+    const unsubscribe = springValue.on("change", (latest: number) => {
+      if (ref.current) {
+        const formattedValue = withFormatter
+          ? isTime
+            ? nFormatterTime(latest, { digits: decimalPlaces })
+            : nFormatter(latest, { digits: decimalPlaces })
+          : Intl.NumberFormat("en-US", {
+              minimumFractionDigits: decimalPlaces,
+              maximumFractionDigits: decimalPlaces,
+            }).format(Number(latest.toFixed(decimalPlaces)))
+        ref.current.textContent = formattedValue
+      }
+    })
+    return () => unsubscribe()
+  }, [springValue, decimalPlaces])
 
   return (
     <span

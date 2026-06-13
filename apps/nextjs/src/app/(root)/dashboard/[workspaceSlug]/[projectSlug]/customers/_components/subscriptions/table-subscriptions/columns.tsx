@@ -19,6 +19,17 @@ import { DataTableRowActions } from "./data-table-row-actions"
 
 type Subscription = RouterOutputs["subscriptions"]["listByActiveProject"]["subscriptions"][number]
 
+function SubscriptionCustomerCell({ row }: { row: { original: Subscription } }) {
+  const { workspaceSlug, projectSlug } = useParams()
+  return (
+    <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/${row.original.id}`}>
+      <div className="whitespace-nowrap text-sm">
+        {row.original.customer.email} - {row.original.customer.name}
+      </div>
+    </SuperLink>
+  )
+}
+
 export const columns: ColumnDef<Subscription>[] = [
   {
     id: "select",
@@ -51,19 +62,7 @@ export const columns: ColumnDef<Subscription>[] = [
     accessorKey: "customerId",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Customer" />,
-    cell: ({ row }) => {
-      const { workspaceSlug, projectSlug } = useParams()
-
-      return (
-        <SuperLink
-          href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/${row.original.id}`}
-        >
-          <div className="whitespace-nowrap text-sm">
-            {row.original.customer.email} - {row.original.customer.name}
-          </div>
-        </SuperLink>
-      )
-    },
+    cell: ({ row }) => <SubscriptionCustomerCell row={row} />,
     size: 40,
     filterFn: (row, _, filterValue) => {
       // search by name, email or customer id

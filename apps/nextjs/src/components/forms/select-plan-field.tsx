@@ -77,6 +77,8 @@ export default function SelectPlanFormField<TFieldValues extends FormValues>({
                     variant="outline"
                     // biome-ignore lint/a11y/useSemanticElements: <explanation>
                     role="combobox"
+                    aria-expanded={switcherCustomerOpen}
+                    aria-controls="select-plan-popup"
                     disabled={isDisabled}
                     className={cn("w-full justify-between")}
                   >
@@ -92,7 +94,10 @@ export default function SelectPlanFormField<TFieldValues extends FormValues>({
                 </FormControl>
               </div>
             </PopoverTrigger>
-            <PopoverContent className="max-h-[--radix-popover-content-available-height] w-[--radix-popover-trigger-width] p-0">
+            <PopoverContent
+              id="select-plan-popup"
+              className="max-h-[--radix-popover-content-available-height] w-[--radix-popover-trigger-width] p-0"
+            >
               <Command>
                 <CommandInput placeholder="Search a plan..." />
                 <CommandList className="overflow-hidden">

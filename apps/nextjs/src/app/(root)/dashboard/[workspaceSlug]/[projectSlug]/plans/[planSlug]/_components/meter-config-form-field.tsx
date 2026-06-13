@@ -527,6 +527,8 @@ export function MeterConfigFormField({
                       variant="outline"
                       // biome-ignore lint/a11y/useSemanticElements: Button trigger matches the shared searchable picker pattern used across the app.
                       role="combobox"
+                      aria-expanded={isPickerOpen}
+                      aria-controls="meter-event-picker-popup"
                       disabled={isDisabled}
                       className="h-9 w-full justify-between gap-2 px-3 font-normal"
                     >
@@ -556,6 +558,7 @@ export function MeterConfigFormField({
                   </FormControl>
                 </PopoverTrigger>
                 <PopoverContent
+                  id="meter-event-picker-popup"
                   align="start"
                   className="max-h-[--radix-popover-content-available-height] w-[var(--radix-popover-trigger-width)] p-0"
                 >

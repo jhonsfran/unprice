@@ -58,6 +58,7 @@ export function ProjectSwitcher() {
           // biome-ignore lint/a11y/useSemanticElements: <explanation>
           role="combobox"
           aria-expanded={switcherOpen}
+          aria-controls="project-switcher-popup"
           aria-label="Select a project"
           className="w-36 sm:w-full"
         >
@@ -77,7 +78,7 @@ export function ProjectSwitcher() {
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-56 p-0" align="start">
+      <PopoverContent id="project-switcher-popup" className="w-56 p-0" align="start">
         <Command>
           <CommandList>
             <CommandInput placeholder="Search project..." />

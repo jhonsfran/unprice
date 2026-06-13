@@ -3,6 +3,7 @@
 import { createUser } from "@unprice/auth/utils"
 import { AUTH_ROUTES } from "@unprice/config"
 
+// react-doctor-disable-next-line react-doctor/server-auth-actions
 export async function signUpWithCredentials({
   email,
   password,

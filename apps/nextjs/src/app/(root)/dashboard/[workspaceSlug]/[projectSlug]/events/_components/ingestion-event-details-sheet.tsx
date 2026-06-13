@@ -30,7 +30,11 @@ export function IngestionEventDetailsSheet({
   const trpc = useTRPC()
   const hasReplayPayload = event?.state === "failed" && event.replayable
   const canReplay = hasReplayPayload && !isReplayQueued
-  const payload = useQuery(
+  const {
+    data: payloadData,
+    isLoading: isPayloadLoading,
+    error: payloadError,
+  } = useQuery(
     trpc.analytics.getFailedIngestionEventPayload.queryOptions(
       {
         canonicalAuditId: event?.canonicalAuditId ?? "",
@@ -45,7 +49,7 @@ export function IngestionEventDetailsSheet({
     return null
   }
 
-  const issue = getIssueDetails(event, payload.data)
+  const issue = getIssueDetails(event, payloadData)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -125,7 +129,7 @@ export function IngestionEventDetailsSheet({
                 <DetailTerm label="Failure reason" value={event.failureReason ?? "none"} />
                 <DetailTerm
                   label="Failure message"
-                  value={event.failureMessage ?? payload.data?.failureMessage ?? "none"}
+                  value={event.failureMessage ?? payloadData?.failureMessage ?? "none"}
                 />
                 <DetailTerm label="Replayable" value={event.replayable ? "yes" : "no"} />
               </dl>
@@ -134,7 +138,15 @@ export function IngestionEventDetailsSheet({
 
           <section className="space-y-3">
             <SectionTitle>Payload</SectionTitle>
-            <PayloadPanel event={event} payload={payload} canFetchPayload={hasReplayPayload} />
+            <PayloadPanel
+              event={event}
+              payload={{
+                data: payloadData,
+                isLoading: isPayloadLoading,
+                error: payloadError ?? null,
+              }}
+              canFetchPayload={hasReplayPayload}
+            />
           </section>
         </div>
       </SheetContent>

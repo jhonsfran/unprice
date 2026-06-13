@@ -89,6 +89,8 @@ export default function TimeZoneFormField<TFieldValues extends FormValues>({
                     variant="outline"
                     // biome-ignore lint/a11y/useSemanticElements: <explanation>
                     role="combobox"
+                    aria-expanded={switcherCustomerOpen}
+                    aria-controls="timezone-picker-popup"
                     disabled={isDisabled}
                     className={cn("w-full justify-between")}
                   >
@@ -98,7 +100,10 @@ export default function TimeZoneFormField<TFieldValues extends FormValues>({
                 </FormControl>
               </div>
             </PopoverTrigger>
-            <PopoverContent className="max-h-[--radix-popover-content-available-height] w-[--radix-popover-trigger-width] p-0">
+            <PopoverContent
+              id="timezone-picker-popup"
+              className="max-h-[--radix-popover-content-available-height] w-[--radix-popover-trigger-width] p-0"
+            >
               <Command>
                 <CommandInput placeholder="Search a timezone..." />
                 <CommandList className="overflow-hidden">

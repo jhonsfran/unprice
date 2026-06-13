@@ -7,9 +7,8 @@ export function WorkspaceSwitcherSkeleton() {
     <Button
       variant="ghost"
       size="sm"
-      // biome-ignore lint/a11y/useSemanticElements: <explanation>
-      role="combobox"
       aria-label="Select a workspace"
+      aria-busy="true"
       className="w-44 justify-between"
     >
       <Avatar className="mr-2 h-5 w-5">

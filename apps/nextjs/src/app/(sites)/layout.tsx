@@ -39,10 +39,7 @@ export default function SitesLayout(props: { children: React.ReactNode }) {
     <ViewTransitions>
       <html lang="en" suppressHydrationWarning>
         <head>
-          <meta
-            name="viewport"
-            content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
-          />
+          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         </head>
         <body
           className={cn(

@@ -8,7 +8,7 @@ import { Switch } from "@unprice/ui/switch"
 import { cn } from "@unprice/ui/utils"
 import { CreditCard, ExternalLink, RefreshCw, TestTube2, TriangleAlert } from "lucide-react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { toastAction } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
@@ -160,14 +160,19 @@ export function PaymentProviderConfigForm({
   const trpc = useTRPC()
   let projectSlug = params.projectSlug as string
   const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null)
+  const [prevProviderId, setPrevProviderId] = useState(provider?.id)
+  const [prevProviderUpdatedAtM, setPrevProviderUpdatedAtM] = useState(provider?.updatedAtM)
+
+  // Reset the override whenever the provider identity or data changes, without a useEffect delay
+  if (prevProviderId !== provider?.id || prevProviderUpdatedAtM !== provider?.updatedAtM) {
+    setPrevProviderId(provider?.id)
+    setPrevProviderUpdatedAtM(provider?.updatedAtM)
+    setEnabledOverride(null)
+  }
 
   if (!projectSlug) {
     projectSlug = searchParams.get("projectSlug") as string
   }
-
-  useEffect(() => {
-    setEnabledOverride(null)
-  }, [provider?.active, provider?.id, provider?.updatedAtM])
 
   const startConnection = useMutation(
     trpc.paymentProvider.startConnection.mutationOptions({

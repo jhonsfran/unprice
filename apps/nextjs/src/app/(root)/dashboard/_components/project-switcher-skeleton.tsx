@@ -6,9 +6,8 @@ export function ProjectSwitcherSkeleton() {
     <Button
       variant="ghost"
       size="sm"
-      // biome-ignore lint/a11y/useSemanticElements: <explanation>
-      role="combobox"
       aria-label="project"
+      aria-busy="true"
       className="w-44 justify-between opacity-50"
     >
       <Skeleton className="h-[20px] w-full bg-background-bgHover" />

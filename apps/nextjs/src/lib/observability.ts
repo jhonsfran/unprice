@@ -38,6 +38,11 @@ export const { withEvlog, useLogger, log, createError, createEvlogError } = crea
   sampling: sharedSamplingConfig(env.APP_ENV),
 })
 
+// Internal alias without the `use` prefix.
+// useLogger from evlog/next reads per-request context via AsyncLocalStorage,
+// not React state — calling it from async server-side functions is safe.
+const getEvlogLogger = useLogger
+
 // ============================================
 // Helper to get typed logger from evlog/next context
 // ============================================
@@ -46,7 +51,7 @@ export function getRequestLoggers(_requestId?: string): {
   requestLogger: RequestLogger<Record<string, unknown>>
   logger: Logger
 } {
-  const requestLogger = useLogger<Record<string, unknown>>()
+  const requestLogger = getEvlogLogger<Record<string, unknown>>()
   return {
     requestLogger,
     logger: createLogger(requestLogger, {

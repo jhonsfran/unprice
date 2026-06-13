@@ -1,7 +1,9 @@
 "use server"
 
+import { getSession } from "@unprice/auth/server-rsc"
 import { COOKIES_APP } from "@unprice/config"
 import { cookies } from "next/headers"
+import { redirect } from "next/navigation"
 
 /**
  * Update the context cookies for the current workspace and project
@@ -15,6 +17,9 @@ export async function updateContextCookies(
   workspaceSlug: string | null,
   projectSlug: string | null
 ) {
+  const session = await getSession()
+  if (!session?.user) redirect("/auth/signin")
+
   const cookieStore = cookies()
 
   const cookieOptions = {

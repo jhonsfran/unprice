@@ -3,6 +3,26 @@ import { siteConfig } from "~/constants/layout"
 
 export const runtime = "edge"
 
+// Simplified Logo for Satori (no filters)
+const SimpleLogo = ({ size = 80, color = "#ffc53d" }: { size?: number; color?: string }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    role="img"
+    aria-label="Unprice Logo"
+  >
+    {/* Left Pillar */}
+    <rect x="3" y="4" width="3" height="16" fill={color} />
+    {/* Right Pillar */}
+    <rect x="18" y="4" width="3" height="16" fill={color} />
+    {/* The Foundation (Bottom) */}
+    <rect x="3" y="17" width="18" height="3" fill={color} />
+  </svg>
+)
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const title = searchParams.get("title") || siteConfig.name
@@ -32,26 +52,6 @@ export async function GET(req: Request) {
   if (!font) {
     return new Response("Failed to load fonts for OG image generation.", { status: 500 })
   }
-
-  // Simplified Logo for Satori (no filters)
-  const SimpleLogo = ({ size = 80, color = "#ffc53d" }: { size?: number; color?: string }) => (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      role="img"
-      aria-label="Unprice Logo"
-    >
-      {/* Left Pillar */}
-      <rect x="3" y="4" width="3" height="16" fill={color} />
-      {/* Right Pillar */}
-      <rect x="18" y="4" width="3" height="16" fill={color} />
-      {/* The Foundation (Bottom) */}
-      <rect x="3" y="17" width="18" height="3" fill={color} />
-    </svg>
-  )
 
   // Default Pluto landing page OG image
   return new ImageResponse(
@@ -84,9 +84,9 @@ export async function GET(req: Request) {
         }}
       >
         {logoUrl ? (
-          // biome-ignore lint/a11y/useAltText: <explanation>
           <img
             src={logoUrl}
+            alt="Logo"
             style={{ width: "80px", height: "80px", borderRadius: "12px", objectFit: "contain" }}
           />
         ) : (

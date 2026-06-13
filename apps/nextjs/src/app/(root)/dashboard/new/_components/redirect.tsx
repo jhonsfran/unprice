@@ -11,6 +11,9 @@ export default function Redirect({ url }: { url: string }) {
   const queryClient = useQueryClient()
 
   useEffect(() => {
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout>
+
     const validate = async () => {
       // refetch active project queries
       await queryClient.refetchQueries({
@@ -27,14 +30,24 @@ export default function Redirect({ url }: { url: string }) {
       // // trigger the session update
       await updateSession()
 
+      if (cancelled) return
+
       // wait 1 second to make sure the session is updated
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      await new Promise<void>((resolve) => {
+        timeoutId = setTimeout(resolve, 1000)
+      })
+
+      if (cancelled) return
 
       // redirect to the url
       router.push(url)
     }
 
     validate()
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+    }
   }, [])
 
   return <LayoutLoader />

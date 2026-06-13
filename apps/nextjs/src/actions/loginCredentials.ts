@@ -3,6 +3,7 @@
 import { signIn } from "@unprice/auth/server"
 import { APP_DOMAIN } from "@unprice/config"
 
+// react-doctor-disable-next-line react-doctor/server-auth-actions
 export async function loginWithCredentials({
   email,
   password,

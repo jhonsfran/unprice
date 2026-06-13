@@ -17,6 +17,20 @@ import { DataTableRowActions } from "./data-table-row-actions"
 
 type InvoiceCustomer = RouterOutputs["customers"]["getInvoices"]["invoices"][number]
 
+function InvoiceIdCell({ row }: { row: { original: InvoiceCustomer } }) {
+  const { workspaceSlug, projectSlug, customerId } = useParams()
+  return (
+    <div className="whitespace-nowrap text-sm">
+      <SuperLink
+        href={`/${workspaceSlug}/${projectSlug}/customers/${customerId}/invoices/${row.original.id}`}
+        className="hover:underline"
+      >
+        {row.original.id}
+      </SuperLink>
+    </div>
+  )
+}
+
 export const columns: ColumnDef<InvoiceCustomer>[] = [
   {
     id: "select",
@@ -49,19 +63,7 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     accessorKey: "id",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Invoice" />,
-    cell: ({ row }) => {
-      const { workspaceSlug, projectSlug, customerId } = useParams()
-      return (
-        <div className="whitespace-nowrap text-sm">
-          <SuperLink
-            href={`/${workspaceSlug}/${projectSlug}/customers/${customerId}/invoices/${row.original.id}`}
-            className="hover:underline"
-          >
-            {row.original.id}
-          </SuperLink>
-        </div>
-      )
-    },
+    cell: ({ row }) => <InvoiceIdCell row={row} />,
     size: 40,
     filterFn: (row, _, filterValue) => {
       // search by id

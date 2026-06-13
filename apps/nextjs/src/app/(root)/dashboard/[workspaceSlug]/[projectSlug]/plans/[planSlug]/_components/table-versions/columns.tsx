@@ -17,6 +17,39 @@ import { DataTableRowActions } from "./data-table-row-actions"
 
 export type PlanVersion = RouterOutputs["plans"]["getVersionsBySlug"]["plan"]["versions"][number]
 
+function PlanVersionTitleCell({ row }: { row: { original: PlanVersion } }) {
+  const pathname = usePathname()
+  const latestToneClass = statusToneClasses[getStatusTone("latest")]
+
+  return (
+    <SuperLink href={`${pathname}/${row.original.id}`} prefetch={false}>
+      <div className="flex items-center gap-2">
+        <Typography variant="h6" className="truncate">
+          {row.original.title}
+        </Typography>
+
+        {row.original.latest && (
+          <div
+            className={cn(
+              "inline-flex items-center gap-1 font-medium text-xs",
+              latestToneClass.text
+            )}
+          >
+            <span className={cn("size-1.5 rounded-full", latestToneClass.dot)} />
+            <span>latest</span>
+          </div>
+        )}
+      </div>
+
+      {row.original.description && (
+        <div className="line-clamp-1 hidden text-muted-foreground text-xs md:inline">
+          {`${row.original.description.slice(0, 40)}...`}
+        </div>
+      )}
+    </SuperLink>
+  )
+}
+
 export const columns: ColumnDef<PlanVersion>[] = [
   {
     id: "select",
@@ -51,38 +84,7 @@ export const columns: ColumnDef<PlanVersion>[] = [
   {
     accessorKey: "title",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Title" />,
-    cell: ({ row }) => {
-      const pathname = usePathname()
-      const latestToneClass = statusToneClasses[getStatusTone("latest")]
-
-      return (
-        <SuperLink href={`${pathname}/${row.original.id}`} prefetch={false}>
-          <div className="flex items-center gap-2">
-            <Typography variant="h6" className="truncate">
-              {row.original.title}
-            </Typography>
-
-            {row.original.latest && (
-              <div
-                className={cn(
-                  "inline-flex items-center gap-1 font-medium text-xs",
-                  latestToneClass.text
-                )}
-              >
-                <span className={cn("size-1.5 rounded-full", latestToneClass.dot)} />
-                <span>latest</span>
-              </div>
-            )}
-          </div>
-
-          {row.original.description && (
-            <div className="line-clamp-1 hidden text-muted-foreground text-xs md:inline">
-              {`${row.original.description.slice(0, 40)}...`}
-            </div>
-          )}
-        </SuperLink>
-      )
-    },
+    cell: ({ row }) => <PlanVersionTitleCell row={row} />,
     enableSorting: true,
     enableHiding: false,
     enableResizing: true,
