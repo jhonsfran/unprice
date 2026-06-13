@@ -28,26 +28,10 @@ export default async function DashboardOverview(props: {
         ...ANALYTICS_CONFIG_REALTIME,
       }
     ),
-    trpc.analytics.getProjectUsage.queryOptions(
+    trpc.analytics.getUsageDashboard.queryOptions(
       {
         range: filter.intervalFilter,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
-    trpc.analytics.getProjectUsageTimeseries.queryOptions(
-      {
-        range: filter.intervalFilter,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
-    trpc.analytics.getTopConsumers.queryOptions(
-      {
-        range: filter.intervalFilter,
-        limit: 10,
+        topConsumersLimit: 10,
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,

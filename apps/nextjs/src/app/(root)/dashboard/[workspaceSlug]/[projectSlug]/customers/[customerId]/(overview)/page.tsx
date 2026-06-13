@@ -43,16 +43,7 @@ export default async function CustomerUsagePage({
   }
 
   batchPrefetch([
-    trpc.analytics.getProjectUsage.queryOptions(
-      {
-        customerId,
-        range: filter.intervalFilter,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
-    trpc.analytics.getProjectUsageTimeseries.queryOptions(
+    trpc.analytics.getUsageDashboard.queryOptions(
       {
         customerId,
         range: filter.intervalFilter,
