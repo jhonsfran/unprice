@@ -33,6 +33,23 @@ export type {
 } from "./analytics/forecast-usage"
 export { aiAnswerEnvelopeSchema, aiEvidenceSchema } from "./analytics/ai-contracts"
 export type { AiAnswerEnvelope, AiEvidence } from "./analytics/ai-contracts"
+export {
+  emptyUsageDashboardOutput,
+  getUsageDashboard,
+  getUsageDashboardInputSchema,
+  getUsageDashboardOutputSchema,
+  usageDashboardFeatureSchema,
+  usageDashboardTimeseriesRowSchema,
+  usageDashboardTopConsumerSchema,
+} from "./analytics/get-usage-dashboard"
+export type {
+  GetUsageDashboardDeps,
+  GetUsageDashboardInput,
+  GetUsageDashboardOutput,
+  UsageDashboardFeature,
+  UsageDashboardTimeseriesRow,
+  UsageDashboardTopConsumer,
+} from "./analytics/get-usage-dashboard"
 export { activateSubscription } from "./billing/provision-period"
 export {
   ExplainChargeError,
