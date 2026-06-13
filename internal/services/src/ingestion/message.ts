@@ -9,6 +9,11 @@ export const ingestionSourceSchema = z.object({
   sourceName: z.string().nullable(),
 })
 
+export const rawIngestionStorageSchema = z.object({
+  bucketName: z.string().min(1),
+  objectKey: z.string().min(1),
+})
+
 export const ingestionQueueMessageSchema = z.object({
   version: z.literal(1),
   workspaceId: z.string(),
@@ -22,6 +27,7 @@ export const ingestionQueueMessageSchema = z.object({
   timestamp: z.number(),
   properties: z.record(z.string(), z.unknown()),
   source: ingestionSourceSchema,
+  rawStorage: rawIngestionStorageSchema.optional(),
 })
 
 export type IngestionQueueMessage = z.infer<typeof ingestionQueueMessageSchema>

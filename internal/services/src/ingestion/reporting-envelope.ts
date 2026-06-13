@@ -1,6 +1,7 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import { EVENTS_SCHEMA_VERSION, type IngestionOutcome } from "./interface"
 import type { IngestionQueueMessage } from "./message"
+import { serializeReplayPayload } from "./message-outcomes"
 import {
   type IngestionReportingAuditRecord,
   type IngestionReportingEnvelope,
@@ -60,6 +61,9 @@ export async function buildIngestionReportingAuditRecord(params: {
     computeCanonicalAuditId(projectId, customerId, message.idempotencyKey),
     computePayloadHash(message),
   ])
+  const failed = outcome.state === "failed"
+  const payloadJson = failed ? serializeReplayPayload(message) : null
+  const r2ObjectKey = message.rawStorage?.objectKey ?? null
 
   return {
     idempotencyKey: message.idempotencyKey,
@@ -74,7 +78,12 @@ export async function buildIngestionReportingAuditRecord(params: {
     sourceId: message.source.sourceId,
     sourceName: message.source.sourceName,
     status: outcome.state,
-    rejectionReason: outcome.rejectionReason,
+    rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
+    failureStage: failed ? outcome.failureStage : null,
+    failureReason: failed ? outcome.failureReason : null,
+    replayable: failed ? outcome.replayable : false,
+    payloadJson,
+    r2ObjectKey,
     auditPayloadJson: JSON.stringify(
       buildIngestionAuditPayload(message, outcome, canonicalAuditId, payloadHash, handledAt)
     ),
@@ -90,6 +99,8 @@ export function buildIngestionAuditPayload(
   payloadHash: string,
   handledAt: number
 ): Record<string, unknown> {
+  const failed = outcome.state === "failed"
+
   return {
     event_date: toEventDate(message.timestamp),
     schema_version: EVENTS_SCHEMA_VERSION,
@@ -109,7 +120,12 @@ export function buildIngestionAuditPayload(
     received_at: message.receivedAt,
     handled_at: handledAt,
     state: outcome.state,
-    rejection_reason: outcome.rejectionReason,
+    rejection_reason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
+    failure_stage: failed ? outcome.failureStage : null,
+    failure_reason: failed ? outcome.failureReason : null,
+    replayable: failed ? outcome.replayable : false,
+    payload_json: failed ? serializeReplayPayload(message) : null,
+    r2_object_key: message.rawStorage?.objectKey ?? null,
     properties: message.properties,
     canonical_audit_id: canonicalAuditId,
     payload_hash: payloadHash,

@@ -517,7 +517,7 @@ describe("IngestionService entitlement routing", () => {
     expect(chargeCount).toBe(1)
     expect((send.mock.calls[1]?.[0] as IngestionReportingEnvelope).meterFacts).toHaveLength(1)
     expect(logger.error).toHaveBeenCalledWith(
-      "raw ingestion queue processing failed",
+      "ingestion reporting enqueue failed",
       expect.objectContaining({
         customerId: entitlement.customerId,
         projectId: entitlement.projectId,
@@ -863,7 +863,7 @@ describe("IngestionService entitlement routing", () => {
     )
   })
 
-  it("retries a partially applied async fanout and relies on entitlement idempotency for replay", async () => {
+  it("reports a partially applied async fanout as replayable failed ingestion", async () => {
     const eventsEntitlement = createEntitlement({
       customerEntitlementId: "ce_events",
       featurePlanVersionId: "fpv_events",
@@ -960,15 +960,22 @@ describe("IngestionService entitlement routing", () => {
       ],
     }
 
-    const first = await service.processCustomerGroup(group)
-    const retry = await service.processCustomerGroup(group)
+    const result = await service.processCustomerGroup(group)
+    const failedEnvelope = send.mock.calls[0]?.[0] as IngestionReportingEnvelope
 
-    expect(first[0]?.disposition.action).toBe("retry")
-    expect(retry[0]?.disposition.action).toBe("ack")
-    expect(eventsApplyBatch).toHaveBeenCalledTimes(2)
-    expect(keysApplyBatch).toHaveBeenCalledTimes(2)
+    expect(result[0]?.disposition.action).toBe("ack")
+    expect(eventsApplyBatch).toHaveBeenCalledTimes(1)
+    expect(keysApplyBatch).toHaveBeenCalledTimes(1)
     expect(eventsChargeCount).toBe(1)
     expect(send).toHaveBeenCalledTimes(1)
+    expect(failedEnvelope.meterFacts).toEqual([])
+    expect(failedEnvelope.auditRecords[0]).toMatchObject({
+      status: "failed",
+      failureStage: "rating_fact",
+      failureReason: "raw_ingestion_queue_processing_failed",
+      replayable: true,
+    })
+    expect(failedEnvelope.auditRecords[0]?.payloadJson).toEqual(JSON.stringify(group.messages[0]))
   })
 
   it("keeps async fanout processed when one meter applies before another denies late", async () => {
@@ -1713,6 +1720,11 @@ function createReportingAuditRecord(
     sourceId: "key_123",
     sourceName: null,
     status: "processed",
+    failureStage: null,
+    failureReason: null,
+    replayable: false,
+    payloadJson: null,
+    r2ObjectKey: null,
     firstSeenAt: SERVICE_NOW,
     handledAt: SERVICE_NOW + 1,
     auditPayloadJson: JSON.stringify({ id: "evt_123" }),

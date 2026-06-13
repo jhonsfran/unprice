@@ -20,10 +20,28 @@ export const INGESTION_REJECTION_REASONS = [
 
 export type IngestionRejectionReason = (typeof INGESTION_REJECTION_REASONS)[number]
 
-export type IngestionOutcome = {
-  rejectionReason?: IngestionRejectionReason
-  state: "processed" | "rejected"
-}
+export const INGESTION_FAILURE_STAGES = [
+  "raw_ingestion",
+  "rating_fact",
+  "reporting_delivery",
+] as const
+
+export type IngestionFailureStage = (typeof INGESTION_FAILURE_STAGES)[number]
+
+export type IngestionOutcome =
+  | {
+      state: "processed"
+    }
+  | {
+      rejectionReason: IngestionRejectionReason
+      state: "rejected"
+    }
+  | {
+      failureReason: string
+      failureStage: IngestionFailureStage
+      replayable: true
+      state: "failed"
+    }
 
 export type IngestionSyncResult = {
   allowed: boolean

@@ -62,7 +62,11 @@ describe("IngestionReportingConsumer", () => {
         idempotency_key: "idem_123",
         state: "processed",
         rejection_reason: null,
+        failure_stage: null,
+        failure_reason: null,
         replayable: false,
+        payload_json: null,
+        r2_object_key: null,
         timestamp: TEST_NOW,
         received_at: TEST_NOW,
         handled_at: TEST_NOW + 1,
@@ -108,6 +112,82 @@ describe("IngestionReportingConsumer", () => {
 
     expect(ingestMeterFacts).toHaveBeenCalledTimes(2)
     expect(ingestMeterFacts.mock.calls.map(([chunk]) => chunk.length)).toEqual([5_000, 1])
+  })
+
+  it("writes failed replay fields to Tinybird ingestion status events", async () => {
+    const payloadJson = JSON.stringify({
+      version: 1,
+      workspaceId: "ws_123",
+      projectId: "proj_123",
+      customerId: "cus_123",
+      requestId: "req_123",
+      receivedAt: TEST_NOW,
+      idempotencyKey: "idem_123",
+      id: "evt_123",
+      slug: "usage.recorded",
+      timestamp: TEST_NOW,
+      properties: { amount: 1 },
+      source: {
+        environment: "test",
+        apiKeyId: "key_123",
+        sourceType: "api_key",
+        sourceId: "key_123",
+        sourceName: null,
+      },
+    })
+    const auditRecord = createAuditRecord({
+      status: "failed",
+      failureStage: "rating_fact",
+      failureReason: "raw_ingestion_queue_processing_failed",
+      replayable: true,
+      payloadJson,
+      r2ObjectKey: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
+      auditPayloadJson: createAuditPayloadJson({
+        id: "evt_123",
+        slug: "usage.recorded",
+        timestamp: TEST_NOW,
+        failure_stage: "rating_fact",
+        failure_reason: "raw_ingestion_queue_processing_failed",
+        replayable: true,
+        payload_json: payloadJson,
+        r2_object_key: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
+      }),
+    })
+    const ingestIngestionEvents = vi.fn().mockResolvedValue({
+      quarantined_rows: 0,
+      successful_rows: 1,
+    })
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents,
+      ingestMeterFacts: vi.fn().mockResolvedValue({
+        quarantined_rows: 0,
+        successful_rows: 0,
+      }),
+      logger: createLogger() as never,
+      publishAuditRecords: vi.fn().mockResolvedValue(undefined),
+    })
+
+    await consumer.consumeBatch({
+      messages: [
+        {
+          ack: vi.fn(),
+          body: createEnvelope({ auditRecords: [auditRecord] }),
+          retry: vi.fn(),
+        },
+      ],
+    })
+
+    expect(ingestIngestionEvents).toHaveBeenCalledWith([
+      expect.objectContaining({
+        state: "failed",
+        rejection_reason: null,
+        failure_stage: "rating_fact",
+        failure_reason: "raw_ingestion_queue_processing_failed",
+        replayable: true,
+        payload_json: payloadJson,
+        r2_object_key: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
+      }),
+    ])
   })
 
   it("chunks Tinybird writes by NDJSON byte size", () => {
@@ -486,6 +566,11 @@ function createAuditRecord(
     sourceId: "key_123",
     sourceName: null,
     status: "processed",
+    failureStage: null,
+    failureReason: null,
+    replayable: false,
+    payloadJson: null,
+    r2ObjectKey: null,
     firstSeenAt: TEST_NOW,
     handledAt: TEST_NOW + 1,
     auditPayloadJson: JSON.stringify({
@@ -507,6 +592,11 @@ function createAuditRecord(
       received_at: TEST_NOW,
       handled_at: TEST_NOW + 1,
       state: "processed",
+      failure_stage: null,
+      failure_reason: null,
+      replayable: false,
+      payload_json: null,
+      r2_object_key: null,
       properties: { amount: 1 },
       canonical_audit_id: "audit_123",
       payload_hash: "hash_123",
@@ -515,7 +605,16 @@ function createAuditRecord(
   }
 }
 
-function createAuditPayloadJson(input: { id: string; slug: string; timestamp: number }): string {
+function createAuditPayloadJson(input: {
+  failure_reason?: string | null
+  failure_stage?: "raw_ingestion" | "rating_fact" | "reporting_delivery" | null
+  id: string
+  payload_json?: string | null
+  r2_object_key?: string | null
+  replayable?: boolean
+  slug: string
+  timestamp: number
+}): string {
   return JSON.stringify({
     event_date: "2026-03-20",
     schema_version: 1,
@@ -535,6 +634,11 @@ function createAuditPayloadJson(input: { id: string; slug: string; timestamp: nu
     received_at: TEST_NOW,
     handled_at: TEST_NOW + 1,
     state: "processed",
+    failure_stage: input.failure_stage ?? null,
+    failure_reason: input.failure_reason ?? null,
+    replayable: input.replayable ?? false,
+    payload_json: input.payload_json ?? null,
+    r2_object_key: input.r2_object_key ?? null,
     properties: { amount: 1 },
     canonical_audit_id: "audit_123",
     payload_hash: "hash_123",
@@ -560,7 +664,11 @@ function createIngestionEvent(
     idempotency_key: "idem_123",
     state: "processed",
     rejection_reason: null,
+    failure_stage: null,
+    failure_reason: null,
     replayable: false,
+    payload_json: null,
+    r2_object_key: null,
     timestamp: TEST_NOW,
     received_at: TEST_NOW,
     handled_at: TEST_NOW + 1,

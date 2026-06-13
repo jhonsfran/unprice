@@ -2,6 +2,7 @@ import type { Logger } from "@unprice/logs"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import type { FanoutMessageOutcome as MessageOutcome } from "./fanout-outcomes"
 import type {
+  IngestionFailureStage,
   IngestionMessageProcessingResult,
   IngestionOutcome,
   IngestionRejectionReason,
@@ -50,7 +51,7 @@ export class IngestionMessageOutcomes {
         customerId: params.customerId,
         message,
         projectId: params.projectId,
-        rejectionReason: outcome.rejectionReason,
+        rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
       })
       tooOldOutcomes.push({ message, outcome })
     }
@@ -112,6 +113,24 @@ export class IngestionMessageOutcomes {
     })
   }
 
+  public buildFailedOutcomes(
+    messages: IngestionQueueMessage[],
+    params: {
+      failureReason: string
+      failureStage: IngestionFailureStage
+    }
+  ): MessageOutcome[] {
+    return messages.map((message) => ({
+      message,
+      outcome: {
+        state: "failed",
+        failureStage: params.failureStage,
+        failureReason: params.failureReason,
+        replayable: true,
+      },
+    }))
+  }
+
   public logRejectedMessage(params: {
     customerId: string
     message: IngestionQueueMessage
@@ -158,16 +177,20 @@ export function retryMessage(
   }
 }
 
+export function serializeReplayPayload(message: IngestionQueueMessage): string {
+  return JSON.stringify(message)
+}
+
 export function toSyncResult(params: {
   allowed: boolean
   message?: string
-  outcome: IngestionOutcome
+  outcome: Extract<IngestionOutcome, { state: "processed" | "rejected" }>
 }): IngestionSyncResult {
   const { allowed, message, outcome } = params
   return {
     allowed,
     message,
-    rejectionReason: outcome.rejectionReason,
+    rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
     state: outcome.state,
   }
 }

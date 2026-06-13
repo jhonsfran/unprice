@@ -63,6 +63,8 @@ export class IngestionCustomerGroupProcessor {
   }): Promise<IngestionMessageProcessingResult[]> {
     const { customerId, projectId } = params
     const messages = [...params.messages].sort(sortIngestionMessages)
+    let finalizedOutcomes: MessageOutcome[] = []
+    let unfinalizedMessages = messages
 
     try {
       const { freshMessages, tooOldOutcomes } = this.messageOutcomes.partitionTooOldMessages({
@@ -73,10 +75,12 @@ export class IngestionCustomerGroupProcessor {
 
       if (tooOldOutcomes.length > 0) {
         await this.enqueueOutcomesToReporting(projectId, customerId, tooOldOutcomes)
+        finalizedOutcomes = tooOldOutcomes
+        unfinalizedMessages = freshMessages
       }
 
       if (freshMessages.length === 0) {
-        return mapOutcomesToAckResults(tooOldOutcomes)
+        return mapOutcomesToAckResults(finalizedOutcomes)
       }
 
       let preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({
@@ -84,6 +88,7 @@ export class IngestionCustomerGroupProcessor {
         messages: freshMessages,
         projectId,
       })
+      unfinalizedMessages = preparedGroup.messages
 
       const customerNotFoundOutcomes = this.resolveCustomerNotFoundOutcomes({
         customerId,
@@ -94,7 +99,7 @@ export class IngestionCustomerGroupProcessor {
         await this.enqueueOutcomesToReporting(projectId, customerId, customerNotFoundOutcomes)
         return [
           ...mapOutcomesToAckResults(customerNotFoundOutcomes),
-          ...mapOutcomesToAckResults(tooOldOutcomes),
+          ...mapOutcomesToAckResults(finalizedOutcomes),
         ]
       }
 
@@ -111,6 +116,7 @@ export class IngestionCustomerGroupProcessor {
           messages: freshMessages,
           projectId,
         })
+        unfinalizedMessages = preparedGroup.messages
       }
 
       const freshOutcomes = await this.processFreshPreparedMessages({
@@ -130,15 +136,59 @@ export class IngestionCustomerGroupProcessor {
         tooOldOutcomeCount: tooOldOutcomes.length,
       })
 
-      return [...mapOutcomesToAckResults(freshOutcomes), ...mapOutcomesToAckResults(tooOldOutcomes)]
+      return [
+        ...mapOutcomesToAckResults(freshOutcomes),
+        ...mapOutcomesToAckResults(finalizedOutcomes),
+      ]
     } catch (error) {
+      if (error instanceof IngestionReportingEnqueueError) {
+        this.logReportingEnqueueFailure({
+          customerId,
+          error: error.originalError,
+          projectId,
+        })
+
+        return [
+          ...unfinalizedMessages.map((message) => retryMessage(message)),
+          ...mapOutcomesToAckResults(finalizedOutcomes),
+        ]
+      }
+
       this.logger.error("raw ingestion queue processing failed", {
         projectId,
         customerId,
         error,
       })
 
-      return messages.map((message) => retryMessage(message))
+      const failedOutcomes = this.messageOutcomes.buildFailedOutcomes(unfinalizedMessages, {
+        failureStage: "rating_fact",
+        failureReason: "raw_ingestion_queue_processing_failed",
+      })
+
+      try {
+        await this.enqueueOutcomesToReporting(projectId, customerId, failedOutcomes)
+      } catch (reportingError) {
+        const errorToLog =
+          reportingError instanceof IngestionReportingEnqueueError
+            ? reportingError.originalError
+            : reportingError
+
+        this.logger.error("raw ingestion failure reporting enqueue failed", {
+          projectId,
+          customerId,
+          error: errorToLog,
+        })
+
+        return [
+          ...unfinalizedMessages.map((message) => retryMessage(message)),
+          ...mapOutcomesToAckResults(finalizedOutcomes),
+        ]
+      }
+
+      return [
+        ...mapOutcomesToAckResults(failedOutcomes),
+        ...mapOutcomesToAckResults(finalizedOutcomes),
+      ]
     }
   }
 
@@ -219,7 +269,33 @@ export class IngestionCustomerGroupProcessor {
       return
     }
 
-    await this.reportingDispatcher.enqueueOutcomes({ customerId, outcomes, projectId })
+    try {
+      await this.reportingDispatcher.enqueueOutcomes({ customerId, outcomes, projectId })
+    } catch (error) {
+      throw new IngestionReportingEnqueueError(error)
+    }
+  }
+
+  private logReportingEnqueueFailure(params: {
+    customerId: string
+    error: unknown
+    projectId: string
+  }): void {
+    this.logger.error("raw ingestion reporting enqueue failed", {
+      projectId: params.projectId,
+      customerId: params.customerId,
+      error: params.error,
+    })
+  }
+}
+
+class IngestionReportingEnqueueError extends Error {
+  public readonly originalError: unknown
+
+  constructor(originalError: unknown) {
+    super("ingestion reporting enqueue failed")
+    this.name = "IngestionReportingEnqueueError"
+    this.originalError = originalError
   }
 }
 

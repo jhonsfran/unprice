@@ -1,6 +1,6 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import { describe, expect, it } from "vitest"
-import type { IngestionQueueMessage } from "./message"
+import { type IngestionQueueMessage, ingestionQueueMessageSchema } from "./message"
 import {
   buildIngestionReportingAuditRecord,
   buildIngestionReportingEnvelope,
@@ -86,6 +86,11 @@ describe("ingestion reporting envelope builder", () => {
       sourceId: "key_123",
       sourceName: null,
       rejectionReason: "WALLET_EMPTY",
+      failureStage: null,
+      failureReason: null,
+      replayable: false,
+      payloadJson: null,
+      r2ObjectKey: null,
       status: "rejected",
     })
     expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
@@ -101,8 +106,106 @@ describe("ingestion reporting envelope builder", () => {
       source_name: null,
       state: "rejected",
       rejection_reason: "WALLET_EMPTY",
+      failure_stage: null,
+      failure_reason: null,
+      replayable: false,
+      payload_json: null,
+      r2_object_key: null,
       canonical_audit_id: record.canonicalAuditId,
       payload_hash: record.payloadHash,
+    })
+  })
+
+  it("includes payload_json only for failed reporting audit records", async () => {
+    const message = createMessage({
+      rawStorage: {
+        bucketName: "raw-events",
+        objectKey: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
+      },
+    })
+
+    const [processedRecord, rejectedRecord, failedRecord] = await Promise.all([
+      buildIngestionReportingAuditRecord({
+        customerId: message.customerId,
+        message,
+        now: () => HANDLED_AT,
+        outcome: { state: "processed" },
+        projectId: message.projectId,
+      }),
+      buildIngestionReportingAuditRecord({
+        customerId: message.customerId,
+        message,
+        now: () => HANDLED_AT,
+        outcome: { state: "rejected", rejectionReason: "WALLET_EMPTY" },
+        projectId: message.projectId,
+      }),
+      buildIngestionReportingAuditRecord({
+        customerId: message.customerId,
+        message,
+        now: () => HANDLED_AT,
+        outcome: {
+          state: "failed",
+          failureStage: "rating_fact",
+          failureReason: "raw_ingestion_queue_processing_failed",
+          replayable: true,
+        },
+        projectId: message.projectId,
+      }),
+    ])
+
+    expect(processedRecord.payloadJson).toBeNull()
+    expect(processedRecord).toMatchObject({
+      status: "processed",
+      failureStage: null,
+      failureReason: null,
+      replayable: false,
+      payloadJson: null,
+      r2ObjectKey: message.rawStorage?.objectKey,
+    })
+    expect(JSON.parse(processedRecord.auditPayloadJson)).toMatchObject({
+      failure_stage: null,
+      failure_reason: null,
+      payload_json: null,
+      r2_object_key: message.rawStorage?.objectKey,
+      replayable: false,
+    })
+    expect(rejectedRecord.payloadJson).toBeNull()
+    expect(rejectedRecord).toMatchObject({
+      status: "rejected",
+      failureStage: null,
+      failureReason: null,
+      replayable: false,
+      payloadJson: null,
+      r2ObjectKey: message.rawStorage?.objectKey,
+    })
+    expect(JSON.parse(rejectedRecord.auditPayloadJson)).toMatchObject({
+      failure_stage: null,
+      failure_reason: null,
+      payload_json: null,
+      r2_object_key: message.rawStorage?.objectKey,
+      replayable: false,
+    })
+
+    expect(failedRecord).toMatchObject({
+      status: "failed",
+      failureStage: "rating_fact",
+      failureReason: "raw_ingestion_queue_processing_failed",
+      replayable: true,
+      payloadJson: JSON.stringify(message),
+      r2ObjectKey: message.rawStorage?.objectKey,
+    })
+    expect(ingestionQueueMessageSchema.parse(JSON.parse(failedRecord.payloadJson ?? ""))).toEqual(
+      message
+    )
+    const failedAuditPayload = JSON.parse(failedRecord.auditPayloadJson)
+    expect(failedAuditPayload).not.toHaveProperty("rejection_reason")
+    expect(failedAuditPayload).toMatchObject({
+      state: "failed",
+      failure_stage: "rating_fact",
+      failure_reason: "raw_ingestion_queue_processing_failed",
+      replayable: true,
+      payload_json: JSON.stringify(message),
+      r2_object_key: message.rawStorage?.objectKey,
     })
   })
 

@@ -155,6 +155,48 @@ describe("IngestionCustomerGroupProcessor", () => {
     )
   })
 
+  it("logs and retries unreported messages when normal outcome reporting enqueue fails", async () => {
+    const logger = createLogger()
+    const reportingError = new Error("reporting down")
+    const message = createMessage()
+    const enqueueOutcomes = vi.fn().mockRejectedValue(reportingError)
+    const processor = createProcessor({
+      enqueueOutcomes,
+      logger,
+      preparedGroup: {
+        candidateEntitlements: [],
+        messages: [message],
+      },
+      preparedProcess: vi.fn().mockResolvedValue([
+        {
+          message,
+          outcome: { state: "processed" },
+        },
+      ]),
+    })
+
+    const result = await processor.processCustomerGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [message],
+    })
+
+    expect(result).toEqual([
+      {
+        message,
+        disposition: {
+          action: "retry",
+          retryAfterSeconds: undefined,
+        },
+      },
+    ])
+    expect(logger.error).toHaveBeenCalledWith("raw ingestion reporting enqueue failed", {
+      customerId: "cus_123",
+      projectId: "proj_123",
+      error: reportingError,
+    })
+  })
+
   it("reloads prepared context after subscription catch-up changes lifecycle state", async () => {
     const message = createMessage()
     const firstPreparedGroup = {
@@ -216,7 +258,7 @@ describe("IngestionCustomerGroupProcessor", () => {
     })
   })
 
-  it("returns retry results for the sorted group when processing fails", async () => {
+  it("reports unexpected raw processing failures as replayable failed outcomes and acks after enqueue", async () => {
     const logger = createLogger()
     const olderMessage = createMessage({
       id: "evt_older",
@@ -228,7 +270,85 @@ describe("IngestionCustomerGroupProcessor", () => {
       idempotencyKey: "idem_newer",
       timestamp: TEST_NOW,
     })
+    const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
     const processor = createProcessor({
+      enqueueOutcomes,
+      logger,
+      preparedProcess: vi.fn().mockRejectedValue(new Error("apply failed")),
+      preparedGroup: {
+        candidateEntitlements: [],
+        messages: [olderMessage, newerMessage],
+      },
+    })
+
+    const result = await processor.processCustomerGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [newerMessage, olderMessage],
+    })
+
+    expect(result).toEqual([
+      {
+        message: olderMessage,
+        disposition: {
+          action: "ack",
+        },
+      },
+      {
+        message: newerMessage,
+        disposition: {
+          action: "ack",
+        },
+      },
+    ])
+    expect(enqueueOutcomes).toHaveBeenCalledWith({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      outcomes: [
+        {
+          message: olderMessage,
+          outcome: {
+            state: "failed",
+            failureStage: "rating_fact",
+            failureReason: "raw_ingestion_queue_processing_failed",
+            replayable: true,
+          },
+        },
+        {
+          message: newerMessage,
+          outcome: {
+            state: "failed",
+            failureStage: "rating_fact",
+            failureReason: "raw_ingestion_queue_processing_failed",
+            replayable: true,
+          },
+        },
+      ],
+    })
+    expect(logger.error).toHaveBeenCalledWith(
+      "raw ingestion queue processing failed",
+      expect.objectContaining({
+        customerId: "cus_123",
+        projectId: "proj_123",
+      })
+    )
+  })
+
+  it("retries raw messages when failed status reporting cannot be enqueued", async () => {
+    const logger = createLogger()
+    const olderMessage = createMessage({
+      id: "evt_older",
+      idempotencyKey: "idem_older",
+      timestamp: TEST_NOW - 10,
+    })
+    const newerMessage = createMessage({
+      id: "evt_newer",
+      idempotencyKey: "idem_newer",
+      timestamp: TEST_NOW,
+    })
+    const enqueueOutcomes = vi.fn().mockRejectedValue(new Error("reporting down"))
+    const processor = createProcessor({
+      enqueueOutcomes,
       logger,
       preparedProcess: vi.fn().mockRejectedValue(new Error("apply failed")),
       preparedGroup: {
@@ -260,12 +380,85 @@ describe("IngestionCustomerGroupProcessor", () => {
       },
     ])
     expect(logger.error).toHaveBeenCalledWith(
-      "raw ingestion queue processing failed",
+      "raw ingestion failure reporting enqueue failed",
       expect.objectContaining({
         customerId: "cus_123",
         projectId: "proj_123",
       })
     )
+  })
+
+  it("keeps already reported stale messages rejected when later fresh processing fails", async () => {
+    const logger = createLogger()
+    const staleMessage = createMessage({
+      id: "evt_stale",
+      idempotencyKey: "idem_stale",
+      timestamp: TEST_NOW - INGESTION_MAX_EVENT_AGE_MS - 1,
+    })
+    const freshMessage = createMessage({
+      id: "evt_fresh",
+      idempotencyKey: "idem_fresh",
+      timestamp: TEST_NOW,
+    })
+    const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
+    const processor = createProcessor({
+      enqueueOutcomes,
+      logger,
+      preparedProcess: vi.fn().mockRejectedValue(new Error("apply failed")),
+      preparedGroup: {
+        candidateEntitlements: [],
+        messages: [freshMessage],
+      },
+    })
+
+    const result = await processor.processCustomerGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [freshMessage, staleMessage],
+    })
+
+    expect(result).toEqual([
+      {
+        message: freshMessage,
+        disposition: {
+          action: "ack",
+        },
+      },
+      {
+        message: staleMessage,
+        disposition: {
+          action: "ack",
+        },
+      },
+    ])
+    expect(enqueueOutcomes).toHaveBeenNthCalledWith(1, {
+      customerId: "cus_123",
+      projectId: "proj_123",
+      outcomes: [
+        {
+          message: staleMessage,
+          outcome: {
+            state: "rejected",
+            rejectionReason: "EVENT_TOO_OLD",
+          },
+        },
+      ],
+    })
+    expect(enqueueOutcomes).toHaveBeenNthCalledWith(2, {
+      customerId: "cus_123",
+      projectId: "proj_123",
+      outcomes: [
+        {
+          message: freshMessage,
+          outcome: {
+            state: "failed",
+            failureStage: "rating_fact",
+            failureReason: "raw_ingestion_queue_processing_failed",
+            replayable: true,
+          },
+        },
+      ],
+    })
   })
 })
 
