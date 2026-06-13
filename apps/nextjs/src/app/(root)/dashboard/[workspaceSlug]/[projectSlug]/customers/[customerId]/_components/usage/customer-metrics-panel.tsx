@@ -30,6 +30,7 @@ export function CustomerMetricsPanel({ customerId, invoiceCount }: CustomerMetri
       },
       {
         ...ANALYTICS_CONFIG_REALTIME,
+        placeholderData: (previousData) => previousData,
         staleTime: isNearRealtime ? 30 * 1000 : 0,
         refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
         refetchOnWindowFocus: false,

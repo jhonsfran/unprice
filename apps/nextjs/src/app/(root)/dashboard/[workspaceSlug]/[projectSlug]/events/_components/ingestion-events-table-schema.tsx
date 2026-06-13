@@ -93,7 +93,7 @@ export function buildIngestionEventsColumns(params: {
             : false
 
       return (
-        <div className="flex items-center justify-center">
+        <div className="flex w-full items-center justify-center">
           <Checkbox
             checked={checked}
             disabled={!hasReplayableRows}
@@ -103,6 +103,7 @@ export function buildIngestionEventsColumns(params: {
               }
             }}
             aria-label="Select replayable failed events"
+            className="translate-y-[2px]"
           />
         </div>
       )
@@ -115,13 +116,12 @@ export function buildIngestionEventsColumns(params: {
       }
 
       return (
-        <div className="flex items-center justify-center">
-          <Checkbox
-            checked={row.getIsSelected()}
-            onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label="Select replayable failed event"
-          />
-        </div>
+        <Checkbox
+          checked={row.getIsSelected()}
+          onCheckedChange={(value) => row.toggleSelected(!!value)}
+          aria-label="Select replayable failed event"
+          className="translate-y-[2px]"
+        />
       )
     },
     enableSorting: false,

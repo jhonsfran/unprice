@@ -16,6 +16,7 @@ import {
   Users,
 } from "lucide-react"
 import { type ReactNode, useMemo } from "react"
+import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { SuperLink } from "~/components/super-link"
 import { UsageAreaChart, type UsageChartPoint, buildUsageChartConfig } from "./usage-area-chart"
@@ -87,13 +88,22 @@ export function UsageDashboardView({
         )}
       />
       <CardHeader>
-        <CardTitle>{mode === "customer" ? "Customer usage" : "Usage Dashboard"}</CardTitle>
-        <CardDescription>
-          Usage in the {intervalLabel}
-          {mode === "project" ? " for the currently selected project." : "."}
-        </CardDescription>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1.5">
+            <CardTitle>{mode === "customer" ? "Customer usage" : "Usage Dashboard"}</CardTitle>
+            <CardDescription>
+              Usage for this {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
+            </CardDescription>
+          </div>
+          {mode === "customer" && <IntervalFilter />}
+        </div>
       </CardHeader>
-      <CardContent className="space-y-6 pb-6">
+      <CardContent
+        className={cn(
+          "space-y-6 pb-6 transition-opacity duration-300 motion-reduce:transition-none",
+          isFetching ? "opacity-90" : "opacity-100"
+        )}
+      >
         <div className="grid gap-3 md:grid-cols-4">
           <MetricCard
             label="Features with usage"
@@ -307,8 +317,15 @@ function UsageDashboardEmptyState({
   return (
     <Card className="border-muted/60">
       <CardHeader>
-        <CardTitle>{mode === "customer" ? "Customer usage" : "Usage Dashboard"}</CardTitle>
-        <CardDescription>Usage for the {intervalLabel}.</CardDescription>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1.5">
+            <CardTitle>{mode === "customer" ? "Customer usage" : "Usage Dashboard"}</CardTitle>
+            <CardDescription>
+              Usage for this {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
+            </CardDescription>
+          </div>
+          {mode === "customer" && <IntervalFilter />}
+        </div>
       </CardHeader>
       <CardContent className="py-4">
         <EmptyPlaceholder className="min-h-[220px] transition-opacity duration-300">
