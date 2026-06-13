@@ -34,7 +34,12 @@ export function ExplainChargeSheet({
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const trpc = useTRPC()
-  const explanation = useQuery(
+  const {
+    data: explanationData,
+    error: explanationError,
+    isLoading: explanationLoading,
+    isFetching: explanationFetching,
+  } = useQuery(
     trpc.analytics.explainCharge.queryOptions(
       {
         invoiceId: invoice.id,
@@ -58,7 +63,7 @@ export function ExplainChargeSheet({
               size="xs"
               variant="ghost"
             >
-              {explanation.isFetching && isOpen ? (
+              {explanationFetching && isOpen ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : (
                 <FileSearch className="size-3.5" />
@@ -80,12 +85,12 @@ export function ExplainChargeSheet({
         </SheetHeader>
 
         <div className="mt-6 space-y-6">
-          {explanation.isLoading ? (
+          {explanationLoading ? (
             <ExplainChargeSkeleton />
-          ) : explanation.error ? (
-            <ExplainChargeError message={explanation.error.message} />
-          ) : explanation.data ? (
-            <ExplainChargeContent explanation={explanation.data} invoice={invoice} line={line} />
+          ) : explanationError ? (
+            <ExplainChargeError message={explanationError.message} />
+          ) : explanationData ? (
+            <ExplainChargeContent explanation={explanationData} invoice={invoice} line={line} />
           ) : null}
         </div>
       </SheetContent>
@@ -251,16 +256,28 @@ function ExplainChargeSkeleton() {
   )
 }
 
+// Hoist Intl formatters to module level - constructing them is expensive (~0.5ms each)
+const numberFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 })
+
+// Pre-allocate formatters for common currency scales (0-8 covers all currencies)
+const scaledFormatters: Record<number, Intl.NumberFormat> = {
+  0: new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }),
+  1: new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }),
+  2: new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }),
+  3: new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }),
+  4: numberFormatter,
+  5: new Intl.NumberFormat(undefined, { maximumFractionDigits: 5 }),
+  6: new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }),
+  7: new Intl.NumberFormat(undefined, { maximumFractionDigits: 7 }),
+  8: new Intl.NumberFormat(undefined, { maximumFractionDigits: 8 }),
+}
+
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 4,
-  }).format(value)
+  return numberFormatter.format(value)
 }
 
 function formatRawLedgerAmount(amount: number, currency: string, scale: number): string {
   const value = amount / 10 ** scale
-
-  return `${new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: scale,
-  }).format(value)} ${currency}`
+  const formatter = scaledFormatters[scale] ?? numberFormatter
+  return `${formatter.format(value)} ${currency}`
 }

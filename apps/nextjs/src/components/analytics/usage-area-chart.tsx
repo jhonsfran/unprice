@@ -1,37 +1,11 @@
 "use client"
 
 import { nFormatter } from "@unprice/db/utils"
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@unprice/ui/chart"
+import type { ChartConfig } from "@unprice/ui/chart"
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@unprice/ui/chart"
 import { cn } from "@unprice/ui/utils"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
-
-export type UsageChartPoint = {
-  date: number
-  dateLabel: string
-  [feature: string]: string | number
-}
-
-const TIMESERIES_COLORS = [
-  "var(--chart-1)",
-  "var(--chart-2)",
-  "var(--chart-3)",
-  "var(--chart-4)",
-  "var(--chart-5)",
-]
-
-export function buildUsageChartConfig(features: string[]): ChartConfig {
-  return Object.fromEntries(
-    features.map((feature, index) => [
-      feature,
-      { label: feature, color: TIMESERIES_COLORS[index % TIMESERIES_COLORS.length] },
-    ])
-  ) satisfies ChartConfig
-}
+import { TIMESERIES_COLORS, type UsageChartPoint } from "./usage-chart-config"
 
 export function UsageAreaChart({
   data,

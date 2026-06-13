@@ -12,6 +12,11 @@
       "date-fns": "^3.3.1"
     },
     "packageExtensions": {
+      "@hookform/resolvers": {
+        "peerDependencies": {
+          "zod": ">=3.0.0"
+        }
+      },
       "react-virtual": {
         "peerDependencies": {
           "react": ">=16.6.3"

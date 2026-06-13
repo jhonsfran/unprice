@@ -9,7 +9,6 @@ import {
   computePayloadHash,
 } from "./reporting"
 
-
 export type IngestionReportingOutcome = {
   meterFacts?: AnalyticsEntitlementMeterFact[]
   message: IngestionQueueMessage

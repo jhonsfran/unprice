@@ -15,11 +15,25 @@ import {
   TriangleAlert,
   Users,
 } from "lucide-react"
+import dynamic from "next/dynamic"
 import { type ReactNode, useMemo } from "react"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { SuperLink } from "~/components/super-link"
-import { UsageAreaChart, type UsageChartPoint, buildUsageChartConfig } from "./usage-area-chart"
+import { type UsageChartPoint, buildUsageChartConfig } from "./usage-chart-config"
+
+const UsageAreaChart = dynamic(
+  () => import("./usage-area-chart").then((m) => ({ default: m.UsageAreaChart })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="overflow-hidden rounded-md border border-border/60 p-3 sm:p-4">
+        <Skeleton className="mb-3 h-3 w-24" />
+        <Skeleton className="h-[220px] w-full rounded-md" />
+      </div>
+    ),
+  }
+)
 
 type UsageDashboardData = RouterOutputs["analytics"]["getUsageDashboard"]
 type UsageDashboardFeature = UsageDashboardData["features"][number]
@@ -64,6 +78,13 @@ export function UsageDashboardView({
   invoiceCount?: number
   customerHref?: (customerId: string) => string
 }) {
+  // Hooks must be called unconditionally (before any early return)
+  const chart = useMemo(
+    () => buildChartData(data.timeseries, dateFormat),
+    [data.timeseries, dateFormat]
+  )
+  const chartConfig = useMemo(() => buildUsageChartConfig(chart.features), [chart.features])
+
   if (data.error) {
     return <UsageDashboardErrorState error={data.error} />
   }
@@ -72,11 +93,6 @@ export function UsageDashboardView({
     return <UsageDashboardEmptyState intervalLabel={intervalLabel} mode={mode} />
   }
 
-  const chart = useMemo(
-    () => buildChartData(data.timeseries, dateFormat),
-    [data.timeseries, dateFormat]
-  )
-  const chartConfig = useMemo(() => buildUsageChartConfig(chart.features), [chart.features])
   const maxFeatureUsage = data.features[0]?.usage ?? 1
 
   return (
@@ -216,20 +232,12 @@ function UsageFeatureTable({
                   <BarChart3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate font-medium text-sm">{feature.featureSlug}</span>
                 </div>
-                <div
-                  role="progressbar"
-                  tabIndex={0}
-                  aria-valuenow={Math.round(usagePercent)}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
+                <progress
+                  value={Math.round(usagePercent)}
+                  max={100}
                   aria-label={`${feature.featureSlug} usage`}
-                  className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
-                >
-                  <div
-                    className="h-full rounded-full bg-primary/60 transition-all"
-                    style={{ width: `${usagePercent}%` }}
-                  />
-                </div>
+                  className="h-1.5 w-full appearance-none overflow-hidden rounded-full bg-muted/60 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-primary-border [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-primary-border [&::-webkit-progress-value]:transition-all"
+                />
               </div>
               <Badge variant="outline" className="justify-self-end font-mono text-xs tabular-nums">
                 {nFormatter(feature.usage, { digits: 1 })}
@@ -360,10 +368,13 @@ function buildChartData(
     pointsByDate.set(row.date, point)
   }
 
-  return {
-    data: [...pointsByDate.values()].sort((a, b) => a.date - b.date),
-    features: [...featureSet].sort(),
-  }
+  const data = Array.from(pointsByDate.values())
+  data.sort((a, b) => a.date - b.date)
+
+  const features = Array.from(featureSet)
+  features.sort()
+
+  return { data, features }
 }
 
 function formatDateLabel(timestamp: number, format: string): string {

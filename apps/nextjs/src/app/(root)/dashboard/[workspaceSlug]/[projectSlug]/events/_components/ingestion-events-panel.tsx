@@ -27,6 +27,26 @@ const EVENTS_PAGE_SIZE = 50
 const MAX_REPLAY_IDS = 50
 const MAX_STORED_REPLAY_IDS = 500
 
+function today(): Date {
+  return new Date()
+}
+
+function oneMonthAgo(): Date {
+  const d = new Date()
+  d.setMonth(d.getMonth() - 1)
+  return d
+}
+
+function computeWindowLabel(from: number, to: number): string {
+  const diffMs = to - from
+  const diffHours = Math.round(diffMs / (1000 * 60 * 60))
+  if (diffHours <= 1) return "in the last hour"
+  if (diffHours < 24) return `in the last ${diffHours} hours`
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24))
+  if (diffDays === 1) return "today"
+  return `in the last ${diffDays} days`
+}
+
 function resolveWindow(
   from: number | null,
   to: number | null,
@@ -47,10 +67,7 @@ export function IngestionEventsPanel() {
   const [filters, setFilters] = useFilterDataTable()
   const [detailsEvent, setDetailsEvent] = useState<IngestionEventRow | null>(null)
   const [rollingNow, setRollingNow] = useState(() => Date.now())
-  const replayStorageKey = useMemo(
-    () => `unprice:events:replay-queued:${workspaceSlug}:${projectSlug}`,
-    [workspaceSlug, projectSlug]
-  )
+  const replayStorageKey = `unprice:events:replay-queued:${workspaceSlug}:${projectSlug}`
   const [queuedReplayIds, setQueuedReplayIds] = useState<ReadonlySet<string>>(() => new Set())
   const [pendingReplayIds, setPendingReplayIds] = useState<ReadonlySet<string>>(() => new Set())
   const hasExplicitDateRange = filters.from !== null || filters.to !== null
@@ -95,7 +112,16 @@ export function IngestionEventsPanel() {
     [filters.from, filters.to]
   )
 
-  const query = useInfiniteQuery(
+  const {
+    data: queryData,
+    refetch,
+    isLoading,
+    isFetching,
+    error: queryError,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery(
     trpc.analytics.getIngestionStatus.infiniteQueryOptions(
       {
         window: queryWindow,
@@ -113,13 +139,13 @@ export function IngestionEventsPanel() {
   const replayMutation = useMutation(
     trpc.analytics.replayIngestionEvents.mutationOptions({
       onSuccess: async () => {
-        await query.refetch()
+        await refetch()
       },
     })
   )
 
-  const pages = query.data?.pages ?? []
-  const rows = useMemo(() => flattenUniqueEvents(pages), [pages])
+  const pages = queryData?.pages
+  const rows = useMemo(() => flattenUniqueEvents(pages ?? []), [pages])
   const hasReplayableRows = useMemo(
     () =>
       rows.some(
@@ -137,8 +163,7 @@ export function IngestionEventsPanel() {
       rows.find((row) => row.canonicalAuditId === detailsEvent.canonicalAuditId) ?? detailsEvent
     )
   }, [detailsEvent, rows])
-  const firstPage = pages[0]
-  const { fetchNextPage, hasNextPage, isFetchingNextPage } = query
+  const firstPage = pages?.[0]
   const handleLoadMore = useCallback(() => {
     if (!hasNextPage || isFetchingNextPage) {
       return Promise.resolve()
@@ -185,13 +210,6 @@ export function IngestionEventsPanel() {
     }
   }, [])
 
-  const today = useMemo(() => new Date(), [])
-  const oneMonthAgo = useMemo(() => {
-    const d = new Date()
-    d.setMonth(d.getMonth() - 1)
-    return d
-  }, [])
-
   const filterOptions = useMemo(
     () =>
       buildIngestionEventsFilters(rows, {
@@ -200,8 +218,8 @@ export function IngestionEventsPanel() {
         label: "Date",
         value: dateRange,
         defaultOpen: true,
-        fromDate: oneMonthAgo,
-        toDate: today,
+        fromDate: oneMonthAgo(),
+        toDate: today(),
         numberOfMonths: 1,
         onChange: (range) => {
           if (!range) {
@@ -216,7 +234,7 @@ export function IngestionEventsPanel() {
           })
         },
       }),
-    [dateRange, rows, setFilters, today, oneMonthAgo]
+    [dateRange, rows, setFilters]
   )
 
   const processed = firstPage?.totals.processed ?? 0
@@ -224,71 +242,20 @@ export function IngestionEventsPanel() {
   const failed = firstPage?.totals.failed ?? 0
   const total = firstPage?.totals.total ?? 0
 
-  const windowLabel = useMemo(() => {
-    const diffMs = queryWindow.to - queryWindow.from
-    const diffHours = Math.round(diffMs / (1000 * 60 * 60))
-    if (diffHours <= 1) return "in the last hour"
-    if (diffHours < 24) return `in the last ${diffHours} hours`
-    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24))
-    if (diffDays === 1) return "today"
-    return `in the last ${diffDays} days`
-  }, [queryWindow.from, queryWindow.to])
+  const windowLabel = computeWindowLabel(queryWindow.from, queryWindow.to)
 
-  const isInitialLoading = query.isLoading && rows.length === 0
-  const isRefreshing = query.isFetching && !isInitialLoading && !isFetchingNextPage
+  const isInitialLoading = isLoading && rows.length === 0
+  const isRefreshing = isFetching && !isInitialLoading && !isFetchingNextPage
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="font-medium text-sm">Processed</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="font-bold text-2xl">
-              <NumberTicker value={processed} decimalPlaces={0} startValue={0} />
-            </div>
-            <p className="text-muted-foreground text-xs">{windowLabel}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="font-medium text-sm">Rejected</CardTitle>
-            <XCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="font-bold text-2xl">
-              <NumberTicker value={rejected} decimalPlaces={0} startValue={0} />
-            </div>
-            <p className="text-muted-foreground text-xs">{windowLabel}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="font-medium text-sm">Failed</CardTitle>
-            <TriangleAlert className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="font-bold text-2xl">
-              <NumberTicker value={failed} decimalPlaces={0} startValue={0} />
-            </div>
-            <p className="text-muted-foreground text-xs">{windowLabel}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="font-medium text-sm">Total</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="font-bold text-2xl">
-              <NumberTicker value={total} decimalPlaces={0} startValue={0} />
-            </div>
-            <p className="text-muted-foreground text-xs">{windowLabel}</p>
-          </CardContent>
-        </Card>
-      </div>
+      <IngestionStatsCards
+        processed={processed}
+        rejected={rejected}
+        failed={failed}
+        total={total}
+        windowLabel={windowLabel}
+      />
       <FilterDataTable
         columns={buildIngestionEventsColumns({
           workspaceSlug,
@@ -306,9 +273,9 @@ export function IngestionEventsPanel() {
         filters={filterOptions}
         searchColumn="eventSlug"
         searchPlaceholder="Search events..."
-        emptyTitle={query.error ? "Events could not be loaded" : "No events"}
+        emptyTitle={queryError ? "Events could not be loaded" : "No events"}
         emptyDescription={
-          query.error?.message ?? "No ingestion events were found for the selected filters."
+          queryError?.message ?? "No ingestion events were found for the selected filters."
         }
         getRowClassName={(row) =>
           row.state === "failed"
@@ -377,6 +344,73 @@ export function IngestionEventsPanel() {
             : replayMutation.isPending
         }
       />
+    </div>
+  )
+}
+
+function IngestionStatsCards({
+  processed,
+  rejected,
+  failed,
+  total,
+  windowLabel,
+}: {
+  processed: number
+  rejected: number
+  failed: number
+  total: number
+  windowLabel: string
+}) {
+  return (
+    <div className="grid gap-4 md:grid-cols-4">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="font-medium text-sm">Processed</CardTitle>
+          <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="font-bold text-2xl">
+            <NumberTicker value={processed} decimalPlaces={0} startValue={0} />
+          </div>
+          <p className="text-muted-foreground text-xs">{windowLabel}</p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="font-medium text-sm">Rejected</CardTitle>
+          <XCircle className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="font-bold text-2xl">
+            <NumberTicker value={rejected} decimalPlaces={0} startValue={0} />
+          </div>
+          <p className="text-muted-foreground text-xs">{windowLabel}</p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="font-medium text-sm">Failed</CardTitle>
+          <TriangleAlert className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="font-bold text-2xl">
+            <NumberTicker value={failed} decimalPlaces={0} startValue={0} />
+          </div>
+          <p className="text-muted-foreground text-xs">{windowLabel}</p>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="font-medium text-sm">Total</CardTitle>
+          <Activity className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="font-bold text-2xl">
+            <NumberTicker value={total} decimalPlaces={0} startValue={0} />
+          </div>
+          <p className="text-muted-foreground text-xs">{windowLabel}</p>
+        </CardContent>
+      </Card>
     </div>
   )
 }

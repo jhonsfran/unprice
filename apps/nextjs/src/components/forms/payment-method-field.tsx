@@ -27,6 +27,13 @@ interface FormValues extends FieldValues {
   paymentMethodId?: string | null
 }
 
+function getErrorMessage(errors: FieldErrors<FieldValues>, field: string): string | undefined {
+  const error = errors[field as keyof typeof errors]
+  return error && typeof error === "object" && "message" in error
+    ? (error.message as string)
+    : undefined
+}
+
 export default function PaymentMethodsFormField<TFieldValues extends FormValues>({
   form,
   isDisabled,
@@ -53,7 +60,8 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
   const isReturningFromSetup =
     paymentSetup === "success" && returnedProvider === paymentProvider && !!customerId
 
-  const [isConfirmingPaymentMethod, setIsConfirmingPaymentMethod] = useState(isReturningFromSetup)
+  // User-intent state: they started (or returned from) payment provider setup
+  const [awaitingPaymentSetup, setAwaitingPaymentSetup] = useState(isReturningFromSetup)
   const [confirmationTimedOut, setConfirmationTimedOut] = useState(false)
 
   const subscriptionReturnUrl = `${APP_DOMAIN}/${workspaceSlug}/${projectSlug}/customers/subscriptions/new?customerId=${customerId ?? ""}&provider=${paymentProvider}`
@@ -65,37 +73,39 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
     () => ({
       customerId: customerId ?? "",
       provider: paymentProvider,
-      ...(isConfirmingPaymentMethod ? { skipCache: true } : {}),
+      ...(awaitingPaymentSetup ? { skipCache: true } : {}),
     }),
-    [customerId, paymentProvider, isConfirmingPaymentMethod]
+    [customerId, paymentProvider, awaitingPaymentSetup]
   )
 
   const { data, isLoading } = useQuery(
     trpc.customers.listPaymentMethods.queryOptions(paymentMethodsInput, {
       enabled: !!customerId,
       placeholderData: (previousData) => previousData,
-      refetchInterval: isConfirmingPaymentMethod ? 2000 : false,
+      refetchInterval: awaitingPaymentSetup && !confirmationTimedOut ? 2000 : false,
       refetchOnMount: true,
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
-      staleTime: isConfirmingPaymentMethod ? 0 : 1000 * 30,
+      staleTime: awaitingPaymentSetup ? 0 : 1000 * 30,
     })
   )
 
   const hasPaymentMethods = (data?.paymentMethods.length ?? 0) > 0
+  // Derived: actively confirming = user started setup + no methods yet + not timed out
+  const isConfirmingPaymentMethod =
+    awaitingPaymentSetup && !hasPaymentMethods && !confirmationTimedOut
   const shouldShowCheckingState = isLoading && !data
   const shouldShowConfirmingState = isConfirmingPaymentMethod && !hasPaymentMethods
 
   useEffect(() => {
-    if (!isConfirmingPaymentMethod) return
+    if (!awaitingPaymentSetup || confirmationTimedOut) return
 
     const timeout = window.setTimeout(() => {
-      setIsConfirmingPaymentMethod(false)
       setConfirmationTimedOut(true)
     }, 90_000)
 
     return () => window.clearTimeout(timeout)
-  }, [isConfirmingPaymentMethod])
+  }, [awaitingPaymentSetup, confirmationTimedOut])
 
   useEffect(() => {
     const defaultPaymentMethod = data?.paymentMethods.at(0)
@@ -124,21 +134,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
         }
       )
     }
-
-    setIsConfirmingPaymentMethod(false)
-    setConfirmationTimedOut(false)
   }, [customerId, data, form, paymentProvider, queryClient, trpc.customers.listPaymentMethods])
-
-  // Helper function to safely get the error message
-  const getErrorMessage = (
-    errors: FieldErrors<TFieldValues>,
-    field: string
-  ): string | undefined => {
-    const error = errors[field as keyof typeof errors]
-    return error && typeof error === "object" && "message" in error
-      ? (error.message as string)
-      : undefined
-  }
 
   // if payment method is not required, hide the field
   if (!paymentProviderRequired) {
@@ -257,7 +253,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
               isRefreshing={shouldShowConfirmingState}
               onProviderSessionStarted={() => {
                 setConfirmationTimedOut(false)
-                setIsConfirmingPaymentMethod(true)
+                setAwaitingPaymentSetup(true)
               }}
             />
           </EmptyPlaceholder.Action>

@@ -364,6 +364,19 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   before showing an empty state.
 - 2026-05-07: Keep subscription creation drafts open while provider setup runs; refetch with
   `skipCache` and auto-select the first method.
+- 2026-06-13: When commits fail with react-doctor errors, run `npx react-doctor@latest --verbose`
+  in `apps/nextjs`, read the full diagnostics directory it outputs, and fix each rule's root cause.
+  Do not suppress rules. Common fixes: move hooks before early returns (rules-of-hooks), derive
+  state instead of syncing via useEffect (no-derived-state), hoist `new Intl.*` to module scope
+  (js-hoist-intl), use `next/dynamic` for heavy chart libs (prefer-dynamic-import), replace
+  `[...arr].sort()` with in-place sort or `.toSorted()` (js-tosorted-immutable), combine
+  `.filter().map()` chains into `for...of` loops (js-combine-iterations), destructure
+  `useQuery`/`useInfiniteQuery` results (query-destructure-result), and split 300+ line components
+  (no-giant-component).
+- 2026-06-13: Every `next/dynamic` or `React.lazy()` component must include a `loading` fallback
+  that matches the component's layout dimensions (e.g., a `<Skeleton>` with the same height/width).
+  Without it, the page content shifts when the chunk arrives, causing visible flicker. Follow the
+  same pattern as `ThemeToggle` in `src/components/layout/footer.tsx`.
 
 ## Tests, Tooling, And Docs
 

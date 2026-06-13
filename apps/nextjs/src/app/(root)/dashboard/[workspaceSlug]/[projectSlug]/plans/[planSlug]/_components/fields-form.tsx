@@ -221,33 +221,35 @@ export function ResetConfigFeatureFormField({
   const billingConfig = form.watch("billingConfig")
 
   // filter dev option when node_env is production
-  const options = Object.entries(RESET_CONFIG)
-    .filter(([key]) => {
-      if (process.env.NODE_ENV === "production") {
-        return RESET_CONFIG[key]?.dev !== true
+  const options: { label: string; key: string; description: string }[] = []
+  for (const [key, value] of Object.entries(RESET_CONFIG)) {
+    // Exclude dev-only options in production, exclude onetime in development
+    if (process.env.NODE_ENV === "production") {
+      if (value?.dev === true) continue
+    } else {
+      if (key === "onetime") continue
+    }
+
+    // Exclude options that exceed the billing cadence
+    if (billingConfig) {
+      if (
+        !isResetCadenceAtMostBilling(
+          {
+            name: key,
+            resetInterval: value.resetInterval,
+            resetIntervalCount: value.resetIntervalCount,
+            resetAnchor: "dayOfCreation",
+            planType: value.planType,
+          },
+          billingConfig
+        )
+      ) {
+        continue
       }
+    }
 
-      return key !== "onetime"
-    })
-    .filter(([key, value]) => {
-      if (!billingConfig) return true
-
-      return isResetCadenceAtMostBilling(
-        {
-          name: key,
-          resetInterval: value.resetInterval,
-          resetIntervalCount: value.resetIntervalCount,
-          resetAnchor: "dayOfCreation",
-          planType: value.planType,
-        },
-        billingConfig
-      )
-    })
-    .map(([key, value]) => ({
-      label: value.label,
-      key,
-      description: value.description,
-    }))
+    options.push({ label: value.label, key, description: value.description })
+  }
 
   return (
     <div className="w-full">
@@ -310,19 +312,15 @@ export function BillingConfigFeatureFormField({
   isDisabled?: boolean
 }) {
   // filter dev option when node_env is production
-  const options = Object.entries(BILLING_CONFIG)
-    .filter(([key]) => {
-      if (process.env.NODE_ENV === "production") {
-        return BILLING_CONFIG[key]?.dev !== true
-      }
-
-      return key !== "onetime"
-    })
-    .map(([key, value]) => ({
-      label: value.label,
-      key,
-      description: value.description,
-    }))
+  const options: { label: string; key: string; description: string }[] = []
+  for (const [key, value] of Object.entries(BILLING_CONFIG)) {
+    if (process.env.NODE_ENV === "production") {
+      if (value?.dev === true) continue
+    } else {
+      if (key === "onetime") continue
+    }
+    options.push({ label: value.label, key, description: value.description })
+  }
 
   return (
     <div className="w-full">
