@@ -32,3 +32,9 @@
     {"second":"2099-01-01 00:00:03.000","processed":0,"rejected":1,"failed":0,"total":1}
     {"second":"2099-01-01 00:00:04.000","processed":1,"rejected":0,"failed":0,"total":1}
     {"second":"2099-01-01 00:00:06.000","processed":0,"rejected":0,"failed":1,"total":1}
+
+- name: ingestion_live_prefers_latest_handled_status
+  description: Counts a stale failed-then-processed canonical id as processed
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4071081600000&to_ts=4071168000000
+  expected_result: |
+    {"second":"2099-01-03 00:00:01.000","processed":1,"rejected":0,"failed":0,"total":1}
