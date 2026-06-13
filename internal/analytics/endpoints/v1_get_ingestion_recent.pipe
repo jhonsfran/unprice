@@ -20,7 +20,6 @@ SQL >
         tupleElement(argMax(tuple(failure_reason), tuple(handled_at, created_at)), 1) AS failure_reason,
         tupleElement(argMax(tuple(failure_message), tuple(handled_at, created_at)), 1) AS failure_message,
         argMax(replayable, tuple(handled_at, created_at)) AS replayable,
-        tupleElement(argMax(tuple(r2_object_key), tuple(handled_at, created_at)), 1) AS r2_object_key,
         argMax(timestamp, tuple(handled_at, created_at)) AS timestamp,
         argMax(received_at, tuple(handled_at, created_at)) AS received_at,
         max(handled_at) AS latest_handled_at
@@ -42,7 +41,6 @@ SQL >
       failure_reason,
       failure_message,
       replayable,
-      r2_object_key,
       timestamp,
       received_at,
       latest_handled_at AS handled_at

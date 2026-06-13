@@ -26,7 +26,6 @@ SCHEMA >
     `failure_message` Nullable(String) `json:$.failure_message`,
     `replayable` Bool `json:$.replayable`,
     `payload_json` Nullable(String) `json:$.payload_json`,
-    `r2_object_key` Nullable(String) `json:$.r2_object_key`,
     `timestamp` Int64 `json:$.timestamp`,
     `received_at` Int64 `json:$.received_at`,
     `handled_at` Int64 `json:$.handled_at`,

@@ -115,7 +115,6 @@ describe("ingestion reporting envelope builder", () => {
     expect(rejectedPayload).not.toHaveProperty("failure_message")
     expect(rejectedPayload).not.toHaveProperty("replayable")
     expect(rejectedPayload).not.toHaveProperty("payload_json")
-    expect(rejectedPayload).not.toHaveProperty("r2_object_key")
   })
 
   it("includes payload_json only for failed reporting audit records", async () => {
@@ -169,7 +168,6 @@ describe("ingestion reporting envelope builder", () => {
     expect(processedPayload).not.toHaveProperty("failure_message")
     expect(processedPayload).not.toHaveProperty("replayable")
     expect(processedPayload).not.toHaveProperty("payload_json")
-    expect(processedPayload).not.toHaveProperty("r2_object_key")
     expect(rejectedRecord.payloadJson).toBeNull()
     expect(rejectedRecord).toMatchObject({
       status: "rejected",
@@ -189,7 +187,6 @@ describe("ingestion reporting envelope builder", () => {
     expect(rejectedPayload2).not.toHaveProperty("failure_message")
     expect(rejectedPayload2).not.toHaveProperty("replayable")
     expect(rejectedPayload2).not.toHaveProperty("payload_json")
-    expect(rejectedPayload2).not.toHaveProperty("r2_object_key")
 
     expect(failedRecord).toMatchObject({
       status: "failed",
@@ -212,7 +209,6 @@ describe("ingestion reporting envelope builder", () => {
     expect(failedAuditPayload).not.toHaveProperty("failure_message")
     expect(failedAuditPayload).not.toHaveProperty("replayable")
     expect(failedAuditPayload).not.toHaveProperty("payload_json")
-    expect(failedAuditPayload).not.toHaveProperty("r2_object_key")
   })
 
   it("carries meter facts from outcomes into the reporting envelope", async () => {

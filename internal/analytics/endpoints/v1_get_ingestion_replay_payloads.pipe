@@ -13,7 +13,6 @@ SQL >
       failure_reason,
       failure_message,
       payload_json,
-      r2_object_key,
       handled_at
     FROM (
       SELECT
@@ -26,7 +25,6 @@ SQL >
         failure_message,
         replayable,
         payload_json,
-        r2_object_key,
         handled_at
       FROM unprice_ingestion_events
       WHERE project_id = {{ String(project_id) }}
