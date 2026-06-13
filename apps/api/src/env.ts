@@ -61,7 +61,6 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       QUEUE_SHARD_0: cloudflareQueue,
       QUEUE_SHARD_1: cloudflareQueue,
       INGESTION_REPORTING_QUEUE: cloudflareQueue,
-      UNPRICE_INTERNAL_API_SECRET: z.string().min(1),
       unprice_lakehouse_dev: cloudflareR2Bucket.optional(),
       unprice_lakehouse_prod: cloudflareR2Bucket.optional(),
       STRIPE_API_KEY: z.string().optional(),

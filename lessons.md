@@ -126,6 +126,9 @@ patterns. Keep it cheap to load and useful.
   authenticated admin/UI workflow, not a local operator script.
 - 2026-06-13: Dashboard-to-API workflows should use the `@unprice/api` SDK path; avoid bespoke
   internal fetches for public API operations such as ingestion replay.
+- 2026-06-13: Dashboard-to-API project overrides should pass `project_id` through the public SDK
+  body and use `validateIsAllowedToAccessProject`; do not add parallel internal auth headers when
+  API-key admin/root access already models the permission.
 - 2026-06-13: Ingestion replay uses Tinybird failed rows as the recovery index and `payload_json`
   as the immediate replay source; R2 remains write-once audit storage.
 - 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor

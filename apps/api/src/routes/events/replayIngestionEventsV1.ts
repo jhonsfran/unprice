@@ -3,21 +3,17 @@ import {
   type IngestionQueueMessage,
   ingestionQueueMessageSchema,
 } from "@unprice/services/ingestion"
-import type { Context } from "hono"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import type { HonoEnv } from "~/hono/env"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import { safeSendToQueue } from "./ingestEventsV1"
 
-const INTERNAL_SECRET_HEADER = "unprice-internal-secret"
-const INTERNAL_PROJECT_HEADER = "unprice-internal-project-id"
-
 const replayRequestSchema = z.object({
   canonical_audit_ids: z.array(z.string()).min(1).max(50),
+  project_id: z.string().optional(),
 })
 
 const replayResponseSchema = z.object({
@@ -42,8 +38,13 @@ export const route = createRoute({
 
 export const registerReplayIngestionEventsV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const projectId = await resolveReplayProjectId(c)
+    const key = await keyAuth(c)
     const body = c.req.valid("json")
+    const projectId = validateIsAllowedToAccessProject({
+      isMain: (key.project.isMain ?? false) || key.project.workspace.isMain,
+      key,
+      requestedProjectId: body.project_id ?? key.projectId,
+    })
     const canonicalAuditIds = Array.from(new Set(body.canonical_audit_ids))
     const response = await c.get("analytics").getIngestionReplayPayloads({
       project_id: projectId,
@@ -76,35 +77,6 @@ export const registerReplayIngestionEventsV1 = (app: App) =>
       HttpStatusCodes.OK
     )
   })
-
-async function resolveReplayProjectId(c: Context<HonoEnv>) {
-  const internalSecret = c.req.header(INTERNAL_SECRET_HEADER)?.trim()
-  const internalProjectId = c.req.header(INTERNAL_PROJECT_HEADER)?.trim()
-
-  if (internalSecret || internalProjectId) {
-    if (
-      !internalSecret ||
-      !internalProjectId ||
-      internalSecret !== c.env.UNPRICE_INTERNAL_API_SECRET
-    ) {
-      throw new UnpriceApiError({
-        code: "UNAUTHORIZED",
-        message: "invalid internal replay credentials",
-      })
-    }
-
-    c.get("logger").set({
-      business: {
-        project_id: internalProjectId,
-      },
-    })
-
-    return internalProjectId
-  }
-
-  const key = await keyAuth(c)
-  return key.projectId
-}
 
 function parseReplayQueueMessage(params: {
   payloadJson: string

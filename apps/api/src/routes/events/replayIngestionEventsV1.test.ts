@@ -13,9 +13,13 @@ const authMocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+  }
+})
 
 const verifiedKey = {
   id: "key_123",
@@ -27,6 +31,7 @@ const verifiedKey = {
     isInternal: false,
     isMain: false,
     workspace: {
+      isMain: false,
       unPriceCustomerId: null,
     },
   },
@@ -123,8 +128,19 @@ describe("replayIngestionEventsV1 route", () => {
     expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
   })
 
-  it("uses the internal project header for dashboard replay requests", async () => {
-    const { app, analytics, env, executionCtx, logger } = createTestApp([
+  it("allows a main API key to replay a requested project", async () => {
+    authMocks.keyAuth.mockResolvedValueOnce({
+      ...verifiedKey,
+      project: {
+        ...verifiedKey.project,
+        isMain: true,
+        workspace: {
+          ...verifiedKey.project.workspace,
+          isMain: true,
+        },
+      },
+    })
+    const { app, analytics, env, executionCtx } = createTestApp([
       createReplayRow({
         canonical_audit_id: "audit_1",
         payload_json: createPayloadJson({ projectId: "proj_dashboard" }),
@@ -132,21 +148,17 @@ describe("replayIngestionEventsV1 route", () => {
     ])
 
     const response = await app.fetch(
-      buildRequest(
-        { canonical_audit_ids: ["audit_1"] },
-        {
-          internalSecret: "internal_secret",
-          internalProjectId: "proj_dashboard",
-          includeBearer: false,
-        }
-      ),
+      buildRequest({
+        canonical_audit_ids: ["audit_1"],
+        project_id: "proj_dashboard",
+      }),
       env,
       executionCtx
     )
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({ replayed: 1, skipped: 0 })
-    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+    expect(authMocks.keyAuth).toHaveBeenCalledTimes(1)
     expect(analytics.getIngestionReplayPayloads).toHaveBeenCalledWith({
       project_id: "proj_dashboard",
       canonical_audit_ids: "audit_1",
@@ -157,36 +169,27 @@ describe("replayIngestionEventsV1 route", () => {
         requestId: "req_123",
       })
     )
-    expect(logger.set).toHaveBeenCalledWith({
-      business: {
-        project_id: "proj_dashboard",
-      },
-    })
   })
 
-  it("rejects invalid internal replay credentials without falling back to bearer auth", async () => {
+  it("rejects project override when the API key is not main", async () => {
     const { app, analytics, env, executionCtx } = createTestApp([
       createReplayRow({ canonical_audit_id: "audit_1", payload_json: createPayloadJson() }),
     ])
 
     const response = await app.fetch(
-      buildRequest(
-        { canonical_audit_ids: ["audit_1"] },
-        {
-          internalSecret: "wrong_secret",
-          internalProjectId: "proj_123",
-        }
-      ),
+      buildRequest({
+        canonical_audit_ids: ["audit_1"],
+        project_id: "proj_other",
+      }),
       env,
       executionCtx
     )
 
-    expect(response.status).toBe(401)
+    expect(response.status).toBe(403)
     await expect(response.json()).resolves.toEqual({
-      code: "UNAUTHORIZED",
-      message: "invalid internal replay credentials",
+      code: "FORBIDDEN",
+      message: "You are not allowed to access a different project.",
     })
-    expect(authMocks.keyAuth).not.toHaveBeenCalled()
     expect(analytics.getIngestionReplayPayloads).not.toHaveBeenCalled()
     expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
   })
@@ -320,7 +323,6 @@ function createTestApp(rows: ReplayPayloadRow[]) {
   registerReplayIngestionEventsV1(app)
 
   const env = {
-    UNPRICE_INTERNAL_API_SECRET: "internal_secret",
     QUEUE_SHARD_0: {
       send: vi.fn().mockResolvedValue(undefined),
     },
@@ -335,10 +337,8 @@ function createTestApp(rows: ReplayPayloadRow[]) {
 }
 
 function buildRequest(
-  body: { canonical_audit_ids: string[] },
+  body: { canonical_audit_ids: string[]; project_id?: string },
   opts: {
-    internalSecret?: string
-    internalProjectId?: string
     includeBearer?: boolean
   } = {}
 ) {
@@ -348,14 +348,6 @@ function buildRequest(
 
   if (opts.includeBearer !== false) {
     headers.set("authorization", "Bearer sk_test")
-  }
-
-  if (opts.internalSecret) {
-    headers.set("unprice-internal-secret", opts.internalSecret)
-  }
-
-  if (opts.internalProjectId) {
-    headers.set("unprice-internal-project-id", opts.internalProjectId)
   }
 
   return new Request("https://example.com/v1/events/ingest/replay", {

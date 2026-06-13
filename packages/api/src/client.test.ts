@@ -302,6 +302,7 @@ describe("Unprice client", () => {
 
     const { result, error } = await client.replayFailedIngestionEvents({
       canonical_audit_ids: ["audit_1"],
+      project_id: "proj_123",
     })
 
     expect(error).toBeUndefined()
@@ -311,6 +312,7 @@ describe("Unprice client", () => {
     expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
     await expect(requests[0]?.json()).resolves.toEqual({
       canonical_audit_ids: ["audit_1"],
+      project_id: "proj_123",
     })
   })
 
