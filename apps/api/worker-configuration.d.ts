@@ -22,6 +22,7 @@ declare namespace Cloudflare {
 		DATABASE_READ2_URL: string;
 		ENCRYPTION_KEY: string;
 		AUTH_SECRET: string;
+		UNPRICE_INTERNAL_API_SECRET: string;
 		DRIZZLE_LOG: string;
 		APP_ENV: string;
 		NODE_ENV: string;
@@ -56,6 +57,7 @@ declare namespace Cloudflare {
 		DATABASE_READ2_URL: string;
 		ENCRYPTION_KEY: string;
 		AUTH_SECRET: string;
+		UNPRICE_INTERNAL_API_SECRET: string;
 		DRIZZLE_LOG: string;
 		APP_ENV: string;
 		NODE_ENV: string;
@@ -90,6 +92,7 @@ declare namespace Cloudflare {
 		DATABASE_READ2_URL: string;
 		ENCRYPTION_KEY: string;
 		AUTH_SECRET: string;
+		UNPRICE_INTERNAL_API_SECRET: string;
 		DRIZZLE_LOG: string;
 		APP_ENV: string;
 		NODE_ENV: string;
@@ -119,6 +122,7 @@ declare namespace Cloudflare {
 		DATABASE_READ2_URL: string;
 		ENCRYPTION_KEY: string;
 		AUTH_SECRET: string;
+		UNPRICE_INTERNAL_API_SECRET: string;
 		DRIZZLE_LOG: string;
 		APP_ENV: string;
 		NODE_ENV: string;
@@ -149,7 +153,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TINYBIRD_TOKEN" | "TINYBIRD_URL" | "CLOUDFLARE_ZONE_ID" | "CLOUDFLARE_API_TOKEN" | "CLOUDFLARE_ACCOUNT_ID" | "DATABASE_URL" | "LOCAL_PIPELINE_URL" | "DATABASE_READ1_URL" | "DATABASE_READ2_URL" | "ENCRYPTION_KEY" | "AUTH_SECRET" | "DRIZZLE_LOG" | "APP_ENV" | "NODE_ENV" | "AXIOM_API_TOKEN" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN" | "UNPRICE_API_KEY" | "UNPRICE_API_URL" | "STRIPE_API_KEY" | "STRIPE_CONNECT_WEBHOOK_SECRET">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "TINYBIRD_TOKEN" | "TINYBIRD_URL" | "CLOUDFLARE_ZONE_ID" | "CLOUDFLARE_API_TOKEN" | "CLOUDFLARE_ACCOUNT_ID" | "DATABASE_URL" | "LOCAL_PIPELINE_URL" | "DATABASE_READ1_URL" | "DATABASE_READ2_URL" | "ENCRYPTION_KEY" | "AUTH_SECRET" | "UNPRICE_INTERNAL_API_SECRET" | "DRIZZLE_LOG" | "APP_ENV" | "NODE_ENV" | "AXIOM_API_TOKEN" | "AXIOM_DATASET" | "UPSTASH_REDIS_REST_URL" | "UPSTASH_REDIS_REST_TOKEN" | "UNPRICE_API_KEY" | "UNPRICE_API_URL" | "STRIPE_API_KEY" | "STRIPE_CONNECT_WEBHOOK_SECRET">> {}
 }
 declare module "*.sql" {
 	const value: string;
