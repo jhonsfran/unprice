@@ -133,16 +133,6 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
-      getUsageTimeseries: new Namespace<CacheNamespaces["getUsageTimeseries"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
-      getTopConsumers: new Namespace<CacheNamespaces["getTopConsumers"]>(this.context, {
-        ...defaultOpts,
-        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
-        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
-      }),
       getCurrentUsage: new Namespace<CacheNamespaces["getCurrentUsage"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds

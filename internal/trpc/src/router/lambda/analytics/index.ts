@@ -10,9 +10,6 @@ import { getPagesOverview } from "./getPagesOverview"
 import { getPlanClickBySessionId } from "./getPlanClickBySessionId"
 import { getPlansConversion } from "./getPlansConversion"
 import { getPlansStats } from "./getPlansStats"
-import { getProjectUsage } from "./getProjectUsage"
-import { getProjectUsageTimeseries } from "./getProjectUsageTimeseries"
-import { getTopConsumers } from "./getTopConsumers"
 import { getUsage } from "./getUsage"
 import { getUsageDashboard } from "./getUsageDashboard"
 import { replayIngestionEvents } from "./replayIngestionEvents"
@@ -21,11 +18,8 @@ export const analyticsRouter = createTRPCRouter({
   explainCharge: explainCharge,
   getUsage: getUsage,
   getUsageDashboard: getUsageDashboard,
-  getProjectUsage: getProjectUsage,
-  getProjectUsageTimeseries: getProjectUsageTimeseries,
   getFailedIngestionEventPayload: getFailedIngestionEventPayload,
   getIngestionStatus: getIngestionStatus,
-  getTopConsumers: getTopConsumers,
   getBrowserVisits: getBrowserVisits,
   getCountryVisits: getCountryVisits,
   getOverviewStats: getOverviewStats,

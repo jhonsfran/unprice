@@ -1,5 +1,4 @@
 import type {
-  FeatureUsageTimeseriesRow,
   PageBrowserVisits,
   PageCountryVisits,
   PageOverview,
@@ -43,14 +42,6 @@ export type WorkspaceGuardCache = {
 
 export type CustomersProjectCache = Pick<Customer, "id" | "name" | "email" | "projectId" | "isMain">
 
-export type TopConsumerCacheEntry = {
-  customerId: string
-  email: string
-  name: string
-  totalUsage: number
-  displaySpending: string
-}
-
 export type CacheNamespaces = {
   apiKeyByHash: ApiKeyExtended | null
   customersProject: CustomersProjectCache[] | null
@@ -73,8 +64,6 @@ export type CacheNamespaces = {
   getPlansStats: Stats | null
   getOverviewStats: Stats | null
   getUsage: Usage | null
-  getUsageTimeseries: FeatureUsageTimeseriesRow[] | null
-  getTopConsumers: TopConsumerCacheEntry[] | null
   getUsageDashboard: GetUsageDashboardOutput | null
   getCurrentUsage: CurrentUsage | null
   ingestionPreparedGrantContext: PreparedCustomerGrantContext
