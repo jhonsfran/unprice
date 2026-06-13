@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unpr
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
 import { BarChart3, CalendarRange, Coins, Layers3, ReceiptText, TriangleAlert, Users } from "lucide-react"
-import type { ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { SuperLink } from "~/components/super-link"
 import {
@@ -67,8 +67,14 @@ export function UsageDashboardView({
     return <UsageDashboardEmptyState intervalLabel={intervalLabel} mode={mode} />
   }
 
-  const chart = buildChartData(data.timeseries, dateFormat)
-  const chartConfig = buildUsageChartConfig(chart.features)
+  const chart = useMemo(
+    () => buildChartData(data.timeseries, dateFormat),
+    [data.timeseries, dateFormat]
+  )
+  const chartConfig = useMemo(
+    () => buildUsageChartConfig(chart.features),
+    [chart.features]
+  )
   const maxFeatureUsage = data.features[0]?.usage ?? 1
 
   return (
@@ -199,7 +205,14 @@ function UsageFeatureTable({
                   <BarChart3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate font-medium text-sm">{feature.featureSlug}</span>
                 </div>
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60">
+                <div
+                  role="progressbar"
+                  aria-valuenow={Math.round(usagePercent)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label={`${feature.featureSlug} usage`}
+                  className="h-1.5 w-full overflow-hidden rounded-full bg-muted/60"
+                >
                   <div
                     className="h-full rounded-full bg-primary/60 transition-all"
                     style={{ width: `${usagePercent}%` }}
