@@ -2,7 +2,10 @@
 
 import { useSuspenseQuery } from "@tanstack/react-query"
 import { useParams } from "next/navigation"
-import { UsageDashboardSkeleton, UsageDashboardView } from "~/components/analytics/usage-dashboard-view"
+import {
+  UsageDashboardSkeleton,
+  UsageDashboardView,
+} from "~/components/analytics/usage-dashboard-view"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
@@ -16,11 +19,7 @@ export function UsageStats() {
   const params = useParams<{ workspaceSlug: string; projectSlug: string }>()
   const isNearRealtime = intervalFilter.intervalDays === 1
 
-  const {
-    data,
-    dataUpdatedAt,
-    isFetching,
-  } = useSuspenseQuery(
+  const { data, dataUpdatedAt, isFetching } = useSuspenseQuery(
     trpc.analytics.getUsageDashboard.queryOptions(
       {
         range: intervalFilter.name,

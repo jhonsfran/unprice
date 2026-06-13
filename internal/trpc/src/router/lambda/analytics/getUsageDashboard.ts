@@ -21,7 +21,13 @@ export const getUsageDashboard = protectedProjectProcedure
     const customerId = opts.input.customerId
     const range = opts.input.range
     const topConsumersLimit = opts.input.topConsumersLimit
-    const cacheKey = ["usage-dashboard", projectId, customerId ?? "all", range, topConsumersLimit].join(":")
+    const cacheKey = [
+      "usage-dashboard",
+      projectId,
+      customerId ?? "all",
+      range,
+      topConsumersLimit,
+    ].join(":")
 
     const { err, val: cached } = await opts.ctx.cache.getUsageDashboard.swr(cacheKey, async () => {
       const result = await getUsageDashboardUseCase(
