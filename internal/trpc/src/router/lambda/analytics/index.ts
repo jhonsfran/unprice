@@ -13,6 +13,7 @@ import { getProjectUsage } from "./getProjectUsage"
 import { getProjectUsageTimeseries } from "./getProjectUsageTimeseries"
 import { getTopConsumers } from "./getTopConsumers"
 import { getUsage } from "./getUsage"
+import { replayIngestionEvents } from "./replayIngestionEvents"
 
 export const analyticsRouter = createTRPCRouter({
   explainCharge: explainCharge,
@@ -29,4 +30,5 @@ export const analyticsRouter = createTRPCRouter({
   getPagesOverview: getPagesOverview,
   getPlanClickBySessionId: getPlanClickBySessionId,
   getLatestEvents: getLatestEvents,
+  replayIngestionEvents: replayIngestionEvents,
 })

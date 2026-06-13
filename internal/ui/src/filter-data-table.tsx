@@ -58,6 +58,10 @@ export type FilterDataTableFilter =
       numberOfMonths?: number
     }
 
+export type FilterDataTableToolbarActions<TData> =
+  | React.ReactNode
+  | ((params: { clearSelection: () => void; selectedRows: TData[] }) => React.ReactNode)
+
 export interface FilterDataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
@@ -66,8 +70,9 @@ export interface FilterDataTableProps<TData, TValue> {
   searchPlaceholder?: string
   emptyTitle?: string
   emptyDescription?: string
+  getRowId?: (row: TData, index: number) => string
   getRowClassName?: (row: TData) => string | undefined
-  toolbarActions?: React.ReactNode
+  toolbarActions?: FilterDataTableToolbarActions<TData>
   initialColumnVisibility?: VisibilityState
   hasMore?: boolean
   isLoadingMore?: boolean
@@ -82,6 +87,7 @@ export function FilterDataTable<TData, TValue>({
   searchPlaceholder = "Search data table...",
   emptyTitle = "No results",
   emptyDescription = "There are no rows for the selected filters.",
+  getRowId,
   getRowClassName,
   toolbarActions,
   initialColumnVisibility,
@@ -99,6 +105,7 @@ export function FilterDataTable<TData, TValue>({
   const table = useReactTable({
     data,
     columns,
+    getRowId,
     state: {
       columnFilters,
       sorting,
@@ -109,6 +116,7 @@ export function FilterDataTable<TData, TValue>({
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    enableRowSelection: true,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
@@ -123,6 +131,14 @@ export function FilterDataTable<TData, TValue>({
   const loadMoreRef = React.useRef<HTMLDivElement | null>(null)
   const loadMoreRequestedRef = React.useRef(false)
   const canLoadMore = Boolean(hasMore && onLoadMore)
+  const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original)
+  const computedToolbarActions =
+    typeof toolbarActions === "function"
+      ? toolbarActions({
+          clearSelection: () => table.resetRowSelection(),
+          selectedRows,
+        })
+      : toolbarActions
 
   React.useEffect(() => {
     const target = loadMoreRef.current
@@ -181,34 +197,42 @@ export function FilterDataTable<TData, TValue>({
                 />
               </div>
             ) : null}
-            {toolbarActions}
+            {computedToolbarActions}
           </div>
           <div className="overflow-auto">
             <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
               <TableHeader>
                 {table.getHeaderGroups().map((headerGroup) => (
                   <TableRow key={headerGroup.id}>
-                    {headerGroup.headers.map((header) => (
-                      <TableHead key={header.id} style={{ width: header.getSize() }}>
-                        {header.isPlaceholder ? null : (
-                          <button
-                            type="button"
-                            className={cn(
-                              "flex w-full items-center gap-2 text-left font-medium",
-                              header.column.getCanSort() && "cursor-pointer"
-                            )}
-                            onClick={header.column.getToggleSortingHandler()}
-                          >
-                            {flexRender(header.column.columnDef.header, header.getContext())}
-                            {header.column.getIsSorted() ? (
-                              <span className="text-muted-foreground text-xs">
-                                {header.column.getIsSorted() === "desc" ? "desc" : "asc"}
-                              </span>
-                            ) : null}
-                          </button>
-                        )}
-                      </TableHead>
-                    ))}
+                    {headerGroup.headers.map((header) => {
+                      const headerContent = header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())
+                      const sorted = header.column.getIsSorted()
+
+                      return (
+                        <TableHead key={header.id} style={{ width: header.getSize() }}>
+                          {headerContent && header.column.getCanSort() ? (
+                            <button
+                              type="button"
+                              className="flex w-full cursor-pointer items-center gap-2 text-left font-medium"
+                              onClick={header.column.getToggleSortingHandler()}
+                            >
+                              {headerContent}
+                              {sorted ? (
+                                <span className="text-muted-foreground text-xs">
+                                  {sorted === "desc" ? "desc" : "asc"}
+                                </span>
+                              ) : null}
+                            </button>
+                          ) : (
+                            <div className="flex w-full items-center gap-2 text-left font-medium">
+                              {headerContent}
+                            </div>
+                          )}
+                        </TableHead>
+                      )
+                    })}
                   </TableRow>
                 ))}
               </TableHeader>

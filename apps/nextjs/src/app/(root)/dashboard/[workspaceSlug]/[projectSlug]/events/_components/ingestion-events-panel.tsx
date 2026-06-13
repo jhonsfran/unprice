@@ -1,9 +1,11 @@
 "use client"
 
-import { useInfiniteQuery } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation } from "@tanstack/react-query"
+import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { FilterDataTable } from "@unprice/ui/filter-data-table"
-import { Activity, CheckCircle2, XCircle } from "lucide-react"
+import { toast } from "@unprice/ui/sonner"
+import { Activity, CheckCircle2, RotateCcw, XCircle } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useCallback, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
@@ -20,6 +22,7 @@ import {
 
 const DEFAULT_WINDOW_MS = 60 * 60 * 1000
 const EVENTS_PAGE_SIZE = 50
+const MAX_REPLAY_IDS = 50
 
 function resolveWindow(from: number | null, to: number | null): { from: number; to: number } {
   const now = Date.now()
@@ -65,6 +68,13 @@ export function IngestionEventsPanel() {
       }
     )
   )
+  const replayMutation = useMutation(
+    trpc.analytics.replayIngestionEvents.mutationOptions({
+      onSuccess: async () => {
+        await query.refetch()
+      },
+    })
+  )
 
   const pages = query.data?.pages ?? []
   const rows = useMemo(() => flattenUniqueEvents(pages), [pages])
@@ -77,6 +87,31 @@ export function IngestionEventsPanel() {
 
     return fetchNextPage().then(() => undefined)
   }, [fetchNextPage, hasNextPage, isFetchingNextPage])
+  const handleReplay = useCallback(
+    async (canonicalAuditIds: string | string[]) => {
+      const ids = Array.isArray(canonicalAuditIds) ? canonicalAuditIds : [canonicalAuditIds]
+      const dedupedIds = Array.from(new Set(ids))
+
+      if (dedupedIds.length === 0) {
+        return
+      }
+
+      if (dedupedIds.length > MAX_REPLAY_IDS) {
+        const message = `Select ${MAX_REPLAY_IDS} or fewer failed events to replay.`
+        toast.error(message)
+        throw new Error(message)
+      }
+
+      try {
+        const result = await replayMutation.mutateAsync({ canonicalAuditIds: dedupedIds })
+        toast.success(result.replayed === 1 ? "Replay queued" : `${result.replayed} replays queued`)
+      } catch (error) {
+        toast.error(getReplayErrorMessage(error))
+        throw error
+      }
+    },
+    [replayMutation]
+  )
 
   const today = useMemo(() => new Date(), [])
   const oneMonthAgo = useMemo(() => {
@@ -166,8 +201,14 @@ export function IngestionEventsPanel() {
         </Card>
       </div>
       <FilterDataTable
-        columns={buildIngestionEventsColumns({ workspaceSlug, projectSlug })}
+        columns={buildIngestionEventsColumns({
+          workspaceSlug,
+          projectSlug,
+          onReplay: handleReplay,
+          isReplayPending: replayMutation.isPending,
+        })}
         data={rows}
+        getRowId={(row) => row.canonicalAuditId}
         filters={filterOptions}
         searchColumn="eventSlug"
         searchPlaceholder="Search events..."
@@ -175,7 +216,44 @@ export function IngestionEventsPanel() {
         emptyDescription={
           query.error?.message ?? "No ingestion events were found for the selected filters."
         }
-        getRowClassName={(row) => (row.state === "rejected" ? "bg-destructive/10" : undefined)}
+        getRowClassName={(row) =>
+          row.state === "failed"
+            ? "bg-destructive/10"
+            : row.state === "rejected"
+              ? "bg-warning/10"
+              : undefined
+        }
+        toolbarActions={({ clearSelection, selectedRows }) => {
+          const replayableRows = selectedRows.filter(
+            (row) => row.state === "failed" && row.replayable
+          )
+          const canonicalAuditIds = Array.from(
+            new Set(replayableRows.map((row) => row.canonicalAuditId))
+          )
+
+          if (canonicalAuditIds.length === 0) {
+            return null
+          }
+
+          const isOverReplayLimit = canonicalAuditIds.length > MAX_REPLAY_IDS
+
+          return (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={replayMutation.isPending || isOverReplayLimit}
+              onClick={() => {
+                void handleReplay(canonicalAuditIds)
+                  .then(() => clearSelection())
+                  .catch(() => undefined)
+              }}
+            >
+              <RotateCcw className="mr-1.5 size-3.5" />
+              {isOverReplayLimit ? `Select ${MAX_REPLAY_IDS} or fewer` : "Replay selected"}
+            </Button>
+          )
+        }}
         initialColumnVisibility={{
           sourceId: false,
           rejectionReason: false,
@@ -187,6 +265,14 @@ export function IngestionEventsPanel() {
       />
     </div>
   )
+}
+
+function getReplayErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  return "Failed to replay ingestion events"
 }
 
 function flattenUniqueEvents(pages: IngestionStatus[]): IngestionEventRow[] {
