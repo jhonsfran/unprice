@@ -108,6 +108,11 @@ if ! command -v tb &> /dev/null; then
   exit 1
 fi
 
+if ! command -v jq &> /dev/null; then
+  echo "jq could not be found"
+  exit 1
+fi
+
 if ! command -v node &> /dev/null; then
   echo "Node could not be found"
   exit 1
@@ -149,6 +154,7 @@ if [ "$MODE_ID" = "dev" ]; then
   DRIZZLE_LOG="false"
   UPSTASH_REDIS_REST_URL="http://localhost:8079"
   UPSTASH_REDIS_REST_TOKEN="unprice"
+  DATABASE_URL="postgresql://postgres:postgres@localhost:5432/unprice"
 
   # loging to tb
   cd internal/analytics
@@ -181,30 +187,52 @@ if [ "$MODE_ID" = "dev" ]; then
     ((attempt++))
   done
 
-  # We need to override on development some variables so we can work with local first tools.
-  # TB_TOKEN=$(curl -s http://localhost:7181/tokens | jq -r ".workspace_admin_token")
-  TB_TOKEN=$(tb --local --output=json info | jq .local.token | tr -d '"')
-  TB_LOCAL_WORKSPACE=$(tb --local --output=json info | jq .local.workspace_name | tr -d '"')
-  echo "Using Tinybird local workspace: $TB_LOCAL_WORKSPACE"
+  # TB_LOCAL_BRANCH=$(git branch --show-current | sed 's/[\/-]/_/g')
+  # echo "Using Tinybird local branch: $TB_LOCAL_BRANCH"
 
-  # auth tb with the admin token
-  echo "Authenticating Tinybird"
-  # tb auth --token $TB_TOKEN --host $TB_HOST
-
-  echo "Building and deploying Tinybird to local runtime"
   tb --local build
   tb --local deploy
 
+  # Local runtime admin token so the app can query the Tinybird Local API.
+  TB_TOKEN="$(
+    TB_VERSION_WARNING=0 tb --local token ls --match "web-apps" \
+      | awk -F'token: ' '/token: / {print $2; exit}'
+  )"
+
+  echo "Using Tinybird token for branch: $TB_LOCAL_BRANCH"
+
   cd ../../
 
+  run_dev_env() {
+    infisical run --env=preview --path=/ --recursive -- env \
+      TINYBIRD_TOKEN="$TB_TOKEN" \
+      DATABASE_URL="$DATABASE_URL" \
+      DATABASE_READ1_URL="$DATABASE_URL" \
+      DATABASE_READ2_URL="$DATABASE_URL" \
+      TINYBIRD_URL="$TB_HOST" \
+      REDIS_URL="$REDIS_URL" \
+      REDIS_TOKEN="$REDIS_TOKEN" \
+      AUTH_REDIRECT_PROXY_URL="$AUTH_REDIRECT_PROXY_URL" \
+      UNPRICE_API_URL="$UNPRICE_API_URL" \
+      UNPRICE_API_KEY="$UNPRICE_API_KEY" \
+      MAIN_PROJECT_ID="$MAIN_PROJECT_ID" \
+      DRIZZLE_LOG="$DRIZZLE_LOG" \
+      UPSTASH_REDIS_REST_URL="$UPSTASH_REDIS_REST_URL" \
+      UPSTASH_REDIS_REST_TOKEN="$UPSTASH_REDIS_REST_TOKEN" \
+      NODE_ENV="$NODE_ENV" \
+      APP_ENV="$APP_ENV" \
+      "$@"
+  }
+
   echo "Applying migrations"
-  infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST REDIS_URL=$REDIS_URL REDIS_TOKEN=$REDIS_TOKEN AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db migrate:custom
+  run_dev_env pnpm --filter db migrate:custom
 
   echo "Starting the application"
   if [ -z "$DEV_FILTER" ]; then
-    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST REDIS_URL=$REDIS_URL REDIS_TOKEN=$REDIS_TOKEN AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm run dev
+    run_dev_env pnpm run dev
   else
-    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN=$TB_TOKEN TINYBIRD_URL=$TB_HOST REDIS_URL=$REDIS_URL REDIS_TOKEN=$REDIS_TOKEN AUTH_REDIRECT_PROXY_URL=$AUTH_REDIRECT_PROXY_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG UPSTASH_REDIS_REST_URL=$UPSTASH_REDIS_REST_URL UPSTASH_REDIS_REST_TOKEN=$UPSTASH_REDIS_REST_TOKEN NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm turbo run dev --parallel $DEV_FILTER
+    # shellcheck disable=SC2086
+    run_dev_env pnpm turbo run dev --parallel $DEV_FILTER
   fi
 
 elif [ "$MODE_ID" = "preview" ]; then
@@ -232,9 +260,9 @@ elif [ "$MODE_ID" = "preview" ]; then
 
   # override the token in the env
   if [ -z "$DEV_FILTER" ]; then
-    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" TINYBIRD_URL="$TB_HOST" pnpm run dev
+    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" DATABASE_URL="$DATABASE_URL" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" TINYBIRD_URL="$TB_HOST" pnpm run dev
   else
-    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" TINYBIRD_URL="$TB_HOST" pnpm turbo run dev --parallel $DEV_FILTER
+    infisical run --env=preview --path=/ --recursive -- env TINYBIRD_TOKEN="$TB_ADMIN_TOKEN" DATABASE_URL="$DATABASE_URL" NODE_ENV="$NODE_ENV" APP_ENV="$APP_ENV" TINYBIRD_URL="$TB_HOST" pnpm turbo run dev --parallel $DEV_FILTER
   fi
 else
   echo "Invalid mode: $MODE_ID"

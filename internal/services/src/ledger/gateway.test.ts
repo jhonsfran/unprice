@@ -378,7 +378,7 @@ describe("LedgerGateway", () => {
                 id: "entry-2",
                 amount: "2.50000000",
                 created_at: new Date("2024-02-02"),
-                metadata: { kind: "usage", description: "API calls", quantity: 250 },
+                metadata: { kind: "usage", feature_slug: "api_calls", quantity: 250 },
                 currency: "USD",
               },
             ],
@@ -402,6 +402,7 @@ describe("LedgerGateway", () => {
       expect(result.val![0]!.quantity).toBe(1)
       expect(result.val![0]!.statementKey).toBe("stmt-abc")
       expect(result.val![1]!.kind).toBe("usage")
+      expect(result.val![1]!.description).toBe("api_calls")
       expect(result.val![1]!.quantity).toBe(250)
     })
 
@@ -416,6 +417,62 @@ describe("LedgerGateway", () => {
 
       expect(result.err).toBeUndefined()
       expect(result.val!).toEqual([])
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // getRecognizedRevenue
+  // -------------------------------------------------------------------------
+
+  describe("getRecognizedRevenue", () => {
+    it("sums invoice-visible consumed credits for a project interval", async () => {
+      db = createMockDb((sql) => {
+        if (sql.includes("SUM(e.amount)") && sql.includes("customer.%.consumed")) {
+          return {
+            rows: [{ amount: "7.50000000" }],
+          }
+        }
+        return { rows: [] }
+      })
+
+      gateway = new LedgerGateway({ db: db as unknown as Database, logger })
+
+      const result = await gateway.getRecognizedRevenue({
+        projectId,
+        currency: "USD",
+        start: new Date("2024-02-01T00:00:00.000Z"),
+        end: new Date("2024-03-01T00:00:00.000Z"),
+      })
+
+      expect(result.err).toBeUndefined()
+      const snap = toSnapshot(result.val!)
+      expect(snap.amount).toBe(750000000)
+      expect(snap.currency.code).toBe("USD")
+    })
+
+    it("returns zero when no recognized revenue matches", async () => {
+      db = createMockDb((sql) => {
+        if (sql.includes("SUM(e.amount)") && sql.includes("customer.%.consumed")) {
+          return {
+            rows: [{ amount: "0" }],
+          }
+        }
+        return { rows: [] }
+      })
+
+      gateway = new LedgerGateway({ db: db as unknown as Database, logger })
+
+      const result = await gateway.getRecognizedRevenue({
+        projectId,
+        currency: "USD",
+        start: new Date("2024-02-01T00:00:00.000Z"),
+        end: new Date("2024-03-01T00:00:00.000Z"),
+      })
+
+      expect(result.err).toBeUndefined()
+      const snap = toSnapshot(result.val!)
+      expect(snap.amount).toBe(0)
+      expect(snap.currency.code).toBe("USD")
     })
   })
 

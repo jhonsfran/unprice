@@ -1,1 +1,0 @@
-ALTER TABLE `wallet_reservation` ADD `pending_flush_final` integer DEFAULT false NOT NULL;

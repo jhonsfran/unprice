@@ -65,7 +65,11 @@ function fieldToSchema(field: LakehouseFieldDefinition): z.ZodTypeAny {
     }
   }
 
-  return field.required ? schema : schema.optional()
+  if (field.required) {
+    return schema
+  }
+
+  return field.defaultValue === null ? schema.nullable().optional() : schema.optional()
 }
 
 export function buildLakehouseEventZodSchema(

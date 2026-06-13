@@ -95,6 +95,14 @@ export const billingPeriods = pgTableProject(
       table.subscriptionId,
       table.statementKey
     ),
+    idxIngestionInvoiceContext: index("billing_periods_ingestion_invoice_context_idx").on(
+      table.projectId,
+      table.customerId,
+      table.subscriptionItemId,
+      table.status,
+      table.cycleStartAt,
+      table.cycleEndAt
+    ),
   })
 )
 

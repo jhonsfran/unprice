@@ -5,6 +5,10 @@ import { getMessageOutcomeKey } from "./fanout-outcomes"
 import type { EntitlementWindowState, IngestionRejectionReason } from "./interface"
 import type { IngestionQueueMessage } from "./message"
 
+type EntitlementWindowApplySource = IngestionQueueMessage["source"] & {
+  workspaceId: string
+}
+
 export type EntitlementWindowApplyResult = {
   allowed: boolean
   deniedReason?: Extract<
@@ -21,6 +25,7 @@ export type EntitlementWindowApplyBatchEvent = {
   idempotencyKey: string
   now: number
   properties: Record<string, unknown>
+  source: EntitlementWindowApplySource
   slug: string
   timestamp: number
 }
@@ -43,6 +48,7 @@ export type EntitlementWindowApplyInput = {
   event: {
     id: string
     properties: Record<string, unknown>
+    source: EntitlementWindowApplySource
     slug: string
     timestamp: number
   }
@@ -59,10 +65,14 @@ export type EntitlementWindowStatus = {
   outboxCount: number
   walletReservation: {
     allocationAmount: number
+    billingPeriodId: string | null
     consumedAmount: number
     currency: string | null
+    cycleEndAt: number | null
+    cycleStartAt: number | null
     customerId: string | null
     deletionRequested: boolean
+    featurePlanVersionItemId: string | null
     flushedAmount: number
     flushSeq: number
     lastEventAt: number | null
@@ -76,8 +86,27 @@ export type EntitlementWindowStatus = {
     refillInFlight: boolean
     reservationEndAt: number | null
     reservationId: string | null
+    statementKey: string | null
     unflushedAmount: number
   } | null
+}
+
+export type FlushReservationForInvoicingInput = {
+  statementKey: string
+  billingPeriodIds: string[]
+}
+
+export type FlushReservationForInvoicingResult = {
+  ok: boolean
+  outcome:
+    | "deferred"
+    | "flushed"
+    | "no_reservation"
+    | "no_unflushed_usage"
+    | "recovery_required"
+    | "statement_mismatch"
+    | "wallet_error"
+  errorMessage?: string
 }
 
 export type EntitlementWindowController = {
@@ -92,6 +121,9 @@ export type EntitlementWindowController = {
   }) => Promise<{ results: EntitlementWindowApplyBatchResult[] }>
   getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
   getStatus?: () => Promise<EntitlementWindowStatus>
+  flushReservationForInvoicing?: (
+    input: FlushReservationForInvoicingInput
+  ) => Promise<FlushReservationForInvoicingResult>
 }
 
 export interface EntitlementWindowClient {
@@ -152,6 +184,7 @@ export class EntitlementWindowApplier {
         slug: message.slug,
         timestamp: message.timestamp,
         properties: message.properties,
+        source: buildEntitlementWindowApplySource(message),
         idempotencyKey: message.idempotencyKey,
         now: message.receivedAt,
       })),
@@ -194,6 +227,7 @@ export class EntitlementWindowApplier {
         slug: message.slug,
         timestamp: message.timestamp,
         properties: message.properties,
+        source: buildEntitlementWindowApplySource(message),
       },
       entitlement: applyEntitlement,
       idempotencyKey: message.idempotencyKey,
@@ -234,6 +268,7 @@ export class EntitlementWindowApplier {
           slug: message.slug,
           timestamp: message.timestamp,
           properties: message.properties,
+          source: buildEntitlementWindowApplySource(message),
         },
         entitlement: applyEntitlement,
         idempotencyKey: message.idempotencyKey,
@@ -287,4 +322,13 @@ function mapBatchResultsToMessages(
 
     return { ...result, idempotencyKey: message.idempotencyKey, correlationKey }
   })
+}
+
+function buildEntitlementWindowApplySource(
+  message: IngestionQueueMessage
+): EntitlementWindowApplySource {
+  return {
+    workspaceId: message.workspaceId,
+    ...message.source,
+  }
 }

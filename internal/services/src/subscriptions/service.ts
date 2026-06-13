@@ -28,8 +28,8 @@ import { GrantsManager } from "../entitlements/grants"
 import type { EntitlementService } from "../entitlements/service"
 import type { LedgerGateway } from "../ledger"
 import type { Metrics } from "../metrics"
-import { getPaymentProviderCapabilities } from "../payment-provider/service"
 import type { RatingService } from "../rating/service"
+import type { BillingReservationFlushGateway } from "../use-cases/billing/reservation-flush-gateway"
 import { toErrorContext } from "../utils/log-context"
 import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
@@ -84,6 +84,7 @@ export class SubscriptionService {
   private readonly ratingService: RatingService
   private readonly ledgerService: LedgerGateway
   private readonly walletService: WalletService | undefined
+  private readonly reservationFlushGateway: BillingReservationFlushGateway | undefined
 
   constructor({
     db,
@@ -99,6 +100,7 @@ export class SubscriptionService {
     ratingService,
     ledgerService,
     walletService,
+    reservationFlushGateway,
   }: {
     db: Database
     repo: SubscriptionRepository
@@ -114,6 +116,7 @@ export class SubscriptionService {
     ratingService: RatingService
     ledgerService: LedgerGateway
     walletService?: WalletService
+    reservationFlushGateway?: BillingReservationFlushGateway
   }) {
     this.db = db
     this.repo = repo
@@ -127,6 +130,7 @@ export class SubscriptionService {
     this.ratingService = ratingService
     this.ledgerService = ledgerService
     this.walletService = walletService
+    this.reservationFlushGateway = reservationFlushGateway
   }
 
   private setLockContext(context: {
@@ -947,22 +951,37 @@ export class SubscriptionService {
     //   billingAnchorToUse = getDate(toZonedTime(startAtToUse, subscriptionTimezone))
     // }
     const paymentProviderToUse = paymentProvider ?? versionData.paymentProvider
-    const providerCaps = getPaymentProviderCapabilities(paymentProviderToUse)
     const creditLinePolicyToUse = creditLinePolicy ?? "uncapped"
     const creditLineAmountToUse =
       creditLinePolicyToUse === "uncapped" ? null : (creditLineAmount ?? null)
+    let paymentMethodIdToUse = paymentMethodId ?? null
 
-    // skip payment method validation for providers without async payment confirmation
-    if (
-      paymentMethodRequired &&
-      providerCaps.asyncPaymentConfirmation &&
-      (!paymentMethodId || paymentMethodId === "")
-    ) {
-      return Err(
-        new UnPriceSubscriptionError({
-          message: "Payment method is required for this plan version",
+    if (paymentMethodRequired && (!paymentMethodIdToUse || paymentMethodIdToUse === "")) {
+      const { err: paymentMethodErr, val: paymentMethod } =
+        await this.customerService.validatePaymentMethod({
+          customerId: subscriptionWithPhases.customerId,
+          projectId,
+          paymentProvider: paymentProviderToUse,
+          requiredPaymentMethod: true,
         })
-      )
+
+      if (paymentMethodErr) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: paymentMethodErr.message,
+          })
+        )
+      }
+
+      paymentMethodIdToUse = paymentMethod.paymentMethodId
+
+      if (!paymentMethodIdToUse) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "Payment method is required for this plan version",
+          })
+        )
+      }
     }
 
     // check the subscription items configuration
@@ -1030,7 +1049,7 @@ export class SubscriptionService {
         projectId,
         planVersionId,
         subscriptionId,
-        paymentMethodId: paymentMethodId ?? null,
+        paymentMethodId: paymentMethodIdToUse,
         paymentProvider: paymentProviderToUse,
         creditLinePolicy: creditLinePolicyToUse,
         creditLineAmount: creditLineAmountToUse,
@@ -1106,7 +1125,7 @@ export class SubscriptionService {
         const isAdvancePending =
           versionStrategy?.billPhaseTrigger === "period_start" &&
           paymentMethodRequired &&
-          (!paymentMethodId || paymentMethodId === "")
+          (!paymentMethodIdToUse || paymentMethodIdToUse === "")
         const status =
           trialUnitsToUse > 0 ? "trialing" : isAdvancePending ? "pending_payment" : "active"
         await txRepo.updateSubscription({
@@ -1161,24 +1180,21 @@ export class SubscriptionService {
       return Ok(phase)
     })
 
-    // generate the billing periods for the new phase on background
-    // this can fail but background jobs can retry
-    this.waitUntil(
-      // TODO: report the event to analytics with more context
-      // this.analytics.trackEvent({
-      //   event: "subscription.phase.created",
-      //   properties: {
-      //     subscriptionId,
-      //   },
-      // })
-      !["test"].includes(env.NODE_ENV)
-        ? this.billingService.generateBillingPeriods({
-            subscriptionId,
-            projectId,
-            now: Date.now(), // get the periods until the current date
-          })
-        : Promise.resolve(undefined)
-    )
+    if (!result.err && !db && env.NODE_ENV !== "test") {
+      const periodsResult = await this.billingService.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now: Date.now(),
+      })
+
+      if (periodsResult.err) {
+        this.logger.warn("subscription phase billing period generation failed", {
+          subscriptionId,
+          projectId,
+          error: periodsResult.err,
+        })
+      }
+    }
 
     return result
   }
@@ -1299,6 +1315,8 @@ export class SubscriptionService {
     const creditLinePolicyToUse = phaseToUpdate.creditLinePolicy ?? "uncapped"
     const creditLineAmountToUse =
       creditLinePolicyToUse === "uncapped" ? null : (phaseToUpdate.creditLineAmount ?? null)
+    const paymentMethodIdToUse =
+      input.paymentMethodId === undefined ? phaseToUpdate.paymentMethodId : input.paymentMethodId
 
     // update the phase with the new dates
     const phase = {
@@ -1327,6 +1345,7 @@ export class SubscriptionService {
         data: {
           startAt: startAt,
           endAt: endAtToUse ?? null,
+          paymentMethodId: paymentMethodIdToUse,
           creditLinePolicy: creditLinePolicyToUse,
           creditLineAmount: creditLineAmountToUse,
         },
@@ -1408,16 +1427,20 @@ export class SubscriptionService {
       return Ok(subscriptionPhase)
     })
 
-    if (!result.err) {
-      this.waitUntil(
-        env.NODE_ENV !== "test"
-          ? this.billingService.generateBillingPeriods({
-              subscriptionId,
-              projectId,
-              now: Date.now(),
-            })
-          : Promise.resolve(undefined)
-      )
+    if (!result.err && !db && env.NODE_ENV !== "test") {
+      const periodsResult = await this.billingService.generateBillingPeriods({
+        subscriptionId,
+        projectId,
+        now: Date.now(),
+      })
+
+      if (periodsResult.err) {
+        this.logger.warn("subscription phase billing period generation failed", {
+          subscriptionId,
+          projectId,
+          error: periodsResult.err,
+        })
+      }
     }
 
     return result
@@ -1674,6 +1697,22 @@ export class SubscriptionService {
     return this.repo.findSubscription({ subscriptionId, projectId })
   }
 
+  public materializeBillingPeriods({
+    subscriptionId,
+    projectId,
+    now = Date.now(),
+  }: {
+    subscriptionId: string
+    projectId: string
+    now?: number
+  }): ReturnType<BillingService["generateBillingPeriods"]> {
+    return this.billingService.generateBillingPeriods({
+      subscriptionId,
+      projectId,
+      now,
+    })
+  }
+
   public async getSubscriptionById({
     subscriptionId,
   }: {
@@ -1783,6 +1822,8 @@ export class SubscriptionService {
         ratingService: this.ratingService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,
+        billingService: this.billingService,
+        reservationFlushGateway: this.reservationFlushGateway,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })
@@ -1836,7 +1877,7 @@ export class SubscriptionService {
         subscriptionId,
         projectId,
         now,
-        lock: false,
+        lock: true,
         run: async (machine) => {
           const result = await machine.activate()
           if (result.err) throw result.err

@@ -8,14 +8,13 @@ import {
 } from "@unprice/analytics"
 import { type Database, and, between, count, eq } from "@unprice/db"
 import { features, plans, subscriptions, versions } from "@unprice/db/schema"
-import { calculateFlatPricePlan } from "@unprice/db/validators"
+import type { Currency } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { currencySymbol } from "@unprice/money"
-import { type Dinero, add, dinero, toDecimal } from "dinero.js"
-import * as currencies from "dinero.js/currencies"
+import { toDecimal } from "dinero.js"
 import type { z } from "zod"
-import { toErrorContext } from "../utils/log-context"
+import type { LedgerGateway } from "../ledger"
 
 type OverviewStats = z.infer<typeof statsSchema>
 type PageCountryVisits = Awaited<ReturnType<Analytics["getCountryVisits"]>>["data"]
@@ -29,19 +28,23 @@ export class AnalyticsService {
   private readonly db: Database
   private readonly logger: Logger
   private readonly analytics: Analytics
+  private readonly ledgerGateway: LedgerGateway
 
   constructor({
     db,
     logger,
     analytics,
+    ledgerGateway,
   }: {
     db: Database
     logger: Logger
     analytics: Analytics
+    ledgerGateway: LedgerGateway
   }) {
     this.db = db
     this.logger = logger
     this.analytics = analytics
+    this.ledgerGateway = ledgerGateway
   }
 
   public async getPlansStats({
@@ -151,12 +154,12 @@ export class AnalyticsService {
     interval,
   }: {
     projectId: string
-    defaultCurrency: keyof typeof currencies
+    defaultCurrency: Currency
     interval: Interval
   }): Promise<Result<OverviewStats, FetchError>> {
     const preparedInterval = prepareInterval(interval)
 
-    const { val: subscriptions, err } = await wrapResult(
+    const { val, err } = await wrapResult(
       this.db.query.subscriptions.findMany({
         where: (table, { eq }) => eq(table.projectId, projectId),
         columns: {
@@ -171,17 +174,6 @@ export class AnalyticsService {
           phases: {
             columns: {
               id: true,
-            },
-            with: {
-              planVersion: {
-                with: {
-                  planFeatures: {
-                    with: {
-                      feature: true,
-                    },
-                  },
-                },
-              },
             },
             where: (table, { lte, and, isNull, gte, or }) =>
               and(
@@ -206,9 +198,13 @@ export class AnalyticsService {
       return Err(err)
     }
 
-    const defaultDineroCurrency = currencies[defaultCurrency]
-
-    let total: Dinero<number> = dinero({ amount: 0, currency: defaultDineroCurrency })
+    const subscriptions = val
+    const recognizedRevenue = await this.ledgerGateway.getRecognizedRevenue({
+      projectId,
+      currency: defaultCurrency,
+      start: new Date(preparedInterval.start),
+      end: new Date(preparedInterval.end),
+    })
 
     const stats = {
       newSignups: {
@@ -234,35 +230,37 @@ export class AnalyticsService {
       },
     }
 
-    for (const subscription of subscriptions) {
-      const planVersion = subscription.phases[0]?.planVersion
-
-      if (!planVersion) {
-        continue
-      }
-
-      const { err: priceErr, val } = calculateFlatPricePlan({
-        planVersion,
-        prorate: 1,
+    if (recognizedRevenue.err) {
+      this.logger.error(recognizedRevenue.err, {
+        context: "failed to fetch recognized revenue for overview stats",
+        projectId,
       })
-
-      if (priceErr) {
-        this.logger.warn("error calculating flat plan price for overview stats", {
-          error: toErrorContext(priceErr),
-          projectId,
+      return Err(
+        new FetchError({
+          message: `failed to fetch overview stats: ${recognizedRevenue.err.message}`,
+          retry: false,
         })
+      )
+    }
+
+    for (const subscription of subscriptions) {
+      if (!subscription.phases[0]) {
         continue
       }
-
-      const price = val.dinero
 
       stats.newSignups.total += 1
-      total = add(total, price)
       stats.newSubscriptions.total += 1
       stats.newCustomers.total += 1
     }
 
-    const displayAmount = toDecimal(total, ({ value }: { value: number | string }) => Number(value))
+    const displayAmount = toDecimal(
+      recognizedRevenue.val,
+      ({
+        value,
+      }: {
+        value: number | string
+      }) => Number(value)
+    )
     stats.totalRevenue.total = displayAmount
 
     return Ok(stats as OverviewStats)
@@ -494,40 +492,5 @@ export class AnalyticsService {
     }
 
     return Ok({ data: val ?? [] })
-  }
-
-  public async getRealtimeTicketCustomer({
-    projectId,
-    customerId,
-  }: {
-    projectId: string
-    customerId: string
-  }): Promise<Result<{ id: string; projectId: string } | null, FetchError>> {
-    const { val, err } = await wrapResult(
-      this.db.query.customers.findFirst({
-        where: (table, { and, eq }) =>
-          and(eq(table.id, customerId), eq(table.projectId, projectId)),
-        columns: {
-          id: true,
-          projectId: true,
-        },
-      }),
-      (error) =>
-        new FetchError({
-          message: `failed to fetch customer for realtime ticket: ${error.message}`,
-          retry: false,
-        })
-    )
-
-    if (err) {
-      this.logger.error(err, {
-        context: "failed to fetch customer for realtime ticket",
-        projectId,
-        customerId,
-      })
-      return Err(err)
-    }
-
-    return Ok(val ?? null)
   }
 }

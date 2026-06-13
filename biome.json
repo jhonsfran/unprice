@@ -59,8 +59,7 @@
       "./internal/lakehouse/.ipynb_checkpoints",
       "./internal/lakehouse/lakehouse.ipynb",
       "./apps/api/scripts/*",
-      "**/__pycache__/**",
-      "apps/lakehouse-api/**"
+      "**/__pycache__/**"
     ]
   },
   "formatter": {
@@ -89,8 +88,7 @@
       "./internal/lakehouse/.ipynb_checkpoints",
       "./internal/lakehouse/lakehouse.ipynb",
       "./apps/api/scripts/*",
-      "**/__pycache__/**",
-      "apps/lakehouse-api/**"
+      "**/__pycache__/**"
     ]
   },
   "organizeImports": {
@@ -114,8 +112,7 @@
       "./internal/lakehouse/.ipynb_checkpoints",
       "./internal/lakehouse/lakehouse.ipynb",
       "./apps/api/scripts/*",
-      "**/__pycache__/**",
-      "apps/lakehouse-api/**"
+      "**/__pycache__/**"
     ]
   },
   "javascript": {

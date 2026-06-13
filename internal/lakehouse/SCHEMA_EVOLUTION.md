@@ -2,12 +2,13 @@
 
 This package is the source of truth for lakehouse event schema.
 
+This package is not a customer-facing query API. It only owns the Pipeline/R2 events schema used by the reporting consumer. Cloudflare Data Catalog partitioning is controlled by the sink's ingestion-time behavior; project_id, customer_id, and event_date are query columns, not partition guarantees.
+
 ## Source Of Truth
 
 - Registry: `internal/lakehouse/src/registry.ts`
 - Runtime validation: `internal/lakehouse/src/zod.ts` (generated from registry)
 - Event TS types: `internal/lakehouse/src/interface.ts` (derived from registry types)
-- Query/table aliases: `internal/lakehouse/src/registry.ts` + `internal/lakehouse/src/predefined-queries.ts`
 - Cloudflare stream schemas (`apps/api/scripts/schemas/*.json`) are generated from registry.
 
 Do not hand-edit `apps/api/scripts/schemas/*.json`.
@@ -60,11 +61,9 @@ Cloudflare conversions/normalization are handled by `toCloudflarePipelineSchema(
 4. Prefer `required: false` first unless every producer can immediately populate it.
 5. Update event production in API pipeline:
    - `apps/api/src/lakehouse/pipeline.ts`
-6. If needed, update predefined queries:
-   - `internal/lakehouse/src/predefined-queries.ts`
-7. Regenerate Cloudflare stream schemas:
+6. Regenerate Cloudflare stream schemas:
    - `cd apps/api && npm run scripts:lakehouse-schemas`
-8. Recreate pipeline resources for the target environment:
+7. Recreate pipeline resources for the target environment:
    - `cd apps/api && ./scripts/configure-lakehouse-pipelines.sh <env> --recreate`
 
 ### 2) Change field type or semantics (breaking)
@@ -73,7 +72,7 @@ Recommended approach:
 
 1. Add a new field name (for example `amount_v2`) instead of mutating existing semantics in place.
 2. Emit both old + new fields during migration window.
-3. Migrate consumers/queries to new field.
+3. Migrate consumers to new field.
 4. Remove old field later in a separate change.
 
 Also bump schema version constant if needed:
@@ -81,9 +80,9 @@ Also bump schema version constant if needed:
 
 ### 3) Remove a field
 
-Field removal is breaking for queries and downstream readers.
+Field removal is breaking for downstream readers.
 
-1. First stop usage in predefined queries and consumers.
+1. First stop usage in consumers.
 2. Keep field in schema temporarily as optional if possible.
 3. Remove only after all environments are migrated and validated.
 4. Regenerate schemas and recreate resources.
@@ -116,4 +115,3 @@ If you use custom `--name-prefix` or `--name-suffix`, ensure `apps/api/wrangler.
 
 - R2 bucket lifecycle and bucket creation are separate concerns from pipeline schema.
 - R2 Data Catalog partitioning is controlled by Cloudflare sink behavior (`__ingest_ts`), not by this registry.
-- `schema_version` is now used by the query builder for version-aware projections via `applyEvolutionDefault` in `internal/lakehouse/src/query-builder.ts`.

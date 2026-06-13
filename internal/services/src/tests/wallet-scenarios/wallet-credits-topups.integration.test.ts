@@ -123,8 +123,9 @@ function processTopupWebhook(input: {
       services: {
         customers: input.customers,
         subscriptions: { reconcilePaymentOutcome: vi.fn() },
+        billing: { generateBillingPeriods: vi.fn() },
         wallet: input.wallet,
-      } as unknown as Pick<ServiceContext, "customers" | "subscriptions" | "wallet">,
+      } as unknown as Pick<ServiceContext, "customers" | "subscriptions" | "wallet" | "billing">,
       waitUntil: vi.fn(),
     },
     {

@@ -20,6 +20,7 @@ import type {
   WorkspaceRole,
 } from "@unprice/db/validators"
 import type { PreparedCustomerGrantContext } from "../ingestion/entitlement-context"
+import type { GetUsageDashboardOutput } from "../use-cases/analytics/get-usage-dashboard"
 
 export type ProjectFeatureCache = {
   project: {
@@ -63,6 +64,7 @@ export type CacheNamespaces = {
   getPlansStats: Stats | null
   getOverviewStats: Stats | null
   getUsage: Usage | null
+  getUsageDashboard: GetUsageDashboardOutput | null
   getCurrentUsage: CurrentUsage | null
   ingestionPreparedGrantContext: PreparedCustomerGrantContext
 }

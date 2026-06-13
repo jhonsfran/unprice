@@ -27,6 +27,13 @@ interface FormValues extends FieldValues {
   paymentMethodId?: string | null
 }
 
+function getErrorMessage(errors: FieldErrors<FieldValues>, field: string): string | undefined {
+  const error = errors[field as keyof typeof errors]
+  return error && typeof error === "object" && "message" in error
+    ? (error.message as string)
+    : undefined
+}
+
 export default function PaymentMethodsFormField<TFieldValues extends FormValues>({
   form,
   isDisabled,
@@ -46,9 +53,16 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
   const projectSlug = useParams().projectSlug as string
   const searchParams = useSearchParams()
   const customerId = form.watch("customerId" as FieldPath<TFieldValues>) as string | undefined
-  const [isConfirmingPaymentMethod, setIsConfirmingPaymentMethod] = useState(false)
+
+  // Derive whether the user just returned from the payment-provider redirect
+  const paymentSetup = searchParams.get("paymentSetup")
+  const returnedProvider = searchParams.get("provider")
+  const isReturningFromSetup =
+    paymentSetup === "success" && returnedProvider === paymentProvider && !!customerId
+
+  // User-intent state: they started (or returned from) payment provider setup
+  const [awaitingPaymentSetup, setAwaitingPaymentSetup] = useState(isReturningFromSetup)
   const [confirmationTimedOut, setConfirmationTimedOut] = useState(false)
-  const [handledSetupReturn, setHandledSetupReturn] = useState<string | null>(null)
 
   const subscriptionReturnUrl = `${APP_DOMAIN}/${workspaceSlug}/${projectSlug}/customers/subscriptions/new?customerId=${customerId ?? ""}&provider=${paymentProvider}`
   const successUrl = `${subscriptionReturnUrl}&paymentSetup=success`
@@ -59,54 +73,39 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
     () => ({
       customerId: customerId ?? "",
       provider: paymentProvider,
-      ...(isConfirmingPaymentMethod ? { skipCache: true } : {}),
+      ...(awaitingPaymentSetup ? { skipCache: true } : {}),
     }),
-    [customerId, paymentProvider, isConfirmingPaymentMethod]
+    [customerId, paymentProvider, awaitingPaymentSetup]
   )
 
   const { data, isLoading } = useQuery(
     trpc.customers.listPaymentMethods.queryOptions(paymentMethodsInput, {
       enabled: !!customerId,
       placeholderData: (previousData) => previousData,
-      refetchInterval: isConfirmingPaymentMethod ? 2000 : false,
+      refetchInterval: awaitingPaymentSetup && !confirmationTimedOut ? 2000 : false,
       refetchOnMount: true,
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
-      staleTime: isConfirmingPaymentMethod ? 0 : 1000 * 30,
+      staleTime: awaitingPaymentSetup ? 0 : 1000 * 30,
     })
   )
 
   const hasPaymentMethods = (data?.paymentMethods.length ?? 0) > 0
+  // Derived: actively confirming = user started setup + no methods yet + not timed out
+  const isConfirmingPaymentMethod =
+    awaitingPaymentSetup && !hasPaymentMethods && !confirmationTimedOut
   const shouldShowCheckingState = isLoading && !data
   const shouldShowConfirmingState = isConfirmingPaymentMethod && !hasPaymentMethods
 
   useEffect(() => {
-    if (!isConfirmingPaymentMethod) return
+    if (!awaitingPaymentSetup || confirmationTimedOut) return
 
     const timeout = window.setTimeout(() => {
-      setIsConfirmingPaymentMethod(false)
       setConfirmationTimedOut(true)
     }, 90_000)
 
     return () => window.clearTimeout(timeout)
-  }, [isConfirmingPaymentMethod])
-
-  useEffect(() => {
-    const paymentSetup = searchParams.get("paymentSetup")
-    const returnedProvider = searchParams.get("provider")
-    const setupReturnKey = `${paymentSetup}:${returnedProvider}:${customerId}`
-
-    if (
-      paymentSetup === "success" &&
-      customerId &&
-      returnedProvider === paymentProvider &&
-      handledSetupReturn !== setupReturnKey
-    ) {
-      setHandledSetupReturn(setupReturnKey)
-      setConfirmationTimedOut(false)
-      setIsConfirmingPaymentMethod(true)
-    }
-  }, [customerId, handledSetupReturn, paymentProvider, searchParams])
+  }, [awaitingPaymentSetup, confirmationTimedOut])
 
   useEffect(() => {
     const defaultPaymentMethod = data?.paymentMethods.at(0)
@@ -121,7 +120,11 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
     )
 
     const currentPaymentMethodId = form.getValues("paymentMethodId" as FieldPath<TFieldValues>)
-    if (!currentPaymentMethodId) {
+    const hasCurrentPaymentMethod =
+      typeof currentPaymentMethodId === "string" &&
+      (data?.paymentMethods.some((method) => method.id === currentPaymentMethodId) ?? false)
+
+    if (!hasCurrentPaymentMethod) {
       form.setValue(
         "paymentMethodId" as FieldPath<TFieldValues>,
         defaultPaymentMethod.id as PathValue<TFieldValues, FieldPath<TFieldValues>>,
@@ -131,21 +134,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
         }
       )
     }
-
-    setIsConfirmingPaymentMethod(false)
-    setConfirmationTimedOut(false)
   }, [customerId, data, form, paymentProvider, queryClient, trpc.customers.listPaymentMethods])
-
-  // Helper function to safely get the error message
-  const getErrorMessage = (
-    errors: FieldErrors<TFieldValues>,
-    field: string
-  ): string | undefined => {
-    const error = errors[field as keyof typeof errors]
-    return error && typeof error === "object" && "message" in error
-      ? (error.message as string)
-      : undefined
-  }
 
   // if payment method is not required, hide the field
   if (!paymentProviderRequired) {
@@ -264,7 +253,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
               isRefreshing={shouldShowConfirmingState}
               onProviderSessionStarted={() => {
                 setConfirmationTimedOut(false)
-                setIsConfirmingPaymentMethod(true)
+                setAwaitingPaymentSetup(true)
               }}
             />
           </EmptyPlaceholder.Action>

@@ -214,3 +214,27 @@ export type ResetConfig = z.infer<typeof resetConfigSchema>
 export type MeterConfig = z.infer<typeof meterConfigSchema>
 export type OverageStrategy = z.infer<typeof overageStrategySchema>
 export type GrantType = z.infer<typeof grantTypeSchema>
+
+const BILLING_CADENCE_MINUTES: Record<BillingInterval, number> = {
+  minute: 1,
+  day: 60 * 24,
+  week: 60 * 24 * 7,
+  month: 60 * 24 * 30,
+  year: 60 * 24 * 365,
+  onetime: Number.POSITIVE_INFINITY,
+}
+
+export function billingCadenceMinutes(config: BillingConfig): number {
+  return BILLING_CADENCE_MINUTES[config.billingInterval] * config.billingIntervalCount
+}
+
+export function resetCadenceMinutes(config: ResetConfig): number {
+  return BILLING_CADENCE_MINUTES[config.resetInterval] * config.resetIntervalCount
+}
+
+export function isResetCadenceAtMostBilling(
+  resetConfig: ResetConfig,
+  billingConfig: BillingConfig
+): boolean {
+  return resetCadenceMinutes(resetConfig) <= billingCadenceMinutes(billingConfig)
+}

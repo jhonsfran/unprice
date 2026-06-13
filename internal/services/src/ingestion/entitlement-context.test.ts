@@ -33,6 +33,8 @@ describe("IngestionEntitlementContextLoader", () => {
 
   it("maps customer entitlement records into ingestion entitlements", () => {
     const entitlement = createEntitlement({
+      subscriptionId: "sub_123",
+      subscriptionItemId: "si_123",
       grants: [
         {
           allowanceUnits: null,
@@ -47,6 +49,7 @@ describe("IngestionEntitlementContextLoader", () => {
     const mapped = toIngestionEntitlement(createCustomerEntitlementRecord(entitlement) as never)
 
     expect(mapped).toMatchObject({
+      billingPeriods: [],
       creditLinePolicy: "capped",
       customerEntitlementId: "ce_123",
       featureSlug: "api_calls",
@@ -66,6 +69,8 @@ describe("IngestionEntitlementContextLoader", () => {
           priority: 20,
         },
       ],
+      subscriptionId: "sub_123",
+      subscriptionItemId: "si_123",
     })
   })
 
@@ -93,7 +98,14 @@ describe("IngestionEntitlementContextLoader", () => {
       endAt: TEST_NOW,
     })
 
-    expect(result).toBe(cachedContext)
+    expect(result).toEqual({
+      candidateEntitlements: [
+        {
+          ...cachedContext.candidateEntitlements[0],
+          billingPeriods: [],
+        },
+      ],
+    })
     expect(getCustomerEntitlementsForCustomer).not.toHaveBeenCalled()
   })
 
@@ -233,6 +245,7 @@ function createLogger() {
 function createMessage(overrides: Partial<IngestionQueueMessage> = {}): IngestionQueueMessage {
   return {
     version: 1,
+    workspaceId: "ws_123",
     projectId: "proj_123",
     customerId: "cus_123",
     requestId: "req_123",
@@ -242,12 +255,20 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
     slug: "usage.recorded",
     timestamp: TEST_NOW,
     properties: { amount: 1 },
+    source: {
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
+    },
     ...overrides,
   }
 }
 
 function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
+    billingPeriods: [],
     creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
@@ -277,6 +298,7 @@ function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): Inges
     overageStrategy: "none",
     projectId: "proj_123",
     resetConfig: null,
+    subscriptionItemId: null,
     ...overrides,
   }
 }
@@ -287,9 +309,9 @@ function createCustomerEntitlementRecord(entitlement: IngestionEntitlement) {
     projectId: entitlement.projectId,
     customerId: entitlement.customerId,
     featurePlanVersionId: entitlement.featurePlanVersionId,
-    subscriptionId: null,
+    subscriptionId: entitlement.subscriptionId ?? null,
     subscriptionPhaseId: null,
-    subscriptionItemId: null,
+    subscriptionItemId: entitlement.subscriptionItemId,
     effectiveAt: entitlement.effectiveAt,
     expiresAt: entitlement.expiresAt,
     overageStrategy: entitlement.overageStrategy,

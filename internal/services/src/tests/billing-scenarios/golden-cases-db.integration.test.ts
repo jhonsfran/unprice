@@ -244,9 +244,15 @@ describe("DB-backed billing golden cases", () => {
       statement_key: string
       statement_start_at_m: string
       status: string
-      total_amount: string
+      gross_amount: string
+
+      amount_due: string
+
+      amount_paid: string
+
+      amount_included: string
     }>(sql`
-      SELECT id, status, total_amount, statement_key, statement_start_at_m, statement_end_at_m
+      SELECT id, status, gross_amount, amount_due, amount_paid, amount_included, statement_key, statement_start_at_m, statement_end_at_m
       FROM unprice_invoices
       WHERE project_id = ${projectId}
         AND subscription_id = ${subscriptionId}
@@ -257,7 +263,13 @@ describe("DB-backed billing golden cases", () => {
         ...invoice,
         statement_end_at_m: Number(invoice.statement_end_at_m),
         statement_start_at_m: Number(invoice.statement_start_at_m),
-        total_amount: Number(invoice.total_amount),
+        gross_amount: Number(invoice.gross_amount),
+
+        amount_due: Number(invoice.amount_due),
+
+        amount_paid: Number(invoice.amount_paid),
+
+        amount_included: Number(invoice.amount_included),
       }))
     ).toEqual([
       expect.objectContaining({
@@ -265,7 +277,13 @@ describe("DB-backed billing golden cases", () => {
         statement_key: statementKey,
         statement_start_at_m: jan1,
         status: "draft",
-        total_amount: invoiceTotal,
+        gross_amount: invoiceTotal,
+
+        amount_due: invoiceTotal,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       }),
     ])
 
@@ -405,9 +423,15 @@ describe("DB-backed billing golden cases", () => {
       statement_end_at_m: string
       statement_key: string
       statement_start_at_m: string
-      total_amount: string
+      gross_amount: string
+
+      amount_due: string
+
+      amount_paid: string
+
+      amount_included: string
     }>(sql`
-      SELECT statement_key, statement_start_at_m, statement_end_at_m, total_amount
+      SELECT statement_key, statement_start_at_m, statement_end_at_m, gross_amount, amount_due, amount_paid, amount_included
       FROM unprice_invoices
       WHERE project_id = ${projectId}
         AND subscription_id = ${subscriptionId}
@@ -418,14 +442,26 @@ describe("DB-backed billing golden cases", () => {
         ...invoice,
         statement_end_at_m: Number(invoice.statement_end_at_m),
         statement_start_at_m: Number(invoice.statement_start_at_m),
-        total_amount: Number(invoice.total_amount),
+        gross_amount: Number(invoice.gross_amount),
+
+        amount_due: Number(invoice.amount_due),
+
+        amount_paid: Number(invoice.amount_paid),
+
+        amount_included: Number(invoice.amount_included),
       }))
     ).toEqual([
       {
         statement_end_at_m: nextYear,
         statement_key: annualStatementKey,
         statement_start_at_m: jan1,
-        total_amount: invoiceTotal,
+        gross_amount: invoiceTotal,
+
+        amount_due: invoiceTotal,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       },
     ])
 

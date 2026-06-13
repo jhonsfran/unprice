@@ -9,11 +9,14 @@
   "packageManager": "pnpm@10.28.0",
   "pnpm": {
     "overrides": {
-      "@duckdb/duckdb-wasm": "1.32.0",
-      "apache-arrow": "17.0.0",
       "date-fns": "^3.3.1"
     },
     "packageExtensions": {
+      "@hookform/resolvers": {
+        "peerDependencies": {
+          "zod": ">=3.0.0"
+        }
+      },
       "react-virtual": {
         "peerDependencies": {
           "react": ">=16.6.3"
@@ -40,7 +43,8 @@
     "bump-versions": "pnpm changeset version && pnpm install",
     "release": "pnpm build && pnpm changeset publish",
     "prepare": "husky",
-    "preinstall": "npx only-allow pnpm"
+    "preinstall": "npx only-allow pnpm",
+    "doctor": "npx react-doctor@0.4.0"
   },
   "dependencies": {
     "@biomejs/biome": "1.9.4",

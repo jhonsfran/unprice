@@ -2538,7 +2538,10 @@
                         "issue_date": { "type": "integer", "nullable": true },
                         "sent_at": { "type": "integer", "nullable": true },
                         "paid_at": { "type": "integer", "nullable": true },
-                        "total_amount": { "type": "integer", "minimum": 0 }
+                        "gross_amount": { "type": "integer", "minimum": 0 },
+                        "amount_due": { "type": "integer", "minimum": 0 },
+                        "amount_paid": { "type": "integer", "minimum": 0 },
+                        "amount_included": { "type": "integer", "minimum": 0 }
                       },
                       "required": [
                         "id",
@@ -2555,7 +2558,10 @@
                         "issue_date",
                         "sent_at",
                         "paid_at",
-                        "total_amount"
+                        "gross_amount",
+                        "amount_due",
+                        "amount_paid",
+                        "amount_included"
                       ]
                     },
                     "lines": {
@@ -2569,6 +2575,33 @@
                           "description": { "type": "string", "nullable": true },
                           "quantity": { "type": "number", "nullable": true },
                           "amount": { "type": "integer", "minimum": 0 },
+                          "amount_due": { "type": "integer", "minimum": 0 },
+                          "amount_paid": { "type": "integer", "minimum": 0 },
+                          "amount_included": { "type": "integer", "minimum": 0 },
+                          "collectable": { "type": "boolean" },
+                          "settlement_source": {
+                            "type": "string",
+                            "enum": [
+                              "provider",
+                              "credit_line",
+                              "cash_wallet",
+                              "plan_included",
+                              "trial",
+                              "promo",
+                              "manual"
+                            ]
+                          },
+                          "settlement_status": {
+                            "type": "string",
+                            "enum": ["due", "paid", "included"]
+                          },
+                          "wallet_credit_id": { "type": "string", "nullable": true },
+                          "wallet_credit_source": {
+                            "type": "string",
+                            "enum": ["promo", "plan_included", "trial", "manual", "credit_line"],
+                            "nullable": true
+                          },
+                          "wallet_id": { "type": "string", "nullable": true },
                           "currency": { "type": "string", "enum": ["USD", "EUR"] },
                           "created_at": { "type": "string", "format": "date-time" }
                         },
@@ -2579,6 +2612,15 @@
                           "description",
                           "quantity",
                           "amount",
+                          "amount_due",
+                          "amount_paid",
+                          "amount_included",
+                          "collectable",
+                          "settlement_source",
+                          "settlement_status",
+                          "wallet_credit_id",
+                          "wallet_credit_source",
+                          "wallet_id",
                           "currency",
                           "created_at"
                         ]
@@ -2586,177 +2628,6 @@
                     }
                   },
                   "required": ["invoice", "lines"]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ErrBadRequest" } }
-            }
-          },
-          "401": {
-            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ErrUnauthorized" } }
-            }
-          },
-          "403": {
-            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ErrForbidden" } }
-            }
-          },
-          "404": {
-            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ErrNotFound" } }
-            }
-          },
-          "409": {
-            "description": "This response is sent when a request conflicts with the current state of the server.",
-            "content": {
-              "application/json": { "schema": { "$ref": "#/components/schemas/ErrConflict" } }
-            }
-          },
-          "412": {
-            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrPreconditionFailed" }
-              }
-            }
-          },
-          "429": {
-            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrTooManyRequests" }
-              }
-            }
-          },
-          "500": {
-            "description": "The server has encountered a situation it does not know how to handle.",
-            "content": {
-              "application/json": {
-                "schema": { "$ref": "#/components/schemas/ErrInternalServerError" }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/lakehouse/file-plan": {
-      "post": {
-        "operationId": "lakehouse.getFilePlan",
-        "summary": "get scoped lakehouse file plan",
-        "description": "Return temporary R2 credentials and matching lakehouse parquet files in one response.",
-        "tags": ["lakehouse"],
-        "requestBody": {
-          "description": "Lakehouse file plan request payload",
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "projectId": { "type": "string" },
-                  "customerId": { "type": "string" },
-                  "tables": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "enum": ["usage", "verification", "metadata", "entitlement_snapshot"]
-                    },
-                    "minItems": 1
-                  },
-                  "interval": {
-                    "type": "string",
-                    "enum": ["1d", "7d", "30d", "90d"],
-                    "default": "30d"
-                  },
-                  "targetEnv": {
-                    "type": "string",
-                    "enum": ["non_prod", "prod"],
-                    "default": "non_prod"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Lakehouse file plan",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "projectIds": { "type": "array", "items": { "type": "string" } },
-                    "customerIds": { "type": "array", "items": { "type": "string" } },
-                    "interval": { "type": "string", "enum": ["1d", "7d", "30d", "90d"] },
-                    "intervalDays": { "type": "integer" },
-                    "targetEnv": { "type": "string", "enum": ["non_prod", "prod"] },
-                    "window": {
-                      "type": "object",
-                      "properties": { "start": { "type": "string" }, "end": { "type": "string" } },
-                      "required": ["start", "end"]
-                    },
-                    "tableFiles": {
-                      "type": "object",
-                      "additionalProperties": { "type": "array", "items": { "type": "string" } }
-                    },
-                    "urls": { "type": "array", "items": { "type": "string" } },
-                    "errors": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "table": { "type": "string" },
-                          "error": { "type": "string" }
-                        },
-                        "required": ["table", "error"]
-                      }
-                    },
-                    "credentials": {
-                      "type": "object",
-                      "nullable": true,
-                      "properties": {
-                        "bucket": { "type": "string" },
-                        "r2Endpoint": { "type": "string" },
-                        "accessKeyId": { "type": "string" },
-                        "secretAccessKey": { "type": "string" },
-                        "sessionToken": { "type": "string" },
-                        "expiration": { "anyOf": [{ "type": "string" }, { "type": "number" }] },
-                        "ttlSeconds": { "type": "integer" },
-                        "prefixes": { "type": "array", "items": { "type": "string" } }
-                      },
-                      "required": [
-                        "bucket",
-                        "r2Endpoint",
-                        "accessKeyId",
-                        "secretAccessKey",
-                        "sessionToken",
-                        "expiration",
-                        "ttlSeconds",
-                        "prefixes"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "projectIds",
-                    "customerIds",
-                    "interval",
-                    "intervalDays",
-                    "targetEnv",
-                    "window",
-                    "tableFiles",
-                    "urls",
-                    "errors",
-                    "credentials"
-                  ]
                 }
               }
             }
@@ -6770,6 +6641,718 @@
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ErrInternalServerError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/explain-charge": {
+      "post": {
+        "operationId": "analytics.explainCharge",
+        "summary": "explain charge",
+        "description": "Explain one invoice line using ledger metadata and rated meter facts.",
+        "tags": ["analytics"],
+        "requestBody": {
+          "description": "Explain charge request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "project_id": {
+                    "type": "string"
+                  },
+                  "invoice_id": {
+                    "type": "string"
+                  },
+                  "entry_id": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "default": 100
+                  },
+                  "offset": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "default": 0
+                  }
+                },
+                "required": ["invoice_id", "entry_id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Explain charge response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invoice": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "statement_key": {
+                          "type": "string"
+                        },
+                        "customer_id": {
+                          "type": "string"
+                        },
+                        "currency": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "statement_key", "customer_id", "currency"]
+                    },
+                    "line": {
+                      "type": "object",
+                      "properties": {
+                        "entry_id": {
+                          "type": "string"
+                        },
+                        "billing_period_id": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string"
+                        },
+                        "amount": {
+                          "type": "integer"
+                        },
+                        "currency": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["entry_id", "billing_period_id", "kind", "amount", "currency"]
+                    },
+                    "scope": {
+                      "type": "object",
+                      "properties": {
+                        "project_id": {
+                          "type": "string"
+                        },
+                        "customer_id": {
+                          "type": "string"
+                        },
+                        "feature_slug": {
+                          "type": "string"
+                        },
+                        "period_key": {
+                          "type": "string"
+                        },
+                        "customer_entitlement_id": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "feature_plan_version_id": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "project_id",
+                        "customer_id",
+                        "feature_slug",
+                        "period_key",
+                        "customer_entitlement_id",
+                        "feature_plan_version_id"
+                      ]
+                    },
+                    "summary": {
+                      "type": "object",
+                      "properties": {
+                        "event_count": {
+                          "type": "integer"
+                        },
+                        "total_usage": {
+                          "type": "number"
+                        },
+                        "total_amount": {
+                          "type": "integer"
+                        },
+                        "latest_amount_after": {
+                          "type": "integer"
+                        },
+                        "currency": {
+                          "type": "string"
+                        },
+                        "amount_scale": {
+                          "type": "integer"
+                        },
+                        "first_event_at": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "last_event_at": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "multi_component_event_count": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "event_count",
+                        "total_usage",
+                        "total_amount",
+                        "latest_amount_after",
+                        "currency",
+                        "amount_scale",
+                        "first_event_at",
+                        "last_event_at",
+                        "multi_component_event_count"
+                      ]
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "event_id": {
+                            "type": "string"
+                          },
+                          "idempotency_key": {
+                            "type": "string"
+                          },
+                          "customer_entitlement_id": {
+                            "type": "string"
+                          },
+                          "grant_id": {
+                            "type": "string"
+                          },
+                          "feature_plan_version_id": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "feature_slug": {
+                            "type": "string"
+                          },
+                          "period_key": {
+                            "type": "string"
+                          },
+                          "event_slug": {
+                            "type": "string"
+                          },
+                          "aggregation_method": {
+                            "type": "string"
+                          },
+                          "timestamp": {
+                            "type": "number",
+                            "description": "timestamp of the ingested event"
+                          },
+                          "created_at": {
+                            "type": "number",
+                            "description": "timestamp of when the fact row was created"
+                          },
+                          "delta": {
+                            "type": "number"
+                          },
+                          "value_after": {
+                            "type": "number"
+                          },
+                          "amount": {
+                            "type": "integer"
+                          },
+                          "amount_after": {
+                            "type": "integer"
+                          },
+                          "amount_scale": {
+                            "type": "number",
+                            "enum": [8]
+                          },
+                          "currency": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 3
+                          },
+                          "priced_at": {
+                            "type": "integer"
+                          },
+                          "tier_index": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "tier_mode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": ["volume", "graduated"]
+                          },
+                          "pricing_component_count": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "source_type": {
+                            "type": "string",
+                            "enum": ["api_key", "system", "unknown"]
+                          },
+                          "source_id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "event_id",
+                          "idempotency_key",
+                          "customer_entitlement_id",
+                          "grant_id",
+                          "feature_plan_version_id",
+                          "feature_slug",
+                          "period_key",
+                          "event_slug",
+                          "aggregation_method",
+                          "timestamp",
+                          "created_at",
+                          "delta",
+                          "value_after",
+                          "amount",
+                          "amount_after",
+                          "amount_scale",
+                          "currency",
+                          "priced_at",
+                          "tier_index",
+                          "tier_mode",
+                          "pricing_component_count",
+                          "source_type",
+                          "source_id"
+                        ]
+                      }
+                    },
+                    "answer": {
+                      "type": "string"
+                    },
+                    "evidence": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": ["ledger_line", "billing_period", "meter_fact"]
+                          },
+                          "id": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["type", "id"]
+                      }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "limit": {
+                          "type": "integer"
+                        },
+                        "offset": {
+                          "type": "integer"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["limit", "offset", "has_more"]
+                    }
+                  },
+                  "required": [
+                    "invoice",
+                    "line",
+                    "scope",
+                    "summary",
+                    "events",
+                    "answer",
+                    "evidence",
+                    "pagination"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/analytics/ingestion/status": {
+      "post": {
+        "operationId": "analytics.ingestion.status",
+        "summary": "get ingestion status",
+        "description": "Get live ingestion status for a customer in a requested window.",
+        "tags": ["analytics"],
+        "requestBody": {
+          "description": "Get ingestion status request",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "customer_id": {
+                    "type": "string"
+                  },
+                  "from_ts": {
+                    "type": "integer"
+                  },
+                  "to_ts": {
+                    "type": "integer"
+                  },
+                  "source_id": {
+                    "type": "string"
+                  },
+                  "event_slug": {
+                    "type": "string"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 50
+                  }
+                },
+                "required": ["customer_id", "from_ts", "to_ts"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Get ingestion status response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "window": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "integer"
+                        },
+                        "to": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["from", "to"]
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "processed": {
+                          "type": "integer"
+                        },
+                        "rejected": {
+                          "type": "integer"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": ["processed", "rejected", "total"]
+                    },
+                    "successRate": {
+                      "type": "number"
+                    },
+                    "freshness": {
+                      "type": "object",
+                      "properties": {
+                        "latestHandledAt": {
+                          "type": "integer",
+                          "nullable": true
+                        },
+                        "secondsSinceLatest": {
+                          "type": "number",
+                          "nullable": true
+                        }
+                      },
+                      "required": ["latestHandledAt", "secondsSinceLatest"]
+                    },
+                    "live": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "second": {
+                            "type": "string"
+                          },
+                          "processed": {
+                            "type": "integer"
+                          },
+                          "rejected": {
+                            "type": "integer"
+                          },
+                          "total": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": ["second", "processed", "rejected", "total"]
+                      }
+                    },
+                    "rejections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "rejectionReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "eventSlug": {
+                            "type": "string"
+                          },
+                          "sourceId": {
+                            "type": "string"
+                          },
+                          "sourceType": {
+                            "type": "string"
+                          },
+                          "eventCount": {
+                            "type": "integer"
+                          },
+                          "lastSeenAt": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "rejectionReason",
+                          "eventSlug",
+                          "sourceId",
+                          "sourceType",
+                          "eventCount",
+                          "lastSeenAt"
+                        ]
+                      }
+                    },
+                    "recentEvents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "eventId": {
+                            "type": "string"
+                          },
+                          "canonicalAuditId": {
+                            "type": "string"
+                          },
+                          "eventSlug": {
+                            "type": "string"
+                          },
+                          "sourceType": {
+                            "type": "string"
+                          },
+                          "sourceId": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": ["processed", "rejected"]
+                          },
+                          "rejectionReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "timestamp": {
+                            "type": "integer"
+                          },
+                          "receivedAt": {
+                            "type": "integer"
+                          },
+                          "handledAt": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "eventId",
+                          "canonicalAuditId",
+                          "eventSlug",
+                          "sourceType",
+                          "sourceId",
+                          "state",
+                          "rejectionReason",
+                          "timestamp",
+                          "receivedAt",
+                          "handledAt"
+                        ]
+                      }
+                    },
+                    "answer": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "window",
+                    "totals",
+                    "successRate",
+                    "freshness",
+                    "live",
+                    "rejections",
+                    "recentEvents",
+                    "answer"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrBadRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Although the HTTP standard specifies \"unauthorized\", semantically this response means \"unauthenticated\". That is, the client must authenticate itself to get the requested response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrUnauthorized"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrForbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrNotFound"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "This response is sent when a request conflicts with the current state of the server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrConflict"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrPreconditionFailed"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The user has sent too many requests in a given amount of time (\"rate limiting\")",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrTooManyRequests"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The server has encountered a situation it does not know how to handle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrInternalServerError"
+                }
               }
             }
           }

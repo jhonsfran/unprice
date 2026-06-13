@@ -1,17 +1,21 @@
 import { TRPCError } from "@trpc/server"
-import { customerSelectSchema, subscriptionInvoiceSelectSchema } from "@unprice/db/validators"
+import {
+  customerSelectSchema,
+  searchParamsSchemaDataTable,
+  subscriptionInvoiceSelectSchema,
+} from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
 
 const getInvoicesOutputSchema = z.object({
-  customer: customerSelectSchema.extend({
-    invoices: subscriptionInvoiceSelectSchema.array(),
-  }),
+  customer: customerSelectSchema,
+  invoices: subscriptionInvoiceSelectSchema.array(),
+  pageCount: z.number(),
 })
 
 export const getInvoices = protectedProjectProcedure
   .input(
-    z.object({
+    searchParamsSchemaDataTable.extend({
       customerId: z.string(),
     })
   )
@@ -21,9 +25,10 @@ export const getInvoices = protectedProjectProcedure
     const { project } = opts.ctx
     const { customers } = opts.ctx.services
 
-    const { err, val: customerWithSubscriptions } = await customers.getCustomerInvoices({
+    const { err, val: customerInvoices } = await customers.getCustomerInvoices({
       customerId,
       projectId: project.id,
+      query: opts.input,
     })
 
     if (err) {
@@ -33,7 +38,7 @@ export const getInvoices = protectedProjectProcedure
       })
     }
 
-    if (!customerWithSubscriptions) {
+    if (!customerInvoices) {
       throw new TRPCError({
         code: "NOT_FOUND",
         message: "Customer not found",
@@ -41,6 +46,8 @@ export const getInvoices = protectedProjectProcedure
     }
 
     return getInvoicesOutputSchema.parse({
-      customer: customerWithSubscriptions,
+      customer: customerInvoices.customer,
+      invoices: customerInvoices.invoices,
+      pageCount: customerInvoices.pageCount,
     })
   })

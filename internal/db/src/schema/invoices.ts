@@ -56,10 +56,14 @@ export const invoices = pgTableProject(
     // when the invoice is due and ready to be billed
     dueAt: bigint("due_at_m", { mode: "number" }).notNull(),
     paidAt: bigint("paid_at_m", { mode: "number" }),
-    // Total amount of the invoice at pgledger scale 8 (1 USD = 100_000_000).
-    // Payment providers receive a cents/minor-unit conversion at the provider
-    // boundary, not in this persisted invoice header.
-    totalAmount: bigint("total_amount", { mode: "number" }).notNull().default(0),
+    // Gross invoice amount at pgledger scale 8. Equals every visible invoice line.
+    grossAmount: bigint("gross_amount", { mode: "number" }).notNull().default(0),
+    // Amount still collectable through the payment provider.
+    amountDue: bigint("amount_due", { mode: "number" }).notNull().default(0),
+    // Amount already paid by purchased wallet balance.
+    amountPaid: bigint("amount_paid", { mode: "number" }).notNull().default(0),
+    // Amount covered by plan-included, trial, promo, or manual credits.
+    amountIncluded: bigint("amount_included", { mode: "number" }).notNull().default(0),
     invoicePaymentProviderId: text("invoice_payment_provider_id"),
     invoicePaymentProviderUrl: text("invoice_payment_provider_url"),
     // when the subscription is considered past due

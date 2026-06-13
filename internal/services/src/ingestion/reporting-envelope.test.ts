@@ -1,6 +1,6 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import { describe, expect, it } from "vitest"
-import type { IngestionQueueMessage } from "./message"
+import { type IngestionQueueMessage, ingestionQueueMessageSchema } from "./message"
 import {
   buildIngestionReportingAuditRecord,
   buildIngestionReportingEnvelope,
@@ -79,19 +79,136 @@ describe("ingestion reporting envelope builder", () => {
       handledAt: HANDLED_AT,
       firstSeenAt: message.receivedAt,
       idempotencyKey: message.idempotencyKey,
+      workspaceId: message.workspaceId,
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
       rejectionReason: "WALLET_EMPTY",
+      failureStage: null,
+      failureReason: null,
+      failureMessage: null,
+      replayable: false,
+      payloadJson: null,
       status: "rejected",
     })
     expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
       event_date: "2026-03-19",
       id: "evt_rejected",
+      workspace_id: message.workspaceId,
       project_id: message.projectId,
       customer_id: message.customerId,
+      environment: "test",
+      api_key_id: "key_123",
+      source_type: "api_key",
+      source_id: "key_123",
+      source_name: null,
       state: "rejected",
       rejection_reason: "WALLET_EMPTY",
       canonical_audit_id: record.canonicalAuditId,
       payload_hash: record.payloadHash,
     })
+    const rejectedPayload = JSON.parse(record.auditPayloadJson)
+    expect(rejectedPayload).not.toHaveProperty("failure_stage")
+    expect(rejectedPayload).not.toHaveProperty("failure_reason")
+    expect(rejectedPayload).not.toHaveProperty("failure_message")
+    expect(rejectedPayload).not.toHaveProperty("replayable")
+    expect(rejectedPayload).not.toHaveProperty("payload_json")
+  })
+
+  it("includes payload_json only for failed reporting audit records", async () => {
+    const message = createMessage()
+
+    const [processedRecord, rejectedRecord, failedRecord] = await Promise.all([
+      buildIngestionReportingAuditRecord({
+        customerId: message.customerId,
+        message,
+        now: () => HANDLED_AT,
+        outcome: { state: "processed" },
+        projectId: message.projectId,
+      }),
+      buildIngestionReportingAuditRecord({
+        customerId: message.customerId,
+        message,
+        now: () => HANDLED_AT,
+        outcome: { state: "rejected", rejectionReason: "WALLET_EMPTY" },
+        projectId: message.projectId,
+      }),
+      buildIngestionReportingAuditRecord({
+        customerId: message.customerId,
+        message,
+        now: () => HANDLED_AT,
+        outcome: {
+          state: "failed",
+          failureStage: "rating_fact",
+          failureReason: "raw_ingestion_queue_processing_failed",
+          failureMessage: "apply failed",
+          replayable: true,
+        },
+        projectId: message.projectId,
+      }),
+    ])
+
+    expect(processedRecord.payloadJson).toBeNull()
+    expect(processedRecord).toMatchObject({
+      status: "processed",
+      failureStage: null,
+      failureReason: null,
+      failureMessage: null,
+      replayable: false,
+      payloadJson: null,
+    })
+    expect(JSON.parse(processedRecord.auditPayloadJson)).toMatchObject({
+      state: "processed",
+    })
+    const processedPayload = JSON.parse(processedRecord.auditPayloadJson)
+    expect(processedPayload).not.toHaveProperty("failure_stage")
+    expect(processedPayload).not.toHaveProperty("failure_reason")
+    expect(processedPayload).not.toHaveProperty("failure_message")
+    expect(processedPayload).not.toHaveProperty("replayable")
+    expect(processedPayload).not.toHaveProperty("payload_json")
+    expect(rejectedRecord.payloadJson).toBeNull()
+    expect(rejectedRecord).toMatchObject({
+      status: "rejected",
+      failureStage: null,
+      failureReason: null,
+      failureMessage: null,
+      replayable: false,
+      payloadJson: null,
+    })
+    expect(JSON.parse(rejectedRecord.auditPayloadJson)).toMatchObject({
+      state: "rejected",
+      rejection_reason: "WALLET_EMPTY",
+    })
+    const rejectedPayload2 = JSON.parse(rejectedRecord.auditPayloadJson)
+    expect(rejectedPayload2).not.toHaveProperty("failure_stage")
+    expect(rejectedPayload2).not.toHaveProperty("failure_reason")
+    expect(rejectedPayload2).not.toHaveProperty("failure_message")
+    expect(rejectedPayload2).not.toHaveProperty("replayable")
+    expect(rejectedPayload2).not.toHaveProperty("payload_json")
+
+    expect(failedRecord).toMatchObject({
+      status: "failed",
+      failureStage: "rating_fact",
+      failureReason: "raw_ingestion_queue_processing_failed",
+      failureMessage: "apply failed",
+      replayable: true,
+      payloadJson: JSON.stringify(message),
+    })
+    expect(ingestionQueueMessageSchema.parse(JSON.parse(failedRecord.payloadJson ?? ""))).toEqual(
+      message
+    )
+    const failedAuditPayload = JSON.parse(failedRecord.auditPayloadJson)
+    expect(failedAuditPayload).not.toHaveProperty("rejection_reason")
+    expect(failedAuditPayload).toMatchObject({
+      state: "failed",
+    })
+    expect(failedAuditPayload).not.toHaveProperty("failure_stage")
+    expect(failedAuditPayload).not.toHaveProperty("failure_reason")
+    expect(failedAuditPayload).not.toHaveProperty("failure_message")
+    expect(failedAuditPayload).not.toHaveProperty("replayable")
+    expect(failedAuditPayload).not.toHaveProperty("payload_json")
   })
 
   it("carries meter facts from outcomes into the reporting envelope", async () => {
@@ -118,6 +235,7 @@ describe("ingestion reporting envelope builder", () => {
 function createMessage(overrides: Partial<IngestionQueueMessage> = {}): IngestionQueueMessage {
   return {
     version: 1,
+    workspaceId: "ws_123",
     projectId: "proj_123",
     customerId: "cus_123",
     requestId: "req_123",
@@ -127,6 +245,13 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
     slug: "usage.recorded",
     timestamp: TEST_NOW,
     properties: { amount: 1 },
+    source: {
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
+    },
     ...overrides,
   }
 }
@@ -137,8 +262,14 @@ function createMeterFact(
   return {
     event_id: "evt_123",
     idempotency_key: "idem_123",
+    workspace_id: "ws_123",
     project_id: "proj_123",
     customer_id: "cus_123",
+    environment: "test",
+    api_key_id: "key_123",
+    source_type: "api_key",
+    source_id: "key_123",
+    source_name: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",
@@ -155,6 +286,9 @@ function createMeterFact(
     amount_scale: 8,
     currency: "USD",
     priced_at: TEST_NOW + 1,
+    tier_index: null,
+    tier_mode: null,
+    pricing_component_count: 0,
     ...overrides,
   }
 }

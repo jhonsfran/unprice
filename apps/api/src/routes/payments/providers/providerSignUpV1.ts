@@ -57,7 +57,7 @@ export const registerProviderSignUpV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { sessionId, projectId, provider } = c.req.valid("param")
     const key = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for") ?? projectId
-    const { customer, subscription } = c.get("services")
+    const { billing, customer, subscription } = c.get("services")
 
     // rate limit the request
     const result = await c.env.RL_FREE_1000_60s.limit({ key })
@@ -72,6 +72,7 @@ export const registerProviderSignUpV1 = (app: App) =>
     const { err, val } = await completeProviderSignUp(
       {
         services: {
+          billing,
           customers: customer,
           subscriptions: subscription,
         },

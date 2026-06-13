@@ -10,6 +10,7 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { Stripe } from "@unprice/stripe"
 import { env } from "../../../env"
+import { upsertManagedSandboxProviderConfig } from "../../payment-provider/sandbox-config"
 
 type ProviderConnectionDeps = {
   db: Database
@@ -413,63 +414,17 @@ export async function setProviderEnabled(
   }
 
   if (input.paymentProvider === "sandbox") {
-    const { val, err } = await wrapResult(
-      deps.db
-        .insert(paymentProviderConfig)
-        .values({
-          id: existing?.id ?? newId("payment_provider_config"),
-          projectId: input.projectId,
-          paymentProvider: "sandbox",
-          active: true,
-          connectionType: "managed_connection",
-          mode: "test",
-          status: "active",
-          key: null,
-          keyIv: null,
-          webhookSecret: null,
-          webhookSecretIv: null,
-          externalAccountId: null,
-          connectionData: null,
-        })
-        .onConflictDoUpdate({
-          target: [paymentProviderConfig.paymentProvider, paymentProviderConfig.projectId],
-          set: {
-            active: true,
-            connectionType: "managed_connection",
-            mode: "test",
-            status: "active",
-            key: null,
-            keyIv: null,
-            webhookSecret: null,
-            webhookSecretIv: null,
-            externalAccountId: null,
-            connectionData: null,
-            updatedAtM: Date.now(),
-          },
-        })
-        .returning()
-        .then((rows) => rows[0] ?? null),
-      (error) =>
-        new FetchError({
-          message: `error enabling sandbox provider: ${error.message}`,
-          retry: false,
-        })
-    )
+    const { val, err } = await upsertManagedSandboxProviderConfig({
+      db: deps.db,
+      projectId: input.projectId,
+      existingId: existing?.id,
+    })
 
     if (err) {
       return Err(err)
     }
 
-    if (!val) {
-      return Err(
-        new FetchError({
-          message: "Sandbox provider connection was not saved",
-          retry: false,
-        })
-      )
-    }
-
-    return Ok({ paymentProviderConfig: val as PaymentProviderConfig })
+    return Ok({ paymentProviderConfig: val })
   }
 
   if (input.paymentProvider !== "stripe") {

@@ -1,19 +1,27 @@
-import { Dashboard } from "@unprice/ui/icons"
-import { BarChartIcon, Calculator, Key, Link, Settings, Sticker, Users } from "lucide-react"
+import { FEATURE_SLUGS } from "@unprice/config"
+import {
+  Activity,
+  Calculator,
+  Key,
+  LayoutDashboard,
+  Link,
+  Settings,
+  Sticker,
+  Users,
+} from "lucide-react"
 import type { DashboardRoute, Shortcut } from "~/types"
 
 export const PROJECT_NAV: DashboardRoute[] = [
   {
     name: "Overview",
-    icon: Dashboard,
+    icon: LayoutDashboard,
     href: "/dashboard",
   },
   {
-    name: "Analytics",
-    icon: BarChartIcon,
-    href: "/lakehouse",
-    // disabled: true,
-    // featureSlug: "lakehouse",
+    name: "Events",
+    icon: Activity,
+    href: "/events",
+    featureSlug: FEATURE_SLUGS.EVENTS.SLUG,
   },
   {
     name: "Plans",
@@ -21,25 +29,25 @@ export const PROJECT_NAV: DashboardRoute[] = [
     href: "/plans",
     disabled: false,
     isNew: true,
-    featureSlug: "plans",
+    featureSlug: FEATURE_SLUGS.PLANS.SLUG,
   },
   {
     name: "Pages",
     icon: Sticker,
     href: "/pages",
-    featureSlug: "pages",
+    featureSlug: FEATURE_SLUGS.PAGES.SLUG,
   },
   {
-    name: "API Keys",
+    name: "Api Keys",
     href: "/apikeys",
     icon: Key,
-    featureSlug: "apikeys",
+    featureSlug: FEATURE_SLUGS.API_KEYS.SLUG,
   },
   {
     name: "Customers",
     href: "/customers",
     icon: Users,
-    featureSlug: "customers",
+    featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
   },
   {
     name: "Settings",
@@ -72,9 +80,9 @@ export const PROJECT_SHORTCUTS: Shortcut[] = [
     featureSlug: "customers",
   },
   {
-    name: "All Customers",
-    href: "customers",
+    name: "Events",
+    href: "events",
     icon: Link,
-    featureSlug: "customers",
+    featureSlug: "events",
   },
 ]

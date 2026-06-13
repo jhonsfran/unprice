@@ -114,7 +114,7 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
     const logger = createLogger()
     const ledger = new LedgerGateway({ db, logger })
     const wallet = new WalletService({ db, logger, ledgerGateway: ledger })
-    const analytics = createAnalytics({ events: 1200 })
+    const analytics = createAnalytics({ events: 0 })
     const rating = new RatingService({
       logger,
       analytics,
@@ -168,7 +168,13 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
       expect.objectContaining({
         due_at_m: advanceDueAt,
         statement_key: startStatementKey,
-        total_amount: fixedAmount,
+        gross_amount: fixedAmount,
+
+        amount_due: fixedAmount,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       }),
     ])
     await expectInvoiceLineAmounts(ledger, startStatementKey, [fixedAmount])
@@ -212,9 +218,16 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
       refillChunkAmount: 0,
       statementKey: usageStatementKey,
       final: true,
+      billingPeriodId: "bp_test_advance_capped_events_jan",
+      kind: "usage",
       effectiveAt: new Date(feb1),
       sourceId: "bp_test_advance_capped_events_jan:item_test_advance_capped_events",
-      metadata: { owner: "p0-d-integration" },
+      metadata: {
+        description: "Events",
+        feature_plan_version_item_id: "item_test_advance_capped_events",
+        owner: "p0-d-integration",
+        quantity: 1200,
+      },
     })
     expect(flush.err).toBeUndefined()
     await expectWalletState(wallet, {
@@ -247,18 +260,30 @@ describe("P0-D pay_in_advance capped wallet workflow", () => {
       expect.objectContaining({
         due_at_m: advanceDueAt,
         statement_key: startStatementKey,
-        total_amount: fixedAmount,
+        gross_amount: fixedAmount,
+
+        amount_due: fixedAmount,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       }),
       expect.objectContaining({
         due_at_m: usageDueAt,
         statement_key: usageStatementKey,
-        total_amount: usageAmount,
+        gross_amount: usageAmount,
+
+        amount_due: usageAmount,
+
+        amount_paid: 0,
+
+        amount_included: 0,
       }),
     ])
     await expectInvoiceLineAmounts(ledger, usageStatementKey, [usageAmount])
     await expectReservationClosed(reservationId)
     await expectLedgerSources()
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
 })
 
@@ -266,9 +291,15 @@ async function listInvoices() {
   const invoices = await db.execute<{
     due_at_m: number
     statement_key: string
-    total_amount: number
+    gross_amount: number
+
+    amount_due: number
+
+    amount_paid: number
+
+    amount_included: number
   }>(sql`
-    SELECT due_at_m, statement_key, total_amount
+    SELECT due_at_m, statement_key, gross_amount, amount_due, amount_paid, amount_included
     FROM unprice_invoices
     WHERE project_id = ${projectId}
       AND subscription_id = ${subscriptionId}
@@ -279,7 +310,13 @@ async function listInvoices() {
   return invoices.rows.map((invoice) => ({
     ...invoice,
     due_at_m: Number(invoice.due_at_m),
-    total_amount: Number(invoice.total_amount),
+    gross_amount: Number(invoice.gross_amount),
+
+    amount_due: Number(invoice.amount_due),
+
+    amount_paid: Number(invoice.amount_paid),
+
+    amount_included: Number(invoice.amount_included),
   }))
 }
 
@@ -339,7 +376,7 @@ async function expectLedgerSources() {
     ORDER BY source_type
   `)
   expect(sources.rows).toEqual([
-    { count: 2, source_type: "subscription_billing_period_charge_v1" },
+    { count: 1, source_type: "subscription_billing_period_charge_v1" },
     { count: 1, source_type: "wallet_adjust" },
     { count: 1, source_type: "wallet_capture_usage" },
     { count: 1, source_type: "wallet_reserve_granted" },

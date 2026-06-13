@@ -1,1 +1,0 @@
-ALTER TABLE `meter_window` ADD `last_flushed_at` integer;

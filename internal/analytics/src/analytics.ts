@@ -7,9 +7,24 @@ import {
   type AnalyticsEventAction,
   analyticsEventSchema,
   entitlementMeterFactSchemaV1,
+  explainChargeEventRowSchema,
+  explainChargeQuerySchema,
+  explainChargeSummaryQuerySchema,
+  explainChargeSummaryRowSchema,
   featureUsagePeriodRowSchema,
+  featureUsageTimeseriesRowSchema,
+  ingestionEventSchemaV1,
+  ingestionLiveQuerySchema,
+  ingestionLiveRowSchema,
+  ingestionRecentEventRowSchema,
+  ingestionRecentQuerySchema,
+  ingestionRejectionRowSchema,
+  ingestionRejectionsQuerySchema,
+  ingestionReplayPayloadQuerySchema,
+  ingestionReplayPayloadRowSchema,
   pageEventSchema,
   schemaPlanClick,
+  topConsumerRowSchema,
 } from "./validators"
 
 export class Analytics {
@@ -50,6 +65,14 @@ export class Analytics {
     return this.writeClient.buildIngestEndpoint({
       datasource: "unprice_entitlement_meter_facts",
       event: entitlementMeterFactSchemaV1,
+      wait: true,
+    })
+  }
+
+  public get ingestIngestionEvents() {
+    return this.writeClient.buildIngestEndpoint({
+      datasource: "unprice_ingestion_events",
+      event: ingestionEventSchemaV1,
       wait: true,
     })
   }
@@ -239,6 +262,151 @@ export class Analytics {
         cache: "no-store",
         retries: 3,
         timeout: 5000, // 5 seconds
+      },
+    })
+  }
+
+  public get getFeaturesUsageTimeseries() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_feature_usage_timeseries",
+      parameters: z
+        .object({
+          project_id: z.string(),
+          customer_id: z.string().optional(),
+          interval_days: z.number().optional(),
+          start: z.number().optional(),
+          end: z.number().optional(),
+          feature_slugs: z.array(z.string()).optional(),
+        })
+        .superRefine((params, ctx) => {
+          const hasStart = typeof params.start !== "undefined"
+          const hasEnd = typeof params.end !== "undefined"
+
+          if (hasStart !== hasEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "start and end must be provided together",
+            })
+          }
+        }),
+      data: z.object({
+        ...featureUsageTimeseriesRowSchema.shape,
+      }),
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getTopConsumers() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_top_consumers",
+      parameters: z
+        .object({
+          project_id: z.string(),
+          interval_days: z.number().optional(),
+          start: z.number().optional(),
+          end: z.number().optional(),
+          limit: z.number().optional(),
+        })
+        .superRefine((params, ctx) => {
+          const hasStart = typeof params.start !== "undefined"
+          const hasEnd = typeof params.end !== "undefined"
+
+          if (hasStart !== hasEnd) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "start and end must be provided together",
+            })
+          }
+        }),
+      data: z.object({
+        ...topConsumerRowSchema.shape,
+      }),
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getExplainChargeEvents() {
+    return this.readClient.buildPipe({
+      pipe: "v1_explain_charge_events",
+      parameters: explainChargeQuerySchema,
+      data: explainChargeEventRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getExplainChargeSummary() {
+    return this.readClient.buildPipe({
+      pipe: "v1_explain_charge_summary",
+      parameters: explainChargeSummaryQuerySchema,
+      data: explainChargeSummaryRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionLive() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_live",
+      parameters: ingestionLiveQuerySchema,
+      data: ingestionLiveRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionRejections() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_rejections",
+      parameters: ingestionRejectionsQuerySchema,
+      data: ingestionRejectionRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionRecent() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_recent",
+      parameters: ingestionRecentQuerySchema,
+      data: ingestionRecentEventRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionReplayPayloads() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_replay_payloads",
+      parameters: ingestionReplayPayloadQuerySchema,
+      data: ingestionReplayPayloadRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 2,
+        timeout: 5000,
       },
     })
   }

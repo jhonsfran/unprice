@@ -2,15 +2,15 @@ import { DEFAULT_RESERVATION_POLICY } from "@unprice/services/wallet/reservation
 import { describe, expect, it } from "vitest"
 import {
   buildBatchEventApplyInput,
+  computeBatchReservationHeadroom,
+  computeBatchReservationRefillAmount,
   createAllowedBatchOutcome,
   createCachedBatchResult,
   createDeniedBatchOutcome,
-  hasStagedBatchMutations,
   idempotencyEntryToApplyResult,
   planWalletReservationSpend,
-  stageBatchIdempotencyEntry,
 } from "./batch-apply-helpers"
-import type { ApplyBatchInput, BatchIdempotencyEntry, WalletReservationSnapshot } from "./contracts"
+import type { ApplyBatchInput, WalletReservationSnapshot } from "./contracts"
 
 describe("batch apply helpers", () => {
   it("builds a single-event apply input from a batch event", () => {
@@ -27,28 +27,16 @@ describe("batch apply helpers", () => {
         slug: "tokens_used",
         timestamp: 100,
         properties: { amount: 1 },
+        source: {
+          workspaceId: "ws_123",
+          environment: "test",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       },
     })
-  })
-
-  it("detects whether optimized batch processing has staged mutations", () => {
-    expect(
-      hasStagedBatchMutations({
-        idempotencyEntryCount: 0,
-        meterStateDirty: false,
-        touchedGrantStateCount: 0,
-        walletDirty: false,
-      })
-    ).toBe(false)
-
-    expect(
-      hasStagedBatchMutations({
-        idempotencyEntryCount: 1,
-        meterStateDirty: false,
-        touchedGrantStateCount: 0,
-        walletDirty: false,
-      })
-    ).toBe(true)
   })
 
   it("converts idempotency entries back to apply results", () => {
@@ -68,21 +56,13 @@ describe("batch apply helpers", () => {
     })
   })
 
-  it("creates and stages denied batch outcomes", () => {
-    const entries: BatchIdempotencyEntry[] = []
-    const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
+  it("creates denied batch outcomes", () => {
     const outcome = createDeniedBatchOutcome({
       correlationKey: "corr_123",
       createdAt: 1,
       deniedReason: "LATE_EVENT_CLOSED_PERIOD",
       idempotencyKey: "idem_123",
       message: "late",
-    })
-
-    stageBatchIdempotencyEntry({
-      entries,
-      entry: outcome.entry,
-      stagedResultsByKey,
     })
 
     expect(outcome.result).toMatchObject({
@@ -92,8 +72,11 @@ describe("batch apply helpers", () => {
       idempotencyKey: "idem_123",
       message: "late",
     })
-    expect(entries).toEqual([outcome.entry])
-    expect(stagedResultsByKey.get("idem_123")).toBe(outcome.entry)
+    expect(outcome.entry).toMatchObject({
+      eventId: "idem_123",
+      allowed: false,
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
   })
 
   it("creates allowed and cached batch result rows", () => {
@@ -130,6 +113,7 @@ describe("batch apply helpers", () => {
       eventTimestamp: 100,
       policy: DEFAULT_RESERVATION_POLICY,
       totalCost: 20,
+      totalUnits: 2,
       window: createOpenWalletReservation({ allocationAmount: 10 }),
     })
 
@@ -148,10 +132,13 @@ describe("batch apply helpers", () => {
       eventTimestamp: 900,
       policy: { ...DEFAULT_RESERVATION_POLICY, refillThresholdBps: 9000 },
       totalCost: 15,
+      totalUnits: 3,
       window: createOpenWalletReservation({
         allocationAmount: 100,
         consumedAmount: 80,
+        consumedQuantity: 8,
         flushedAmount: 70,
+        flushedQuantity: 7,
         flushSeq: 3,
       }),
     })
@@ -161,10 +148,12 @@ describe("batch apply helpers", () => {
       kind: "funded",
       walletStateUpdate: {
         consumedAmount: 95,
+        consumedQuantity: 11,
         lastEventAt: 1_000,
       },
       refillStateUpdate: {
         pendingFlushAmount: 25,
+        pendingFlushQuantity: 4,
         pendingFlushFinal: false,
         pendingFlushSeq: 4,
         refillInFlight: true,
@@ -172,9 +161,56 @@ describe("batch apply helpers", () => {
       refillTrigger: {
         effectiveAt: 900,
         flushAmount: 25,
+        flushQuantity: 4,
         flushSeq: 4,
       },
     })
+  })
+
+  it("computes required headroom from staged wallet consumption plus current event cost", () => {
+    const result = computeBatchReservationHeadroom({
+      persistedConsumedAmount: 100,
+      stagedConsumedAmount: 350,
+      currentEventEffectiveCostAmount: 200,
+    })
+
+    expect(result).toEqual({
+      stagedDeltaAmount: 250,
+      requiredHeadroomAmount: 450,
+    })
+  })
+
+  it("computes zero refill when current remaining already covers required batch headroom", () => {
+    const refillAmount = computeBatchReservationRefillAmount({
+      currentRemainingAmount: 500,
+      requiredHeadroomAmount: 450,
+      targetReservationAmount: 700,
+      maxOutstandingAmount: 1_000,
+    })
+
+    expect(refillAmount).toBe(0)
+  })
+
+  it("computes a top-up that covers the required batch headroom and target runway", () => {
+    const refillAmount = computeBatchReservationRefillAmount({
+      currentRemainingAmount: 100,
+      requiredHeadroomAmount: 450,
+      targetReservationAmount: 700,
+      maxOutstandingAmount: 1_000,
+    })
+
+    expect(refillAmount).toBe(600)
+  })
+
+  it("caps the batch refill amount by max outstanding amount", () => {
+    const refillAmount = computeBatchReservationRefillAmount({
+      currentRemainingAmount: 100,
+      requiredHeadroomAmount: 900,
+      targetReservationAmount: 1_500,
+      maxOutstandingAmount: 1_000,
+    })
+
+    expect(refillAmount).toBe(900)
   })
 })
 
@@ -183,17 +219,25 @@ function createOpenWalletReservation(
 ): NonNullable<WalletReservationSnapshot> & { reservationId: string } {
   return {
     allocationAmount: 100,
+    billingPeriodId: "bp_123",
     consumedAmount: 0,
+    consumedQuantity: 0,
     currency: "USD",
     customerId: "cus_123",
+    cycleEndAt: null,
+    cycleStartAt: null,
     deletionRequested: false,
+    featurePlanVersionItemId: "item_123",
+    featureSlug: "api_calls",
     flushedAmount: 0,
+    flushedQuantity: 0,
     flushSeq: 0,
     lastEventAt: null,
     lastFlushedAt: null,
     lastRateSampledAtMs: null,
     maxEventCostAmount: 0,
     pendingFlushAmount: null,
+    pendingFlushQuantity: null,
     pendingFlushFinal: false,
     pendingFlushSeq: null,
     pendingRefillAmount: 0,
@@ -205,6 +249,7 @@ function createOpenWalletReservation(
     reservationEndAt: null,
     reservationId: "res_123",
     spendEwmaAmount: 0,
+    statementKey: "stmt_123",
     targetReservationAmount: 100,
     ...overrides,
   }
@@ -251,6 +296,14 @@ function createBatchInput(): ApplyBatchInput {
         idempotencyKey: "idem_123",
         now: 123,
         properties: { amount: 1 },
+        source: {
+          workspaceId: "ws_123",
+          environment: "test",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
         slug: "tokens_used",
         timestamp: 100,
       },

@@ -363,8 +363,14 @@ async function createDraftInvoice({
   })
   expect(result.phasesProcessed).toBe(1)
 
-  const invoices = await db.execute<{ id: string; total_amount: number }>(sql`
-    SELECT id, total_amount
+  const invoices = await db.execute<{
+    id: string
+    gross_amount: number
+    amount_due: number
+    amount_paid: number
+    amount_included: number
+  }>(sql`
+    SELECT id, gross_amount, amount_due, amount_paid, amount_included
     FROM unprice_invoices
     WHERE project_id = ${projectId}
       AND subscription_id = ${subscriptionId}
@@ -377,7 +383,10 @@ async function createDraftInvoice({
     throw new Error("Expected billPeriod to create a draft invoice")
   }
 
-  expect(Number(invoice.total_amount)).toBe(invoiceTotal)
+  expect(Number(invoice.gross_amount)).toBe(invoiceTotal)
+  expect(Number(invoice.amount_due)).toBe(invoiceTotal)
+  expect(Number(invoice.amount_paid)).toBe(0)
+  expect(Number(invoice.amount_included)).toBe(0)
   return invoice.id
 }
 
@@ -604,6 +613,7 @@ async function processProviderWebhook({
     return await processWebhookEvent(
       {
         services: {
+          billing: services.billing,
           customers: customerServiceFor(provider),
           subscriptions: services.subscriptions,
           wallet,
@@ -775,6 +785,7 @@ describe("paid invoice lifecycle integration", () => {
       const paidWebhook = await processWebhookEvent(
         {
           services: {
+            billing: services.billing,
             customers: customerServiceFor(provider),
             subscriptions: services.subscriptions,
             wallet: services.wallet,
@@ -804,6 +815,7 @@ describe("paid invoice lifecycle integration", () => {
       const replay = await processWebhookEvent(
         {
           services: {
+            billing: services.billing,
             customers: customerServiceFor(provider),
             subscriptions: services.subscriptions,
             wallet: services.wallet,
@@ -991,6 +1003,7 @@ describe("paid invoice lifecycle integration", () => {
       const firstAttempt = await processWebhookEvent(
         {
           services: {
+            billing: services.billing,
             customers: customerServiceFor(provider),
             subscriptions: services.subscriptions,
             wallet: flakyWallet,
@@ -1040,6 +1053,7 @@ describe("paid invoice lifecycle integration", () => {
       const retry = await processWebhookEvent(
         {
           services: {
+            billing: services.billing,
             customers: customerServiceFor(provider),
             subscriptions: services.subscriptions,
             wallet: flakyWallet,

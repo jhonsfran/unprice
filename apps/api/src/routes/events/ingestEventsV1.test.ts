@@ -23,8 +23,11 @@ vi.mock("~/auth/key", () => ({
 import type { Logger } from "@unprice/logs"
 import type { ExecutionContext } from "hono"
 import {
+  INGESTION_TEST_FAILURE_HEADER,
+  INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
   generateEventId,
   registerIngestEventsV1,
+  resolveIngestionMessageRequestId,
   safeSendToQueue,
   selectQueueShardIndex,
 } from "./ingestEventsV1"
@@ -91,6 +94,7 @@ describe("ingestEventsV1 helpers", () => {
         queue: queue as Queue<IngestionQueueMessage>,
         message: {
           version: 1,
+          workspaceId: "ws_123",
           projectId: "proj_123",
           customerId: "cus_123",
           requestId: "req_123",
@@ -100,6 +104,13 @@ describe("ingestEventsV1 helpers", () => {
           slug: "tokens_used",
           timestamp: Date.now(),
           properties: {},
+          source: {
+            environment: "development",
+            apiKeyId: "key_123",
+            sourceType: "api_key",
+            sourceId: "key_123",
+            sourceName: null,
+          },
         },
       })
     ).rejects.toBeInstanceOf(UnpriceApiError)
@@ -107,6 +118,26 @@ describe("ingestEventsV1 helpers", () => {
     expect(queue.send).toHaveBeenCalledTimes(3)
     expect(logger.warn).toHaveBeenCalledTimes(3)
     expect(logger.error).toHaveBeenCalledTimes(1)
+  })
+
+  it("marks non-production failure-test request ids", () => {
+    expect(
+      resolveIngestionMessageRequestId({
+        appEnv: "development",
+        failureTestHeader: INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
+        requestId: "req_123",
+      })
+    ).toBe("test:raw_ingestion_queue_processing_failed:req_123")
+  })
+
+  it("ignores failure-test request ids in production", () => {
+    expect(
+      resolveIngestionMessageRequestId({
+        appEnv: "production",
+        failureTestHeader: INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
+        requestId: "req_123",
+      })
+    ).toBe("req_123")
   })
 })
 
@@ -138,9 +169,48 @@ describe("ingestEventsV1 route", () => {
         projectId: "proj_123",
         requestId: "req_123",
         receivedAt: requestBody.timestamp,
+        workspaceId: "ws_123",
+        source: {
+          environment: "development",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       })
     )
     expect(otherQueue.send).not.toHaveBeenCalled()
+  })
+
+  it("marks accepted non-production messages for raw processing failure tests", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest(
+        {
+          ...requestBody,
+          timestamp: Date.now(),
+        },
+        {
+          [INGESTION_TEST_FAILURE_HEADER]: INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
+        }
+      ),
+      env,
+      executionCtx
+    )
+    expect(response.status).toBe(202)
+
+    const selectedQueue =
+      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
+
+    expect(selectedQueue.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "test:raw_ingestion_queue_processing_failed:req_123",
+      })
+    )
   })
 
   it("uses the request start time when the raw event timestamp is omitted", async () => {
@@ -433,6 +503,7 @@ function createTestApp() {
 
   const env = {
     APP_ENV: "development",
+    NODE_ENV: "test",
     MAIN_PROJECT_ID: undefined,
     QUEUE_SHARD_0: {
       send: vi.fn().mockResolvedValue(undefined),
@@ -452,12 +523,16 @@ function createTestApp() {
   return { app, env, executionCtx, logger, waitUntilPromises }
 }
 
-function buildRequest(body: Record<string, unknown> = requestBody) {
+function buildRequest(
+  body: Record<string, unknown> = requestBody,
+  headers: Record<string, string> = {}
+) {
   return new Request("https://example.com/v1/events/ingest", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",
       "content-type": "application/json",
+      ...headers,
     },
     body: JSON.stringify(body),
   })

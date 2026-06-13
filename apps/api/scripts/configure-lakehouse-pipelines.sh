@@ -151,9 +151,20 @@ if (!envConfig || typeof envConfig !== "object") {
   process.exit(1)
 }
 
-const buckets = Array.isArray(envConfig.r2_buckets) ? envConfig.r2_buckets : []
+const bindingByEnv = {
+  prod: "unprice_lakehouse_prod",
+  preview: "unprice_lakehouse_dev",
+  dev: "unprice_lakehouse_dev",
+}
+
+const allBuckets = [
+  ...(Array.isArray(envConfig.r2_buckets) ? envConfig.r2_buckets : []),
+  ...(Array.isArray(config.r2_buckets) ? config.r2_buckets : []),
+]
+
 const lakehouseBucket =
-  buckets.find((bucket) => bucket?.binding === "LAKEHOUSE") ?? buckets[0]
+  allBuckets.find((bucket) => bucket?.binding === bindingByEnv[envName]) ??
+  allBuckets.find((bucket) => bucket?.binding === "LAKEHOUSE")
 
 if (!lakehouseBucket?.bucket_name) {
   console.error(`No LAKEHOUSE bucket configured for environment '${envName}' in ${configPath}`)

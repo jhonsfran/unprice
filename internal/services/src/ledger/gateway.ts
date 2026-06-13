@@ -1,11 +1,16 @@
 import { type Database, sql } from "@unprice/db"
 import { ledgerIdempotency } from "@unprice/db/schema"
-import type { Currency } from "@unprice/db/validators"
+import type { Currency, WalletCreditSource } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import { type Dinero, toSnapshot } from "dinero.js"
 
 import type { Logger } from "@unprice/logs"
-import { fromLedgerAmount, toLedgerAmount } from "@unprice/money"
+import { fromLedgerAmount, toLedgerAmount, toLedgerMinor } from "@unprice/money"
+import {
+  type InvoiceSettlementSource,
+  type InvoiceSettlementStatus,
+  classifyInvoiceLineSettlement,
+} from "../billing/invoice-settlement"
 import type { DbExecutor } from "../deps"
 import {
   PLATFORM_FUNDING_KINDS,
@@ -105,6 +110,15 @@ export interface InvoiceLine {
   description: string | null
   quantity: number | null
   amount: Dinero<number>
+  amountDue: number
+  amountIncluded: number
+  amountPaid: number
+  collectable: boolean
+  settlementSource: InvoiceSettlementSource
+  settlementStatus: InvoiceSettlementStatus
+  walletCreditId: string | null
+  walletCreditSource: WalletCreditSource | null
+  walletId: string | null
   currency: Currency
   createdAt: Date
   metadata: Record<string, unknown> | null
@@ -605,7 +619,8 @@ export class LedgerGateway {
             AND i.statement_key         = ${opts.statementKey}
             AND e.amount                > 0
             AND a.name                  LIKE 'customer.%.consumed'
-            AND (e.metadata->>'kind') IS NOT NULL
+            AND e.metadata->>'kind' IS NOT NULL
+            AND COALESCE((e.metadata->>'invoice_visible')::boolean, true) = true
           ORDER BY e.created_at ASC, e.id ASC
         `
       )
@@ -615,6 +630,49 @@ export class LedgerGateway {
       this.logger.error(error, {
         context: "ledger.get_invoice_lines_failed",
         ...opts,
+      })
+      return Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" }))
+    }
+  }
+
+  /**
+   * Recognized project revenue for dashboard analytics.
+   *
+   * Uses the same "invoice-visible consumed credit" contract as invoice-line
+   * projection, but aggregates across all statements in a time window.
+   */
+  public async getRecognizedRevenue(opts: {
+    projectId: string
+    currency: Currency
+    start: Date
+    end: Date
+  }): Promise<Result<Dinero<number>, UnPriceLedgerError>> {
+    try {
+      const result = await this.db.execute<{ amount: string }>(
+        sql`
+          SELECT COALESCE(SUM(e.amount), 0)::text AS amount
+          FROM unprice_ledger_idempotency i
+          INNER JOIN pgledger_entries_view  e ON e.transfer_id = i.transfer_id
+          INNER JOIN pgledger_accounts_view a ON a.id          = e.account_id
+          WHERE i.project_id            = ${opts.projectId}
+            AND i.statement_key IS NOT NULL
+            AND e.amount                > 0
+            AND a.name                  LIKE 'customer.%.consumed'
+            AND a.currency              = ${opts.currency}
+            AND e.metadata->>'kind' IS NOT NULL
+            AND COALESCE((e.metadata->>'invoice_visible')::boolean, true) = true
+            AND COALESCE(e.event_at, e.created_at) >= ${opts.start}
+            AND COALESCE(e.event_at, e.created_at) <  ${opts.end}
+        `
+      )
+
+      const amount = result.rows[0]?.amount ?? "0"
+      return Ok(fromLedgerAmount(amount, opts.currency))
+    } catch (error) {
+      this.logger.error(error, {
+        context: "ledger.get_recognized_revenue_failed",
+        projectId: opts.projectId,
+        currency: opts.currency,
       })
       return Err(new UnPriceLedgerError({ message: "LEDGER_GET_ENTRIES_FAILED" }))
     }
@@ -942,17 +1000,30 @@ export class LedgerGateway {
     statementKey: string
   ): InvoiceLine {
     const currency = asCurrency(row.currency)
-    const metadata = row.metadata ?? {}
+    const metadata = row.metadata
+    const amount = fromLedgerAmount(row.amount, currency)
+    const settlement = classifyInvoiceLineSettlement({
+      amount: toLedgerMinor(amount),
+      metadata,
+    })
+    const metadataFields = metadata ?? {}
+    const description =
+      typeof metadataFields.description === "string"
+        ? metadataFields.description
+        : typeof metadataFields.feature_slug === "string"
+          ? metadataFields.feature_slug
+          : null
     return {
       entryId: row.id,
       statementKey,
-      kind: String(metadata.kind ?? ""),
-      description: typeof metadata.description === "string" ? metadata.description : null,
-      quantity: this.parseQuantity(metadata.quantity),
-      amount: fromLedgerAmount(row.amount, currency),
+      kind: String(metadataFields.kind ?? ""),
+      description,
+      quantity: this.parseQuantity(metadataFields.quantity),
+      amount,
+      ...settlement,
       currency,
       createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
-      metadata: row.metadata,
+      metadata,
     }
   }
 

@@ -13,7 +13,7 @@ import { checkPaymentProviderAvailability } from "../payment-provider/availabili
 import { activateWalletIfSubscriptionIsActive } from "./activate-wallet-if-active"
 
 type CreateSubscriptionDeps = {
-  services: Pick<ServiceContext, "customers" | "subscriptions">
+  services: Pick<ServiceContext, "customers" | "subscriptions" | "billing">
   db: Database
   logger: Logger
 }
@@ -143,6 +143,16 @@ export async function createSubscription(
 
   if (result.err) {
     return result
+  }
+
+  const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
+    subscriptionId: result.val.id,
+    projectId,
+    now: Date.now(),
+  })
+
+  if (billingPeriodsResult.err) {
+    return Err(new UnPriceSubscriptionError({ message: billingPeriodsResult.err.message }))
   }
 
   // Sub-create is a pure DB write up to here. Wallet activation only fires

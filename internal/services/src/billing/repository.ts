@@ -108,8 +108,7 @@ export interface CreatePeriodsBatchInput {
 
 /**
  * Invoices are header-only rows. Lines are projected from the ledger on read.
- * Totals are reconciled from ledger projection when needed; `totalAmount` is a
- * ledger-scale snapshot stamped at materialization time.
+ * Settlement totals are ledger-scale snapshots stamped at materialization time.
  */
 export interface CreateInvoiceInput {
   id: string
@@ -132,7 +131,10 @@ export interface CreateInvoiceInput {
   pastDueAt: number
   dueAt: number
   paidAt: number | null
-  totalAmount: number
+  grossAmount: number
+  amountDue: number
+  amountPaid: number
+  amountIncluded: number
   issueDate: number | null
   metadata: Record<string, unknown> | null
 }
@@ -164,7 +166,10 @@ export interface UpdateInvoiceInput {
       | "paidAt"
       | "sentAt"
       | "issueDate"
-      | "totalAmount"
+      | "grossAmount"
+      | "amountDue"
+      | "amountPaid"
+      | "amountIncluded"
       | "invoicePaymentProviderId"
       | "invoicePaymentProviderUrl"
       | "metadata"

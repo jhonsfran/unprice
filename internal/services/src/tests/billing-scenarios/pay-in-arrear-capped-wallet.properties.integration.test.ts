@@ -280,10 +280,16 @@ async function expectInvoice(expectedAmount: number) {
   const invoices = await db.execute<{
     id: string
     status: "draft"
-    total_amount: number
+    gross_amount: number
+
+    amount_due: number
+
+    amount_paid: number
+
+    amount_included: number
     statement_key: string
   }>(sql`
-    SELECT id, status, total_amount, statement_key
+    SELECT id, status, gross_amount, amount_due, amount_paid, amount_included, statement_key
     FROM unprice_invoices
     WHERE project_id = ${projectId}
       AND subscription_id = ${subscriptionId}
@@ -291,13 +297,25 @@ async function expectInvoice(expectedAmount: number) {
   `)
   const invoiceRows = invoices.rows.map((invoice) => ({
     ...invoice,
-    total_amount: Number(invoice.total_amount),
+    gross_amount: Number(invoice.gross_amount),
+
+    amount_due: Number(invoice.amount_due),
+
+    amount_paid: Number(invoice.amount_paid),
+
+    amount_included: Number(invoice.amount_included),
   }))
   expect(invoiceRows).toEqual([
     expect.objectContaining({
       status: "draft",
       statement_key: statementKey,
-      total_amount: expectedAmount,
+      gross_amount: expectedAmount,
+
+      amount_due: expectedAmount,
+
+      amount_paid: 0,
+
+      amount_included: 0,
     }),
   ])
 
@@ -382,12 +400,16 @@ async function expectLedgerSources() {
     { count: 1, source_type: "wallet_reserve_granted" },
   ])
 
-  const statementEntries = await db.execute<{ count: number }>(sql`
-    SELECT COUNT(*)::int AS count
-    FROM unprice_ledger_idempotency i
-    JOIN pgledger_entries_view e ON e.transfer_id = i.transfer_id
-    WHERE i.project_id = ${projectId}
-      AND i.statement_key = ${statementKey}
+  const statementSources = await db.execute<{ source_type: string; count: number }>(sql`
+    SELECT source_type, COUNT(*)::int AS count
+    FROM unprice_ledger_idempotency
+    WHERE project_id = ${projectId}
+      AND statement_key = ${statementKey}
+    GROUP BY source_type
+    ORDER BY source_type
   `)
-  expect(statementEntries.rows).toEqual([{ count: 4 }])
+  expect(statementSources.rows).toEqual([
+    { count: 2, source_type: "subscription_billing_period_charge_v1" },
+    { count: 1, source_type: "wallet_capture_usage" },
+  ])
 }

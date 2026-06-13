@@ -210,6 +210,7 @@ function createLogger() {
 function createMessage(overrides: Partial<IngestionQueueMessage> = {}): IngestionQueueMessage {
   return {
     version: 1,
+    workspaceId: "ws_123",
     projectId: "proj_123",
     customerId: "cus_123",
     requestId: "req_123",
@@ -219,12 +220,20 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
     slug: "usage.recorded",
     timestamp: TEST_NOW,
     properties: { amount: 1 },
+    source: {
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
+    },
     ...overrides,
   }
 }
 
 function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
+    billingPeriods: [],
     creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
@@ -254,6 +263,7 @@ function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): Inges
     overageStrategy: "none",
     projectId: "proj_123",
     resetConfig: null,
+    subscriptionItemId: null,
     ...overrides,
   }
 }

@@ -1,6 +1,5 @@
 "use client"
 import { useSuspenseQuery } from "@tanstack/react-query"
-import { FEATURE_SLUGS } from "@unprice/config"
 import { Avatar, AvatarFallback, AvatarImage } from "@unprice/ui/avatar"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
@@ -36,7 +35,7 @@ export function WorkspaceSwitcher({
   const router = useRouter()
   const [switcherOpen, setSwitcherOpen] = useState(false)
 
-  const isProEnabled = useFlags(FEATURE_SLUGS.ACCESS_PRO.SLUG)
+  const isProEnabled = useFlags("ACCESS_PRO")
 
   const { data: dataWorkspaces } = useSuspenseQuery(
     trpc.workspaces.listWorkspacesByActiveUser.queryOptions(undefined, {

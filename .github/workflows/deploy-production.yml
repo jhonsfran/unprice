@@ -182,4 +182,3 @@ jobs:
           vercel-args: '--prod --env NEXT_PUBLIC_APP_DOMAIN=unprice.dev --env NEXT_PUBLIC_APP_ENV=production --build-env NEXT_PUBLIC_APP_DOMAIN=unprice.dev --build-env NEXT_PUBLIC_APP_ENV=production'
           alias-domains: |
             unprice.vercel.app
-

@@ -1,6 +1,4 @@
 "use client"
-
-import { FEATURE_SLUGS } from "@unprice/config"
 import { Kbd } from "@unprice/ui/kbd"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { useRouter, useSearchParams } from "next/navigation"
@@ -17,7 +15,7 @@ const TabsDashboard = ({
 }: { baseUrl: string; activeTab: (typeof tabs)[number] }) => {
   const isMounted = useMounted()
 
-  const isPagesEnabled = useFlags(FEATURE_SLUGS.PAGES.SLUG)
+  const isPagesEnabled = useFlags("PAGES")
   const showPages = isMounted && isPagesEnabled
 
   // add a query params in the url to avoid wipe the filters
@@ -57,6 +55,10 @@ const TabsDashboard = ({
       keyup: true, // to avoid someone holding the key down and triggering the hotkey multiple times
     }
   )
+
+  if (visibleTabs.length === 1) {
+    return null
+  }
 
   return (
     <TabNavigation className="gap-1" variant="solid">

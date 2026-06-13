@@ -2,7 +2,7 @@
 
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import { FileStack, Search } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Input } from "@unprice/ui/input"
@@ -26,12 +26,22 @@ interface PlanFeatureListProps {
   planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
 }
 
+const EMPTY_FEATURES: never[] = []
+
 export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
   const [filter, setFilter] = useState("")
 
-  if (!planVersion) return null
-
-  const { planFeatures, plan, ...activePlanVersion } = planVersion
+  // Use stable references for derived values to prevent unnecessary effect re-runs.
+  // Track version identity to only re-sync atoms when the version actually changes.
+  const versionId = planVersion?.id
+  const versionUpdatedAt = planVersion?.updatedAtM
+  const planFeatures = planVersion?.planFeatures ?? EMPTY_FEATURES
+  const plan = planVersion?.plan ?? null
+  const activePlanVersion = useMemo(() => {
+    if (!planVersion) return null
+    const { planFeatures: _pf, plan: _p, ...rest } = planVersion
+    return rest
+  }, [planVersion])
 
   // Hydrate atoms with initial server data — required for SSR consistency.
   useHydrateAtoms([[configPlanFeaturesListAtom, planFeatures]])
@@ -42,14 +52,23 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
   const [, setActivePlanVersion] = useActivePlanVersion()
   const [, setActivePlan] = useActivePlan()
 
-  // Re-sync atoms when the plan version id changes (route navigation between versions).
+  // Re-sync atoms when navigating versions or when settings refresh the same version.
+  // Uses refs for data values so the effect fires only on identity change.
+  const planFeaturesRef = useRef(planFeatures)
+  const planRef = useRef(plan)
+  const activePlanVersionRef = useRef(activePlanVersion)
+  planFeaturesRef.current = planFeatures
+  planRef.current = plan
+  activePlanVersionRef.current = activePlanVersion
+
   useEffect(() => {
-    setPlanFeaturesList(planFeatures)
-    setActivePlanVersion(activePlanVersion)
-    setActivePlan(plan)
-    // intentionally narrow deps — only react to id changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planVersion.id])
+    if (!planFeaturesRef.current || !activePlanVersionRef.current || !planRef.current) return
+    setPlanFeaturesList(planFeaturesRef.current)
+    setActivePlanVersion(activePlanVersionRef.current)
+    setActivePlan(planRef.current)
+  }, [versionId, versionUpdatedAt, setPlanFeaturesList, setActivePlanVersion, setActivePlan])
+
+  if (!planVersion) return null
 
   const filteredFeatures =
     featuresList.filter((feature) =>

@@ -109,6 +109,22 @@ type PostResponse<TPath extends keyof paths, TStatus extends number = 200> = pat
   ? JsonResponse<TOperation, TStatus>
   : never
 
+type WithOptionalFields<TInput, TField extends keyof TInput> = Omit<TInput, TField> &
+  Partial<Pick<TInput, TField>>
+
+type ExplainChargeRequest = WithOptionalFields<
+  PostBody<"/v1/analytics/explain-charge">,
+  "limit" | "offset"
+>
+type IngestionStatusRequest = WithOptionalFields<
+  PostBody<"/v1/analytics/ingestion/status">,
+  "limit"
+>
+type ForecastUsageRequest = WithOptionalFields<
+  PostBody<"/v1/analytics/forecast-usage">,
+  "horizon_days"
+>
+
 type GetResponse<TPath extends keyof paths, TStatus extends number = 200> = paths[TPath] extends {
   get: infer TOperation
 }
@@ -354,6 +370,16 @@ export class Unprice {
     }
   }
 
+  public replayFailedIngestionEvents(
+    req: PostBody<"/v1/events/ingest/replay">
+  ): Promise<ApiResult<PostResponse<"/v1/events/ingest/replay">>> {
+    return this.toResult(
+      this.openapi.POST("/v1/events/ingest/replay", {
+        body: req,
+      })
+    )
+  }
+
   public get access() {
     return {
       update: (
@@ -427,6 +453,12 @@ export class Unprice {
           })
         )
       },
+
+      replayFailedIngestionEvents: (
+        req: PostBody<"/v1/events/ingest/replay">
+      ): Promise<ApiResult<PostResponse<"/v1/events/ingest/replay">>> => {
+        return this.replayFailedIngestionEvents(req)
+      },
     }
   }
 
@@ -434,20 +466,6 @@ export class Unprice {
     return {
       list: (): Promise<ApiResult<GetResponse<"/v1/features/list">>> => {
         return this.toResult(this.openapi.GET("/v1/features/list"))
-      },
-    }
-  }
-
-  public get lakehouse() {
-    return {
-      getFilePlan: (
-        req: PostBody<"/v1/lakehouse/file-plan">
-      ): Promise<ApiResult<PostResponse<"/v1/lakehouse/file-plan">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/lakehouse/file-plan", {
-            body: req,
-          })
-        )
       },
     }
   }
@@ -521,6 +539,45 @@ export class Unprice {
 
   public get analytics() {
     return {
+      explainCharge: (
+        req: ExplainChargeRequest
+      ): Promise<ApiResult<PostResponse<"/v1/analytics/explain-charge">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/analytics/explain-charge", {
+            body: {
+              ...req,
+              limit: req.limit ?? 100,
+              offset: req.offset ?? 0,
+            },
+          })
+        )
+      },
+      forecastUsage: (
+        req: ForecastUsageRequest
+      ): Promise<ApiResult<PostResponse<"/v1/analytics/forecast-usage">>> => {
+        return this.toResult(
+          this.openapi.POST("/v1/analytics/forecast-usage", {
+            body: {
+              ...req,
+              horizon_days: req.horizon_days ?? 14,
+            },
+          })
+        )
+      },
+      ingestion: {
+        status: (
+          req: IngestionStatusRequest
+        ): Promise<ApiResult<PostResponse<"/v1/analytics/ingestion/status">>> => {
+          return this.toResult(
+            this.openapi.POST("/v1/analytics/ingestion/status", {
+              body: {
+                ...req,
+                limit: req.limit ?? 50,
+              },
+            })
+          )
+        },
+      },
       usage: {
         get: (
           req: PostBody<"/v1/analytics/usage/get">
@@ -601,6 +658,39 @@ export class Unprice {
             },
           })
         )
+      },
+    }
+  }
+
+  public get billing() {
+    return {
+      reservations: {
+        flushForInvoicing: (req: {
+          customerId: string
+          subscriptionId: string
+          subscriptionPhaseId: string
+          statementKey: string
+        }): Promise<ApiResult<{ ok: boolean; flushed: number; skipped: number }>> => {
+          const request = new Request(
+            `${this.baseUrl}/v1/billing/reservations/flush-for-invoicing`,
+            {
+              method: "POST",
+              headers: {
+                ...this.getHeaders(),
+                "content-type": "application/json",
+              },
+              body: JSON.stringify(req),
+            }
+          )
+          return this.toResult(
+            this.fetchWithRetry(request).then(async (response) => {
+              if (!response.ok) {
+                return { error: await response.json(), response } as never
+              }
+              return { data: await response.json(), response }
+            })
+          )
+        },
       },
     }
   }

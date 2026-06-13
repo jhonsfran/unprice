@@ -1,8 +1,17 @@
 import { z } from "zod"
 import type { IngestionEntitlement } from "./entitlement-context"
 
+export const ingestionSourceSchema = z.object({
+  environment: z.string().min(1),
+  apiKeyId: z.string().nullable(),
+  sourceType: z.enum(["api_key", "system", "unknown"]),
+  sourceId: z.string().min(1),
+  sourceName: z.string().nullable(),
+})
+
 export const ingestionQueueMessageSchema = z.object({
   version: z.literal(1),
+  workspaceId: z.string(),
   projectId: z.string(),
   customerId: z.string(),
   requestId: z.string(),
@@ -12,6 +21,7 @@ export const ingestionQueueMessageSchema = z.object({
   slug: z.string(),
   timestamp: z.number(),
   properties: z.record(z.string(), z.unknown()),
+  source: ingestionSourceSchema,
 })
 
 export type IngestionQueueMessage = z.infer<typeof ingestionQueueMessageSchema>

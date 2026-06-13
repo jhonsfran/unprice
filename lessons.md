@@ -12,9 +12,21 @@ patterns. Keep it cheap to load and useful.
 - Do not record secrets, customer data, or one-off local noise.
 - Architecture rule changes need an ADR link.
 - You need to use nvm use to install the proper node version of the project
+- Before adding a helper, utility, or repeated row shape, search the repo for an established
+  pattern first; reuse or extract the canonical path instead of duplicating logic.
 
 ## Cloudflare, API, And Ingestion
 
+- 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,
+  `drizzle/migrations.js`, and `drizzle/meta/_journal.json` updated together; otherwise existing
+  DOs can type-check but fail at runtime on missing columns. Never create migrations manually, always use pnpm run db:check:ingestion:migrations for the api.
+- 2026-06-06: `bin/startup.dev` builds/deploys analytics with `tb --local`; use
+  `TB_VERSION_WARNING=0 tb --local --output=json info | jq -r ".local.token"` for the app token,
+  because `tb --local token copy "workspace admin token"` can return a static token rejected by
+  Tinybird Local API requests.
+- 2026-06-06: Local dev startup must override `DATABASE_READ1_URL` and `DATABASE_READ2_URL`
+  alongside `DATABASE_URL`; `apps/api/dev.sh` regenerates `.dev.vars` from non-empty parent env
+  values and otherwise preserves stale preview read-replica secrets.
 - 2026-05-09: Removing a Durable Object class needs `deleted_classes` in the affected
   `apps/api/wrangler.jsonc env.*` migration.
 - 2026-05-08: `entitlement/verify` stays compact: decision fields only, no internal
@@ -43,6 +55,12 @@ patterns. Keep it cheap to load and useful.
   final flushes as final.
 - 2026-05-09: Serialize native `Error` objects before `evlog.log.error`; Cloudflare/Axiom can
   otherwise store `{}`.
+- 2026-06-13: When logging caught failures with `Logger.error`, pass the caught `Error` as the
+  first argument and put the operation name in fields; string-first error logs make evlog create a
+  wrapper error whose stack hides the real cause.
+- 2026-06-13: Ingestion status fields are end-to-end contracts; when adding a customer-visible
+  field, update the reporting envelope, Tinybird datasource/endpoints/fixtures, analytics
+  validators, service use cases, API tests, and dashboard row/detail types together.
 - 2026-05-17: Axiom-bound logs should normalize known camelCase aliases in
   `@unprice/observability`; keep business fields snake_case to avoid duplicate columns.
 - 2026-05-18: Keep `request.*` and `business.*` as the canonical Axiom shape; evlog may use
@@ -51,8 +69,14 @@ patterns. Keep it cheap to load and useful.
   `type: metric` for `LogdrainMetrics` payloads.
 - 2026-05-18: In `APP_ENV=development`, do not attach a custom drain; let evlog's built-in
   pretty development logger handle console output.
+- 2026-06-12: When `openlogs tail <service>` has no registered command stream, inspect the raw
+  per-service files directly under `.openlogs`, for example `.api.<timestamp>.raw.log` and
+  `.nextjs.<timestamp>.raw.log`. Also you can use openlogs tail -n 100 to get the latest logs.
 - 2026-05-18: API Axiom drain flushes should be batched through scheduled `waitUntil`;
   reserve immediate flushes for errors, thrown DO operations, and slow requests.
+- 2026-06-08: EntitlementWindowDO batch diagnostics that must be queried in Axiom need a
+  first-class drain event; constructor-scoped DO logger entries can be absent from top-level
+  Axiom rows, leaving only the outer `runDoOperation` wrapper fields.
 - 2026-05-18: HTTP tRPC inside Next.js should enrich the enclosing Next wide event
   instead of emitting a second event; only standalone/RSC tRPC contexts should emit
   their own batched procedure event.
@@ -89,11 +113,99 @@ patterns. Keep it cheap to load and useful.
   `IngestionAuditDO.commit` into sync or async request handling.
 - 2026-05-31: `IngestionAuditDO` is retired; keep only the `deleted_classes` migration marker
   in `apps/api/wrangler.jsonc`, and use reporting envelopes for audit/Pipeline/Tinybird delivery.
+- 2026-06-05: Customer-visible ingestion analytics should project from reporting envelopes in
+  the reporting consumer; avoid parallel service-level status writes that can split evidence.
+- 2026-06-05: Lakehouse registry fields with `required: false` and `defaultValue: null` should
+  parse explicit `null`, because reporting payloads send nullable optional columns.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
+- 2026-06-10: EntitlementWindowDO batch wallet retries must discard in-memory staged plans before
+  awaiting wallet I/O; reread SQLite and retry optimized so reservation fixes do not turn into
+  per-event sequential writes.
+- 2026-06-12: EntitlementWindowDO batch wallet growth readiness must compare reservation runway
+  against staged batch headroom, not only the current event cost; post-refill wallet-empty denials
+  must be staged before mutating the optimized batch draft.
+- 2026-06-12: EntitlementWindowDO optimized batch wallet growth that hits
+  `maxOutstandingAmount` is exhausted headroom; stage `WALLET_EMPTY` for that event instead of
+  throwing so async ingestion can ack the rest of the customer batch.
+- 2026-06-13: EntitlementWindowDO optimized batch lazy bootstrap should only throw the
+  bootstrap-retry signal for positive projected cost; zero-cost staged events must stay on the
+  compact local commit path without opening a wallet reservation.
+- 2026-06-13: Raw ingestion and reporting queues must not share a DLQ; replay should be an
+  authenticated admin/UI workflow, not a local operator script.
+- 2026-06-13: Dashboard-to-API workflows should use the `@unprice/api` SDK path; avoid bespoke
+  internal fetches for public API operations such as ingestion replay.
+- 2026-06-13: Dashboard-to-API project overrides should pass `project_id` through the public SDK
+  body and use `validateIsAllowedToAccessProject`; do not add parallel internal auth headers when
+  API-key admin/root access already models the permission.
+- 2026-06-13: k6 ingestion-failure testing should create real UI-visible failed rows through the
+  non-production `/v1/events/ingest` failure-test header; keep the marker in `requestId` so
+  frontend replay can replace it before requeueing.
+- 2026-06-13: Ingestion replay uses Tinybird failed rows as the recovery index and `payload_json`
+  as the immediate replay source; R2 remains write-once audit storage.
+- 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
+  (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
+  timestamp.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-08: Sandbox payment-provider invoice methods should return an empty hosted invoice URL;
+  the dashboard must keep sandbox invoice viewing inside Unprice instead of opening placeholder
+  external origins.
+- 2026-06-08: Project creation must seed an active managed sandbox payment-provider config in the
+  same transaction; plan-version publish should log provider validation failures with normalized
+  error context before returning `payment_provider_error`.
+- 2026-06-08: Invoice finalization collectability should use the provider/display
+  currency-minor amount; if a tiny positive ledger-scale total rounds to zero,
+  skip provider work and void the invoice.
+- 2026-06-08: Usage plan-version features should persist an explicit reset cadence;
+  when reset follows billing, derive and store it from feature `billingConfig` while keeping
+  `metadata.resetCadenceOverride=false`, so rating/explainability read the same period keys.
+- 2026-06-08: Project dashboard revenue should use invoice-visible ledger credits into
+  `customer.*.consumed`; do not estimate it from plan prices or raw payment/top-up funding
+  accounts.
+- 2026-06-07: Customer-facing invoice money should quantize ledger-scale amounts through
+  `toCurrencyMinor` before display; keep sub-cent precision internal.
+- 2026-06-07: Provider invoice items must allocate currency-minor rounding from the
+  ledger-summed invoice header total; do not independently round each line and let
+  provider totals drift.
+- 2026-06-06: Invoice headers store `grossAmount`, `amountDue`, `amountPaid`, and
+  `amountIncluded`; ledger lines remain the invoice source of truth, and
+  collectability comes from settlement metadata derived from wallet funding legs.
+- 2026-06-06: Plan publish should set `paymentMethodRequired` from any non-zero
+  `charge_automatically` feature price path, not flat price alone; `createPhase`
+  resolves the provider default before inserting a required payment method.
+- 2026-06-07: `createPhase` status decisions must use the resolved/stamped
+  `paymentMethodIdToUse`; sandbox defaults can be discovered during phase creation and should
+  not park direct signup in `pending_payment`.
+- 2026-06-07: Wallet-backed usage invoices should project wallet capture ledger lines; do not
+  re-rate capped wallet captures through Tinybird during BILL or they can zero/duplicate invoices.
+- 2026-06-07: Wallet capture ledger metadata must include `feature_slug` and `quantity`; invoice
+  read models should consume ledger-projected descriptions/quantities instead of looking up usage
+  feature labels from billing periods.
+- 2026-06-07: Subscription phase edits must persist `paymentMethodId` in `updatePhase`; the
+  Next.js phase form should not reset a selected payment method from plan-version defaults.
+- 2026-06-07: Transaction-backed phase creation must materialize billing periods after the outer
+  transaction commits and before wallet activation; async `waitUntil` period generation can race
+  immediate usage ingestion and leave EntitlementWindowDO without invoice context.
+- 2026-06-12: Subscription machine activation already runs under the subscription lock during
+  renewals; call billing-period materialization with `lock: false` from that actor, or
+  `generateBillingPeriods` will reacquire the same lock and park the subscription in
+  `pending_activation`. Ingestion catch-up must retry `activateWallet` for subscriptions already
+  parked there instead of fanning out to EntitlementWindowDO with stale billing context.
+- 2026-06-12: Ingestion catch-up must materialize per-item billing periods for active/trialing
+  subscriptions even when the subscription cycle is not due for renewal; usage feature cadences can
+  be shorter than the subscription cycle and still need invoice context before DO fanout.
+- 2026-06-07: When signup or provider-completion use cases materialize billing periods, wire
+  `billing` through API route service bags and `apps/api/src/hono/env.ts`; missing adapter wiring
+  can return signup `success=false` with a hidden `generateBillingPeriods` error.
+- 2026-06-06: `explainCharge` treats invoice rows as grouped buckets: use ledger totals for the
+  line amount, query Tinybird by period key when available, and fall back to the billing window
+  when the key cannot be derived.
+- 2026-06-06: Draft plan-version billing changes should cascade feature billing/reset cadences
+  unless `metadata.billingCadenceOverride` or `metadata.resetCadenceOverride` is true; missing
+  override flags mean the feature follows the plan. Usage feature billing may be shorter or longer
+  than plan billing; only reset cadence must be less than or equal to feature billing cadence.
 - 2026-05-06: `pay_in_advance` moves fixed fees to period start only; usage actuals invoice at
   period end.
 - 2026-05-06: Billing-period rating requires active entitlement grants; no grants intentionally
@@ -138,6 +250,16 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-18: EntitlementWindowDO alarm scheduling should use flush cadence only when
   `consumedAmount > flushedAmount`; fully flushed live reservations should wake on lifecycle
   deadlines, not stale `lastFlushedAt`.
+- 2026-06-08: EntitlementWindowDO time-based wallet flushes with `pendingRefillAmount=0` are
+  capture-only; do not call reservation extension for a zero-amount refill or alarms can keep
+  retrying flush/refill work.
+- 2026-06-08: Wallet capture usage transfers are statement-keyed; capped-wallet statement tests
+  should assert transfer source types, not raw pgledger debit/credit entry counts.
+- 2026-06-08: API error mapping must treat `UnPriceWalletError("WALLET_LEDGER_FAILED")` as an
+  infrastructure 500; only `WALLET_EMPTY` is a business ingestion denial.
+- 2026-06-09: EntitlementWindowDO apply logs must keep wallet-empty denial fields and wallet
+  service error fields mutually exclusive; stale `error_message` values in Axiom can misclassify
+  operational underfunding as ledger failure.
 - 2026-05-17: Reservation release and grant expiration are separate financial events: release
   restores unused reserved funds to customer buckets; only grant expiration returns available
   grant balance to platform funding.
@@ -173,6 +295,11 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-11: `withLockedMachine` mocks must pass `assertLockHeld` as the second `run` arg.
 - 2026-05-11: Reference billing model has no grant expiry; add expiry support before expiry
   golden cases.
+
+### 2026-06-12: Queued usage ingestion may catch up subscription renewals, but entitlement context stays read-only.
+
+- Billing-period generation and wallet grant issuance belong to the subscription lifecycle. If queued ingestion sees subscription-backed usage past the funded billing window, call the subscription machine under its existing lock, then reload entitlement context before fanout.
+- Do not add billing-period writes to `internal/services/src/ingestion/entitlement-context.ts`; that loader reads/caches entitlements and billing contexts only.
 
 Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardrails.md).
 
@@ -224,10 +351,32 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## UI And Dashboard
 
+- 2026-06-13: `@unprice/ui/checkbox` wraps Radix Checkbox and renders a button; do not nest it
+  inside another button in filter rows or table actions, because React/Next will hydration-fail on
+  invalid button descendants.
+- 2026-06-13: Dashboard near-realtime queries with a default relative window must advance the
+  query input timestamp on each poll; refetching a frozen `{ from, to }` window only reloads old
+  data.
+- 2026-06-12: Dashboard client components that use `useSuspenseQuery` for protected tRPC data
+  must have matching RSC `trpc/server` prefetches; otherwise server render can fall back to the
+  app React Query HTTP link without browser cookies and log `User not found in session`.
 - 2026-05-07: After provider payment-method setup, bypass `customerPaymentMethods` cache and poll
   before showing an empty state.
 - 2026-05-07: Keep subscription creation drafts open while provider setup runs; refetch with
   `skipCache` and auto-select the first method.
+- 2026-06-13: When commits fail with react-doctor errors, run `npx react-doctor@latest --verbose`
+  in `apps/nextjs`, read the full diagnostics directory it outputs, and fix each rule's root cause.
+  Do not suppress rules. Common fixes: move hooks before early returns (rules-of-hooks), derive
+  state instead of syncing via useEffect (no-derived-state), hoist `new Intl.*` to module scope
+  (js-hoist-intl), use `next/dynamic` for heavy chart libs (prefer-dynamic-import), replace
+  `[...arr].sort()` with in-place sort or `.toSorted()` (js-tosorted-immutable), combine
+  `.filter().map()` chains into `for...of` loops (js-combine-iterations), destructure
+  `useQuery`/`useInfiniteQuery` results (query-destructure-result), and split 300+ line components
+  (no-giant-component).
+- 2026-06-13: Every `next/dynamic` or `React.lazy()` component must include a `loading` fallback
+  that matches the component's layout dimensions (e.g., a `<Skeleton>` with the same height/width).
+  Without it, the page content shifts when the chunk arrives, causing visible flicker. Follow the
+  same pattern as `ThemeToggle` in `src/components/layout/footer.tsx`.
 
 ## Tests, Tooling, And Docs
 
@@ -298,3 +447,6 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `billingInterval: "minute"` with `billingIntervalCount: 60`.
 - 2026-05-11: Deterministic DB fixture ids must stay within the shared cuid column length
   (`varchar(36)`); Drizzle catches shape drift, but length constraints still fail at runtime.
+- 2026-06-08: Durable Object diagnostics that must be queried in Axiom should go through
+  `createDoLogger` as first-class drain events; request-scoped wrapper rows alone can hide inner
+  fields such as `mode`, fallback `reason`, and `error`.

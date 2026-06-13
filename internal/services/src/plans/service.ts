@@ -3,6 +3,7 @@ import { type Database, and, desc, eq, getTableColumns, sql } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
 import { nFormatter, newId } from "@unprice/db/utils"
 import {
+  type BillingConfig,
   type BillingInterval,
   type Currency,
   type Customer,
@@ -13,6 +14,7 @@ import {
   type PlanVersionExtended,
   type PlanVersionFeature,
   type Project,
+  type ResetConfig,
   type Subscription,
   calculateFlatPricePlan,
   calculateFreeUnits,
@@ -21,6 +23,7 @@ import {
   configTierSchema,
   configUsageSchema,
   getAnchor,
+  isResetCadenceAtMostBilling,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -28,6 +31,98 @@ import type { Cache } from "../cache/service"
 import type { Metrics } from "../metrics"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
+
+function billingConfigsMatch(left: BillingConfig, right: BillingConfig): boolean {
+  return (
+    left.name === right.name &&
+    left.billingInterval === right.billingInterval &&
+    left.billingIntervalCount === right.billingIntervalCount &&
+    left.billingAnchor === right.billingAnchor &&
+    left.planType === right.planType
+  )
+}
+
+function resetConfigFollowsBillingConfig(
+  resetConfig: ResetConfig | null,
+  billingConfig: BillingConfig
+): boolean {
+  return (
+    resetConfig !== null &&
+    resetConfig.name === billingConfig.name &&
+    resetConfig.resetInterval === billingConfig.billingInterval &&
+    resetConfig.resetIntervalCount === billingConfig.billingIntervalCount &&
+    resetConfig.resetAnchor === billingConfig.billingAnchor &&
+    resetConfig.planType === billingConfig.planType
+  )
+}
+
+function resetConfigsMatch(
+  left: ResetConfig | null | undefined,
+  right: ResetConfig | null | undefined
+): boolean {
+  if (!left || !right) {
+    return left === right
+  }
+
+  return (
+    left.name === right.name &&
+    left.resetInterval === right.resetInterval &&
+    left.resetIntervalCount === right.resetIntervalCount &&
+    left.resetAnchor === right.resetAnchor &&
+    left.planType === right.planType
+  )
+}
+
+function resetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
+  return {
+    name: billingConfig.name,
+    resetInterval: billingConfig.billingInterval,
+    resetIntervalCount: billingConfig.billingIntervalCount,
+    resetAnchor: billingConfig.billingAnchor,
+    planType: billingConfig.planType,
+  }
+}
+
+function resolveResetConfigForFeature({
+  featureType,
+  resetConfig,
+  billingConfig,
+}: {
+  featureType: PlanVersionFeature["featureType"]
+  resetConfig: ResetConfig | null | undefined
+  billingConfig: BillingConfig
+}): ResetConfig | null {
+  if (featureType !== "usage") {
+    return null
+  }
+
+  return resetConfig ?? resetConfigFromBillingConfig(billingConfig)
+}
+
+function featureMetadataWithCadenceFlags({
+  metadata,
+  featureType,
+  featureBillingConfig,
+  planBillingConfig,
+  resetConfig,
+}: {
+  metadata?: PlanVersionFeature["metadata"]
+  featureType: PlanVersionFeature["featureType"]
+  featureBillingConfig: BillingConfig
+  planBillingConfig: BillingConfig
+  resetConfig: ResetConfig | null
+}): NonNullable<PlanVersionFeature["metadata"]> {
+  const nextMetadata = { ...(metadata ?? {}) } as NonNullable<PlanVersionFeature["metadata"]>
+
+  nextMetadata.billingCadenceOverride =
+    featureType === "usage" && !billingConfigsMatch(featureBillingConfig, planBillingConfig)
+  nextMetadata.resetCadenceOverride =
+    featureType === "usage" &&
+    resetConfig !== null &&
+    !resetConfigFollowsBillingConfig(resetConfig, featureBillingConfig)
+
+  return nextMetadata
+}
 
 export class PlanService {
   private readonly db: Database
@@ -1341,12 +1436,23 @@ export class PlanService {
 
     const { val, err } = await wrapResult(
       this.db.transaction(async (tx) => {
-        if (currency && currency !== planVersionData.currency) {
-          const features = await tx.query.planVersionFeatures.findMany({
-            where: (feature, { and, eq }) =>
-              and(eq(feature.planVersionId, planVersionData.id), eq(feature.projectId, projectId)),
-          })
+        const shouldUpdateFeatureCurrency = currency && currency !== planVersionData.currency
+        const shouldUpdateFeatureCadence =
+          billingConfig !== undefined &&
+          !billingConfigsMatch(planVersionData.billingConfig, billingConfig)
 
+        const features =
+          shouldUpdateFeatureCurrency || shouldUpdateFeatureCadence
+            ? await tx.query.planVersionFeatures.findMany({
+                where: (feature, { and, eq }) =>
+                  and(
+                    eq(feature.planVersionId, planVersionData.id),
+                    eq(feature.projectId, projectId)
+                  ),
+              })
+            : []
+
+        if (shouldUpdateFeatureCurrency) {
           await Promise.all(
             features.map(async (feature) => {
               switch (feature.featureType) {
@@ -1488,6 +1594,74 @@ export class PlanService {
                 default:
                   return undefined
               }
+            })
+          )
+        }
+
+        if (shouldUpdateFeatureCadence && billingConfig) {
+          await Promise.all(
+            features.map((feature) => {
+              const update: Partial<
+                Pick<
+                  PlanVersionFeature,
+                  "billingConfig" | "resetConfig" | "metadata" | "updatedAtM"
+                >
+              > = {}
+              const canPreserveBilling =
+                feature.featureType === "usage" && feature.metadata?.billingCadenceOverride === true
+              const shouldSyncBilling = !canPreserveBilling
+              const nextBillingConfig = shouldSyncBilling ? billingConfig : feature.billingConfig
+              const canPreserveReset =
+                feature.featureType === "usage" &&
+                feature.metadata?.resetCadenceOverride === true &&
+                feature.resetConfig !== null &&
+                isResetCadenceAtMostBilling(feature.resetConfig, nextBillingConfig)
+              const shouldSyncReset = !canPreserveReset
+              const nextResetConfig =
+                shouldSyncReset && feature.featureType === "usage"
+                  ? resetConfigFromBillingConfig(nextBillingConfig)
+                  : feature.resetConfig
+
+              if (shouldSyncBilling && !billingConfigsMatch(feature.billingConfig, billingConfig)) {
+                update.billingConfig = nextBillingConfig
+              }
+
+              if (!resetConfigsMatch(feature.resetConfig, nextResetConfig)) {
+                update.resetConfig = nextResetConfig
+              }
+
+              const nextMetadata = featureMetadataWithCadenceFlags({
+                metadata: feature.metadata,
+                featureType: feature.featureType,
+                featureBillingConfig: nextBillingConfig,
+                planBillingConfig: billingConfig,
+                resetConfig: nextResetConfig,
+              })
+
+              if (
+                feature.featureType === "usage" &&
+                (feature.metadata?.billingCadenceOverride !== nextMetadata.billingCadenceOverride ||
+                  feature.metadata?.resetCadenceOverride !== nextMetadata.resetCadenceOverride)
+              ) {
+                update.metadata = nextMetadata
+              }
+
+              if (Object.keys(update).length === 0) {
+                return undefined
+              }
+
+              return tx
+                .update(schema.planVersionFeatures)
+                .set({
+                  ...update,
+                  updatedAtM: Date.now(),
+                })
+                .where(
+                  and(
+                    eq(schema.planVersionFeatures.id, feature.id),
+                    eq(schema.planVersionFeatures.projectId, projectId)
+                  )
+                )
             })
           )
         }
@@ -1926,6 +2100,18 @@ export class PlanService {
 
     const billingConfigCreate =
       featureType === "usage" ? billingConfig : planVersionData.billingConfig
+    const resetConfigCreate = resolveResetConfigForFeature({
+      featureType,
+      resetConfig,
+      billingConfig: billingConfigCreate,
+    })
+    const metadataCreate = featureMetadataWithCadenceFlags({
+      metadata,
+      featureType,
+      featureBillingConfig: billingConfigCreate,
+      planBillingConfig: planVersionData.billingConfig,
+      resetConfig: resetConfigCreate,
+    })
 
     const meterConfigSnapshot =
       featureType !== "usage"
@@ -1940,7 +2126,15 @@ export class PlanService {
       })
     }
 
-    const resetConfigCreate = billingConfigCreate.name === resetConfig?.name ? null : resetConfig
+    if (
+      featureType === "usage" &&
+      resetConfigCreate &&
+      !isResetCadenceAtMostBilling(resetConfigCreate, billingConfigCreate)
+    ) {
+      return Ok({
+        state: "invalid_reset_config",
+      })
+    }
 
     if (resetConfigCreate) {
       try {
@@ -1962,13 +2156,10 @@ export class PlanService {
             projectId,
             planVersionId: planVersionData.id,
             unitOfMeasure: unitOfMeasure ?? featureData.unitOfMeasure ?? "units",
-            billingConfig: {
-              ...billingConfigCreate,
-              billingAnchor: planVersionData.billingConfig.billingAnchor,
-            },
+            billingConfig: billingConfigCreate,
             featureType,
             config,
-            metadata,
+            metadata: metadataCreate,
             order: Number(order ?? 1024),
             defaultQuantity: defaultQuantity === 0 ? null : defaultQuantity,
             limit: limit === 0 ? null : limit,
@@ -2117,7 +2308,31 @@ export class PlanService {
 
     const featureTypeUpdate = featureType ?? existingPlanVersionFeature.featureType
     const billingConfigUpdate =
-      featureTypeUpdate === "usage" ? billingConfig : planVersionData.billingConfig
+      featureTypeUpdate === "usage"
+        ? (billingConfig ?? existingPlanVersionFeature.billingConfig)
+        : planVersionData.billingConfig
+    const shouldPreserveExistingReset =
+      resetConfig === undefined &&
+      existingPlanVersionFeature.metadata?.resetCadenceOverride === true &&
+      existingPlanVersionFeature.resetConfig !== null &&
+      isResetCadenceAtMostBilling(existingPlanVersionFeature.resetConfig, billingConfigUpdate)
+    const resetConfigUpdate = shouldPreserveExistingReset
+      ? existingPlanVersionFeature.resetConfig
+      : resolveResetConfigForFeature({
+          featureType: featureTypeUpdate,
+          resetConfig,
+          billingConfig: billingConfigUpdate,
+        })
+    const metadataUpdate = featureMetadataWithCadenceFlags({
+      metadata: {
+        ...(existingPlanVersionFeature.metadata ?? {}),
+        ...(metadata ?? {}),
+      } as PlanVersionFeature["metadata"],
+      featureType: featureTypeUpdate,
+      featureBillingConfig: billingConfigUpdate,
+      planBillingConfig: planVersionData.billingConfig,
+      resetConfig: resetConfigUpdate,
+    })
 
     const featureData = existingPlanVersionFeature.feature
     const unitOfMeasureUpdate =
@@ -2141,9 +2356,19 @@ export class PlanService {
       })
     }
 
-    if (resetConfig) {
+    if (
+      featureTypeUpdate === "usage" &&
+      resetConfigUpdate &&
+      !isResetCadenceAtMostBilling(resetConfigUpdate, billingConfigUpdate)
+    ) {
+      return Ok({
+        state: "invalid_reset_config",
+      })
+    }
+
+    if (resetConfigUpdate) {
       try {
-        getAnchor(Date.now(), resetConfig.resetInterval, resetConfig.resetAnchor)
+        getAnchor(Date.now(), resetConfigUpdate.resetInterval, resetConfigUpdate.resetAnchor)
       } catch {
         return Ok({
           state: "invalid_reset_config",
@@ -2160,7 +2385,7 @@ export class PlanService {
             ...(featureId && { featureId }),
             ...(featureType && { featureType }),
             ...(config && { config }),
-            ...(metadata && { metadata: { ...planVersionData.metadata, ...metadata } }),
+            metadata: metadataUpdate,
             ...(order && { order }),
             ...(unitOfMeasureUpdate !== undefined && { unitOfMeasure: unitOfMeasureUpdate }),
             ...(defaultQuantity !== undefined && {
@@ -2171,12 +2396,9 @@ export class PlanService {
               meterConfig: meterConfigUpdate,
             }),
             ...(billingConfigUpdate && {
-              billingConfig: {
-                ...billingConfigUpdate,
-                billingAnchor: planVersionData.billingConfig.billingAnchor,
-              },
+              billingConfig: billingConfigUpdate,
             }),
-            ...(resetConfig && { resetConfig }),
+            ...(featureTypeUpdate === "usage" && { resetConfig: resetConfigUpdate }),
             ...(type && { type }),
             updatedAtM: Date.now(),
           })

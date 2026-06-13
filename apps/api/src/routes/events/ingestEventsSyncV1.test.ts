@@ -1,6 +1,7 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
 import type { Logger } from "@unprice/logs"
 import { INGESTION_MAX_EVENT_AGE_MS } from "@unprice/services/entitlements"
+import { UnPriceWalletError } from "@unprice/services/wallet"
 import type { ExecutionContext } from "hono"
 import { timing } from "hono/timing"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -87,6 +88,14 @@ describe("ingestEventsSyncV1 route", () => {
         id: "evt_123",
         idempotencyKey: "idem_123",
         slug: "tokens_used",
+        workspaceId: "ws_123",
+        source: {
+          environment: "development",
+          apiKeyId: "key_123",
+          sourceType: "api_key",
+          sourceId: "key_123",
+          sourceName: null,
+        },
       }),
     })
   })
@@ -232,6 +241,24 @@ describe("ingestEventsSyncV1 route", () => {
     await expect(response.json()).resolves.toEqual({
       code: "INTERNAL_SERVER_ERROR",
       message: "reporting enqueue failed",
+    })
+  })
+
+  it("maps wallet ledger failures to an infrastructure error", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+    ingestFeatureSync.mockRejectedValueOnce(
+      new UnPriceWalletError({ message: "WALLET_LEDGER_FAILED" })
+    )
+
+    const response = await app.fetch(buildRequest(), env, executionCtx)
+
+    expect(response.status).toBe(500)
+    await expect(response.json()).resolves.toEqual({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "WALLET_LEDGER_FAILED",
     })
   })
 })

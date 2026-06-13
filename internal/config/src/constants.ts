@@ -123,62 +123,74 @@ export const FEATURE_SLUGS = {
     TITLE: "API Keys",
     DESCRIPTION: "authentication and authorization",
     UNIT: "key",
+    AVAILABLE: true,
   },
   PLANS: {
     SLUG: "plans",
     TITLE: "Plans",
     DESCRIPTION: "pricing and billing",
     UNIT: "plan",
+    AVAILABLE: true,
   },
   PLAN_VERSIONS: {
     SLUG: "plan-versions",
     TITLE: "Plan Versions",
     DESCRIPTION: "iterate on your plans and add new features",
     UNIT: "version",
+    AVAILABLE: true,
   },
   PROJECTS: {
     SLUG: "projects",
     TITLE: "Projects",
     DESCRIPTION: "organize your resources",
     UNIT: "project",
+    AVAILABLE: true,
   },
   ACCESS_PRO: {
     SLUG: "access-pro",
     TITLE: "Access Pro",
     DESCRIPTION: "grant access to paid features",
     UNIT: "access",
+    AVAILABLE: true,
   },
   ACCESS_FREE: {
     SLUG: "access-free",
     TITLE: "Access Free",
     DESCRIPTION: "grant access to basic features",
     UNIT: "access",
+    AVAILABLE: true,
   },
   EVENTS: {
     SLUG: "events",
     TITLE: "Events",
     DESCRIPTION: "verification and usage tracking events",
     UNIT: "event",
+    AVAILABLE: true,
   },
   CUSTOMERS: {
     SLUG: "customers",
     TITLE: "Customers",
     DESCRIPTION: "manage your customers and subscriptions",
     UNIT: "customer",
+    AVAILABLE: true,
   },
   DOMAINS: {
     SLUG: "domains",
     TITLE: "Domains",
     DESCRIPTION: "manage your domains and DNS",
     UNIT: "domain",
+    AVAILABLE: false,
   },
   PAGES: {
     SLUG: "pages",
     TITLE: "Pages",
     DESCRIPTION: "manage your pricing pages",
     UNIT: "page",
+    AVAILABLE: false,
   },
 }
+
+export type FeatureSlug = keyof typeof FEATURE_SLUGS
 
 export const DEFAULT_PLAN_FEATURES = [
   FEATURE_SLUGS.API_KEYS,

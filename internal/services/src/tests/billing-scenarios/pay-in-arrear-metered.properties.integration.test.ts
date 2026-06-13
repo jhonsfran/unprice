@@ -152,10 +152,16 @@ async function runBillingPropertyCase(usage: number) {
   const invoices = await db.execute<{
     id: string
     status: "draft"
-    total_amount: number
+    gross_amount: number
+
+    amount_due: number
+
+    amount_paid: number
+
+    amount_included: number
     statement_key: string
   }>(sql`
-    SELECT id, status, total_amount, statement_key
+    SELECT id, status, gross_amount, amount_due, amount_paid, amount_included, statement_key
     FROM unprice_invoices
     WHERE project_id = ${projectId}
       AND subscription_id = ${subscriptionId}
@@ -163,14 +169,26 @@ async function runBillingPropertyCase(usage: number) {
   `)
   const invoiceRows = invoices.rows.map((invoice) => ({
     ...invoice,
-    total_amount: Number(invoice.total_amount),
+    gross_amount: Number(invoice.gross_amount),
+
+    amount_due: Number(invoice.amount_due),
+
+    amount_paid: Number(invoice.amount_paid),
+
+    amount_included: Number(invoice.amount_included),
   }))
   expect(invoiceRows).toHaveLength(1)
   expect(invoiceRows[0]).toEqual(
     expect.objectContaining({
       status: "draft",
       statement_key: statementKey,
-      total_amount: expectedTotalAmount,
+      gross_amount: expectedTotalAmount,
+
+      amount_due: expectedTotalAmount,
+
+      amount_paid: 0,
+
+      amount_included: 0,
     })
   )
 

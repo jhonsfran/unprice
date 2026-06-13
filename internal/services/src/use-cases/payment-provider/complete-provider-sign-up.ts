@@ -11,7 +11,7 @@ import { UnPriceCustomerError } from "../../customers/errors"
 import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 export type CompleteProviderSignUpDeps = {
-  services: Pick<ServiceContext, "customers" | "subscriptions">
+  services: Pick<ServiceContext, "customers" | "subscriptions" | "billing">
   db: Database
   logger: Logger
   analytics: Analytics
@@ -443,6 +443,21 @@ export async function completeProviderSignUp(
       provider,
     })
     return Err(subscriptionResult.err)
+  }
+
+  const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
+    subscriptionId: subscriptionResult.val.subscriptionId,
+    projectId,
+    now: Date.now(),
+  })
+
+  if (billingPeriodsResult.err) {
+    return Err(
+      new UnPriceCustomerError({
+        code: "PHASE_NOT_CREATED",
+        message: billingPeriodsResult.err.message,
+      })
+    )
   }
 
   await activateWalletIfSubscriptionIsActive(deps, {

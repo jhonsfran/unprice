@@ -5,7 +5,11 @@ import type { UseFormReturn } from "react-hook-form"
 import { useFieldArray } from "react-hook-form"
 
 import { BILLING_CONFIG, OVERAGE_STRATEGIES_MAP, RESET_CONFIG } from "@unprice/db/utils"
-import type { Currency, PlanVersionFeatureInsert } from "@unprice/db/validators"
+import {
+  type Currency,
+  type PlanVersionFeatureInsert,
+  isResetCadenceAtMostBilling,
+} from "@unprice/db/validators"
 
 import { currencySymbol } from "@unprice/money"
 import { Button } from "@unprice/ui/button"
@@ -214,21 +218,38 @@ export function ResetConfigFeatureFormField({
   form: UseFormReturn<PlanVersionFeatureInsert>
   isDisabled?: boolean
 }) {
-  // filter dev option when node_env is production
-  const options = Object.entries(RESET_CONFIG)
-    .filter(([key]) => {
-      if (process.env.NODE_ENV === "production") {
-        return RESET_CONFIG[key]?.dev !== true
-      }
+  const billingConfig = form.watch("billingConfig")
 
-      // deactivate yearly for now
-      return !["yearly", "onetime"].includes(key)
-    })
-    .map(([key, value]) => ({
-      label: value.label,
-      key,
-      description: value.description,
-    }))
+  // filter dev option when node_env is production
+  const options: { label: string; key: string; description: string }[] = []
+  for (const [key, value] of Object.entries(RESET_CONFIG)) {
+    // Exclude dev-only options in production, exclude onetime in development
+    if (process.env.NODE_ENV === "production") {
+      if (value?.dev === true) continue
+    } else {
+      if (key === "onetime") continue
+    }
+
+    // Exclude options that exceed the billing cadence
+    if (billingConfig) {
+      if (
+        !isResetCadenceAtMostBilling(
+          {
+            name: key,
+            resetInterval: value.resetInterval,
+            resetIntervalCount: value.resetIntervalCount,
+            resetAnchor: "dayOfCreation",
+            planType: value.planType,
+          },
+          billingConfig
+        )
+      ) {
+        continue
+      }
+    }
+
+    options.push({ label: value.label, key, description: value.description })
+  }
 
   return (
     <div className="w-full">
@@ -291,20 +312,15 @@ export function BillingConfigFeatureFormField({
   isDisabled?: boolean
 }) {
   // filter dev option when node_env is production
-  const options = Object.entries(BILLING_CONFIG)
-    .filter(([key]) => {
-      if (process.env.NODE_ENV === "production") {
-        return BILLING_CONFIG[key]?.dev !== true
-      }
-
-      // deactivate yearly for now
-      return !["yearly", "onetime"].includes(key)
-    })
-    .map(([key, value]) => ({
-      label: value.label,
-      key,
-      description: value.description,
-    }))
+  const options: { label: string; key: string; description: string }[] = []
+  for (const [key, value] of Object.entries(BILLING_CONFIG)) {
+    if (process.env.NODE_ENV === "production") {
+      if (value?.dev === true) continue
+    } else {
+      if (key === "onetime") continue
+    }
+    options.push({ label: value.label, key, description: value.description })
+  }
 
   return (
     <div className="w-full">
@@ -334,6 +350,34 @@ export function BillingConfigFeatureFormField({
                 form.setValue("billingConfig.billingIntervalCount", config.billingIntervalCount)
                 form.setValue("billingConfig.billingInterval", config.billingInterval)
                 form.setValue("billingConfig.name", value)
+
+                const matchingResetConfig = RESET_CONFIG[value]
+                if (!matchingResetConfig) return
+
+                form.setValue("resetConfig.planType", matchingResetConfig.planType, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+                form.setValue(
+                  "resetConfig.resetIntervalCount",
+                  matchingResetConfig.resetIntervalCount,
+                  {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  }
+                )
+                form.setValue("resetConfig.resetInterval", matchingResetConfig.resetInterval, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+                form.setValue("resetConfig.resetAnchor", "dayOfCreation", {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+                form.setValue("resetConfig.name", value, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
               }}
               value={field.value?.toString() ?? ""}
               disabled={isDisabled}

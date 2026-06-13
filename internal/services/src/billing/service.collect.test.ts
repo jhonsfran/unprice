@@ -50,6 +50,7 @@ const updateInvoiceMock = vi.fn(
   async (input: { invoiceId: string; projectId: string; data: Record<string, unknown> }) => {
     repoCalls.updateInvoice.push(input)
     return {
+      ...findInvoiceByIdResult,
       id: input.invoiceId,
       projectId: input.projectId,
       status: (input.data.status as string | undefined) ?? "unpaid",
@@ -88,7 +89,10 @@ function makeInvoice(overrides: Partial<SubscriptionInvoice> = {}): Subscription
     paymentMethodId: "pm_1",
     collectionMethod: "charge_automatically",
     currency: "USD",
-    totalAmount: 1_000_000_000,
+    grossAmount: 1_000_000_000,
+    amountDue: 1_000_000_000,
+    amountPaid: 0,
+    amountIncluded: 0,
     paidAt: null,
     metadata: null,
     pastDueAt: null,
@@ -327,6 +331,41 @@ describe("BillingService._collectInvoicePayment", () => {
     expect(repoCalls.updateInvoice).toHaveLength(0)
   })
 
+  it("unpaid invoice whose collectable amount rounds to zero is voided before provider collection", async () => {
+    const invoice = makeInvoice({
+      status: "unpaid",
+      currency: "EUR",
+      grossAmount: 10_000,
+      amountDue: 10_000,
+    })
+    const provider = makeProviderService({
+      getStatusInvoice: vi.fn(),
+      collectPayment: vi.fn(),
+      sendInvoice: vi.fn(),
+    } as unknown as Partial<PaymentProviderService>)
+    const { billing, customerService } = makeBillingService({ invoice, paymentProvider: provider })
+
+    const result = await collectInvoicePayment(billing, {
+      invoiceId: "inv_1",
+      projectId: "proj_1",
+      now: 5_000,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toMatchObject({ status: "void" })
+    expect(customerService.getPaymentProvider).not.toHaveBeenCalled()
+    expect(provider.getStatusInvoice).not.toHaveBeenCalled()
+    expect(provider.collectPayment).not.toHaveBeenCalled()
+    expect(provider.sendInvoice).not.toHaveBeenCalled()
+    expect(repoCalls.updateInvoice).toHaveLength(1)
+    expect(repoCalls.updateInvoice[0]?.data).toMatchObject({
+      status: "void",
+      metadata: expect.objectContaining({
+        reason: "invoice_voided",
+      }),
+    })
+  })
+
   it("failed invoice rejected — cannot collect failed", async () => {
     const invoice = makeInvoice({ status: "failed" })
     const { billing } = makeBillingService({ invoice })
@@ -387,7 +426,7 @@ describe("BillingService._collectInvoicePayment", () => {
     expect(repoCalls.updateInvoice[0]?.data).toMatchObject({ status: "failed" })
   })
 
-  it("waiting invoice provider paid — updates to paid", async () => {
+  it("waiting invoice provider paid — updates to paid and settles wallet", async () => {
     const invoice = makeInvoice({ status: "waiting", pastDueAt: 10_000 })
     const provider = makeProviderService({
       getStatusInvoice: vi
@@ -406,6 +445,14 @@ describe("BillingService._collectInvoicePayment", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val).toMatchObject({ status: "paid" })
+    expect(settleMock).toHaveBeenCalledWith({
+      walletService: expect.anything(),
+      invoice: expect.objectContaining({
+        id: "inv_1",
+        status: "paid",
+        amountDue: 1_000_000_000,
+      }),
+    })
   })
 
   it("collect failure — collectPayment returns error, records metadata, returns Err", async () => {

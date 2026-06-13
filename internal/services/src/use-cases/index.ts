@@ -1,6 +1,67 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
+export {
+  getFailedIngestionEventPayload,
+  getFailedIngestionEventPayloadInputSchema,
+  getFailedIngestionEventPayloadOutputSchema,
+} from "./analytics/get-failed-ingestion-event-payload"
+export type {
+  GetFailedIngestionEventPayloadDeps,
+  GetFailedIngestionEventPayloadInput,
+  GetFailedIngestionEventPayloadOutput,
+} from "./analytics/get-failed-ingestion-event-payload"
+export {
+  getIngestionStatus,
+  getIngestionStatusCursorSchema,
+  getIngestionStatusInputSchema,
+  getIngestionStatusOutputSchema,
+} from "./analytics/get-ingestion-status"
+export type {
+  GetIngestionStatusDeps,
+  GetIngestionStatusInput,
+  GetIngestionStatusOutput,
+} from "./analytics/get-ingestion-status"
+export {
+  forecastUsage,
+  forecastUsageInputSchema,
+  forecastUsageOutputSchema,
+} from "./analytics/forecast-usage"
+export type {
+  ForecastUsageDeps,
+  ForecastUsageInput,
+  ForecastUsageOutput,
+} from "./analytics/forecast-usage"
+export { aiAnswerEnvelopeSchema, aiEvidenceSchema } from "./analytics/ai-contracts"
+export type { AiAnswerEnvelope, AiEvidence } from "./analytics/ai-contracts"
+export {
+  emptyUsageDashboardOutput,
+  getUsageDashboard,
+  getUsageDashboardInputSchema,
+  getUsageDashboardOutputSchema,
+  usageDashboardFeatureSchema,
+  usageDashboardTimeseriesRowSchema,
+  usageDashboardTopConsumerSchema,
+} from "./analytics/get-usage-dashboard"
+export type {
+  GetUsageDashboardDeps,
+  GetUsageDashboardInput,
+  GetUsageDashboardOutput,
+  UsageDashboardFeature,
+  UsageDashboardTimeseriesRow,
+  UsageDashboardTopConsumer,
+} from "./analytics/get-usage-dashboard"
 export { activateSubscription } from "./billing/provision-period"
+export {
+  ExplainChargeError,
+  explainCharge,
+  explainChargeInputSchema,
+  explainChargeOutputSchema,
+} from "./billing/explain-charge"
+export type {
+  ExplainChargeDeps,
+  ExplainChargeInput,
+  ExplainChargeOutput,
+} from "./billing/explain-charge"
 export { createSubscription } from "./subscription/create"
 export { deriveActivationInputsFromPlan } from "./billing/derive-provision-inputs"
 export { settlePrepaidInvoiceToWallet } from "./billing/settle-invoice"

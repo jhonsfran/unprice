@@ -2,6 +2,7 @@ import {
   type Dinero,
   add,
   dinero,
+  halfUp,
   isZero,
   multiply,
   subtract,
@@ -20,8 +21,8 @@ type DineroCurrency = (typeof currencies)[keyof typeof currencies]
  * computation that must preserve sub-cent precision (e.g. $0.000003/token).
  *
  * Quantization to currency minor units (cents) happens only at external
- * boundaries — Stripe, invoice line items, display — via
- * `formatAmountForProvider`.
+ * boundaries. Provider handoff uses `formatAmountForProvider`; customer
+ * display uses `toCurrencyMinor`.
  *
  * Changing this value is a data-model break: existing ledger entries,
  * persisted outbox payloads, and Tinybird rows all interpret `amount` at
@@ -131,6 +132,19 @@ export function fromCurrencyMinor(minor: number, currency: string): Dinero<numbe
 }
 
 /**
+ * Quantize a precise money amount to the currency's normal minor unit using
+ * standard half-up rounding. Use this for customer-facing display totals and
+ * amounts. Use `formatAmountForProvider` when an external provider must never
+ * receive a sub-minor positive amount rounded down to zero.
+ */
+export function toCurrencyMinor(amount: Dinero<number>): number {
+  const { currency } = toSnapshot(amount)
+  const scaled = transformScale(amount, currency.exponent, halfUp)
+
+  return toSnapshot(scaled).amount
+}
+
+/**
  * Precise subtraction at `LEDGER_SCALE`, returning a signed number of minor
  * units. This is the correct primitive for "price delta of this event" —
  * compute `price(usageAfter) - price(usageBefore)` without prematurely
@@ -147,7 +161,7 @@ export function diffLedgerMinor(after: Dinero<number>, before: Dinero<number>): 
 /**
  * Quantize a `Dinero<number>` to the currency's minor unit (e.g. cents for
  * USD/EUR) for handoff to external systems that only accept integer minor
- * units: Stripe, invoice line-item columns, user-facing display.
+ * units and should not receive a positive sub-minor amount rounded down.
  *
  * This is the ONE seam where sub-cent precision is deliberately lost. Do not
  * use inside internal pricing math — use `toLedgerMinor` / `diffLedgerMinor`.
@@ -180,17 +194,26 @@ export function calculatePercentage(price: Dinero<number>, percentage: number): 
   return multiply(price, { amount: Math.round(rest), scale })
 }
 
+type FormatMoneyOptions = {
+  maximumFractionDigits?: number
+  minimumFractionDigits?: number
+}
+
 /**
  * Format a decimal string as a localized currency string for display.
  * Rendering-only — never feed the result back into a pricing calculation.
  */
-export function formatMoney(amount: string, currencyCode = "USD"): string {
+export function formatMoney(
+  amount: string,
+  currencyCode = "USD",
+  options: FormatMoneyOptions = {}
+): string {
   const userLocale = currencyCode === "USD" ? "en-US" : "es-ES"
   return new Intl.NumberFormat(userLocale, {
     style: "currency",
     currency: currencyCode,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
+    minimumFractionDigits: options.minimumFractionDigits ?? 0,
+    maximumFractionDigits: options.maximumFractionDigits ?? 3,
   }).format(Number.parseFloat(amount))
 }
 

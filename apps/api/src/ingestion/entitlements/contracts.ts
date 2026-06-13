@@ -71,13 +71,6 @@ export class EntitlementWindowReservationUnderfundedError extends Error {
   }
 }
 
-export class EntitlementWindowBatchSequentialReplayRequired extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = EntitlementWindowBatchSequentialReplayRequired.name
-  }
-}
-
 export type DeniedReason = Extract<
   IngestionRejectionReason,
   "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
@@ -100,6 +93,7 @@ export type ApplyInnerOptions = {
 export type RefillTrigger = {
   flushSeq: number
   flushAmount: number
+  flushQuantity: number
   refillAmount: number
   effectiveAt: number
 }
@@ -112,8 +106,14 @@ export const entitlementApplyMeterFactSchema = z
   .object({
     event_id: z.string(),
     idempotency_key: z.string(),
+    workspace_id: z.string(),
     project_id: z.string(),
     customer_id: z.string(),
+    environment: z.string(),
+    api_key_id: z.string().nullable().optional(),
+    source_type: z.enum(["api_key", "system", "unknown"]),
+    source_id: z.string(),
+    source_name: z.string().nullable().optional(),
     currency: z.string().length(3),
     customer_entitlement_id: z.string(),
     grant_id: z.string(),
@@ -134,6 +134,9 @@ export const entitlementApplyMeterFactSchema = z
     amount_after: z.number().int().optional(),
     amount_scale: z.literal(LEDGER_SCALE),
     priced_at: z.number().int(),
+    tier_index: z.number().int().nullable(),
+    tier_mode: z.enum(["volume", "graduated"]).nullable(),
+    pricing_component_count: z.number().int().nonnegative(),
   })
   .transform((fact) => ({
     ...fact,
@@ -145,6 +148,14 @@ const rawEventSchema = z.object({
   slug: z.string(),
   timestamp: z.number().finite(),
   properties: z.record(z.unknown()),
+  source: z.object({
+    workspaceId: z.string().min(1),
+    environment: z.string().min(1),
+    apiKeyId: z.string().nullable(),
+    sourceType: z.enum(["api_key", "system", "unknown"]),
+    sourceId: z.string().min(1),
+    sourceName: z.string().nullable(),
+  }),
 })
 
 const overageStrategySchema = z.enum(["none", "last-call", "always"] satisfies readonly [
@@ -165,6 +176,17 @@ export const activeGrantSchema = z.object({
 })
 
 export const entitlementConfigSchema = z.object({
+  billingPeriods: z
+    .array(
+      z.object({
+        billingPeriodId: z.string().min(1),
+        cycleEndAt: z.number().finite(),
+        cycleStartAt: z.number().finite(),
+        featurePlanVersionItemId: z.string().min(1),
+        statementKey: z.string().min(1),
+      })
+    )
+    .default([]),
   creditLinePolicy: creditLinePolicySchema.default("uncapped"),
   customerEntitlementId: z.string().min(1),
   customerId: z.string().min(1),
@@ -178,6 +200,7 @@ export const entitlementConfigSchema = z.object({
   overageStrategy: overageStrategySchema,
   projectId: z.string().min(1),
   resetConfig: resetConfigSnapshotSchema.nullable().optional(),
+  subscriptionItemId: z.string().min(1).nullable().optional(),
 })
 
 export const applyInputSchema = z.object({
@@ -288,15 +311,25 @@ export const entitlementWindowStatusSchema = z.object({
       customerId: z.string().nullable(),
       currency: z.string().nullable(),
       reservationEndAt: z.number().nullable(),
+      billingPeriodId: z.string().nullable(),
+      cycleEndAt: z.number().nullable(),
+      cycleStartAt: z.number().nullable(),
+      featurePlanVersionItemId: z.string().nullable(),
+      featureSlug: z.string().nullable(),
+      statementKey: z.string().nullable(),
       consumedAmount: z.number().int(),
       flushedAmount: z.number().int(),
       unflushedAmount: z.number().int(),
+      consumedQuantity: z.number(),
+      flushedQuantity: z.number(),
+      unflushedQuantity: z.number(),
       allocationAmount: z.number().int(),
       refillInFlight: z.boolean(),
       flushSeq: z.number().int(),
       pendingFlushSeq: z.number().int().nullable(),
       pendingFlushFinal: z.boolean(),
       pendingFlushAmount: z.number().int().nullable(),
+      pendingFlushQuantity: z.number().nullable(),
       pendingRefillAmount: z.number().int(),
       lastEventAt: z.number().nullable(),
       lastFlushedAt: z.number().nullable(),
@@ -335,6 +368,9 @@ export type PricedFact = {
   featureSlug: string
   grantId: string
   periodKey: string
+  pricingComponentCount: number
+  tierIndex: number | null
+  tierMode: "volume" | "graduated" | null
   usageAfter: number
   usageBefore: number
   units: number
@@ -356,6 +392,24 @@ export type CloseReservationOptions = {
   allowDeletionRequested?: boolean
   closeReason: ReservationCloseReason
   recoverPendingFinal?: boolean
+}
+
+export type FlushReservationForInvoicingInput = {
+  statementKey: string
+  billingPeriodIds: string[]
+}
+
+export type FlushReservationForInvoicingResult = {
+  ok: boolean
+  outcome:
+    | "deferred"
+    | "flushed"
+    | "no_reservation"
+    | "no_unflushed_usage"
+    | "recovery_required"
+    | "statement_mismatch"
+    | "wallet_error"
+  errorMessage?: string
 }
 
 export type EnforcementStateResult = {
@@ -383,10 +437,18 @@ export type WalletReservationSnapshot = {
   customerId: string | null
   currency: string
   reservationEndAt: number | null
+  billingPeriodId: string | null
+  cycleEndAt: number | null
+  cycleStartAt: number | null
+  featurePlanVersionItemId: string | null
+  featureSlug: string | null
+  statementKey: string | null
   reservationId: string | null
   allocationAmount: number
   consumedAmount: number
   flushedAmount: number
+  consumedQuantity: number
+  flushedQuantity: number
   refillThresholdBps: number
   refillChunkAmount: number
   targetReservationAmount: number
@@ -395,6 +457,7 @@ export type WalletReservationSnapshot = {
   maxEventCostAmount: number
   pendingRefillAmount: number
   pendingFlushAmount: number | null
+  pendingFlushQuantity: number | null
   refillInFlight: boolean
   flushSeq: number
   pendingFlushSeq: number | null
@@ -404,3 +467,35 @@ export type WalletReservationSnapshot = {
   deletionRequested: boolean
   recoveryRequired: boolean
 } | null
+
+export class EntitlementWindowBatchReservationUnderfundedError extends Error {
+  constructor(
+    public readonly params: {
+      eventId: string
+      eventTimestamp: number
+      meterKey: string
+      meterSlug: string
+      reservationId: string
+      persistedConsumedAmount: number
+      stagedConsumedAmount: number
+      effectiveCostAmount: number
+      currentRemainingAmount: number
+      targetReservationAmount: number
+    }
+  ) {
+    super(`Batch reservation underfunded for meter ${params.meterSlug}`)
+    this.name = EntitlementWindowBatchReservationUnderfundedError.name
+  }
+}
+
+export class EntitlementWindowBatchReservationBootstrapRequired extends Error {
+  constructor(
+    public readonly params: {
+      event: ApplyBatchInput["events"][number]
+      projectedCost: number
+    }
+  ) {
+    super("wallet bootstrap required before optimized batch commit")
+    this.name = EntitlementWindowBatchReservationBootstrapRequired.name
+  }
+}

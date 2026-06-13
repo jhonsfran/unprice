@@ -96,7 +96,7 @@ export const update = protectedProjectProcedure
     if (val.state === "invalid_reset_config") {
       throw new TRPCError({
         code: "BAD_REQUEST",
-        message: "Invalid reset configuration: invalid reset anchor",
+        message: "Reset cadence must be equal to or shorter than feature billing",
       })
     }
 

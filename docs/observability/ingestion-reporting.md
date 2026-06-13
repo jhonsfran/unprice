@@ -21,7 +21,7 @@ flowchart TD
 
 `EntitlementWindowDO` is the only quota, wallet, compact usage, and idempotency state
 machine. Reporting is append-only and at-least-once; duplicate delivery is handled by
-deterministic audit identities and Tinybird `argMax(..., tuple(timestamp, created_at))`
+deterministic audit identities and Tinybird `argMax(..., tuple(handled_at, created_at))`
 reads.
 
 ## 1M Event Queue Cost
@@ -84,3 +84,14 @@ pipeline_records_per_pipeline_send =
 
 Alert when `reporting_retry_count` or `reporting_enqueue_failure_count` is non-zero over the
 same window.
+
+## Failed Event Replay
+
+Replay uses Tinybird as the recovery index. The raw ingestion worker reports unexpected apply/rate
+failures through the reporting queue as `state=failed`, `replayable=true`, and no meter facts. The
+failed Tinybird row stores `payload_json` so replay does not wait for R2/Pipeline visibility.
+
+The reporting queue remains the single writer for ingestion status rows. Rejected rows are business
+outcomes and are not replayable by default. Failed rows are system outcomes and can be replayed from
+the Events UI. R2 stores the accepted raw queue message once before enqueue as audit provenance;
+replay still reads Tinybird `payload_json` for the immediate recovery path.

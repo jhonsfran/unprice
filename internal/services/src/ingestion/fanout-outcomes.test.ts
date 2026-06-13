@@ -162,6 +162,7 @@ function createEntitlement(customerEntitlementId: string): TestEntitlement {
 function createMessage(overrides: Partial<IngestionQueueMessage> = {}): IngestionQueueMessage {
   return {
     version: 1,
+    workspaceId: "ws_123",
     projectId: "proj_123",
     customerId: "cus_123",
     requestId: "req_123",
@@ -171,6 +172,13 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
     slug: "usage.recorded",
     timestamp: TEST_NOW,
     properties: { amount: 1 },
+    source: {
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
+    },
     ...overrides,
   }
 }
@@ -181,8 +189,14 @@ function createMeterFact(
   return {
     event_id: "evt_123",
     idempotency_key: "idem_123",
+    workspace_id: "ws_123",
     project_id: "proj_123",
     customer_id: "cus_123",
+    environment: "test",
+    api_key_id: "key_123",
+    source_type: "api_key",
+    source_id: "key_123",
+    source_name: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",
@@ -199,6 +213,9 @@ function createMeterFact(
     amount_scale: 8,
     currency: "USD",
     priced_at: TEST_NOW + 1,
+    tier_index: null,
+    tier_mode: null,
+    pricing_component_count: 0,
     ...overrides,
   }
 }

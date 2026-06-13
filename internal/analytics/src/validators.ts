@@ -158,8 +158,14 @@ export const featureMetadataSchemaV1 = z.object({
 export const entitlementMeterFactSchemaV1 = z.object({
   event_id: z.string(),
   idempotency_key: z.string(),
+  workspace_id: z.string(),
   project_id: z.string(),
   customer_id: z.string(),
+  environment: z.string(),
+  api_key_id: z.string().nullable().optional(),
+  source_type: z.enum(["api_key", "system", "unknown"]),
+  source_id: z.string(),
+  source_name: z.string().nullable().optional(),
   customer_entitlement_id: z.string(),
   feature_slug: z.string(),
   period_key: z.string(),
@@ -176,6 +182,39 @@ export const entitlementMeterFactSchemaV1 = z.object({
   amount_scale: z.literal(LEDGER_SCALE),
   currency: z.string().length(3),
   priced_at: z.number().int(),
+  tier_index: z.number().int().nullable(),
+  tier_mode: z.union([z.enum(["volume", "graduated"]), z.null()]),
+  pricing_component_count: z.number().int().nonnegative(),
+})
+
+export const ingestionEventSchemaV1 = z.object({
+  event_id: z.string(),
+  canonical_audit_id: z.string(),
+  payload_hash: z.string(),
+  workspace_id: z.string(),
+  project_id: z.string(),
+  customer_id: z.string(),
+  environment: z.string(),
+  api_key_id: z.string().nullable().optional(),
+  source_type: z.enum(["api_key", "system", "unknown"]),
+  source_id: z.string(),
+  source_name: z.string().nullable().optional(),
+  event_slug: z.string(),
+  idempotency_key: z.string(),
+  state: z.enum(["processed", "rejected", "failed"]),
+  rejection_reason: z.string().nullable().optional(),
+  failure_stage: z
+    .enum(["raw_ingestion", "rating_fact", "reporting_delivery"])
+    .nullable()
+    .optional(),
+  failure_reason: z.string().nullable().optional(),
+  failure_message: z.string().nullable().optional(),
+  replayable: z.boolean().default(false),
+  payload_json: z.string().nullable().optional(),
+  timestamp: z.number().int(),
+  received_at: z.number().int(),
+  handled_at: z.number().int(),
+  created_at: z.number().int(),
 })
 
 export const auditLogSchemaV1 = z.object({
@@ -223,6 +262,202 @@ export const featureUsagePeriodRowSchema = z.object({
   value_after: z.number().optional(),
   amount_after: z.number().int().optional(),
   currency: z.string().length(3).optional(),
+})
+
+export const featureUsageTimeseriesRowSchema = z.object({
+  date: datetimeToUnixMilli,
+  feature_slug: z.string(),
+  usage: z.number().optional(),
+  amount_after: z.number().int().optional(),
+  currency: z.string().length(3).optional(),
+})
+
+export type FeatureUsageTimeseriesRow = z.infer<typeof featureUsageTimeseriesRowSchema>
+
+export const topConsumerRowSchema = z.object({
+  customer_id: z.string(),
+  total_usage: z.number().optional(),
+  total_amount_after: z.number().int().optional(),
+  currency: z.string().length(3).optional(),
+})
+
+export type TopConsumerRow = z.infer<typeof topConsumerRowSchema>
+
+const explainChargeBaseQuerySchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string(),
+  feature_slug: z.string(),
+  period_key: z.string().optional(),
+  start: z.number().int().optional(),
+  end: z.number().int().optional(),
+  customer_entitlement_id: z.string().optional(),
+  limit: z.number().int().min(1).max(500).default(100),
+  offset: z.number().int().min(0).default(0),
+})
+
+function validateExplainChargeQuery(
+  query: { period_key?: string; start?: number; end?: number },
+  ctx: z.RefinementCtx
+) {
+  const hasWindow = query.start !== undefined || query.end !== undefined
+
+  if (!query.period_key && !hasWindow) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "period_key or start/end must be provided",
+    })
+  }
+
+  if (hasWindow && (query.start === undefined || query.end === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "start and end must be provided together",
+    })
+  }
+}
+
+export const explainChargeQuerySchema = explainChargeBaseQuerySchema.superRefine(
+  validateExplainChargeQuery
+)
+
+export const explainChargeSummaryQuerySchema = explainChargeBaseQuerySchema
+  .omit({
+    limit: true,
+    offset: true,
+  })
+  .superRefine(validateExplainChargeQuery)
+
+export const explainChargeEventRowSchema = entitlementMeterFactSchemaV1
+  .pick({
+    event_id: true,
+    idempotency_key: true,
+    customer_entitlement_id: true,
+    grant_id: true,
+    feature_plan_version_id: true,
+    feature_slug: true,
+    period_key: true,
+    event_slug: true,
+    aggregation_method: true,
+    timestamp: true,
+    created_at: true,
+    delta: true,
+    value_after: true,
+    amount: true,
+    amount_after: true,
+    amount_scale: true,
+    currency: true,
+    priced_at: true,
+    tier_index: true,
+    tier_mode: true,
+    pricing_component_count: true,
+    source_type: true,
+    source_id: true,
+  })
+  .extend({
+    feature_plan_version_id: z.string().nullable(),
+  })
+
+export const explainChargeSummaryRowSchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string(),
+  feature_slug: z.string(),
+  period_key: z.string(),
+  currency: z.string().length(3),
+  amount_scale: z.literal(LEDGER_SCALE),
+  event_count: z.number().int().nonnegative(),
+  total_delta: z.number(),
+  total_amount: z.number().int(),
+  latest_amount_after: z.number().int(),
+  first_event_at: z.number().int(),
+  last_event_at: z.number().int(),
+  multi_component_event_count: z.number().int().nonnegative(),
+})
+
+export const ingestionStatusWindowQuerySchema = z.object({
+  project_id: z.string(),
+  customer_id: z.string().optional(),
+  from_ts: z.number().int(),
+  to_ts: z.number().int(),
+})
+
+export const ingestionStateFilterSchema = z.enum(["processed", "rejected", "failed"])
+
+export const ingestionLiveQuerySchema = ingestionStatusWindowQuerySchema.extend({
+  source_id: z.string().optional(),
+  event_slug: z.string().optional(),
+  state: ingestionStateFilterSchema.optional(),
+})
+
+export const ingestionRejectionsQuerySchema = ingestionStatusWindowQuerySchema.extend({
+  source_id: z.string().optional(),
+  event_slug: z.string().optional(),
+  state: ingestionStateFilterSchema.optional(),
+  limit: z.number().int().min(1).max(100).default(50),
+})
+
+export const ingestionRecentQuerySchema = ingestionStatusWindowQuerySchema.extend({
+  source_id: z.string().optional(),
+  event_slug: z.string().optional(),
+  state: ingestionStateFilterSchema.optional(),
+  cursor_handled_at: z.number().int().optional(),
+  cursor_canonical_audit_id: z.string().optional(),
+  limit: z.number().int().min(1).max(101).default(50),
+})
+
+export const ingestionLiveRowSchema = z.object({
+  second: z.string(),
+  processed: z.number().int().nonnegative(),
+  rejected: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative().default(0),
+  total: z.number().int().nonnegative(),
+})
+
+export const ingestionRejectionRowSchema = z.object({
+  rejection_reason: z.string().nullable(),
+  event_slug: z.string(),
+  source_id: z.string(),
+  source_type: z.string(),
+  event_count: z.number().int().nonnegative(),
+  last_seen_at: z.number().int(),
+})
+
+export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
+  .pick({
+    event_id: true,
+    canonical_audit_id: true,
+    customer_id: true,
+    event_slug: true,
+    source_type: true,
+    source_id: true,
+    state: true,
+    rejection_reason: true,
+    failure_stage: true,
+    failure_reason: true,
+    failure_message: true,
+    replayable: true,
+    timestamp: true,
+    received_at: true,
+    handled_at: true,
+  })
+  .extend({
+    rejection_reason: z.string().nullable(),
+    failure_message: z.string().nullable(),
+  })
+
+export const ingestionReplayPayloadQuerySchema = z.object({
+  project_id: z.string(),
+  canonical_audit_ids: z.string(),
+})
+
+export const ingestionReplayPayloadRowSchema = z.object({
+  event_id: z.string(),
+  canonical_audit_id: z.string(),
+  customer_id: z.string(),
+  failure_stage: z.string().nullable(),
+  failure_reason: z.string().nullable(),
+  failure_message: z.string().nullable(),
+  payload_json: z.string(),
+  handled_at: z.number().int(),
 })
 
 export const usageSpendingResponseSchema = z.object({
@@ -364,10 +599,17 @@ export type AnalyticsEvent = z.infer<typeof analyticsEventSchema>
 export type AnalyticsEventAction = z.infer<typeof analyticsEventSchema>["action"]
 export type GetUsageResponse = z.infer<typeof getUsageResponseSchema>
 export type FeatureUsagePeriodRow = z.infer<typeof featureUsagePeriodRowSchema>
+export type ExplainChargeEventRow = z.infer<typeof explainChargeEventRowSchema>
+export type ExplainChargeSummaryRow = z.infer<typeof explainChargeSummaryRowSchema>
+export type IngestionLiveRow = z.infer<typeof ingestionLiveRowSchema>
+export type IngestionRejectionRow = z.infer<typeof ingestionRejectionRowSchema>
+export type IngestionRecentEventRow = z.infer<typeof ingestionRecentEventRowSchema>
+export type IngestionReplayPayloadRow = z.infer<typeof ingestionReplayPayloadRowSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>
 export type AnalyticsEntitlementMeterFact = z.infer<typeof entitlementMeterFactSchemaV1>
+export type AnalyticsIngestionEvent = z.infer<typeof ingestionEventSchemaV1>
 
 // Plan conversion response schemas
 export const planConversionResponseSchema = z.object({

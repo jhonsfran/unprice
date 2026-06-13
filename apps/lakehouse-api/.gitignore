@@ -1,8 +1,0 @@
-python_modules
-__pycache__/
-.venv
-.venv-workers
-.dev.vars
-.env
-.env.*
-!.env.local.example

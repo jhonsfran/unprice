@@ -13,7 +13,7 @@ type UsageFeature = {
   aggregationField?: string
 }
 
-const UNPRICE_TOKEN = process.env.UNPRICE_TOKEN || ""
+const UNPRICE_TOKEN = process.env.UNPRICE_TOKEN || "unprice_dev_1234567890"
 const UNPRICE_API_URL = process.env.UNPRICE_API_URL || "http://localhost:8787"
 const CUSTOMER_ID = process.env.CUSTOMER_ID?.trim() || ""
 const FEATURE_SLUG = process.env.FEATURE_SLUG?.trim() || ""

@@ -1,0 +1,38 @@
+TOKEN "web-apps" APPEND
+
+DESCRIPTION >
+    Customer-visible ingestion outcomes projected from reporting envelopes. One row per raw event outcome, independent from rated meter facts.
+
+TAGS "ingestion,events,status,customers"
+
+SCHEMA >
+    `event_id` String `json:$.event_id`,
+    `canonical_audit_id` String `json:$.canonical_audit_id`,
+    `payload_hash` String `json:$.payload_hash`,
+    `workspace_id` String `json:$.workspace_id`,
+    `project_id` String `json:$.project_id`,
+    `customer_id` String `json:$.customer_id`,
+    `environment` LowCardinality(String) `json:$.environment`,
+    `api_key_id` Nullable(String) `json:$.api_key_id`,
+    `source_type` LowCardinality(String) `json:$.source_type`,
+    `source_id` String `json:$.source_id`,
+    `source_name` Nullable(String) `json:$.source_name`,
+    `event_slug` LowCardinality(String) `json:$.event_slug`,
+    `idempotency_key` String `json:$.idempotency_key`,
+    `state` LowCardinality(String) `json:$.state`,
+    `rejection_reason` LowCardinality(Nullable(String)) `json:$.rejection_reason`,
+    `failure_stage` LowCardinality(Nullable(String)) `json:$.failure_stage`,
+    `failure_reason` LowCardinality(Nullable(String)) `json:$.failure_reason`,
+    `failure_message` Nullable(String) `json:$.failure_message`,
+    `replayable` Bool `json:$.replayable`,
+    `payload_json` Nullable(String) `json:$.payload_json`,
+    `timestamp` Int64 `json:$.timestamp`,
+    `received_at` Int64 `json:$.received_at`,
+    `handled_at` Int64 `json:$.handled_at`,
+    `created_at` Int64 `json:$.created_at`
+
+ENGINE ReplacingMergeTree
+ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(handled_at, 'UTC'))
+ENGINE_SORTING_KEY project_id, customer_id, handled_at, canonical_audit_id
+ENGINE_VER created_at
+ENGINE_TTL toDateTime(fromUnixTimestamp64Milli(handled_at, 'UTC')) + INTERVAL 14 DAY

@@ -8,11 +8,13 @@ import {
 import {
   type IngestionQueueMessage,
   ingestionQueueMessageSchema,
+  markRawProcessingFailureTestRequestId,
 } from "@unprice/services/ingestion"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
+import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -21,6 +23,8 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 const tags = ["events"]
 const SAFE_QUEUE_SEND_RETRIES = 3
 const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
+export const INGESTION_TEST_FAILURE_HEADER = "x-unprice-ingestion-test-failure"
+export const INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE = "raw_queue_processing_failed"
 
 export const rawEventSchema = z.object({
   id: z
@@ -165,8 +169,20 @@ export const registerIngestEventsV1 = (app: App) =>
       customerId,
       projectId,
       receivedAt,
-      requestId,
+      requestId: resolveIngestionMessageRequestId({
+        appEnv: c.env.APP_ENV,
+        failureTestHeader: c.req.header(INGESTION_TEST_FAILURE_HEADER),
+        requestId,
+      }),
+      source: {
+        environment: c.env.APP_ENV,
+        apiKeyId: key.id,
+        sourceType: "api_key",
+        sourceId: key.id,
+        sourceName: null,
+      },
       timestamp,
+      workspaceId: key.project.workspaceId,
     })
 
     // shard by customerid to make sure the messages of specific customer go to the same queue
@@ -254,13 +270,17 @@ export function buildIngestionQueueMessage(params: {
   projectId: string
   receivedAt: number
   requestId: string
+  source: IngestionQueueMessage["source"]
   timestamp: number
+  workspaceId: string
 }): IngestionQueueMessage {
-  const { body, customerId, projectId, receivedAt, requestId, timestamp } = params
+  const { body, customerId, projectId, receivedAt, requestId, source, timestamp, workspaceId } =
+    params
   const eventId = body.id ?? generateEventId(receivedAt)
 
   return ingestionQueueMessageSchema.parse({
     version: 1,
+    workspaceId,
     projectId,
     customerId,
     requestId,
@@ -270,6 +290,7 @@ export function buildIngestionQueueMessage(params: {
     slug: body.eventSlug,
     timestamp,
     properties: body.properties,
+    source,
   })
 }
 
@@ -278,6 +299,21 @@ export function resolveRequestCustomerId(params: {
   defaultCustomerId?: string | null
 }): string | null {
   return params.explicitCustomerId ?? params.defaultCustomerId ?? null
+}
+
+export function resolveIngestionMessageRequestId(params: {
+  appEnv: Env["APP_ENV"]
+  failureTestHeader?: string | undefined
+  requestId: string
+}): string {
+  if (
+    params.appEnv === "production" ||
+    params.failureTestHeader !== INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE
+  ) {
+    return params.requestId
+  }
+
+  return markRawProcessingFailureTestRequestId(params.requestId)
 }
 
 export function logEventTooOldRejection(params: {

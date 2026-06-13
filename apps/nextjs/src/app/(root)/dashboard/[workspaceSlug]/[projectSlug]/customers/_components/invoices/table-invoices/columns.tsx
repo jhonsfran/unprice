@@ -2,7 +2,6 @@
 
 import type { ColumnDef } from "@tanstack/react-table"
 
-import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Checkbox } from "@unprice/ui/checkbox"
@@ -13,10 +12,10 @@ import { InfoIcon } from "lucide-react"
 import { useParams } from "next/navigation"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
 import { SuperLink } from "~/components/super-link"
+import { formatInvoiceMoney } from "../format-invoice-money"
 import { DataTableRowActions } from "./data-table-row-actions"
 
-type InvoiceCustomer =
-  RouterOutputs["customers"]["getSubscriptions"]["customer"]["invoices"][number]
+type InvoiceCustomer = RouterOutputs["customers"]["getInvoices"]["invoices"][number]
 
 export const columns: ColumnDef<InvoiceCustomer>[] = [
   {
@@ -102,16 +101,11 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     size: 20,
   },
   {
-    accessorKey: "total",
+    accessorKey: "amountDue",
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Amount" />,
     cell: ({ row }) => (
-      <Badge>
-        {formatMoney(
-          toDecimal(fromLedgerMinor(row.original.totalAmount, row.original.currency)),
-          row.original.currency
-        )}
-      </Badge>
+      <Badge>{formatInvoiceMoney(row.original.amountDue, row.original.currency)}</Badge>
     ),
     size: 20,
   },

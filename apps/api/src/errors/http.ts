@@ -1,6 +1,7 @@
 import { z } from "@hono/zod-openapi"
 import { BaseError, FetchError } from "@unprice/error"
 import { UnPriceCustomerError } from "@unprice/services/customers"
+import { UnPriceWalletError } from "@unprice/services/wallet"
 import type { Context } from "hono"
 import { HTTPException } from "hono/http-exception"
 import type { ContentfulStatusCode, StatusCode } from "hono/utils/http-status"
@@ -144,6 +145,13 @@ export function toUnpriceApiError(error: unknown): UnpriceApiError {
   if (error instanceof UnPriceCustomerError) {
     return new UnpriceApiError({
       code: "BAD_REQUEST",
+      message: error.message,
+    })
+  }
+
+  if (error instanceof UnPriceWalletError && error.message === "WALLET_LEDGER_FAILED") {
+    return new UnpriceApiError({
+      code: "INTERNAL_SERVER_ERROR",
       message: error.message,
     })
   }

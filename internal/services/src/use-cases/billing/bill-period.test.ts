@@ -1,6 +1,6 @@
 import type { Database } from "@unprice/db"
 import type { Customer, Subscription } from "@unprice/db/validators"
-import { Err, Ok } from "@unprice/error"
+import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { dinero } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
@@ -104,6 +104,7 @@ function makeBillingPeriod(overrides: Record<string, unknown> = {}) {
     cycleEndAt: 1_702_000_000_000,
     type: "regular",
     subscriptionItem: {
+      id: "item_1",
       units: 1,
       featurePlanVersion: {
         id: "fpv_1",
@@ -166,12 +167,14 @@ function makeLedgerService(overrides: Partial<LedgerGateway> = {}): LedgerGatewa
           createdAt: new Date(),
           metadata: {
             billing_period_id: "bp_1",
+            feature_plan_version_item_id: "item_1",
             subscription_id: "sub_1",
             subscription_item_id: "item_1",
             cycle_start_at: 1_700_000_000_000,
             cycle_end_at: 1_702_000_000_000,
             proration_factor: 1,
             description: "API Calls",
+            settlement_status: "due",
           },
         },
       ])
@@ -263,8 +266,10 @@ describe("billPeriod", () => {
             amount: dinero({ amount: 1000_0000_00, currency: usd, scale: 8 }),
             metadata: {
               billing_period_id: "bp_1",
+              feature_plan_version_item_id: "item_1",
               cycle_start_at: 1_700_000_000_000,
               cycle_end_at: 1_702_000_000_000,
+              settlement_status: "due",
             },
           },
           {
@@ -273,8 +278,10 @@ describe("billPeriod", () => {
             amount: dinero({ amount: 500_0000_00, currency: usd, scale: 8 }),
             metadata: {
               billing_period_id: "bp_2",
+              feature_plan_version_item_id: "item_2",
               cycle_start_at: 1_700_000_000_000,
               cycle_end_at: 1_702_000_000_000,
+              settlement_status: "due",
             },
           },
         ])
@@ -300,10 +307,14 @@ describe("billPeriod", () => {
     expect(ledgerService.createTransfer).toHaveBeenCalledTimes(2)
     expect(txRepoInstance.createInvoice).toHaveBeenCalledTimes(1)
     expect(txRepoInstance.updateInvoice).toHaveBeenCalledTimes(1)
-    // Total should be sum of both lines (1000_0000_00 + 500_0000_00 = 1500_0000_00 at scale 8 = 15_00 in ledger minor)
     const updateCall = txRepoInstance.updateInvoice.mock.calls[0]?.[0]
     expect(updateCall).toBeDefined()
-    expect(updateCall.data.totalAmount).toBeGreaterThan(0)
+    expect(updateCall.data).toMatchObject({
+      grossAmount: 1500_0000_00,
+      amountDue: 1500_0000_00,
+      amountIncluded: 0,
+      amountPaid: 0,
+    })
     expect(txRepoInstance.markPeriodsInvoiced).toHaveBeenCalledWith(
       expect.objectContaining({ periodIds: ["bp_1", "bp_2"] })
     )
@@ -578,6 +589,71 @@ describe("billPeriod", () => {
     expect(result.phasesProcessed).toBe(2)
     // Only the second group triggers billing work
     expect(repo.findPhaseForBilling).toHaveBeenCalledTimes(2)
+    expect(txRepoInstance.createInvoice).toHaveBeenCalledTimes(1)
+  })
+
+  it("blocks invoicing when reservation flush gateway fails", async () => {
+    const db = makeDb()
+    const ratingService = makeRatingService()
+    const ledgerService = makeLedgerService()
+    const repo = makeRepo()
+    const logger = makeLogger()
+    const reservationFlushGateway = {
+      flushForInvoicing: vi.fn().mockResolvedValue(
+        Err(
+          new FetchError({
+            message: "reservation flush deferred",
+            retry: true,
+            context: { url: "/v1/billing/reservations/flush-for-invoicing", method: "POST" },
+          })
+        )
+      ),
+    }
+
+    await expect(
+      billPeriod({
+        context: makeContext(),
+        logger,
+        db,
+        repo,
+        ratingService,
+        ledgerService,
+        reservationFlushGateway,
+      })
+    ).rejects.toThrow("reservation flush deferred")
+
+    // Rating and ledger should not have been reached
+    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
+    expect(ledgerService.createTransfer).not.toHaveBeenCalled()
+  })
+
+  it("proceeds with invoicing when reservation flush gateway succeeds", async () => {
+    const db = makeDb()
+    const ratingService = makeRatingService()
+    const ledgerService = makeLedgerService()
+    const repo = makeRepo()
+    const logger = makeLogger()
+    const reservationFlushGateway = {
+      flushForInvoicing: vi.fn().mockResolvedValue(Ok(undefined)),
+    }
+
+    const result = await billPeriod({
+      context: makeContext(),
+      logger,
+      db,
+      repo,
+      ratingService,
+      ledgerService,
+      reservationFlushGateway,
+    })
+
+    expect(result.phasesProcessed).toBe(1)
+    expect(reservationFlushGateway.flushForInvoicing).toHaveBeenCalledWith({
+      customerId: "cust_1",
+      subscriptionId: "sub_1",
+      subscriptionPhaseId: "phase_1",
+      statementKey: "stmt_2026_04",
+    })
     expect(txRepoInstance.createInvoice).toHaveBeenCalledTimes(1)
   })
 })

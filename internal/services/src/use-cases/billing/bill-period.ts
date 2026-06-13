@@ -3,10 +3,11 @@ import { customerEntitlements } from "@unprice/db/schema"
 import { type Dinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
-import { add, toLedgerMinor } from "@unprice/money"
+import { add, fromLedgerMinor, toLedgerMinor } from "@unprice/money"
 import { format } from "date-fns"
 import { toZonedTime } from "date-fns-tz"
 import { isNegative } from "dinero.js"
+import { summarizeInvoiceSettlementAmounts } from "../../billing/invoice-settlement"
 import { DrizzleBillingRepository } from "../../billing/repository.drizzle"
 import { billingStrategyForInterval } from "../../billing/strategy"
 import { LATE_EVENT_GRACE_MS } from "../../entitlements"
@@ -14,6 +15,7 @@ import { type InvoiceLine, type LedgerGateway, customerAccountKeys } from "../..
 import type { RatingService } from "../../rating/service"
 import type { SubscriptionRepository } from "../../subscriptions/repository"
 import type { SubscriptionContext } from "../../subscriptions/types"
+import type { BillingReservationFlushGateway } from "./reservation-flush-gateway"
 
 /**
  * BILL phase. Materializes pending billing periods into ledger entries +
@@ -26,7 +28,7 @@ import type { SubscriptionContext } from "../../subscriptions/types"
  *   2. Post `customer.receivable → customer.consumed` ledger transfers
  *      tagged with the statement_key.
  *   3. Aggregate posted entries into a single invoice row stamped with
- *      `totalAmount` and the statement window.
+ *      settlement totals and the statement window.
  *   4. Mark the periods as `invoiced`.
  *
  * Skipped for wallet-only subscriptions — the machine guard routes RENEW
@@ -39,6 +41,7 @@ export async function billPeriod({
   repo,
   ratingService,
   ledgerService,
+  reservationFlushGateway,
 }: {
   context: SubscriptionContext
   logger: Logger
@@ -46,6 +49,7 @@ export async function billPeriod({
   repo: SubscriptionRepository
   ratingService: RatingService
   ledgerService: LedgerGateway
+  reservationFlushGateway?: BillingReservationFlushGateway
 }): Promise<
   Partial<SubscriptionContext> & {
     phasesProcessed: number
@@ -72,6 +76,27 @@ export async function billPeriod({
 
     if (!phase || !phase.planVersion || !phase.subscription) {
       continue
+    }
+
+    // Flush wallet reservation usage into the ledger before invoicing.
+    // This ensures the invoice reflects all consumed usage up to this moment.
+    if (reservationFlushGateway) {
+      const flush = await reservationFlushGateway.flushForInvoicing({
+        customerId: phase.subscription.customerId,
+        subscriptionId: periodItemGroup.subscriptionId,
+        subscriptionPhaseId: periodItemGroup.subscriptionPhaseId,
+        statementKey: periodItemGroup.statementKey,
+      })
+
+      if (flush.err) {
+        logger.warn("Blocking invoicing until wallet reservation usage flushes", {
+          projectId: periodItemGroup.projectId,
+          subscriptionId: periodItemGroup.subscriptionId,
+          statementKey: periodItemGroup.statementKey,
+          error: flush.err.message,
+        })
+        throw flush.err
+      }
     }
 
     // Serialize concurrent re-runs for the same statement and wrap the entire
@@ -133,6 +158,38 @@ export async function billPeriod({
           )
         }
 
+        const featurePlanVersionItemId = period.subscriptionItem.id
+        const walletSettlementForItem = await ledgerService.getInvoiceLines(
+          {
+            projectId: phase.projectId,
+            statementKey: periodItemGroup.statementKey,
+          },
+          tx
+        )
+
+        if (walletSettlementForItem.err) {
+          logger.error(walletSettlementForItem.err, {
+            billingPeriodId: period.id,
+            phaseId: phase.id,
+            statementKey: periodItemGroup.statementKey,
+            context: "Error while loading wallet settlement lines before ledger posting",
+          })
+          throw walletSettlementForItem.err
+        }
+
+        const existingWalletCapturesForItem = walletSettlementForItem.val.filter((line) => {
+          const metadata = line.metadata ?? {}
+          return (
+            metadata.billing_period_id === period.id &&
+            metadata.feature_plan_version_item_id === featurePlanVersionItemId &&
+            metadata.flow === "capture"
+          )
+        })
+
+        if (existingWalletCapturesForItem.length > 0) {
+          continue
+        }
+
         const ratingResult = await ratingService.rateBillingPeriod({
           projectId: period.projectId,
           customerId: period.customerId,
@@ -156,7 +213,7 @@ export async function billPeriod({
         const ratedCharges = ratingResult.val
         const firstCharge = ratedCharges[0]
 
-        const totalAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
+        const grossChargeAmount = ratedCharges.reduce<Dinero<number> | null>((sum, charge) => {
           if (sum === null) return charge.price.totalPrice.dinero
           return add(sum, charge.price.totalPrice.dinero)
         }, null)
@@ -176,12 +233,19 @@ export async function billPeriod({
               : 1
         const sourceType = "subscription_billing_period_charge_v1"
         const sourceId = `${period.id}:${period.subscriptionItemId}`
+        const kind =
+          period.type === "trial"
+            ? "trial"
+            : period.subscriptionItem.featurePlanVersion.featureType === "usage"
+              ? "usage"
+              : "subscription"
         const entryMetadata = {
           subscription_id: period.subscriptionId,
           subscription_phase_id: period.subscriptionPhaseId,
           subscription_item_id: period.subscriptionItemId,
           billing_period_id: period.id,
           feature_plan_version_id: period.subscriptionItem.featurePlanVersion.id,
+          feature_plan_version_item_id: featurePlanVersionItemId,
           line_kind: (period.type === "trial" ? "trial" : "period") as "trial" | "period",
           cycle_start_at: period.cycleStartAt,
           cycle_end_at: period.cycleEndAt,
@@ -193,11 +257,11 @@ export async function billPeriod({
 
         // Trial / zero-amount periods don't post to the ledger — pgledger
         // rejects non-positive transfers and there's no receivable to record.
-        if (!totalAmount || isZero(totalAmount)) {
+        if (!grossChargeAmount || isZero(grossChargeAmount)) {
           continue
         }
 
-        if (isNegative(totalAmount)) {
+        if (isNegative(grossChargeAmount)) {
           // Negative period totals would require issuing credits from a grant
           // account, which isn't wired up at the ledger layer. Skip here and
           // let the wallet layer post credits against the customer account.
@@ -205,6 +269,25 @@ export async function billPeriod({
             billingPeriodId: period.id,
             phaseId: phase.id,
           })
+          continue
+        }
+
+        const paidOrIncludedForItem = walletSettlementForItem.val.filter((line) => {
+          const metadata = line.metadata ?? {}
+          return (
+            metadata.billing_period_id === period.id &&
+            metadata.feature_plan_version_item_id === featurePlanVersionItemId &&
+            (metadata.settlement_status === "paid" || metadata.settlement_status === "included")
+          )
+        })
+
+        const coveredAmount = paidOrIncludedForItem.reduce(
+          (sum, line) => sum + toLedgerMinor(line.amount),
+          0
+        )
+        const collectableAmount = Math.max(0, toLedgerMinor(grossChargeAmount) - coveredAmount)
+
+        if (collectableAmount <= 0) {
           continue
         }
 
@@ -221,13 +304,17 @@ export async function billPeriod({
             projectId: period.projectId,
             fromAccount: customerAccountKeys(period.customerId).receivable,
             toAccount: customerAccountKeys(period.customerId).consumed,
-            amount: totalAmount,
+            amount: fromLedgerMinor(collectableAmount, phase.planVersion.currency),
             source: { type: sourceType, id: sourceId },
             statementKey: period.statementKey,
             metadata: {
               ...entryMetadata,
               flow: "subscription",
-              kind: "subscription",
+              kind,
+              collectable: true,
+              settlement_source: phase.creditLinePolicy === "capped" ? "credit_line" : "provider",
+              settlement_status: "due",
+              source_id: `${period.id}:${featurePlanVersionItemId}`,
               statement_key: period.statementKey,
             },
             eventAt: new Date(now),
@@ -347,7 +434,10 @@ export async function billPeriod({
         pastDueAt: pastDueAt,
         dueAt: dueAt,
         paidAt: null,
-        totalAmount: 0,
+        grossAmount: 0,
+        amountDue: 0,
+        amountPaid: 0,
+        amountIncluded: 0,
         issueDate: null,
         metadata: { note: "Invoiced by scheduler" },
       })
@@ -362,22 +452,21 @@ export async function billPeriod({
         )
       }
 
-      // The invoice total is the sum of credit-leg ledger transfers landing on
-      // `customer.*.consumed` under this statement_key, matching the API read
-      // projection. We sum the line Dineros (at `LEDGER_SCALE = 8`) and store
-      // the invoice total at ledger scale. Provider calls quantize to currency
-      // minor units separately at the provider boundary.
-      const totalDinero = linesToInvoice.reduce<Dinero<number> | null>(
-        (sum, line) => (sum === null ? line.amount : add(sum, line.amount)),
-        null
+      const totals = summarizeInvoiceSettlementAmounts(
+        linesToInvoice.map((line) => ({
+          amount: toLedgerMinor(line.amount),
+          metadata: line.metadata,
+        }))
       )
-      const totalAmountForInvoice = totalDinero ? toLedgerMinor(totalDinero) : 0
 
       await txBillingRepo.updateInvoice({
         invoiceId: invoice.id,
         projectId: phase.projectId,
         data: {
-          totalAmount: totalAmountForInvoice,
+          amountDue: totals.amountDue,
+          amountIncluded: totals.amountIncluded,
+          amountPaid: totals.amountPaid,
+          grossAmount: totals.grossAmount,
           updatedAtM: now,
         },
       })

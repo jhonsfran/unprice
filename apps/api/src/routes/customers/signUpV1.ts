@@ -62,7 +62,7 @@ export const registerSignUpV1 = (app: App) =>
       metadata,
       sessionId,
     } = c.req.valid("json")
-    const { customer, subscription, plans } = c.get("services")
+    const { billing, customer, subscription, plans } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
@@ -74,6 +74,7 @@ export const registerSignUpV1 = (app: App) =>
         services: {
           customers: customer,
           subscriptions: subscription,
+          billing,
           plans,
         },
         db: c.get("db"),

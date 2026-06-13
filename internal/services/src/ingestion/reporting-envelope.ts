@@ -1,6 +1,7 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import { EVENTS_SCHEMA_VERSION, type IngestionOutcome } from "./interface"
 import type { IngestionQueueMessage } from "./message"
+import { serializeReplayPayload } from "./message-outcomes"
 import {
   type IngestionReportingAuditRecord,
   type IngestionReportingEnvelope,
@@ -60,15 +61,27 @@ export async function buildIngestionReportingAuditRecord(params: {
     computeCanonicalAuditId(projectId, customerId, message.idempotencyKey),
     computePayloadHash(message),
   ])
-
+  const failed = outcome.state === "failed"
+  const payloadJson = failed ? serializeReplayPayload(message) : null
   return {
     idempotencyKey: message.idempotencyKey,
     canonicalAuditId,
     payloadHash,
+    workspaceId: message.workspaceId,
     projectId,
     customerId,
+    environment: message.source.environment,
+    apiKeyId: message.source.apiKeyId,
+    sourceType: message.source.sourceType,
+    sourceId: message.source.sourceId,
+    sourceName: message.source.sourceName,
     status: outcome.state,
-    rejectionReason: outcome.rejectionReason,
+    rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
+    failureStage: failed ? outcome.failureStage : null,
+    failureReason: failed ? outcome.failureReason : null,
+    failureMessage: failed ? (outcome.failureMessage ?? null) : null,
+    replayable: failed ? outcome.replayable : false,
+    payloadJson,
     auditPayloadJson: JSON.stringify(
       buildIngestionAuditPayload(message, outcome, canonicalAuditId, payloadHash, handledAt)
     ),
@@ -88,8 +101,14 @@ export function buildIngestionAuditPayload(
     event_date: toEventDate(message.timestamp),
     schema_version: EVENTS_SCHEMA_VERSION,
     id: message.id,
+    workspace_id: message.workspaceId,
     project_id: message.projectId,
     customer_id: message.customerId,
+    environment: message.source.environment,
+    api_key_id: message.source.apiKeyId,
+    source_type: message.source.sourceType,
+    source_id: message.source.sourceId,
+    source_name: message.source.sourceName,
     request_id: message.requestId,
     idempotency_key: message.idempotencyKey,
     slug: message.slug,
@@ -97,7 +116,7 @@ export function buildIngestionAuditPayload(
     received_at: message.receivedAt,
     handled_at: handledAt,
     state: outcome.state,
-    rejection_reason: outcome.rejectionReason,
+    rejection_reason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
     properties: message.properties,
     canonical_audit_id: canonicalAuditId,
     payload_hash: payloadHash,

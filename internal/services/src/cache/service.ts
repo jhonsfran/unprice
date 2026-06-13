@@ -128,6 +128,11 @@ export class CacheService {
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
         stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
       }),
+      getUsageDashboard: new Namespace<CacheNamespaces["getUsageDashboard"]>(this.context, {
+        ...defaultOpts,
+        fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds
+        stale: CACHE_ANALYTICS_STALENESS_TIME_MS, // revalidate 1 hour
+      }),
       getCurrentUsage: new Namespace<CacheNamespaces["getCurrentUsage"]>(this.context, {
         ...defaultOpts,
         fresh: CACHE_ANALYTICS_FRESHNESS_TIME_MS, // 30 seconds

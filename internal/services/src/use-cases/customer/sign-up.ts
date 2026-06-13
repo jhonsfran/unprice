@@ -13,7 +13,7 @@ import { checkPaymentProviderAvailability } from "../payment-provider/availabili
 import { activateWalletIfSubscriptionIsActive } from "../subscription/activate-wallet-if-active"
 
 type SignUpDeps = {
-  services: Pick<ServiceContext, "plans" | "customers" | "subscriptions">
+  services: Pick<ServiceContext, "plans" | "customers" | "subscriptions" | "billing">
   db: Database
   logger: Logger
   analytics: Analytics
@@ -538,6 +538,21 @@ async function handleDirectProvisioningFlow(
 
     if (txResult.err) {
       return Err(txResult.err)
+    }
+
+    const billingPeriodsResult = await deps.services.billing.generateBillingPeriods({
+      subscriptionId: txResult.val.subscriptionId,
+      projectId,
+      now: Date.now(),
+    })
+
+    if (billingPeriodsResult.err) {
+      return Err(
+        new UnPriceCustomerError({
+          code: "PHASE_NOT_CREATED",
+          message: billingPeriodsResult.err.message,
+        })
+      )
     }
 
     await activateWalletIfSubscriptionIsActive(deps, {

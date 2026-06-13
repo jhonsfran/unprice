@@ -60,6 +60,11 @@ describe("EntitlementWindowApplier", () => {
 
     expect(apply).toHaveBeenCalledTimes(2)
     expect(apply.mock.calls.map(([input]) => input.event.id)).toEqual(["evt_1", "evt_2"])
+    expect(apply.mock.calls[0]?.[0].event.source).toMatchObject({
+      workspaceId: "ws_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+    })
     expect(results.map((result) => result.idempotencyKey)).toEqual(["idem_1", "idem_2"])
     expect(results.every((result) => result.allowed)).toBe(true)
   })
@@ -91,7 +96,15 @@ describe("EntitlementWindowApplier", () => {
     expect(applyBatch).toHaveBeenCalledWith(
       expect.objectContaining({
         events: [
-          expect.objectContaining({ id: "evt_1", idempotencyKey: "idem_1" }),
+          expect.objectContaining({
+            id: "evt_1",
+            idempotencyKey: "idem_1",
+            source: expect.objectContaining({
+              workspaceId: "ws_123",
+              sourceType: "api_key",
+              sourceId: "key_123",
+            }),
+          }),
           expect.objectContaining({ id: "evt_2", idempotencyKey: "idem_2" }),
         ],
       })
@@ -167,6 +180,7 @@ function createClient(stub: Partial<EntitlementWindowController>): EntitlementWi
 function createMessage(overrides: Partial<IngestionQueueMessage> = {}): IngestionQueueMessage {
   return {
     version: 1,
+    workspaceId: "ws_123",
     projectId: "proj_123",
     customerId: "cus_123",
     requestId: "req_123",
@@ -176,12 +190,20 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
     slug: "usage.recorded",
     timestamp: TEST_NOW,
     properties: { amount: 1 },
+    source: {
+      environment: "test",
+      apiKeyId: "key_123",
+      sourceType: "api_key",
+      sourceId: "key_123",
+      sourceName: null,
+    },
     ...overrides,
   }
 }
 
 function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
+    billingPeriods: [],
     creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
@@ -211,6 +233,7 @@ function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): Inges
     overageStrategy: "none",
     projectId: "proj_123",
     resetConfig: null,
+    subscriptionItemId: null,
     ...overrides,
   }
 }

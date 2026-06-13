@@ -13,7 +13,7 @@ import {
 } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { formatAmountForProvider, toLedgerMinor } from "@unprice/money"
+import { fromLedgerMinor, toCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { addDays } from "date-fns"
 import type { Cache } from "../cache"
 import type { CustomerService } from "../customers/service"
@@ -46,8 +46,18 @@ export interface InvoiceStatementLine {
   description: string | null
   quantity: number | null
   amount: number
+  amountDue: number
+  amountIncluded: number
+  amountPaid: number
+  collectable: boolean
+  settlementSource: InvoiceLine["settlementSource"]
+  settlementStatus: InvoiceLine["settlementStatus"]
+  walletCreditId: string | null
+  walletCreditSource: InvoiceLine["walletCreditSource"]
+  walletId: string | null
   currency: Currency
   createdAt: Date
+  metadata: Record<string, unknown> | null
 }
 
 type BillingPeriodStatementRow = {
@@ -57,6 +67,7 @@ type BillingPeriodStatementRow = {
   invoiceAt: number
   cycleStartAt: number
   subscriptionItem: {
+    id: string
     units: number | null
     featurePlanVersion: {
       featureType: string
@@ -69,6 +80,10 @@ type BillingPeriodStatementRow = {
 }
 
 type ProviderInvoiceItem = PaymentProviderInvoice["items"][number]
+type ProviderInvoiceLineItem = {
+  line: InvoiceLine
+  totalAmount: number
+}
 
 function normalizeProviderTimestamp(timestamp: number | undefined, fallback: number): number {
   if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) {
@@ -86,6 +101,9 @@ function providerInvoiceItemMetadata(line: InvoiceLine): Record<string, string> 
     subscription_id: String(meta.subscription_id ?? ""),
     subscription_item_id: String(meta.subscription_item_id ?? ""),
     kind: line.kind,
+    gross_amount: String(toLedgerMinor(line.amount)),
+    settlement_source: line.settlementSource,
+    settlement_status: line.settlementStatus,
   }
 }
 
@@ -111,12 +129,154 @@ function providerInvoiceItemKey(metadata: Record<string, unknown> | undefined): 
   return `${billingPeriodId}:${subscriptionId}:${subscriptionItemId}:${kind}`
 }
 
-function buildProviderInvoiceItemInput(
-  providerInvoiceId: string,
+function readMetadataString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key]
+  return typeof value === "string" && value.length > 0 ? value : null
+}
+
+function invoiceLineGroupKey(line: InvoiceStatementLine): string {
+  const metadata = line.metadata ?? {}
+  const billingPeriodId = readMetadataString(metadata, "billing_period_id")
+  const itemId =
+    readMetadataString(metadata, "feature_plan_version_item_id") ??
+    readMetadataString(metadata, "subscription_item_id")
+
+  if (!billingPeriodId || !itemId) {
+    return line.entryId
+  }
+
+  return [
+    billingPeriodId,
+    itemId,
+    line.kind,
+    line.settlementSource,
+    line.settlementStatus,
+    line.collectable ? "collectable" : "non_collectable",
+  ].join(":")
+}
+
+function mergeNullableString(left: string | null, right: string | null): string | null {
+  if (left === right) return left
+  if (!left) return right
+  if (!right) return left
+  return null
+}
+
+function mergeNullableNumber(left: number | null, right: number | null): number | null {
+  if (left === null || right === null) return null
+  return left + right
+}
+
+function groupInvoiceStatementLines(lines: InvoiceStatementLine[]): InvoiceStatementLine[] {
+  const grouped = new Map<string, InvoiceStatementLine>()
+
+  for (const line of lines) {
+    const key = invoiceLineGroupKey(line)
+    const existing = grouped.get(key)
+
+    if (!existing) {
+      grouped.set(key, line)
+      continue
+    }
+
+    grouped.set(key, {
+      ...existing,
+      entryId: `group:${key}`,
+      description: existing.description ?? line.description,
+      quantity: mergeNullableNumber(existing.quantity, line.quantity),
+      amount: existing.amount + line.amount,
+      amountDue: existing.amountDue + line.amountDue,
+      amountIncluded: existing.amountIncluded + line.amountIncluded,
+      amountPaid: existing.amountPaid + line.amountPaid,
+      walletCreditId: mergeNullableString(existing.walletCreditId, line.walletCreditId),
+      walletCreditSource:
+        existing.walletCreditSource === line.walletCreditSource
+          ? existing.walletCreditSource
+          : null,
+      walletId: mergeNullableString(existing.walletId, line.walletId),
+      createdAt: existing.createdAt <= line.createdAt ? existing.createdAt : line.createdAt,
+    })
+  }
+
+  return [...grouped.values()]
+}
+
+function toProviderCurrencyMinor(amount: number, currency: Currency): number {
+  return toCurrencyMinor(fromLedgerMinor(amount, currency))
+}
+
+function invoiceHasProviderCollectableAmount(
+  invoice: Pick<SubscriptionInvoice, "amountDue" | "currency">
+): boolean {
+  return invoice.amountDue > 0 && toProviderCurrencyMinor(invoice.amountDue, invoice.currency) > 0
+}
+
+function finalizedInvoiceStatus(
+  invoice: Pick<SubscriptionInvoice, "grossAmount" | "amountDue" | "currency">
+): InvoiceStatus {
+  if (
+    invoice.grossAmount === 0 ||
+    (invoice.amountDue > 0 && !invoiceHasProviderCollectableAmount(invoice))
+  ) {
+    return "void"
+  }
+
+  if (invoice.amountDue === 0) {
+    return "paid"
+  }
+
+  return "unpaid"
+}
+
+function allocateProviderInvoiceLineItems(
+  lines: InvoiceLine[],
+  invoice: Pick<SubscriptionInvoice, "amountDue" | "currency">
+): ProviderInvoiceLineItem[] {
+  const targetTotal = toProviderCurrencyMinor(invoice.amountDue, invoice.currency)
+  const items = lines.map((line) => ({
+    line,
+    totalAmount: toProviderCurrencyMinor(line.amountDue, line.currency),
+  }))
+  let delta = targetTotal - items.reduce((total, item) => total + item.totalAmount, 0)
+
+  if (delta === 0 || items.length === 0) {
+    return items
+  }
+
+  // Provider APIs only accept integer currency minor units per item. Keep the
+  // invoice total canonical by assigning any rounding residue to stable line
+  // order after the first pass.
+  for (let i = 0; delta !== 0; i = (i + 1) % items.length) {
+    const step = delta > 0 ? 1 : -1
+    const item = items[i]
+
+    if (!item) {
+      continue
+    }
+
+    const nextAmount = item.totalAmount + step
+
+    if (nextAmount < 0) {
+      continue
+    }
+
+    item.totalAmount = nextAmount
+    delta -= step
+  }
+
+  return items
+}
+
+function buildProviderInvoiceItemInput({
+  providerInvoiceId,
+  line,
+  totalAmount,
+}: {
+  providerInvoiceId: string
   line: InvoiceLine
-): AddInvoiceItemOpts {
+  totalAmount: number
+}): AddInvoiceItemOpts {
   const meta = (line.metadata as Record<string, unknown> | null) ?? {}
-  const totalMinor = formatAmountForProvider(line.amount).amount
   const cycleStart = meta.cycle_start_at as number | undefined
   const cycleEnd = meta.cycle_end_at as number | undefined
   const prorationFactor = meta.proration_factor as number | undefined
@@ -126,7 +286,7 @@ function buildProviderInvoiceItemInput(
     name: line.description ?? "Subscription charge",
     description: line.description ?? undefined,
     isProrated: typeof prorationFactor === "number" && prorationFactor !== 1,
-    totalAmount: totalMinor,
+    totalAmount,
     quantity: line.quantity ?? 1,
     currency: line.currency,
     period:
@@ -137,11 +297,13 @@ function buildProviderInvoiceItemInput(
   }
 }
 
-function providerItemMatchesLine(item: ProviderInvoiceItem, line: InvoiceLine): boolean {
-  const totalMinor = formatAmountForProvider(line.amount).amount
-
+function providerItemMatchesLine(
+  item: ProviderInvoiceItem,
+  desiredItem: ProviderInvoiceLineItem
+): boolean {
+  const { line, totalAmount } = desiredItem
   return (
-    item.amount === totalMinor &&
+    item.amount === totalAmount &&
     item.currency === line.currency &&
     item.quantity === (line.quantity ?? 1)
   )
@@ -250,6 +412,7 @@ export class BillingService {
         ratingService: this.ratingService,
         ledgerService: this.ledgerService,
         walletService: this.walletService,
+        billingService: this,
         setLockContext: (ctx: Parameters<typeof this.setLockContext>[0]) =>
           this.setLockContext(ctx),
       })
@@ -270,19 +433,21 @@ export class BillingService {
     now = Date.now(),
     db,
     dryRun = false,
+    lock,
   }: {
     subscriptionId: string
     projectId: string
     now?: number
     db?: Database
     dryRun?: boolean
+    lock?: boolean
   }): Promise<Result<{ cyclesCreated: number; phasesProcessed: number }, UnPriceBillingError>> {
     try {
       const status = await this.withSubscriptionMachine({
         subscriptionId,
         projectId,
         now,
-        lock: !dryRun, // Skip lock for dry run
+        lock: lock ?? !dryRun, // Skip lock for dry run and for callers already inside the subscription lock.
         db,
         dryRun,
         run: async () => {
@@ -339,13 +504,13 @@ export class BillingService {
             await machine.reportInvoiceFailure({ invoiceId, error: col.err.message })
             throw col.err
           }
-          const { totalAmount, status } = col.val
+          const { amountDue, status } = col.val
           if (status === "paid" || status === "void") {
             await machine.reportInvoiceSuccess({ invoiceId })
           } else if (status === "failed") {
             await machine.reportPaymentFailure({ invoiceId, error: "Payment failed" })
           }
-          return { total: totalAmount, status }
+          return { total: amountDue, status }
         },
       })
       return Ok(res)
@@ -667,6 +832,32 @@ export class BillingService {
       return Ok(invoice)
     }
 
+    const localTerminalStatus = finalizedInvoiceStatus(invoice)
+    if (localTerminalStatus !== "unpaid") {
+      const updatedInvoice = await billingRepo.updateInvoice({
+        invoiceId: invoice.id,
+        projectId,
+        data: {
+          status: localTerminalStatus,
+          metadata: {
+            ...(invoice.metadata ?? {}),
+            reason: localTerminalStatus === "void" ? "invoice_voided" : "payment_received",
+            note:
+              localTerminalStatus === "void"
+                ? "Invoice voided because its collectable amount rounds to zero"
+                : "Invoice marked paid because no amount is due",
+          },
+          updatedAtM: now,
+        },
+      })
+
+      if (!updatedInvoice) {
+        return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+      }
+
+      return Ok(updatedInvoice)
+    }
+
     // validate if the invoice is failed
     if (invoice.status === "failed") {
       // meaning the invoice is past due and we cannot collect the payment with 3 attempts
@@ -796,6 +987,20 @@ export class BillingService {
 
         if (!updatedInvoice) {
           return Err(new UnPriceBillingError({ message: "Error updating invoice" }))
+        }
+
+        if (statusPaymentProviderInvoice.val.status === "paid") {
+          const settled = await settlePrepaidInvoiceToWallet({
+            walletService: this.walletService,
+            invoice: updatedInvoice,
+          })
+          if (settled.err) {
+            return Err(
+              new UnPriceBillingError({
+                message: `Failed to settle prepaid invoice ${updatedInvoice.id} to wallet: ${settled.err.message}`,
+              })
+            )
+          }
         }
 
         return Ok(updatedInvoice)
@@ -1069,7 +1274,7 @@ export class BillingService {
           // provider finalization completed.
           let providerInvoiceId = lockedInvoiceData.invoicePaymentProviderId
           let providerInvoiceUrl = lockedInvoiceData.invoicePaymentProviderUrl
-          const skipProvider = lockedInvoiceData.totalAmount === 0
+          const skipProvider = !invoiceHasProviderCollectableAmount(lockedInvoiceData)
 
           if (!skipProvider) {
             const upserted = await this._upsertPaymentProviderInvoice({
@@ -1205,7 +1410,7 @@ export class BillingService {
   /**
    * Invoice lines are projected from the ledger (see `LedgerGateway.getInvoiceLines`),
    * while this row is only the invoice header. Finalization here moves the
-   * invoice from `draft` to `unpaid` (or `void` when `totalAmount === 0`) and
+   * invoice from `draft` to `unpaid`, `paid`, or `void` and
    * stamps `issueDate`. Provider-side invoice creation runs separately in
    * `_upsertPaymentProviderInvoice` (called *before* this method by the
    * public `finalizeInvoice` wrapper) so a provider failure leaves the row
@@ -1225,7 +1430,7 @@ export class BillingService {
     const result = await this.db.transaction(async (tx) => {
       try {
         const txBillingRepo = new DrizzleBillingRepository(tx)
-        const statusInvoice = invoice.totalAmount === 0 ? ("void" as const) : ("unpaid" as const)
+        const statusInvoice = finalizedInvoiceStatus(invoice)
 
         const updatedInvoice = await txBillingRepo.updateInvoice({
           invoiceId: invoice.id,
@@ -1323,12 +1528,11 @@ export class BillingService {
       return Err(new UnPriceBillingError({ message: linesResult.err.message }))
     }
 
-    const lines = linesResult.val.filter(
-      (line) => (line.metadata as Record<string, unknown> | null)?.billing_period_id != null
-    )
+    const lines = linesResult.val
+    const collectableLines = lines.filter((line) => line.collectable && line.amountDue > 0)
 
-    if (lines.length === 0) {
-      // Nothing to push. A non-zero `totalAmount` with no lines is a data
+    if (invoice.amountDue > 0 && collectableLines.length === 0) {
+      // Nothing to push. A non-zero `amountDue` with no collectable lines is a data
       // integrity error — surface it loudly rather than silently creating an
       // empty Stripe invoice.
       return Err(
@@ -1415,8 +1619,12 @@ export class BillingService {
       }
     }
 
-    for (const line of lines) {
-      const desiredItem = buildProviderInvoiceItemInput(providerInvoiceId, line)
+    for (const allocatedItem of allocateProviderInvoiceLineItems(collectableLines, invoice)) {
+      const desiredItem = buildProviderInvoiceItemInput({
+        providerInvoiceId,
+        line: allocatedItem.line,
+        totalAmount: allocatedItem.totalAmount,
+      })
       const existingItemKey = providerInvoiceItemKey(desiredItem.metadata)
       const existingItem = existingItemKey ? existingItems.get(existingItemKey) : undefined
 
@@ -1426,7 +1634,7 @@ export class BillingService {
           existingItems.delete(existingItemKey)
         }
 
-        if (providerItemMatchesLine(existingItem, line)) {
+        if (providerItemMatchesLine(existingItem, allocatedItem)) {
           continue
         }
 
@@ -1822,6 +2030,7 @@ export class BillingService {
         and(eq(period.projectId, projectId), eq(period.invoiceId, invoiceId)),
       orderBy: (period, { asc }) => [asc(period.cycleStartAt), asc(period.id)],
     })) as BillingPeriodStatementRow[]
+    const periodById = new Map(periods.map((period) => [period.id, period]))
 
     const zeroLines = periods
       .filter((period) => !billedPeriodIds.has(period.id))
@@ -1833,25 +2042,56 @@ export class BillingService {
           description: period.subscriptionItem.featurePlanVersion.feature.title,
           quantity: period.subscriptionItem.units ?? 0,
           amount: 0,
+          amountDue: 0,
+          amountIncluded: 0,
+          amountPaid: 0,
+          collectable: false,
+          settlementSource: period.type === "trial" ? "trial" : "provider",
+          settlementStatus: period.type === "trial" ? "included" : "due",
+          walletCreditId: null,
+          walletCreditSource: null,
+          walletId: null,
           currency,
           createdAt: new Date(period.invoiceAt),
+          metadata: null,
         })
       )
 
-    const projectedLedgerLines = ledgerLines.map(
-      (line): InvoiceStatementLine => ({
+    const projectedLedgerLines = ledgerLines.map((line): InvoiceStatementLine => {
+      const metadata = (line.metadata as Record<string, unknown> | null) ?? null
+      const billingPeriodId =
+        metadata && typeof metadata.billing_period_id === "string"
+          ? metadata.billing_period_id
+          : null
+      const period = billingPeriodId ? periodById.get(billingPeriodId) : null
+
+      return {
         entryId: line.entryId,
         statementKey: line.statementKey,
         kind: line.kind,
-        description: line.description,
-        quantity: line.quantity,
+        description: line.description ?? line.kind,
+        quantity:
+          line.quantity ??
+          (period?.subscriptionItem.featurePlanVersion.featureType === "usage"
+            ? null
+            : (period?.subscriptionItem.units ?? null)),
         amount: toLedgerMinor(line.amount),
+        amountDue: line.amountDue,
+        amountIncluded: line.amountIncluded,
+        amountPaid: line.amountPaid,
+        collectable: line.collectable,
+        settlementSource: line.settlementSource,
+        settlementStatus: line.settlementStatus,
+        walletCreditId: line.walletCreditId,
+        walletCreditSource: line.walletCreditSource,
+        walletId: line.walletId,
         currency: line.currency,
         createdAt: line.createdAt,
-      })
-    )
+        metadata,
+      }
+    })
 
-    return Ok([...projectedLedgerLines, ...zeroLines])
+    return Ok([...groupInvoiceStatementLines(projectedLedgerLines), ...zeroLines])
   }
 
   /**

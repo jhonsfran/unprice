@@ -1,5 +1,6 @@
 import { entitlementMeterFactSchemaV1 } from "@unprice/analytics"
 import { z } from "zod"
+import { INGESTION_FAILURE_STAGES } from "./interface"
 import type { IngestionQueueMessage } from "./message"
 
 export const INGESTION_REPORTING_ENVELOPE_TARGET_BYTES = 96 * 1024
@@ -10,10 +11,21 @@ export const ingestionReportingAuditRecordSchema = z.object({
   canonicalAuditId: z.string(),
   payloadHash: z.string(),
   idempotencyKey: z.string(),
+  workspaceId: z.string(),
   projectId: z.string(),
   customerId: z.string(),
-  status: z.enum(["processed", "rejected"]),
+  environment: z.string(),
+  apiKeyId: z.string().nullable(),
+  sourceType: z.enum(["api_key", "system", "unknown"]),
+  sourceId: z.string(),
+  sourceName: z.string().nullable(),
+  status: z.enum(["processed", "rejected", "failed"]),
   rejectionReason: z.string().optional(),
+  failureStage: z.enum(INGESTION_FAILURE_STAGES).nullable(),
+  failureReason: z.string().nullable(),
+  failureMessage: z.string().nullable(),
+  replayable: z.boolean(),
+  payloadJson: z.string().nullable(),
   firstSeenAt: z.number().int(),
   handledAt: z.number().int(),
   auditPayloadJson: z.string(),

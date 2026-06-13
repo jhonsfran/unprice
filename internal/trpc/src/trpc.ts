@@ -369,7 +369,13 @@ export const publicProcedure = t.procedure.use(async ({ ctx, next, path }) => {
       ctx.logger.set({
         error: { trpc_code: result.error.code },
       })
-      ctx.logger.error(result.error)
+      ctx.logger.error(result.error, {
+        context: "trpc.procedure_failed",
+        path,
+        status,
+        trpc_code: result.error.code,
+        message: result.error.message,
+      })
     }
 
     return result

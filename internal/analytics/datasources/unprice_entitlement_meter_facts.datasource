@@ -8,8 +8,14 @@ TAGS "entitlements,usage,metering,billing"
 SCHEMA >
     `event_id` String `json:$.event_id`,
     `idempotency_key` String `json:$.idempotency_key`,
+    `workspace_id` String `json:$.workspace_id`,
     `project_id` String `json:$.project_id`,
     `customer_id` String `json:$.customer_id`,
+    `environment` LowCardinality(String) `json:$.environment`,
+    `api_key_id` Nullable(String) `json:$.api_key_id`,
+    `source_type` LowCardinality(String) `json:$.source_type`,
+    `source_id` String `json:$.source_id`,
+    `source_name` Nullable(String) `json:$.source_name`,
     `customer_entitlement_id` String `json:$.customer_entitlement_id`,
     `grant_id` String `json:$.grant_id`,
     `feature_plan_version_id` Nullable(String) `json:$.feature_plan_version_id`,
@@ -25,7 +31,10 @@ SCHEMA >
     `amount` Int64 `json:$.amount`,
     `amount_after` Int64 `json:$.amount_after`,
     `amount_scale` Int8 `json:$.amount_scale`,
-    `currency` LowCardinality(String) `json:$.currency`
+    `currency` LowCardinality(String) `json:$.currency`,
+    `tier_index` Nullable(Int16) `json:$.tier_index`,
+    `tier_mode` LowCardinality(Nullable(String)) `json:$.tier_mode`,
+    `pricing_component_count` UInt8 `json:$.pricing_component_count`
 
 ENGINE ReplacingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(timestamp, 'UTC'))

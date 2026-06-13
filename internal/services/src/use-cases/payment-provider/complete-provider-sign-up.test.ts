@@ -1,4 +1,5 @@
 import type { Database } from "@unprice/db"
+import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { PaymentProviderService } from "../../payment-provider/service"
@@ -65,6 +66,9 @@ describe("completeProviderSignUp", () => {
     const analytics = {
       ingestEvents: vi.fn().mockResolvedValue(undefined),
     }
+    const generateBillingPeriods = vi
+      .fn()
+      .mockResolvedValue(Ok({ cyclesCreated: 0, phasesProcessed: 1 }))
     const waitUntil = vi.fn()
 
     const result = await completeProviderSignUp(
@@ -74,6 +78,9 @@ describe("completeProviderSignUp", () => {
             getPaymentProvider: vi.fn().mockResolvedValue({ val: paymentProvider }),
           } as never,
           subscriptions: subscriptions as never,
+          billing: {
+            generateBillingPeriods,
+          } as never,
         },
         db,
         logger,
@@ -94,6 +101,11 @@ describe("completeProviderSignUp", () => {
     expect(txUpdate).toHaveBeenCalledTimes(1)
     expect(subscriptions.createSubscription).not.toHaveBeenCalled()
     expect(subscriptions.createPhase).not.toHaveBeenCalled()
+    expect(generateBillingPeriods).toHaveBeenCalledWith({
+      subscriptionId: "sub_existing",
+      projectId: "proj_1",
+      now: expect.any(Number),
+    })
     expect(subscriptions.activateWallet).toHaveBeenCalledWith(
       expect.objectContaining({
         subscriptionId: "sub_existing",

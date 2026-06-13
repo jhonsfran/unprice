@@ -1,3 +1,5 @@
+import { type Database, and, eq, gt, inArray, lte, ne } from "@unprice/db"
+import { billingPeriods } from "@unprice/db/schema"
 import type {
   BillingConfig,
   ConfigFeatureVersionType,
@@ -24,7 +26,16 @@ export type IngestionGrant = {
   priority: number
 }
 
+export type IngestionBillingPeriodContext = {
+  billingPeriodId: string
+  cycleEndAt: number
+  cycleStartAt: number
+  featurePlanVersionItemId: string
+  statementKey: string
+}
+
 export type IngestionEntitlement = {
+  billingPeriods: IngestionBillingPeriodContext[]
   creditLinePolicy: CreditLinePolicy
   customerEntitlementId: string
   customerId: string
@@ -39,6 +50,8 @@ export type IngestionEntitlement = {
   overageStrategy: OverageStrategy
   projectId: string
   resetConfig: ResetConfig | null
+  subscriptionId?: string | null
+  subscriptionItemId: string | null
 }
 
 export type IngestionCandidateEntitlements = IngestionEntitlement[]
@@ -89,15 +102,18 @@ const GRANT_CONTEXT_CACHE_BUCKET_MS = 300_000
 
 export class IngestionEntitlementContextLoader {
   private readonly cache: PreparedGrantContextCache
+  private readonly db: Database | null
   private readonly entitlementService: EntitlementService
   private readonly logger: Pick<Logger, "warn">
 
   constructor(opts: {
     cache: PreparedGrantContextCache
+    db?: Database
     entitlementService: EntitlementService
     logger: Pick<Logger, "warn">
   }) {
     this.cache = opts.cache
+    this.db = opts.db ?? null
     this.entitlementService = opts.entitlementService
     this.logger = opts.logger
   }
@@ -170,10 +186,13 @@ export class IngestionEntitlementContextLoader {
         error: cachedResult.err.message,
       })
 
-      return this.loadCustomerEntitlementContext(params)
+      return this.withFreshBillingPeriodContexts(
+        await this.loadCustomerEntitlementContext(params),
+        params
+      )
     }
 
-    return cachedResult.val
+    return this.withFreshBillingPeriodContexts(cachedResult.val, params)
   }
 
   private async loadCustomerEntitlementContext(params: {
@@ -224,6 +243,83 @@ export class IngestionEntitlementContextLoader {
         : "NO_MATCHING_ENTITLEMENT",
     }
   }
+
+  private async withFreshBillingPeriodContexts(
+    context: PreparedCustomerGrantContext,
+    params: {
+      customerId: string
+      endAt: number
+      projectId: string
+      startAt: number
+    }
+  ): Promise<PreparedCustomerGrantContext> {
+    const billingPeriodsByItemId = await this.loadBillingPeriodContexts({
+      customerId: params.customerId,
+      entitlements: context.candidateEntitlements,
+      endAt: params.endAt,
+      projectId: params.projectId,
+      startAt: params.startAt,
+    })
+
+    return {
+      ...context,
+      candidateEntitlements: context.candidateEntitlements.map((entitlement) => ({
+        ...entitlement,
+        billingPeriods:
+          entitlement.subscriptionItemId !== null
+            ? (billingPeriodsByItemId.get(entitlement.subscriptionItemId) ?? [])
+            : [],
+      })),
+    }
+  }
+
+  private async loadBillingPeriodContexts(params: {
+    customerId: string
+    endAt: number
+    entitlements: Array<{ subscriptionItemId: string | null }>
+    projectId: string
+    startAt: number
+  }): Promise<Map<string, IngestionBillingPeriodContext[]>> {
+    if (!this.db) return new Map()
+
+    const subscriptionItemIds = [
+      ...new Set(
+        params.entitlements
+          .map((entitlement) => entitlement.subscriptionItemId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      ),
+    ]
+    if (subscriptionItemIds.length === 0) return new Map()
+
+    const rows = await this.db
+      .select({
+        billingPeriodId: billingPeriods.id,
+        cycleEndAt: billingPeriods.cycleEndAt,
+        cycleStartAt: billingPeriods.cycleStartAt,
+        featurePlanVersionItemId: billingPeriods.subscriptionItemId,
+        statementKey: billingPeriods.statementKey,
+      })
+      .from(billingPeriods)
+      .where(
+        and(
+          eq(billingPeriods.projectId, params.projectId),
+          eq(billingPeriods.customerId, params.customerId),
+          inArray(billingPeriods.subscriptionItemId, subscriptionItemIds),
+          ne(billingPeriods.status, "voided"),
+          lte(billingPeriods.cycleStartAt, params.endAt),
+          gt(billingPeriods.cycleEndAt, params.startAt)
+        )
+      )
+
+    const byItemId = new Map<string, IngestionBillingPeriodContext[]>()
+    for (const row of rows) {
+      const contexts = byItemId.get(row.featurePlanVersionItemId) ?? []
+      contexts.push(row)
+      byItemId.set(row.featurePlanVersionItemId, contexts)
+    }
+
+    return byItemId
+  }
 }
 
 export function resolveCustomerGrantContextWindow(params: {
@@ -237,9 +333,11 @@ export function resolveCustomerGrantContextWindow(params: {
 }
 
 export function toIngestionEntitlement(
-  entitlement: CustomerEntitlementExtended
+  entitlement: CustomerEntitlementExtended,
+  options: { billingPeriods?: IngestionBillingPeriodContext[] } = {}
 ): IngestionEntitlement {
   return {
+    billingPeriods: options.billingPeriods ?? [],
     creditLinePolicy: entitlement.subscriptionPhase?.creditLinePolicy ?? "uncapped",
     customerEntitlementId: entitlement.id,
     customerId: entitlement.customerId,
@@ -262,6 +360,8 @@ export function toIngestionEntitlement(
     resetConfig:
       entitlement.featurePlanVersion.resetConfig ??
       toResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig),
+    subscriptionId: entitlement.subscriptionId,
+    subscriptionItemId: entitlement.subscriptionItemId,
   }
 }
 

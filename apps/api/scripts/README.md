@@ -76,7 +76,7 @@ export WRANGLER_R2_SQL_AUTH_TOKEN="<token>"
 
 Supported environments: `dev`, `preview`, `prod`.
 
-The script reads the `LAKEHOUSE` bucket directly from `apps/api/wrangler.jsonc` for the selected environment.
+The script resolves the lakehouse bucket from `apps/api/wrangler.jsonc` by preferring top-level `unprice_lakehouse_prod` for `prod` and `unprice_lakehouse_dev` for `preview`/`dev`, then falling back to a `LAKEHOUSE` binding for compatibility.
 
 ### Options
 

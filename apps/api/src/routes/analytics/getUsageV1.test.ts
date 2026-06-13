@@ -117,30 +117,80 @@ describe("getUsageV1 route", () => {
       ],
     })
   })
+
+  it("logs Tinybird query context before returning an API error", async () => {
+    const tinybirdError = new Error("connect ECONNREFUSED 127.0.0.1:7181")
+    const { app, env, executionCtx, loggerError } = createTestApp({
+      analyticsError: tinybirdError,
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customer_id: "cus_123",
+        project_id: "proj_123",
+        range: "24h",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(500)
+    expect(loggerError).toHaveBeenCalledWith(
+      "analytics usage tinybird query failed",
+      expect.objectContaining({
+        error: expect.objectContaining({
+          message: "connect ECONNREFUSED 127.0.0.1:7181",
+          type: "Error",
+        }),
+        error_message: "connect ECONNREFUSED 127.0.0.1:7181",
+        pipe: "v1_get_feature_usage_period",
+        project_id: "proj_123",
+        customer_id: "cus_123",
+        range: "24h",
+      })
+    )
+  })
 })
 
 function createTestApp(
   options: {
     rows?: Array<Record<string, unknown>>
+    analyticsError?: Error
   } = {}
 ) {
   const app = new OpenAPIHono<HonoEnv>()
-  const getFeaturesUsagePeriod = vi.fn().mockResolvedValue({
-    data: options.rows ?? [
-      {
-        project_id: "proj_123",
-        customer_id: "cus_123",
-        feature_slug: "events",
-        usage: 10000,
-        amount_after: 0,
-        currency: "EUR",
-      },
-    ],
+  const getFeaturesUsagePeriod = vi.fn().mockImplementation(async () => {
+    if (options.analyticsError) {
+      throw options.analyticsError
+    }
+
+    return {
+      data: options.rows ?? [
+        {
+          project_id: "proj_123",
+          customer_id: "cus_123",
+          feature_slug: "events",
+          usage: 10000,
+          amount_after: 0,
+          currency: "EUR",
+        },
+      ],
+    }
   })
-  const swr = vi.fn(async (_key: string, loader: () => Promise<unknown>) => ({
-    err: undefined,
-    val: await loader(),
-  }))
+  const loggerError = vi.fn()
+  const swr = vi.fn(async (_key: string, loader: () => Promise<unknown>) => {
+    try {
+      return {
+        err: undefined,
+        val: await loader(),
+      }
+    } catch (error) {
+      return {
+        err: error,
+        val: undefined,
+      }
+    }
+  })
 
   app.use(timing())
 
@@ -161,6 +211,14 @@ function createTestApp(
         swr,
       },
     })
+    c.set("logger", {
+      set: vi.fn(),
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: loggerError,
+      flush: vi.fn(),
+    })
 
     await next()
   })
@@ -176,7 +234,7 @@ function createTestApp(
     waitUntil: vi.fn(),
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, getFeaturesUsagePeriod, swr }
+  return { app, env, executionCtx, getFeaturesUsagePeriod, swr, loggerError }
 }
 
 function buildRequest(body: Record<string, unknown>) {

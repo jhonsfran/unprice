@@ -148,6 +148,9 @@ describe("customer signUp payment provider guard", () => {
     } as unknown as Database
     const createSubscription = vi.fn().mockResolvedValue(Ok({ id: "sub_123" }))
     const createPhase = vi.fn().mockResolvedValue(Ok({ id: "phase_123" }))
+    const generateBillingPeriods = vi
+      .fn()
+      .mockResolvedValue(Ok({ cyclesCreated: 1, phasesProcessed: 1 }))
 
     const result = await signUp(
       {
@@ -169,6 +172,9 @@ describe("customer signUp payment provider guard", () => {
             getSubscriptionData: vi.fn().mockResolvedValue({ status: "inactive" }),
             activateWallet: vi.fn().mockResolvedValue(undefined),
           },
+          billing: {
+            generateBillingPeriods,
+          },
           plans: {},
         } as never,
       },
@@ -189,6 +195,11 @@ describe("customer signUp payment provider guard", () => {
     expect(result.err).toBeUndefined()
     expect(result.val?.success).toBe(true)
     expect(createSubscription).toHaveBeenCalled()
+    expect(generateBillingPeriods).toHaveBeenCalledWith({
+      subscriptionId: "sub_123",
+      projectId: "proj_123",
+      now: expect.any(Number),
+    })
     expect(createPhase).toHaveBeenCalledWith(
       expect.objectContaining({
         input: expect.objectContaining({

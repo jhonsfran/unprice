@@ -966,7 +966,10 @@ async function listInvoices() {
   return db
     .select({
       statementKey: invoices.statementKey,
-      totalAmount: invoices.totalAmount,
+      grossAmount: invoices.grossAmount,
+      amountDue: invoices.amountDue,
+      amountPaid: invoices.amountPaid,
+      amountIncluded: invoices.amountIncluded,
       statementStartAt: invoices.statementStartAt,
       statementEndAt: invoices.statementEndAt,
     })
@@ -1035,15 +1038,24 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
       expect.arrayContaining([
         expect.objectContaining({
           statementKey: dailyStatementKey,
-          totalAmount: 1_000_000_000,
+          grossAmount: 1_000_000_000,
+          amountDue: 1_000_000_000,
+          amountPaid: 0,
+          amountIncluded: 0,
         }),
         expect.objectContaining({
           statementKey: monthlyStatementKey,
-          totalAmount: 13_712_000_000,
+          grossAmount: 13_712_000_000,
+          amountDue: 13_712_000_000,
+          amountPaid: 0,
+          amountIncluded: 0,
         }),
         expect.objectContaining({
           statementKey: weeklyStatementKey,
-          totalAmount: 1_200_000_000,
+          grossAmount: 1_200_000_000,
+          amountDue: 1_200_000_000,
+          amountPaid: 0,
+          amountIncluded: 0,
         }),
       ])
     )
@@ -1126,7 +1138,10 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
     expect(invoicesForSubscription).toEqual([
       {
         statementKey: coBilledStatementKey,
-        totalAmount: 121_450_000_000,
+        grossAmount: 121_450_000_000,
+        amountDue: 121_450_000_000,
+        amountPaid: 0,
+        amountIncluded: 0,
         statementStartAt: jan1,
         statementEndAt: jan1_2027,
       },
@@ -1267,13 +1282,19 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
         statementKey: coBilledStatementKey,
         statementStartAt: jan1,
         statementEndAt: jan1_2027,
-        totalAmount: 121_000_000_000,
+        grossAmount: 121_000_000_000,
+        amountDue: 121_000_000_000,
+        amountPaid: 0,
+        amountIncluded: 0,
       }),
       expect.objectContaining({
         statementKey: splitStatementKey,
         statementStartAt: dec31,
         statementEndAt: jan1_2027,
-        totalAmount: 450_000_000,
+        grossAmount: 450_000_000,
+        amountDue: 450_000_000,
+        amountPaid: 0,
+        amountIncluded: 0,
       }),
     ])
 
@@ -1355,7 +1376,10 @@ describe("DB-backed complex pricing and mixed meter cadence billing", () => {
         statementKey: advanceWithPriorUsageStatementKey,
         statementStartAt: jan1,
         statementEndAt: mar1,
-        totalAmount: 10_012_000_000,
+        grossAmount: 10_012_000_000,
+        amountDue: 10_012_000_000,
+        amountPaid: 0,
+        amountIncluded: 0,
       },
     ])
 

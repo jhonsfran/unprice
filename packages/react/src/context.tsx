@@ -45,7 +45,7 @@ export function useUnpriceClient() {
   const context = useContext(UnpriceContext)
 
   if (!context) {
-    throw new Error("useUnpriceClient must be used within UnpriceProvider or UnpriceClientProvider")
+    throw new Error("useUnpriceClient must be used within UnpriceClientProvider")
   }
 
   return context

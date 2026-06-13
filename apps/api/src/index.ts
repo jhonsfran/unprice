@@ -11,15 +11,19 @@ export { DurableObjectProject } from "~/project/do"
 export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
+import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
+import { registerForecastUsageV1 } from "./routes/analytics/forecastUsageV1"
+import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
 import { registerGetAnalyticsUsageV1 } from "./routes/analytics/getUsageV1"
+import { registerFlushReservationsForInvoicingV1 } from "./routes/billing/flushReservationsForInvoicingV1"
 import { registerSignUpV1 } from "./routes/customers/signUpV1"
 import { registerGetEntitlementWindowStatusV1 } from "./routes/entitlements/getEntitlementWindowStatusV1"
 import { registerGetEntitlementsV1 } from "./routes/entitlements/getEntitlementsV1"
 import { registerVerifyV1 } from "./routes/entitlements/verifyV1"
 import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
+import { registerReplayIngestionEventsV1 } from "./routes/events/replayIngestionEventsV1"
 import { registerGetFeaturesV1 } from "./routes/features/getFeaturesV1"
-import { registerGetLakehouseFilePlanV1 } from "./routes/lakehouse/getLakehouseFilePlanV1"
 import { registerCreatePaymentMethodV1 } from "./routes/payments/methods/createPaymentMethodV1"
 import { registerListPaymentMethodsV1 } from "./routes/payments/methods/listPaymentMethodsV1"
 import { registerProviderSetupV1 } from "./routes/payments/providers/providerSetupV1"
@@ -28,7 +32,6 @@ import { registerProviderStripeConnectWebhookV1 } from "./routes/payments/provid
 import { registerProviderWebhookV1 } from "./routes/payments/providers/providerWebhookV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
 import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
-import { registerGetRealtimeTicketV1 } from "./routes/realtime/getRealtimeTicketV1"
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
 
 import { env } from "cloudflare:workers"
@@ -139,6 +142,9 @@ app.use(
 // Access routes
 registerUpdateACLV1(app)
 
+// Billing routes
+registerFlushReservationsForInvoicingV1(app)
+
 // Customer routes
 registerSignUpV1(app)
 
@@ -149,6 +155,7 @@ registerVerifyV1(app)
 // Event routes
 registerIngestEventsV1(app)
 registerIngestEventsSyncV1(app)
+registerReplayIngestionEventsV1(app)
 registerGetEntitlementWindowStatusV1(app)
 
 // Feature routes
@@ -156,9 +163,6 @@ registerGetFeaturesV1(app)
 
 // Invoice routes
 registerGetInvoiceV1(app)
-
-// Lakehouse routes
-registerGetLakehouseFilePlanV1(app)
 
 // Payment routes
 registerListPaymentMethodsV1(app)
@@ -172,13 +176,13 @@ registerProviderStripeConnectWebhookV1(app)
 registerGetPlanVersionV1(app)
 registerListPlanVersionsV1(app)
 
-// Realtime routes
-registerGetRealtimeTicketV1(app)
-
 // Subscription routes
 registerGetSubscriptionV1(app)
 
 // Usage routes
+registerExplainChargeV1(app)
+registerForecastUsageV1(app)
+registerGetIngestionStatusV1(app)
 registerGetAnalyticsUsageV1(app)
 
 // Wallet routes

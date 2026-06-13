@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import { Unprice } from "./client"
+import type { paths } from "./openapi"
 
 const createJsonResponse = (body: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(body), {
@@ -11,6 +12,70 @@ const createJsonResponse = (body: unknown, init?: ResponseInit) =>
   })
 
 describe("Unprice client", () => {
+  it("keeps analytics SDK contracts aligned with route defaults and nullable tier data", () => {
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      disableTelemetry: true,
+      retry: { attempts: 0 },
+    })
+
+    expectTypeOf(client.analytics.explainCharge).parameter(0).toMatchTypeOf<{
+      invoice_id: string
+      entry_id: string
+      project_id?: string
+      limit?: number
+      offset?: number
+    }>()
+    expectTypeOf<{
+      invoice_id: string
+      entry_id: string
+      limit: number
+      offset: number
+    }>().toMatchTypeOf<
+      paths["/v1/analytics/explain-charge"]["post"]["requestBody"]["content"]["application/json"]
+    >()
+    expectTypeOf(client.analytics.ingestion.status).parameter(0).toMatchTypeOf<{
+      customer_id?: string
+      from_ts: number
+      to_ts: number
+      cursor?: {
+        handledAt: number
+        canonicalAuditId: string
+      } | null
+      source_id?: string
+      event_slug?: string
+      state?: "processed" | "rejected" | "failed"
+      limit?: number
+    }>()
+    expectTypeOf<{
+      customer_id: string
+      from_ts: number
+      to_ts: number
+      limit: number
+    }>().toMatchTypeOf<
+      paths["/v1/analytics/ingestion/status"]["post"]["requestBody"]["content"]["application/json"]
+    >()
+    expectTypeOf(client.analytics.forecastUsage).parameter(0).toMatchTypeOf<{
+      customer_id: string
+      feature_slug: string
+      period_key?: string
+      horizon_days?: number
+    }>()
+    expectTypeOf<{
+      customer_id: string
+      feature_slug: string
+    }>().toMatchTypeOf<Parameters<typeof client.analytics.forecastUsage>[0]>()
+    expectTypeOf<{
+      customer_id: string
+      feature_slug: string
+      horizon_days: number
+    }>().toMatchTypeOf<
+      paths["/v1/analytics/forecast-usage"]["post"]["requestBody"]["content"]["application/json"]
+    >()
+    expectTypeOf<ExplainChargeEventRow["tier_mode"]>().toEqualTypeOf<unknown>()
+  })
+
   it("exposes resource clients for every public API route", () => {
     const client = new Unprice({
       token: "test-token",
@@ -25,19 +90,24 @@ describe("Unprice client", () => {
     expect(typeof client.entitlements.verify).toBe("function")
     expect(typeof client.events.ingest).toBe("function")
     expect(typeof client.events.ingestSync).toBe("function")
+    expect(typeof client.events.replayFailedIngestionEvents).toBe("function")
+    expect(typeof client.replayFailedIngestionEvents).toBe("function")
     expect(typeof client.features.list).toBe("function")
     expect(typeof client.invoices.get).toBe("function")
-    expect(typeof client.lakehouse.getFilePlan).toBe("function")
     expect(typeof client.plans.getVersion).toBe("function")
     expect(typeof client.plans.listVersions).toBe("function")
     expect(typeof client.payments.methods.create).toBe("function")
     expect(typeof client.payments.methods.list).toBe("function")
     expect(typeof client.realtime.createTicket).toBe("function")
+    expect(typeof client.analytics.explainCharge).toBe("function")
+    expect(typeof client.analytics.forecastUsage).toBe("function")
+    expect(typeof client.analytics.ingestion.status).toBe("function")
     expect(typeof client.subscriptions.get).toBe("function")
     expect(typeof client.analytics.usage.get).toBe("function")
     expect(typeof client.wallet.balance).toBe("function")
     expect(typeof client.wallet.creditBalance).toBe("function")
     expect(typeof client.wallet.get).toBe("function")
+    expect(typeof client.billing.reservations.flushForInvoicing).toBe("function")
     expect("getPlanVersion" in client.plans).toBe(false)
     expect("getEntitlements" in client.customers).toBe(false)
     expect("usage" in client).toBe(false)
@@ -70,7 +140,10 @@ describe("Unprice client", () => {
             issue_date: 1,
             sent_at: 1,
             paid_at: 2,
-            total_amount: 100,
+            gross_amount: 100,
+            amount_due: 75,
+            amount_paid: 15,
+            amount_included: 10,
           },
           lines: [],
         })
@@ -81,6 +154,10 @@ describe("Unprice client", () => {
 
     expect(error).toBeUndefined()
     expect(result?.invoice.id).toBe("inv_123")
+    expect(result?.invoice.gross_amount).toBe(100)
+    expect(result?.invoice.amount_due).toBe(75)
+    expect(result?.invoice.amount_paid).toBe(15)
+    expect(result?.invoice.amount_included).toBe(10)
     expect(requests).toHaveLength(1)
     expect(requests[0]?.method).toBe("GET")
     expect(requests[0]?.url).toBe("https://example.com/v1/invoices/inv_123")
@@ -207,6 +284,38 @@ describe("Unprice client", () => {
     })
   })
 
+  it("calls replay failed ingestion endpoint", async () => {
+    const requests: Request[] = []
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      disableTelemetry: true,
+      retry: { attempts: 0 },
+      fetch: async (request) => {
+        requests.push(request.clone())
+        return createJsonResponse({
+          replayed: 1,
+          skipped: 0,
+        })
+      },
+    })
+
+    const { result, error } = await client.replayFailedIngestionEvents({
+      canonical_audit_ids: ["audit_1"],
+      project_id: "proj_123",
+    })
+
+    expect(error).toBeUndefined()
+    expect(result).toEqual({ replayed: 1, skipped: 0 })
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.url).toBe("https://example.com/v1/events/ingest/replay")
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
+    await expect(requests[0]?.json()).resolves.toEqual({
+      canonical_audit_ids: ["audit_1"],
+      project_id: "proj_123",
+    })
+  })
+
   it("maps API error payloads to the SDK result shape", async () => {
     const client = new Unprice({
       token: "test-token",
@@ -280,4 +389,36 @@ describe("Unprice client", () => {
     expect(result?.accepted).toBe(true)
     expect(calls).toBe(2)
   })
+
+  it("posts invoicing reservation flush requests", async () => {
+    const requests: Request[] = []
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://api.test",
+      disableTelemetry: true,
+      retry: { attempts: 0 },
+      fetch: async (request) => {
+        requests.push(request.clone())
+        return createJsonResponse({ ok: true, flushed: 1, skipped: 0 })
+      },
+    })
+
+    const { result, error } = await client.billing.reservations.flushForInvoicing({
+      customerId: "cus_123",
+      subscriptionId: "sub_123",
+      subscriptionPhaseId: "phase_123",
+      statementKey: "stmt_123",
+    })
+
+    expect(error).toBeUndefined()
+    expect(result).toEqual({ ok: true, flushed: 1, skipped: 0 })
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.url).toBe("https://api.test/v1/billing/reservations/flush-for-invoicing")
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
+  })
 })
+
+type ExplainChargeResponse =
+  paths["/v1/analytics/explain-charge"]["post"]["responses"][200]["content"]["application/json"]
+type ExplainChargeEventRow = ExplainChargeResponse["events"][number]

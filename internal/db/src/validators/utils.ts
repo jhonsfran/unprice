@@ -12,6 +12,10 @@ export const searchParamsSchemaDataTable = z.object({
   search: z.string().nullable(),
   from: z.coerce.number().nullable(),
   to: z.coerce.number().nullable(),
+  sort: z.string().nullable().optional(),
+  filters: z
+    .record(z.string(), z.array(z.union([z.boolean(), z.number(), z.string()])))
+    .default({}),
 })
 
 export type SearchParamsDataTable = z.infer<typeof searchParamsSchemaDataTable>

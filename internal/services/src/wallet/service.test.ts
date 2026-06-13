@@ -63,6 +63,7 @@ interface FakeState {
     payloadHash: string
     result: Record<string, unknown>
   }>
+  replayWalletCommands: boolean
   balances: Record<string, number> // account name → minor units (scale 8)
   transfers: LedgerTransferRequest[] // every ledger call, in order
   transferBatches: number // count of `createTransfers` calls
@@ -77,6 +78,7 @@ function createState(): FakeState {
     reservations: [],
     fundingLegs: [],
     walletCommands: [],
+    replayWalletCommands: false,
     balances: {},
     transfers: [],
     transferBatches: 0,
@@ -126,7 +128,9 @@ function createDb(state: FakeState): Database {
         ),
       },
       walletCommandIdempotency: {
-        findFirst: vi.fn(async () => null),
+        findFirst: vi.fn(async () =>
+          state.replayWalletCommands ? (state.walletCommands[0] ?? null) : null
+        ),
       },
     },
     execute: vi.fn(async () => ({ rows: [] })),
@@ -819,7 +823,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       fromAccount: keys.reserved,
       toAccount: keys.consumed,
     })
-    expect(state.transfers[0]?.statementKey).toBeUndefined()
+    expect(state.transfers[0]?.statementKey).toBe("stmt_1")
     expect(state.transfers[1]).toMatchObject({
       fromAccount: keys.granted,
       toAccount: keys.reserved,
@@ -876,14 +880,150 @@ describe("WalletService reservation capture, extend, and release", () => {
 
     expect(err).toBeUndefined()
     expect(val?.capturedAmount).toBe(4 * DOLLAR)
-    expect(state.transfers).toHaveLength(1)
+    expect(state.transfers).toHaveLength(2)
     expect(state.transfers[0]).toMatchObject({
       fromAccount: keys.reserved,
       toAccount: keys.consumed,
     })
-    expect(toLedgerMinor(state.transfers[0]!.amount)).toBe(4 * DOLLAR)
+    expect(state.transfers[1]).toMatchObject({
+      fromAccount: keys.reserved,
+      toAccount: keys.consumed,
+    })
+    expect(state.transfers.map((transfer) => toLedgerMinor(transfer.amount))).toEqual([
+      3 * DOLLAR,
+      1 * DOLLAR,
+    ])
     expect(state.fundingLegs.map((leg) => leg.capturedAmount)).toEqual([3 * DOLLAR, 1 * DOLLAR])
     expect(state.reservations[0]?.consumedAmount).toBe(4 * DOLLAR)
+  })
+
+  it("attributes captured usage to settlement metadata by funding source", async () => {
+    const { state, wallet } = buildService()
+    seedReservation(state, {
+      id: "res_capture_settlement",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 9 * DOLLAR,
+      consumedAmount: 0,
+      fundingAllocations: [
+        {
+          source: "granted",
+          amount: 3 * DOLLAR,
+          grantSource: "plan_included",
+          walletCreditId: "wcr_plan",
+        },
+        {
+          source: "granted",
+          amount: 4 * DOLLAR,
+          grantSource: "credit_line",
+          walletCreditId: "wcr_credit",
+        },
+        { source: "purchased", amount: 2 * DOLLAR },
+      ],
+    })
+    state.balances[keys.reserved] = 9 * DOLLAR
+
+    const { val, err } = await wallet.captureReservationUsage({
+      projectId,
+      customerId,
+      currency: "USD",
+      reservationId: "res_capture_settlement",
+      flushSeq: 1,
+      amount: 9 * DOLLAR,
+      statementKey: "stmt_capture_settlement",
+      billingPeriodId: "bp_1",
+    })
+
+    expect(err).toBeUndefined()
+    expect(val?.capturedAmount).toBe(9 * DOLLAR)
+    expect(state.transfers).toHaveLength(3)
+    expect(state.transfers.map((transfer) => toLedgerMinor(transfer.amount))).toEqual([
+      3 * DOLLAR,
+      4 * DOLLAR,
+      2 * DOLLAR,
+    ])
+    expect(state.transfers.map((transfer) => transfer.metadata)).toMatchObject([
+      {
+        settlement_source: "plan_included",
+        settlement_status: "included",
+        collectable: false,
+        invoice_visible: true,
+        wallet_credit_id: "wcr_plan",
+        wallet_credit_source: "plan_included",
+      },
+      {
+        settlement_source: "credit_line",
+        settlement_status: "due",
+        collectable: true,
+        invoice_visible: true,
+        wallet_credit_id: "wcr_credit",
+        wallet_credit_source: "credit_line",
+      },
+      {
+        settlement_source: "cash_wallet",
+        settlement_status: "paid",
+        collectable: false,
+        invoice_visible: true,
+      },
+    ])
+  })
+
+  it("treats changed capture invoice context as a wallet idempotency conflict", async () => {
+    const { state, wallet } = buildService()
+    seedReservation(state, {
+      id: "res_capture_hash",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 2 * DOLLAR,
+      consumedAmount: 0,
+      fundingAllocations: [{ source: "purchased", amount: 2 * DOLLAR }],
+    })
+    state.balances[keys.reserved] = 2 * DOLLAR
+
+    const baseInput = {
+      projectId,
+      customerId,
+      currency: "USD" as const,
+      reservationId: "res_capture_hash",
+      flushSeq: 1,
+      amount: 2 * DOLLAR,
+      statementKey: "stmt_capture_hash",
+      billingPeriodId: "bp_1",
+      kind: "usage",
+      sourceId: "bp_1:item_1",
+      metadata: {
+        billing_period_id: "bp_1",
+        cycle_end_at: 2000,
+        cycle_start_at: 1000,
+        feature_plan_version_item_id: "item_1",
+        source_id: "bp_1:item_1",
+      },
+    }
+
+    const first = await wallet.captureReservationUsage(baseInput)
+    expect(first.err).toBeUndefined()
+    expect(first.val?.capturedAmount).toBe(2 * DOLLAR)
+
+    state.replayWalletCommands = true
+
+    const replay = await wallet.captureReservationUsage(baseInput)
+    expect(replay.err).toBeUndefined()
+    expect(replay.val?.capturedAmount).toBe(2 * DOLLAR)
+
+    const changed = await wallet.captureReservationUsage({
+      ...baseInput,
+      billingPeriodId: "bp_2",
+      sourceId: "bp_2:item_1",
+      metadata: {
+        ...baseInput.metadata,
+        billing_period_id: "bp_2",
+        source_id: "bp_2:item_1",
+      },
+    })
+
+    expect(changed.err?.message).toBe("WALLET_IDEMPOTENCY_CONFLICT")
   })
 
   it("rejects captures that exceed still-reserved funding legs", async () => {

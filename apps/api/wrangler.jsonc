@@ -22,12 +22,6 @@
         "pattern": "api.unprice.dev",
         "custom_domain": true
       },
-      "r2_buckets": [
-        {
-          "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-prod"
-        }
-      ],
       "queues": {
         "producers": [
           {
@@ -45,6 +39,10 @@
           {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-prod"
+          },
+          {
+            "binding": "INGESTION_REPORTING_DLQ",
+            "queue": "unprice-api-ingestion-reporting-dlq-prod"
           }
         ],
         "consumers": [
@@ -67,12 +65,9 @@
             "max_batch_size": 100,
             "max_batch_timeout": 30,
             "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
+            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-prod"
           }
         ]
-      },
-      "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         "bindings": [
@@ -150,12 +145,6 @@
         "pattern": "preview-api.unprice.dev",
         "custom_domain": true
       },
-      "r2_buckets": [
-        {
-          "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-dev"
-        }
-      ],
       "queues": {
         "producers": [
           {
@@ -173,6 +162,10 @@
           {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-preview"
+          },
+          {
+            "binding": "INGESTION_REPORTING_DLQ",
+            "queue": "unprice-api-ingestion-reporting-dlq-preview"
           }
         ],
         "consumers": [
@@ -195,12 +188,9 @@
             "max_batch_size": 100,
             "max_batch_timeout": 30,
             "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
+            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-preview"
           }
         ]
-      },
-      "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
@@ -266,12 +256,6 @@
     },
     "dev": {
       "workers_dev": true,
-      "r2_buckets": [
-        {
-          "binding": "LAKEHOUSE",
-          "bucket_name": "unprice-lakehouse-dev"
-        }
-      ],
       "queues": {
         "producers": [
           {
@@ -289,6 +273,10 @@
           {
             "binding": "INGESTION_DLQ",
             "queue": "unprice-api-ingestion-dlq-dev"
+          },
+          {
+            "binding": "INGESTION_REPORTING_DLQ",
+            "queue": "unprice-api-ingestion-reporting-dlq-dev"
           }
         ],
         "consumers": [
@@ -311,12 +299,9 @@
             "max_batch_size": 100,
             "max_batch_timeout": 5, // to avoid wait in dev
             "max_retries": 3,
-            "dead_letter_queue": "unprice-api-ingestion-dlq-dev"
+            "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-dev"
           }
         ]
-      },
-      "vars": {
-        "LAKEHOUSE_FILE_PLAN_BASE_URL": "https://lakehouse.unprice.dev"
       },
       "unsafe": {
         // # Limit: the number of tokens allowed within a given period in a single
@@ -386,16 +371,6 @@
       "type": "Text",
       "globs": ["**/*.sql"],
       "fallthrough": true
-    }
-  ],
-  "r2_buckets": [
-    {
-      "bucket_name": "unprice-lakehouse-dev",
-      "binding": "unprice_lakehouse_dev"
-    },
-    {
-      "bucket_name": "unprice-lakehouse-prod",
-      "binding": "unprice_lakehouse_prod"
     }
   ]
   // disable smart placement for now

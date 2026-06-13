@@ -4,7 +4,6 @@ import {
   runDoOperation as _runDoOperation,
   createLogger,
   createMetricsLogger,
-  createStandaloneRequestLogger,
   createUnpriceDrain,
   initObservability,
   sharedSamplingConfig,
@@ -59,8 +58,108 @@ export function createApiLogger(
 export const apiMetricsLogger: Logger = createMetricsLogger(apiDrain)
 
 export function createDoLogger(requestId: string): Logger {
-  const { logger } = createStandaloneRequestLogger({ requestId }, { flush: apiDrain?.flush })
-  return logger
+  let context: Record<string, unknown> = {
+    requestId,
+    request: { id: requestId },
+    cloud: {
+      platform: "cloudflare",
+      durable_object_id: requestId,
+    },
+  }
+
+  return {
+    set(fields) {
+      context = mergeLogFields(context, fields)
+    },
+    debug(message, fields) {
+      apiMetricsLogger.info(message, { ...buildDoLogFields(context, fields), level: "debug" })
+    },
+    info(message, fields) {
+      apiMetricsLogger.info(message, buildDoLogFields(context, fields))
+    },
+    warn(message, fields) {
+      apiMetricsLogger.warn(message, buildDoLogFields(context, fields))
+    },
+    error(message, fields) {
+      apiMetricsLogger.error(message, buildDoErrorFields(message, context, fields))
+    },
+    flush() {
+      return apiMetricsLogger.flush()
+    },
+  }
+}
+
+function buildDoLogFields(
+  context: Record<string, unknown>,
+  fields?: Record<string, unknown>
+): Record<string, unknown> {
+  return mergeLogFields(
+    {
+      type: "log",
+      ...context,
+    },
+    fields ?? {}
+  )
+}
+
+function buildDoErrorFields(
+  message: unknown,
+  context: Record<string, unknown>,
+  fields?: Record<string, unknown>
+): Record<string, unknown> {
+  const error = normalizeError(message, fields)
+  return mergeLogFields(buildDoLogFields(context, fields), error ? { error } : {})
+}
+
+function normalizeError(
+  message: unknown,
+  fields?: Record<string, unknown>
+): {
+  message: string
+  name: string
+  stack?: string
+} | null {
+  if (message instanceof Error) {
+    return {
+      message: message.message,
+      name: message.name,
+      stack: message.stack,
+    }
+  }
+
+  const maybeError = fields?.error
+  if (maybeError instanceof Error) {
+    return {
+      message: maybeError.message,
+      name: maybeError.name,
+      stack: maybeError.stack,
+    }
+  }
+
+  return null
+}
+
+function mergeLogFields(
+  base: Record<string, unknown>,
+  next: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    ...base,
+    ...next,
+    business: mergeObjects(base.business, next.business),
+    cloud: mergeObjects(base.cloud, next.cloud),
+    request: mergeObjects(base.request, next.request),
+  }
+}
+
+function mergeObjects(left: unknown, right: unknown): unknown {
+  if (!isRecord(left)) return right
+  if (!isRecord(right)) return left
+  return { ...left, ...right }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
 /**

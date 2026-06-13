@@ -13,6 +13,7 @@ import { type Dinero, dinero, toSnapshot } from "dinero.js"
 import * as dineroCurrencies from "dinero.js/currencies"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { BillingService } from "../billing/service"
 import type { CustomerService } from "../customers/service"
 import type { InvoiceLine, LedgerEntry, LedgerGateway } from "../ledger"
 import type { RatingService } from "../rating/service"
@@ -128,7 +129,7 @@ function buildMockSubscription({
             paymentProvider: "stripe",
             paymentMethodRequired: true,
             whenToBill,
-            currency: "usd",
+            currency: "USD",
             collectionMethod,
             gracePeriod: 3,
             autoRenew,
@@ -360,6 +361,15 @@ describe("SubscriptionMachine - comprehensive", () => {
                 description: null,
                 quantity: null,
                 amount: e.amount,
+                amountDue: toSnapshot(e.amount).amount,
+                amountIncluded: 0,
+                amountPaid: 0,
+                collectable: true,
+                settlementSource: "provider",
+                settlementStatus: "due",
+                walletCreditId: null,
+                walletCreditSource: null,
+                walletId: null,
                 currency: e.currency as InvoiceLine["currency"],
                 createdAt: new Date(),
                 metadata: e.metadata,
@@ -649,6 +659,7 @@ describe("SubscriptionMachine - comprehensive", () => {
     now?: number
     db?: Database
     walletService?: WalletService
+    billingService?: Pick<BillingService, "generateBillingPeriods">
   }) =>
     SubscriptionMachine.create({
       subscriptionId: input.subscriptionId,
@@ -660,6 +671,16 @@ describe("SubscriptionMachine - comprehensive", () => {
       ratingService: mockRatingService,
       ledgerService: mockLedgerService,
       walletService: input.walletService,
+      billingService:
+        input.billingService ??
+        ({
+          generateBillingPeriods: vi.fn().mockResolvedValue(
+            Ok({
+              cyclesCreated: 0,
+              phasesProcessed: 0,
+            })
+          ),
+        } as Pick<BillingService, "generateBillingPeriods">),
       db: input.db ?? mockDb,
       repo: new DrizzleSubscriptionRepository(input.db ?? mockDb),
     })
@@ -1070,5 +1091,46 @@ describe("SubscriptionMachine - comprehensive", () => {
     expect(m.getState()).toBe("error")
     expect(dbMockData.find((entry) => entry.table === "invoices")).toBeUndefined()
     await m.shutdown()
+  })
+
+  it("materializes billing periods when activation runs after renewal", async () => {
+    const { sub, now } = buildMockSubscription({
+      status: "active",
+      autoRenew: true,
+      trialEnded: true,
+      whenToBill: "pay_in_advance",
+    })
+    sub.currentCycleEndAt = now - 1_000
+    sub.renewAt = now - 1_000
+    setupDbMocks(sub)
+
+    const generateBillingPeriods = vi.fn().mockResolvedValue(
+      Ok({
+        cyclesCreated: 1,
+        phasesProcessed: 1,
+      })
+    )
+
+    const created = await createMachine({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+      now,
+      billingService: { generateBillingPeriods },
+    })
+    expect(created.err).toBeUndefined()
+    if (created.err) return
+
+    const machine = created.val
+    const result = await machine.renew()
+
+    expect(result.err).toBeUndefined()
+    expect(generateBillingPeriods).toHaveBeenCalledWith({
+      subscriptionId: sub.id,
+      projectId: sub.projectId,
+      now,
+      lock: false,
+    })
+
+    await machine.shutdown()
   })
 })

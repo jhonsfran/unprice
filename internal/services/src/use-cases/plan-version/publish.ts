@@ -1,10 +1,10 @@
 import { type Database, and, eq, inArray } from "@unprice/db"
 import * as schema from "@unprice/db/schema"
-import { type PlanVersion, calculateFlatPricePlan } from "@unprice/db/validators"
+import { type PlanVersion, planVersionRequiresPaymentMethod } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { isZero } from "dinero.js"
 import type { ServiceContext } from "../../context"
+import { toErrorContext } from "../../utils/log-context"
 
 type PublishPlanVersionDeps = {
   services: Pick<ServiceContext, "customers">
@@ -78,7 +78,7 @@ export async function publishPlanVersion(
     })
   }
 
-  const { err, val: totalPricePlan } = calculateFlatPricePlan({
+  const { err, val: paymentMethodRequired } = planVersionRequiresPaymentMethod({
     planVersion: planVersionData,
   })
 
@@ -88,8 +88,6 @@ export async function publishPlanVersion(
     })
   }
 
-  const paymentMethodRequired = !isZero(totalPricePlan.dinero)
-
   if (paymentMethodRequired) {
     const { err: validatePaymentMethodErr } = await deps.services.customers.getPaymentProvider({
       projectId,
@@ -97,11 +95,17 @@ export async function publishPlanVersion(
     })
 
     if (validatePaymentMethodErr) {
-      deps.logger.error(validatePaymentMethodErr, {
+      deps.logger.error("payment provider validation failed while publishing plan version", {
         context: "error validating payment provider for plan version publish",
         projectId,
         planVersionId: id,
         provider: planVersionData.paymentProvider,
+        paymentProvider: planVersionData.paymentProvider,
+        paymentProviderError: toErrorContext(validatePaymentMethodErr),
+        paymentProviderErrorCode:
+          validatePaymentMethodErr instanceof Error && "code" in validatePaymentMethodErr
+            ? validatePaymentMethodErr.code
+            : undefined,
       })
 
       return Ok({

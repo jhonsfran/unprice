@@ -1,12 +1,14 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, count, eq, getTableColumns, ilike, or } from "@unprice/db"
-import { customers, subscriptions } from "@unprice/db/schema"
-import { newId, withDateFilters, withPagination } from "@unprice/db/utils"
+import { type Database, and, count, eq, getTableColumns, ilike, inArray, or } from "@unprice/db"
+import { customers, invoices, subscriptions } from "@unprice/db/schema"
+import { INVOICE_STATUS, newId, withDateFilters, withPagination } from "@unprice/db/utils"
 import type {
   Customer,
   CustomerPaymentMethod,
   PaymentProvider,
+  SearchParamsDataTable,
   SubscriptionCache,
+  SubscriptionInvoice,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -659,20 +661,83 @@ export class CustomerService {
   public async getCustomerInvoices({
     customerId,
     projectId,
+    query,
   }: {
     customerId: string
     projectId: string
-  }): Promise<Result<unknown | null, FetchError>> {
+    query: SearchParamsDataTable
+  }): Promise<
+    Result<
+      {
+        customer: Customer
+        invoices: SubscriptionInvoice[]
+        pageCount: number
+      } | null,
+      FetchError
+    >
+  > {
+    const invoiceColumns = getTableColumns(invoices)
+    const invoiceStatusValues = new Set<string>(INVOICE_STATUS)
+    const filter = `%${query.search ?? ""}%`
+    const statusFilters =
+      query.filters.status?.filter(
+        (value): value is SubscriptionInvoice["status"] =>
+          typeof value === "string" && invoiceStatusValues.has(value)
+      ) ?? []
+
     const { val, err } = await wrapResult(
-      this.db.query.customers.findFirst({
-        with: {
-          invoices: {
-            orderBy: (table, { desc }) => [desc(table.dueAt)],
-          },
-        },
-        where: (table, { eq, and }) =>
-          and(eq(table.id, customerId), eq(table.projectId, projectId)),
-        orderBy: (table, { desc }) => [desc(table.createdAtM)],
+      this.db.transaction(async (tx) => {
+        const customer = await tx.query.customers.findFirst({
+          where: (table, { eq, and }) =>
+            and(eq(table.id, customerId), eq(table.projectId, projectId)),
+          orderBy: (table, { desc }) => [desc(table.createdAtM)],
+        })
+
+        if (!customer) {
+          return null
+        }
+
+        const expressions = [
+          eq(invoiceColumns.customerId, customerId),
+          eq(invoiceColumns.projectId, projectId),
+          query.search ? ilike(invoiceColumns.id, filter) : undefined,
+          statusFilters.length > 0 ? inArray(invoiceColumns.status, statusFilters) : undefined,
+        ]
+        const whereQuery = withDateFilters<SubscriptionInvoice>(
+          expressions,
+          invoiceColumns.dueAt,
+          query.from,
+          query.to
+        )
+        const invoiceQuery = tx.select().from(invoices).$dynamic()
+
+        const data = await withPagination(
+          invoiceQuery,
+          whereQuery,
+          [
+            {
+              column: invoiceColumns.dueAt,
+              order: "desc",
+            },
+          ],
+          query.page,
+          query.page_size
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(invoices)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        return {
+          customer,
+          invoices: data as SubscriptionInvoice[],
+          pageCount: Math.ceil(total / query.page_size),
+        }
       }),
       (error) =>
         new FetchError({

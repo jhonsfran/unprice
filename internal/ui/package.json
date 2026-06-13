@@ -107,6 +107,7 @@
     "./checkbox": "./src/checkbox.tsx",
     "./command": "./src/command.tsx",
     "./data-table": "./src/data-table.tsx",
+    "./filter-data-table": "./src/filter-data-table.tsx",
     "./dialog": "./src/dialog.tsx",
     "./dropdown-menu": "./src/dropdown-menu.tsx",
     "./form": "./src/form.tsx",

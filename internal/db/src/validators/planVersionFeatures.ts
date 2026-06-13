@@ -168,6 +168,18 @@ export const planVersionFeatureMetadataSchema = z
       .describe(
         "Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false"
       ),
+    billingCadenceOverride: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this usage feature intentionally uses a billing cadence different from the parent plan. Default: false"
+      ),
+    resetCadenceOverride: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether this usage feature intentionally uses a reset cadence different from its billing cadence. Default: false"
+      ),
   })
   .describe(
     "Additional configuration options controlling feature behavior, notifications, and visibility"

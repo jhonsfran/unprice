@@ -6,7 +6,6 @@ import { Button } from "@unprice/ui/button"
 import { XCircle } from "@unprice/ui/icons"
 import { Input } from "@unprice/ui/input"
 
-import { useFilterDataTable } from "~/hooks/use-filter-datatable"
 import { DateRangePicker } from "../analytics/date-range-picker"
 import type { FilterOptionDataTable } from "./data-table"
 import { DataTableFacetedFilter } from "./data-table-faceted-filter"
@@ -18,8 +17,6 @@ interface DataTableToolbarProps<TData> {
 }
 
 export function DataTableToolbar<TData>({ table, filterOptions }: DataTableToolbarProps<TData>) {
-  // Controls ss pagination
-  const [filters, setFilters] = useFilterDataTable()
   const isFiltered = table.getState().columnFilters.length > 0
   const filterBy = filterOptions?.filterBy ?? ""
 
@@ -68,13 +65,9 @@ export function DataTableToolbar<TData>({ table, filterOptions }: DataTableToolb
         {table.getColumn(filterBy) && (
           <Input
             placeholder={`filter by ${filterBy}`}
-            value={(table.getColumn(filterBy)?.getFilterValue() as string) ?? filters.search ?? ""}
+            value={(table.getColumn(filterBy)?.getFilterValue() as string) ?? ""}
             onChange={(event) => {
-              if (filterOptions?.filterServerSide) {
-                setFilters({ search: event.target.value })
-              } else {
-                table.getColumn(filterBy)?.setFilterValue(event.target.value)
-              }
+              table.getColumn(filterBy)?.setFilterValue(event.target.value)
             }}
             className="h-8 w-[150px] bg-background lg:w-[250px]"
           />

@@ -1,6 +1,14 @@
 import { check, fail } from "k6"
 import http from "k6/http"
 import { Counter } from "k6/metrics"
+import {
+  buildProperties,
+  discoverCustomerUsageProfile,
+  nonNegativeInteger,
+  normalizeBaseUrl,
+  positiveInteger,
+  randomInteger,
+} from "./usage-profile.js"
 
 const asyncUsageEventsSent = new Counter("async_usage_events_sent")
 const verifyRequestsSent = new Counter("verify_requests_sent")
@@ -78,73 +86,17 @@ export function teardown(profile) {
 }
 
 function discoverCustomerProfile() {
-  const response = postJson(
-    "/v1/entitlements/get",
-    {
-      customerId: CUSTOMER_ID,
-      projectId: PROJECT_ID,
-    },
-    "POST /v1/entitlements/get"
-  )
+  const profile = discoverCustomerUsageProfile({
+    customerId: CUSTOMER_ID,
+    projectId: PROJECT_ID,
+    postJson,
+  })
 
-  if (
-    !check(response, {
-      "entitlements.get returns 200": (res) => res.status === 200,
-    })
-  ) {
-    fail(`entitlements.get failed: ${response.status} ${response.body}`)
-  }
+  check(profile, {
+    "entitlements.get returns usage profile": (result) => result.usageEvents.length > 0,
+  })
 
-  const entitlements = parseJson(response)
-
-  if (!Array.isArray(entitlements) || entitlements.length === 0) {
-    fail(`No active entitlements found for customer ${CUSTOMER_ID} in project ${PROJECT_ID}`)
-  }
-
-  const featureSlugs = []
-  const usageEventFieldsByEventSlug = new Map()
-
-  for (const entitlement of entitlements) {
-    const featureSlug = getFeatureSlug(entitlement)
-
-    if (featureSlug) {
-      featureSlugs.push(featureSlug)
-    }
-
-    const meterConfig = getMeterConfig(entitlement)
-
-    if (!meterConfig) {
-      continue
-    }
-
-    const propertyFields = usageEventFieldsByEventSlug.get(meterConfig.eventSlug) ?? []
-
-    if (meterConfig.aggregationMethod !== "count") {
-      if (!meterConfig.aggregationField) {
-        fail(
-          `Usage meter for feature ${featureSlug ?? "unknown"} uses ${meterConfig.aggregationMethod} but has no aggregationField`
-        )
-      }
-
-      if (!propertyFields.includes(meterConfig.aggregationField)) {
-        propertyFields.push(meterConfig.aggregationField)
-      }
-    }
-
-    usageEventFieldsByEventSlug.set(meterConfig.eventSlug, propertyFields)
-  }
-
-  if (featureSlugs.length === 0) {
-    fail(`Could not resolve feature slugs from entitlements for customer ${CUSTOMER_ID}`)
-  }
-
-  return {
-    featureSlugs: unique(featureSlugs),
-    usageEvents: [...usageEventFieldsByEventSlug.entries()].map(([eventSlug, propertyFields]) => ({
-      eventSlug,
-      propertyFields,
-    })),
-  }
+  return profile
 }
 
 function postJson(path, body, name) {
@@ -208,98 +160,6 @@ function shouldVerifyThisIteration() {
   return VERIFY_EVERY > 0 && __ITER % VERIFY_EVERY === 0
 }
 
-function buildProperties(propertyFields) {
-  const properties = {}
-
-  for (const field of propertyFields) {
-    properties[field] = randomUsageValue()
-  }
-
-  return properties
-}
-
-function parseJson(response) {
-  try {
-    return response.json()
-  } catch (_error) {
-    return null
-  }
-}
-
 function nextIdempotencyKey(eventSlug) {
   return `k6-async-${eventSlug}-${Date.now()}-${__VU}-${__ITER}-${randomInteger(100000, 999999)}`
-}
-
-function getFeatureSlug(entitlement) {
-  const directSlug = trimString(entitlement?.featureSlug)
-
-  if (directSlug) {
-    return directSlug
-  }
-
-  return trimString(entitlement?.featurePlanVersion?.feature?.slug)
-}
-
-function getMeterConfig(entitlement) {
-  const meterConfig = entitlement?.featurePlanVersion?.meterConfig
-
-  if (!meterConfig || typeof meterConfig !== "object") {
-    return null
-  }
-
-  const eventSlug = trimString(meterConfig.eventSlug)
-
-  if (!eventSlug) {
-    return null
-  }
-
-  return {
-    eventSlug,
-    aggregationMethod: trimString(meterConfig.aggregationMethod) || "count",
-    aggregationField: trimString(meterConfig.aggregationField),
-  }
-}
-
-function randomUsageValue() {
-  return randomInteger(1, 5)
-}
-
-function randomInteger(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min
-}
-
-function nonNegativeInteger(value, fallback) {
-  if (value === undefined || value === null || value === "") {
-    return fallback
-  }
-
-  const parsed = Number(value)
-
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    fail(`Expected a non-negative integer, received: ${value}`)
-  }
-
-  return parsed
-}
-
-function trimString(value) {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
-}
-
-function unique(values) {
-  return [...new Set(values)]
-}
-
-function normalizeBaseUrl(value) {
-  return value.endsWith("/") ? value.slice(0, -1) : value
-}
-
-function positiveInteger(value, fallback) {
-  const parsed = Number(value)
-
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback
-  }
-
-  return Math.floor(parsed)
 }

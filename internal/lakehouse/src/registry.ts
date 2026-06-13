@@ -1,6 +1,6 @@
 import type { LakehouseSource } from "./source"
 
-export const LAKEHOUSE_PARTITION_COLUMNS = ["project_id", "customer_id", "event_date"] as const
+export const LAKEHOUSE_PARTITION_COLUMNS = [] as const
 
 export type LakehouseFieldType =
   | "string"
@@ -69,7 +69,7 @@ export const lakehouseSourceSchemaRegistry = {
   events: {
     source: "events",
     firstVersion: 1,
-    currentVersion: 2,
+    currentVersion: 3,
     streamName: "lakehouse_events_stream",
     schemaFile: "events.json",
     sinkTable: "events",
@@ -83,7 +83,8 @@ export const lakehouseSourceSchemaRegistry = {
         required: true,
         addedInVersion: 1,
         defaultValue: null,
-        description: "UTC date partition key formatted as YYYY-MM-DD.",
+        description:
+          "UTC event date column for filters. Cloudflare Data Catalog partitioning is sink-managed ingestion time, not this business date.",
       },
       {
         name: "schema_version",
@@ -116,6 +117,54 @@ export const lakehouseSourceSchemaRegistry = {
         addedInVersion: 1,
         defaultValue: null,
         description: "Customer identifier.",
+      },
+      {
+        name: "workspace_id",
+        type: "string",
+        required: false,
+        addedInVersion: 3,
+        defaultValue: "",
+        description: "Workspace identifier that owned the API key used for ingestion.",
+      },
+      {
+        name: "environment",
+        type: "string",
+        required: false,
+        addedInVersion: 3,
+        defaultValue: "",
+        description: "Application environment that accepted the event.",
+      },
+      {
+        name: "api_key_id",
+        type: "string",
+        required: false,
+        addedInVersion: 3,
+        defaultValue: null,
+        description: "API key identifier that authorized the event.",
+      },
+      {
+        name: "source_type",
+        type: "string",
+        required: false,
+        addedInVersion: 3,
+        defaultValue: "unknown",
+        description: "Source type such as api_key, system, or unknown.",
+      },
+      {
+        name: "source_id",
+        type: "string",
+        required: false,
+        addedInVersion: 3,
+        defaultValue: "",
+        description: "Stable source identifier, usually the API key id.",
+      },
+      {
+        name: "source_name",
+        type: "string",
+        required: false,
+        addedInVersion: 3,
+        defaultValue: null,
+        description: "Optional source display name.",
       },
       {
         name: "request_id",
@@ -171,7 +220,7 @@ export const lakehouseSourceSchemaRegistry = {
         required: true,
         addedInVersion: 1,
         defaultValue: null,
-        description: "Ingestion lifecycle state: processed or rejected.",
+        description: "Ingestion lifecycle state: processed, rejected, or failed.",
       },
       {
         name: "rejection_reason",

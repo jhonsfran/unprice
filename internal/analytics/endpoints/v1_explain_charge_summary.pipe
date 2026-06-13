@@ -1,0 +1,122 @@
+TOKEN "web-apps" READ
+
+TAGS "billing,explainability,ai"
+
+NODE deduped_explain_charge_summary_node
+SQL >
+    %
+    SELECT
+      project_id,
+      customer_id,
+      customer_entitlement_id,
+      grant_id,
+      idempotency_key,
+      event_id,
+      feature_slug,
+      period_key,
+      {% if defined(period_key) %}
+        period_key AS scope_key,
+      {% else %}
+        concat('window:', toString({{ Int64(start) }}), ':', toString({{ Int64(end) }})) AS scope_key,
+      {% end %}
+      currency,
+      amount_scale,
+      timestamp,
+      created_at,
+      delta,
+      amount,
+      amount_after,
+      pricing_component_count
+    FROM unprice_entitlement_meter_facts
+    WHERE project_id = {{ String(project_id) }}
+      AND customer_id = {{ String(customer_id) }}
+      AND feature_slug = {{ String(feature_slug) }}
+      {% if defined(period_key) %}
+        AND period_key = {{ String(period_key) }}
+      {% end %}
+      {% if defined(start) and defined(end) %}
+        AND timestamp >= {{ Int64(start) }}
+        AND timestamp < {{ Int64(end) }}
+      {% end %}
+      {% if defined(customer_entitlement_id) %}
+        AND customer_entitlement_id = {{ String(customer_entitlement_id) }}
+      {% end %}
+    ORDER BY created_at DESC, event_id DESC
+    LIMIT 1 BY project_id, customer_id, customer_entitlement_id, period_key, feature_slug, grant_id, idempotency_key
+
+NODE explain_charge_summary_aggregates_node
+SQL >
+    %
+    SELECT
+      project_id,
+      customer_id,
+      feature_slug,
+      scope_key,
+      currency,
+      amount_scale,
+      count() AS event_count,
+      sum(delta) AS total_delta,
+      sum(amount) AS total_amount,
+      min(timestamp) AS first_event_at,
+      max(timestamp) AS last_event_at,
+      countIf(pricing_component_count > 1) AS multi_component_event_count
+    FROM deduped_explain_charge_summary_node
+    GROUP BY project_id, customer_id, feature_slug, scope_key, currency, amount_scale
+
+NODE explain_charge_latest_allocations_node
+SQL >
+    %
+    SELECT
+      project_id,
+      customer_id,
+      feature_slug,
+      scope_key,
+      currency,
+      amount_scale,
+      customer_entitlement_id,
+      grant_id,
+      argMax(amount_after, tuple(timestamp, created_at, event_id, idempotency_key)) AS latest_amount_after
+    FROM deduped_explain_charge_summary_node
+    GROUP BY project_id, customer_id, feature_slug, scope_key, currency, amount_scale, customer_entitlement_id, grant_id
+
+NODE explain_charge_latest_total_node
+SQL >
+    %
+    SELECT
+      project_id,
+      customer_id,
+      feature_slug,
+      scope_key,
+      currency,
+      amount_scale,
+      sum(latest_amount_after) AS latest_amount_after
+    FROM explain_charge_latest_allocations_node
+    GROUP BY project_id, customer_id, feature_slug, scope_key, currency, amount_scale
+
+NODE explain_charge_summary_node
+SQL >
+    %
+    SELECT
+      aggregates.project_id,
+      aggregates.customer_id,
+      aggregates.feature_slug,
+      aggregates.scope_key AS period_key,
+      aggregates.currency,
+      aggregates.amount_scale,
+      aggregates.event_count,
+      aggregates.total_delta,
+      aggregates.total_amount,
+      latest.latest_amount_after,
+      aggregates.first_event_at,
+      aggregates.last_event_at,
+      aggregates.multi_component_event_count
+    FROM explain_charge_summary_aggregates_node AS aggregates
+    INNER JOIN explain_charge_latest_total_node AS latest
+      ON aggregates.project_id = latest.project_id
+      AND aggregates.customer_id = latest.customer_id
+      AND aggregates.feature_slug = latest.feature_slug
+      AND aggregates.scope_key = latest.scope_key
+      AND aggregates.currency = latest.currency
+      AND aggregates.amount_scale = latest.amount_scale
+
+TYPE endpoint
