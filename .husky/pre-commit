@@ -16,4 +16,7 @@ cd internal/analytics
 TB_VERSION_WARNING=0 tb build
 cd ../../
 
+echo "Running react-doctor (errors only)"
+pnpm react-doctor --project nextjs --no-warnings --no-score
+
 echo "Pre-commit hook completed"

@@ -13,6 +13,10 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +52,13 @@ jobs:
           # fake database url
           DATABASE_URL: postgresql://postgresql:postgresql@localhost:5432/unprice
           NODE_ENV: test
+
+      - name: React Doctor (errors only)
+        uses: millionco/react-doctor@v2
+        with:
+          version: "0.4.0"
+          project: "nextjs"
+          blocking: "error"
 
   integration-tests:
     name: Services integration tests

@@ -361,6 +361,7 @@ export function UsageStats() {
   return (
     <Card className="overflow-hidden border-muted/60">
       <div
+        suppressHydrationWarning
         className={cn(
           "pointer-events-none h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent transition-opacity duration-300",
           isUsageFetching ? "opacity-100" : "opacity-0"

@@ -61,12 +61,14 @@ const OverviewStats = () => {
   return (
     <div className="relative min-h-[150px]">
       <div
+        suppressHydrationWarning
         className={cn(
           "pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/55 to-transparent transition-opacity duration-300",
           isFetching ? "opacity-100" : "opacity-0"
         )}
       />
       <div
+        suppressHydrationWarning
         className={cn(
           "transition-opacity duration-300 motion-reduce:transition-none",
           isFetching ? "opacity-90" : "opacity-100"

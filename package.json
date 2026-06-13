@@ -39,7 +39,7 @@
     "release": "pnpm build && pnpm changeset publish",
     "prepare": "husky",
     "preinstall": "npx only-allow pnpm",
-    "doctor": "npx react-doctor@latest"
+    "doctor": "react-doctor"
   },
   "dependencies": {
     "@biomejs/biome": "1.9.4",
@@ -52,6 +52,7 @@
     "husky": "^9.1.4",
     "knip": "^5.17.4",
     "lint-staged": "^15.2.9",
+    "react-doctor": "0.4.0",
     "turbo": "2.3.3",
     "typescript": "^5.3.3"
   },
