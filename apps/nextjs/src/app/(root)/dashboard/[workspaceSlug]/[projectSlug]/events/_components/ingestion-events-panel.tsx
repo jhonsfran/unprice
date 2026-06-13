@@ -369,16 +369,20 @@ export function IngestionEventsPanel() {
         onOpenChange={handleDetailsOpenChange}
         onReplay={handleReplay}
         isReplayQueued={
-          visibleDetailsEvent ? queuedReplayIds.has(visibleDetailsEvent.canonicalAuditId) : false
+          visibleDetailsEvent ? isReplayQueued(visibleDetailsEvent, queuedReplayIds) : false
         }
         isReplayPending={
           visibleDetailsEvent
-            ? pendingReplayIds.has(visibleDetailsEvent.canonicalAuditId) || replayMutation.isPending
+            ? isReplayQueued(visibleDetailsEvent, pendingReplayIds) || replayMutation.isPending
             : replayMutation.isPending
         }
       />
     </div>
   )
+}
+
+function isReplayQueued(row: IngestionEventRow, replayIds: ReadonlySet<string>): boolean {
+  return row.state === "failed" && row.replayable && replayIds.has(row.canonicalAuditId)
 }
 
 function readStoredReplayIds(storageKey: string): string[] {

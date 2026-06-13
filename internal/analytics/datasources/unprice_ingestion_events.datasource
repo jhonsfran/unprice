@@ -23,6 +23,7 @@ SCHEMA >
     `rejection_reason` LowCardinality(Nullable(String)) `json:$.rejection_reason`,
     `failure_stage` LowCardinality(Nullable(String)) `json:$.failure_stage`,
     `failure_reason` LowCardinality(Nullable(String)) `json:$.failure_reason`,
+    `failure_message` Nullable(String) `json:$.failure_message`,
     `replayable` Bool `json:$.replayable`,
     `payload_json` Nullable(String) `json:$.payload_json`,
     `r2_object_key` Nullable(String) `json:$.r2_object_key`,

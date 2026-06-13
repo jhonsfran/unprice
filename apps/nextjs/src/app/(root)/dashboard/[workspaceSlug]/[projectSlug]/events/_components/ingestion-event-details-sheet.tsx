@@ -6,7 +6,7 @@ import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@unprice/ui/sheet"
 import { Skeleton } from "@unprice/ui/skeleton"
-import { CheckCircle2, Loader2, RotateCcw } from "lucide-react"
+import { CheckCircle2, Loader2, RotateCcw, TriangleAlert } from "lucide-react"
 import type { ReactNode } from "react"
 import { formatDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
@@ -45,6 +45,8 @@ export function IngestionEventDetailsSheet({
     return null
   }
 
+  const issue = getIssueDetails(event, payload.data)
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="hide-scrollbar flex max-h-screen w-full flex-col overflow-y-auto md:w-1/2 lg:w-[760px]">
@@ -62,7 +64,7 @@ export function IngestionEventDetailsSheet({
             {hasReplayPayload ? (
               <Button
                 type="button"
-                variant="outline"
+                variant="primary"
                 size="sm"
                 disabled={isReplayPending || isReplayQueued}
                 className="shrink-0"
@@ -106,10 +108,25 @@ export function IngestionEventDetailsSheet({
           <section className="space-y-3">
             <SectionTitle>Outcome</SectionTitle>
             <div className="rounded-md border bg-muted/20 p-4">
+              {issue ? (
+                <div className="mb-4 flex gap-3 rounded-md border bg-background/70 p-3">
+                  <TriangleAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm">{issue.title}</p>
+                    <p className="mt-1 break-words font-mono text-muted-foreground text-xs">
+                      {issue.message}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
               <dl className="grid gap-3 text-sm sm:grid-cols-2">
                 <DetailTerm label="Rejection reason" value={event.rejectionReason ?? "none"} />
                 <DetailTerm label="Failure stage" value={event.failureStage ?? "none"} />
                 <DetailTerm label="Failure reason" value={event.failureReason ?? "none"} />
+                <DetailTerm
+                  label="Failure message"
+                  value={event.failureMessage ?? payload.data?.failureMessage ?? "none"}
+                />
                 <DetailTerm label="Replayable" value={event.replayable ? "yes" : "no"} />
               </dl>
             </div>
@@ -145,6 +162,32 @@ function DetailTerm({ label, value }: { label: string; value: string }) {
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return <h3 className="font-medium text-sm">{children}</h3>
+}
+
+function getIssueDetails(
+  event: IngestionEventRow,
+  payload: PayloadQueryData | undefined
+): { message: string; title: string } | null {
+  if (event.state === "rejected") {
+    return {
+      title: "Rejected",
+      message: event.rejectionReason ?? "No rejection reason was recorded.",
+    }
+  }
+
+  if (event.state === "failed") {
+    return {
+      title: "Pipeline failure",
+      message:
+        event.failureMessage ??
+        payload?.failureMessage ??
+        event.failureReason ??
+        event.failureStage ??
+        "No failure detail was recorded.",
+    }
+  }
+
+  return null
 }
 
 function PayloadPanel({
@@ -229,6 +272,7 @@ function formatJson(rawJson: string): string {
 }
 
 type PayloadQueryData = {
+  failureMessage: string | null
   payloadJson: string
 } | null
 

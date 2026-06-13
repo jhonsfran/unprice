@@ -11,6 +11,7 @@ SQL >
       customer_id,
       failure_stage,
       failure_reason,
+      failure_message,
       payload_json,
       r2_object_key,
       handled_at
@@ -22,6 +23,7 @@ SQL >
         state,
         failure_stage,
         failure_reason,
+        failure_message,
         replayable,
         payload_json,
         r2_object_key,

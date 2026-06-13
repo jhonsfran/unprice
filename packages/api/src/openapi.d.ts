@@ -5650,6 +5650,7 @@ export interface operations {
               rejectionReason: string | null
               failureStage: string | null
               failureReason: string | null
+              failureMessage: string | null
               replayable: boolean
               r2ObjectKey: string | null
               timestamp: number

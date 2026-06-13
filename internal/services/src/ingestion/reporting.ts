@@ -23,6 +23,7 @@ export const ingestionReportingAuditRecordSchema = z.object({
   rejectionReason: z.string().optional(),
   failureStage: z.enum(INGESTION_FAILURE_STAGES).nullable(),
   failureReason: z.string().nullable(),
+  failureMessage: z.string().nullable(),
   replayable: z.boolean(),
   payloadJson: z.string().nullable(),
   r2ObjectKey: z.string().nullable(),

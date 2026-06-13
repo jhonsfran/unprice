@@ -37,6 +37,7 @@ export type IngestionOutcome =
       state: "rejected"
     }
   | {
+      failureMessage?: string
       failureReason: string
       failureStage: IngestionFailureStage
       replayable: true

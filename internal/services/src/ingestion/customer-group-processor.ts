@@ -162,7 +162,8 @@ export class IngestionCustomerGroupProcessor {
         ]
       }
 
-      this.logger.error(toError(error), {
+      const failedError = toError(error)
+      this.logger.error(failedError, {
         projectId,
         customerId,
         failureReason: "raw_ingestion_queue_processing_failed",
@@ -173,6 +174,7 @@ export class IngestionCustomerGroupProcessor {
       const failedOutcomes = this.messageOutcomes.buildFailedOutcomes(unfinalizedMessages, {
         failureStage: "rating_fact",
         failureReason: "raw_ingestion_queue_processing_failed",
+        failureMessage: failedError.message,
       })
 
       try {

@@ -116,6 +116,7 @@ export class IngestionMessageOutcomes {
   public buildFailedOutcomes(
     messages: IngestionQueueMessage[],
     params: {
+      failureMessage?: string
       failureReason: string
       failureStage: IngestionFailureStage
     }
@@ -124,6 +125,7 @@ export class IngestionMessageOutcomes {
       message,
       outcome: {
         state: "failed",
+        failureMessage: params.failureMessage,
         failureStage: params.failureStage,
         failureReason: params.failureReason,
         replayable: true,

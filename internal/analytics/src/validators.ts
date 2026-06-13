@@ -208,6 +208,7 @@ export const ingestionEventSchemaV1 = z.object({
     .nullable()
     .optional(),
   failure_reason: z.string().nullable().optional(),
+  failure_message: z.string().nullable().optional(),
   replayable: z.boolean().default(false),
   payload_json: z.string().nullable().optional(),
   r2_object_key: z.string().nullable().optional(),
@@ -433,6 +434,7 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
     rejection_reason: true,
     failure_stage: true,
     failure_reason: true,
+    failure_message: true,
     replayable: true,
     r2_object_key: true,
     timestamp: true,
@@ -441,6 +443,7 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
   })
   .extend({
     rejection_reason: z.string().nullable(),
+    failure_message: z.string().nullable(),
   })
 
 export const ingestionReplayPayloadQuerySchema = z.object({
@@ -454,6 +457,7 @@ export const ingestionReplayPayloadRowSchema = z.object({
   customer_id: z.string(),
   failure_stage: z.string().nullable(),
   failure_reason: z.string().nullable(),
+  failure_message: z.string().nullable(),
   payload_json: z.string(),
   r2_object_key: z.string().nullable().optional(),
   handled_at: z.number().int(),

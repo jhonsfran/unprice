@@ -61,6 +61,10 @@ function isReplayableFailedRow(
   return row.state === "failed" && row.replayable && !queuedReplayIds.has(row.canonicalAuditId)
 }
 
+function isReplayBlockedFailedRow(row: IngestionEventRow, replayIds: ReadonlySet<string>): boolean {
+  return row.state === "failed" && row.replayable && replayIds.has(row.canonicalAuditId)
+}
+
 export function buildIngestionEventsColumns(params: {
   workspaceSlug: string
   projectSlug: string
@@ -178,8 +182,8 @@ export function buildIngestionEventsColumns(params: {
       accessorKey: "sourceType",
       header: "Source",
       cell: ({ row }) => {
-        const isReplayQueued = params.queuedReplayIds.has(row.original.canonicalAuditId)
-        const isReplayPending = params.pendingReplayIds.has(row.original.canonicalAuditId)
+        const isReplayQueued = isReplayBlockedFailedRow(row.original, params.queuedReplayIds)
+        const isReplayPending = isReplayBlockedFailedRow(row.original, params.pendingReplayIds)
         const canReplay = isReplayableFailedRow(row.original, params.blockedReplayIds)
 
         return (

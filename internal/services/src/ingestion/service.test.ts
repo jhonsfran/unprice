@@ -973,6 +973,7 @@ describe("IngestionService entitlement routing", () => {
       status: "failed",
       failureStage: "rating_fact",
       failureReason: "raw_ingestion_queue_processing_failed",
+      failureMessage: "keys window crashed",
       replayable: true,
     })
     expect(failedEnvelope.auditRecords[0]?.payloadJson).toEqual(JSON.stringify(group.messages[0]))
@@ -1722,6 +1723,7 @@ function createReportingAuditRecord(
     status: "processed",
     failureStage: null,
     failureReason: null,
+    failureMessage: null,
     replayable: false,
     payloadJson: null,
     r2ObjectKey: null,

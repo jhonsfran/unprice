@@ -64,6 +64,7 @@ describe("IngestionReportingConsumer", () => {
         rejection_reason: null,
         failure_stage: null,
         failure_reason: null,
+        failure_message: null,
         replayable: false,
         payload_json: null,
         r2_object_key: null,
@@ -139,6 +140,7 @@ describe("IngestionReportingConsumer", () => {
       status: "failed",
       failureStage: "rating_fact",
       failureReason: "raw_ingestion_queue_processing_failed",
+      failureMessage: "EntitlementWindowBatchReservationBootstrapRequired",
       replayable: true,
       payloadJson,
       r2ObjectKey: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
@@ -148,6 +150,7 @@ describe("IngestionReportingConsumer", () => {
         timestamp: TEST_NOW,
         failure_stage: "rating_fact",
         failure_reason: "raw_ingestion_queue_processing_failed",
+        failure_message: "EntitlementWindowBatchReservationBootstrapRequired",
         replayable: true,
         payload_json: payloadJson,
         r2_object_key: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
@@ -183,6 +186,7 @@ describe("IngestionReportingConsumer", () => {
         rejection_reason: null,
         failure_stage: "rating_fact",
         failure_reason: "raw_ingestion_queue_processing_failed",
+        failure_message: "EntitlementWindowBatchReservationBootstrapRequired",
         replayable: true,
         payload_json: payloadJson,
         r2_object_key: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
@@ -568,6 +572,7 @@ function createAuditRecord(
     status: "processed",
     failureStage: null,
     failureReason: null,
+    failureMessage: null,
     replayable: false,
     payloadJson: null,
     r2ObjectKey: null,
@@ -594,6 +599,7 @@ function createAuditRecord(
       state: "processed",
       failure_stage: null,
       failure_reason: null,
+      failure_message: null,
       replayable: false,
       payload_json: null,
       r2_object_key: null,
@@ -606,6 +612,7 @@ function createAuditRecord(
 }
 
 function createAuditPayloadJson(input: {
+  failure_message?: string | null
   failure_reason?: string | null
   failure_stage?: "raw_ingestion" | "rating_fact" | "reporting_delivery" | null
   id: string
@@ -636,6 +643,7 @@ function createAuditPayloadJson(input: {
     state: "processed",
     failure_stage: input.failure_stage ?? null,
     failure_reason: input.failure_reason ?? null,
+    failure_message: input.failure_message ?? null,
     replayable: input.replayable ?? false,
     payload_json: input.payload_json ?? null,
     r2_object_key: input.r2_object_key ?? null,
@@ -666,6 +674,7 @@ function createIngestionEvent(
     rejection_reason: null,
     failure_stage: null,
     failure_reason: null,
+    failure_message: null,
     replayable: false,
     payload_json: null,
     r2_object_key: null,
