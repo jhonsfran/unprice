@@ -1,10 +1,8 @@
 import { DurableObject } from "cloudflare:workers"
 import { createConnection } from "@unprice/db"
 import type {
-  ConfigFeatureVersionType,
   Currency,
   OverageStrategy,
-  ResetConfig,
 } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import { LEDGER_SCALE, formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
@@ -16,7 +14,6 @@ import {
   type Fact,
   type GrantConsumptionState,
   LATE_EVENT_GRACE_MS,
-  type MeterConfig,
   computeGrantPeriodBucket,
   computeMaxMarginalPriceMinor,
   computeUsagePriceDeltaExplanation,
@@ -41,7 +38,7 @@ import {
   computeSyncGrowRefillAmount,
   updateSpendVelocity,
 } from "@unprice/services/wallet/reservation-sizing"
-import { asc, desc, eq, inArray, lt } from "drizzle-orm"
+import { desc, eq, inArray } from "drizzle-orm"
 import { type DrizzleSqliteDODatabase, drizzle } from "drizzle-orm/durable-sqlite"
 import { migrate } from "drizzle-orm/durable-sqlite/migrator"
 import type { Env } from "~/env"
@@ -56,17 +53,15 @@ import {
   idempotencyEntryToApplyResult,
   planWalletReservationSpend,
 } from "./batch-apply-helpers"
+import { EntitlementWindowStore, replaceGrantConsumptionState } from "./entitlement-window-store"
 import {
   type OptimizedBatchDraft,
   type OptimizedBatchWriteMetrics,
   createOptimizedBatchDraft,
 } from "./optimized-batch-draft"
 import {
-  APPLY_BATCH_SIZE_LIMIT,
   FLUSH_INTERVAL_MS,
-  IDEMPOTENCY_CLEANUP_BATCH_SIZE,
   IDEMPOTENCY_CLEANUP_INTERVAL_MS,
-  WALLET_RESERVATION_ROW_ID,
 } from "./constants"
 import {
   type ActiveGrantInput,
@@ -103,16 +98,10 @@ import {
   type WalletReservationSnapshot,
   applyBatchInputSchema,
   applyInputSchema,
-  batchIdempotencyEntryListSchema,
-  compactGrantConsumptionStateListSchema,
   createApplyBatchMetrics,
   enforcementStateInputSchema,
 } from "./contracts"
 import {
-  entitlementConfigTable,
-  entitlementPeriodUsageTable,
-  grantsTable,
-  idempotencyKeyBatchesTable,
   meterStateTable,
   schema,
   walletReservationTable,
@@ -126,9 +115,7 @@ import {
 import { InMemoryMeterStorageAdapter, type MeterStateDraft } from "./meter-state-adapter"
 import {
   inactivityThresholdMs,
-  jsonEquals,
   maxFlushIntervalMs,
-  minNullableExpiry,
   unique,
 } from "./utils"
 
@@ -423,13 +410,13 @@ export class EntitlementWindowDO extends DurableObject {
   private readonly logger: Logger
   private readonly ready: Promise<void>
   private readonly runtimeEnv: Env
+  private readonly store: EntitlementWindowStore
   // Lazily constructed on the first flush+refill call so a DO that never
   // opens a reservation never opens a Postgres connection.
   private walletService: WalletService | null = null
   private nextAlarmAt: number | null = null
   private lastIdempotencyCleanupAt: number | null = null
   private enforcementStateCache: EnforcementStateCache | null = null
-  private batchIdempotencyResults: Map<string, BatchIdempotencyEntry> | null = null
   // In-memory single-flight for lazy reservation bootstrap. It only dedupes
   // external wallet I/O while this DO instance is alive; the reservation row
   // remains the durable source of truth.
@@ -455,9 +442,12 @@ export class EntitlementWindowDO extends DurableObject {
     })
 
     this.db = drizzle(this.ctx.storage, { schema, logger: false })
+    this.store = new EntitlementWindowStore(this.db, this.logger, () =>
+      this.invalidateEnforcementStateCache()
+    )
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
       await migrate(this.db, migrations)
-      this.hydrateBatchIdempotencyResults()
+      this.store.hydrateBatchIdempotencyResults()
       this.nextAlarmAt = await this.ctx.storage.getAlarm()
 
       // Crash recovery. If the DO was evicted mid-flush, the SQLite row still
@@ -467,7 +457,7 @@ export class EntitlementWindowDO extends DurableObject {
       // call after a successful commit is a no-op. Newer events accepted
       // after the pending seq was created must wait for the next seq, so
       // replays use the persisted pending amount and quantity.
-      const window = this.readWalletReservation(this.db)
+      const window = this.store.readWalletReservation(this.db)
       if (
         window?.reservationId &&
         !window.recoveryRequired &&
@@ -669,36 +659,36 @@ export class EntitlementWindowDO extends DurableObject {
     idempotencyKeys: string[]
   ): OptimizedBatchSetup {
     return this.db.transaction((tx) => {
-      this.syncEntitlementConfig(tx, {
+      this.store.syncEntitlementConfig(tx, {
         entitlement: input.entitlement,
         createdAt,
       })
-      this.syncGrants(tx, {
+      this.store.syncGrants(tx, {
         customerEntitlementId: input.entitlement.customerEntitlementId,
         grants: input.grants,
         createdAt,
       })
 
-      const entitlement = this.readEntitlementConfig(tx)
+      const entitlement = this.store.readEntitlementConfig(tx)
       if (!entitlement) {
         throw new Error("No entitlement config found after sync")
       }
 
-      const grants = this.readGrants(tx)
+      const grants = this.store.readGrants(tx)
       const meter = resolveMeterIdentity(entitlement)
 
       return {
-        cachedResults: this.lookupCachedIdempotencyResults(idempotencyKeys),
+        cachedResults: this.store.lookupCachedIdempotencyResults(idempotencyKeys),
         entitlement,
-        grantStates: this.readGrantStatesForBatch(
+        grantStates: this.store.readGrantStatesForBatch(
           tx,
           grants,
           input.events.map((event) => event.timestamp)
         ),
         grants,
         meter,
-        meterState: this.readMeterStateDraft(tx, meter.key, createdAt),
-        wallet: this.readWalletReservation(tx),
+        meterState: this.store.readMeterStateDraft(tx, meter.key, createdAt),
+        wallet: this.store.readWalletReservation(tx),
       }
     })
   }
@@ -1030,7 +1020,7 @@ export class EntitlementWindowDO extends DurableObject {
       return true
     }
 
-    state.wallet = this.readWalletReservation(this.db)
+    state.wallet = this.store.readWalletReservation(this.db)
     return false
   }
 
@@ -1120,7 +1110,7 @@ export class EntitlementWindowDO extends DurableObject {
           activeGrants,
           facts: pendingFacts,
           overageStrategy: setup.entitlement.overageStrategy,
-          states: this.selectGrantStatesForActiveGrants(
+          states: this.store.selectGrantStatesForActiveGrants(
             activeGrants,
             state.grantStates,
             event.timestamp
@@ -1262,7 +1252,7 @@ export class EntitlementWindowDO extends DurableObject {
     // synchronous DO SQLite transaction. No await belongs inside this block.
     this.db.transaction((tx) => {
       if (params.meterState.dirty) {
-        this.ensureMeterState(tx, {
+        this.store.ensureMeterState(tx, {
           meterKey: params.meter.key,
           createdAt: params.meterState.createdAt,
         })
@@ -1275,16 +1265,9 @@ export class EntitlementWindowDO extends DurableObject {
           .run()
       }
 
-      this.writeGrantConsumptions(tx, params.touchedGrantStates.values())
+      this.store.writeGrantConsumptions(tx, params.touchedGrantStates.values())
 
-      if (params.idempotencyEntries.length > 0) {
-        tx.insert(idempotencyKeyBatchesTable)
-          .values({
-            createdAt: params.createdAt,
-            entries: JSON.stringify(params.idempotencyEntries),
-          })
-          .run()
-      }
+      this.store.writeBatchIdempotencyResults(tx, params.idempotencyEntries)
 
       if (params.walletDirty && params.wallet) {
         tx.update(walletReservationTable)
@@ -1307,7 +1290,7 @@ export class EntitlementWindowDO extends DurableObject {
       }
     })
 
-    this.recordBatchIdempotencyResults(params.idempotencyEntries)
+    this.store.recordBatchIdempotencyResults(params.idempotencyEntries)
     this.invalidateEnforcementStateCache()
     this.schedulePostCommitAlarm()
 
@@ -1417,7 +1400,7 @@ export class EntitlementWindowDO extends DurableObject {
     const { idempotencyKey, metrics, wideEvent } = params
     // Idempotency short-circuit before any wallet I/O. A retried event with a
     // cached result must not re-call wallet.createReservation.
-    const cachedResult = this.lookupCachedIdempotencyResult(idempotencyKey)
+    const cachedResult = this.store.lookupCachedIdempotencyResult(idempotencyKey)
     if (!cachedResult) {
       wideEvent.idempotent_replay = false
       return null
@@ -1490,7 +1473,7 @@ export class EntitlementWindowDO extends DurableObject {
     // Out-of-tx because Postgres ↔ SQLite can't share a single transaction.
     // A small in-memory single-flight prevents duplicate wallet calls while
     // this DO instance is awaiting external I/O.
-    const preWindow = this.readWalletReservation(this.db)
+    const preWindow = this.store.readWalletReservation(this.db)
     const usesWalletReservation = creditLinePolicy !== "uncapped"
     const needsBootstrap = usesWalletReservation && (!preWindow || preWindow.reservationId === null)
     wideEvent.bootstrap_attempted = needsBootstrap
@@ -1530,16 +1513,16 @@ export class EntitlementWindowDO extends DurableObject {
 
   private prepareSingleApplyContext(input: ApplyInput, createdAt: number): SingleApplyContext {
     const activeGrants = this.db.transaction((tx) => {
-      this.syncEntitlementConfig(tx, {
+      this.store.syncEntitlementConfig(tx, {
         entitlement: input.entitlement,
         createdAt,
       })
-      this.syncGrants(tx, {
+      this.store.syncGrants(tx, {
         customerEntitlementId: input.entitlement.customerEntitlementId,
         grants: input.grants,
         createdAt,
       })
-      return resolveActiveGrants(this.readGrants(tx), input.event.timestamp)
+      return resolveActiveGrants(this.store.readGrants(tx), input.event.timestamp)
     })
 
     if (activeGrants.length === 0) {
@@ -1549,7 +1532,7 @@ export class EntitlementWindowDO extends DurableObject {
       throw new Error("No active grants found for event timestamp")
     }
 
-    const entitlement = this.readEntitlementConfig(this.db)
+    const entitlement = this.store.readEntitlementConfig(this.db)
     if (!entitlement) {
       throw new Error("No entitlement config found after sync")
     }
@@ -1721,7 +1704,7 @@ export class EntitlementWindowDO extends DurableObject {
         })
 
         if (txResult.idempotencyEntry) {
-          this.recordBatchIdempotencyResults([txResult.idempotencyEntry])
+          this.store.recordBatchIdempotencyResults([txResult.idempotencyEntry])
           this.schedulePostCommitAlarm()
         }
 
@@ -1850,12 +1833,12 @@ export class EntitlementWindowDO extends DurableObject {
     } = params
 
     return this.db.transaction((tx) => {
-      const existingBatchEntry = this.getBatchIdempotencyResults().get(idempotencyKey)
-      if (existingBatchEntry) {
+      const cachedResult = this.store.lookupCachedIdempotencyResult(idempotencyKey)
+      if (cachedResult) {
         metrics.duplicateCount = 1
         return {
           idempotencyEntry: null,
-          result: idempotencyEntryToApplyResult(existingBatchEntry),
+          result: cachedResult,
         }
       }
 
@@ -1979,7 +1962,7 @@ export class EntitlementWindowDO extends DurableObject {
     const window = this.refreshWalletReservationInvoiceContextIfMissing(
       tx,
       input,
-      this.readWalletReservation(tx)
+      this.store.readWalletReservation(tx)
     )
     if (!usesWalletReservation || !window?.reservationId || pricedFacts.length === 0) {
       return { lastEventAtStamped: false, window }
@@ -2034,7 +2017,7 @@ export class EntitlementWindowDO extends DurableObject {
   }): { facts: Fact[]; meterState: MeterStateDraft } {
     const { activeGrants, createdAt, entitlement, input, meter, metrics, overageStrategy, tx } =
       params
-    const meterState = this.readMeterStateDraft(tx, meter.key, createdAt)
+    const meterState = this.store.readMeterStateDraft(tx, meter.key, createdAt)
     const adapter = new InMemoryMeterStorageAdapter(meterState)
     // The engine persists only raw aggregation state through its adapter.
     // Entitlement usage is written below into compact period state.
@@ -2053,7 +2036,7 @@ export class EntitlementWindowDO extends DurableObject {
           activeGrants,
           facts: pendingFacts,
           overageStrategy,
-          states: this.readGrantStatesForActiveGrants(tx, activeGrants, input.event.timestamp),
+          states: this.store.readGrantStatesForActiveGrants(tx, activeGrants, input.event.timestamp),
           entitlement,
           timestamp: input.event.timestamp,
         })
@@ -2087,7 +2070,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     metrics.meterStateWriteCount = meterState.exists ? 1 : 2
-    this.ensureMeterState(tx, {
+    this.store.ensureMeterState(tx, {
       meterKey: meter.key,
       createdAt: meterState.createdAt,
     })
@@ -2118,7 +2101,7 @@ export class EntitlementWindowDO extends DurableObject {
       denyMessage: null,
       meterFacts,
     }
-    this.writeBatchIdempotencyResults(tx, [idempotencyEntry])
+    this.store.writeBatchIdempotencyResults(tx, [idempotencyEntry])
     metrics.idempotencyInsertCount = 1
     return idempotencyEntry
   }
@@ -2268,7 +2251,7 @@ export class EntitlementWindowDO extends DurableObject {
   public async getStatus(): Promise<EntitlementWindowStatus> {
     await this.ready
 
-    const window = this.readWalletReservation(this.db)
+    const window = this.store.readWalletReservation(this.db)
 
     return {
       durableObjectId: this.ctx.id.toString(),
@@ -2410,7 +2393,7 @@ export class EntitlementWindowDO extends DurableObject {
       tinybirdFlushFailed,
       wideEvent,
     } = params
-    const lifecycleEndAt = this.readLifecycleEndAt()
+    const lifecycleEndAt = this.store.readLifecycleEndAt()
     wideEvent.lifecycle_end_at = lifecycleEndAt
 
     if (!lifecycleEndAt) {
@@ -2467,7 +2450,7 @@ export class EntitlementWindowDO extends DurableObject {
     // request. A DO without a reservation (or one marked
     // `recoveryRequired`) skips the flush — there's nothing to close out
     // or the last attempt failed terminally and an operator has to look.
-    const window = this.readWalletReservation(this.db)
+    const window = this.store.readWalletReservation(this.db)
 
     wideEvent.reservation_id = window?.reservationId ?? null
     wideEvent.recovery_required = window?.recoveryRequired ?? false
@@ -2616,7 +2599,7 @@ export class EntitlementWindowDO extends DurableObject {
       return 0
     }
 
-    const staleIdempotencyCount = this.cleanupStaleIdempotencyKeys(now)
+    const staleIdempotencyCount = this.store.cleanupStaleIdempotencyKeys(now)
     this.lastIdempotencyCleanupAt = now
     wideEvent.idempotency_next_cleanup_at = now + IDEMPOTENCY_CLEANUP_INTERVAL_MS
     return staleIdempotencyCount
@@ -2628,7 +2611,7 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent: Record<string, unknown>
   }): Promise<boolean> {
     const { flushIntervalMs, now, wideEvent } = params
-    const postFlushWindow = this.readWalletReservation(this.db)
+    const postFlushWindow = this.store.readWalletReservation(this.db)
     if (
       !postFlushWindow?.reservationId ||
       postFlushWindow.recoveryRequired ||
@@ -2696,7 +2679,7 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent: Record<string, unknown>
   }): Promise<void> {
     const { now, originalWindow, tinybirdFlushFailed, wideEvent } = params
-    const latestWindow = this.readWalletReservation(this.db)
+    const latestWindow = this.store.readWalletReservation(this.db)
     const latestOutboxCount = 0
     wideEvent.outbox_remaining = latestOutboxCount
     wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, latestOutboxCount)
@@ -2753,7 +2736,7 @@ export class EntitlementWindowDO extends DurableObject {
       tinybirdFlushFailed,
       wideEvent,
     } = params
-    const latestWindow = this.readWalletReservation(this.db)
+    const latestWindow = this.store.readWalletReservation(this.db)
     wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, remainingOutboxCount)
     wideEvent.self_destruct_due = true
     wideEvent.pending_wallet_flush = this.hasPendingWalletFlush(latestWindow)
@@ -2807,7 +2790,7 @@ export class EntitlementWindowDO extends DurableObject {
     // Pick the soonest among: pending wallet recheck, time-based flush
     // deadline, reservation close deadlines, and self-destruct. Re-read the
     // window because the time-flush may have just updated `lastFlushedAt`.
-    const finalWindow = this.readWalletReservation(this.db)
+    const finalWindow = this.store.readWalletReservation(this.db)
     const candidates: number[] = []
     const pushFutureCandidate = (timestamp: number | null) => {
       if (timestamp !== null && Number.isFinite(timestamp) && timestamp > now) {
@@ -2893,7 +2876,7 @@ export class EntitlementWindowDO extends DurableObject {
     input: FlushReservationForInvoicingInput
   ): Promise<FlushReservationForInvoicingResult> {
     const startTime = Date.now()
-    const window = this.readWalletReservation(this.db)
+    const window = this.store.readWalletReservation(this.db)
     const wideEvent: Record<string, unknown> = {
       operation: "flush_reservation_for_invoicing",
       statement_key: input.statementKey,
@@ -2970,7 +2953,7 @@ export class EntitlementWindowDO extends DurableObject {
         effectiveAt: Date.now(),
       })
 
-      const after = this.readWalletReservation(this.db)
+      const after = this.store.readWalletReservation(this.db)
       if (after?.pendingFlushSeq !== null || after?.flushSeq !== flushSeq) {
         wideEvent.outcome = "wallet_error"
         return {
@@ -3028,7 +3011,7 @@ export class EntitlementWindowDO extends DurableObject {
     options: CloseReservationOptions
   ): Promise<CloseReservationResult> {
     const startTime = Date.now()
-    const window = this.readWalletReservation(this.db)
+    const window = this.store.readWalletReservation(this.db)
     const wideEvent: Record<string, unknown> = {
       operation: "close_reservation",
       close_reason: options.closeReason,
@@ -3509,72 +3492,6 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  private ensureMeterState(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    params: {
-      meterKey: string
-      createdAt: number
-    }
-  ): void {
-    tx.insert(meterStateTable)
-      .values({
-        meterKey: params.meterKey,
-        usage: 0,
-        updatedAt: null,
-        createdAt: params.createdAt,
-      })
-      .onConflictDoNothing({ target: meterStateTable.meterKey })
-      .run()
-  }
-
-  private ensureWalletReservation(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    params: {
-      projectId: string
-      customerId: string
-      currency: string
-      reservationEndAt: number
-      billingPeriodId?: string | null
-      cycleEndAt?: number | null
-      cycleStartAt?: number | null
-      featurePlanVersionItemId?: string | null
-      featureSlug?: string | null
-      statementKey?: string | null
-    }
-  ): void {
-    tx.insert(walletReservationTable)
-      .values({
-        id: WALLET_RESERVATION_ROW_ID,
-        projectId: params.projectId,
-        customerId: params.customerId,
-        currency: params.currency,
-        reservationEndAt: params.reservationEndAt,
-        billingPeriodId: params.billingPeriodId ?? null,
-        cycleEndAt: params.cycleEndAt ?? null,
-        cycleStartAt: params.cycleStartAt ?? null,
-        featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
-        featureSlug: params.featureSlug ?? null,
-        statementKey: params.statementKey ?? null,
-      })
-      .onConflictDoNothing({ target: walletReservationTable.id })
-      .run()
-
-    tx.update(walletReservationTable)
-      .set({
-        projectId: params.projectId,
-        customerId: params.customerId,
-        currency: params.currency,
-        reservationEndAt: params.reservationEndAt,
-        billingPeriodId: params.billingPeriodId ?? null,
-        cycleEndAt: params.cycleEndAt ?? null,
-        cycleStartAt: params.cycleStartAt ?? null,
-        featurePlanVersionItemId: params.featurePlanVersionItemId ?? null,
-        featureSlug: params.featureSlug ?? null,
-        statementKey: params.statementKey ?? null,
-      })
-      .run()
-  }
-
   private resolveTotalGrantUnits(grants: ActiveGrantInput[]): number | null {
     if (grants.some((grant) => grant.allowanceUnits === null)) {
       return null
@@ -3626,348 +3543,6 @@ export class EntitlementWindowDO extends DurableObject {
     return null
   }
 
-  private syncEntitlementConfig(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    params: {
-      createdAt: number
-      entitlement: EntitlementConfigInput
-    }
-  ): void {
-    const existing = tx
-      .select({
-        customerEntitlementId: entitlementConfigTable.customerEntitlementId,
-        projectId: entitlementConfigTable.projectId,
-        customerId: entitlementConfigTable.customerId,
-        effectiveAt: entitlementConfigTable.effectiveAt,
-        expiresAt: entitlementConfigTable.expiresAt,
-        featureConfig: entitlementConfigTable.featureConfig,
-        featurePlanVersionId: entitlementConfigTable.featurePlanVersionId,
-        featureSlug: entitlementConfigTable.featureSlug,
-        meterConfig: entitlementConfigTable.meterConfig,
-        overageStrategy: entitlementConfigTable.overageStrategy,
-        resetConfig: entitlementConfigTable.resetConfig,
-      })
-      .from(entitlementConfigTable)
-      .where(
-        eq(entitlementConfigTable.customerEntitlementId, params.entitlement.customerEntitlementId)
-      )
-      .get()
-
-    const values = {
-      customerEntitlementId: params.entitlement.customerEntitlementId,
-      projectId: params.entitlement.projectId,
-      customerId: params.entitlement.customerId,
-      effectiveAt: params.entitlement.effectiveAt,
-      expiresAt: params.entitlement.expiresAt,
-      featureConfig: params.entitlement.featureConfig,
-      featurePlanVersionId: params.entitlement.featurePlanVersionId,
-      featureSlug: params.entitlement.featureSlug,
-      meterConfig: params.entitlement.meterConfig,
-      overageStrategy: params.entitlement.overageStrategy,
-      resetConfig: params.entitlement.resetConfig ?? null,
-      updatedAt: params.createdAt,
-    }
-
-    if (existing) {
-      this.assertImmutableEntitlementConfig(existing, params.entitlement)
-
-      const nextExpiresAt = minNullableExpiry(existing.expiresAt ?? null, values.expiresAt)
-      if (nextExpiresAt !== (existing.expiresAt ?? null)) {
-        tx.update(entitlementConfigTable)
-          .set({
-            expiresAt: nextExpiresAt,
-            updatedAt: params.createdAt,
-          })
-          .where(
-            eq(
-              entitlementConfigTable.customerEntitlementId,
-              params.entitlement.customerEntitlementId
-            )
-          )
-          .run()
-        this.invalidateEnforcementStateCache()
-      }
-      return
-    }
-
-    tx.insert(entitlementConfigTable)
-      .values({
-        ...values,
-        addedAt: params.createdAt,
-      })
-      .run()
-    this.invalidateEnforcementStateCache()
-  }
-
-  private assertImmutableEntitlementConfig(
-    existing: {
-      customerEntitlementId: string
-      projectId: string
-      customerId: string
-      effectiveAt: number
-      featureConfig: ConfigFeatureVersionType
-      featurePlanVersionId: string
-      featureSlug: string
-      meterConfig: MeterConfig
-      overageStrategy: OverageStrategy
-      resetConfig: ResetConfig | null
-    },
-    incoming: EntitlementConfigInput
-  ): void {
-    const mismatches: string[] = []
-
-    if (existing.customerEntitlementId !== incoming.customerEntitlementId) {
-      mismatches.push("customerEntitlementId")
-    }
-    if (existing.projectId !== incoming.projectId) mismatches.push("projectId")
-    if (existing.customerId !== incoming.customerId) mismatches.push("customerId")
-    if (existing.effectiveAt !== incoming.effectiveAt) mismatches.push("effectiveAt")
-    if (existing.featurePlanVersionId !== incoming.featurePlanVersionId) {
-      mismatches.push("featurePlanVersionId")
-    }
-    if (existing.featureSlug !== incoming.featureSlug) mismatches.push("featureSlug")
-    if (existing.overageStrategy !== incoming.overageStrategy) mismatches.push("overageStrategy")
-    if (!jsonEquals(existing.featureConfig, incoming.featureConfig)) {
-      mismatches.push("featureConfig")
-    }
-    if (!jsonEquals(existing.meterConfig, incoming.meterConfig)) {
-      mismatches.push("meterConfig")
-    }
-    if (!jsonEquals(existing.resetConfig ?? null, incoming.resetConfig ?? null)) {
-      mismatches.push("resetConfig")
-    }
-
-    if (mismatches.length > 0) {
-      throw new Error(
-        `Immutable entitlement config changed for ${incoming.customerEntitlementId}: ${mismatches.join(", ")}`
-      )
-    }
-  }
-
-  private readEntitlementConfig(
-    tx: DrizzleSqliteDODatabase<typeof schema>
-  ): EntitlementConfigInput | null {
-    const row = tx
-      .select({
-        customerEntitlementId: entitlementConfigTable.customerEntitlementId,
-        projectId: entitlementConfigTable.projectId,
-        customerId: entitlementConfigTable.customerId,
-        effectiveAt: entitlementConfigTable.effectiveAt,
-        expiresAt: entitlementConfigTable.expiresAt,
-        featureConfig: entitlementConfigTable.featureConfig,
-        featurePlanVersionId: entitlementConfigTable.featurePlanVersionId,
-        featureSlug: entitlementConfigTable.featureSlug,
-        meterConfig: entitlementConfigTable.meterConfig,
-        overageStrategy: entitlementConfigTable.overageStrategy,
-        resetConfig: entitlementConfigTable.resetConfig,
-      })
-      .from(entitlementConfigTable)
-      .get()
-
-    if (!row) {
-      return null
-    }
-
-    return {
-      billingPeriods: [],
-      creditLinePolicy: "uncapped",
-      customerEntitlementId: row.customerEntitlementId,
-      projectId: row.projectId,
-      customerId: row.customerId,
-      effectiveAt: row.effectiveAt,
-      expiresAt: row.expiresAt ?? null,
-      featureConfig: row.featureConfig,
-      featurePlanVersionId: row.featurePlanVersionId,
-      featureSlug: row.featureSlug,
-      featureType: "usage",
-      meterConfig: row.meterConfig,
-      overageStrategy: row.overageStrategy,
-      resetConfig: row.resetConfig ?? null,
-      subscriptionItemId: null,
-    }
-  }
-
-  private syncGrants(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    params: {
-      customerEntitlementId: string
-      createdAt: number
-      grants: ApplyGrantInput[]
-    }
-  ): void {
-    for (const grant of params.grants) {
-      const existing = tx
-        .select({
-          grantId: grantsTable.grantId,
-          expiresAt: grantsTable.expiresAt,
-        })
-        .from(grantsTable)
-        .where(eq(grantsTable.grantId, grant.grantId))
-        .get()
-
-      if (existing) {
-        const nextExpiresAt = minNullableExpiry(existing.expiresAt ?? null, grant.expiresAt)
-        if (nextExpiresAt !== (existing.expiresAt ?? null)) {
-          tx.update(grantsTable)
-            .set({ expiresAt: nextExpiresAt })
-            .where(eq(grantsTable.grantId, grant.grantId))
-            .run()
-          this.invalidateEnforcementStateCache()
-        }
-      } else {
-        tx.insert(grantsTable)
-          .values({
-            grantId: grant.grantId,
-            customerEntitlementId: params.customerEntitlementId,
-            allowanceUnits: grant.allowanceUnits,
-            effectiveAt: grant.effectiveAt,
-            expiresAt: grant.expiresAt,
-            priority: grant.priority,
-            addedAt: params.createdAt,
-          })
-          .run()
-        this.invalidateEnforcementStateCache()
-      }
-    }
-  }
-
-  private readGrants(tx: DrizzleSqliteDODatabase<typeof schema>): ActiveGrantInput[] {
-    const entitlement = this.readEntitlementConfig(tx)
-    if (!entitlement) {
-      return []
-    }
-
-    return tx
-      .select({
-        grantId: grantsTable.grantId,
-        allowanceUnits: grantsTable.allowanceUnits,
-        effectiveAt: grantsTable.effectiveAt,
-        expiresAt: grantsTable.expiresAt,
-        priority: grantsTable.priority,
-      })
-      .from(grantsTable)
-      .all()
-      .map((row) => ({
-        allowanceUnits: row.allowanceUnits ?? null,
-        cadenceEffectiveAt: entitlement.effectiveAt,
-        cadenceExpiresAt: entitlement.expiresAt,
-        currencyCode: extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig) ?? "USD",
-        effectiveAt: row.effectiveAt,
-        expiresAt: row.expiresAt ?? null,
-        grantId: row.grantId,
-        priority: row.priority,
-        resetConfig: entitlement.resetConfig ?? null,
-      }))
-  }
-
-  private readGrantStatesForActiveGrants(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    grants: ActiveGrantInput[],
-    timestamp: number
-  ): GrantConsumptionState[] {
-    const buckets = grants
-      .map((grant) => computeGrantPeriodBucket(grant, timestamp))
-      .filter((bucket): bucket is NonNullable<typeof bucket> => bucket !== null)
-    const bucketKeys = new Set(buckets.map((bucket) => bucket.bucketKey))
-    const periodKeys = unique(buckets.map((bucket) => bucket.periodKey))
-
-    if (bucketKeys.size === 0 || periodKeys.length === 0) {
-      return []
-    }
-
-    return this.readGrantStatesForPeriodKeys(tx, periodKeys).filter((state) =>
-      bucketKeys.has(state.bucketKey)
-    )
-  }
-
-  private readGrantStatesForBatch(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    grants: ActiveGrantInput[],
-    timestamps: number[]
-  ): GrantConsumptionState[] {
-    const buckets = timestamps.flatMap((timestamp) =>
-      grants
-        .map((grant) => computeGrantPeriodBucket(grant, timestamp))
-        .filter((bucket): bucket is NonNullable<typeof bucket> => bucket !== null)
-    )
-    const bucketKeys = new Set(buckets.map((bucket) => bucket.bucketKey))
-    const periodKeys = unique(buckets.map((bucket) => bucket.periodKey))
-
-    if (bucketKeys.size === 0 || periodKeys.length === 0) {
-      return []
-    }
-
-    return this.readGrantStatesForPeriodKeys(tx, periodKeys).filter((state) =>
-      bucketKeys.has(state.bucketKey)
-    )
-  }
-
-  private readGrantStatesForPeriodKeys(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    periodKeys: string[]
-  ): GrantConsumptionState[] {
-    const states: GrantConsumptionState[] = []
-
-    for (let i = 0; i < periodKeys.length; i += APPLY_BATCH_SIZE_LIMIT) {
-      const rows = tx
-        .select({
-          grantStatesJson: entitlementPeriodUsageTable.grantStatesJson,
-        })
-        .from(entitlementPeriodUsageTable)
-        .where(
-          inArray(
-            entitlementPeriodUsageTable.periodKey,
-            periodKeys.slice(i, i + APPLY_BATCH_SIZE_LIMIT)
-          )
-        )
-        .all()
-
-      for (const row of rows) {
-        states.push(...this.parseCompactGrantStates(row.grantStatesJson))
-      }
-    }
-
-    return states
-  }
-
-  private selectGrantStatesForActiveGrants(
-    grants: ActiveGrantInput[],
-    states: GrantConsumptionState[],
-    timestamp: number
-  ): GrantConsumptionState[] {
-    const activeBucketKeys = new Set(
-      grants
-        .map((grant) => computeGrantPeriodBucket(grant, timestamp)?.bucketKey)
-        .filter((key): key is string => typeof key === "string" && key.length > 0)
-    )
-
-    return states.filter((state) => activeBucketKeys.has(state.bucketKey))
-  }
-
-  private readMeterStateDraft(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    meterKey: string,
-    createdAt: number
-  ): MeterStateDraft {
-    const row = tx
-      .select({
-        usage: meterStateTable.usage,
-        updatedAt: meterStateTable.updatedAt,
-      })
-      .from(meterStateTable)
-      .where(eq(meterStateTable.meterKey, meterKey))
-      .get()
-
-    return {
-      createdAt,
-      dirty: false,
-      exists: Boolean(row),
-      meterKey,
-      updatedAt: row?.updatedAt ?? null,
-      usage: Number(row?.usage ?? 0),
-    }
-  }
-
   private readEnforcementStateSnapshot(
     input: EnforcementStateInput | null,
     timestamp: number
@@ -3984,26 +3559,26 @@ export class EntitlementWindowDO extends DurableObject {
     const syncedAt = Date.now()
     const snapshot = this.db.transaction((tx) => {
       if (input) {
-        this.syncEntitlementConfig(tx, {
+        this.store.syncEntitlementConfig(tx, {
           entitlement: input.entitlement,
           createdAt: syncedAt,
         })
-        this.syncGrants(tx, {
+        this.store.syncGrants(tx, {
           customerEntitlementId: input.entitlement.customerEntitlementId,
           grants: input.grants,
           createdAt: syncedAt,
         })
       }
 
-      const entitlement = this.readEntitlementConfig(tx)
-      const grants = this.readGrants(tx)
+      const entitlement = this.store.readEntitlementConfig(tx)
+      const grants = this.store.readGrants(tx)
       const activeGrants = resolveActiveGrants(grants, timestamp)
 
       return {
         entitlement,
         grants,
         inputSignature,
-        states: this.readGrantStatesForActiveGrants(tx, activeGrants, timestamp),
+        states: this.store.readGrantStatesForActiveGrants(tx, activeGrants, timestamp),
       }
     })
 
@@ -4093,14 +3668,14 @@ export class EntitlementWindowDO extends DurableObject {
     }
   ): { periodWriteCount: number; pricedFacts: PricedFact[]; touchedStateCount: number } {
     const grantStates = params.facts.some((fact) => fact.delta > 0)
-      ? this.readGrantStatesForActiveGrants(tx, params.activeGrants, params.eventTimestamp)
+      ? this.store.readGrantStatesForActiveGrants(tx, params.activeGrants, params.eventTimestamp)
       : []
     const { pricedFacts, touchedStates } = this.priceFactsFromGrantStates({
       ...params,
       grantStates,
     })
 
-    const periodWriteCount = this.writeGrantConsumptions(tx, touchedStates.values())
+    const periodWriteCount = this.store.writeGrantConsumptions(tx, touchedStates.values())
 
     return { periodWriteCount, pricedFacts, touchedStateCount: touchedStates.size }
   }
@@ -4168,7 +3743,7 @@ export class EntitlementWindowDO extends DurableObject {
           units: allocation.units,
         })
 
-        this.replaceGrantConsumptionState(params.grantStates, allocation.nextState)
+        replaceGrantConsumptionState(params.grantStates, allocation.nextState)
         touchedStates.set(allocation.nextState.bucketKey, allocation.nextState)
       }
 
@@ -4230,108 +3805,6 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  private writeGrantConsumptions(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    states: Iterable<GrantConsumptionState>
-  ): number {
-    const statesByPeriod = new Map<string, GrantConsumptionState[]>()
-    for (const state of states) {
-      const existing = statesByPeriod.get(state.periodKey)
-      if (existing) {
-        existing.push(state)
-      } else {
-        statesByPeriod.set(state.periodKey, [state])
-      }
-    }
-
-    if (statesByPeriod.size === 0) {
-      return 0
-    }
-
-    const updatedAt = Date.now()
-    for (const [periodKey, periodStates] of statesByPeriod.entries()) {
-      const existing = tx
-        .select({
-          grantStatesJson: entitlementPeriodUsageTable.grantStatesJson,
-        })
-        .from(entitlementPeriodUsageTable)
-        .where(eq(entitlementPeriodUsageTable.periodKey, periodKey))
-        .get()
-
-      const mergedStates = existing ? this.parseCompactGrantStates(existing.grantStatesJson) : []
-      for (const state of periodStates) {
-        this.replaceGrantConsumptionState(mergedStates, state)
-      }
-
-      const sortedStates = mergedStates.sort((left, right) =>
-        left.bucketKey.localeCompare(right.bucketKey)
-      )
-      const grantStatesJson = JSON.stringify(sortedStates)
-      const periodStartAt = Math.min(...sortedStates.map((candidate) => candidate.periodStartAt))
-      const periodEndAt = Math.max(...sortedStates.map((candidate) => candidate.periodEndAt))
-
-      if (existing) {
-        tx.update(entitlementPeriodUsageTable)
-          .set({
-            periodStartAt,
-            periodEndAt,
-            grantStatesJson,
-            updatedAt,
-          })
-          .where(eq(entitlementPeriodUsageTable.periodKey, periodKey))
-          .run()
-      } else {
-        tx.insert(entitlementPeriodUsageTable)
-          .values({
-            periodKey,
-            periodStartAt,
-            periodEndAt,
-            grantStatesJson,
-            updatedAt,
-          })
-          .run()
-      }
-    }
-
-    this.invalidateEnforcementStateCache()
-    return statesByPeriod.size
-  }
-
-  private parseCompactGrantStates(raw: string): GrantConsumptionState[] {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch (error) {
-      this.logger.warn("skipping unparsable compact entitlement period state", {
-        error: error instanceof Error ? error.message : String(error),
-      })
-      return []
-    }
-
-    const result = compactGrantConsumptionStateListSchema.safeParse(parsed)
-    if (!result.success) {
-      this.logger.warn("skipping malformed compact entitlement period state", {
-        error: result.error.message,
-      })
-      return []
-    }
-
-    return result.data
-  }
-
-  private replaceGrantConsumptionState(
-    states: GrantConsumptionState[],
-    state: GrantConsumptionState
-  ): void {
-    const index = states.findIndex((candidate) => candidate.bucketKey === state.bucketKey)
-    if (index >= 0) {
-      states[index] = state
-      return
-    }
-
-    states.push(state)
-  }
-
   private firstGrantByDrainOrder(grants: ActiveGrantInput[]): ActiveGrantInput {
     const grant = [...grants].sort((left, right) => this.compareGrantDrainOrder(left, right))[0]
     if (!grant) {
@@ -4375,120 +3848,6 @@ export class EntitlementWindowDO extends DurableObject {
     )
   }
 
-  private readLifecycleEndAt(): number | null {
-    const latestPeriodUsage = this.db
-      .select({ periodEndAt: entitlementPeriodUsageTable.periodEndAt })
-      .from(entitlementPeriodUsageTable)
-      .orderBy(desc(entitlementPeriodUsageTable.periodEndAt))
-      .limit(1)
-      .get()
-
-    const lifecycleEnds: number[] = []
-    if (
-      typeof latestPeriodUsage?.periodEndAt === "number" &&
-      Number.isFinite(latestPeriodUsage.periodEndAt)
-    ) {
-      lifecycleEnds.push(latestPeriodUsage.periodEndAt)
-    }
-    const reservationEndAt = this.readWalletReservation(this.db)?.reservationEndAt
-    if (typeof reservationEndAt === "number" && Number.isFinite(reservationEndAt)) {
-      lifecycleEnds.push(reservationEndAt)
-    }
-
-    return lifecycleEnds.length > 0 ? Math.max(...lifecycleEnds) : null
-  }
-
-  // Read the reservation-relevant fields in one shot. Returns `null` when
-  // no reservation row exists yet (pre-first-paid-apply). A row with a null
-  // `reservationId` means the DO is operating without a reservation —
-  // callers must treat that as "skip wallet check".
-  private readWalletReservation(
-    tx: DrizzleSqliteDODatabase<typeof schema>
-  ): WalletReservationSnapshot {
-    const row = tx
-      .select({
-        projectId: walletReservationTable.projectId,
-        customerId: walletReservationTable.customerId,
-        currency: walletReservationTable.currency,
-        reservationEndAt: walletReservationTable.reservationEndAt,
-        billingPeriodId: walletReservationTable.billingPeriodId,
-        cycleEndAt: walletReservationTable.cycleEndAt,
-        cycleStartAt: walletReservationTable.cycleStartAt,
-        featurePlanVersionItemId: walletReservationTable.featurePlanVersionItemId,
-        featureSlug: walletReservationTable.featureSlug,
-        statementKey: walletReservationTable.statementKey,
-        reservationId: walletReservationTable.reservationId,
-        allocationAmount: walletReservationTable.allocationAmount,
-        consumedAmount: walletReservationTable.consumedAmount,
-        flushedAmount: walletReservationTable.flushedAmount,
-        consumedQuantity: walletReservationTable.consumedQuantity,
-        flushedQuantity: walletReservationTable.flushedQuantity,
-        refillThresholdBps: walletReservationTable.refillThresholdBps,
-        refillChunkAmount: walletReservationTable.refillChunkAmount,
-        targetReservationAmount: walletReservationTable.targetReservationAmount,
-        spendEwmaAmount: walletReservationTable.spendEwmaAmount,
-        lastRateSampledAtMs: walletReservationTable.lastRateSampledAtMs,
-        maxEventCostAmount: walletReservationTable.maxEventCostAmount,
-        pendingRefillAmount: walletReservationTable.pendingRefillAmount,
-        pendingFlushAmount: walletReservationTable.pendingFlushAmount,
-        pendingFlushQuantity: walletReservationTable.pendingFlushQuantity,
-        refillInFlight: walletReservationTable.refillInFlight,
-        flushSeq: walletReservationTable.flushSeq,
-        pendingFlushSeq: walletReservationTable.pendingFlushSeq,
-        pendingFlushFinal: walletReservationTable.pendingFlushFinal,
-        lastEventAt: walletReservationTable.lastEventAt,
-        lastFlushedAt: walletReservationTable.lastFlushedAt,
-        deletionRequested: walletReservationTable.deletionRequested,
-        recoveryRequired: walletReservationTable.recoveryRequired,
-      })
-      .from(walletReservationTable)
-      .get()
-
-    if (!row) return null
-
-    return {
-      projectId: row.projectId ?? null,
-      customerId: row.customerId ?? null,
-      currency: String(row.currency ?? ""),
-      reservationEndAt: row.reservationEndAt ?? null,
-      billingPeriodId: row.billingPeriodId ?? null,
-      cycleEndAt: row.cycleEndAt ?? null,
-      cycleStartAt: row.cycleStartAt ?? null,
-      featurePlanVersionItemId: row.featurePlanVersionItemId ?? null,
-      featureSlug: row.featureSlug ?? null,
-      statementKey: row.statementKey ?? null,
-      reservationId: row.reservationId ?? null,
-      allocationAmount: Number(row.allocationAmount ?? 0),
-      consumedAmount: Number(row.consumedAmount ?? 0),
-      flushedAmount: Number(row.flushedAmount ?? 0),
-      consumedQuantity: Number(row.consumedQuantity ?? 0),
-      flushedQuantity: Number(row.flushedQuantity ?? 0),
-      refillThresholdBps: Number(row.refillThresholdBps ?? 0),
-      refillChunkAmount: Number(row.refillChunkAmount ?? 0),
-      targetReservationAmount: Number(row.targetReservationAmount ?? 0),
-      spendEwmaAmount: Number(row.spendEwmaAmount ?? 0),
-      lastRateSampledAtMs: row.lastRateSampledAtMs ?? null,
-      maxEventCostAmount: Number(row.maxEventCostAmount ?? 0),
-      pendingRefillAmount: Number(row.pendingRefillAmount ?? 0),
-      pendingFlushAmount:
-        row.pendingFlushAmount === null || row.pendingFlushAmount === undefined
-          ? null
-          : Number(row.pendingFlushAmount),
-      pendingFlushQuantity:
-        row.pendingFlushQuantity === null || row.pendingFlushQuantity === undefined
-          ? null
-          : Number(row.pendingFlushQuantity),
-      refillInFlight: Boolean(row.refillInFlight),
-      flushSeq: Number(row.flushSeq ?? 0),
-      pendingFlushSeq: row.pendingFlushSeq ?? null,
-      pendingFlushFinal: Boolean(row.pendingFlushFinal),
-      lastEventAt: row.lastEventAt ?? null,
-      lastFlushedAt: row.lastFlushedAt ?? null,
-      deletionRequested: Boolean(row.deletionRequested),
-      recoveryRequired: Boolean(row.recoveryRequired),
-    }
-  }
-
   private hasPendingWalletFlush(window: WalletReservationSnapshot): boolean {
     return Boolean(
       window?.reservationId &&
@@ -4500,7 +3859,7 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private isCleanupComplete(
-    window: ReturnType<typeof this.readWalletReservation>,
+    window: WalletReservationSnapshot,
     outboxCount: number
   ): boolean {
     return (
@@ -4620,7 +3979,7 @@ export class EntitlementWindowDO extends DurableObject {
   private resolveReservationGrowthReadiness(
     params: EntitlementWindowReservationUnderfundedError["params"]
   ): ReservationGrowthReadiness {
-    const window = this.readWalletReservation(this.db)
+    const window = this.store.readWalletReservation(this.db)
     if (
       !window?.reservationId ||
       window.reservationId !== params.reservationId ||
@@ -4773,7 +4132,7 @@ export class EntitlementWindowDO extends DurableObject {
 
   private async requestFlushAndRefillInner(trigger: RefillTrigger): Promise<void> {
     const startTime = Date.now()
-    const window = this.readWalletReservation(this.db)
+    const window = this.store.readWalletReservation(this.db)
     const wideEvent = this.createFlushRefillWideEvent({ trigger, window })
 
     try {
@@ -5035,86 +4394,6 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent.error_message = error.message
   }
 
-  // Looks up a previously committed idempotency result for this event id.
-  // Used to short-circuit retries before any wallet I/O — the in-tx check
-  // in apply() catches concurrent retries that race past this read.
-  private lookupCachedIdempotencyResult(eventId: string): ApplyResult | null {
-    const batchEntry = this.getBatchIdempotencyResults().get(eventId)
-    if (!batchEntry) return null
-
-    return idempotencyEntryToApplyResult(batchEntry)
-  }
-
-  private lookupCachedIdempotencyResults(eventIds: string[]): Map<string, BatchIdempotencyEntry> {
-    const results = new Map<string, BatchIdempotencyEntry>()
-    const uniqueEventIds = unique(eventIds)
-    const batched = this.getBatchIdempotencyResults()
-
-    for (const eventId of uniqueEventIds) {
-      const entry = batched.get(eventId)
-      if (entry) {
-        results.set(eventId, entry)
-      }
-    }
-
-    return results
-  }
-
-  private getBatchIdempotencyResults(): Map<string, BatchIdempotencyEntry> {
-    if (!this.batchIdempotencyResults) {
-      this.hydrateBatchIdempotencyResults()
-    }
-
-    return this.batchIdempotencyResults!
-  }
-
-  private hydrateBatchIdempotencyResults(): void {
-    const results = new Map<string, BatchIdempotencyEntry>()
-    const rows = this.db
-      .select({
-        entries: idempotencyKeyBatchesTable.entries,
-      })
-      .from(idempotencyKeyBatchesTable)
-      .all()
-
-    for (const row of rows) {
-      let rawEntries: unknown
-      try {
-        rawEntries = JSON.parse(row.entries)
-      } catch (error) {
-        this.logger.warn("skipping unparsable idempotency batch row", {
-          error: error instanceof Error ? error.message : String(error),
-        })
-        continue
-      }
-
-      const parsed = batchIdempotencyEntryListSchema.safeParse(rawEntries)
-      if (!parsed.success) {
-        this.logger.warn("skipping malformed idempotency batch row", {
-          error: parsed.error.message,
-        })
-        continue
-      }
-
-      for (const entry of parsed.data) {
-        results.set(entry.eventId, entry)
-      }
-    }
-
-    this.batchIdempotencyResults = results
-  }
-
-  private recordBatchIdempotencyResults(entries: BatchIdempotencyEntry[]): void {
-    if (entries.length === 0) {
-      return
-    }
-
-    const results = this.getBatchIdempotencyResults()
-    for (const entry of entries) {
-      results.set(entry.eventId, entry)
-    }
-  }
-
   private persistDeniedApplyResult(params: {
     closeReason?: ReservationCloseReason
     createdAt: number
@@ -5147,25 +4426,9 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private persistBatchIdempotencyResult(entry: BatchIdempotencyEntry): void {
-    this.writeBatchIdempotencyResults(this.db, [entry])
-    this.recordBatchIdempotencyResults([entry])
+    this.store.writeBatchIdempotencyResults(this.db, [entry])
+    this.store.recordBatchIdempotencyResults([entry])
     this.schedulePostCommitAlarm()
-  }
-
-  private writeBatchIdempotencyResults(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    entries: BatchIdempotencyEntry[]
-  ): void {
-    if (entries.length === 0) {
-      return
-    }
-
-    tx.insert(idempotencyKeyBatchesTable)
-      .values({
-        createdAt: entries[0]?.createdAt ?? Date.now(),
-        entries: JSON.stringify(entries),
-      })
-      .run()
   }
 
   private async bootstrapReservationSingleFlight(
@@ -5176,7 +4439,7 @@ export class EntitlementWindowDO extends DurableObject {
     const existing = this.reservationBootstrapPromise
     if (existing) {
       const result = await existing
-      const window = this.readWalletReservation(this.db)
+      const window = this.store.readWalletReservation(this.db)
       return window?.reservationId ? null : result
     }
 
@@ -5354,11 +4617,11 @@ export class EntitlementWindowDO extends DurableObject {
     reservation: CreateReservationOutput
   }): void {
     const { input, invoiceContext, meter, plan, projectedCost, reservation } = params
-    this.ensureMeterState(this.db, {
+    this.store.ensureMeterState(this.db, {
       meterKey: meter.key,
       createdAt: Date.now(),
     })
-    this.ensureWalletReservation(this.db, {
+    this.store.ensureWalletReservation(this.db, {
       projectId: input.projectId,
       customerId: input.customerId,
       currency: meter.currency,
@@ -5662,7 +4925,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     const consumed = consumeGrantsByPriority({
       grants: params.activeGrants,
-      states: this.readGrantStatesForActiveGrants(
+      states: this.store.readGrantStatesForActiveGrants(
         this.db,
         params.activeGrants,
         params.eventTimestamp
@@ -5721,32 +4984,6 @@ export class EntitlementWindowDO extends DurableObject {
       this.lastIdempotencyCleanupAt === null ||
       now - this.lastIdempotencyCleanupAt >= IDEMPOTENCY_CLEANUP_INTERVAL_MS
     )
-  }
-
-  private cleanupStaleIdempotencyKeys(now: number): number {
-    const staleIdempotencyCutoff = now - DO_IDEMPOTENCY_TTL_MS
-    const staleBatchRows = this.db
-      .select({ id: idempotencyKeyBatchesTable.id })
-      .from(idempotencyKeyBatchesTable)
-      .where(lt(idempotencyKeyBatchesTable.createdAt, staleIdempotencyCutoff))
-      .orderBy(asc(idempotencyKeyBatchesTable.createdAt))
-      .limit(IDEMPOTENCY_CLEANUP_BATCH_SIZE)
-      .all()
-
-    if (staleBatchRows.length > 0) {
-      this.db
-        .delete(idempotencyKeyBatchesTable)
-        .where(
-          inArray(
-            idempotencyKeyBatchesTable.id,
-            staleBatchRows.map((row) => row.id)
-          )
-        )
-        .run()
-      this.batchIdempotencyResults = null
-    }
-
-    return staleBatchRows.length
   }
 
   private async scheduleAlarm(target: number): Promise<void> {
