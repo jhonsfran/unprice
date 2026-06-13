@@ -201,8 +201,16 @@ export const ingestionEventSchemaV1 = z.object({
   source_name: z.string().nullable().optional(),
   event_slug: z.string(),
   idempotency_key: z.string(),
-  state: z.enum(["processed", "rejected"]),
+  state: z.enum(["processed", "rejected", "failed"]),
   rejection_reason: z.string().nullable().optional(),
+  failure_stage: z
+    .enum(["raw_ingestion", "rating_fact", "reporting_delivery"])
+    .nullable()
+    .optional(),
+  failure_reason: z.string().nullable().optional(),
+  replayable: z.boolean().default(false),
+  payload_json: z.string().nullable().optional(),
+  r2_object_key: z.string().nullable().optional(),
   timestamp: z.number().int(),
   received_at: z.number().int(),
   handled_at: z.number().int(),
@@ -372,7 +380,7 @@ export const ingestionStatusWindowQuerySchema = z.object({
   to_ts: z.number().int(),
 })
 
-export const ingestionStateFilterSchema = z.enum(["processed", "rejected"])
+export const ingestionStateFilterSchema = z.enum(["processed", "rejected", "failed"])
 
 export const ingestionLiveQuerySchema = ingestionStatusWindowQuerySchema.extend({
   source_id: z.string().optional(),
@@ -400,6 +408,7 @@ export const ingestionLiveRowSchema = z.object({
   second: z.string(),
   processed: z.number().int().nonnegative(),
   rejected: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative().default(0),
   total: z.number().int().nonnegative(),
 })
 
@@ -422,6 +431,10 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
     source_id: true,
     state: true,
     rejection_reason: true,
+    failure_stage: true,
+    failure_reason: true,
+    replayable: true,
+    r2_object_key: true,
     timestamp: true,
     received_at: true,
     handled_at: true,
@@ -429,6 +442,22 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
   .extend({
     rejection_reason: z.string().nullable(),
   })
+
+export const ingestionReplayPayloadQuerySchema = z.object({
+  project_id: z.string(),
+  canonical_audit_ids: z.string(),
+})
+
+export const ingestionReplayPayloadRowSchema = z.object({
+  event_id: z.string(),
+  canonical_audit_id: z.string(),
+  customer_id: z.string(),
+  failure_stage: z.string().nullable(),
+  failure_reason: z.string().nullable(),
+  payload_json: z.string(),
+  r2_object_key: z.string().nullable().optional(),
+  handled_at: z.number().int(),
+})
 
 export const usageSpendingResponseSchema = z.object({
   amount: z.string(),
@@ -574,6 +603,7 @@ export type ExplainChargeSummaryRow = z.infer<typeof explainChargeSummaryRowSche
 export type IngestionLiveRow = z.infer<typeof ingestionLiveRowSchema>
 export type IngestionRejectionRow = z.infer<typeof ingestionRejectionRowSchema>
 export type IngestionRecentEventRow = z.infer<typeof ingestionRecentEventRowSchema>
+export type IngestionReplayPayloadRow = z.infer<typeof ingestionReplayPayloadRowSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>
 export type AnalyticsUsage = z.infer<typeof featureUsageSchemaV1>

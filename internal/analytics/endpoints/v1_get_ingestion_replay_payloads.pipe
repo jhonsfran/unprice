@@ -1,0 +1,40 @@
+TOKEN "web-apps" READ
+
+TAGS "ingestion,status,replay"
+
+NODE replay_payloads_node
+SQL >
+    %
+    SELECT
+      event_id,
+      canonical_audit_id,
+      customer_id,
+      failure_stage,
+      failure_reason,
+      payload_json,
+      r2_object_key,
+      handled_at
+    FROM (
+      SELECT
+        event_id,
+        canonical_audit_id,
+        customer_id,
+        state,
+        failure_stage,
+        failure_reason,
+        replayable,
+        payload_json,
+        r2_object_key,
+        handled_at
+      FROM unprice_ingestion_events
+      WHERE project_id = {{ String(project_id) }}
+        AND has(splitByChar(',', {{ String(canonical_audit_ids) }}), canonical_audit_id)
+      ORDER BY canonical_audit_id ASC, handled_at DESC, created_at DESC, event_id DESC
+      LIMIT 1 BY canonical_audit_id
+    )
+    WHERE state = 'failed'
+      AND replayable = true
+      AND payload_json IS NOT NULL
+    ORDER BY handled_at DESC, canonical_audit_id DESC
+
+TYPE endpoint

@@ -20,6 +20,8 @@ import {
   ingestionRecentQuerySchema,
   ingestionRejectionRowSchema,
   ingestionRejectionsQuerySchema,
+  ingestionReplayPayloadQuerySchema,
+  ingestionReplayPayloadRowSchema,
   pageEventSchema,
   schemaPlanClick,
   topConsumerRowSchema,
@@ -391,6 +393,19 @@ export class Analytics {
       opts: {
         cache: "no-store",
         retries: 3,
+        timeout: 5000,
+      },
+    })
+  }
+
+  public get getIngestionReplayPayloads() {
+    return this.readClient.buildPipe({
+      pipe: "v1_get_ingestion_replay_payloads",
+      parameters: ingestionReplayPayloadQuerySchema,
+      data: ingestionReplayPayloadRowSchema,
+      opts: {
+        cache: "no-store",
+        retries: 2,
         timeout: 5000,
       },
     })

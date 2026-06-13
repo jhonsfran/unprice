@@ -57,12 +57,14 @@ describe("getIngestionStatusV1 route", () => {
             second: "2026-06-05 12:00:00",
             processed: 2,
             rejected: 1,
+            failed: 0,
             total: 3,
           },
           {
             second: "2026-06-05 12:00:01",
             processed: 1,
             rejected: 0,
+            failed: 0,
             total: 1,
           },
         ],
@@ -130,6 +132,7 @@ describe("getIngestionStatusV1 route", () => {
       totals: {
         processed: 3,
         rejected: 1,
+        failed: 0,
         total: 4,
       },
       successRate: 0.75,
@@ -145,12 +148,14 @@ describe("getIngestionStatusV1 route", () => {
           second: "2026-06-05 12:00:00",
           processed: 2,
           rejected: 1,
+          failed: 0,
           total: 3,
         },
         {
           second: "2026-06-05 12:00:01",
           processed: 1,
           rejected: 0,
+          failed: 0,
           total: 1,
         },
       ],
@@ -174,6 +179,10 @@ describe("getIngestionStatusV1 route", () => {
           sourceId: "src_1",
           state: "processed",
           rejectionReason: null,
+          failureStage: null,
+          failureReason: null,
+          replayable: false,
+          r2ObjectKey: null,
           timestamp: fromTs - 100,
           receivedAt: fromTs + 100,
           handledAt: fromTs + 5_500,
@@ -181,7 +190,7 @@ describe("getIngestionStatusV1 route", () => {
       ],
       nextCursor: null,
       answer:
-        "4 events were observed in the requested window for customer cus_123 (1780000000000 to 1780000010000). 3 were processed and 1 were rejected, for a 75% success rate.",
+        "4 events were observed in the requested window for customer cus_123 (1780000000000 to 1780000010000). 3 were processed, 1 were rejected, and 0 failed, for a 75% success rate.",
       confidence: "high",
       evidence: [
         {
@@ -215,9 +224,9 @@ describe("getIngestionStatusV1 route", () => {
           timestamp: fromTs + 5_500,
         },
       ],
-      warnings: ["Some ingestion events were rejected in the requested window."],
+      warnings: ["Some ingestion events were rejected or failed in the requested window."],
       nextActions: [
-        "Inspect rejected events and fix the reported rejection reasons: missing_entitlement",
+        "Inspect rejected or failed events and fix the reported reasons: missing_entitlement",
       ],
     })
     expect(getIngestionLive).toHaveBeenCalledWith({
@@ -279,6 +288,7 @@ describe("getIngestionStatusV1 route", () => {
       totals: {
         processed: 0,
         rejected: 0,
+        failed: 0,
         total: 0,
       },
       successRate: 0,
@@ -365,6 +375,7 @@ describe("getIngestionStatusV1 route", () => {
           second: "2026-06-05 12:00:00",
           processed: 1,
           rejected: 0,
+          failed: 0,
           total: 1,
         },
       ],
@@ -417,6 +428,38 @@ describe("getIngestionStatusV1 route", () => {
       cursor_handled_at: fromTs + 8_000,
       cursor_canonical_audit_id: "audit_cursor",
       limit: 6,
+    })
+  })
+
+  it("accepts failed state filters", async () => {
+    const { app, env, executionCtx, getIngestionLive, getIngestionRecent } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        customer_id: "cus_123",
+        from_ts: fromTs,
+        to_ts: toTs,
+        state: "failed",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(getIngestionLive).toHaveBeenCalledWith({
+      project_id: "proj_123",
+      customer_id: "cus_123",
+      from_ts: fromTs,
+      to_ts: toTs,
+      state: "failed",
+    })
+    expect(getIngestionRecent).toHaveBeenCalledWith({
+      project_id: "proj_123",
+      customer_id: "cus_123",
+      from_ts: fromTs,
+      to_ts: toTs,
+      state: "failed",
+      limit: 51,
     })
   })
 })
@@ -500,6 +543,10 @@ function makeRecentEvent(overrides: Record<string, unknown> = {}) {
     source_id: "src_1",
     state: "processed",
     rejection_reason: null,
+    failure_stage: null,
+    failure_reason: null,
+    replayable: false,
+    r2_object_key: null,
     timestamp: fromTs - 100,
     received_at: fromTs + 100,
     handled_at: fromTs + 1_000,

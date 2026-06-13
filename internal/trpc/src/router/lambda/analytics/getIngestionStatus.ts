@@ -25,7 +25,7 @@ export const getIngestionStatus = protectedProjectProcedure
         .object({
           sourceId: z.string().optional(),
           eventSlug: z.string().optional(),
-          state: z.enum(["processed", "rejected"]).optional(),
+          state: z.enum(["processed", "rejected", "failed"]).optional(),
         })
         .optional()
         .default({}),

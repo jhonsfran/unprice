@@ -262,6 +262,7 @@ function buildIngestionEvent(
     idempotency_key: record.idempotencyKey,
     state: record.status,
     rejection_reason: record.rejectionReason ?? null,
+    replayable: false,
     timestamp: payload.timestamp,
     received_at: record.firstSeenAt,
     handled_at: record.handledAt,

@@ -9,6 +9,7 @@ SQL >
       toStartOfSecond(fromUnixTimestamp64Milli(handled_at, 'UTC')) AS second,
       countIf(state = 'processed') AS processed,
       countIf(state = 'rejected') AS rejected,
+      countIf(state = 'failed') AS failed,
       count() AS total
     FROM (
       SELECT

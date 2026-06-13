@@ -27,7 +27,7 @@ export const getIngestionStatusInputSchema = z.object({
     .object({
       sourceId: z.string().optional(),
       eventSlug: z.string().optional(),
-      state: z.enum(["processed", "rejected"]).optional(),
+      state: z.enum(["processed", "rejected", "failed"]).optional(),
     })
     .default({}),
   limit: z.number().int().min(1).max(100).default(50),
@@ -38,6 +38,7 @@ export const getIngestionStatusOutputSchema = z.object({
   totals: z.object({
     processed: z.number().int(),
     rejected: z.number().int(),
+    failed: z.number().int(),
     total: z.number().int(),
   }),
   successRate: z.number(),
@@ -53,6 +54,7 @@ export const getIngestionStatusOutputSchema = z.object({
       second: z.string(),
       processed: z.number().int(),
       rejected: z.number().int(),
+      failed: z.number().int(),
       total: z.number().int(),
     })
   ),
@@ -74,8 +76,12 @@ export const getIngestionStatusOutputSchema = z.object({
       eventSlug: z.string(),
       sourceType: z.string(),
       sourceId: z.string(),
-      state: z.enum(["processed", "rejected"]),
+      state: z.enum(["processed", "rejected", "failed"]),
       rejectionReason: z.string().nullable(),
+      failureStage: z.string().nullable().optional(),
+      failureReason: z.string().nullable().optional(),
+      replayable: z.boolean(),
+      r2ObjectKey: z.string().nullable().optional(),
       timestamp: z.number().int(),
       receivedAt: z.number().int(),
       handledAt: z.number().int(),
@@ -223,6 +229,7 @@ function mapLiveRow(row: IngestionLiveRow): GetIngestionStatusOutput["live"][num
     second: row.second,
     processed: row.processed,
     rejected: row.rejected,
+    failed: row.failed ?? 0,
     total: row.total,
   }
 }
@@ -239,6 +246,10 @@ function mapRecentEventRow(
     sourceId: row.source_id,
     state: row.state,
     rejectionReason: row.rejection_reason,
+    failureStage: row.failure_stage ?? null,
+    failureReason: row.failure_reason ?? null,
+    replayable: row.replayable ?? false,
+    r2ObjectKey: row.r2_object_key ?? null,
     timestamp: row.timestamp,
     receivedAt: row.received_at,
     handledAt: row.handled_at,
@@ -265,7 +276,7 @@ function getNextCursor(
 }
 
 function matchesFilter(
-  row: { source_id: string; event_slug: string; state?: "processed" | "rejected" },
+  row: { source_id: string; event_slug: string; state?: "processed" | "rejected" | "failed" },
   filter: IngestionStatusFilter
 ): boolean {
   if (filter.sourceId && row.source_id !== filter.sourceId) {
@@ -286,7 +297,7 @@ function matchesFilter(
 function toTinybirdFilter(filter: IngestionStatusFilter): {
   source_id?: string
   event_slug?: string
-  state?: "processed" | "rejected"
+  state?: "processed" | "rejected" | "failed"
 } {
   return {
     ...(filter.sourceId ? { source_id: filter.sourceId } : {}),
@@ -321,9 +332,10 @@ function deriveTotals({
     (acc, row) => ({
       processed: acc.processed + row.processed,
       rejected: acc.rejected + row.rejected,
+      failed: acc.failed + row.failed,
       total: acc.total + row.total,
     }),
-    { processed: 0, rejected: 0, total: 0 }
+    { processed: 0, rejected: 0, failed: 0, total: 0 }
   )
 
   if (liveTotals.total > 0) {
@@ -335,9 +347,10 @@ function deriveTotals({
       (acc, event) => ({
         processed: acc.processed + (event.state === "processed" ? 1 : 0),
         rejected: acc.rejected + (event.state === "rejected" ? 1 : 0),
+        failed: acc.failed + (event.state === "failed" ? 1 : 0),
         total: acc.total + 1,
       }),
-      { processed: 0, rejected: 0, total: 0 }
+      { processed: 0, rejected: 0, failed: 0, total: 0 }
     )
 
     return recentTotals
@@ -347,6 +360,7 @@ function deriveTotals({
   return {
     processed: 0,
     rejected,
+    failed: 0,
     total: rejected,
   }
 }
@@ -441,8 +455,8 @@ function buildWarnings({
     return ["No ingestion events were observed in the requested window."]
   }
 
-  if (totals.rejected > 0) {
-    return ["Some ingestion events were rejected in the requested window."]
+  if (totals.rejected > 0 || totals.failed > 0) {
+    return ["Some ingestion events were rejected or failed in the requested window."]
   }
 
   return []
@@ -459,11 +473,11 @@ function buildNextActions({
     return ["Verify the customer_id, source_id, event_slug, and time window."]
   }
 
-  if (totals.rejected > 0) {
+  if (totals.rejected > 0 || totals.failed > 0) {
     const reasons = [...new Set(rejections.map((row) => row.rejectionReason).filter(Boolean))]
     const suffix = reasons.length > 0 ? `: ${reasons.join(", ")}` : "."
 
-    return [`Inspect rejected events and fix the reported rejection reasons${suffix}`]
+    return [`Inspect rejected or failed events and fix the reported reasons${suffix}`]
   }
 
   return ["No immediate action required."]
@@ -490,5 +504,5 @@ function buildAnswer({
 
   const successPercent = Math.round(successRate * 10_000) / 100
 
-  return `${totals.total} events were observed in the requested window for ${scope} (${window.from} to ${window.to}). ${totals.processed} were processed and ${totals.rejected} were rejected, for a ${successPercent}% success rate.`
+  return `${totals.total} events were observed in the requested window for ${scope} (${window.from} to ${window.to}). ${totals.processed} were processed, ${totals.rejected} were rejected, and ${totals.failed} failed, for a ${successPercent}% success rate.`
 }

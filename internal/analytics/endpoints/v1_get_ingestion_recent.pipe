@@ -14,6 +14,10 @@ SQL >
       source_id,
       state,
       rejection_reason,
+      failure_stage,
+      failure_reason,
+      replayable,
+      r2_object_key,
       timestamp,
       received_at,
       handled_at
@@ -29,6 +33,10 @@ SQL >
         argMax(source_id, created_at) AS source_id,
         argMax(state, created_at) AS state,
         argMax(rejection_reason, created_at) AS rejection_reason,
+        argMax(failure_stage, created_at) AS failure_stage,
+        argMax(failure_reason, created_at) AS failure_reason,
+        argMax(replayable, created_at) AS replayable,
+        argMax(r2_object_key, created_at) AS r2_object_key,
         argMax(timestamp, created_at) AS timestamp,
         argMax(received_at, created_at) AS received_at
       FROM unprice_ingestion_events

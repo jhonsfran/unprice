@@ -22,7 +22,7 @@ export const getIngestionStatusApiRequestSchema = z
     cursor: getIngestionStatusCursorSchema.nullish(),
     source_id: z.string().optional(),
     event_slug: z.string().optional(),
-    state: z.enum(["processed", "rejected"]).optional(),
+    state: z.enum(["processed", "rejected", "failed"]).optional(),
     limit: z.number().int().min(1).max(100).optional().default(50),
   })
   .refine((input) => input.from_ts < input.to_ts, {

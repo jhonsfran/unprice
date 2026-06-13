@@ -55,6 +55,7 @@ describe("getIngestionStatus", () => {
           second: "2099-01-01 00:00:03.000",
           processed: 2,
           rejected: 1,
+          failed: 0,
           total: 3,
         },
       ],
@@ -66,6 +67,7 @@ describe("getIngestionStatus", () => {
     expect(result.val?.totals).toEqual({
       processed: 2,
       rejected: 1,
+      failed: 0,
       total: 3,
     })
     expect(result.val?.successRate).toBe(2 / 3)
@@ -95,6 +97,7 @@ describe("getIngestionStatus", () => {
     expect(result.val?.totals).toEqual({
       processed: 0,
       rejected: 2,
+      failed: 0,
       total: 2,
     })
     expect(result.val?.freshness).toEqual({
@@ -115,6 +118,7 @@ describe("getIngestionStatus", () => {
           second: "2099-01-01 00:00:04.000",
           processed: 1,
           rejected: 1,
+          failed: 0,
           total: 2,
         },
       ],
@@ -209,6 +213,7 @@ describe("getIngestionStatus", () => {
           second: "2099-01-01 00:00:04.000",
           processed: 1,
           rejected: 0,
+          failed: 0,
           total: 1,
         },
       ],
@@ -367,6 +372,10 @@ function recentEvent(overrides: Partial<IngestionRecentEventRow> = {}): Ingestio
     source_id: "src_1",
     state: "processed",
     rejection_reason: null,
+    failure_stage: null,
+    failure_reason: null,
+    replayable: false,
+    r2_object_key: null,
     timestamp: fromTs + 1_000,
     received_at: fromTs + 1_100,
     handled_at: fromTs + 1_200,
