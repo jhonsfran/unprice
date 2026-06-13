@@ -67,7 +67,6 @@ describe("IngestionReportingConsumer", () => {
         failure_message: null,
         replayable: false,
         payload_json: null,
-        r2_object_key: null,
         timestamp: TEST_NOW,
         received_at: TEST_NOW,
         handled_at: TEST_NOW + 1,
@@ -143,7 +142,6 @@ describe("IngestionReportingConsumer", () => {
       failureMessage: "EntitlementWindowBatchReservationBootstrapRequired",
       replayable: true,
       payloadJson,
-      r2ObjectKey: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
       auditPayloadJson: createAuditPayloadJson({
         id: "evt_123",
         slug: "usage.recorded",
@@ -153,7 +151,6 @@ describe("IngestionReportingConsumer", () => {
         failure_message: "EntitlementWindowBatchReservationBootstrapRequired",
         replayable: true,
         payload_json: payloadJson,
-        r2_object_key: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
       }),
     })
     const ingestIngestionEvents = vi.fn().mockResolvedValue({
@@ -189,7 +186,6 @@ describe("IngestionReportingConsumer", () => {
         failure_message: "EntitlementWindowBatchReservationBootstrapRequired",
         replayable: true,
         payload_json: payloadJson,
-        r2_object_key: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
       }),
     ])
   })
@@ -575,7 +571,6 @@ function createAuditRecord(
     failureMessage: null,
     replayable: false,
     payloadJson: null,
-    r2ObjectKey: null,
     firstSeenAt: TEST_NOW,
     handledAt: TEST_NOW + 1,
     auditPayloadJson: JSON.stringify({
@@ -602,7 +597,6 @@ function createAuditRecord(
       failure_message: null,
       replayable: false,
       payload_json: null,
-      r2_object_key: null,
       properties: { amount: 1 },
       canonical_audit_id: "audit_123",
       payload_hash: "hash_123",
@@ -617,7 +611,6 @@ function createAuditPayloadJson(input: {
   failure_stage?: "raw_ingestion" | "rating_fact" | "reporting_delivery" | null
   id: string
   payload_json?: string | null
-  r2_object_key?: string | null
   replayable?: boolean
   slug: string
   timestamp: number
@@ -646,7 +639,6 @@ function createAuditPayloadJson(input: {
     failure_message: input.failure_message ?? null,
     replayable: input.replayable ?? false,
     payload_json: input.payload_json ?? null,
-    r2_object_key: input.r2_object_key ?? null,
     properties: { amount: 1 },
     canonical_audit_id: "audit_123",
     payload_hash: "hash_123",
@@ -677,7 +669,6 @@ function createIngestionEvent(
     failure_message: null,
     replayable: false,
     payload_json: null,
-    r2_object_key: null,
     timestamp: TEST_NOW,
     received_at: TEST_NOW,
     handled_at: TEST_NOW + 1,

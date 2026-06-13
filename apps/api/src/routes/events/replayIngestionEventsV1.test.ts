@@ -395,7 +395,6 @@ function createReplayRow(overrides: Partial<ReplayPayloadRow> = {}): ReplayPaylo
     failure_stage: "rating_fact",
     failure_reason: "raw_ingestion_queue_processing_failed",
     payload_json: createPayloadJson(),
-    r2_object_key: null,
     handled_at: Date.UTC(2026, 2, 18, 10, 0, 0),
     ...overrides,
   }
@@ -416,6 +415,5 @@ type ReplayPayloadRow = {
   failure_stage: string | null
   failure_reason: string | null
   payload_json: string
-  r2_object_key?: string | null
   handled_at: number
 }

@@ -90,47 +90,6 @@ describe("ingestion entitlement message helpers", () => {
     expect(() => ingestionQueueMessageSchema.parse(messageWithoutSource)).toThrow()
   })
 
-  it("accepts optional raw storage pointers with non-empty bucket and object keys", () => {
-    const message = {
-      version: 1,
-      workspaceId: "ws_1",
-      projectId: "proj_1",
-      customerId: "cus_1",
-      requestId: "req_1",
-      receivedAt: 1_000,
-      idempotencyKey: "idem_1",
-      id: "evt_1",
-      slug: "tokens.used",
-      timestamp: 900,
-      properties: { tokens: 42 },
-      source: {
-        environment: "development",
-        apiKeyId: "key_1",
-        sourceType: "api_key",
-        sourceId: "key_1",
-        sourceName: null,
-      },
-      rawStorage: {
-        bucketName: "raw-events",
-        objectKey: "ingestion/raw/development/proj_1/cus_1/idem_1/evt_1.json",
-      },
-    }
-
-    expect(ingestionQueueMessageSchema.parse(message).rawStorage).toEqual(message.rawStorage)
-    expect(() =>
-      ingestionQueueMessageSchema.parse({
-        ...message,
-        rawStorage: { bucketName: "", objectKey: message.rawStorage.objectKey },
-      })
-    ).toThrow()
-    expect(() =>
-      ingestionQueueMessageSchema.parse({
-        ...message,
-        rawStorage: { bucketName: message.rawStorage.bucketName, objectKey: "" },
-      })
-    ).toThrow()
-  })
-
   it("rejects events outside the entitlement window", () => {
     const state = entitlement({
       effectiveAt: timestamp - 100,

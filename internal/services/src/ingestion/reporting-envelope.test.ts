@@ -91,7 +91,6 @@ describe("ingestion reporting envelope builder", () => {
       failureMessage: null,
       replayable: false,
       payloadJson: null,
-      r2ObjectKey: null,
       status: "rejected",
     })
     expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
@@ -120,12 +119,7 @@ describe("ingestion reporting envelope builder", () => {
   })
 
   it("includes payload_json only for failed reporting audit records", async () => {
-    const message = createMessage({
-      rawStorage: {
-        bucketName: "raw-events",
-        objectKey: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
-      },
-    })
+    const message = createMessage()
 
     const [processedRecord, rejectedRecord, failedRecord] = await Promise.all([
       buildIngestionReportingAuditRecord({
@@ -165,7 +159,6 @@ describe("ingestion reporting envelope builder", () => {
       failureMessage: null,
       replayable: false,
       payloadJson: null,
-      r2ObjectKey: message.rawStorage?.objectKey,
     })
     expect(JSON.parse(processedRecord.auditPayloadJson)).toMatchObject({
       state: "processed",
@@ -185,7 +178,6 @@ describe("ingestion reporting envelope builder", () => {
       failureMessage: null,
       replayable: false,
       payloadJson: null,
-      r2ObjectKey: message.rawStorage?.objectKey,
     })
     expect(JSON.parse(rejectedRecord.auditPayloadJson)).toMatchObject({
       state: "rejected",
@@ -206,7 +198,6 @@ describe("ingestion reporting envelope builder", () => {
       failureMessage: "apply failed",
       replayable: true,
       payloadJson: JSON.stringify(message),
-      r2ObjectKey: message.rawStorage?.objectKey,
     })
     expect(ingestionQueueMessageSchema.parse(JSON.parse(failedRecord.payloadJson ?? ""))).toEqual(
       message

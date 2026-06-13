@@ -1726,7 +1726,6 @@ function createReportingAuditRecord(
     failureMessage: null,
     replayable: false,
     payloadJson: null,
-    r2ObjectKey: null,
     firstSeenAt: SERVICE_NOW,
     handledAt: SERVICE_NOW + 1,
     auditPayloadJson: JSON.stringify({ id: "evt_123" }),

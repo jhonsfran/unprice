@@ -64,8 +64,6 @@ export async function buildIngestionReportingAuditRecord(params: {
   ])
   const failed = outcome.state === "failed"
   const payloadJson = failed ? serializeReplayPayload(message) : null
-  const r2ObjectKey = message.rawStorage?.objectKey ?? null
-
   return {
     idempotencyKey: message.idempotencyKey,
     canonicalAuditId,
@@ -85,7 +83,6 @@ export async function buildIngestionReportingAuditRecord(params: {
     failureMessage: failed ? (outcome.failureMessage ?? null) : null,
     replayable: failed ? outcome.replayable : false,
     payloadJson,
-    r2ObjectKey,
     auditPayloadJson: JSON.stringify(
       buildIngestionAuditPayload(message, outcome, canonicalAuditId, payloadHash, handledAt)
     ),

@@ -26,7 +26,6 @@ export const ingestionReportingAuditRecordSchema = z.object({
   failureMessage: z.string().nullable(),
   replayable: z.boolean(),
   payloadJson: z.string().nullable(),
-  r2ObjectKey: z.string().nullable(),
   firstSeenAt: z.number().int(),
   handledAt: z.number().int(),
   auditPayloadJson: z.string(),

@@ -35,7 +35,6 @@ describe("getFailedIngestionEventPayload", () => {
       failureReason: "raw_ingestion_queue_processing_failed",
       failureMessage: "apply failed",
       payloadJson: JSON.stringify({ id: "evt_123" }),
-      r2ObjectKey: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
       handledAt: 4_070_908_800_000,
     })
   })
@@ -102,7 +101,6 @@ function replayPayloadRow(
     failure_reason: "raw_ingestion_queue_processing_failed",
     failure_message: "apply failed",
     payload_json: JSON.stringify({ id: "evt_123" }),
-    r2_object_key: "ingestion/raw/test/proj_123/cus_123/idem_123/evt_123.json",
     handled_at: 4_070_908_800_000,
     ...overrides,
   }

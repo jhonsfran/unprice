@@ -28,7 +28,6 @@ import {
   generateEventId,
   registerIngestEventsV1,
   resolveIngestionMessageRequestId,
-  resolveLakehouseBucket,
   safeSendToQueue,
   selectQueueShardIndex,
 } from "./ingestEventsV1"
@@ -121,48 +120,6 @@ describe("ingestEventsV1 helpers", () => {
     expect(logger.error).toHaveBeenCalledTimes(1)
   })
 
-  it("resolves preview lakehouse writes to the dev bucket binding", () => {
-    const devBucket = createR2Bucket()
-
-    expect(
-      resolveLakehouseBucket({
-        APP_ENV: "preview",
-        unprice_lakehouse_dev: devBucket as unknown as R2Bucket,
-      })
-    ).toEqual({
-      bucket: devBucket,
-      bucketName: "unprice-lakehouse-dev",
-    })
-  })
-
-  it("resolves development lakehouse writes without the prod bucket binding", () => {
-    const devBucket = createR2Bucket()
-
-    expect(
-      resolveLakehouseBucket({
-        APP_ENV: "development",
-        unprice_lakehouse_dev: devBucket as unknown as R2Bucket,
-      })
-    ).toEqual({
-      bucket: devBucket,
-      bucketName: "unprice-lakehouse-dev",
-    })
-  })
-
-  it("resolves production lakehouse writes to the prod bucket binding", () => {
-    const prodBucket = createR2Bucket()
-
-    expect(
-      resolveLakehouseBucket({
-        APP_ENV: "production",
-        unprice_lakehouse_prod: prodBucket as unknown as R2Bucket,
-      })
-    ).toEqual({
-      bucket: prodBucket,
-      bucketName: "unprice-lakehouse-prod",
-    })
-  })
-
   it("marks non-production failure-test request ids", () => {
     expect(
       resolveIngestionMessageRequestId({
@@ -213,10 +170,6 @@ describe("ingestEventsV1 route", () => {
         requestId: "req_123",
         receivedAt: requestBody.timestamp,
         workspaceId: "ws_123",
-        rawStorage: {
-          bucketName: "unprice-lakehouse-dev",
-          objectKey: "ingestion/raw/development/proj_123/cus_123/idem_123/evt_123.json",
-        },
         source: {
           environment: "development",
           apiKeyId: "key_123",
@@ -256,125 +209,6 @@ describe("ingestEventsV1 route", () => {
     expect(selectedQueue.send).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId: "test:raw_ingestion_queue_processing_failed:req_123",
-      })
-    )
-  })
-
-  it("writes the accepted raw payload before enqueueing", async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date(requestBody.timestamp))
-
-    const { app, env, executionCtx } = createTestApp()
-
-    const response = await app.fetch(
-      buildRequest({
-        ...requestBody,
-        timestamp: Date.now(),
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(202)
-
-    const expectedObjectKey = "ingestion/raw/development/proj_123/cus_123/idem_123/evt_123.json"
-
-    expect(env.unprice_lakehouse_dev.put).toHaveBeenCalledTimes(1)
-    expect(env.unprice_lakehouse_dev.put).toHaveBeenCalledWith(
-      expectedObjectKey,
-      expect.stringContaining('"rawStorage"'),
-      expect.objectContaining({
-        onlyIf: {
-          etagDoesNotMatch: "*",
-        },
-        httpMetadata: {
-          contentType: "application/json",
-        },
-      })
-    )
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenCalledTimes(1)
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rawStorage: {
-          bucketName: "unprice-lakehouse-dev",
-          objectKey: expectedObjectKey,
-        },
-      })
-    )
-
-    const putCallOrder = env.unprice_lakehouse_dev.put.mock.invocationCallOrder[0]
-    const sendCallOrder = env.QUEUE_SHARD_0.send.mock.invocationCallOrder[0]
-
-    if (putCallOrder === undefined || sendCallOrder === undefined) {
-      throw new Error("expected R2 put and queue send to be invoked")
-    }
-
-    expect(putCallOrder).toBeLessThan(sendCallOrder)
-  })
-
-  it("does not overwrite an existing raw payload and still enqueues", async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date(requestBody.timestamp))
-
-    const { app, env, executionCtx } = createTestApp()
-    env.unprice_lakehouse_dev.put.mockResolvedValueOnce(null)
-
-    const response = await app.fetch(
-      buildRequest({
-        ...requestBody,
-        timestamp: Date.now(),
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(202)
-
-    const expectedObjectKey = "ingestion/raw/development/proj_123/cus_123/idem_123/evt_123.json"
-
-    expect(env.unprice_lakehouse_dev.put).toHaveBeenCalledWith(
-      expectedObjectKey,
-      expect.stringContaining('"rawStorage"'),
-      expect.objectContaining({
-        onlyIf: {
-          etagDoesNotMatch: "*",
-        },
-      })
-    )
-    expect(env.QUEUE_SHARD_0.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        rawStorage: {
-          bucketName: "unprice-lakehouse-dev",
-          objectKey: expectedObjectKey,
-        },
-      })
-    )
-  })
-
-  it("does not enqueue when raw payload persistence fails", async () => {
-    const { app, env, executionCtx, logger } = createTestApp()
-    env.unprice_lakehouse_dev.put.mockRejectedValueOnce(new Error("r2 down"))
-
-    const response = await app.fetch(
-      buildRequest({
-        ...requestBody,
-        timestamp: Date.now(),
-      }),
-      env,
-      executionCtx
-    )
-
-    expect(response.status).toBe(400)
-    expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
-    expect(env.QUEUE_SHARD_1.send).not.toHaveBeenCalled()
-    expect(logger.error).toHaveBeenCalledWith(
-      "raw ingestion payload persistence failed",
-      expect.objectContaining({
-        error: expect.objectContaining({
-          message: "r2 down",
-          type: "Error",
-        }),
-        error_message: "r2 down",
       })
     )
   })
@@ -677,10 +511,6 @@ function createTestApp() {
     QUEUE_SHARD_1: {
       send: vi.fn().mockResolvedValue(undefined),
     },
-    unprice_lakehouse_dev: {
-      put: vi.fn().mockResolvedValue(null),
-    },
-    unprice_lakehouse_prod: undefined,
   }
 
   const executionCtx = {
@@ -713,11 +543,5 @@ function createRouteLogger(): Pick<Logger, "error" | "warn" | "set"> {
     error: vi.fn(),
     warn: vi.fn(),
     set: vi.fn(),
-  }
-}
-
-function createR2Bucket() {
-  return {
-    put: vi.fn().mockResolvedValue(null),
   }
 }

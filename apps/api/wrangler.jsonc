@@ -98,12 +98,6 @@
           "binding": "PIPELINE_EVENTS"
         }
       ],
-      "r2_buckets": [
-        {
-          "bucket_name": "unprice-lakehouse-prod",
-          "binding": "unprice_lakehouse_prod"
-        }
-      ],
       "durable_objects": {
         "bindings": [
           {
@@ -229,12 +223,6 @@
           "binding": "PIPELINE_EVENTS"
         }
       ],
-      "r2_buckets": [
-        {
-          "bucket_name": "unprice-lakehouse-dev",
-          "binding": "unprice_lakehouse_dev"
-        }
-      ],
       "durable_objects": {
         "bindings": [
           {
@@ -356,12 +344,6 @@
         {
           "pipeline": "c9884129e550480383e900929202980c",
           "binding": "PIPELINE_EVENTS"
-        }
-      ],
-      "r2_buckets": [
-        {
-          "bucket_name": "unprice-lakehouse-dev",
-          "binding": "unprice_lakehouse_dev"
         }
       ],
       "migrations": [

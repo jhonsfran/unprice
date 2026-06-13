@@ -400,7 +400,6 @@ function recentEvent(overrides: Partial<IngestionRecentEventRow> = {}): Ingestio
     failure_reason: null,
     failure_message: null,
     replayable: false,
-    r2_object_key: null,
     timestamp: fromTs + 1_000,
     received_at: fromTs + 1_100,
     handled_at: fromTs + 1_200,

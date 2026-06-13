@@ -16,7 +16,6 @@ export const getFailedIngestionEventPayloadOutputSchema = z
     failureReason: z.string().nullable(),
     failureMessage: z.string().nullable(),
     payloadJson: z.string(),
-    r2ObjectKey: z.string().nullable(),
     handledAt: z.number().int(),
   })
   .nullable()
@@ -82,7 +81,6 @@ function mapReplayPayloadRow(
     failureReason: row.failure_reason,
     failureMessage: row.failure_message,
     payloadJson: row.payload_json,
-    r2ObjectKey: row.r2_object_key ?? null,
     handledAt: row.handled_at,
   }
 }

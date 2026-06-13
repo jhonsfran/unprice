@@ -211,7 +211,6 @@ export const ingestionEventSchemaV1 = z.object({
   failure_message: z.string().nullable().optional(),
   replayable: z.boolean().default(false),
   payload_json: z.string().nullable().optional(),
-  r2_object_key: z.string().nullable().optional(),
   timestamp: z.number().int(),
   received_at: z.number().int(),
   handled_at: z.number().int(),
@@ -436,7 +435,6 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
     failure_reason: true,
     failure_message: true,
     replayable: true,
-    r2_object_key: true,
     timestamp: true,
     received_at: true,
     handled_at: true,
@@ -459,7 +457,6 @@ export const ingestionReplayPayloadRowSchema = z.object({
   failure_reason: z.string().nullable(),
   failure_message: z.string().nullable(),
   payload_json: z.string(),
-  r2_object_key: z.string().nullable().optional(),
   handled_at: z.number().int(),
 })
 

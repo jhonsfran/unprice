@@ -267,7 +267,6 @@ function buildIngestionEvent(
     failure_message: record.failureMessage ?? null,
     replayable: record.replayable ?? false,
     payload_json: record.payloadJson ?? null,
-    r2_object_key: record.r2ObjectKey ?? null,
     timestamp: payload.timestamp,
     received_at: record.firstSeenAt,
     handled_at: record.handledAt,

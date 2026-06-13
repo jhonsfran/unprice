@@ -16,7 +16,6 @@ import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
-import { serializeError } from "~/errors/log"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import * as HttpStatusCodes from "~/util/http-status-codes"
@@ -26,26 +25,6 @@ const SAFE_QUEUE_SEND_RETRIES = 3
 const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
 export const INGESTION_TEST_FAILURE_HEADER = "x-unprice-ingestion-test-failure"
 export const INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE = "raw_queue_processing_failed"
-const LAKEHOUSE_BUCKETS_BY_ENV = {
-  development: {
-    bucketName: "unprice-lakehouse-dev",
-    bindingName: "unprice_lakehouse_dev",
-  },
-  preview: {
-    bucketName: "unprice-lakehouse-dev",
-    bindingName: "unprice_lakehouse_dev",
-  },
-  production: {
-    bucketName: "unprice-lakehouse-prod",
-    bindingName: "unprice_lakehouse_prod",
-  },
-} as const satisfies Record<
-  Env["APP_ENV"],
-  {
-    bucketName: string
-    bindingName: "unprice_lakehouse_dev" | "unprice_lakehouse_prod"
-  }
->
 
 export const rawEventSchema = z.object({
   id: z
@@ -182,7 +161,7 @@ export const registerIngestEventsV1 = (app: App) =>
     // 4. the event should be parsed to be sure we don't receive garbage, before sending it
     // to the queue
     // TODO: we could deduplicate this here in memory
-    const messageWithoutRawStorage = buildIngestionQueueMessage({
+    const message = buildIngestionQueueMessage({
       body: {
         ...body,
         idempotencyKey,
@@ -204,26 +183,6 @@ export const registerIngestEventsV1 = (app: App) =>
       },
       timestamp,
       workspaceId: key.project.workspaceId,
-    })
-
-    const { bucket, bucketName } = resolveLakehouseBucket(c.env)
-    const objectKey = buildRawIngestionObjectKey({
-      environment: c.env.APP_ENV,
-      projectId,
-      customerId,
-      idempotencyKey,
-      eventId: messageWithoutRawStorage.id,
-    })
-    const message = addRawStorageToIngestionQueueMessage(messageWithoutRawStorage, {
-      bucketName,
-      objectKey,
-    })
-
-    await persistRawIngestionPayload({
-      bucket,
-      logger,
-      message,
-      objectKey,
     })
 
     // shard by customerid to make sure the messages of specific customer go to the same queue
@@ -301,83 +260,6 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-export function resolveLakehouseBucket(
-  env: Pick<Env, "APP_ENV" | "unprice_lakehouse_dev" | "unprice_lakehouse_prod">
-): {
-  bucket: R2Bucket
-  bucketName: string
-} {
-  const bucketConfig = LAKEHOUSE_BUCKETS_BY_ENV[env.APP_ENV]
-  const bucket = env[bucketConfig.bindingName]
-
-  if (!bucket) {
-    throw new UnpriceApiError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: `Missing ${bucketConfig.bindingName} R2 binding`,
-    })
-  }
-
-  return {
-    bucket,
-    bucketName: bucketConfig.bucketName,
-  }
-}
-
-export function buildRawIngestionObjectKey(params: {
-  customerId: string
-  environment: string
-  eventId: string
-  idempotencyKey: string
-  projectId: string
-}): string {
-  return [
-    "ingestion",
-    "raw",
-    encodeURIComponent(params.environment),
-    encodeURIComponent(params.projectId),
-    encodeURIComponent(params.customerId),
-    encodeURIComponent(params.idempotencyKey),
-    `${encodeURIComponent(params.eventId)}.json`,
-  ].join("/")
-}
-
-export async function persistRawIngestionPayload(params: {
-  bucket: R2Bucket
-  logger: Logger
-  message: IngestionQueueMessage
-  objectKey: string
-}): Promise<void> {
-  const { bucket, logger, message, objectKey } = params
-
-  try {
-    await bucket.put(objectKey, JSON.stringify(message), {
-      onlyIf: {
-        etagDoesNotMatch: "*",
-      },
-      httpMetadata: {
-        contentType: "application/json",
-      },
-    })
-  } catch (error) {
-    const serializedError = serializeError(error)
-
-    logger.error("raw ingestion payload persistence failed", {
-      projectId: message.projectId,
-      customerId: message.customerId,
-      eventId: message.id,
-      idempotencyKey: message.idempotencyKey,
-      objectKey,
-      error: serializedError,
-      error_message: serializedError.message,
-    })
-
-    throw new UnpriceApiError({
-      code: "INTERNAL_SERVER_ERROR",
-      message: "Failed to persist raw ingestion payload",
-    })
-  }
-}
-
 export function generateEventId(now = Date.now()): string {
   return `evt_${ulid(now)}`
 }
@@ -409,16 +291,6 @@ export function buildIngestionQueueMessage(params: {
     timestamp,
     properties: body.properties,
     source,
-  })
-}
-
-export function addRawStorageToIngestionQueueMessage(
-  message: IngestionQueueMessage,
-  rawStorage: NonNullable<IngestionQueueMessage["rawStorage"]>
-): IngestionQueueMessage {
-  return ingestionQueueMessageSchema.parse({
-    ...message,
-    rawStorage,
   })
 }
 
