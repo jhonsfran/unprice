@@ -3,6 +3,7 @@ import type {
   CustomerMessageGroupPreparer,
   PreparedCustomerMessageGroup,
 } from "./entitlement-context"
+import { hasRawProcessingFailureTestMarker } from "./failure-injection"
 import type { FanoutMessageOutcome as MessageOutcome } from "./fanout-outcomes"
 import type { IngestionMessageProcessingResult, IngestionRejectionReason } from "./interface"
 import type { IngestionQueueMessage } from "./message"
@@ -39,9 +40,11 @@ export class IngestionCustomerGroupProcessor {
   private readonly preparedMessageProcessor: PreparedMessageProcessor
   private readonly reportingDispatcher: IngestionReportingOutcomeDispatcher
   private readonly subscriptionCatchUp: SubscriptionCatchUpProcessor | undefined
+  private readonly enableTestFailureInjection: boolean
 
   constructor(opts: {
     entitlementContext: CustomerMessageGroupPreparer
+    enableTestFailureInjection?: boolean
     logger: Pick<Logger, "error" | "info">
     messageOutcomes: IngestionMessageOutcomes
     preparedMessageProcessor: PreparedMessageProcessor
@@ -54,6 +57,7 @@ export class IngestionCustomerGroupProcessor {
     this.preparedMessageProcessor = opts.preparedMessageProcessor
     this.reportingDispatcher = opts.reportingDispatcher
     this.subscriptionCatchUp = opts.subscriptionCatchUp
+    this.enableTestFailureInjection = opts.enableTestFailureInjection ?? false
   }
 
   public async processCustomerGroup(params: {
@@ -81,6 +85,10 @@ export class IngestionCustomerGroupProcessor {
 
       if (freshMessages.length === 0) {
         return mapOutcomesToAckResults(finalizedOutcomes)
+      }
+
+      if (this.enableTestFailureInjection && hasRawProcessingFailureTestMarker(freshMessages)) {
+        throw new Error("raw ingestion processing failure test requested")
       }
 
       let preparedGroup = await this.entitlementContext.prepareCustomerMessageGroup({

@@ -129,6 +129,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-13: Dashboard-to-API project overrides should pass `project_id` through the public SDK
   body and use `validateIsAllowedToAccessProject`; do not add parallel internal auth headers when
   API-key admin/root access already models the permission.
+- 2026-06-13: k6 replay testing should create real UI-visible failed rows through the
+  non-production `/v1/events/ingest` failure-test header; keep the marker out of replay behavior by
+  storing it only in `requestId`, which replay replaces before requeueing.
 - 2026-06-13: Ingestion replay uses Tinybird failed rows as the recovery index and `payload_json`
   as the immediate replay source; R2 remains write-once audit storage.
 - 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor

@@ -20,6 +20,11 @@ BASE_URL=http://localhost:8787
 PROJECT_ID=proj_xxx
 CUSTOMER_ID=cus_xxx
 EVENTS=1000
+REPLAY_AUTO_REPLAY=false
+REPLAY_EVENT_SLUG=
+REPLAY_POLL_INTERVAL_MS=1000
+REPLAY_POLL_TIMEOUT_MS=60000
+REPLAY_WINDOW_MS=300000
 ```
 
 ## Run
@@ -37,3 +42,25 @@ usage event slugs, the run sends `EVENTS * eventSlugCount` async usage events.
 
 The script also verifies every active entitlement on every iteration. Usage and verification
 requests are sent in parallel with `http.batch()`.
+
+## Replay Failure Test
+
+The replay failure script creates a real failed ingestion row that the Events UI can list and
+replay. It sends a valid usage event with the non-production failure-test header, then polls
+`/v1/analytics/ingestion/status` until a `state=failed`, `replayable=true` row appears.
+
+Run it against a local or preview API where `APP_ENV !== "production"`:
+
+```bash
+pnpm --filter @unprice/k6 replay-failure
+```
+
+By default the script stops after printing the `canonicalAuditId`, so you can replay that failed
+row from the Events UI. To verify the API replay path too:
+
+```bash
+REPLAY_AUTO_REPLAY=true pnpm --filter @unprice/k6 replay-failure
+```
+
+Set `REPLAY_EVENT_SLUG` when the customer has multiple usage event slugs and you want a specific
+metered event.

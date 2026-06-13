@@ -23,8 +23,11 @@ vi.mock("~/auth/key", () => ({
 import type { Logger } from "@unprice/logs"
 import type { ExecutionContext } from "hono"
 import {
+  INGESTION_TEST_FAILURE_HEADER,
+  INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
   generateEventId,
   registerIngestEventsV1,
+  resolveIngestionMessageRequestId,
   resolveLakehouseBucket,
   safeSendToQueue,
   selectQueueShardIndex,
@@ -159,6 +162,26 @@ describe("ingestEventsV1 helpers", () => {
       bucketName: "unprice-lakehouse-prod",
     })
   })
+
+  it("marks non-production failure-test request ids", () => {
+    expect(
+      resolveIngestionMessageRequestId({
+        appEnv: "development",
+        failureTestHeader: INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
+        requestId: "req_123",
+      })
+    ).toBe("test:raw_ingestion_queue_processing_failed:req_123")
+  })
+
+  it("ignores failure-test request ids in production", () => {
+    expect(
+      resolveIngestionMessageRequestId({
+        appEnv: "production",
+        failureTestHeader: INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
+        requestId: "req_123",
+      })
+    ).toBe("req_123")
+  })
 })
 
 describe("ingestEventsV1 route", () => {
@@ -204,6 +227,37 @@ describe("ingestEventsV1 route", () => {
       })
     )
     expect(otherQueue.send).not.toHaveBeenCalled()
+  })
+
+  it("marks accepted non-production messages for raw processing failure tests", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(requestBody.timestamp))
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest(
+        {
+          ...requestBody,
+          timestamp: Date.now(),
+        },
+        {
+          [INGESTION_TEST_FAILURE_HEADER]: INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
+        }
+      ),
+      env,
+      executionCtx
+    )
+    expect(response.status).toBe(202)
+
+    const selectedQueue =
+      selectQueueShardIndex(requestBody.customerId) === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
+
+    expect(selectedQueue.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "test:raw_ingestion_queue_processing_failed:req_123",
+      })
+    )
   })
 
   it("writes the accepted raw payload before enqueueing", async () => {
@@ -639,12 +693,16 @@ function createTestApp() {
   return { app, env, executionCtx, logger, waitUntilPromises }
 }
 
-function buildRequest(body: Record<string, unknown> = requestBody) {
+function buildRequest(
+  body: Record<string, unknown> = requestBody,
+  headers: Record<string, string> = {}
+) {
   return new Request("https://example.com/v1/events/ingest", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",
       "content-type": "application/json",
+      ...headers,
     },
     body: JSON.stringify(body),
   })

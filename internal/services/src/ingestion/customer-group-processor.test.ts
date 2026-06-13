@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
 import { IngestionCustomerGroupProcessor } from "./customer-group-processor"
+import { markRawProcessingFailureTestRequestId } from "./failure-injection"
 import type { FanoutMessageOutcome } from "./fanout-outcomes"
 import type { IngestionQueueMessage } from "./message"
 import { IngestionMessageOutcomes } from "./message-outcomes"
@@ -334,6 +335,62 @@ describe("IngestionCustomerGroupProcessor", () => {
     )
   })
 
+  it("reports enabled raw processing failure test markers as replayable failed outcomes", async () => {
+    const logger = createLogger()
+    const message = createMessage({
+      requestId: markRawProcessingFailureTestRequestId("req_123"),
+    })
+    const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
+    const prepareCustomerMessageGroup = vi.fn()
+    const preparedProcess = vi.fn()
+    const processor = createProcessor({
+      enableTestFailureInjection: true,
+      enqueueOutcomes,
+      logger,
+      preparedProcess,
+      prepareCustomerMessageGroup,
+    })
+
+    const result = await processor.processCustomerGroup({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [message],
+    })
+
+    expect(result).toEqual([
+      {
+        message,
+        disposition: {
+          action: "ack",
+        },
+      },
+    ])
+    expect(prepareCustomerMessageGroup).not.toHaveBeenCalled()
+    expect(preparedProcess).not.toHaveBeenCalled()
+    expect(enqueueOutcomes).toHaveBeenCalledWith({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      outcomes: [
+        {
+          message,
+          outcome: {
+            state: "failed",
+            failureStage: "rating_fact",
+            failureReason: "raw_ingestion_queue_processing_failed",
+            replayable: true,
+          },
+        },
+      ],
+    })
+    expect(logger.error).toHaveBeenCalledWith(
+      "raw ingestion queue processing failed",
+      expect.objectContaining({
+        customerId: "cus_123",
+        projectId: "proj_123",
+      })
+    )
+  })
+
   it("retries raw messages when failed status reporting cannot be enqueued", async () => {
     const logger = createLogger()
     const olderMessage = createMessage({
@@ -464,6 +521,7 @@ describe("IngestionCustomerGroupProcessor", () => {
 
 function createProcessor(
   overrides: {
+    enableTestFailureInjection?: boolean
     enqueueOutcomes?: ReturnType<typeof vi.fn>
     logger?: ReturnType<typeof createLogger>
     preparedGroup?:
@@ -491,6 +549,7 @@ function createProcessor(
   }
 
   return new IngestionCustomerGroupProcessor({
+    enableTestFailureInjection: overrides.enableTestFailureInjection,
     entitlementContext: {
       prepareCustomerMessageGroup:
         overrides.prepareCustomerMessageGroup ?? vi.fn().mockResolvedValue(preparedGroup),

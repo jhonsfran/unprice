@@ -33,6 +33,7 @@ export function createIngestionService(params: CreateIngestionServiceParams): In
   return new IngestionService({
     cache: params.cache,
     db: params.db,
+    enableTestFailureInjection: params.env.APP_ENV !== "production",
     entitlementService: params.entitlementService,
     entitlementWindowClient: new CloudflareEntitlementWindowClient(params.env),
     reportingClient: new CloudflareReportingQueueClient(params.env),

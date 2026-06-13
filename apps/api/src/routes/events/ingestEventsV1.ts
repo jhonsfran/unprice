@@ -8,6 +8,7 @@ import {
 import {
   type IngestionQueueMessage,
   ingestionQueueMessageSchema,
+  markRawProcessingFailureTestRequestId,
 } from "@unprice/services/ingestion"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
@@ -23,6 +24,8 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 const tags = ["events"]
 const SAFE_QUEUE_SEND_RETRIES = 3
 const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
+export const INGESTION_TEST_FAILURE_HEADER = "x-unprice-ingestion-test-failure"
+export const INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE = "raw_queue_processing_failed"
 const LAKEHOUSE_BUCKETS_BY_ENV = {
   development: {
     bucketName: "unprice-lakehouse-dev",
@@ -187,7 +190,11 @@ export const registerIngestEventsV1 = (app: App) =>
       customerId,
       projectId,
       receivedAt,
-      requestId,
+      requestId: resolveIngestionMessageRequestId({
+        appEnv: c.env.APP_ENV,
+        failureTestHeader: c.req.header(INGESTION_TEST_FAILURE_HEADER),
+        requestId,
+      }),
       source: {
         environment: c.env.APP_ENV,
         apiKeyId: key.id,
@@ -420,6 +427,21 @@ export function resolveRequestCustomerId(params: {
   defaultCustomerId?: string | null
 }): string | null {
   return params.explicitCustomerId ?? params.defaultCustomerId ?? null
+}
+
+export function resolveIngestionMessageRequestId(params: {
+  appEnv: Env["APP_ENV"]
+  failureTestHeader?: string | undefined
+  requestId: string
+}): string {
+  if (
+    params.appEnv === "production" ||
+    params.failureTestHeader !== INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE
+  ) {
+    return params.requestId
+  }
+
+  return markRawProcessingFailureTestRequestId(params.requestId)
 }
 
 export function logEventTooOldRejection(params: {

@@ -38,6 +38,7 @@ export class IngestionService {
     db?: Database
     entitlementService: EntitlementService
     entitlementWindowClient: EntitlementWindowClient
+    enableTestFailureInjection?: boolean
     fanoutWarningThreshold?: number
     reportingClient?: IngestionReportingQueueClient
     logger: Logger
@@ -95,6 +96,7 @@ export class IngestionService {
       : undefined
     this.customerGroupProcessor = new IngestionCustomerGroupProcessor({
       entitlementContext,
+      enableTestFailureInjection: opts.enableTestFailureInjection,
       logger: opts.logger,
       messageOutcomes,
       preparedMessageProcessor,

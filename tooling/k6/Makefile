@@ -5,3 +5,7 @@ baseline:
 lifecycle:
 	pnpm build:lifecycle
 	docker run --env-file .env --rm --network=host -i grafana/k6 run - < dist/lifecycle.js
+
+replay-failure:
+	pnpm build:replay-failure
+	sh ./scripts/run-k6.sh dist/replay-failure.js
