@@ -1,3 +1,4 @@
+import { FEATURE_SLUGS } from "@unprice/config"
 import { AppWindow, Globe, Link, Settings } from "lucide-react"
 import type { DashboardRoute, Shortcut } from "~/types"
 
@@ -11,7 +12,7 @@ export const WORKSPACE_NAV: DashboardRoute[] = [
     icon: Globe,
     name: "Domains",
     href: "/domains",
-    featureSlug: "domains",
+    featureSlug: FEATURE_SLUGS.DOMAINS.SLUG,
   },
   {
     icon: Settings,
@@ -22,7 +23,7 @@ export const WORKSPACE_NAV: DashboardRoute[] = [
       {
         name: "Members",
         href: "/settings/members",
-        featureSlug: "access-pro",
+        featureSlug: FEATURE_SLUGS.ACCESS_PRO.SLUG,
       },
       {
         name: "Billing & Usage",
@@ -37,7 +38,7 @@ export const WORKSPACE_SHORTCUTS: Shortcut[] = [
     name: "Add member",
     href: "settings/members",
     icon: Link,
-    featureSlug: "access-pro",
+    featureSlug: FEATURE_SLUGS.ACCESS_PRO.SLUG,
   },
   {
     name: "Workspace usage",
@@ -48,6 +49,6 @@ export const WORKSPACE_SHORTCUTS: Shortcut[] = [
     name: "Add domain",
     href: "domains",
     icon: Link,
-    featureSlug: "domains",
+    featureSlug: FEATURE_SLUGS.DOMAINS.SLUG,
   },
 ]

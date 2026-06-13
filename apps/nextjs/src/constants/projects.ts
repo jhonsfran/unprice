@@ -1,3 +1,4 @@
+import { FEATURE_SLUGS } from "@unprice/config"
 import {
   Activity,
   Calculator,
@@ -20,6 +21,7 @@ export const PROJECT_NAV: DashboardRoute[] = [
     name: "Events",
     icon: Activity,
     href: "/events",
+    featureSlug: FEATURE_SLUGS.EVENTS.SLUG,
   },
   {
     name: "Plans",
@@ -27,25 +29,25 @@ export const PROJECT_NAV: DashboardRoute[] = [
     href: "/plans",
     disabled: false,
     isNew: true,
-    featureSlug: "plans",
+    featureSlug: FEATURE_SLUGS.PLANS.SLUG,
   },
   {
     name: "Pages",
     icon: Sticker,
     href: "/pages",
-    featureSlug: "pages",
+    featureSlug: FEATURE_SLUGS.PAGES.SLUG,
   },
   {
     name: "Api Keys",
     href: "/apikeys",
     icon: Key,
-    featureSlug: "apikeys",
+    featureSlug: FEATURE_SLUGS.API_KEYS.SLUG,
   },
   {
     name: "Customers",
     href: "/customers",
     icon: Users,
-    featureSlug: "customers",
+    featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
   },
   {
     name: "Settings",

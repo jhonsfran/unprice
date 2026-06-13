@@ -179,7 +179,7 @@ export const FEATURE_SLUGS = {
     TITLE: "Domains",
     DESCRIPTION: "manage your domains and DNS",
     UNIT: "domain",
-    AVAILABLE: true,
+    AVAILABLE: false,
   },
   PAGES: {
     SLUG: "pages",
