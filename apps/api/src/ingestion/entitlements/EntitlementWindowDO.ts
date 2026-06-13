@@ -53,11 +53,14 @@ import {
   createAllowedBatchOutcome,
   createCachedBatchResult,
   createDeniedBatchOutcome,
-  hasStagedBatchMutations,
   idempotencyEntryToApplyResult,
   planWalletReservationSpend,
-  stageBatchIdempotencyEntry,
 } from "./batch-apply-helpers"
+import {
+  type OptimizedBatchDraft,
+  type OptimizedBatchWriteMetrics,
+  createOptimizedBatchDraft,
+} from "./optimized-batch-draft"
 import {
   APPLY_BATCH_SIZE_LIMIT,
   FLUSH_INTERVAL_MS,
@@ -132,17 +135,6 @@ import {
 export { entitlementWindowStatusSchema } from "./contracts"
 export type { EntitlementWindowStatus } from "./contracts"
 
-type OptimizedBatchWriteMetrics = Pick<
-  ApplyBatchMetrics,
-  | "grant_window_write_count"
-  | "idempotency_event_count"
-  | "idempotency_insert_count"
-  | "meter_state_write_count"
-  | "outbox_fact_count"
-  | "outbox_insert_count"
-  | "wallet_reservation_write_count"
->
-
 type OptimizedBatchSetup = {
   cachedResults: Map<string, BatchIdempotencyEntry>
   entitlement: EntitlementConfigInput
@@ -151,20 +143,6 @@ type OptimizedBatchSetup = {
   meter: MeterIdentity
   meterState: MeterStateDraft
   wallet: WalletReservationSnapshot
-}
-
-type OptimizedBatchProcessingState = {
-  grantStates: GrantConsumptionState[]
-  idempotencyEntries: BatchIdempotencyEntry[]
-  meterState: MeterStateDraft
-  metrics: ApplyBatchMetrics
-  refillTrigger: RefillTrigger | null
-  reservationCloseReason: ReservationCloseReason | null
-  results: ApplyBatchResultRow[]
-  stagedResultsByKey: Map<string, BatchIdempotencyEntry>
-  touchedGrantStates: Map<string, GrantConsumptionState>
-  wallet: WalletReservationSnapshot
-  walletDirty: boolean
 }
 
 type OptimizedBatchOptions = {
@@ -195,24 +173,6 @@ type OptimizedBatchWalletDiagnostics = {
   retryLastReservationId: string | null
   retryLastStagedConsumedAmount: number | null
   retryOutcomes: OptimizedBatchWalletRetryOutcome[]
-}
-
-function createOptimizedBatchProcessingState(
-  setup: OptimizedBatchSetup
-): OptimizedBatchProcessingState {
-  return {
-    grantStates: setup.grantStates.map((state) => ({ ...state })),
-    idempotencyEntries: [],
-    meterState: { ...setup.meterState },
-    metrics: createApplyBatchMetrics(),
-    refillTrigger: null,
-    reservationCloseReason: null,
-    results: [],
-    stagedResultsByKey: new Map<string, BatchIdempotencyEntry>(),
-    touchedGrantStates: new Map<string, GrantConsumptionState>(),
-    wallet: setup.wallet ? { ...setup.wallet } : null,
-    walletDirty: false,
-  }
 }
 
 function createOptimizedBatchWalletDiagnostics(): OptimizedBatchWalletDiagnostics {
@@ -750,7 +710,11 @@ export class EntitlementWindowDO extends DurableObject {
     const createdAt = Date.now()
     const idempotencyKeys = unique(input.events.map((event) => event.idempotencyKey))
     const setup = this.prepareOptimizedBatch(input, createdAt, idempotencyKeys)
-    const state = createOptimizedBatchProcessingState(setup)
+    const state = createOptimizedBatchDraft({
+      grantStates: setup.grantStates,
+      meterState: setup.meterState,
+      wallet: setup.wallet,
+    })
 
     for (const event of input.events) {
       await this.processOptimizedBatchEvent({
@@ -763,16 +727,17 @@ export class EntitlementWindowDO extends DurableObject {
       })
     }
 
+    const commit = state.toCommitPayload()
     Object.assign(
       state.metrics,
       this.commitOptimizedBatch({
         createdAt,
-        idempotencyEntries: state.idempotencyEntries,
+        idempotencyEntries: commit.idempotencyEntries,
         meter: setup.meter,
-        meterState: state.meterState,
-        touchedGrantStates: state.touchedGrantStates,
-        wallet: state.wallet,
-        walletDirty: state.walletDirty,
+        meterState: commit.meterState,
+        touchedGrantStates: commit.touchedGrantStates,
+        wallet: commit.wallet,
+        walletDirty: commit.walletDirty,
       })
     )
 
@@ -793,7 +758,7 @@ export class EntitlementWindowDO extends DurableObject {
     input: ApplyBatchInput
     options: OptimizedBatchOptions
     setup: OptimizedBatchSetup
-    state: OptimizedBatchProcessingState
+    state: OptimizedBatchDraft
   }): Promise<void> {
     const { createdAt, event, input, options, setup, state } = params
     const activeGrants = resolveActiveGrants(setup.grants, event.timestamp)
@@ -803,7 +768,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     const cached =
-      state.stagedResultsByKey.get(event.idempotencyKey) ??
+      state.lookupStagedResult(event.idempotencyKey) ??
       setup.cachedResults.get(event.idempotencyKey)
     if (cached) {
       state.metrics.duplicate_count++
@@ -911,7 +876,7 @@ export class EntitlementWindowDO extends DurableObject {
     eventInput: ApplyInput
     input: ApplyBatchInput
     setup: OptimizedBatchSetup
-    state: OptimizedBatchProcessingState
+    state: OptimizedBatchDraft
     usesWalletReservation: boolean
   }): PricedFact[] | null {
     const {
@@ -976,7 +941,7 @@ export class EntitlementWindowDO extends DurableObject {
     eventInput: ApplyInput
     pricedFacts: PricedFact[]
     setup: OptimizedBatchSetup
-    state: OptimizedBatchProcessingState
+    state: OptimizedBatchDraft
   }): void {
     const { createdAt, event, eventInput, pricedFacts, setup, state } = params
     const meterFacts = pricedFacts.map((pricedFact) =>
@@ -994,11 +959,7 @@ export class EntitlementWindowDO extends DurableObject {
       idempotencyKey: event.idempotencyKey,
       meterFacts,
     })
-    stageBatchIdempotencyEntry({
-      entries: state.idempotencyEntries,
-      entry: allowed.entry,
-      stagedResultsByKey: state.stagedResultsByKey,
-    })
+    state.stageIdempotencyEntry(allowed.entry)
     state.results.push(allowed.result)
   }
 
@@ -1008,7 +969,7 @@ export class EntitlementWindowDO extends DurableObject {
     event: ApplyBatchInput["events"][number]
     eventInput: ApplyInput
     setup: OptimizedBatchSetup
-    state: OptimizedBatchProcessingState
+    state: OptimizedBatchDraft
     usesWalletReservation: boolean
   }): Promise<boolean> {
     const { activeGrants, createdAt, event, eventInput, setup, state, usesWalletReservation } =
@@ -1020,7 +981,7 @@ export class EntitlementWindowDO extends DurableObject {
       return false
     }
 
-    if (this.hasOptimizedBatchStagedMutations(state)) {
+    if (state.hasDurableMutations()) {
       const projectedCost = this.computeProjectedBatchEventCostMinor({
         activeGrants,
         entitlement: eventInput.entitlement,
@@ -1081,7 +1042,7 @@ export class EntitlementWindowDO extends DurableObject {
     eventInput: ApplyInput
     refillAttempted: boolean
     setup: OptimizedBatchSetup
-    state: OptimizedBatchProcessingState
+    state: OptimizedBatchDraft
     usesWalletReservation: boolean
   }): boolean {
     const {
@@ -1144,7 +1105,7 @@ export class EntitlementWindowDO extends DurableObject {
     eventInput: ApplyInput
     input: ApplyBatchInput
     setup: OptimizedBatchSetup
-    state: OptimizedBatchProcessingState
+    state: OptimizedBatchDraft
   }): Fact[] {
     const { activeGrants, event, eventInput, input, setup, state } = params
     const adapter = new InMemoryMeterStorageAdapter(state.meterState)
@@ -1184,7 +1145,7 @@ export class EntitlementWindowDO extends DurableObject {
     event: ApplyBatchInput["events"][number]
     pricedFacts: PricedFact[]
     setup: OptimizedBatchSetup
-    state: OptimizedBatchProcessingState
+    state: OptimizedBatchDraft
     usesWalletReservation: boolean
   }): void {
     const { createdAt, event, pricedFacts, setup, state, usesWalletReservation } = params
@@ -1247,21 +1208,12 @@ export class EntitlementWindowDO extends DurableObject {
     }
   }
 
-  private hasOptimizedBatchStagedMutations(state: OptimizedBatchProcessingState): boolean {
-    return hasStagedBatchMutations({
-      idempotencyEntryCount: state.idempotencyEntries.length,
-      meterStateDirty: state.meterState.dirty,
-      touchedGrantStateCount: state.touchedGrantStates.size,
-      walletDirty: state.walletDirty,
-    })
-  }
-
   private stageOptimizedBatchDeniedResult(params: {
     createdAt: number
     deniedReason?: DeniedReason
     event: ApplyBatchInput["events"][number]
     message?: string
-    state: OptimizedBatchProcessingState
+    state: OptimizedBatchDraft
   }): ApplyBatchResultRow {
     const { createdAt, deniedReason, event, message, state } = params
     const denied = createDeniedBatchOutcome({
@@ -1271,11 +1223,7 @@ export class EntitlementWindowDO extends DurableObject {
       idempotencyKey: event.idempotencyKey,
       message,
     })
-    stageBatchIdempotencyEntry({
-      entries: state.idempotencyEntries,
-      entry: denied.entry,
-      stagedResultsByKey: state.stagedResultsByKey,
-    })
+    state.stageIdempotencyEntry(denied.entry)
     state.results.push(denied.result)
     return denied.result
   }
