@@ -532,7 +532,7 @@ export class EntitlementWindowDO extends DurableObject {
           // sequential replays one event at a time when wallet I/O must happen
           // outside a partially staged batch.
           try {
-            const optimized = await this.applyBatchOptimized(input)
+            const optimized = await this.applyBatchWithCompactDraft(input)
             metrics = optimized.metrics
             results.push(...optimized.results)
             return { results: optimized.results }
@@ -557,7 +557,7 @@ export class EntitlementWindowDO extends DurableObject {
               }
 
               reservationAction = "bootstrapped"
-              const retry = await this.applyBatchOptimized(input)
+              const retry = await this.applyBatchWithCompactDraft(input)
               metrics = retry.metrics
               results.push(...retry.results)
               return { results: retry.results }
@@ -592,7 +592,7 @@ export class EntitlementWindowDO extends DurableObject {
                 }
 
                 try {
-                  const retry = await this.applyBatchOptimized(input, {
+                  const retry = await this.applyBatchWithCompactDraft(input, {
                     refillAttemptedEventIds,
                     walletDiagnostics,
                   })
@@ -689,7 +689,7 @@ export class EntitlementWindowDO extends DurableObject {
     })
   }
 
-  private async applyBatchOptimized(
+  private async applyBatchWithCompactDraft(
     input: ApplyBatchInput,
     options: OptimizedBatchOptions = { refillAttemptedEventIds: new Set() }
   ): Promise<ApplyBatchInternalResult> {
@@ -703,7 +703,7 @@ export class EntitlementWindowDO extends DurableObject {
     })
 
     for (const event of input.events) {
-      await this.processOptimizedBatchEvent({
+      await this.stageBatchEventIntoDraft({
         createdAt,
         event,
         input,
@@ -716,7 +716,7 @@ export class EntitlementWindowDO extends DurableObject {
     const commit = state.toCommitPayload()
     Object.assign(
       state.metrics,
-      this.commitOptimizedBatch({
+      this.commitCompactBatchDraft({
         createdAt,
         idempotencyEntries: commit.idempotencyEntries,
         meter: setup.meter,
@@ -738,7 +738,7 @@ export class EntitlementWindowDO extends DurableObject {
     return { results: state.results, metrics: state.metrics }
   }
 
-  private async processOptimizedBatchEvent(params: {
+  private async stageBatchEventIntoDraft(params: {
     createdAt: number
     event: ApplyBatchInput["events"][number]
     input: ApplyBatchInput
@@ -823,7 +823,7 @@ export class EntitlementWindowDO extends DurableObject {
       return
     }
 
-    const pricedFacts = this.applyAndPriceOptimizedBatchEvent({
+    const pricedFacts = this.stageMeterAndPriceFactsIntoDraft({
       activeGrants,
       createdAt,
       event,
@@ -855,7 +855,7 @@ export class EntitlementWindowDO extends DurableObject {
     })
   }
 
-  private applyAndPriceOptimizedBatchEvent(params: {
+  private stageMeterAndPriceFactsIntoDraft(params: {
     activeGrants: ActiveGrantInput[]
     createdAt: number
     event: ApplyBatchInput["events"][number]
@@ -1214,7 +1214,7 @@ export class EntitlementWindowDO extends DurableObject {
     return denied.result
   }
 
-  private commitOptimizedBatch(params: {
+  private commitCompactBatchDraft(params: {
     createdAt: number
     idempotencyEntries: BatchIdempotencyEntry[]
     meter: MeterIdentity
