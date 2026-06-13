@@ -112,6 +112,12 @@ import {
   readNumericEventField,
   resolveMeterIdentity,
 } from "./meter-helpers"
+import {
+  type ReservationInvoiceContext,
+  hasPendingWalletFlush,
+  isReservationInvoiceContextMissing,
+  requireReservationInvoiceContext,
+} from "./wallet-reservation-flow"
 import { InMemoryMeterStorageAdapter, type MeterStateDraft } from "./meter-state-adapter"
 import {
   inactivityThresholdMs,
@@ -347,16 +353,6 @@ type ReservationBootstrapPlan = {
   policy: ReservationPolicy
   sampledAtMs: number
   sizing: InitialReservationDecision
-}
-
-type ReservationInvoiceContext = {
-  billingPeriodId: string
-  cycleEndAt: number
-  cycleStartAt: number
-  featurePlanVersionItemId: string
-  featureSlug: string
-  sourceId: string
-  statementKey: string
 }
 
 function createSingleApplyExecutionMetrics(): SingleApplyExecutionMetrics {
@@ -1171,7 +1167,7 @@ export class EntitlementWindowDO extends DurableObject {
       }
 
       if (spendPlan.refillStateUpdate) {
-        this.requireReservationInvoiceContext(wallet)
+        requireReservationInvoiceContext(wallet)
       }
 
       let nextWallet: NonNullable<WalletReservationSnapshot> = {
@@ -2159,7 +2155,7 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent.reservation_refill_requested_amount = spendPlan.refillAmount
 
     if (spendPlan.refillStateUpdate) {
-      this.requireReservationInvoiceContext(window)
+      requireReservationInvoiceContext(window)
     }
 
     // Synchronous SQLite write before any post-commit action. On replay the
@@ -2473,10 +2469,10 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     wideEvent.close_reservation_reason = trigger.closeReason
-    const hasPendingWalletFlush = this.hasPendingWalletFlush(window)
-    const isPendingFinalFlush = hasPendingWalletFlush && window.pendingFlushFinal
+    const pendingFlush = hasPendingWalletFlush(window)
+    const isPendingFinalFlush = pendingFlush && window.pendingFlushFinal
 
-    if (hasPendingWalletFlush && !isPendingFinalFlush) {
+    if (pendingFlush && !isPendingFinalFlush) {
       return await this.deferAlarmReservationCloseForPendingFlush({
         isDeletionPending: trigger.isDeletionPending,
         wideEvent,
@@ -2684,7 +2680,7 @@ export class EntitlementWindowDO extends DurableObject {
     wideEvent.outbox_remaining = latestOutboxCount
     wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, latestOutboxCount)
     wideEvent.recovery_required = latestWindow?.recoveryRequired ?? false
-    wideEvent.pending_wallet_flush = this.hasPendingWalletFlush(latestWindow)
+    wideEvent.pending_wallet_flush = hasPendingWalletFlush(latestWindow)
 
     if (this.isCleanupComplete(latestWindow, latestOutboxCount)) {
       wideEvent.self_destruct = true
@@ -2696,7 +2692,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     if (
       tinybirdFlushFailed ||
-      this.hasPendingWalletFlush(latestWindow) ||
+      hasPendingWalletFlush(latestWindow) ||
       (latestWindow?.recoveryRequired ?? false)
     ) {
       wideEvent.self_destruct = false
@@ -2739,7 +2735,7 @@ export class EntitlementWindowDO extends DurableObject {
     const latestWindow = this.store.readWalletReservation(this.db)
     wideEvent.cleanup_complete = this.isCleanupComplete(latestWindow, remainingOutboxCount)
     wideEvent.self_destruct_due = true
-    wideEvent.pending_wallet_flush = this.hasPendingWalletFlush(latestWindow)
+    wideEvent.pending_wallet_flush = hasPendingWalletFlush(latestWindow)
     wideEvent.recovery_required = latestWindow?.recoveryRequired ?? false
 
     if (this.isCleanupComplete(latestWindow, remainingOutboxCount)) {
@@ -2752,7 +2748,7 @@ export class EntitlementWindowDO extends DurableObject {
 
     if (
       tinybirdFlushFailed ||
-      this.hasPendingWalletFlush(latestWindow) ||
+      hasPendingWalletFlush(latestWindow) ||
       (latestWindow?.recoveryRequired ?? false)
     ) {
       wideEvent.self_destruct = false
@@ -2803,7 +2799,7 @@ export class EntitlementWindowDO extends DurableObject {
     }
 
     if (finalWindow?.reservationId && !finalWindow.recoveryRequired) {
-      const pendingWalletFlush = this.hasPendingWalletFlush(finalWindow)
+      const pendingWalletFlush = hasPendingWalletFlush(finalWindow)
       const unflushed = Math.max(0, finalWindow.consumedAmount - finalWindow.flushedAmount)
 
       if (pendingWalletFlush) {
@@ -2912,7 +2908,7 @@ export class EntitlementWindowDO extends DurableObject {
         return { ok: false, outcome: "statement_mismatch", errorMessage }
       }
 
-      if (this.hasPendingWalletFlush(window)) {
+      if (hasPendingWalletFlush(window)) {
         wideEvent.outcome = "deferred"
         return {
           ok: false,
@@ -3080,7 +3076,7 @@ export class EntitlementWindowDO extends DurableObject {
     const { closeReason, isRecoveringPendingFinal, wideEvent, window } = params
     const walletService = this.getWalletService()
     const durableObjectId = this.ctx.id.toString()
-    const invoiceContext = this.requireReservationInvoiceContext(window)
+    const invoiceContext = requireReservationInvoiceContext(window)
     const flushIntent = this.persistFinalReservationFlushIntent({
       isRecoveringPendingFinal,
       wideEvent,
@@ -3409,7 +3405,7 @@ export class EntitlementWindowDO extends DurableObject {
       window.pendingFlushSeq !== undefined &&
       window.pendingFlushSeq > window.flushSeq
 
-    if (this.hasPendingWalletFlush(window) && !isRecoveringPendingFinal) {
+    if (hasPendingWalletFlush(window) && !isRecoveringPendingFinal) {
       wideEvent.outcome = "deferred"
       wideEvent.reason = "pending_wallet_flush"
       wideEvent.pending_flush_seq = window.pendingFlushSeq
@@ -3848,16 +3844,6 @@ export class EntitlementWindowDO extends DurableObject {
     )
   }
 
-  private hasPendingWalletFlush(window: WalletReservationSnapshot): boolean {
-    return Boolean(
-      window?.reservationId &&
-        (window.refillInFlight ||
-          (window.pendingFlushSeq !== null &&
-            window.pendingFlushSeq !== undefined &&
-            window.pendingFlushSeq > window.flushSeq))
-    )
-  }
-
   private isCleanupComplete(
     window: WalletReservationSnapshot,
     outboxCount: number
@@ -3866,7 +3852,7 @@ export class EntitlementWindowDO extends DurableObject {
       outboxCount === 0 &&
       !window?.reservationId &&
       !window?.recoveryRequired &&
-      !this.hasPendingWalletFlush(window)
+      !hasPendingWalletFlush(window)
     )
   }
 
@@ -3903,7 +3889,7 @@ export class EntitlementWindowDO extends DurableObject {
       return null
     }
 
-    this.requireReservationInvoiceContext(readiness.window)
+    requireReservationInvoiceContext(readiness.window)
     this.persistReservationGrowthIntent(plan)
     await this.requestFlushAndRefill(plan.trigger)
 
@@ -3956,7 +3942,7 @@ export class EntitlementWindowDO extends DurableObject {
       effectiveAt: params.eventTimestamp,
     }
 
-    this.requireReservationInvoiceContext(readiness.window)
+    requireReservationInvoiceContext(readiness.window)
     // Persist minimal flush/refill intent without full refill decision state.
     // The batch retry path does not recompute spend velocity or target reservation
     // since the headroom helpers already sized the refill amount.
@@ -4292,7 +4278,7 @@ export class EntitlementWindowDO extends DurableObject {
   }): Promise<number | null> {
     const { trigger, wideEvent, window } = params
     const durableObjectId = this.ctx.id.toString()
-    const invoiceContext = this.requireReservationInvoiceContext(window)
+    const invoiceContext = requireReservationInvoiceContext(window)
     const captureResult = await this.getWalletService().captureReservationUsage({
       projectId: window.projectId,
       customerId: window.customerId,
@@ -4703,7 +4689,7 @@ export class EntitlementWindowDO extends DurableObject {
     input: ApplyInput,
     window: WalletReservationSnapshot
   ): WalletReservationSnapshot {
-    if (!window?.reservationId || !this.isReservationInvoiceContextMissing(window)) {
+    if (!window?.reservationId || !isReservationInvoiceContextMissing(window)) {
       return window
     }
 
@@ -4722,72 +4708,6 @@ export class EntitlementWindowDO extends DurableObject {
     return {
       ...window,
       ...patch,
-    }
-  }
-
-  private isReservationInvoiceContextMissing(
-    window: Pick<
-      NonNullable<WalletReservationSnapshot>,
-      | "billingPeriodId"
-      | "cycleEndAt"
-      | "cycleStartAt"
-      | "featurePlanVersionItemId"
-      | "featureSlug"
-      | "statementKey"
-    >
-  ): boolean {
-    return (
-      !window.billingPeriodId ||
-      window.cycleEndAt === null ||
-      window.cycleStartAt === null ||
-      !window.featurePlanVersionItemId ||
-      !window.featureSlug ||
-      !window.statementKey
-    )
-  }
-
-  private requireReservationInvoiceContext(
-    window: Pick<
-      NonNullable<WalletReservationSnapshot>,
-      | "billingPeriodId"
-      | "cycleEndAt"
-      | "cycleStartAt"
-      | "featurePlanVersionItemId"
-      | "featureSlug"
-      | "reservationId"
-      | "statementKey"
-    >
-  ): ReservationInvoiceContext {
-    const {
-      billingPeriodId,
-      cycleEndAt,
-      cycleStartAt,
-      featurePlanVersionItemId,
-      featureSlug,
-      statementKey,
-    } = window
-
-    if (
-      !billingPeriodId ||
-      cycleEndAt === null ||
-      cycleStartAt === null ||
-      !featurePlanVersionItemId ||
-      !featureSlug ||
-      !statementKey
-    ) {
-      throw new Error(
-        `Wallet reservation ${window.reservationId} is missing billing invoice context`
-      )
-    }
-
-    return {
-      billingPeriodId,
-      cycleEndAt,
-      cycleStartAt,
-      featurePlanVersionItemId,
-      featureSlug,
-      sourceId: `${billingPeriodId}:${featurePlanVersionItemId}`,
-      statementKey,
     }
   }
 
