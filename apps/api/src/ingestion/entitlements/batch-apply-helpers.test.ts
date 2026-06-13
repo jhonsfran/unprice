@@ -7,10 +7,8 @@ import {
   createAllowedBatchOutcome,
   createCachedBatchResult,
   createDeniedBatchOutcome,
-  hasStagedBatchMutations,
   idempotencyEntryToApplyResult,
   planWalletReservationSpend,
-  stageBatchIdempotencyEntry,
 } from "./batch-apply-helpers"
 import type { ApplyBatchInput, BatchIdempotencyEntry, WalletReservationSnapshot } from "./contracts"
 
@@ -41,26 +39,6 @@ describe("batch apply helpers", () => {
     })
   })
 
-  it("detects whether optimized batch processing has staged mutations", () => {
-    expect(
-      hasStagedBatchMutations({
-        idempotencyEntryCount: 0,
-        meterStateDirty: false,
-        touchedGrantStateCount: 0,
-        walletDirty: false,
-      })
-    ).toBe(false)
-
-    expect(
-      hasStagedBatchMutations({
-        idempotencyEntryCount: 1,
-        meterStateDirty: false,
-        touchedGrantStateCount: 0,
-        walletDirty: false,
-      })
-    ).toBe(true)
-  })
-
   it("converts idempotency entries back to apply results", () => {
     expect(
       idempotencyEntryToApplyResult({
@@ -78,21 +56,13 @@ describe("batch apply helpers", () => {
     })
   })
 
-  it("creates and stages denied batch outcomes", () => {
-    const entries: BatchIdempotencyEntry[] = []
-    const stagedResultsByKey = new Map<string, BatchIdempotencyEntry>()
+  it("creates denied batch outcomes", () => {
     const outcome = createDeniedBatchOutcome({
       correlationKey: "corr_123",
       createdAt: 1,
       deniedReason: "LATE_EVENT_CLOSED_PERIOD",
       idempotencyKey: "idem_123",
       message: "late",
-    })
-
-    stageBatchIdempotencyEntry({
-      entries,
-      entry: outcome.entry,
-      stagedResultsByKey,
     })
 
     expect(outcome.result).toMatchObject({
@@ -102,8 +72,11 @@ describe("batch apply helpers", () => {
       idempotencyKey: "idem_123",
       message: "late",
     })
-    expect(entries).toEqual([outcome.entry])
-    expect(stagedResultsByKey.get("idem_123")).toBe(outcome.entry)
+    expect(outcome.entry).toMatchObject({
+      eventId: "idem_123",
+      allowed: false,
+      deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+    })
   })
 
   it("creates allowed and cached batch result rows", () => {

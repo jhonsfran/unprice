@@ -108,20 +108,6 @@ export function buildBatchEventApplyInput(
   }
 }
 
-export function hasStagedBatchMutations(state: {
-  idempotencyEntryCount: number
-  meterStateDirty: boolean
-  touchedGrantStateCount: number
-  walletDirty: boolean
-}): boolean {
-  return (
-    state.idempotencyEntryCount > 0 ||
-    state.meterStateDirty ||
-    state.touchedGrantStateCount > 0 ||
-    state.walletDirty
-  )
-}
-
 export function planWalletReservationSpend(params: {
   createdAt: number
   entitlement: Pick<EntitlementConfigInput, "featureConfig">
@@ -491,15 +477,6 @@ export function createAllowedBatchOutcome(params: {
       meterFacts: params.meterFacts,
     },
   }
-}
-
-export function stageBatchIdempotencyEntry(params: {
-  entries: BatchIdempotencyEntry[]
-  entry: BatchIdempotencyEntry
-  stagedResultsByKey: Map<string, BatchIdempotencyEntry>
-}): void {
-  params.entries.push(params.entry)
-  params.stagedResultsByKey.set(params.entry.eventId, params.entry)
 }
 
 function nonEmptyMeterFacts(

@@ -1562,6 +1562,99 @@ describe("EntitlementWindowDO", () => {
     )
   })
 
+  it("keeps optimized batch writes bounded for mixed allowed denied and duplicate events", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    seedWalletReservation(db, {
+      reservationId: "res_mixed_compact_batch",
+      allocationAmount: 20 * 100_000_000,
+      targetReservationAmount: 20 * 100_000_000,
+      maxEventCostAmount: 100_000_000,
+    })
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const eventId = (event as { id: string }).id
+      const valueAfter = eventId === "evt_mixed_limit" ? 30 : 1
+      const facts = [{ delta: valueAfter, meterKey: DEFAULT_METER_KEY, valueAfter }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput({ enforceLimit: true, limit: 25 })
+    const first = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: true,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "allowed",
+          id: "evt_mixed_allowed",
+          idempotencyKey: "idem_mixed_allowed",
+          now: BASE_NOW,
+          timestamp: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "limit",
+          id: "evt_mixed_limit",
+          idempotencyKey: "idem_mixed_limit",
+          now: BASE_NOW + 1,
+          timestamp: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(first.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "allowed" }),
+      expect.objectContaining({
+        allowed: false,
+        correlationKey: "limit",
+        deniedReason: "LIMIT_EXCEEDED",
+      }),
+    ])
+
+    const second = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: true,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "allowed_replay",
+          id: "evt_mixed_allowed_replay",
+          idempotencyKey: "idem_mixed_allowed",
+          now: BASE_NOW + 2,
+          timestamp: BASE_NOW + 2,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "new_allowed",
+          id: "evt_mixed_new_allowed",
+          idempotencyKey: "idem_mixed_new_allowed",
+          now: BASE_NOW + 3,
+          timestamp: BASE_NOW + 3,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(second.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "allowed_replay" }),
+      expect.objectContaining({ allowed: true, correlationKey: "new_allowed" }),
+    ])
+    expect(db.idempotencyBatchRows).toHaveLength(2)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
+    expect(db.writeCounts.outboxBatchRows).toBe(0)
+    expect(db.writeCounts.idempotencyBatchRows).toBe(2)
+    expect(db.writeCounts.walletRows).toBeLessThanOrEqual(7)
+  })
+
   it("retries optimized batch after growing an underfunded wallet reservation", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
