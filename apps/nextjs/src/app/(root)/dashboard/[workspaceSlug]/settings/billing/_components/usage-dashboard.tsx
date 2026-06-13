@@ -1,4 +1,3 @@
-import { APP_DOMAIN } from "@unprice/config"
 import { nFormatter } from "@unprice/db/utils"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
@@ -42,8 +41,8 @@ export function UsageDashboard({ usageRows, customerId, workspaceSlug }: UsageDa
           </div>
           <PaymentMethodButton
             customerId={customerId}
-            successUrl={`${APP_DOMAIN}/${workspaceSlug}/settings/billing`}
-            cancelUrl={`${APP_DOMAIN}/${workspaceSlug}/settings/billing`}
+            successUrl={`/${workspaceSlug}/settings/billing`}
+            cancelUrl={`/${workspaceSlug}/settings/billing`}
             paymentProvider="stripe"
           />
         </div>

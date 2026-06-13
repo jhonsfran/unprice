@@ -149,6 +149,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-13: Dashboard-initiated provider return URLs should resolve from
+  `window.location.origin` at submit/click time; `APP_DOMAIN` is only safe for canonical host links
+  and can point at localhost when public env defaults leak into preview/prod bundles.
 - 2026-06-08: Sandbox payment-provider invoice methods should return an empty hosted invoice URL;
   the dashboard must keep sandbox invoice viewing inside Unprice instead of opening placeholder
   external origins.

@@ -1,7 +1,6 @@
 "use client"
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { APP_DOMAIN } from "@unprice/config"
 import type { PaymentProvider } from "@unprice/db/validators"
 import {
   FormControl,
@@ -64,7 +63,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
   const [awaitingPaymentSetup, setAwaitingPaymentSetup] = useState(isReturningFromSetup)
   const [confirmationTimedOut, setConfirmationTimedOut] = useState(false)
 
-  const subscriptionReturnUrl = `${APP_DOMAIN}/${workspaceSlug}/${projectSlug}/customers/subscriptions/new?customerId=${customerId ?? ""}&provider=${paymentProvider}`
+  const subscriptionReturnUrl = `/${workspaceSlug}/${projectSlug}/customers/subscriptions/new?customerId=${customerId ?? ""}&provider=${paymentProvider}`
   const successUrl = `${subscriptionReturnUrl}&paymentSetup=success`
   const cancelUrl = `${subscriptionReturnUrl}&paymentSetup=cancelled`
 

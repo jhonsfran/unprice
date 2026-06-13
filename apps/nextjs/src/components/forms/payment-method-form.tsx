@@ -3,6 +3,7 @@
 import { useMutation } from "@tanstack/react-query"
 import type { PaymentProvider } from "@unprice/db/validators"
 import { SubmitButton } from "~/components/submit-button"
+import { toBrowserAbsoluteUrl } from "~/lib/browser-url"
 import { useTRPC } from "~/trpc/client"
 
 export function PaymentMethodButton({
@@ -55,8 +56,8 @@ export function PaymentMethodButton({
         createSession.mutate({
           paymentProvider: paymentProvider,
           customerId,
-          successUrl,
-          cancelUrl,
+          successUrl: toBrowserAbsoluteUrl(successUrl),
+          cancelUrl: toBrowserAbsoluteUrl(cancelUrl),
         })
       }}
       isSubmitting={!isSandbox && createSession.isPending}

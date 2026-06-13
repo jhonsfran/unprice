@@ -17,6 +17,7 @@ import { useEffect } from "react"
 import ConfigItemsFormField from "~/components/forms/items-fields"
 import SelectPlanFormField from "~/components/forms/select-plan-field"
 import { SubmitButton } from "~/components/submit-button"
+import { toBrowserAbsoluteUrl } from "~/lib/browser-url"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
@@ -57,7 +58,11 @@ export default function NewWorkspaceForm({
   )
 
   const onSubmitForm = async (data: WorkspaceSignup) => {
-    await signUpWorkspace.mutateAsync(data)
+    await signUpWorkspace.mutateAsync({
+      ...data,
+      successUrl: toBrowserAbsoluteUrl("/new?customer_id={CUSTOMER_ID}"),
+      cancelUrl: toBrowserAbsoluteUrl("/"),
+    })
   }
 
   if (error) {
