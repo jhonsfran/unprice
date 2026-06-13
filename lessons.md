@@ -125,6 +125,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-12: EntitlementWindowDO optimized batch wallet growth that hits
   `maxOutstandingAmount` is exhausted headroom; stage `WALLET_EMPTY` for that event instead of
   throwing so async ingestion can ack the rest of the customer batch.
+- 2026-06-13: EntitlementWindowDO optimized batch lazy bootstrap should only throw the
+  bootstrap-retry signal for positive projected cost; zero-cost staged events must stay on the
+  compact local commit path without opening a wallet reservation.
 - 2026-06-13: Raw ingestion and reporting queues must not share a DLQ; replay should be an
   authenticated admin/UI workflow, not a local operator script.
 - 2026-06-13: Dashboard-to-API workflows should use the `@unprice/api` SDK path; avoid bespoke
@@ -345,6 +348,12 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## UI And Dashboard
 
+- 2026-06-13: `@unprice/ui/checkbox` wraps Radix Checkbox and renders a button; do not nest it
+  inside another button in filter rows or table actions, because React/Next will hydration-fail on
+  invalid button descendants.
+- 2026-06-13: Dashboard near-realtime queries with a default relative window must advance the
+  query input timestamp on each poll; refetching a frozen `{ from, to }` window only reloads old
+  data.
 - 2026-06-12: Dashboard client components that use `useSuspenseQuery` for protected tRPC data
   must have matching RSC `trpc/server` prefetches; otherwise server render can fall back to the
   app React Query HTTP link without browser cookies and log `User not found in session`.

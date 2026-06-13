@@ -950,23 +950,6 @@ export class EntitlementWindowDO extends DurableObject {
       return false
     }
 
-    if (state.hasDurableMutations()) {
-      const projectedCost = this.computeProjectedBatchEventCostMinor({
-        activeGrants,
-        entitlement: eventInput.entitlement,
-        event: eventInput.event,
-        eventTimestamp: event.timestamp,
-        grantStates: state.grantStates,
-        meter: setup.meter,
-        meterState: state.meterState,
-      })
-
-      throw new EntitlementWindowBatchReservationBootstrapRequired({
-        event,
-        projectedCost,
-      })
-    }
-
     const projectedCost = this.computeProjectedBatchEventCostMinor({
       activeGrants,
       entitlement: eventInput.entitlement,
@@ -979,6 +962,13 @@ export class EntitlementWindowDO extends DurableObject {
 
     if (projectedCost <= 0) {
       return false
+    }
+
+    if (state.hasDurableMutations()) {
+      throw new EntitlementWindowBatchReservationBootstrapRequired({
+        event,
+        projectedCost,
+      })
     }
 
     const denial = await this.bootstrapReservationForProjectedCost({

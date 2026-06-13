@@ -7,7 +7,7 @@ import { Button } from "@unprice/ui/button"
 import { Checkbox } from "@unprice/ui/checkbox"
 import type { FilterDataTableFilter } from "@unprice/ui/filter-data-table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
-import { RotateCcw } from "lucide-react"
+import { CheckCircle2, FileSearch, Loader2, RotateCcw } from "lucide-react"
 import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
 
@@ -54,34 +54,42 @@ function statusBadgeVariant(
   return state === "failed" ? "destructive" : "warning"
 }
 
-function isReplayableFailedRow(row: IngestionEventRow): boolean {
-  return row.state === "failed" && row.replayable
+function isReplayableFailedRow(
+  row: IngestionEventRow,
+  queuedReplayIds: ReadonlySet<string>
+): boolean {
+  return row.state === "failed" && row.replayable && !queuedReplayIds.has(row.canonicalAuditId)
 }
 
 export function buildIngestionEventsColumns(params: {
   workspaceSlug: string
   projectSlug: string
+  onViewDetails: (event: IngestionEventRow) => void
   onReplay: (canonicalAuditId: string) => Promise<void>
+  queuedReplayIds: ReadonlySet<string>
+  pendingReplayIds: ReadonlySet<string>
+  blockedReplayIds: ReadonlySet<string>
   isReplayPending: boolean
+  hasReplayableRows: boolean
 }): ColumnDef<IngestionEventRow>[] {
-  return [
-    {
-      id: "select",
-      size: 44,
-      header: ({ table }) => {
-        const replayableRows = table
-          .getFilteredRowModel()
-          .rows.filter((row) => isReplayableFailedRow(row.original))
-        const hasReplayableRows = replayableRows.length > 0
-        const selectedReplayableRows = replayableRows.filter((row) => row.getIsSelected())
-        const checked =
-          hasReplayableRows && selectedReplayableRows.length === replayableRows.length
-            ? true
-            : selectedReplayableRows.length > 0
-              ? "indeterminate"
-              : false
+  const selectionColumn: ColumnDef<IngestionEventRow> = {
+    id: "select",
+    size: 44,
+    header: ({ table }) => {
+      const replayableRows = table
+        .getFilteredRowModel()
+        .rows.filter((row) => isReplayableFailedRow(row.original, params.blockedReplayIds))
+      const hasReplayableRows = replayableRows.length > 0
+      const selectedReplayableRows = replayableRows.filter((row) => row.getIsSelected())
+      const checked =
+        hasReplayableRows && selectedReplayableRows.length === replayableRows.length
+          ? true
+          : selectedReplayableRows.length > 0
+            ? "indeterminate"
+            : false
 
-        return (
+      return (
+        <div className="flex items-center justify-center">
           <Checkbox
             checked={checked}
             disabled={!hasReplayableRows}
@@ -91,26 +99,32 @@ export function buildIngestionEventsColumns(params: {
               }
             }}
             aria-label="Select replayable failed events"
-            className="translate-y-0.5"
           />
-        )
-      },
-      cell: ({ row }) => {
-        const canReplay = isReplayableFailedRow(row.original)
+        </div>
+      )
+    },
+    cell: ({ row }) => {
+      const canReplay = isReplayableFailedRow(row.original, params.blockedReplayIds)
 
-        return (
+      if (!canReplay) {
+        return null
+      }
+
+      return (
+        <div className="flex items-center justify-center">
           <Checkbox
             checked={row.getIsSelected()}
-            disabled={!canReplay}
             onCheckedChange={(value) => row.toggleSelected(!!value)}
-            aria-label="Select event"
-            className="translate-y-0.5"
+            aria-label="Select replayable failed event"
           />
-        )
-      },
-      enableSorting: false,
-      enableHiding: false,
+        </div>
+      )
     },
+    enableSorting: false,
+    enableHiding: false,
+  }
+
+  const columns: ColumnDef<IngestionEventRow>[] = [
     {
       accessorKey: "handledAt",
       header: "Handled",
@@ -163,9 +177,81 @@ export function buildIngestionEventsColumns(params: {
     {
       accessorKey: "sourceType",
       header: "Source",
-      cell: ({ row }) => <Badge variant="outline">{row.original.sourceType}</Badge>,
+      cell: ({ row }) => {
+        const isReplayQueued = params.queuedReplayIds.has(row.original.canonicalAuditId)
+        const isReplayPending = params.pendingReplayIds.has(row.original.canonicalAuditId)
+        const canReplay = isReplayableFailedRow(row.original, params.blockedReplayIds)
+
+        return (
+          <div className="flex items-center gap-2">
+            <Badge variant="outline">{row.original.sourceType}</Badge>
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    aria-label="View event details"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => params.onViewDetails(row.original)}
+                  >
+                    <FileSearch className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>View details</TooltipContent>
+              </Tooltip>
+              {canReplay ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      aria-label="Replay failed event"
+                      disabled={params.isReplayPending}
+                      onClick={() => {
+                        void params.onReplay(row.original.canonicalAuditId).catch(() => undefined)
+                      }}
+                    >
+                      <RotateCcw className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Replay failed event</TooltipContent>
+                </Tooltip>
+              ) : isReplayPending ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      aria-label="Replay is being queued"
+                      disabled
+                      className="text-muted-foreground"
+                    >
+                      <Loader2 className="size-3.5 animate-spin" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Replay is being queued</TooltipContent>
+                </Tooltip>
+              ) : isReplayQueued ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Badge variant="secondary" className="gap-1 font-normal">
+                      <CheckCircle2 className="size-3" />
+                      queued
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent>Replay already queued from this browser</TooltipContent>
+                </Tooltip>
+              ) : null}
+            </div>
+          </div>
+        )
+      },
       filterFn: (row, id, value) => Array.isArray(value) && value.includes(row.getValue(id)),
-      size: 130,
+      size: 170,
     },
     {
       accessorKey: "sourceId",
@@ -193,39 +279,9 @@ export function buildIngestionEventsColumns(params: {
       ),
       size: 220,
     },
-    {
-      id: "actions",
-      header: "",
-      cell: ({ row }) => {
-        if (!isReplayableFailedRow(row.original)) {
-          return null
-        }
-
-        return (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                aria-label="Replay failed event"
-                disabled={params.isReplayPending}
-                onClick={() => {
-                  void params.onReplay(row.original.canonicalAuditId).catch(() => undefined)
-                }}
-              >
-                <RotateCcw className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Replay failed event</TooltipContent>
-          </Tooltip>
-        )
-      },
-      enableSorting: false,
-      enableHiding: false,
-      size: 52,
-    },
   ]
+
+  return params.hasReplayableRows ? [selectionColumn, ...columns] : columns
 }
 
 export function buildIngestionEventsFilters(
@@ -246,18 +302,25 @@ export function buildIngestionEventsFilters(
       id: "state",
       label: "Status",
       defaultOpen: true,
+      showCounts: true,
       options: statusOptions,
     },
     {
       type: "checkbox",
       id: "sourceType",
       label: "Source",
+      showCounts: true,
+      hideEmptyOptions: true,
+      emptyOptionsLabel: "No sources for the selected filters",
       options: sourceTypeOptions,
     },
     {
       type: "checkbox",
       id: "customerId",
       label: "Customer",
+      showCounts: true,
+      hideEmptyOptions: true,
+      emptyOptionsLabel: "No customers for the selected filters",
       options: customerOptions,
     },
   ]

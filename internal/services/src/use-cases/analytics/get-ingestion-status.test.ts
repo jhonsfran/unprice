@@ -80,6 +80,30 @@ describe("getIngestionStatus", () => {
     })
   })
 
+  it("infers failed totals when live rows use an older shape without failed counts", async () => {
+    const { deps } = makeDeps({
+      liveRows: [
+        {
+          second: "2099-01-01 00:00:03.000",
+          processed: 0,
+          rejected: 0,
+          failed: 0,
+          total: 11,
+        },
+      ],
+    })
+
+    const result = await getIngestionStatus(deps, baseInput())
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.totals).toEqual({
+      processed: 0,
+      rejected: 0,
+      failed: 11,
+      total: 11,
+    })
+  })
+
   it("uses rejection rows for fallback totals and freshness when live/recent rows are unavailable", async () => {
     const { deps } = makeDeps({
       now: () => fromTs + 8_000,

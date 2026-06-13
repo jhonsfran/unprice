@@ -2,6 +2,7 @@ import { createTRPCRouter } from "#trpc"
 import { explainCharge } from "./explainCharge"
 import { getBrowserVisits } from "./getBrowserVisits"
 import { getCountryVisits } from "./getCountryVisits"
+import { getFailedIngestionEventPayload } from "./getFailedIngestionEventPayload"
 import { getIngestionStatus } from "./getIngestionStatus"
 import { getLatestEvents } from "./getLatestEvents"
 import { getOverviewStats } from "./getOverviewStats"
@@ -20,6 +21,7 @@ export const analyticsRouter = createTRPCRouter({
   getUsage: getUsage,
   getProjectUsage: getProjectUsage,
   getProjectUsageTimeseries: getProjectUsageTimeseries,
+  getFailedIngestionEventPayload: getFailedIngestionEventPayload,
   getIngestionStatus: getIngestionStatus,
   getTopConsumers: getTopConsumers,
   getBrowserVisits: getBrowserVisits,

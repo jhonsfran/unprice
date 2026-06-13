@@ -1,6 +1,16 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
 export {
+  getFailedIngestionEventPayload,
+  getFailedIngestionEventPayloadInputSchema,
+  getFailedIngestionEventPayloadOutputSchema,
+} from "./analytics/get-failed-ingestion-event-payload"
+export type {
+  GetFailedIngestionEventPayloadDeps,
+  GetFailedIngestionEventPayloadInput,
+  GetFailedIngestionEventPayloadOutput,
+} from "./analytics/get-failed-ingestion-event-payload"
+export {
   getIngestionStatus,
   getIngestionStatusCursorSchema,
   getIngestionStatusInputSchema,

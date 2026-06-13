@@ -24,8 +24,8 @@ export default async function ProjectEventsPage(_props: {
         <Suspense
           fallback={
             <div className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-3">
-                {Array.from({ length: 3 }).map((_, i) => (
+              <div className="grid gap-4 md:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, i) => (
                   <div
                     key={`skeleton-${
                       // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton

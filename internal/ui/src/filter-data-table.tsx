@@ -16,13 +16,12 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { CalendarDays, Loader2, Search, X } from "lucide-react"
+import { CalendarDays, Check, Loader2, Search, X } from "lucide-react"
 import * as React from "react"
 import type { DateRange } from "react-day-picker"
 import { Badge } from "./badge"
 import { Button } from "./button"
 import { Calendar } from "./calendar"
-import { Checkbox } from "./checkbox"
 import { Input } from "./input"
 import { Popover, PopoverContent, PopoverTrigger } from "./popover"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./table"
@@ -42,6 +41,9 @@ export type FilterDataTableFilter =
       label: string
       options: FilterDataTableOption[]
       defaultOpen?: boolean
+      showCounts?: boolean
+      hideEmptyOptions?: boolean
+      emptyOptionsLabel?: string
     }
   | {
       type: "date"
@@ -75,7 +77,10 @@ export interface FilterDataTableProps<TData, TValue> {
   toolbarActions?: FilterDataTableToolbarActions<TData>
   initialColumnVisibility?: VisibilityState
   hasMore?: boolean
+  isLoading?: boolean
+  isRefreshing?: boolean
   isLoadingMore?: boolean
+  loadingLabel?: string
   onLoadMore?: () => void | Promise<void>
 }
 
@@ -92,7 +97,10 @@ export function FilterDataTable<TData, TValue>({
   toolbarActions,
   initialColumnVisibility,
   hasMore = false,
+  isLoading = false,
+  isRefreshing = false,
   isLoadingMore = false,
+  loadingLabel = "Loading rows",
   onLoadMore,
 }: FilterDataTableProps<TData, TValue>) {
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
@@ -168,8 +176,19 @@ export function FilterDataTable<TData, TValue>({
   }, [canLoadMore, isLoadingMore, onLoadMore])
 
   return (
-    <div className="overflow-hidden rounded-md border bg-background">
-      <div className="grid min-h-[520px] md:grid-cols-[260px_minmax(0,1fr)]">
+    <div className="relative overflow-hidden rounded-md border bg-background">
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-primary/55 to-transparent transition-opacity duration-300",
+          isRefreshing ? "opacity-100" : "opacity-0"
+        )}
+      />
+      <div
+        className={cn(
+          "grid min-h-[520px] transition-opacity duration-300 motion-reduce:transition-none md:grid-cols-[260px_minmax(0,1fr)]",
+          isRefreshing ? "opacity-90" : "opacity-100"
+        )}
+      >
         <aside className="border-border border-b bg-muted/30 md:border-r md:border-b-0">
           <div className="flex h-14 items-center border-b px-4 font-medium text-sm">Filters</div>
           <div className="space-y-1 p-2 [&>*:last-child]:border-b-0">
@@ -237,7 +256,16 @@ export function FilterDataTable<TData, TValue>({
                 ))}
               </TableHeader>
               <TableBody>
-                {table.getRowModel().rows.length > 0 ? (
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={columns.length} className="h-48 text-center">
+                      <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
+                        <Loader2 className="size-4 animate-spin" />
+                        <span>{loadingLabel}</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : table.getRowModel().rows.length > 0 ? (
                   table.getRowModel().rows.map((row) => (
                     <TableRow
                       key={row.id}
@@ -306,20 +334,41 @@ function CheckboxFilter<TData>({
 }) {
   const column = table.getColumn(filter.id)
   const selectedValues = new Set((column?.getFilterValue() as string[] | undefined) ?? [])
+  const facetedUniqueValues = column?.getFacetedUniqueValues()
+  const options = filter.options
+    .map((option) => {
+      const facetedCount = facetedUniqueValues?.get(option.value) ?? 0
+      const count = typeof option.count === "number" ? option.count : facetedCount
+      const checked = selectedValues.has(option.value)
+      const hidden = filter.hideEmptyOptions && !checked && facetedUniqueValues && count === 0
+
+      return {
+        ...option,
+        checked,
+        count,
+        hidden,
+        showsCount: filter.showCounts || typeof option.count === "number",
+      }
+    })
+    .filter((option) => !option.hidden)
 
   return (
     <div className="border-b py-3">
       <div className="mb-2 px-2 font-medium text-sm">{filter.label}</div>
       <div className="space-y-1">
-        {filter.options.map((option) => {
-          const checked = selectedValues.has(option.value)
+        {options.length === 0 ? (
+          <p className="px-2 py-1 text-muted-foreground text-sm">
+            {filter.emptyOptionsLabel ?? "No options"}
+          </p>
+        ) : null}
+        {options.map((option) => {
           return (
             <button
               key={option.value}
               type="button"
               className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-sm hover:bg-muted/60"
               onClick={() => {
-                if (checked) {
+                if (option.checked) {
                   selectedValues.delete(option.value)
                 } else {
                   selectedValues.add(option.value)
@@ -328,11 +377,11 @@ function CheckboxFilter<TData>({
                 column?.setFilterValue(next.length > 0 ? next : undefined)
               }}
             >
-              <Checkbox checked={checked} aria-label={option.label} />
+              <FilterCheckboxMark checked={option.checked} />
               <span className={cn("min-w-0 flex-1 truncate", option.className)}>
                 {option.label}
               </span>
-              {typeof option.count === "number" ? (
+              {option.showsCount ? (
                 <Badge variant="secondary" className="font-mono text-xs">
                   {option.count}
                 </Badge>
@@ -342,6 +391,18 @@ function CheckboxFilter<TData>({
         })}
       </div>
     </div>
+  )
+}
+
+function FilterCheckboxMark({ checked }: { checked: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      data-state={checked ? "checked" : "unchecked"}
+      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-primary text-primary-foreground data-[state=checked]:bg-primary"
+    >
+      {checked ? <Check className="h-4 w-4" /> : null}
+    </span>
   )
 }
 

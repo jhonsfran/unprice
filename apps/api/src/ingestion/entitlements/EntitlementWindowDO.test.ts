@@ -1151,6 +1151,60 @@ describe("EntitlementWindowDO", () => {
     )
   })
 
+  it("keeps zero-cost optimized batches off the lazy wallet bootstrap path", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.pricePerFeature.mockImplementation(() => ({
+      val: { totalPrice: { dinero: fakeDinero(0, 2) } },
+    }))
+    testState.engineApply.mockImplementation((event: unknown, options?: PersistOptions) => {
+      const valueAfter = (event as { id: string }).id === "evt_free_second" ? 2 : 1
+      const facts = [{ delta: 1, meterKey: DEFAULT_METER_KEY, valueAfter }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const baseInput = createApplyInput()
+    const result = await durableObject.applyBatch({
+      customerId: baseInput.customerId,
+      entitlement: baseInput.entitlement,
+      enforceLimit: baseInput.enforceLimit,
+      events: [
+        {
+          ...baseInput.event,
+          correlationKey: "first",
+          id: "evt_free_first",
+          idempotencyKey: "idem_free_first",
+          now: BASE_NOW,
+          timestamp: BASE_NOW,
+        },
+        {
+          ...baseInput.event,
+          correlationKey: "second",
+          id: "evt_free_second",
+          idempotencyKey: "idem_free_second",
+          now: BASE_NOW + 1,
+          timestamp: BASE_NOW + 1,
+        },
+      ],
+      grants: baseInput.grants,
+      projectId: baseInput.projectId,
+    })
+
+    expect(result.results).toEqual([
+      expect.objectContaining({ allowed: true, correlationKey: "first" }),
+      expect.objectContaining({ allowed: true, correlationKey: "second" }),
+    ])
+    expect(testState.createReservation).not.toHaveBeenCalled()
+    expect(db.idempotencyBatchRows).toHaveLength(1)
+    expect(readIdempotencyMeterFacts(db)).toHaveLength(2)
+    expect(readIdempotencyMeterFacts(db).map((fact) => fact.amount)).toEqual([0, 0])
+    expect(db.outboxBatchRows).toHaveLength(0)
+  })
+
   it("retries applyBatch after a pre-commit failure without partial durable writes", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()

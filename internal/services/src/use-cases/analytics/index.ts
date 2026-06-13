@@ -1,4 +1,14 @@
 export {
+  getFailedIngestionEventPayload,
+  getFailedIngestionEventPayloadInputSchema,
+  getFailedIngestionEventPayloadOutputSchema,
+} from "./get-failed-ingestion-event-payload"
+export type {
+  GetFailedIngestionEventPayloadDeps,
+  GetFailedIngestionEventPayloadInput,
+  GetFailedIngestionEventPayloadOutput,
+} from "./get-failed-ingestion-event-payload"
+export {
   getIngestionStatus,
   getIngestionStatusCursorSchema,
   getIngestionStatusInputSchema,

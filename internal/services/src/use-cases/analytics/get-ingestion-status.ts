@@ -339,7 +339,15 @@ function deriveTotals({
   )
 
   if (liveTotals.total > 0) {
-    return liveTotals
+    const accountedTotal = liveTotals.processed + liveTotals.rejected + liveTotals.failed
+    if (accountedTotal >= liveTotals.total) {
+      return liveTotals
+    }
+
+    return {
+      ...liveTotals,
+      failed: liveTotals.failed + (liveTotals.total - accountedTotal),
+    }
   }
 
   if (recentEvents.length > 0) {
