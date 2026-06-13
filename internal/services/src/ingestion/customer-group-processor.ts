@@ -162,10 +162,12 @@ export class IngestionCustomerGroupProcessor {
         ]
       }
 
-      this.logger.error("raw ingestion queue processing failed", {
+      this.logger.error(toError(error), {
         projectId,
         customerId,
-        error,
+        failureReason: "raw_ingestion_queue_processing_failed",
+        failureStage: "rating_fact",
+        message: "raw ingestion queue processing failed",
       })
 
       const failedOutcomes = this.messageOutcomes.buildFailedOutcomes(unfinalizedMessages, {
@@ -305,6 +307,10 @@ class IngestionReportingEnqueueError extends Error {
     this.name = "IngestionReportingEnqueueError"
     this.originalError = originalError
   }
+}
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
 }
 
 function sortIngestionMessages(left: IngestionQueueMessage, right: IngestionQueueMessage): number {

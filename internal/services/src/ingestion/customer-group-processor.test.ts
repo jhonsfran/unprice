@@ -271,11 +271,12 @@ describe("IngestionCustomerGroupProcessor", () => {
       idempotencyKey: "idem_newer",
       timestamp: TEST_NOW,
     })
+    const processingError = new Error("apply failed")
     const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
     const processor = createProcessor({
       enqueueOutcomes,
       logger,
-      preparedProcess: vi.fn().mockRejectedValue(new Error("apply failed")),
+      preparedProcess: vi.fn().mockRejectedValue(processingError),
       preparedGroup: {
         candidateEntitlements: [],
         messages: [olderMessage, newerMessage],
@@ -327,9 +328,11 @@ describe("IngestionCustomerGroupProcessor", () => {
       ],
     })
     expect(logger.error).toHaveBeenCalledWith(
-      "raw ingestion queue processing failed",
+      processingError,
       expect.objectContaining({
         customerId: "cus_123",
+        failureReason: "raw_ingestion_queue_processing_failed",
+        message: "raw ingestion queue processing failed",
         projectId: "proj_123",
       })
     )
@@ -383,9 +386,13 @@ describe("IngestionCustomerGroupProcessor", () => {
       ],
     })
     expect(logger.error).toHaveBeenCalledWith(
-      "raw ingestion queue processing failed",
+      expect.objectContaining({
+        message: "raw ingestion processing failure test requested",
+      }),
       expect.objectContaining({
         customerId: "cus_123",
+        failureReason: "raw_ingestion_queue_processing_failed",
+        message: "raw ingestion queue processing failed",
         projectId: "proj_123",
       })
     )

@@ -55,6 +55,9 @@ patterns. Keep it cheap to load and useful.
   final flushes as final.
 - 2026-05-09: Serialize native `Error` objects before `evlog.log.error`; Cloudflare/Axiom can
   otherwise store `{}`.
+- 2026-06-13: When logging caught failures with `Logger.error`, pass the caught `Error` as the
+  first argument and put the operation name in fields; string-first error logs make evlog create a
+  wrapper error whose stack hides the real cause.
 - 2026-05-17: Axiom-bound logs should normalize known camelCase aliases in
   `@unprice/observability`; keep business fields snake_case to avoid duplicate columns.
 - 2026-05-18: Keep `request.*` and `business.*` as the canonical Axiom shape; evlog may use
