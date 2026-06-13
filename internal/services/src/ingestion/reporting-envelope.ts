@@ -9,6 +9,7 @@ import {
   computePayloadHash,
 } from "./reporting"
 
+
 export type IngestionReportingOutcome = {
   meterFacts?: AnalyticsEntitlementMeterFact[]
   message: IngestionQueueMessage
@@ -100,8 +101,6 @@ export function buildIngestionAuditPayload(
   payloadHash: string,
   handledAt: number
 ): Record<string, unknown> {
-  const failed = outcome.state === "failed"
-
   return {
     event_date: toEventDate(message.timestamp),
     schema_version: EVENTS_SCHEMA_VERSION,
@@ -122,12 +121,6 @@ export function buildIngestionAuditPayload(
     handled_at: handledAt,
     state: outcome.state,
     rejection_reason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
-    failure_stage: failed ? outcome.failureStage : null,
-    failure_reason: failed ? outcome.failureReason : null,
-    failure_message: failed ? (outcome.failureMessage ?? null) : null,
-    replayable: failed ? outcome.replayable : false,
-    payload_json: failed ? serializeReplayPayload(message) : null,
-    r2_object_key: message.rawStorage?.objectKey ?? null,
     properties: message.properties,
     canonical_audit_id: canonicalAuditId,
     payload_hash: payloadHash,

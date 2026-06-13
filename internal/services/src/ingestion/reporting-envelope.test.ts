@@ -107,15 +107,16 @@ describe("ingestion reporting envelope builder", () => {
       source_name: null,
       state: "rejected",
       rejection_reason: "WALLET_EMPTY",
-      failure_stage: null,
-      failure_reason: null,
-      failure_message: null,
-      replayable: false,
-      payload_json: null,
-      r2_object_key: null,
       canonical_audit_id: record.canonicalAuditId,
       payload_hash: record.payloadHash,
     })
+    const rejectedPayload = JSON.parse(record.auditPayloadJson)
+    expect(rejectedPayload).not.toHaveProperty("failure_stage")
+    expect(rejectedPayload).not.toHaveProperty("failure_reason")
+    expect(rejectedPayload).not.toHaveProperty("failure_message")
+    expect(rejectedPayload).not.toHaveProperty("replayable")
+    expect(rejectedPayload).not.toHaveProperty("payload_json")
+    expect(rejectedPayload).not.toHaveProperty("r2_object_key")
   })
 
   it("includes payload_json only for failed reporting audit records", async () => {
@@ -167,13 +168,15 @@ describe("ingestion reporting envelope builder", () => {
       r2ObjectKey: message.rawStorage?.objectKey,
     })
     expect(JSON.parse(processedRecord.auditPayloadJson)).toMatchObject({
-      failure_stage: null,
-      failure_reason: null,
-      failure_message: null,
-      payload_json: null,
-      r2_object_key: message.rawStorage?.objectKey,
-      replayable: false,
+      state: "processed",
     })
+    const processedPayload = JSON.parse(processedRecord.auditPayloadJson)
+    expect(processedPayload).not.toHaveProperty("failure_stage")
+    expect(processedPayload).not.toHaveProperty("failure_reason")
+    expect(processedPayload).not.toHaveProperty("failure_message")
+    expect(processedPayload).not.toHaveProperty("replayable")
+    expect(processedPayload).not.toHaveProperty("payload_json")
+    expect(processedPayload).not.toHaveProperty("r2_object_key")
     expect(rejectedRecord.payloadJson).toBeNull()
     expect(rejectedRecord).toMatchObject({
       status: "rejected",
@@ -185,13 +188,16 @@ describe("ingestion reporting envelope builder", () => {
       r2ObjectKey: message.rawStorage?.objectKey,
     })
     expect(JSON.parse(rejectedRecord.auditPayloadJson)).toMatchObject({
-      failure_stage: null,
-      failure_reason: null,
-      failure_message: null,
-      payload_json: null,
-      r2_object_key: message.rawStorage?.objectKey,
-      replayable: false,
+      state: "rejected",
+      rejection_reason: "WALLET_EMPTY",
     })
+    const rejectedPayload2 = JSON.parse(rejectedRecord.auditPayloadJson)
+    expect(rejectedPayload2).not.toHaveProperty("failure_stage")
+    expect(rejectedPayload2).not.toHaveProperty("failure_reason")
+    expect(rejectedPayload2).not.toHaveProperty("failure_message")
+    expect(rejectedPayload2).not.toHaveProperty("replayable")
+    expect(rejectedPayload2).not.toHaveProperty("payload_json")
+    expect(rejectedPayload2).not.toHaveProperty("r2_object_key")
 
     expect(failedRecord).toMatchObject({
       status: "failed",
@@ -209,13 +215,13 @@ describe("ingestion reporting envelope builder", () => {
     expect(failedAuditPayload).not.toHaveProperty("rejection_reason")
     expect(failedAuditPayload).toMatchObject({
       state: "failed",
-      failure_stage: "rating_fact",
-      failure_reason: "raw_ingestion_queue_processing_failed",
-      failure_message: "apply failed",
-      replayable: true,
-      payload_json: JSON.stringify(message),
-      r2_object_key: message.rawStorage?.objectKey,
     })
+    expect(failedAuditPayload).not.toHaveProperty("failure_stage")
+    expect(failedAuditPayload).not.toHaveProperty("failure_reason")
+    expect(failedAuditPayload).not.toHaveProperty("failure_message")
+    expect(failedAuditPayload).not.toHaveProperty("replayable")
+    expect(failedAuditPayload).not.toHaveProperty("payload_json")
+    expect(failedAuditPayload).not.toHaveProperty("r2_object_key")
   })
 
   it("carries meter facts from outcomes into the reporting envelope", async () => {

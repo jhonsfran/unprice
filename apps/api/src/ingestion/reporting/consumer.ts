@@ -21,16 +21,7 @@ const TINYBIRD_MAX_INGESTION_EVENT_NDJSON_BYTES_PER_REQUEST = 5 * 1024 * 1024
 const textEncoder = new TextEncoder()
 
 const auditPayloadForIngestionEventSchema = z.object({
-  failure_message: z.string().nullable().optional(),
-  failure_reason: z.string().nullable().optional(),
-  failure_stage: z
-    .enum(["raw_ingestion", "rating_fact", "reporting_delivery"])
-    .nullable()
-    .optional(),
   id: z.string(),
-  payload_json: z.string().nullable().optional(),
-  r2_object_key: z.string().nullable().optional(),
-  replayable: z.boolean().optional(),
   slug: z.string(),
   timestamp: z.number().int(),
 })

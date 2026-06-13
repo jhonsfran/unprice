@@ -220,7 +220,7 @@ export const lakehouseSourceSchemaRegistry = {
         required: true,
         addedInVersion: 1,
         defaultValue: null,
-        description: "Ingestion lifecycle state: processed or rejected.",
+        description: "Ingestion lifecycle state: processed, rejected, or failed.",
       },
       {
         name: "rejection_reason",
