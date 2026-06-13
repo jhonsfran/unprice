@@ -147,6 +147,12 @@ patterns. Keep it cheap to load and useful.
   (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
   timestamp.
 
+## Next.js And Dashboard
+
+- 2026-06-13: Public `generateStaticParams` paths must not call session helpers or live database
+  queries; return `[]` for dynamic ISR routes so `next build` does not depend on request scope or
+  preview database reachability.
+
 ## Billing, Wallets, And Invoices
 
 - 2026-06-13: Dashboard-initiated provider return URLs should resolve from

@@ -1,9 +1,7 @@
 "use server"
 
-import { getSession } from "@unprice/auth/server-rsc"
 import type { PlanVersionApi } from "@unprice/db/validators"
 import { unstable_cache } from "next/cache"
-import { redirect } from "next/navigation"
 import { cache } from "react"
 import { db } from "./db"
 import { unprice } from "./unprice"
@@ -70,24 +68,3 @@ export const getPlansData = cache(
     return getCachedPlans()
   }
 )
-
-export async function getAllPublishedDomains() {
-  const session = await getSession()
-  if (!session?.user) redirect("/auth/signin")
-
-  const publishedPages = await db.query.pages.findMany({
-    where: (page, { eq }) => eq(page.published, true),
-    columns: {
-      subdomain: true,
-      customDomain: true,
-    },
-  })
-
-  const domains = new Set<string>()
-  for (const page of publishedPages) {
-    if (page.subdomain) domains.add(page.subdomain)
-    if (page.customDomain) domains.add(page.customDomain)
-  }
-
-  return Array.from(domains)
-}
