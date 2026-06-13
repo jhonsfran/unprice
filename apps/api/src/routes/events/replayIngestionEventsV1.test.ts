@@ -123,6 +123,74 @@ describe("replayIngestionEventsV1 route", () => {
     expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
   })
 
+  it("uses the internal project header for dashboard replay requests", async () => {
+    const { app, analytics, env, executionCtx, logger } = createTestApp([
+      createReplayRow({
+        canonical_audit_id: "audit_1",
+        payload_json: createPayloadJson({ projectId: "proj_dashboard" }),
+      }),
+    ])
+
+    const response = await app.fetch(
+      buildRequest(
+        { canonical_audit_ids: ["audit_1"] },
+        {
+          internalSecret: "internal_secret",
+          internalProjectId: "proj_dashboard",
+          includeBearer: false,
+        }
+      ),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ replayed: 1, skipped: 0 })
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+    expect(analytics.getIngestionReplayPayloads).toHaveBeenCalledWith({
+      project_id: "proj_dashboard",
+      canonical_audit_ids: "audit_1",
+    })
+    expect(env.QUEUE_SHARD_0.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "proj_dashboard",
+        requestId: "req_123",
+      })
+    )
+    expect(logger.set).toHaveBeenCalledWith({
+      business: {
+        project_id: "proj_dashboard",
+      },
+    })
+  })
+
+  it("rejects invalid internal replay credentials without falling back to bearer auth", async () => {
+    const { app, analytics, env, executionCtx } = createTestApp([
+      createReplayRow({ canonical_audit_id: "audit_1", payload_json: createPayloadJson() }),
+    ])
+
+    const response = await app.fetch(
+      buildRequest(
+        { canonical_audit_ids: ["audit_1"] },
+        {
+          internalSecret: "wrong_secret",
+          internalProjectId: "proj_123",
+        }
+      ),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({
+      code: "UNAUTHORIZED",
+      message: "invalid internal replay credentials",
+    })
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+    expect(analytics.getIngestionReplayPayloads).not.toHaveBeenCalled()
+    expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
+  })
+
   it("does not enqueue any messages when a later payload belongs to a different project", async () => {
     const { app, env, executionCtx } = createTestApp([
       createReplayRow({
@@ -144,7 +212,7 @@ describe("replayIngestionEventsV1 route", () => {
     expect(response.status).toBe(400)
     await expect(response.json()).resolves.toEqual({
       code: "BAD_REQUEST",
-      message: "Replay payload project does not match API key project",
+      message: "Replay payload project does not match request project",
     })
     expect(env.QUEUE_SHARD_0.send).not.toHaveBeenCalled()
   })
@@ -252,6 +320,7 @@ function createTestApp(rows: ReplayPayloadRow[]) {
   registerReplayIngestionEventsV1(app)
 
   const env = {
+    UNPRICE_INTERNAL_API_SECRET: "internal_secret",
     QUEUE_SHARD_0: {
       send: vi.fn().mockResolvedValue(undefined),
     },
@@ -265,13 +334,33 @@ function createTestApp(rows: ReplayPayloadRow[]) {
   return { app, analytics, env, executionCtx, logger }
 }
 
-function buildRequest(body: { canonical_audit_ids: string[] }) {
+function buildRequest(
+  body: { canonical_audit_ids: string[] },
+  opts: {
+    internalSecret?: string
+    internalProjectId?: string
+    includeBearer?: boolean
+  } = {}
+) {
+  const headers = new Headers({
+    "content-type": "application/json",
+  })
+
+  if (opts.includeBearer !== false) {
+    headers.set("authorization", "Bearer sk_test")
+  }
+
+  if (opts.internalSecret) {
+    headers.set("unprice-internal-secret", opts.internalSecret)
+  }
+
+  if (opts.internalProjectId) {
+    headers.set("unprice-internal-project-id", opts.internalProjectId)
+  }
+
   return new Request("https://example.com/v1/events/ingest/replay", {
     method: "POST",
-    headers: {
-      authorization: "Bearer sk_test",
-      "content-type": "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
   })
 }

@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
-import { unprice } from "#utils/unprice"
+import { createProjectScopedUnpriceClient } from "#utils/unprice"
 
 const replayIngestionEventsInputSchema = z.object({
   canonicalAuditIds: z.array(z.string()).min(1).max(50),
@@ -45,7 +45,8 @@ export const replayIngestionEvents = protectedProjectProcedure
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
     const canonicalAuditIds = Array.from(new Set(opts.input.canonicalAuditIds))
-    const { result, error } = await unprice.replayFailedIngestionEvents({
+    const client = createProjectScopedUnpriceClient(opts.ctx.project.id)
+    const { result, error } = await client.replayFailedIngestionEvents({
       canonical_audit_ids: canonicalAuditIds,
     })
 

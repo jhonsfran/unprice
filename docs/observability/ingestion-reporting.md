@@ -21,7 +21,7 @@ flowchart TD
 
 `EntitlementWindowDO` is the only quota, wallet, compact usage, and idempotency state
 machine. Reporting is append-only and at-least-once; duplicate delivery is handled by
-deterministic audit identities and Tinybird `argMax(..., tuple(timestamp, created_at))`
+deterministic audit identities and Tinybird `argMax(..., tuple(handled_at, created_at))`
 reads.
 
 ## 1M Event Queue Cost
