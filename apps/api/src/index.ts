@@ -22,6 +22,7 @@ import { registerGetEntitlementsV1 } from "./routes/entitlements/getEntitlements
 import { registerVerifyV1 } from "./routes/entitlements/verifyV1"
 import { registerIngestEventsSyncV1 } from "./routes/events/ingestEventsSyncV1"
 import { registerIngestEventsV1 } from "./routes/events/ingestEventsV1"
+import { registerReplayIngestionEventsV1 } from "./routes/events/replayIngestionEventsV1"
 import { registerGetFeaturesV1 } from "./routes/features/getFeaturesV1"
 import { registerCreatePaymentMethodV1 } from "./routes/payments/methods/createPaymentMethodV1"
 import { registerListPaymentMethodsV1 } from "./routes/payments/methods/listPaymentMethodsV1"
@@ -154,6 +155,7 @@ registerVerifyV1(app)
 // Event routes
 registerIngestEventsV1(app)
 registerIngestEventsSyncV1(app)
+registerReplayIngestionEventsV1(app)
 registerGetEntitlementWindowStatusV1(app)
 
 // Feature routes

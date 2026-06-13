@@ -370,6 +370,16 @@ export class Unprice {
     }
   }
 
+  public replayFailedIngestionEvents(
+    req: PostBody<"/v1/events/ingest/replay">
+  ): Promise<ApiResult<PostResponse<"/v1/events/ingest/replay">>> {
+    return this.toResult(
+      this.openapi.POST("/v1/events/ingest/replay", {
+        body: req,
+      })
+    )
+  }
+
   public get access() {
     return {
       update: (
@@ -442,6 +452,12 @@ export class Unprice {
             body: req,
           })
         )
+      },
+
+      replayFailedIngestionEvents: (
+        req: PostBody<"/v1/events/ingest/replay">
+      ): Promise<ApiResult<PostResponse<"/v1/events/ingest/replay">>> => {
+        return this.replayFailedIngestionEvents(req)
       },
     }
   }

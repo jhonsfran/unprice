@@ -36,11 +36,16 @@ describe("Unprice client", () => {
       paths["/v1/analytics/explain-charge"]["post"]["requestBody"]["content"]["application/json"]
     >()
     expectTypeOf(client.analytics.ingestion.status).parameter(0).toMatchTypeOf<{
-      customer_id: string
+      customer_id?: string
       from_ts: number
       to_ts: number
+      cursor?: {
+        handledAt: number
+        canonicalAuditId: string
+      } | null
       source_id?: string
       event_slug?: string
+      state?: "processed" | "rejected" | "failed"
       limit?: number
     }>()
     expectTypeOf<{
@@ -85,6 +90,8 @@ describe("Unprice client", () => {
     expect(typeof client.entitlements.verify).toBe("function")
     expect(typeof client.events.ingest).toBe("function")
     expect(typeof client.events.ingestSync).toBe("function")
+    expect(typeof client.events.replayFailedIngestionEvents).toBe("function")
+    expect(typeof client.replayFailedIngestionEvents).toBe("function")
     expect(typeof client.features.list).toBe("function")
     expect(typeof client.invoices.get).toBe("function")
     expect(typeof client.plans.getVersion).toBe("function")
@@ -274,6 +281,36 @@ describe("Unprice client", () => {
     await expect(requests[0]?.json()).resolves.toMatchObject({
       customerId: "cus_123",
       featureSlug: "tokens",
+    })
+  })
+
+  it("calls replay failed ingestion endpoint", async () => {
+    const requests: Request[] = []
+    const client = new Unprice({
+      token: "test-token",
+      baseUrl: "https://example.com",
+      disableTelemetry: true,
+      retry: { attempts: 0 },
+      fetch: async (request) => {
+        requests.push(request.clone())
+        return createJsonResponse({
+          replayed: 1,
+          skipped: 0,
+        })
+      },
+    })
+
+    const { result, error } = await client.replayFailedIngestionEvents({
+      canonical_audit_ids: ["audit_1"],
+    })
+
+    expect(error).toBeUndefined()
+    expect(result).toEqual({ replayed: 1, skipped: 0 })
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.url).toBe("https://example.com/v1/events/ingest/replay")
+    expect(requests[0]?.headers.get("authorization")).toBe("Bearer test-token")
+    await expect(requests[0]?.json()).resolves.toEqual({
+      canonical_audit_ids: ["audit_1"],
     })
   })
 

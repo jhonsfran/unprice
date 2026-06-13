@@ -144,6 +144,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  "/v1/events/ingest/replay": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** replay failed ingestion events */
+    post: operations["events.ingest.replay"]
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   "/v1/entitlements/status": {
     parameters: {
       query?: never
@@ -455,7 +472,7 @@ export interface paths {
     put?: never
     /**
      * get ingestion status
-     * @description Get live ingestion status for a customer in a requested window.
+     * @description Get live ingestion status for a project or customer in a requested window.
      */
     post: operations["analytics.ingestion.status"]
     delete?: never
@@ -2234,6 +2251,108 @@ export interface operations {
              * @example Limit exceeded for meter meter_123
              */
             message?: string
+          }
+        }
+      }
+      /** @description The server cannot or will not process the request due to something that is perceived to be a client error (e.g., malformed request syntax, invalid request message framing, or deceptive request routing). */
+      400: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrBadRequest"]
+        }
+      }
+      /** @description Although the HTTP standard specifies "unauthorized", semantically this response means "unauthenticated". That is, the client must authenticate itself to get the requested response. */
+      401: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrUnauthorized"]
+        }
+      }
+      /** @description The client does not have access rights to the content; that is, it is unauthorized, so the server is refusing to give the requested resource. Unlike 401 Unauthorized, the client's identity is known to the server. */
+      403: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrForbidden"]
+        }
+      }
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrNotFound"]
+        }
+      }
+      /** @description This response is sent when a request conflicts with the current state of the server. */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrConflict"]
+        }
+      }
+      /** @description The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails. */
+      412: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrPreconditionFailed"]
+        }
+      }
+      /** @description The user has sent too many requests in a given amount of time ("rate limiting") */
+      429: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrTooManyRequests"]
+        }
+      }
+      /** @description The server has encountered a situation it does not know how to handle. */
+      500: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": components["schemas"]["ErrInternalServerError"]
+        }
+      }
+    }
+  }
+  "events.ingest.replay": {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** @description Replay failed ingestion events */
+    requestBody: {
+      content: {
+        "application/json": {
+          canonical_audit_ids: string[]
+        }
+      }
+    }
+    responses: {
+      /** @description Replay result */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          "application/json": {
+            replayed: number
+            skipped: number
           }
         }
       }
@@ -4769,7 +4888,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrForbidden"]
         }
       }
-      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence on the web. */
+      /** @description The server cannot find the requested resource. In the browser, this means the URL is not recognized. In an API, this can also mean that the endpoint is valid but the resource itself does not exist. Servers may also send this response instead of 403 Forbidden to hide the existence of a resource from an unauthorized client. This response code is probably the most well known due to its frequent occurrence in the web. */
       404: {
         headers: {
           [name: string]: unknown
@@ -5461,11 +5580,17 @@ export interface operations {
     requestBody: {
       content: {
         "application/json": {
-          customer_id: string
+          customer_id?: string
           from_ts: number
           to_ts: number
+          cursor?: {
+            handledAt: number
+            canonicalAuditId: string
+          } | null
           source_id?: string
           event_slug?: string
+          /** @enum {string} */
+          state?: "processed" | "rejected" | "failed"
           /** @default 50 */
           limit: number
         }
@@ -5486,6 +5611,7 @@ export interface operations {
             totals: {
               processed: number
               rejected: number
+              failed: number
               total: number
             }
             successRate: number
@@ -5500,6 +5626,7 @@ export interface operations {
               second: string
               processed: number
               rejected: number
+              failed: number
               total: number
             }[]
             rejections: {
@@ -5513,16 +5640,25 @@ export interface operations {
             recentEvents: {
               eventId: string
               canonicalAuditId: string
+              customerId: string
               eventSlug: string
               sourceType: string
               sourceId: string
               /** @enum {string} */
-              state: "processed" | "rejected"
+              state: "processed" | "rejected" | "failed"
               rejectionReason: string | null
+              failureStage: string | null
+              failureReason: string | null
+              replayable: boolean
+              r2ObjectKey: string | null
               timestamp: number
               receivedAt: number
               handledAt: number
             }[]
+            nextCursor: {
+              handledAt: number
+              canonicalAuditId: string
+            } | null
             answer: string
             /** @enum {string} */
             confidence: "high" | "medium" | "low"
