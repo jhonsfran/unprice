@@ -98,6 +98,12 @@
           "binding": "PIPELINE_EVENTS"
         }
       ],
+      "r2_buckets": [
+        {
+          "bucket_name": "unprice-lakehouse-prod",
+          "binding": "unprice_lakehouse_prod"
+        }
+      ],
       "durable_objects": {
         "bindings": [
           {
@@ -223,6 +229,12 @@
           "binding": "PIPELINE_EVENTS"
         }
       ],
+      "r2_buckets": [
+        {
+          "bucket_name": "unprice-lakehouse-dev",
+          "binding": "unprice_lakehouse_dev"
+        }
+      ],
       "durable_objects": {
         "bindings": [
           {
@@ -346,6 +358,12 @@
           "binding": "PIPELINE_EVENTS"
         }
       ],
+      "r2_buckets": [
+        {
+          "bucket_name": "unprice-lakehouse-dev",
+          "binding": "unprice_lakehouse_dev"
+        }
+      ],
       "migrations": [
         {
           "tag": "v2",
@@ -371,16 +389,6 @@
       "type": "Text",
       "globs": ["**/*.sql"],
       "fallthrough": true
-    }
-  ],
-  "r2_buckets": [
-    {
-      "bucket_name": "unprice-lakehouse-dev",
-      "binding": "unprice_lakehouse_dev"
-    },
-    {
-      "bucket_name": "unprice-lakehouse-prod",
-      "binding": "unprice_lakehouse_prod"
     }
   ]
   // disable smart placement for now
