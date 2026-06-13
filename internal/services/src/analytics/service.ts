@@ -493,39 +493,4 @@ export class AnalyticsService {
 
     return Ok({ data: val ?? [] })
   }
-
-  public async getRealtimeTicketCustomer({
-    projectId,
-    customerId,
-  }: {
-    projectId: string
-    customerId: string
-  }): Promise<Result<{ id: string; projectId: string } | null, FetchError>> {
-    const { val, err } = await wrapResult(
-      this.db.query.customers.findFirst({
-        where: (table, { and, eq }) =>
-          and(eq(table.id, customerId), eq(table.projectId, projectId)),
-        columns: {
-          id: true,
-          projectId: true,
-        },
-      }),
-      (error) =>
-        new FetchError({
-          message: `failed to fetch customer for realtime ticket: ${error.message}`,
-          retry: false,
-        })
-    )
-
-    if (err) {
-      this.logger.error(err, {
-        context: "failed to fetch customer for realtime ticket",
-        projectId,
-        customerId,
-      })
-      return Err(err)
-    }
-
-    return Ok(val ?? null)
-  }
 }

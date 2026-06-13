@@ -849,7 +849,6 @@ export const analyticsRouter = createTRPCRouter({
   getPagesOverview: getPagesOverview,
   getPlanClickBySessionId: getPlanClickBySessionId,
   getLatestEvents: getLatestEvents,
-  getRealtimeTicket: getRealtimeTicket,
 })
 ```
 

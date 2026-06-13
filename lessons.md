@@ -124,6 +124,10 @@ patterns. Keep it cheap to load and useful.
   throwing so async ingestion can ack the rest of the customer batch.
 - 2026-06-13: Raw ingestion and reporting queues must not share a DLQ; replay should be an
   authenticated admin/UI workflow, not a local operator script.
+- 2026-06-13: Dashboard-to-API workflows should use the `@unprice/api` SDK path; avoid bespoke
+  internal fetches for public API operations such as ingestion replay.
+- 2026-06-13: Ingestion replay uses Tinybird failed rows as the recovery index and `payload_json`
+  as the immediate replay source; R2 remains write-once audit storage.
 - 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
   (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
   timestamp.

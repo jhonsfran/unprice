@@ -31,7 +31,6 @@ import { registerProviderStripeConnectWebhookV1 } from "./routes/payments/provid
 import { registerProviderWebhookV1 } from "./routes/payments/providers/providerWebhookV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
 import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
-import { registerGetRealtimeTicketV1 } from "./routes/realtime/getRealtimeTicketV1"
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
 
 import { env } from "cloudflare:workers"
@@ -174,9 +173,6 @@ registerProviderStripeConnectWebhookV1(app)
 // Plans routes
 registerGetPlanVersionV1(app)
 registerListPlanVersionsV1(app)
-
-// Realtime routes
-registerGetRealtimeTicketV1(app)
 
 // Subscription routes
 registerGetSubscriptionV1(app)
