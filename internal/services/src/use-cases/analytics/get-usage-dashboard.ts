@@ -144,25 +144,13 @@ export async function getUsageDashboard(
   let topConsumers: UsageDashboardTopConsumer[] = []
 
   if (!input.customerId) {
-    const topConsumersResult = await wrapResult(
-      loadTopConsumers({
-        deps,
-        projectId: input.projectId,
-        start: interval.start,
-        end: interval.end,
-        limit: input.topConsumersLimit,
-      }),
-      (error) =>
-        new FetchError({
-          message: error.message,
-          retry: true,
-          context: {
-            url: "tinybird:v1_get_top_consumers",
-            method: "GET",
-            projectId: input.projectId,
-          },
-        })
-    )
+    const topConsumersResult = await loadTopConsumers({
+      deps,
+      projectId: input.projectId,
+      start: interval.start,
+      end: interval.end,
+      limit: input.topConsumersLimit,
+    })
 
     if (topConsumersResult.err) {
       return Err(topConsumersResult.err)
@@ -314,29 +302,66 @@ async function loadTopConsumers({
   start: number
   end: number
   limit: number
-}): Promise<UsageDashboardTopConsumer[]> {
-  const response = await deps.analytics.getTopConsumers({
-    project_id: projectId,
-    start,
-    end,
-    limit,
-  })
-  const rows = response.data ?? []
+}): Promise<Result<UsageDashboardTopConsumer[], FetchError>> {
+  const analyticsResult = await wrapResult(
+    deps.analytics.getTopConsumers({
+      project_id: projectId,
+      start,
+      end,
+      limit,
+    }),
+    (error) =>
+      new FetchError({
+        message: error.message,
+        retry: true,
+        context: {
+          url: "tinybird:v1_get_top_consumers",
+          method: "GET",
+          projectId,
+        },
+      })
+  )
+
+  if (analyticsResult.err) {
+    return Err(analyticsResult.err)
+  }
+
+  const rows = analyticsResult.val.data ?? []
 
   if (rows.length === 0) {
-    return []
+    return Ok([])
   }
 
   const customerIds = rows.map((row) => row.customer_id)
-  const customerRecords = await deps.db
-    .select({ id: customers.id, email: customers.email, name: customers.name })
-    .from(customers)
-    .where(inArray(customers.id, customerIds))
-  const customerMap = new Map(customerRecords.map((customer) => [customer.id, customer]))
 
-  return rows
-    .map((row) => mapTopConsumer(row, customerMap))
-    .filter((row): row is UsageDashboardTopConsumer => row !== null)
+  const dbResult = await wrapResult(
+    deps.db
+      .select({ id: customers.id, email: customers.email, name: customers.name })
+      .from(customers)
+      .where(inArray(customers.id, customerIds)),
+    (error) =>
+      new FetchError({
+        message: error.message,
+        retry: false,
+        context: {
+          url: "db:customers",
+          method: "SELECT",
+          projectId,
+        },
+      })
+  )
+
+  if (dbResult.err) {
+    return Err(dbResult.err)
+  }
+
+  const customerMap = new Map(dbResult.val.map((customer) => [customer.id, customer]))
+
+  return Ok(
+    rows
+      .map((row) => mapTopConsumer(row, customerMap))
+      .filter((row): row is UsageDashboardTopConsumer => row !== null)
+  )
 }
 
 function mapTopConsumer(

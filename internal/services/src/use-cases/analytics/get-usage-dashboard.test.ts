@@ -142,6 +142,17 @@ describe("getUsageDashboard", () => {
     expect(result.err).toBeInstanceOf(FetchError)
     expect(result.err?.message).toBe("tinybird unavailable")
   })
+
+  it("returns fetch error when the top-consumers query fails", async () => {
+    const { deps } = makeDeps({
+      timeseriesRows: [timeseriesRow({})],
+      topConsumersError: new Error("tinybird consumers unavailable"),
+    })
+    const result = await getUsageDashboard(deps, baseInput({ customerId: undefined }))
+    expect(result.val).toBeUndefined()
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect(result.err?.message).toBe("tinybird consumers unavailable")
+  })
 })
 
 function baseInput(overrides: Partial<GetUsageDashboardInput> = {}): GetUsageDashboardInput {
