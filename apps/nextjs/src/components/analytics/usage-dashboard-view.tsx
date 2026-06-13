@@ -6,15 +6,19 @@ import { Badge } from "@unprice/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
-import { BarChart3, CalendarRange, Coins, Layers3, ReceiptText, TriangleAlert, Users } from "lucide-react"
-import { useMemo, type ReactNode } from "react"
+import {
+  BarChart3,
+  CalendarRange,
+  Coins,
+  Layers3,
+  ReceiptText,
+  TriangleAlert,
+  Users,
+} from "lucide-react"
+import { type ReactNode, useMemo } from "react"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { SuperLink } from "~/components/super-link"
-import {
-  type UsageChartPoint,
-  UsageAreaChart,
-  buildUsageChartConfig,
-} from "./usage-area-chart"
+import { UsageAreaChart, type UsageChartPoint, buildUsageChartConfig } from "./usage-area-chart"
 
 type UsageDashboardData = RouterOutputs["analytics"]["getUsageDashboard"]
 type UsageDashboardFeature = UsageDashboardData["features"][number]
@@ -71,10 +75,7 @@ export function UsageDashboardView({
     () => buildChartData(data.timeseries, dateFormat),
     [data.timeseries, dateFormat]
   )
-  const chartConfig = useMemo(
-    () => buildUsageChartConfig(chart.features),
-    [chart.features]
-  )
+  const chartConfig = useMemo(() => buildUsageChartConfig(chart.features), [chart.features])
   const maxFeatureUsage = data.features[0]?.usage ?? 1
 
   return (
@@ -207,6 +208,7 @@ function UsageFeatureTable({
                 </div>
                 <div
                   role="progressbar"
+                  tabIndex={0}
                   aria-valuenow={Math.round(usagePercent)}
                   aria-valuemin={0}
                   aria-valuemax={100}
