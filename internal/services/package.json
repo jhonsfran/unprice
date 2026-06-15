@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/index.ts",
+    "./agents": "./src/agents/index.ts",
     "./deps": "./src/deps.ts",
     "./context": "./src/context.ts",
     "./metrics": "./src/metrics/index.ts",

@@ -1,3 +1,4 @@
+import { AgentService } from "./agents/service"
 import { AnalyticsService } from "./analytics/service"
 import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
@@ -28,6 +29,7 @@ import { WorkspaceService } from "./workspaces/service"
  * no service creates its own child services.
  */
 export interface ServiceContext {
+  agents: AgentService
   analytics: AnalyticsService
   apikeys: ApiKeysService
   customers: CustomerService
@@ -57,6 +59,11 @@ export interface ServiceContext {
  */
 export function createServiceContext(deps: ServiceDeps): ServiceContext {
   // 1. Leaf services (no service deps)
+  const agents = new AgentService({
+    db: deps.db,
+    logger: deps.logger,
+  })
+
   const ledger = new LedgerGateway({
     db: deps.db,
     logger: deps.logger,
@@ -199,6 +206,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   return {
+    agents,
     analytics,
     apikeys,
     customers,
