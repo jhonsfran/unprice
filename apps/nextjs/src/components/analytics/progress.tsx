@@ -1,5 +1,4 @@
 "use client"
-import { nFormatter } from "@unprice/db/utils"
 import { Progress } from "@unprice/ui/progress"
 import { cn } from "@unprice/ui/utils"
 
@@ -18,7 +17,7 @@ export function ProgressBar({
   return (
     <div className="flex items-center">
       <Progress value={progress} className={cn("h-2 w-full", className)} max={100} />
-      <span className="ml-2 text-content-subtle text-xs">{nFormatter(max)}</span>
+      {/* <span className="ml-2 text-content-subtle text-xs">{nFormatter(value)}</span> */}
     </div>
   )
 }

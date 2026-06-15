@@ -24,6 +24,7 @@ import { Button } from "./button"
 import { Calendar } from "./calendar"
 import { Input } from "./input"
 import { Popover, PopoverContent, PopoverTrigger } from "./popover"
+import { ScrollArea } from "./scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./table"
 import { cn } from "./utils"
 
@@ -72,6 +73,8 @@ export interface FilterDataTableProps<TData, TValue> {
   searchPlaceholder?: string
   emptyTitle?: string
   emptyDescription?: string
+  emptyState?: React.ReactNode
+  loadingState?: React.ReactNode
   getRowId?: (row: TData, index: number) => string
   getRowClassName?: (row: TData) => string | undefined
   toolbarActions?: FilterDataTableToolbarActions<TData>
@@ -92,6 +95,8 @@ export function FilterDataTable<TData, TValue>({
   searchPlaceholder = "Search data table...",
   emptyTitle = "No results",
   emptyDescription = "There are no rows for the selected filters.",
+  emptyState,
+  loadingState,
   getRowId,
   getRowClassName,
   toolbarActions,
@@ -191,18 +196,20 @@ export function FilterDataTable<TData, TValue>({
       >
         <aside className="border-border border-b bg-muted/30 md:border-r md:border-b-0">
           <div className="flex h-14 items-center border-b px-4 font-medium text-sm">Filters</div>
-          <div className="space-y-1 p-2 [&>*:last-child]:border-b-0">
-            {filters.map((filter) =>
-              filter.type === "checkbox" ? (
-                <CheckboxFilter key={filter.id} table={table} filter={filter} />
-              ) : (
-                <DateFilter key={filter.id} filter={filter} />
-              )
-            )}
-          </div>
+          <ScrollArea className="h-[calc(80vh-3.5rem)]">
+            <div className="space-y-1 p-2 [&>*:last-child]:border-b-0">
+              {filters.map((filter) =>
+                filter.type === "checkbox" ? (
+                  <CheckboxFilter key={filter.id} table={table} filter={filter} />
+                ) : (
+                  <DateFilter key={filter.id} filter={filter} />
+                )
+              )}
+            </div>
+          </ScrollArea>
         </aside>
         <section className="min-w-0">
-          <div className="flex h-14 items-center gap-2 border-b px-2">
+          <div className="flex h-14 shrink-0 items-center gap-2 border-b px-2">
             {searchColumn && table.getColumn(searchColumn) ? (
               <div className="relative min-w-0 flex-1">
                 <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
@@ -218,9 +225,9 @@ export function FilterDataTable<TData, TValue>({
             ) : null}
             {computedToolbarActions}
           </div>
-          <div className="overflow-auto">
+          <ScrollArea className="h-[calc(80vh-3.5rem)]">
             <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-background">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <TableRow key={headerGroup.id}>
                     {headerGroup.headers.map((header) => {
@@ -258,11 +265,13 @@ export function FilterDataTable<TData, TValue>({
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={columns.length} className="h-48 text-center">
-                      <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-                        <Loader2 className="size-4 animate-spin" />
-                        <span>{loadingLabel}</span>
-                      </div>
+                    <TableCell colSpan={columns.length} className="h-48 p-4 text-center">
+                      {loadingState ?? (
+                        <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
+                          <Loader2 className="size-4 animate-spin" />
+                          <span>{loadingLabel}</span>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ) : table.getRowModel().rows.length > 0 ? (
@@ -281,11 +290,13 @@ export function FilterDataTable<TData, TValue>({
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={columns.length} className="h-48 text-center">
-                      <div className="space-y-1">
-                        <p className="font-medium text-sm">{emptyTitle}</p>
-                        <p className="text-muted-foreground text-sm">{emptyDescription}</p>
-                      </div>
+                    <TableCell colSpan={columns.length} className="h-48 p-4 text-center">
+                      {emptyState ?? (
+                        <div className="space-y-1">
+                          <p className="font-medium text-sm">{emptyTitle}</p>
+                          <p className="text-muted-foreground text-sm">{emptyDescription}</p>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 )}
@@ -318,7 +329,7 @@ export function FilterDataTable<TData, TValue>({
                 </Button>
               </div>
             ) : null}
-          </div>
+          </ScrollArea>
         </section>
       </div>
     </div>

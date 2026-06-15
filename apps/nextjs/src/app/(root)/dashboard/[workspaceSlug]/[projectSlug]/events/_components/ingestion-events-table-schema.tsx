@@ -194,10 +194,9 @@ export function buildIngestionEventsColumns(params: {
                 <TooltipTrigger asChild>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="primary"
                     size="xs"
                     aria-label="View event details"
-                    className="text-muted-foreground hover:text-foreground"
                     onClick={() => params.onViewDetails(row.original)}
                   >
                     <FileSearch className="size-3.5" />
@@ -210,7 +209,7 @@ export function buildIngestionEventsColumns(params: {
                   <TooltipTrigger asChild>
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="destructive"
                       size="xs"
                       aria-label="Replay failed event"
                       disabled={params.isReplayPending}

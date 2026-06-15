@@ -386,6 +386,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   that matches the component's layout dimensions (e.g., a `<Skeleton>` with the same height/width).
   Without it, the page content shifts when the chunk arrives, causing visible flicker. Follow the
   same pattern as `ThemeToggle` in `src/components/layout/footer.tsx`.
+- 2026-06-15: Use `EmptyPlaceholder` with `isLoading` prop for loading states instead of inline
+  spinners; use `EmptyPlaceholder` with Icon/Title/Description for empty states. This keeps the UI
+  consistent across tables, charts, and panels. The component lives in
+  `apps/nextjs/src/components/empty-placeholder.tsx` and accepts `isLoading` to show a centered
+  `LoadingAnimation`.
 
 ## Tests, Tooling, And Docs
 

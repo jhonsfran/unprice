@@ -5,11 +5,12 @@ import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { FilterDataTable } from "@unprice/ui/filter-data-table"
 import { toast } from "@unprice/ui/sonner"
-import { Activity, CheckCircle2, RotateCcw, TriangleAlert, XCircle } from "lucide-react"
+import { Activity, AlertTriangle, CheckCircle2, RotateCcw, TriangleAlert, XCircle } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DateRange } from "react-day-picker"
 import { NumberTicker } from "~/components/analytics/number-ticker"
+import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useFilterDataTable } from "~/hooks/use-filter-datatable"
 import { manipulateDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
@@ -276,6 +277,22 @@ export function IngestionEventsPanel() {
         emptyTitle={queryError ? "Events could not be loaded" : "No events"}
         emptyDescription={
           queryError?.message ?? "No ingestion events were found for the selected filters."
+        }
+        emptyState={
+          <EmptyPlaceholder className="min-h-[300px] border-none">
+            <EmptyPlaceholder.Icon>
+              <AlertTriangle className="h-8 w-8" />
+            </EmptyPlaceholder.Icon>
+            <EmptyPlaceholder.Title>
+              {queryError ? "Events could not be loaded" : "No events"}
+            </EmptyPlaceholder.Title>
+            <EmptyPlaceholder.Description>
+              {queryError?.message ?? "No ingestion events were found for the selected filters."}
+            </EmptyPlaceholder.Description>
+          </EmptyPlaceholder>
+        }
+        loadingState={
+          <EmptyPlaceholder className="min-h-[300px] border-none" isLoading />
         }
         getRowClassName={(row) =>
           row.state === "failed"

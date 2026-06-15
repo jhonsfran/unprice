@@ -137,8 +137,9 @@ export async function getUsageDashboard(
     return Err(timeseriesResult.err)
   }
 
-  const denseTimeseries = buildDenseTimeseries(timeseriesResult.val.data ?? [])
-  const features = buildFeatureRows(denseTimeseries)
+  const rawRows = timeseriesResult.val.data ?? []
+  const denseTimeseries = buildDenseTimeseries(rawRows)
+  const features = buildFeatureRows(rawRows)
   const summary = buildSummary(features)
 
   let topConsumers: UsageDashboardTopConsumer[] = []
@@ -243,18 +244,39 @@ function buildDenseTimeseries(rows: FeatureUsageTimeseriesRow[]): UsageDashboard
   return denseRows
 }
 
-function buildFeatureRows(rows: UsageDashboardTimeseriesRow[]): UsageDashboardFeature[] {
-  const latestByFeature = new Map<string, UsageDashboardTimeseriesRow>()
+function buildFeatureRows(
+  rawRows: FeatureUsageTimeseriesRow[]
+): UsageDashboardFeature[] {
+  const aggregates = new Map<
+    string,
+    { totalUsage: number; totalAmountAfter: number; currency: string }
+  >()
 
-  for (const row of rows) {
-    latestByFeature.set(row.featureSlug, row)
+  for (const row of rawRows) {
+    const existing = aggregates.get(row.feature_slug)
+    const usage = row.usage ?? 0
+    const amountAfter = row.amount_after ?? 0
+    const currency = row.currency ?? "USD"
+
+    if (existing) {
+      existing.totalUsage += usage
+      existing.totalAmountAfter += amountAfter
+      // Keep the most recent currency (last row wins since rows are date-ordered)
+      existing.currency = currency
+    } else {
+      aggregates.set(row.feature_slug, {
+        totalUsage: usage,
+        totalAmountAfter: amountAfter,
+        currency,
+      })
+    }
   }
 
-  return [...latestByFeature.values()]
-    .map((row) => ({
-      featureSlug: row.featureSlug,
-      usage: row.usage,
-      spending: row.spending,
+  return [...aggregates.entries()]
+    .map(([featureSlug, agg]) => ({
+      featureSlug,
+      usage: agg.totalUsage,
+      spending: formatLedgerMoney(agg.totalAmountAfter, agg.currency),
     }))
     .sort((a, b) => {
       if (b.usage !== a.usage) {

@@ -14,7 +14,7 @@ const thirdHour = Date.parse("2026-06-13T09:00:00.000Z")
 const now = Date.parse("2026-06-13T09:30:00.000Z")
 
 describe("getUsageDashboard", () => {
-  it("derives summary rows from the final dense cumulative time series state", async () => {
+  it("derives summary rows by aggregating usage across all time buckets", async () => {
     const { deps, analytics } = makeDeps({
       now: () => now,
       timeseriesRows: [
@@ -52,9 +52,10 @@ describe("getUsageDashboard", () => {
     const result = await getUsageDashboard(deps, baseInput({ customerId: "cus_1" }))
 
     expect(result.err).toBeUndefined()
+    // features now sum usage across all raw time buckets (not just the latest)
     expect(result.val?.summary).toEqual({
       featureCount: 3,
-      totalLatestUsage: 14,
+      totalLatestUsage: 18,
       spending: [
         {
           currency: "USD",
@@ -64,7 +65,7 @@ describe("getUsageDashboard", () => {
       ],
     })
     expect(result.val?.features.map((feature) => [feature.featureSlug, feature.usage])).toEqual([
-      ["events", 9],
+      ["events", 13],
       ["customers", 3],
       ["pages", 2],
     ])

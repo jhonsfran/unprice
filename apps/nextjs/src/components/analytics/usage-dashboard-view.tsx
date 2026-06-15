@@ -20,6 +20,7 @@ import { type ReactNode, useMemo } from "react"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { SuperLink } from "~/components/super-link"
+import { ProgressBar } from "./progress"
 import { type UsageChartPoint, buildUsageChartConfig } from "./usage-chart-config"
 
 const UsageAreaChart = dynamic(
@@ -127,7 +128,7 @@ export function UsageDashboardView({
             value={String(data.summary.featureCount)}
           />
           <MetricCard
-            label="Total latest usage"
+            label="Total usage"
             icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
             value={nFormatter(data.summary.totalLatestUsage, { digits: 1 })}
           />
@@ -220,8 +221,6 @@ function UsageFeatureTable({
       </div>
       <div className="divide-y divide-border">
         {features.map((feature) => {
-          const usagePercent = maxFeatureUsage > 0 ? (feature.usage / maxFeatureUsage) * 100 : 0
-
           return (
             <div
               key={feature.featureSlug}
@@ -232,12 +231,7 @@ function UsageFeatureTable({
                   <BarChart3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate font-medium text-sm">{feature.featureSlug}</span>
                 </div>
-                <progress
-                  value={Math.round(usagePercent)}
-                  max={100}
-                  aria-label={`${feature.featureSlug} usage`}
-                  className="h-1.5 w-full appearance-none overflow-hidden rounded-full bg-muted/60 [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-primary-border [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-primary-border [&::-webkit-progress-value]:transition-all"
-                />
+                <ProgressBar value={feature.usage} max={maxFeatureUsage} className="h-1.5 w-full" />
               </div>
               <Badge variant="outline" className="justify-self-end font-mono text-xs tabular-nums">
                 {nFormatter(feature.usage, { digits: 1 })}
