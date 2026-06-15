@@ -1,4 +1,5 @@
 import {
+  type FeatureUsagePeriodRow,
   type FeatureUsageTimeseriesRow,
   type Interval,
   type TopConsumerRow,
@@ -83,6 +84,12 @@ export type GetUsageDashboardAnalytics = {
     start?: number
     end?: number
   }): Promise<{ data?: FeatureUsageTimeseriesRow[] }>
+  getFeaturesUsagePeriod(params: {
+    project_id: string
+    customer_id?: string
+    start?: number
+    end?: number
+  }): Promise<{ data?: FeatureUsagePeriodRow[] }>
   getTopConsumers(params: {
     project_id: string
     start?: number
@@ -112,34 +119,56 @@ export async function getUsageDashboard(
   const input = getUsageDashboardInputSchema.parse(rawInput)
   const interval = prepareInterval(input.range)
   const generatedAt = deps.now?.() ?? Date.now()
+  const usageQuery = {
+    project_id: input.projectId,
+    ...(input.customerId ? { customer_id: input.customerId } : {}),
+    start: interval.start,
+    end: interval.end,
+  }
 
-  const timeseriesResult = await wrapResult(
-    deps.analytics.getFeaturesUsageTimeseries({
-      project_id: input.projectId,
-      ...(input.customerId ? { customer_id: input.customerId } : {}),
-      start: interval.start,
-      end: interval.end,
-    }),
-    (error) =>
-      new FetchError({
-        message: error.message,
-        retry: true,
-        context: {
-          url: "tinybird:v1_get_feature_usage_timeseries",
-          method: "GET",
-          projectId: input.projectId,
-          customerId: input.customerId,
-        },
-      })
-  )
+  const [timeseriesResult, periodResult] = await Promise.all([
+    wrapResult(
+      deps.analytics.getFeaturesUsageTimeseries(usageQuery),
+      (error) =>
+        new FetchError({
+          message: error.message,
+          retry: true,
+          context: {
+            url: "tinybird:v1_get_feature_usage_timeseries",
+            method: "GET",
+            projectId: input.projectId,
+            customerId: input.customerId,
+          },
+        })
+    ),
+    wrapResult(
+      deps.analytics.getFeaturesUsagePeriod(usageQuery),
+      (error) =>
+        new FetchError({
+          message: error.message,
+          retry: true,
+          context: {
+            url: "tinybird:v1_get_feature_usage_period",
+            method: "GET",
+            projectId: input.projectId,
+            customerId: input.customerId,
+          },
+        })
+    ),
+  ])
 
   if (timeseriesResult.err) {
     return Err(timeseriesResult.err)
   }
 
-  const rawRows = timeseriesResult.val.data ?? []
-  const denseTimeseries = buildDenseTimeseries(rawRows)
-  const features = buildFeatureRows(rawRows)
+  if (periodResult.err) {
+    return Err(periodResult.err)
+  }
+
+  const timeseriesRows = timeseriesResult.val.data ?? []
+  const periodRows = periodResult.val.data ?? []
+  const denseTimeseries = buildDenseTimeseries(timeseriesRows)
+  const features = buildFeatureRows(periodRows)
   const summary = buildSummary(features)
 
   let topConsumers: UsageDashboardTopConsumer[] = []
@@ -244,7 +273,7 @@ function buildDenseTimeseries(rows: FeatureUsageTimeseriesRow[]): UsageDashboard
   return denseRows
 }
 
-function buildFeatureRows(rawRows: FeatureUsageTimeseriesRow[]): UsageDashboardFeature[] {
+function buildFeatureRows(rawRows: FeatureUsagePeriodRow[]): UsageDashboardFeature[] {
   const aggregates = new Map<
     string,
     { totalUsage: number; totalAmountAfter: number; currency: string }
@@ -252,7 +281,7 @@ function buildFeatureRows(rawRows: FeatureUsageTimeseriesRow[]): UsageDashboardF
 
   for (const row of rawRows) {
     const existing = aggregates.get(row.feature_slug)
-    const usage = row.usage ?? 0
+    const usage = row.usage ?? row.value_after ?? 0
     const amountAfter = row.amount_after ?? 0
     const currency = row.currency ?? "USD"
 

@@ -1,0 +1,19 @@
+DESCRIPTION >
+    Allocation-grain hourly feature usage metrics for exact billing-aligned analytics.
+
+SCHEMA >
+    `date` DateTime,
+    `project_id` String,
+    `customer_id` String,
+    `customer_entitlement_id` String,
+    `grant_id` String,
+    `feature_slug` LowCardinality(String),
+    `period_key` String,
+    `value` AggregateFunction(argMax, Decimal64(4), Tuple(Int64, Int64, String)),
+    `amount_after` AggregateFunction(argMax, Int64, Tuple(Int64, Int64, String)),
+    `currency` AggregateFunction(argMax, String, Tuple(Int64, Int64, String))
+
+ENGINE AggregatingMergeTree
+ENGINE_PARTITION_KEY toYYYYMM(date)
+ENGINE_SORTING_KEY (project_id, customer_id, customer_entitlement_id, grant_id, period_key, feature_slug, date)
+ENGINE_TTL date + INTERVAL 90 DAY

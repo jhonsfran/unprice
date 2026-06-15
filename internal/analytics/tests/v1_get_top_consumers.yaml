@@ -1,0 +1,14 @@
+
+- name: uses_idempotency_order_for_equal_timestamp_batch_rows
+  description: Verifies top consumers use ingestion order instead of event_id order
+    for equal timestamp/created_at rows
+  parameters: project_id=p_top_tie&start=4070908800000&end=4070912400000&limit=10
+  expected_result: |
+    {"customer_id":"c_top_tie","total_usage":20,"total_amount_after":2000000000,"currency":"USD"}
+
+- name: sums_latest_allocations_for_same_visible_feature
+  description: Verifies top consumers include every entitlement/grant allocation for
+    the visible feature
+  parameters: project_id=p_top_multi&start=4070908800000&end=4070912400000&limit=10
+  expected_result: |
+    {"customer_id":"c_top_multi","total_usage":15,"total_amount_after":1500000000,"currency":"USD"}

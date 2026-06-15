@@ -38,7 +38,9 @@ CREATE TABLE "unprice_agents" (
 DROP INDEX "entitlement_reservations_entitlement_period_idx";--> statement-breakpoint
 ALTER TABLE "unprice_entitlement_reservations" ALTER COLUMN "entitlement_id" DROP NOT NULL;--> statement-breakpoint
 ALTER TABLE "unprice_entitlement_reservations" ADD COLUMN "owner_type" text DEFAULT 'entitlement_window' NOT NULL;--> statement-breakpoint
-ALTER TABLE "unprice_entitlement_reservations" ADD COLUMN "owner_id" varchar(36) COLLATE "C" NOT NULL;--> statement-breakpoint
+ALTER TABLE "unprice_entitlement_reservations" ADD COLUMN "owner_id" varchar(36) COLLATE "C";--> statement-breakpoint
+UPDATE "unprice_entitlement_reservations" SET "owner_id" = "entitlement_id" WHERE "owner_id" IS NULL;--> statement-breakpoint
+ALTER TABLE "unprice_entitlement_reservations" ALTER COLUMN "owner_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "unprice_agent_runs" ADD CONSTRAINT "unprice_agent_runs_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "unprice_agents" ADD CONSTRAINT "unprice_agents_project_id_unprice_projects_id_fk" FOREIGN KEY ("project_id") REFERENCES "public"."unprice_projects"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "agent_runs_agent_idx" ON "unprice_agent_runs" USING btree ("project_id","agent_id");--> statement-breakpoint

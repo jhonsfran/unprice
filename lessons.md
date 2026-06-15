@@ -14,6 +14,7 @@ patterns. Keep it cheap to load and useful.
 - You need to use nvm use to install the proper node version of the project
 - Before adding a helper, utility, or repeated row shape, search the repo for an established
   pattern first; reuse or extract the canonical path instead of duplicating logic.
+- Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.
 
 ## Cloudflare, API, And Ingestion
 
@@ -470,3 +471,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-06-08: Durable Object diagnostics that must be queried in Axiom should go through
   `createDoLogger` as first-class drain events; request-scoped wrapper rows alone can hide inner
   fields such as `mode`, fallback `reason`, and `error`.
+- 2026-06-15: Usage analytics that must reconcile with invoices should aggregate latest
+  `amount_after`/`value_after` per `customer_entitlement_id + grant_id + period_key`, then sum to
+  the visible feature. Equal `timestamp`/`created_at` DO batch rows must tie-break by
+  `idempotency_key`, matching ingestion's sort order.

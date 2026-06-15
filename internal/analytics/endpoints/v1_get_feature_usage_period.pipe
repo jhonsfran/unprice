@@ -2,12 +2,15 @@ TOKEN "web-apps" READ
 
 TAGS "usage, billing"
 
-NODE feature_usage_period_node
+NODE feature_usage_period_allocations_node
 SQL >
     %
     SELECT
         project_id,
         {% if defined(customer_id) %} customer_id, {% end %}
+        customer_entitlement_id,
+        grant_id,
+        period_key,
         feature_slug,
         toFloat64(argMaxMerge(value)) as usage,
         argMaxMerge(amount_after) as amount_after,
@@ -15,23 +18,23 @@ SQL >
     FROM
     {% if defined(interval_days) %}
         {% if Int32(interval_days) > 180 %}
-            unprice_feature_usage_monthly_mv
+            unprice_feature_usage_allocations_monthly_mv
         {% elif Int32(interval_days) > 7 %}
-            unprice_feature_usage_daily_mv
+            unprice_feature_usage_allocations_daily_mv
         {% else %}
-            unprice_feature_usage_hourly_mv
+            unprice_feature_usage_allocations_hourly_mv
         {% end %}
     {% elif defined(start) and defined(end) %}
         {% set diff_days = (Int64(end) - Int64(start)) / 86400000 %}
         {% if diff_days > 180 %}
-            unprice_feature_usage_monthly_mv
+            unprice_feature_usage_allocations_monthly_mv
         {% elif diff_days > 7 %}
-            unprice_feature_usage_daily_mv
+            unprice_feature_usage_allocations_daily_mv
         {% else %}
-            unprice_feature_usage_hourly_mv
+            unprice_feature_usage_allocations_hourly_mv
         {% end %}
     {% else %}
-        unprice_feature_usage_hourly_mv
+        unprice_feature_usage_allocations_hourly_mv
     {% end %}
     WHERE
         project_id = {{ String(project_id) }}
@@ -46,6 +49,19 @@ SQL >
         {% else %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}
+    {% if defined(customer_id) %} GROUP BY project_id, customer_id, customer_entitlement_id, grant_id, period_key, feature_slug {% else %} GROUP BY project_id, customer_entitlement_id, grant_id, period_key, feature_slug {% end %}
+
+NODE feature_usage_period_node
+SQL >
+    %
+    SELECT
+        project_id,
+        {% if defined(customer_id) %} customer_id, {% end %}
+        feature_slug,
+        sum(usage) as usage,
+        sum(amount_after) as amount_after,
+        any(currency) as currency
+    FROM feature_usage_period_allocations_node
     {% if defined(customer_id) %} GROUP BY project_id, customer_id, feature_slug {% else %} GROUP BY project_id, feature_slug {% end %}
 
 TYPE endpoint

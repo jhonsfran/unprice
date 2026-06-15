@@ -1,0 +1,11 @@
+- name: uses_idempotency_order_for_equal_timestamp_batch_rows
+  description: Verifies timeseries buckets use ingestion order instead of event_id order for equal timestamp/created_at rows
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f_tie&start=4070908800000&end=4070912400000
+  expected_result: |
+    {"date":"2099-01-01 00:00:00","feature_slug":"f_tie","usage":15,"amount_after":1500000000,"currency":"USD"}
+
+- name: sums_latest_allocations_for_same_visible_feature
+  description: Verifies timeseries buckets include every entitlement/grant allocation for the visible feature
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f_multi&start=4070908800000&end=4070912400000
+  expected_result: |
+    {"date":"2099-01-01 00:00:00","feature_slug":"f_multi","usage":15,"amount_after":1500000000,"currency":"USD"}

@@ -44,10 +44,7 @@ export function FreshnessIndicator({
 
   return (
     <div
-      className={cn(
-        "flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs",
-        className
-      )}
+      className={cn("flex flex-wrap items-center gap-1.5 text-muted-foreground text-xs", className)}
       title={`Last updated ${absoluteTime}`}
     >
       <RefreshCw className={cn("size-3", isFetching && "animate-spin")} />

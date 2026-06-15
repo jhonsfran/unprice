@@ -1,0 +1,25 @@
+NODE features_usage_allocations_daily_mv_node
+SQL >
+    SELECT
+        toStartOfDay(date) AS date,
+        project_id,
+        customer_id,
+        customer_entitlement_id,
+        grant_id,
+        period_key,
+        feature_slug,
+        argMaxMergeState(value) AS value,
+        argMaxMergeState(amount_after) AS amount_after,
+        argMaxMergeState(currency) AS currency
+    FROM unprice_feature_usage_allocations_hourly_mv
+    GROUP BY
+        date,
+        project_id,
+        customer_id,
+        customer_entitlement_id,
+        grant_id,
+        period_key,
+        feature_slug
+
+TYPE MATERIALIZED
+DATASOURCE unprice_feature_usage_allocations_daily_mv
