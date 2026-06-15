@@ -5,7 +5,7 @@ import { protectedProjectProcedure } from "#trpc"
 export const machine = protectedProjectProcedure
   .input(
     z.object({
-      event: z.enum(["invoice", "renew", "billing_period", "finalize_invoice", "collect_payment"]),
+      event: z.enum(["invoice", "renew", "finalize_invoice", "collect_payment"]),
       subscriptionId: z.string(),
       invoiceId: z.string().optional(),
     })
@@ -105,25 +105,6 @@ export const machine = protectedProjectProcedure
 
         return {
           status: val.status,
-        }
-      }
-
-      case "billing_period": {
-        const { err } = await billing.generateBillingPeriods({
-          subscriptionId: input.subscriptionId,
-          projectId,
-          now: Date.now(),
-        })
-
-        if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
-        }
-
-        return {
-          status: "success",
         }
       }
 

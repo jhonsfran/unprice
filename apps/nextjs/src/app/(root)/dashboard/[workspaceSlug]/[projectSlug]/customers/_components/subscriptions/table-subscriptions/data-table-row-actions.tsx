@@ -77,21 +77,6 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     })
   }
 
-  function onGenerateBillingPeriods() {
-    startTransition(() => {
-      toast.promise(
-        machine.mutateAsync({
-          subscriptionId: subscriptionId,
-          event: "billing_period",
-        }),
-        {
-          loading: "Generating billing periods...",
-          success: "Billing periods generated",
-        }
-      )
-    })
-  }
-
   return (
     <PropagationStopper>
       <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -127,16 +112,6 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
             disabled={machine.isPending}
           >
             Renew Subscription
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.preventDefault()
-              onGenerateBillingPeriods()
-              setOpen(false)
-            }}
-            disabled={machine.isPending}
-          >
-            Generate Billing Periods
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={(e) => {

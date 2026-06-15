@@ -869,6 +869,9 @@ describe("SubscriptionMachine - comprehensive", () => {
                     limit: vi.fn(() => Promise.resolve([])),
                   })),
                 })),
+                orderBy: vi.fn(() => ({
+                  limit: vi.fn(() => Promise.resolve([])),
+                })),
               })),
             }
           }),
@@ -881,8 +884,8 @@ describe("SubscriptionMachine - comprehensive", () => {
     expect(m.getState()).toBe("active")
 
     const res = await m.invoice()
-    expect(res.err).toBeUndefined()
-    expect(m.getState()).toBe("active")
+    expect(res.err).toBeDefined()
+    expect(res.err?.message).toContain("Cannot invoice subscription")
     await m.shutdown()
   })
 

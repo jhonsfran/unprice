@@ -244,9 +244,7 @@ function buildDenseTimeseries(rows: FeatureUsageTimeseriesRow[]): UsageDashboard
   return denseRows
 }
 
-function buildFeatureRows(
-  rawRows: FeatureUsageTimeseriesRow[]
-): UsageDashboardFeature[] {
+function buildFeatureRows(rawRows: FeatureUsageTimeseriesRow[]): UsageDashboardFeature[] {
   const aggregates = new Map<
     string,
     { totalUsage: number; totalAmountAfter: number; currency: string }

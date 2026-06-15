@@ -175,6 +175,9 @@ patterns. Keep it cheap to load and useful.
   accounts.
 - 2026-06-07: Customer-facing invoice money should quantize ledger-scale amounts through
   `toCurrencyMinor` before display; keep sub-cent precision internal.
+- 2026-06-15: After invoice money is quantized to currency minor units, render fixed currency
+  minor digits in invoice UI; otherwise `3.60 EUR` appears as `3,6 €` and looks inconsistent with
+  analytics cards.
 - 2026-06-07: Provider invoice items must allocate currency-minor rounding from the
   ledger-summed invoice header total; do not independently round each line and let
   provider totals drift.
@@ -366,6 +369,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-06-13: Dashboard near-realtime queries with a default relative window must advance the
   query input timestamp on each poll; refetching a frozen `{ from, to }` window only reloads old
   data.
+- 2026-06-15: Customer-visible relative usage dashboards should poll on the same 30s cadence as
+  the analytics SWR freshness window and display payload `freshness.generatedAt`; keep Tinybird
+  throttling in the tRPC cache instead of bypassing it from the UI.
 - 2026-06-12: Dashboard client components that use `useSuspenseQuery` for protected tRPC data
   must have matching RSC `trpc/server` prefetches; otherwise server render can fall back to the
   app React Query HTTP link without browser cookies and log `User not found in session`.

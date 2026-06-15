@@ -5,10 +5,18 @@ import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { FilterDataTable } from "@unprice/ui/filter-data-table"
 import { toast } from "@unprice/ui/sonner"
-import { Activity, AlertTriangle, CheckCircle2, RotateCcw, TriangleAlert, XCircle } from "lucide-react"
+import {
+  Activity,
+  AlertTriangle,
+  CheckCircle2,
+  RotateCcw,
+  TriangleAlert,
+  XCircle,
+} from "lucide-react"
 import { useParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DateRange } from "react-day-picker"
+import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useFilterDataTable } from "~/hooks/use-filter-datatable"
@@ -250,6 +258,12 @@ export function IngestionEventsPanel() {
 
   return (
     <div className="space-y-6">
+      <div className="flex min-h-4 items-center justify-end">
+        <FreshnessIndicator
+          generatedAt={firstPage?.freshness.generatedAt}
+          isFetching={isRefreshing}
+        />
+      </div>
       <IngestionStatsCards
         processed={processed}
         rejected={rejected}
@@ -291,9 +305,7 @@ export function IngestionEventsPanel() {
             </EmptyPlaceholder.Description>
           </EmptyPlaceholder>
         }
-        loadingState={
-          <EmptyPlaceholder className="min-h-[300px] border-none" isLoading />
-        }
+        loadingState={<EmptyPlaceholder className="min-h-[300px] border-none" isLoading />}
         getRowClassName={(row) =>
           row.state === "failed"
             ? "bg-destructive/10"

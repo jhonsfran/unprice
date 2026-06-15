@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import dynamic from "next/dynamic"
 import { type ReactNode, useMemo } from "react"
+import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { SuperLink } from "~/components/super-link"
@@ -91,7 +92,14 @@ export function UsageDashboardView({
   }
 
   if (data.features.length === 0 && data.timeseries.length === 0) {
-    return <UsageDashboardEmptyState intervalLabel={intervalLabel} mode={mode} />
+    return (
+      <UsageDashboardEmptyState
+        intervalLabel={intervalLabel}
+        mode={mode}
+        generatedAt={data.freshness.generatedAt}
+        isFetching={isFetching}
+      />
+    )
   }
 
   const maxFeatureUsage = data.features[0]?.usage ?? 1
@@ -111,6 +119,7 @@ export function UsageDashboardView({
             <CardDescription>
               Usage for this {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
             </CardDescription>
+            <FreshnessIndicator generatedAt={data.freshness.generatedAt} isFetching={isFetching} />
           </div>
           {mode === "customer" && <IntervalFilter />}
         </div>
@@ -312,9 +321,13 @@ function UsageDashboardErrorState({ error }: { error: string }) {
 function UsageDashboardEmptyState({
   intervalLabel,
   mode,
+  generatedAt,
+  isFetching,
 }: {
   intervalLabel: string
   mode: "project" | "customer"
+  generatedAt: number
+  isFetching: boolean
 }) {
   return (
     <Card className="border-muted/60">
@@ -325,6 +338,7 @@ function UsageDashboardEmptyState({
             <CardDescription>
               Usage for this {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
             </CardDescription>
+            <FreshnessIndicator generatedAt={generatedAt} isFetching={isFetching} />
           </div>
           {mode === "customer" && <IntervalFilter />}
         </div>

@@ -30,6 +30,7 @@ type MockBillPeriodTx = {
 
 type MockBillPeriodDb = Database & {
   tx: MockBillPeriodTx
+  nextPendingPeriod: Array<{ invoiceAt: number }> | []
 }
 
 let outerRepoInstance: RepoInstance
@@ -116,8 +117,14 @@ function makeBillingPeriod(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function makeDb(opts: { entitlementRows?: Array<{ id: string }> } = {}): MockBillPeriodDb {
+function makeDb(
+  opts: {
+    entitlementRows?: Array<{ id: string }>
+    nextPendingPeriod?: Array<{ invoiceAt: number }>
+  } = {}
+): MockBillPeriodDb {
   const entitlementRows = opts.entitlementRows ?? [{ id: "ent_1" }]
+  const nextPendingPeriod = opts.nextPendingPeriod ?? []
   const txExecute = vi.fn().mockResolvedValue(undefined)
   const txSelectChain = {
     from: vi.fn().mockReturnThis(),
@@ -130,7 +137,16 @@ function makeDb(opts: { entitlementRows?: Array<{ id: string }> } = {}): MockBil
     return cb(tx)
   })
 
-  return { transaction, tx } as unknown as MockBillPeriodDb
+  // Mock for db.select().from(billingPeriods).where(...).orderBy(...).limit(...)
+  const dbSelectChain = {
+    from: vi.fn().mockReturnThis(),
+    where: vi.fn().mockReturnThis(),
+    orderBy: vi.fn().mockReturnThis(),
+    limit: vi.fn().mockResolvedValue(nextPendingPeriod),
+  }
+  const dbSelect = vi.fn().mockReturnValue(dbSelectChain)
+
+  return { transaction, tx, select: dbSelect, nextPendingPeriod } as unknown as MockBillPeriodDb
 }
 
 function makeRatingService(result?: unknown): RatingService {
@@ -440,25 +456,51 @@ describe("billPeriod", () => {
     expect(txRepoInstance.createInvoice).not.toHaveBeenCalled()
   })
 
-  it("no pending period groups returns phasesProcessed: 0 immediately", async () => {
+  it("no pending period groups throws with next invoice date when future periods exist", async () => {
     outerRepoInstance.listPendingPeriodGroups = vi.fn().mockResolvedValue([])
 
-    const db = makeDb()
+    const futureInvoiceAt = 1_700_100_000_000
+    const db = makeDb({ nextPendingPeriod: [{ invoiceAt: futureInvoiceAt }] })
     const ratingService = makeRatingService()
     const ledgerService = makeLedgerService()
     const repo = makeRepo()
     const logger = makeLogger()
 
-    const result = await billPeriod({
-      context: makeContext(),
-      logger,
-      db,
-      repo,
-      ratingService,
-      ledgerService,
-    })
+    await expect(
+      billPeriod({
+        context: makeContext(),
+        logger,
+        db,
+        repo,
+        ratingService,
+        ledgerService,
+      })
+    ).rejects.toThrow("Cannot invoice subscription, next invoice date is at")
+    expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
+    expect(ledgerService.createTransfer).not.toHaveBeenCalled()
+  })
 
-    expect(result.phasesProcessed).toBe(0)
+  it("no pending period groups throws when no pending billing periods exist at all", async () => {
+    outerRepoInstance.listPendingPeriodGroups = vi.fn().mockResolvedValue([])
+
+    const db = makeDb({ nextPendingPeriod: [] })
+    const ratingService = makeRatingService()
+    const ledgerService = makeLedgerService()
+    const repo = makeRepo()
+    const logger = makeLogger()
+
+    await expect(
+      billPeriod({
+        context: makeContext(),
+        logger,
+        db,
+        repo,
+        ratingService,
+        ledgerService,
+      })
+    ).rejects.toThrow(
+      "Cannot invoice subscription, there are no pending billing periods to invoice"
+    )
     expect(ratingService.rateBillingPeriod).not.toHaveBeenCalled()
     expect(ledgerService.createTransfer).not.toHaveBeenCalled()
   })

@@ -20,22 +20,16 @@ export { UsageDashboardSkeleton as CustomerMetricsPanelSkeleton }
 export function CustomerMetricsPanel({ customerId, invoiceCount }: CustomerMetricsPanelProps) {
   const [intervalFilter] = useIntervalFilter()
   const trpc = useTRPC()
-  const isNearRealtime = intervalFilter.intervalDays === 1
+  const queryInput = {
+    customerId,
+    range: intervalFilter.name,
+  }
 
   const { data, dataUpdatedAt, isFetching } = useSuspenseQuery(
-    trpc.analytics.getUsageDashboard.queryOptions(
-      {
-        customerId,
-        range: intervalFilter.name,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-        placeholderData: (previousData) => previousData,
-        staleTime: isNearRealtime ? 30 * 1000 : 0,
-        refetchInterval: isNearRealtime ? 60 * 1000 : (false as const),
-        refetchOnWindowFocus: false,
-      }
-    )
+    trpc.analytics.getUsageDashboard.queryOptions(queryInput, {
+      ...ANALYTICS_CONFIG_REALTIME,
+      placeholderData: (previousData) => previousData,
+    })
   )
 
   useQueryInvalidation({
