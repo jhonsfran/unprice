@@ -23,7 +23,7 @@
     "@types/node": "20.11.24",
     "@unprice/tsconfig": "workspace:*",
     "typescript": "^5.3.3",
-    "vitest": "^2.1.9"
+    "vitest": "^4.1.9"
   },
   "dependencies": {
     "@t3-oss/env-core": "^0.12.0",
