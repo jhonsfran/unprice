@@ -71,10 +71,12 @@ export class EntitlementWindowReservationUnderfundedError extends Error {
   }
 }
 
-export type DeniedReason = Extract<
-  IngestionRejectionReason,
-  "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
->
+export type DeniedReason =
+  | Extract<
+      IngestionRejectionReason,
+      "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
+    >
+  | "RUN_BUDGET_EXCEEDED"
 
 export type ApplyResult = {
   allowed: boolean
@@ -212,6 +214,12 @@ export const applyInputSchema = z.object({
   grants: z.array(activeGrantSchema).min(1),
   enforceLimit: z.boolean(),
   now: z.number().finite(),
+  walletMode: z.enum(["standard", "external_reservation"]).default("standard"),
+  externalReservation: z
+    .object({
+      remainingAmount: z.number().int().nonnegative(),
+    })
+    .optional(),
 })
 
 const applyBatchEventSchema = rawEventSchema.extend({
@@ -237,10 +245,12 @@ export const batchIdempotencyEntrySchema = z.object({
   createdAt: z.number().finite(),
   allowed: z.boolean(),
   deniedReason: z
-    .enum(["LIMIT_EXCEEDED", "WALLET_EMPTY", "LATE_EVENT_CLOSED_PERIOD"] satisfies readonly [
-      DeniedReason,
-      ...DeniedReason[],
-    ])
+    .enum([
+      "LIMIT_EXCEEDED",
+      "WALLET_EMPTY",
+      "LATE_EVENT_CLOSED_PERIOD",
+      "RUN_BUDGET_EXCEEDED",
+    ] satisfies readonly [DeniedReason, ...DeniedReason[]])
     .nullable(),
   denyMessage: z.string().nullable(),
   meterFacts: z.array(entitlementMeterFactSchemaV1).optional().default([]),

@@ -1274,6 +1274,7 @@ export class EntitlementWindowDO extends DurableObject {
     const input = applyInputSchema.parse(rawInput)
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
+    const walletMode = input.walletMode ?? "standard"
     const { activeGrants, creditLinePolicy, entitlement, meter, overageStrategy } =
       this.prepareSingleApplyContext(input, createdAt)
 
@@ -1288,6 +1289,7 @@ export class EntitlementWindowDO extends DurableObject {
       input,
       meter,
     })
+    wideEvent.wallet_mode = walletMode
 
     let result: ApplyResult | undefined
     let thrown: unknown
@@ -1315,6 +1317,21 @@ export class EntitlementWindowDO extends DurableObject {
       if (lateDenial) {
         result = lateDenial
         return lateDenial
+      }
+
+      if (walletMode === "external_reservation") {
+        const externalResult = this.executeSingleApplyExternalReservation({
+          activeGrants,
+          createdAt,
+          entitlement,
+          idempotencyKey,
+          input,
+          meter,
+          metrics,
+          overageStrategy,
+        })
+        result = externalResult
+        return externalResult
       }
 
       const bootstrap = await this.handleSingleApplyReservationBootstrap({
@@ -1359,6 +1376,104 @@ export class EntitlementWindowDO extends DurableObject {
         wideEvent,
       })
     }
+  }
+
+  // External reservation mode: prices the event and enforces entitlement limits
+  // but does NOT create/manage wallet reservations. Instead, it compares the
+  // priced cost against the caller-provided externalReservation.remainingAmount.
+  // Used by RunBudgetDO which manages its own run-level budget.
+  private executeSingleApplyExternalReservation(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    entitlement: EntitlementConfigInput
+    idempotencyKey: string
+    input: ApplyInput
+    meter: MeterIdentity
+    metrics: SingleApplyExecutionMetrics
+    overageStrategy: OverageStrategy
+  }): ApplyResult {
+    const {
+      activeGrants,
+      createdAt,
+      entitlement,
+      idempotencyKey,
+      input,
+      meter,
+      metrics,
+      overageStrategy,
+    } = params
+
+    return this.db.transaction((tx) => {
+      // Double-check idempotency inside the transaction
+      const cachedResult = this.store.lookupCachedIdempotencyResult(idempotencyKey)
+      if (cachedResult) {
+        metrics.duplicateCount = 1
+        return cachedResult
+      }
+
+      // Apply the meter event and price it (same as standard mode)
+      let pricedFacts: PricedFact[]
+      try {
+        pricedFacts = this.applyAndPriceSingleApplyEvent(tx, {
+          activeGrants,
+          createdAt,
+          entitlement,
+          input,
+          meter,
+          metrics,
+          overageStrategy,
+        })
+      } catch (error) {
+        if (error instanceof EntitlementWindowLimitExceededError) {
+          const deniedResult = this.persistDeniedApplyResult({
+            idempotencyKey,
+            createdAt,
+            deniedReason: "LIMIT_EXCEEDED",
+            message: error.message,
+          })
+          metrics.idempotencyInsertCount = 1
+          return deniedResult
+        }
+        throw error
+      }
+
+      // Compare priced cost against external reservation remaining amount
+      const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+      const remainingAmount = input.externalReservation?.remainingAmount ?? 0
+
+      if (totalCost > remainingAmount) {
+        const deniedResult = this.persistDeniedApplyResult({
+          idempotencyKey,
+          createdAt,
+          deniedReason: "RUN_BUDGET_EXCEEDED",
+          message: `Priced cost ${totalCost} exceeds run remaining amount ${remainingAmount}`,
+        })
+        metrics.idempotencyInsertCount = 1
+        return deniedResult
+      }
+
+      // Build meter facts and persist allowed result (no wallet I/O)
+      const meterFacts = pricedFacts.map((pricedFact) =>
+        this.buildMeterFactPayload({
+          createdAt,
+          input,
+          meter,
+          pricedFact,
+        })
+      )
+
+      const idempotencyEntry = this.persistAllowedSingleApplyResult(tx, {
+        createdAt,
+        idempotencyKey,
+        meterFacts,
+        metrics,
+      })
+
+      this.store.recordBatchIdempotencyResults([idempotencyEntry])
+      this.schedulePostCommitAlarm()
+
+      return { allowed: true, meterFacts } as ApplyResult
+    })
   }
 
   private resolveCachedSingleApplyReplay(params: {

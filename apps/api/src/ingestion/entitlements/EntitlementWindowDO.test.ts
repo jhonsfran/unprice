@@ -6207,6 +6207,94 @@ describe("EntitlementWindowDO", () => {
     expect(result).toMatchObject({ ok: true, outcome: "no_unflushed_usage" })
     expect(testState.flushReservation).not.toHaveBeenCalled()
   })
+
+  // ---------------------------------------------------------------------
+  // External reservation mode. RunBudgetDO calls EntitlementWindowDO with
+  // walletMode: "external_reservation" to price and limit-check events
+  // without creating/managing wallet reservations.
+  // ---------------------------------------------------------------------
+
+  it("external reservation mode does not create or capture entitlement wallet reservations", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 5, meterKey: DEFAULT_METER_KEY, valueAfter: 5 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const input = createApplyInput({ walletMode: "external_reservation" })
+    const result = await durableObject.apply({
+      ...input,
+      walletMode: "external_reservation",
+      externalReservation: { remainingAmount: 1_000_000_000 },
+    })
+
+    expect(result).toMatchObject({ allowed: true })
+    expect(result.meterFacts).toHaveLength(1)
+    expect(testState.createReservation).not.toHaveBeenCalled()
+    expect(testState.captureReservationUsage).not.toHaveBeenCalled()
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+  })
+
+  it("external reservation mode denies when priced usage exceeds run remaining amount", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      // 15 units @ $1/unit = $15 = 1_500_000_000 at LEDGER_SCALE(8)
+      const facts = [{ delta: 15, meterKey: DEFAULT_METER_KEY, valueAfter: 15 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    const input = createApplyInput({ walletMode: "external_reservation" })
+    const result = await durableObject.apply({
+      ...input,
+      walletMode: "external_reservation",
+      externalReservation: { remainingAmount: 1_000_000_000 },
+    })
+
+    expect(result).toMatchObject({
+      allowed: false,
+      deniedReason: "RUN_BUDGET_EXCEEDED",
+    })
+    expect(result.message).toContain("exceeds run remaining amount")
+    expect(testState.createReservation).not.toHaveBeenCalled()
+    expect(testState.captureReservationUsage).not.toHaveBeenCalled()
+    expect(testState.flushReservation).not.toHaveBeenCalled()
+    // Denial is persisted in idempotency
+    expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({
+      allowed: false,
+      deniedReason: "RUN_BUDGET_EXCEEDED",
+    })
+  })
+
+  it("standard mode keeps existing wallet reservation behavior", async () => {
+    const EntitlementWindowDO = await loadEntitlementWindowDO()
+    const state = createDurableObjectState()
+    const db = createFakeDbState()
+    testState.db = db
+    testState.engineApply.mockImplementation((_event: unknown, options?: PersistOptions) => {
+      const facts = [{ delta: 3, meterKey: DEFAULT_METER_KEY, valueAfter: 3 }]
+      options?.beforePersist?.(facts)
+      return facts
+    })
+
+    const durableObject = new EntitlementWindowDO(state, createEnv())
+    // No walletMode field = default "standard"
+    const result = await durableObject.apply(createApplyInput())
+
+    expect(result).toMatchObject({ allowed: true })
+    // Standard mode creates a wallet reservation on first priced apply
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)?.reservationId).toBe("res_lazy_default")
+  })
 })
 
 const createConnectionSpy = vi.fn()
