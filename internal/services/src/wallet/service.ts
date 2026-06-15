@@ -63,12 +63,18 @@ export interface WalletTransferInput {
   idempotencyKey: string
 }
 
+export type ReservationOwner =
+  | { type: "entitlement_window"; id: string }
+  | { type: "agent_run"; id: string }
+
 export interface CreateReservationInput {
   projectId: string
   customerId: string
   currency: Currency
-  entitlementId: string
+  entitlementId: string | null
+  owner?: ReservationOwner
   requestedAmount: number
+  minimumAllocationAmount?: number
   refillThresholdBps: number
   refillChunkAmount: number
   periodStartAt: Date
@@ -339,6 +345,16 @@ export class WalletService {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
     }
 
+    const owner =
+      input.owner ??
+      (input.entitlementId
+        ? ({ type: "entitlement_window", id: input.entitlementId } as const)
+        : null)
+
+    if (!owner) {
+      return Err(new UnPriceWalletError({ message: "WALLET_INVALID_RESERVATION_OWNER" }))
+    }
+
     const keys = customerAccountKeys(input.customerId)
     const reservationMetadata = this.normalizeJsonMetadata(input.metadata)
 
@@ -364,7 +380,8 @@ export class WalletService {
       const existing = await (tx as Transaction).query.entitlementReservations.findFirst({
         where: and(
           eq(entitlementReservations.projectId, input.projectId),
-          eq(entitlementReservations.entitlementId, input.entitlementId),
+          eq(entitlementReservations.ownerType, owner.type),
+          eq(entitlementReservations.ownerId, owner.id),
           eq(entitlementReservations.periodStartAt, input.periodStartAt),
           isNull(entitlementReservations.reconciledAt)
         ),
@@ -392,6 +409,12 @@ export class WalletService {
       const purchasedDrained = Math.max(0, Math.min(stillNeeded, purchasedBalance))
 
       const allocationAmount = grantedDrained + purchasedDrained
+
+      const minimumAllocationAmount = input.minimumAllocationAmount ?? 0
+      if (minimumAllocationAmount > 0 && allocationAmount < minimumAllocationAmount) {
+        return Err(new UnPriceWalletError({ message: "WALLET_EMPTY" }))
+      }
+
       const reservationId = newId("entitlement_reservation")
       const reserveLedgerSourceId = `${input.idempotencyKey}:${reservationId}`
       const fundingAllocations: FundingAllocation[] = [
@@ -419,6 +442,8 @@ export class WalletService {
             drain_source: "granted",
             reservation_id: reservationId,
             entitlement_id: input.entitlementId,
+            reservation_owner_type: owner.type,
+            reservation_owner_id: owner.id,
             grant_ids: grantAllocations
               .map((allocation) => allocation.walletCreditId)
               .filter((id): id is string => !!id),
@@ -443,6 +468,8 @@ export class WalletService {
             drain_source: "purchased",
             reservation_id: reservationId,
             entitlement_id: input.entitlementId,
+            reservation_owner_type: owner.type,
+            reservation_owner_id: owner.id,
             idempotency_key: input.idempotencyKey,
           },
         })
@@ -457,8 +484,8 @@ export class WalletService {
         id: reservationId,
         projectId: input.projectId,
         customerId: input.customerId,
-        ownerType: "entitlement_window",
-        ownerId: input.entitlementId,
+        ownerType: owner.type,
+        ownerId: owner.id,
         entitlementId: input.entitlementId,
         allocationAmount,
         consumedAmount: 0,

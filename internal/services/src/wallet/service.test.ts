@@ -402,7 +402,7 @@ function seedReservation(
     id: string
     customerId: string
     projectId: string
-    entitlementId: string
+    entitlementId: string | null
     fundingAllocations?: SeedFundingAllocation[]
   }
 ): FakeReservation {
@@ -764,6 +764,155 @@ describe("WalletService.createReservation", () => {
     expect(grantUpdates).toHaveLength(2)
     expect(grantUpdates[0]!.set).toEqual({ remainingAmount: 0 })
     expect(grantUpdates[1]!.set).toEqual({ remainingAmount: 2 * DOLLAR })
+  })
+
+  it("creates an agent-run-owned reservation without an entitlement id", async () => {
+    const { state, wallet } = buildService()
+    seedGrant(state, {
+      id: "wcr_agent",
+      customerId,
+      projectId,
+      source: "promo",
+      issuedAmount: 10 * DOLLAR,
+      remainingAmount: 10 * DOLLAR,
+      expiresAt: new Date("2026-12-01"),
+      createdAt: new Date("2026-01-01"),
+    })
+    state.balances[keys.granted] = 10 * DOLLAR
+    state.balances[keys.purchased] = 0
+
+    const { val, err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: null,
+      owner: { type: "agent_run", id: "arun_123" },
+      requestedAmount: 5 * DOLLAR,
+      minimumAllocationAmount: 5 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      idempotencyKey: "reserve-agent-run-123",
+    })
+
+    expect(err).toBeUndefined()
+    expect(val).toMatchObject({
+      allocationAmount: expect.any(Number),
+    })
+    expect(state.inserts).toContainEqual(
+      expect.objectContaining({
+        table: "entitlementReservations",
+        values: expect.objectContaining({
+          entitlementId: null,
+          ownerType: "agent_run",
+          ownerId: "arun_123",
+        }),
+      })
+    )
+  })
+
+  it("fails a strict reservation before moving funds when available balance is short", async () => {
+    const { state, wallet } = buildService()
+    seedGrant(state, {
+      id: "wcr_short",
+      customerId,
+      projectId,
+      source: "promo",
+      issuedAmount: 2 * DOLLAR,
+      remainingAmount: 2 * DOLLAR,
+      expiresAt: new Date("2026-12-01"),
+      createdAt: new Date("2026-01-01"),
+    })
+    state.balances[keys.granted] = 2 * DOLLAR
+    state.balances[keys.purchased] = 0
+
+    const { val, err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: null,
+      owner: { type: "agent_run", id: "arun_strict" },
+      requestedAmount: 5 * DOLLAR,
+      minimumAllocationAmount: 5 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      idempotencyKey: "reserve-agent-run-short",
+    })
+
+    expect(err?.message).toBe("WALLET_EMPTY")
+    expect(val).toBeUndefined()
+    expect(state.transfers).toHaveLength(0)
+    expect(
+      state.inserts.filter((insert) => insert.table === "entitlementReservations")
+    ).toHaveLength(0)
+  })
+
+  it("dedupes active reservations by owner and period", async () => {
+    const { state, wallet } = buildService()
+    state.balances[keys.granted] = 10 * DOLLAR
+    // Seed an existing active reservation with owner-based identity
+    seedReservation(state, {
+      id: "eres_existing",
+      customerId,
+      projectId,
+      entitlementId: null,
+      ownerType: "agent_run",
+      ownerId: "arun_existing",
+      allocationAmount: 5 * DOLLAR,
+      consumedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      createdAt: new Date(),
+      reconciledAt: null,
+      metadata: null,
+    })
+
+    const { val, err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: null,
+      owner: { type: "agent_run", id: "arun_existing" },
+      requestedAmount: 5 * DOLLAR,
+      minimumAllocationAmount: 5 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      idempotencyKey: "reserve-agent-run-existing",
+    })
+
+    expect(err).toBeUndefined()
+    expect(val).toMatchObject({
+      reservationId: "eres_existing",
+      allocationAmount: 5 * DOLLAR,
+      reused: "active",
+    })
+  })
+
+  it("returns WALLET_INVALID_RESERVATION_OWNER when no owner can be resolved", async () => {
+    const { wallet } = buildService()
+
+    const { err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: null,
+      // no owner field, and entitlementId is null → cannot derive owner
+      requestedAmount: 5 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      idempotencyKey: "reserve-no-owner",
+    })
+
+    expect(err?.message).toBe("WALLET_INVALID_RESERVATION_OWNER")
   })
 })
 

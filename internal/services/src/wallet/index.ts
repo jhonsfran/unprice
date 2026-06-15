@@ -41,6 +41,7 @@ export {
   type ReleaseReservationInput,
   type ReleaseReservationOutput,
   type ReservationCloseReason,
+  type ReservationOwner,
   type SettleTopUpInput,
   type SettleTopUpOutput,
   type WalletBalances,

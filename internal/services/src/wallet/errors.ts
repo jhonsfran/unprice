@@ -14,6 +14,8 @@ export type WalletErrorCode =
   | "WALLET_METADATA_REQUIRED"
   | "WALLET_LEDGER_FAILED"
   | "WALLET_GRANT_TRACKING_DRIFT"
+  | "WALLET_EMPTY"
+  | "WALLET_INVALID_RESERVATION_OWNER"
 
 export class UnPriceWalletError extends BaseError<{ context?: Record<string, unknown> }> {
   public readonly retry = false
