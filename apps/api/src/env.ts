@@ -6,6 +6,7 @@ import { env as envObservability } from "@unprice/observability/env"
 import { env as envServices } from "@unprice/services/env"
 import { z } from "zod"
 import type { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
+import type { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 import type { DurableObjectProject } from "./project/do"
 
 export const cloudflareRatelimiter = z.custom<{
@@ -47,6 +48,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       entitlementwindow: z.custom<DurableObjectNamespace<EntitlementWindowDO>>(
         (ns) => typeof ns === "object"
       ),
+      runbudget: z.custom<DurableObjectNamespace<RunBudgetDO>>((ns) => typeof ns === "object"),
       RL_FREE_1000_60s: cloudflareRatelimiter,
       RL_FREE_6000_60s: cloudflareRatelimiter,
       CLOUDFLARE_ZONE_ID: z.string().optional(),

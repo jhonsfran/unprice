@@ -18,7 +18,8 @@
     "clean": "rm -rf .turbo node_modules dist .wrangler",
     "db:generate": "pnpm db:generate:ingestion:entitlements",
     "db:generate:ingestion:entitlements": "drizzle-kit generate --config=drizzle.ingestion.entitlements.config.ts",
-    "db:check:ingestion:migrations": "pnpm db:generate:ingestion:entitlements && git diff --exit-code -- src/ingestion/entitlements/drizzle",
+    "db:generate:ingestion:run-budget": "drizzle-kit generate --config=drizzle.ingestion.run-budget.config.ts",
+    "db:check:ingestion:migrations": "pnpm db:generate:ingestion:entitlements && pnpm db:generate:ingestion:run-budget && git diff --exit-code -- src/ingestion/entitlements/drizzle src/ingestion/run-budget/drizzle",
     "type-check": "pnpm exec tsc --noEmit",
     "type-check:full": "pnpm exec wrangler types && pnpm exec tsc --noEmit"
   },

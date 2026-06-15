@@ -107,6 +107,10 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
+          },
+          {
+            "name": "runbudget",
+            "class_name": "RunBudgetDO"
           }
         ]
       },
@@ -126,6 +130,10 @@
         {
           "tag": "v5",
           "deleted_classes": ["IngestionAuditDO"]
+        },
+        {
+          "tag": "v6",
+          "new_sqlite_classes": ["RunBudgetDO"]
         }
       ]
     },
@@ -232,6 +240,10 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
+          },
+          {
+            "name": "runbudget",
+            "class_name": "RunBudgetDO"
           }
         ]
       },
@@ -251,6 +263,10 @@
         {
           "tag": "v5",
           "deleted_classes": ["IngestionAuditDO"]
+        },
+        {
+          "tag": "v6",
+          "new_sqlite_classes": ["RunBudgetDO"]
         }
       ]
     },
@@ -337,6 +353,10 @@
           {
             "name": "entitlementwindow",
             "class_name": "EntitlementWindowDO"
+          },
+          {
+            "name": "runbudget",
+            "class_name": "RunBudgetDO"
           }
         ]
       },
@@ -362,6 +382,10 @@
         {
           "tag": "v5",
           "deleted_classes": ["IngestionAuditDO"]
+        },
+        {
+          "tag": "v6",
+          "new_sqlite_classes": ["RunBudgetDO"]
         }
       ]
     }
