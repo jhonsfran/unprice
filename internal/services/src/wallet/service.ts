@@ -457,6 +457,8 @@ export class WalletService {
         id: reservationId,
         projectId: input.projectId,
         customerId: input.customerId,
+        ownerType: "entitlement_window",
+        ownerId: input.entitlementId,
         entitlementId: input.entitlementId,
         allocationAmount,
         consumedAmount: 0,

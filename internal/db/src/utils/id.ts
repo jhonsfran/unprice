@@ -43,6 +43,8 @@ export const prefixes = {
   entitlement_reservation_funding_leg: "erfl",
   wallet_topup: "wtup",
   wallet_credit: "wcr",
+  agent: "agt",
+  agent_run: "arun",
 } as const
 
 // Thread-local counter for monotonicity within the same millisecond

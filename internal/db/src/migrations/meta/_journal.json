@@ -71,6 +71,13 @@
       "when": 1780767166925,
       "tag": "0009_cloudy_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781539588939,
+      "tag": "0010_colorful_kitty_pryde",
+      "breakpoints": true
     }
   ]
 }

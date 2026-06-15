@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { randomId } from "./id"
+import { newId, randomId } from "./id"
 
 describe("randomId", () => {
   it("generates distinct edge-safe owner tokens", () => {
@@ -20,5 +20,12 @@ describe("randomId", () => {
     const unique = new Set(tokens)
 
     expect(unique.size).toBe(burstSize)
+  })
+})
+
+describe("newId agent prefixes", () => {
+  it("generates sortable ids for agents and agent runs", () => {
+    expect(newId("agent")).toMatch(/^agt_[1-9A-HJ-NP-Za-km-z]{22}$/)
+    expect(newId("agent_run")).toMatch(/^arun_[1-9A-HJ-NP-Za-km-z]{22}$/)
   })
 })
