@@ -199,6 +199,7 @@ export function init(): MiddlewareHandler<HonoEnv> {
     c.set("waitUntil", waitUntil)
 
     c.set("services", {
+      agents: svcCtx.agents,
       subscription: svcCtx.subscriptions,
       entitlement: svcCtx.entitlements,
       ingestion,

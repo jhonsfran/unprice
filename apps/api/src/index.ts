@@ -12,6 +12,12 @@ export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowD
 export { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
+import { registerApplyAgentRunSyncEventV1 } from "./routes/agents/applyAgentRunSyncEventV1"
+import { registerCreateAgentV1 } from "./routes/agents/createAgentV1"
+import { registerEndAgentRunV1 } from "./routes/agents/endAgentRunV1"
+import { registerGetAgentRunV1 } from "./routes/agents/getAgentRunV1"
+import { registerListAgentsV1 } from "./routes/agents/listAgentsV1"
+import { registerStartAgentRunV1 } from "./routes/agents/startAgentRunV1"
 import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
 import { registerForecastUsageV1 } from "./routes/analytics/forecastUsageV1"
 import { registerGetIngestionStatusV1 } from "./routes/analytics/getIngestionStatusV1"
@@ -142,6 +148,14 @@ app.use(
 
 // Access routes
 registerUpdateACLV1(app)
+
+// Agent routes
+registerCreateAgentV1(app)
+registerListAgentsV1(app)
+registerStartAgentRunV1(app)
+registerApplyAgentRunSyncEventV1(app)
+registerEndAgentRunV1(app)
+registerGetAgentRunV1(app)
 
 // Billing routes
 registerFlushReservationsForInvoicingV1(app)
