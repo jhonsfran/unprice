@@ -592,20 +592,6 @@ export class Unprice {
     }
   }
 
-  public get realtime() {
-    return {
-      createTicket: (
-        req: PostBody<"/v1/realtime/tickets/create">
-      ): Promise<ApiResult<PostResponse<"/v1/realtime/tickets/create">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/realtime/tickets/create", {
-            body: req,
-          })
-        )
-      },
-    }
-  }
-
   public get wallet() {
     return {
       balance: (

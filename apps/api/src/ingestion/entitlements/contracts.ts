@@ -214,7 +214,7 @@ export const applyInputSchema = z.object({
   grants: z.array(activeGrantSchema).min(1),
   enforceLimit: z.boolean(),
   now: z.number().finite(),
-  walletMode: z.enum(["standard", "external_reservation"]).default("standard"),
+  walletMode: z.enum(["standard", "external_reservation"]).optional(),
   externalReservation: z
     .object({
       remainingAmount: z.number().int().nonnegative(),

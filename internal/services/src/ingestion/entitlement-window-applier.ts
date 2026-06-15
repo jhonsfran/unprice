@@ -13,7 +13,7 @@ export type EntitlementWindowApplyResult = {
   allowed: boolean
   deniedReason?: Extract<
     IngestionRejectionReason,
-    "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
+    "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD" | "RUN_BUDGET_EXCEEDED"
   >
   meterFacts?: AnalyticsEntitlementMeterFact[]
   message?: string
@@ -56,6 +56,10 @@ export type EntitlementWindowApplyInput = {
   idempotencyKey: string
   now: number
   projectId: string
+  /** When "external_reservation", the DO skips wallet reservation I/O and uses externalReservation.remainingAmount for budget checks. */
+  walletMode?: "standard" | "external_reservation"
+  /** Required when walletMode is "external_reservation". */
+  externalReservation?: { remainingAmount: number }
 }
 
 export type EntitlementWindowStatus = {

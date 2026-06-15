@@ -98,7 +98,6 @@ describe("Unprice client", () => {
     expect(typeof client.plans.listVersions).toBe("function")
     expect(typeof client.payments.methods.create).toBe("function")
     expect(typeof client.payments.methods.list).toBe("function")
-    expect(typeof client.realtime.createTicket).toBe("function")
     expect(typeof client.analytics.explainCharge).toBe("function")
     expect(typeof client.analytics.forecastUsage).toBe("function")
     expect(typeof client.analytics.ingestion.status).toBe("function")
