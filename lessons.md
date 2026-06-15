@@ -373,6 +373,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-06-15: Customer-visible relative usage dashboards should poll on the same 30s cadence as
   the analytics SWR freshness window and display payload `freshness.generatedAt`; keep Tinybird
   throttling in the tRPC cache instead of bypassing it from the UI.
+- 2026-06-15: Usage dashboard money must reconcile after currency-minor rounding; header totals,
+  feature rows, and top consumers should share the same rounded allocation source instead of each
+  independently rounding raw ledger-scale amounts.
 - 2026-06-12: Dashboard client components that use `useSuspenseQuery` for protected tRPC data
   must have matching RSC `trpc/server` prefetches; otherwise server render can fall back to the
   app React Query HTTP link without browser cookies and log `User not found in session`.
@@ -473,5 +476,11 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   fields such as `mode`, fallback `reason`, and `error`.
 - 2026-06-15: Usage analytics that must reconcile with invoices should aggregate latest
   `amount_after`/`value_after` per `customer_entitlement_id + grant_id + period_key`, then sum to
-  the visible feature. Equal `timestamp`/`created_at` DO batch rows must tie-break by
-  `idempotency_key`, matching ingestion's sort order.
+  the visible feature. Rank latest facts by a DO-owned `fact_sequence`; treat customer
+  `idempotency_key` as dedupe identity and legacy fallback only.
+- 2026-06-15: Agent-run budget reservations use `ownerType="agent_run"` / `ownerId=runId`;
+  entitlement-window reservations keep `ownerType="entitlement_window"` / `ownerId=entitlementId`.
+  Active reservation dedupe stays owner-period scoped so both systems coexist on the same wallet.
+- 2026-06-15: RunBudgetDO uses dynamic imports for wallet/ledger services since it runs in a
+  Durable Object context where service construction differs from the request middleware; keep
+  `buildServices()` as an async factory called once in `startRun` and cached for the DO lifetime.

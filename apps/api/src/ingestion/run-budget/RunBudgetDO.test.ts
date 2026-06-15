@@ -470,7 +470,6 @@ function snakeToCamel(s: string): string {
  */
 function extractEqInfo(where: unknown): { field: string; value: unknown } | null {
   if (!where || typeof where !== "object") return null
-  // biome-ignore lint/suspicious/noExplicitAny: introspecting drizzle SQL internals
   const chunks = (where as Record<string, unknown>).queryChunks as unknown[]
   if (!Array.isArray(chunks) || chunks.length < 4) return null
 
@@ -509,7 +508,6 @@ function evaluateSetValue(row: Record<string, unknown>, _key: string, value: unk
   if (value === null || value === undefined) return value
   if (typeof value !== "object") return value
 
-  // biome-ignore lint/suspicious/noExplicitAny: introspecting drizzle SQL internals
   const chunks = (value as Record<string, unknown>).queryChunks as unknown[]
   if (!Array.isArray(chunks)) return value
 
@@ -556,7 +554,6 @@ function evaluateSetValue(row: Record<string, unknown>, _key: string, value: unk
  */
 function resolveTableName(table: unknown): string {
   if (!table || typeof table !== "object") return "unknown"
-  // biome-ignore lint/suspicious/noExplicitAny: accessing drizzle Symbol-keyed table name
   const name = (table as Record<symbol, unknown>)[DRIZZLE_NAME_SYMBOL]
   if (name === "run_state") return "runState"
   if (name === "run_spend_buckets") return "runSpendBuckets"
