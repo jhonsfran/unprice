@@ -30,7 +30,7 @@ runs:
         cache: 'pip'
 
     - name: Setup Node 20
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       if: ${{ inputs.ts == 'true' }}
       with:
         node-version: 20.17.0
