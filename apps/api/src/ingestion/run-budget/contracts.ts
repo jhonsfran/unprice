@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { activeGrantSchema, entitlementConfigSchema } from "../entitlements/contracts"
 
 export const runStatusSchema = z.enum([
   "running",
@@ -38,46 +39,12 @@ const eventSchema = z.object({
 /**
  * Grant shape passed through to the EntitlementWindowDO.
  */
-const runGrantSchema = z.object({
-  allowanceUnits: z.number().finite().nullable(),
-  effectiveAt: z.number().finite(),
-  expiresAt: z.number().finite().nullable(),
-  grantId: z.string().min(1),
-  priority: z.number().int(),
-})
+const runGrantSchema = activeGrantSchema
 
 /**
  * Entitlement config passed through to the EntitlementWindowDO.
- * This mirrors the entitlementConfigSchema in the EntitlementWindowDO contracts,
- * ensuring the RunBudgetDO can forward it without loss.
  */
-const runEntitlementConfigSchema = z.object({
-  billingPeriods: z
-    .array(
-      z.object({
-        billingPeriodId: z.string().min(1),
-        cycleEndAt: z.number().finite(),
-        cycleStartAt: z.number().finite(),
-        featurePlanVersionItemId: z.string().min(1),
-        statementKey: z.string().min(1),
-      })
-    )
-    .default([]),
-  creditLinePolicy: z.string().default("uncapped"),
-  customerEntitlementId: z.string().min(1),
-  customerId: z.string().min(1),
-  effectiveAt: z.number().finite(),
-  expiresAt: z.number().finite().nullable(),
-  featureConfig: z.custom<unknown>((val) => val != null && typeof val === "object"),
-  featurePlanVersionId: z.string().min(1),
-  featureSlug: z.string().min(1),
-  featureType: z.string().min(1),
-  meterConfig: z.custom<unknown>((val) => val != null && typeof val === "object"),
-  overageStrategy: z.string(),
-  projectId: z.string().min(1),
-  resetConfig: z.custom<unknown>().nullable().optional(),
-  subscriptionItemId: z.string().min(1).nullable().optional(),
-})
+const runEntitlementConfigSchema = entitlementConfigSchema
 
 export const startRunInputSchema = z.object({
   projectId: z.string().min(1),
