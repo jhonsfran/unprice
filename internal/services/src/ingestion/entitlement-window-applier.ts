@@ -123,7 +123,7 @@ export type EntitlementWindowController = {
     grants: IngestionGrant[]
     projectId: string
   }) => Promise<{ results: EntitlementWindowApplyBatchResult[] }>
-  getEnforcementState: (input?: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
+  getEnforcementState: (input: EntitlementWindowStateInput) => Promise<EntitlementWindowState>
   getStatus?: () => Promise<EntitlementWindowStatus>
   flushReservationForInvoicing?: (
     input: FlushReservationForInvoicingInput
