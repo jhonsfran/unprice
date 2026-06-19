@@ -15,10 +15,14 @@ const authMocks = vi.hoisted(() => ({
   resolveContextProjectId: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-  resolveContextProjectId: authMocks.resolveContextProjectId,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+    resolveContextProjectId: authMocks.resolveContextProjectId,
+  }
+})
 
 import type { Logger } from "@unprice/logs"
 import type { ExecutionContext } from "hono"
@@ -46,7 +50,7 @@ const requestBody = {
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
-  defaultCustomerId: "cus_default_123",
+  defaultCustomerId: "cus_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
@@ -391,7 +395,7 @@ describe("ingestEventsV1 route", () => {
     )
   })
 
-  it("uses explicit customerId from body even when key has a different default", async () => {
+  it("returns 403 when explicit customerId differs from the customer-bound API key", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
@@ -405,14 +409,11 @@ describe("ingestEventsV1 route", () => {
       env,
       executionCtx
     )
-    expect(response.status).toBe(202)
-
-    const selectedQueue =
-      selectQueueShardIndex("cus_explicit_999") === 0 ? env.QUEUE_SHARD_0 : env.QUEUE_SHARD_1
-
-    expect(selectedQueue.send).toHaveBeenCalledWith(
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
-        customerId: "cus_explicit_999",
+        code: "FORBIDDEN",
+        message: "This API key is bound to a different customer",
       })
     )
   })
@@ -459,7 +460,7 @@ describe("ingestEventsV1 route", () => {
       executionCtx
     )
 
-    expect(response.status).toBe(400)
+    expect(response.status).toBe(500)
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
         code: "INTERNAL_SERVER_ERROR",
@@ -481,8 +482,7 @@ function createTestApp() {
 
   app.onError((error, c) => {
     if (error instanceof UnpriceApiError) {
-      const status = error.code === "RATE_LIMITED" ? 429 : 400
-      return c.json({ code: error.code, message: error.message }, status)
+      return c.json({ code: error.code, message: error.message }, error.status)
     }
 
     throw error

@@ -8,7 +8,7 @@ import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId } from "~/auth/key"
+import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKey } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -18,7 +18,6 @@ import {
   buildIngestionQueueMessage,
   logEventTooOldRejection,
   rawEventSchema,
-  resolveRequestCustomerId,
 } from "./ingestEventsV1"
 
 const tags = ["events"]
@@ -79,17 +78,19 @@ export const registerIngestEventsSyncV1 = (app: App) =>
     const logger = c.get("logger")
 
     const key = await keyAuth(c)
-    const customerId = resolveRequestCustomerId({
+    const customer = resolveCustomerIdForApiKey({
       explicitCustomerId: body.customerId,
       defaultCustomerId: key.defaultCustomerId,
     })
 
-    if (!customerId) {
+    if (!customer.success) {
       throw new UnpriceApiError({
-        code: "BAD_REQUEST",
-        message: "customerId is required when the API key has no default customer binding",
+        code: customer.code === "customer_forbidden" ? "FORBIDDEN" : "BAD_REQUEST",
+        message: customer.message,
       })
     }
+
+    const customerId = customer.customerId
 
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 

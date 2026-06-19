@@ -13,7 +13,7 @@ import {
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId } from "~/auth/key"
+import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKey } from "~/auth/key"
 import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -108,17 +108,19 @@ export const registerIngestEventsV1 = (app: App) =>
 
     // 1. auth for the request
     const key = await keyAuth(c)
-    const customerId = resolveRequestCustomerId({
+    const customer = resolveCustomerIdForApiKey({
       explicitCustomerId: body.customerId,
       defaultCustomerId: key.defaultCustomerId,
     })
 
-    if (!customerId) {
+    if (!customer.success) {
       throw new UnpriceApiError({
-        code: "BAD_REQUEST",
-        message: "customerId is required when the API key has no default customer binding",
+        code: customer.code === "customer_forbidden" ? "FORBIDDEN" : "BAD_REQUEST",
+        message: customer.message,
       })
     }
+
+    const customerId = customer.customerId
 
     // 2. resolve the proper project Id if this is called from main project
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)

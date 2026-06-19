@@ -260,6 +260,44 @@ export async function resolveContextProjectId(
   return defaultProjectId
 }
 
+export type CustomerResolutionResult =
+  | { success: true; customerId: string }
+  | {
+      success: false
+      code: "customer_required" | "customer_forbidden"
+      message: string
+    }
+
+export function resolveCustomerIdForApiKey(input: {
+  explicitCustomerId?: string | null
+  defaultCustomerId?: string | null
+}): CustomerResolutionResult {
+  const explicitCustomerId = input.explicitCustomerId ?? null
+  const defaultCustomerId = input.defaultCustomerId ?? null
+
+  if (defaultCustomerId !== null) {
+    if (explicitCustomerId !== null && explicitCustomerId !== defaultCustomerId) {
+      return {
+        success: false,
+        code: "customer_forbidden",
+        message: "This API key is bound to a different customer",
+      }
+    }
+
+    return { success: true, customerId: defaultCustomerId }
+  }
+
+  if (explicitCustomerId === null) {
+    return {
+      success: false,
+      code: "customer_required",
+      message: "customerId is required when the API key has no default customer binding",
+    }
+  }
+
+  return { success: true, customerId: explicitCustomerId }
+}
+
 export function validateIsAllowedToAccessProject({
   isMain,
   key,
