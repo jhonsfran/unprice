@@ -1,9 +1,3 @@
-import type {
-  ConfigFeatureVersionType,
-  MeterConfig,
-  OverageStrategy,
-  ResetConfig,
-} from "@unprice/db/validators"
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core"
 
 export const idempotencyKeyBatchesTable = sqliteTable(
@@ -17,34 +11,6 @@ export const idempotencyKeyBatchesTable = sqliteTable(
     createdAtIdx: index("idx_idempotency_key_batches_created_at").on(table.createdAt),
   })
 )
-
-export const entitlementConfigTable = sqliteTable("entitlement_config", {
-  customerEntitlementId: text("customer_entitlement_id").primaryKey(),
-  projectId: text("project_id").notNull(),
-  customerId: text("customer_id").notNull(),
-  effectiveAt: integer("effective_at").notNull(),
-  expiresAt: integer("expires_at"),
-  featureConfig: text("feature_config", { mode: "json" })
-    .$type<ConfigFeatureVersionType>()
-    .notNull(),
-  featurePlanVersionId: text("feature_plan_version_id").notNull(),
-  featureSlug: text("feature_slug").notNull(),
-  meterConfig: text("meter_config", { mode: "json" }).$type<MeterConfig>().notNull(),
-  overageStrategy: text("overage_strategy").$type<OverageStrategy>().notNull(),
-  resetConfig: text("reset_config", { mode: "json" }).$type<ResetConfig | null>(),
-  addedAt: integer("added_at").notNull(),
-  updatedAt: integer("updated_at").notNull(),
-})
-
-export const grantsTable = sqliteTable("grants", {
-  grantId: text("grant_id").primaryKey(),
-  customerEntitlementId: text("customer_entitlement_id").notNull(),
-  allowanceUnits: real("allowance_units"),
-  effectiveAt: integer("effective_at").notNull(),
-  expiresAt: integer("expires_at"),
-  priority: integer("priority").notNull(),
-  addedAt: integer("added_at").notNull(),
-})
 
 export const entitlementPeriodUsageTable = sqliteTable(
   "entitlement_period_usage",
@@ -115,9 +81,7 @@ export const walletReservationTable = sqliteTable("wallet_reservation", {
 
 export const schema = {
   idempotencyKeyBatchesTable,
-  entitlementConfigTable,
   entitlementPeriodUsageTable,
-  grantsTable,
   meterStateTable,
   walletReservationTable,
 }
