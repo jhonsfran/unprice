@@ -23,9 +23,8 @@ describe("randomId", () => {
   })
 })
 
-describe("newId agent prefixes", () => {
-  it("generates sortable ids for agents and agent runs", () => {
-    expect(newId("agent")).toMatch(/^agt_[1-9A-HJ-NP-Za-km-z]{22}$/)
-    expect(newId("agent_run")).toMatch(/^arun_[1-9A-HJ-NP-Za-km-z]{22}$/)
+describe("newId budget_run prefix", () => {
+  it("generates sortable ids for budget runs", () => {
+    expect(newId("budget_run")).toMatch(/^brun_[1-9A-HJ-NP-Za-km-z]{22}$/)
   })
 })
