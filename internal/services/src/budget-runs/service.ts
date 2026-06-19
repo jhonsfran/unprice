@@ -135,6 +135,7 @@ export class BudgetRunService {
     projectId: string
     runId: string
     status: BudgetRunStatus
+    statusReason?: string | null
     consumedAmount: number
     remainingAmount: number
     endedAt?: Date | null
@@ -144,6 +145,7 @@ export class BudgetRunService {
         .update(budgetRuns)
         .set({
           status: input.status,
+          statusReason: input.statusReason ?? null,
           consumedAmount: input.consumedAmount,
           remainingAmount: input.remainingAmount,
           endedAt: input.endedAt ?? null,

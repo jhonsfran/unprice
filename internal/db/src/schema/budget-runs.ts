@@ -20,6 +20,7 @@ export const budgetRuns = pgTableProject(
     ...projectID,
     customerId: cuid("customer_id").notNull(),
     status: text("status").$type<BudgetRunStatus>().notNull().default("running"),
+    statusReason: text("status_reason"),
     budgetAmount: bigint("budget_amount", { mode: "number" }).notNull(),
     consumedAmount: bigint("consumed_amount", { mode: "number" }).notNull().default(0),
     remainingAmount: bigint("remaining_amount", { mode: "number" }).notNull(),
