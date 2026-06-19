@@ -14,6 +14,13 @@ export type BudgetRunStatus =
   | "budget_exceeded"
   | "failed"
 
+/**
+ * Budget run state. One row per run lifecycle.
+ *
+ * All amount columns (budget_amount, consumed_amount, remaining_amount) are
+ * pgledger scale 8 (1 USD = 100_000_000). This matches entitlement reservations,
+ * wallet operations, and priced meter facts throughout the system.
+ */
 export const budgetRuns = pgTableProject(
   "budget_runs",
   {
