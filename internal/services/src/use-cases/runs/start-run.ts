@@ -70,12 +70,30 @@ export async function startRun(
   })
 
   if (doResult.err) {
+    // Mark the Postgres row as failed so it doesn't sit orphaned in "running"
+    await deps.services.budgetRuns.updateRunSummary({
+      projectId: input.projectId,
+      runId: run.id,
+      status: "failed",
+      consumedAmount: 0,
+      remainingAmount: 0,
+      endedAt: new Date(),
+    })
     return Err(new RunUseCaseError("BUDGET_ERROR"))
   }
 
   // Check if the DO reported a wallet error (e.g. WALLET_EMPTY)
   const summary = doResult.val.summary
   if (summary.status === "failed" && doResult.val.walletError) {
+    // Mark the Postgres row as failed before returning the business error
+    await deps.services.budgetRuns.updateRunSummary({
+      projectId: input.projectId,
+      runId: run.id,
+      status: "failed",
+      consumedAmount: 0,
+      remainingAmount: 0,
+      endedAt: new Date(),
+    })
     return Err(new RunUseCaseError("WALLET_EMPTY"))
   }
 
