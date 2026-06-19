@@ -343,8 +343,8 @@ function UsageDashboardEmptyState({
           {mode === "customer" && <IntervalFilter />}
         </div>
       </CardHeader>
-      <CardContent className="py-4">
-        <EmptyPlaceholder className="min-h-[220px] transition-opacity duration-300">
+      <CardContent className="py-6">
+        <EmptyPlaceholder className="min-h-[520px] transition-opacity duration-300">
           <EmptyPlaceholder.Icon>
             <BarChart3 className="h-8 w-8 opacity-40 motion-safe:animate-pulse" />
           </EmptyPlaceholder.Icon>

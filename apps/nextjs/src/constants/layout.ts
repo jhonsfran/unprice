@@ -24,7 +24,7 @@ export const navItems = [
   {
     href: `${PRICING_DOMAIN}/`,
     title: "Pricing",
-    isMarketing: true,
+    isMarketing: false,
     isDashboard: false,
   },
 ] satisfies {

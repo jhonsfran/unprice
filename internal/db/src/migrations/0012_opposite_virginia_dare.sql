@@ -1,0 +1,1 @@
+ALTER TABLE "unprice_budget_runs" ADD COLUMN "status_reason" text;

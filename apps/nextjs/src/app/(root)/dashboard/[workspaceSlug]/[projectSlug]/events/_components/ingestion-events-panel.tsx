@@ -293,7 +293,7 @@ export function IngestionEventsPanel() {
           queryError?.message ?? "No ingestion events were found for the selected filters."
         }
         emptyState={
-          <EmptyPlaceholder className="min-h-[300px] border-none">
+          <EmptyPlaceholder className="min-h-[520px] border-none">
             <EmptyPlaceholder.Icon>
               <AlertTriangle className="h-8 w-8" />
             </EmptyPlaceholder.Icon>

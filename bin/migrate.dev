@@ -64,6 +64,7 @@ if [ "$MODE_ID" = "dev" ]; then
   APP_ENV="development"
   UNPRICE_API_URL="http://localhost:8787"
   UNPRICE_API_KEY="unprice_dev_1234567890"
+  DATABASE_URL="postgresql://postgres:postgres@localhost:5432/unprice"
   MAIN_PROJECT_ID="proj_1234567890"
   DRIZZLE_LOG="true"
   UPSTASH_REDIS_REST_URL="http://localhost:8079"
@@ -71,20 +72,20 @@ if [ "$MODE_ID" = "dev" ]; then
 
   if [ "$COMMAND" = "drop" ]; then
     echo "Dropping database"
-    infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db drop
+    infisical run --env=preview --path=/ --recursive -- env DATABASE_URL=$DATABASE_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db drop
   fi
 
   if [ "$COMMAND" = "generate:custom" ]; then
     echo "Generating custom migrations"
-    infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db generate:custom
+    infisical run --env=preview --path=/ --recursive -- env DATABASE_URL=$DATABASE_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db generate:custom
   fi
 
   if [ "$COMMAND" = "migrate:custom" ]; then
     echo "Generating migrations"
-    infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db generate
+    infisical run --env=preview --path=/ --recursive -- env DATABASE_URL=$DATABASE_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db generate
 
     echo "Applying migrations"
-    infisical run --env=preview --path=/ --recursive -- env UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db migrate:custom
+    infisical run --env=preview --path=/ --recursive -- env DATABASE_URL=$DATABASE_URL UNPRICE_API_URL=$UNPRICE_API_URL UNPRICE_API_KEY=$UNPRICE_API_KEY MAIN_PROJECT_ID=$MAIN_PROJECT_ID DRIZZLE_LOG=$DRIZZLE_LOG NODE_ENV=$NODE_ENV APP_ENV=$APP_ENV pnpm --filter db migrate:custom
   fi
 elif [ "$MODE_ID" = "prod" ]; then
   if [ "$COMMAND" = "drop" ]; then

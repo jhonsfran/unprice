@@ -1,5 +1,4 @@
 import { createRoute } from "@hono/zod-openapi"
-import { invoices } from "@unprice/db/schema"
 import {
   currencySchema,
   invoiceSettlementSourceSchema,
@@ -8,7 +7,6 @@ import {
   walletCreditSourceSchema,
 } from "@unprice/db/validators"
 import { toLedgerMinor } from "@unprice/money"
-import { and, eq } from "drizzle-orm"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
@@ -102,9 +100,11 @@ export const registerGetInvoiceV1 = (app: App) =>
     const isMain = key.project.isMain ?? false
 
     const row = await db.query.invoices.findFirst({
-      where: isMain
-        ? eq(invoices.id, invoiceId)
-        : and(eq(invoices.id, invoiceId), eq(invoices.projectId, key.projectId)),
+      where(fields, { eq, and }) {
+        return isMain
+          ? eq(fields.id, invoiceId)
+          : and(eq(fields.id, invoiceId), eq(fields.projectId, key.projectId))
+      },
     })
 
     if (!row) {

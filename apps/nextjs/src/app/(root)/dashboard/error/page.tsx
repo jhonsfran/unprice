@@ -1,8 +1,7 @@
-import { Link } from "next-view-transitions"
-
 import { Button } from "@unprice/ui/button"
 
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
+import { SuperLink } from "~/components/super-link"
 
 export default function NotFound() {
   return (
@@ -12,11 +11,11 @@ export default function NotFound() {
         We could not find the page that you are looking for!
       </EmptyPlaceholder.Description>
       <div className="flex flex-col items-center justify-center gap-2 md:flex-row">
-        <Link href="/">
+        <SuperLink href="/">
           <Button variant="secondary" className="w-full items-center gap-2">
             Go Back
           </Button>
-        </Link>
+        </SuperLink>
       </div>
     </EmptyPlaceholder>
   )
