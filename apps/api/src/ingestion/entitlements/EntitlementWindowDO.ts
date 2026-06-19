@@ -637,25 +637,11 @@ export class EntitlementWindowDO extends DurableObject {
     createdAt: number,
     idempotencyKeys: string[]
   ): OptimizedBatchSetup {
+    const entitlement = input.entitlement
+    const grants = input.grants
+    const meter = resolveMeterIdentity(entitlement)
+
     return this.db.transaction((tx) => {
-      this.store.syncEntitlementConfig(tx, {
-        entitlement: input.entitlement,
-        createdAt,
-      })
-      this.store.syncGrants(tx, {
-        customerEntitlementId: input.entitlement.customerEntitlementId,
-        grants: input.grants,
-        createdAt,
-      })
-
-      const entitlement = this.store.readEntitlementConfig(tx)
-      if (!entitlement) {
-        throw new Error("No entitlement config found after sync")
-      }
-
-      const grants = this.store.readGrants(tx)
-      const meter = resolveMeterIdentity(entitlement)
-
       return {
         cachedResults: this.store.lookupCachedIdempotencyResults(idempotencyKeys),
         entitlement,
@@ -1595,38 +1581,19 @@ export class EntitlementWindowDO extends DurableObject {
     return { result: deniedResult, usesWalletReservation }
   }
 
-  private prepareSingleApplyContext(input: ApplyInput, createdAt: number): SingleApplyContext {
-    const activeGrants = this.db.transaction((tx) => {
-      this.store.syncEntitlementConfig(tx, {
-        entitlement: input.entitlement,
-        createdAt,
-      })
-      this.store.syncGrants(tx, {
-        customerEntitlementId: input.entitlement.customerEntitlementId,
-        grants: input.grants,
-        createdAt,
-      })
-      return resolveActiveGrants(this.store.readGrants(tx), input.event.timestamp)
-    })
+  private prepareSingleApplyContext(input: ApplyInput, _createdAt: number): SingleApplyContext {
+    const activeGrants = resolveActiveGrants(input.grants, input.event.timestamp)
 
     if (activeGrants.length === 0) {
-      // Ingestion resolves active grants before calling this DO. If the local
-      // replay yields none, the payload is inconsistent and should fail loudly
-      // instead of being cached as a business denial.
       throw new Error("No active grants found for event timestamp")
-    }
-
-    const entitlement = this.store.readEntitlementConfig(this.db)
-    if (!entitlement) {
-      throw new Error("No entitlement config found after sync")
     }
 
     return {
       activeGrants,
       creditLinePolicy: input.entitlement.creditLinePolicy,
-      entitlement,
-      meter: resolveMeterIdentity(entitlement),
-      overageStrategy: entitlement.overageStrategy,
+      entitlement: input.entitlement,
+      meter: resolveMeterIdentity(input.entitlement),
+      overageStrategy: input.entitlement.overageStrategy,
     }
   }
 
@@ -2274,17 +2241,17 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   public async getEnforcementState(
-    rawInput?: EnforcementStateInput
+    rawInput: EnforcementStateInput
   ): Promise<EnforcementStateResult> {
     await this.ready
 
-    const input = rawInput ? enforcementStateInputSchema.parse(rawInput) : null
-    const timestamp = input?.now ?? Date.now()
+    const input = enforcementStateInputSchema.parse(rawInput)
+    const timestamp = input.now
     const snapshot = this.readEnforcementStateSnapshot(input, timestamp)
     const { entitlement, states } = snapshot
     const activeGrants = resolveActiveGrants(snapshot.grants, timestamp)
 
-    if (!entitlement || activeGrants.length === 0) {
+    if (activeGrants.length === 0) {
       return {
         usage: 0,
         limit: null,
@@ -3632,38 +3599,24 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private readEnforcementStateSnapshot(
-    input: EnforcementStateInput | null,
+    input: EnforcementStateInput,
     timestamp: number
   ): EnforcementStateCache {
-    const inputSignature = input ? this.enforcementStateInputSignature(input, timestamp) : null
+    const inputSignature = this.enforcementStateInputSignature(input, timestamp)
 
     if (
       this.enforcementStateCache &&
-      (input === null || this.enforcementStateCache.inputSignature === inputSignature)
+      this.enforcementStateCache.inputSignature === inputSignature
     ) {
       return this.enforcementStateCache
     }
 
-    const syncedAt = Date.now()
     const snapshot = this.db.transaction((tx) => {
-      if (input) {
-        this.store.syncEntitlementConfig(tx, {
-          entitlement: input.entitlement,
-          createdAt: syncedAt,
-        })
-        this.store.syncGrants(tx, {
-          customerEntitlementId: input.entitlement.customerEntitlementId,
-          grants: input.grants,
-          createdAt: syncedAt,
-        })
-      }
-
-      const entitlement = this.store.readEntitlementConfig(tx)
-      const grants = this.store.readGrants(tx)
+      const grants = input.grants
       const activeGrants = resolveActiveGrants(grants, timestamp)
 
       return {
-        entitlement,
+        entitlement: input.entitlement,
         grants,
         inputSignature,
         states: this.store.readGrantStatesForActiveGrants(tx, activeGrants, timestamp),
@@ -3678,18 +3631,7 @@ export class EntitlementWindowDO extends DurableObject {
     const bucketKeys = [
       ...new Set(
         input.grants
-          .map(
-            (grant) =>
-              computeGrantPeriodBucket(
-                {
-                  ...grant,
-                  cadenceEffectiveAt: input.entitlement.effectiveAt,
-                  cadenceExpiresAt: input.entitlement.expiresAt,
-                  resetConfig: input.entitlement.resetConfig ?? null,
-                },
-                timestamp
-              )?.bucketKey
-          )
+          .map((grant) => computeGrantPeriodBucket(grant, timestamp)?.bucketKey)
           .filter((key): key is string => typeof key === "string" && key.length > 0)
       ),
     ].sort()

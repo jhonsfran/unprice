@@ -2728,15 +2728,18 @@ describe("EntitlementWindowDO", () => {
     const fpvs = readOutboxPayloads(db).map((payload) => payload.feature_plan_version_id)
     expect(fpvs).toEqual(["fpv_a", "fpv_a"])
 
-    await expect(
-      durableObject.apply(
-        createApplyInput({
-          idempotencyKey: "idem_mutated_config",
-          featurePlanVersionId: "fpv_b",
-          grants: [createGrantSnapshot({ grantId: "grant_c" })],
-        })
-      )
-    ).rejects.toThrow("Immutable entitlement config changed")
+    // Third apply uses a different featurePlanVersionId. With input-direct
+    // mode, each apply uses its own caller-provided entitlement config.
+    const result = await durableObject.apply(
+      createApplyInput({
+        idempotencyKey: "idem_mutated_config",
+        featurePlanVersionId: "fpv_b",
+        grants: [createGrantSnapshot({ grantId: "grant_c" })],
+      })
+    )
+    expect(result).toMatchObject({ allowed: true })
+    expect(readOutboxPayloads(db)).toHaveLength(3)
+    expect(readOutboxPayloads(db)[2]?.feature_plan_version_id).toBe("fpv_b")
   })
 
   it("splits one usage fact across canonical grants using the entitlement price", async () => {
@@ -2805,7 +2808,7 @@ describe("EntitlementWindowDO", () => {
     })
   })
 
-  it("uses persisted grant data as source of truth and only applies expiry updates", async () => {
+  it("uses caller grant input directly for each apply", async () => {
     const EntitlementWindowDO = await loadEntitlementWindowDO()
     const state = createDurableObjectState()
     const db = createFakeDbState()
@@ -2846,12 +2849,6 @@ describe("EntitlementWindowDO", () => {
       })
     )
 
-    expect(db.grantRows.get("grant_stable")).toMatchObject({
-      allowanceUnits: 50,
-      expiresAt: BASE_NOW + 10_000,
-      priority: 10,
-    })
-
     const payloads = readOutboxPayloads(db)
     expect(payloads.map((payload) => payload.feature_plan_version_id)).toEqual([
       "fpv_original",
@@ -2885,7 +2882,19 @@ describe("EntitlementWindowDO", () => {
     // No apply has run yet — cache is null, so the DO returns a conservative
     // { usage: 0, limit: null, isLimitReached: false }. The caller recomputes
     // isLimitReached against its own resolved state when needed.
-    const result = await durableObject.getEnforcementState()
+    const input = createApplyInput({
+      grants: [
+        createGrantSnapshot({
+          grantId: "grant_expired",
+          expiresAt: BASE_NOW - 1,
+        }),
+      ],
+    })
+    const result = await durableObject.getEnforcementState({
+      entitlement: input.entitlement,
+      grants: input.grants,
+      now: BASE_NOW,
+    })
 
     expect(result).toEqual({
       usage: 0,
@@ -2920,8 +2929,13 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    await durableObject.apply(createApplyInput({ limit: 100 }))
-    expect(await durableObject.getEnforcementState()).toEqual({
+    const input1 = createApplyInput({ limit: 100 })
+    await durableObject.apply(input1)
+    expect(await durableObject.getEnforcementState({
+      entitlement: input1.entitlement,
+      grants: input1.grants,
+      now: BASE_NOW,
+    })).toEqual({
       usage: 7,
       limit: 100,
       isLimitReached: false,
@@ -2938,16 +2952,19 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    await durableObject.apply(
-      createApplyInput({
-        idempotencyKey: "idem_2",
-        grants: [
-          createGrantSnapshot({ grantId: "grant_123", expiresAt: BASE_NOW - 1 }),
-          createGrantSnapshot({ grantId: "grant_limit_7", amount: 7 }),
-        ],
-      })
-    )
-    expect(await durableObject.getEnforcementState()).toEqual({
+    const input2 = createApplyInput({
+      idempotencyKey: "idem_2",
+      grants: [
+        createGrantSnapshot({ grantId: "grant_123", expiresAt: BASE_NOW - 1 }),
+        createGrantSnapshot({ grantId: "grant_limit_7", amount: 7 }),
+      ],
+    })
+    await durableObject.apply(input2)
+    expect(await durableObject.getEnforcementState({
+      entitlement: input2.entitlement,
+      grants: input2.grants,
+      now: BASE_NOW,
+    })).toEqual({
       usage: 7,
       limit: 7,
       isLimitReached: true,
@@ -2964,20 +2981,23 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    await durableObject.apply(
-      createApplyInput({
-        idempotencyKey: "idem_3",
-        grants: [
-          createGrantSnapshot({ grantId: "grant_limit_7", amount: 7, expiresAt: BASE_NOW - 1 }),
-          createGrantSnapshot({
-            grantId: "grant_always",
-            amount: 7,
-            overageStrategy: "always",
-          }),
-        ],
-      })
-    )
-    expect(await durableObject.getEnforcementState()).toEqual({
+    const input3 = createApplyInput({
+      idempotencyKey: "idem_3",
+      grants: [
+        createGrantSnapshot({ grantId: "grant_limit_7", amount: 7, expiresAt: BASE_NOW - 1 }),
+        createGrantSnapshot({
+          grantId: "grant_always",
+          amount: 7,
+          overageStrategy: "always",
+        }),
+      ],
+    })
+    await durableObject.apply(input3)
+    expect(await durableObject.getEnforcementState({
+      entitlement: input3.entitlement,
+      grants: input3.grants,
+      now: BASE_NOW,
+    })).toEqual({
       usage: 3,
       limit: 7,
       isLimitReached: false,
@@ -3002,20 +3022,29 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    await durableObject.apply(createApplyInput({ limit: 10 }))
+    const input = createApplyInput({ limit: 10 })
+    await durableObject.apply(input)
 
     db.storageReadCounts.entitlementConfig = 0
     db.storageReadCounts.grants = 0
     db.storageReadCounts.grantWindows = 0
 
-    expect(await durableObject.getEnforcementState()).toMatchObject({
+    expect(await durableObject.getEnforcementState({
+      entitlement: input.entitlement,
+      grants: input.grants,
+      now: BASE_NOW,
+    })).toMatchObject({
       usage: 4,
       limit: 10,
       isLimitReached: false,
     })
     const readsAfterFirstVerify = { ...db.storageReadCounts }
 
-    expect(await durableObject.getEnforcementState()).toMatchObject({
+    expect(await durableObject.getEnforcementState({
+      entitlement: input.entitlement,
+      grants: input.grants,
+      now: BASE_NOW,
+    })).toMatchObject({
       usage: 4,
       limit: 10,
       isLimitReached: false,
@@ -3027,16 +3056,19 @@ describe("EntitlementWindowDO", () => {
       options?.beforePersist?.(facts)
       return facts
     })
-    await durableObject.apply(
-      createApplyInput({
-        idempotencyKey: "idem_cache_refresh",
-        event: { id: "evt_cache_refresh" },
-        limit: 10,
-      })
-    )
+    const input2 = createApplyInput({
+      idempotencyKey: "idem_cache_refresh",
+      event: { id: "evt_cache_refresh" },
+      limit: 10,
+    })
+    await durableObject.apply(input2)
 
     const readsAfterApply = { ...db.storageReadCounts }
-    expect(await durableObject.getEnforcementState()).toMatchObject({
+    expect(await durableObject.getEnforcementState({
+      entitlement: input2.entitlement,
+      grants: input2.grants,
+      now: BASE_NOW,
+    })).toMatchObject({
       usage: 6,
       limit: 10,
       isLimitReached: false,
@@ -3182,10 +3214,15 @@ describe("EntitlementWindowDO", () => {
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    const denied = await durableObject.apply(createApplyInput({ enforceLimit: true, limit: 10 }))
+    const input = createApplyInput({ enforceLimit: true, limit: 10 })
+    const denied = await durableObject.apply(input)
     expect(denied.allowed).toBe(false)
 
-    const result = await durableObject.getEnforcementState()
+    const result = await durableObject.getEnforcementState({
+      entitlement: input.entitlement,
+      grants: input.grants,
+      now: BASE_NOW,
+    })
     expect(result).toEqual({
       usage: 0,
       limit: 10,
@@ -4551,7 +4588,12 @@ describe("EntitlementWindowDO", () => {
     // The recovery check runs inside blockConcurrencyWhile (the DO's
     // `ready` promise). Drive that to completion through a public method
     // that awaits `ready` before we inspect the scheduled waitUntils.
-    await durableObject.getEnforcementState()
+    const recoveryInput = createApplyInput()
+    await durableObject.getEnforcementState({
+      entitlement: recoveryInput.entitlement,
+      grants: recoveryInput.grants,
+      now: BASE_NOW,
+    })
     await Promise.all(state.waitUntilPromises)
 
     expect(testState.flushReservation).toHaveBeenCalledTimes(1)
@@ -4730,7 +4772,12 @@ describe("EntitlementWindowDO", () => {
     })
 
     const revived = new EntitlementWindowDO(state, createEnv())
-    await revived.getEnforcementState()
+    const revivedInput = createApplyInput()
+    await revived.getEnforcementState({
+      entitlement: revivedInput.entitlement,
+      grants: revivedInput.grants,
+      now: BASE_NOW,
+    })
     await Promise.all(state.waitUntilPromises)
 
     expect(testState.flushReservation).toHaveBeenCalledTimes(2)
@@ -4808,7 +4855,12 @@ describe("EntitlementWindowDO", () => {
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    await durableObject.getEnforcementState()
+    const wakeInput = createApplyInput()
+    await durableObject.getEnforcementState({
+      entitlement: wakeInput.entitlement,
+      grants: wakeInput.grants,
+      now: BASE_NOW,
+    })
     await Promise.all(state.waitUntilPromises)
 
     expect(testState.flushReservation).toHaveBeenCalledTimes(1)
@@ -4869,7 +4921,12 @@ describe("EntitlementWindowDO", () => {
     })
 
     const durableObject = new EntitlementWindowDO(state, createEnv())
-    await durableObject.getEnforcementState()
+    const wakeInput2 = createApplyInput()
+    await durableObject.getEnforcementState({
+      entitlement: wakeInput2.entitlement,
+      grants: wakeInput2.grants,
+      now: BASE_NOW,
+    })
     await Promise.all(state.waitUntilPromises)
 
     expect(testState.flushReservation).not.toHaveBeenCalled()
@@ -7753,10 +7810,14 @@ function createGrantSnapshot(overrides: Record<string, unknown> = {}) {
   return {
     allowanceUnits: amount,
     amount,
+    cadenceEffectiveAt: BASE_NOW - 60_000,
+    cadenceExpiresAt: null,
+    currencyCode: "USD",
     effectiveAt: BASE_NOW - 60_000,
     expiresAt: null,
     grantId: "grant_123",
     priority: 10,
+    resetConfig: null,
     ...overrides,
   }
 }
@@ -7778,13 +7839,19 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
   const amount = typeof overrides.limit === "number" ? overrides.limit : null
   const overageStrategy =
     typeof overrides.overageStrategy === "string" ? overrides.overageStrategy : "none"
+  const resetConfig = (overrides.resetConfig as Record<string, unknown> | null | undefined) ?? null
+  const currencyCode = typeof overrides.currency === "string" ? overrides.currency : "USD"
   const grantSnapshots = (overrides.grants as
     | ReturnType<typeof createGrantSnapshot>[]
     | undefined) ?? [
     createGrantSnapshot({
       amount,
+      cadenceEffectiveAt: periodStartAt,
+      cadenceExpiresAt: periodEndAt,
+      currencyCode,
       effectiveAt: periodStartAt,
       expiresAt: periodEndAt,
+      resetConfig,
     }),
   ]
   const entitlementExpiresAt =
@@ -7825,7 +7892,7 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
     meterConfig,
     overageStrategy,
     projectId,
-    resetConfig: (overrides.resetConfig as Record<string, unknown> | null | undefined) ?? null,
+    resetConfig,
     subscriptionItemId,
     ...((overrides.entitlement as Record<string, unknown> | undefined) ?? {}),
   }
@@ -7859,10 +7926,14 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
           : typeof grant.amount === "number"
             ? grant.amount
             : null,
+      cadenceEffectiveAt: Number(grant.cadenceEffectiveAt ?? periodStartAt),
+      cadenceExpiresAt: grant.cadenceExpiresAt != null ? Number(grant.cadenceExpiresAt) : entitlementExpiresAt,
+      currencyCode: String(grant.currencyCode ?? currencyCode),
       effectiveAt: Number(grant.effectiveAt),
       expiresAt: grant.expiresAt != null ? Number(grant.expiresAt) : null,
       grantId: String(grant.grantId),
       priority: Number(grant.priority),
+      resetConfig: grant.resetConfig ?? resetConfig,
     })),
   }
 }
