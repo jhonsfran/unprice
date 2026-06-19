@@ -15,11 +15,20 @@ const TEST_ENTITLEMENT_FIELDS = {
     customerId: "cus_1",
     effectiveAt: BASE_NOW - 86_400_000,
     expiresAt: null,
-    featureConfig: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: { displayAmount: "0.05", dinpieces: 5000 } }] },
+    featureConfig: {
+      tiers: [
+        { firstUnit: 1, lastUnit: null, unitPrice: { displayAmount: "0.05", dinpieces: 5000 } },
+      ],
+    },
     featurePlanVersionId: "fpv_1",
     featureSlug: "tokens",
     featureType: "usage",
-    meterConfig: { eventSlug: "tokens_used", eventId: "meter_1", aggregationMethod: "sum", aggregationField: "amount" },
+    meterConfig: {
+      eventSlug: "tokens_used",
+      eventId: "meter_1",
+      aggregationMethod: "sum",
+      aggregationField: "amount",
+    },
     overageStrategy: "none",
     projectId: "proj_1",
     resetConfig: null,
@@ -28,10 +37,14 @@ const TEST_ENTITLEMENT_FIELDS = {
   grants: [
     {
       allowanceUnits: 1000,
+      cadenceEffectiveAt: BASE_NOW - 86_400_000,
+      cadenceExpiresAt: null,
+      currencyCode: "USD",
       effectiveAt: BASE_NOW - 86_400_000,
       expiresAt: null,
       grantId: "grant_1",
       priority: 0,
+      resetConfig: null,
     },
   ],
 } as const

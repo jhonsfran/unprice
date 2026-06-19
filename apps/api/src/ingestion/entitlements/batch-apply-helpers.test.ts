@@ -282,10 +282,14 @@ function createBatchInput(): ApplyBatchInput {
     grants: [
       {
         allowanceUnits: 100,
+        cadenceEffectiveAt: 1,
+        cadenceExpiresAt: null,
+        currencyCode: "USD",
         effectiveAt: 1,
         expiresAt: null,
         grantId: "grant_123",
         priority: 1,
+        resetConfig: null,
       },
     ],
     enforceLimit: true,

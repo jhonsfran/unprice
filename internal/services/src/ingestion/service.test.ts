@@ -1416,10 +1416,14 @@ describe("IngestionService entitlement routing", () => {
         grants: [
           {
             allowanceUnits: 7,
+            cadenceEffectiveAt: Date.UTC(2026, 2, 1),
+            cadenceExpiresAt: null,
+            currencyCode: "USD",
             effectiveAt: Date.UTC(2026, 2, 1),
             expiresAt: null,
             grantId: `grant_${featureType}`,
             priority: 10,
+            resetConfig: null,
           },
         ],
         meterConfig: null,
@@ -1872,10 +1876,14 @@ function toGrantRecords(entitlement: IngestionEntitlement) {
       : [
           {
             allowanceUnits: 100,
+            cadenceEffectiveAt: entitlement.effectiveAt,
+            cadenceExpiresAt: entitlement.expiresAt,
+            currencyCode: "USD",
             effectiveAt: entitlement.effectiveAt,
             expiresAt: entitlement.expiresAt,
             grantId: `${entitlement.customerEntitlementId}_grant`,
             priority: 10,
+            resetConfig: null,
           },
         ]
 
