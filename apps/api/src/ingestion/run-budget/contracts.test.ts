@@ -9,12 +9,11 @@ describe("run budget contracts", () => {
   it("parses startRun input", () => {
     expect(
       startRunInputSchema.parse({
-        agentId: "agt_123",
-        runId: "arun_123",
-        customerId: "cus_123",
         projectId: "proj_123",
-        currency: "USD",
+        customerId: "cus_123",
+        runId: "arun_123",
         budgetAmount: 100_000_000,
+        currency: "USD",
         idempotencyKey: "start-1",
         now: 1_781_503_200_000,
         metadata: {},
@@ -24,7 +23,6 @@ describe("run budget contracts", () => {
 
   it("requires an idempotency key for run sync events", () => {
     const result = applyRunSyncEventInputSchema.safeParse({
-      agentId: "agt_123",
       runId: "arun_123",
       customerId: "cus_123",
       projectId: "proj_123",

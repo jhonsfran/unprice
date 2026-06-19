@@ -51,7 +51,7 @@ export class RunBudgetDO extends DurableObject {
       runId: input.runId,
       projectId: input.projectId,
       customerId: input.customerId,
-      agentId: input.agentId,
+      agentId: input.agentId ?? "",
       reservationId: walletResult.reservationId,
       status: "running",
       currency: input.currency,
@@ -292,7 +292,6 @@ export class RunBudgetDO extends DurableObject {
 
     for (const run of expiredRuns) {
       await this.endRun({
-        agentId: run.agentId,
         runId: run.runId,
         customerId: run.customerId,
         projectId: run.projectId,
@@ -409,7 +408,7 @@ export class RunBudgetDO extends DurableObject {
       flushSeq: Date.now(), // Use timestamp as monotonic seq for run captures
       amount: input.amount,
       statementKey: input.statementKey,
-      kind: "agent_run_capture",
+      kind: "budget_run_capture",
       metadata: { idempotency_key: input.idempotencyKey },
       sourceId: input.idempotencyKey,
     })
@@ -576,6 +575,7 @@ export class RunBudgetDO extends DurableObject {
       budgetAmount: run.budgetAmount,
       consumedAmount: run.consumedAmount,
       remainingAmount: Math.max(0, run.budgetAmount - run.consumedAmount),
+      walletReservationId: run.reservationId ?? null,
     }
   }
 

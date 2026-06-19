@@ -1,51 +1,128 @@
+import { Err, Ok, type Result } from "@unprice/error"
 import type {
-  ApplyAgentRunSyncEventInput,
-  EndAgentRunInput,
-  StartAgentRunInput,
-} from "@unprice/db/validators"
-import type {
-  AgentRunBudgetSummary,
-  AgentRunSyncDecision,
   RunBudgetClient,
+  RunBudgetError,
+  RunBudgetStartResult,
+  RunBudgetSummary,
+  RunSyncDecision,
 } from "@unprice/services/use-cases"
+import { RunBudgetError as RunBudgetErrorClass } from "@unprice/services/use-cases"
 import type { Env } from "~/env"
+import type { RunBudgetDecision } from "./contracts"
 
 export class CloudflareRunBudgetClient implements RunBudgetClient {
   constructor(private readonly env: Pick<Env, "runbudget">) {}
 
-  async startRun(input: StartAgentRunInput): Promise<AgentRunBudgetSummary> {
-    return this.stub(input).startRun({
-      ...input,
-      runId: input.agentId,
-      now: Date.now(),
-      budgetAmount: input.budgetAmount,
-      expiresAt: input.expiresAt ? input.expiresAt.getTime() : undefined,
-    })
+  async startRun(input: {
+    projectId: string
+    customerId: string
+    runId: string
+    budgetAmount: number
+    currency: string
+    idempotencyKey: string
+    agentId?: string | null
+    traceId?: string | null
+    metadata?: Record<string, unknown>
+    expiresAt?: number | null
+  }): Promise<Result<RunBudgetStartResult, RunBudgetError>> {
+    try {
+      const summary = await this.stub(input).startRun({
+        ...input,
+        metadata: input.metadata ?? {},
+        now: Date.now(),
+      })
+      return Ok({
+        summary,
+        walletReservationId: summary.walletReservationId ?? "",
+      })
+    } catch (error) {
+      return Err(
+        new RunBudgetErrorClass({
+          message: error instanceof Error ? error.message : "startRun failed",
+        })
+      )
+    }
   }
 
-  async applySyncEvent(input: ApplyAgentRunSyncEventInput): Promise<AgentRunSyncDecision> {
-    return this.stub(input).applySyncEvent(input)
+  async applySyncEvent(input: {
+    projectId: string
+    customerId: string
+    runId: string
+    featureSlug: string
+    idempotencyKey: string
+    event: {
+      id: string
+      slug: string
+      timestamp: number
+      properties: Record<string, unknown>
+    }
+    source: {
+      workspaceId: string
+      environment: string
+      apiKeyId: string | null
+      sourceType: "api_key" | "system" | "unknown"
+      sourceId: string
+      sourceName: string | null
+    }
+    now: number
+  }): Promise<Result<RunSyncDecision, RunBudgetError>> {
+    try {
+      const decision: RunBudgetDecision = await this.stub(input).applySyncEvent(input)
+      return Ok({
+        allowed: decision.allowed,
+        state: decision.state,
+        rejectionReason: decision.rejectionReason,
+        message: decision.message,
+        budget: decision.budget,
+      })
+    } catch (error) {
+      return Err(
+        new RunBudgetErrorClass({
+          message: error instanceof Error ? error.message : "applySyncEvent failed",
+        })
+      )
+    }
   }
 
-  async endRun(input: EndAgentRunInput): Promise<AgentRunBudgetSummary> {
-    return this.stub(input).endRun({
-      ...input,
-      endedAt: input.endedAt.getTime(),
-    })
+  async endRun(input: {
+    projectId: string
+    customerId: string
+    runId: string
+    status: "completed" | "expired" | "canceled"
+    endedAt: number
+  }): Promise<Result<RunBudgetSummary, RunBudgetError>> {
+    try {
+      const summary = await this.stub(input).endRun(input)
+      return Ok(summary)
+    } catch (error) {
+      return Err(
+        new RunBudgetErrorClass({
+          message: error instanceof Error ? error.message : "endRun failed",
+        })
+      )
+    }
   }
 
   async getRunStatus(input: {
-    agentId: string
-    customerId: string
     projectId: string
+    customerId: string
     runId: string
-  }): Promise<AgentRunBudgetSummary> {
-    return this.stub(input).getRunStatus(input)
+  }): Promise<Result<RunBudgetSummary, RunBudgetError>> {
+    try {
+      const summary = await this.stub(input).getRunStatus(input)
+      return Ok(summary)
+    } catch (error) {
+      return Err(
+        new RunBudgetErrorClass({
+          message: error instanceof Error ? error.message : "getRunStatus failed",
+        })
+      )
+    }
   }
 
-  private stub(input: { projectId: string; customerId: string; runId?: string }) {
+  private stub(input: { projectId: string; customerId: string; runId: string }) {
     const id = this.env.runbudget.idFromName(
-      `${input.projectId}:${input.customerId}:${input.runId ?? "unknown"}`
+      `${input.projectId}:${input.customerId}:${input.runId}`
     )
     return this.env.runbudget.get(id)
   }

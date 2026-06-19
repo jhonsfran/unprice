@@ -15,6 +15,7 @@ export const runBudgetSummarySchema = z.object({
   budgetAmount: z.number().int().nonnegative(),
   consumedAmount: z.number().int().nonnegative(),
   remainingAmount: z.number().int().nonnegative(),
+  walletReservationId: z.string().nullable().optional(),
 })
 
 const sourceSchema = z.object({
@@ -34,14 +35,13 @@ const eventSchema = z.object({
 })
 
 export const startRunInputSchema = z.object({
-  agentId: z.string().min(1),
-  runId: z.string().min(1),
-  customerId: z.string().min(1),
   projectId: z.string().min(1),
-  parentRunId: z.string().min(1).nullable().optional(),
-  currency: z.string().length(3),
+  customerId: z.string().min(1),
+  runId: z.string().min(1),
   budgetAmount: z.number().int().positive(),
+  currency: z.string().min(3).max(12),
   idempotencyKey: z.string().min(1),
+  agentId: z.string().min(1).nullable().optional(),
   traceId: z.string().min(1).nullable().optional(),
   metadata: z.record(z.unknown()).default({}),
   expiresAt: z.number().finite().nullable().optional(),
@@ -49,7 +49,6 @@ export const startRunInputSchema = z.object({
 })
 
 export const applyRunSyncEventInputSchema = z.object({
-  agentId: z.string().min(1),
   runId: z.string().min(1),
   customerId: z.string().min(1),
   projectId: z.string().min(1),
@@ -61,7 +60,6 @@ export const applyRunSyncEventInputSchema = z.object({
 })
 
 export const endRunInputSchema = z.object({
-  agentId: z.string().min(1),
   runId: z.string().min(1),
   customerId: z.string().min(1),
   projectId: z.string().min(1),
@@ -70,7 +68,6 @@ export const endRunInputSchema = z.object({
 })
 
 export const getRunStatusInputSchema = z.object({
-  agentId: z.string().min(1),
   runId: z.string().min(1),
   customerId: z.string().min(1),
   projectId: z.string().min(1),
