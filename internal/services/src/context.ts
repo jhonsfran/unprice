@@ -62,6 +62,8 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   const budgetRuns = new BudgetRunService({
     db: deps.db,
     logger: deps.logger,
+    cache: deps.cache,
+    waitUntil: deps.waitUntil,
   })
 
   const ledger = new LedgerGateway({

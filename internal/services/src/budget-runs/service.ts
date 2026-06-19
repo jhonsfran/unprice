@@ -2,8 +2,10 @@ import { type Database, and, eq } from "@unprice/db"
 import { budgetRuns } from "@unprice/db/schema"
 import type { BudgetRunStatus } from "@unprice/db/schema"
 import { newId } from "@unprice/db/utils"
-import { BaseError, Err, Ok, type Result } from "@unprice/error"
+import { BaseError, Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import type { Cache } from "../cache"
+import { cachedQuery } from "../utils/cached-query"
 
 export class BudgetRunServiceError extends BaseError {
   public readonly retry = false
@@ -13,6 +15,8 @@ export class BudgetRunServiceError extends BaseError {
 type BudgetRunServiceDeps = {
   db: Database
   logger: Logger
+  cache: Cache
+  waitUntil: (promise: Promise<unknown>) => void
 }
 
 type BudgetRunRow = typeof budgetRuns.$inferSelect
@@ -79,27 +83,41 @@ export class BudgetRunService {
     projectId: string
     runId: string
   }): Promise<Result<BudgetRunRow, BudgetRunServiceError>> {
-    try {
-      const row = await this.deps.db.query.budgetRuns.findFirst({
-        where: and(eq(budgetRuns.id, input.runId), eq(budgetRuns.projectId, input.projectId)),
-      })
+    const cacheKey = `${input.projectId}:${input.runId}`
 
-      if (!row) {
-        return Err(
-          new BudgetRunServiceError({
-            message: "RUN_NOT_FOUND",
-          })
-        )
-      }
+    const { val, err } = await cachedQuery({
+      cache: this.deps.cache.budgetRun,
+      cacheKey,
+      load: async () => {
+        const row = await this.deps.db.query.budgetRuns.findFirst({
+          where: and(eq(budgetRuns.id, input.runId), eq(budgetRuns.projectId, input.projectId)),
+        })
+        return row ?? null
+      },
+      wrapLoadError: (error) =>
+        new FetchError({
+          message: error.message ?? "Failed to get budget run",
+          retry: false,
+        }),
+    })
 
-      return Ok(row)
-    } catch (_error) {
+    if (err) {
       return Err(
         new BudgetRunServiceError({
           message: "Failed to get budget run",
         })
       )
     }
+
+    if (!val) {
+      return Err(
+        new BudgetRunServiceError({
+          message: "RUN_NOT_FOUND",
+        })
+      )
+    }
+
+    return Ok(val)
   }
 
   async updateRunReservation(input: {
@@ -120,6 +138,10 @@ export class BudgetRunService {
       if (!row) {
         return Err(new BudgetRunServiceError({ message: "RUN_NOT_FOUND" }))
       }
+
+      // Invalidate cache after mutation
+      const cacheKey = `${input.projectId}:${input.runId}`
+      this.deps.waitUntil(this.deps.cache.budgetRun.remove(cacheKey))
 
       return Ok(row)
     } catch (_error) {
@@ -157,6 +179,10 @@ export class BudgetRunService {
       if (!row) {
         return Err(new BudgetRunServiceError({ message: "RUN_NOT_FOUND" }))
       }
+
+      // Invalidate cache after mutation
+      const cacheKey = `${input.projectId}:${input.runId}`
+      this.deps.waitUntil(this.deps.cache.budgetRun.remove(cacheKey))
 
       return Ok(row)
     } catch (_error) {
