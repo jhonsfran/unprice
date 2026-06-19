@@ -11,19 +11,19 @@ describe("run budget contracts", () => {
       startRunInputSchema.parse({
         projectId: "proj_123",
         customerId: "cus_123",
-        runId: "arun_123",
+        runId: "run_123",
         budgetAmount: 100_000_000,
         currency: "USD",
         idempotencyKey: "start-1",
         now: 1_781_503_200_000,
         metadata: {},
       })
-    ).toMatchObject({ runId: "arun_123", budgetAmount: 100_000_000 })
+    ).toMatchObject({ runId: "run_123", budgetAmount: 100_000_000 })
   })
 
   it("requires an idempotency key for run sync events", () => {
     const result = applyRunSyncEventInputSchema.safeParse({
-      runId: "arun_123",
+      runId: "run_123",
       customerId: "cus_123",
       projectId: "proj_123",
       featureSlug: "tokens",
@@ -50,7 +50,7 @@ describe("run budget contracts", () => {
         rejectionReason: "RUN_BUDGET_EXCEEDED",
         message: "Run budget exceeded",
         budget: {
-          runId: "arun_123",
+          runId: "run_123",
           status: "budget_exceeded",
           budgetAmount: 100,
           consumedAmount: 100,
