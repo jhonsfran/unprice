@@ -13,9 +13,8 @@ export const runStatusSchema = z.enum([
 
 export const startRunInputSchema = z.object({
   customerId: z.string().min(1).optional(),
-  /** Budget amount in pgledger scale-8 minor units (1 USD = 100_000_000). */
+  /** Budget in currency minor units (cents). e.g. 500 = $5.00 USD. */
   budgetAmount: z.number().int().positive(),
-  currency: z.string().min(3).max(12),
   idempotencyKey: z.string().min(1),
   agentId: z.string().min(1).nullable().optional(),
   traceId: z.string().min(1).nullable().optional(),
@@ -40,12 +39,12 @@ export const runSummarySchema = z.object({
   runId: z.string(),
   status: runStatusSchema,
   customerId: z.string(),
-  /** Budget amount in pgledger scale-8 minor units (1 USD = 100_000_000). */
-  budgetAmount: z.number(),
-  /** Consumed amount in pgledger scale-8 minor units. */
-  consumedAmount: z.number(),
-  /** Remaining amount in pgledger scale-8 minor units. */
-  remainingAmount: z.number(),
+  /** Budget in currency minor units (cents). */
+  budgetAmount: z.number().int(),
+  /** Consumed in currency minor units (cents). */
+  consumedAmount: z.number().int(),
+  /** Remaining in currency minor units (cents). */
+  remainingAmount: z.number().int(),
   currency: z.string(),
   agentId: z.string().nullable(),
 })

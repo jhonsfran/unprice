@@ -1,5 +1,7 @@
 import { createRoute } from "@hono/zod-openapi"
+import { newId } from "@unprice/db/utils"
 import { applyRunSyncEventInputSchema, runSyncDecisionSchema } from "@unprice/db/validators"
+import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
 import { RunUseCaseError, applyRunSyncEvent } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -52,7 +54,7 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
         featureSlug: body.featureSlug,
         idempotencyKey: body.idempotencyKey,
         event: {
-          id: body.id ?? `evt_${Date.now()}`,
+          id: body.id ?? newId("event"),
           slug: body.eventSlug ?? body.featureSlug,
           timestamp: body.timestamp ?? Date.now(),
           properties: body.properties ?? {},
@@ -83,5 +85,19 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
       })
     }
 
-    return c.json(result.val, HttpStatusCodes.OK)
+    const { currency } = result.val.run
+    return c.json(
+      {
+        ...result.val,
+        run: {
+          ...result.val.run,
+          budgetAmount: toCurrencyMinor(fromLedgerMinor(result.val.run.budgetAmount, currency)),
+          consumedAmount: toCurrencyMinor(fromLedgerMinor(result.val.run.consumedAmount, currency)),
+          remainingAmount: toCurrencyMinor(
+            fromLedgerMinor(result.val.run.remainingAmount, currency)
+          ),
+        },
+      },
+      HttpStatusCodes.OK
+    )
   })

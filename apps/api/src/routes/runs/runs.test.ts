@@ -122,6 +122,17 @@ function createTestApp() {
     updateRunSummary: vi.fn(),
   }
 
+  const customerMock = {
+    getActiveSubscription: vi.fn().mockResolvedValue({
+      val: {
+        activePhase: {
+          planVersion: { currency: "USD" },
+        },
+      },
+      err: undefined,
+    }),
+  }
+
   app.onError((error, c) => {
     if (error instanceof UnpriceApiError) {
       return c.json({ code: error.code, message: error.message }, error.status)
@@ -132,6 +143,7 @@ function createTestApp() {
   app.use("*", async (c, next) => {
     c.set("services", {
       budgetRuns: budgetRunsMock,
+      customer: customerMock,
     } as unknown as HonoEnv["Variables"]["services"])
     await next()
   })
@@ -147,7 +159,7 @@ function createTestApp() {
     waitUntil: vi.fn(),
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, budgetRunsMock }
+  return { app, env, executionCtx, budgetRunsMock, customerMock }
 }
 
 // ---------------------------------------------------------------------------
@@ -163,13 +175,14 @@ describe("budgeted runs API", () => {
       customerId: "cus_default",
     })
 
+    // Use case returns ledger-scale amounts (LEDGER_SCALE=8: $10.00 = 1_000_000_000)
     const runSummary = {
       runId: "brun_abc123",
       status: "running",
       customerId: "cus_default",
-      budgetAmount: 1000,
+      budgetAmount: 1_000_000_000,
       consumedAmount: 0,
-      remainingAmount: 1000,
+      remainingAmount: 1_000_000_000,
       currency: "USD",
       agentId: null,
     }
@@ -178,7 +191,7 @@ describe("budgeted runs API", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    // When POST /v1/runs is called without customerId and with optional agentId
+    // When POST /v1/runs is called without customerId (uses key default)
     const response = await app.fetch(
       new Request("https://example.com/v1/runs", {
         method: "POST",
@@ -187,7 +200,6 @@ describe("budgeted runs API", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          currency: "USD",
           budgetAmount: 1000,
           idempotencyKey: "idem_start_1",
           agentId: "my-agent",
@@ -197,13 +209,17 @@ describe("budgeted runs API", () => {
       executionCtx
     )
 
-    // Then response is 200, runId starts with brun_, customerId is the key default, status is running
+    // Then response is 200, amounts are in currency minor units (cents)
     expect(response.status).toBe(200)
     const body = await response.json()
     expect(body).toMatchObject({
       runId: expect.stringMatching(/^brun_/),
       status: "running",
       customerId: "cus_default",
+      budgetAmount: 1000,
+      consumedAmount: 0,
+      remainingAmount: 1000,
+      currency: "USD",
     })
   })
 
@@ -228,7 +244,6 @@ describe("budgeted runs API", () => {
         },
         body: JSON.stringify({
           customerId: "cus_other",
-          currency: "USD",
           budgetAmount: 1000,
           idempotencyKey: "idem_mismatch_1",
         }),
@@ -263,7 +278,6 @@ describe("budgeted runs API", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          currency: "USD",
           budgetAmount: 1000,
           idempotencyKey: "idem_unbound_1",
         }),
@@ -289,9 +303,9 @@ describe("budgeted runs API", () => {
         runId: "brun_abc123",
         status: "running",
         customerId: "cus_default",
-        budgetAmount: 1000,
-        consumedAmount: 100,
-        remainingAmount: 900,
+        budgetAmount: 1_000_000_000,
+        consumedAmount: 100_000_000,
+        remainingAmount: 900_000_000,
         currency: "USD",
         agentId: null,
       },
@@ -370,9 +384,9 @@ describe("budgeted runs API", () => {
       runId: "brun_abc123",
       status: "completed",
       customerId: "cus_default",
-      budgetAmount: 1000,
-      consumedAmount: 300,
-      remainingAmount: 700,
+      budgetAmount: 1_000_000_000,
+      consumedAmount: 300_000_000,
+      remainingAmount: 700_000_000,
       currency: "USD",
       agentId: null,
     }

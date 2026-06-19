@@ -1,5 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
 import { runSummarySchema, startRunInputSchema } from "@unprice/db/validators"
+import { fromCurrencyMinor, fromLedgerMinor, toCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { RunUseCaseError, startRun } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth, resolveCustomerIdForApiKey } from "~/auth/key"
@@ -15,7 +16,10 @@ export const route = createRoute({
   path: "/v1/runs",
   operationId: "runs.start",
   summary: "start a budgeted run",
-  description: "Start a new budgeted run with a budget reservation against a customer",
+  description:
+    "Start a new budgeted run with a budget reservation against a customer. " +
+    "The currency is inherited from the customer's active subscription plan. " +
+    "budgetAmount is in currency minor units (e.g. 500 = $5.00 USD).",
   method: "post",
   tags,
   request: {
@@ -44,6 +48,27 @@ export const registerStartRunV1 = (app: App) =>
       })
     }
 
+    // Resolve currency from the customer's active subscription
+    const { customer: customerService } = c.get("services")
+    const subscriptionResult = await customerService.getActiveSubscription({
+      customerId: customer.customerId,
+      projectId: key.projectId,
+      now: Date.now(),
+    })
+
+    if (subscriptionResult.err || !subscriptionResult.val?.activePhase) {
+      throw new UnpriceApiError({
+        code: "BAD_REQUEST",
+        message:
+          "Customer has no active subscription. A subscription with an active plan is required to start a budgeted run.",
+      })
+    }
+
+    const currency = subscriptionResult.val.activePhase.planVersion.currency
+
+    // Convert budgetAmount from currency minor units (cents) to ledger scale
+    const budgetAmountLedger = toLedgerMinor(fromCurrencyMinor(body.budgetAmount, currency))
+
     const { budgetRuns } = c.get("services")
     const runBudget = new CloudflareRunBudgetClient(c.env)
 
@@ -52,8 +77,8 @@ export const registerStartRunV1 = (app: App) =>
       {
         projectId: key.projectId,
         customerId: customer.customerId,
-        budgetAmount: body.budgetAmount,
-        currency: body.currency,
+        budgetAmount: budgetAmountLedger,
+        currency,
         idempotencyKey: body.idempotencyKey,
         agentId: body.agentId,
         traceId: body.traceId,
@@ -77,5 +102,14 @@ export const registerStartRunV1 = (app: App) =>
       })
     }
 
-    return c.json(result.val, HttpStatusCodes.OK)
+    // Convert response amounts from ledger scale back to currency minor units
+    return c.json(
+      {
+        ...result.val,
+        budgetAmount: toCurrencyMinor(fromLedgerMinor(result.val.budgetAmount, currency)),
+        consumedAmount: toCurrencyMinor(fromLedgerMinor(result.val.consumedAmount, currency)),
+        remainingAmount: toCurrencyMinor(fromLedgerMinor(result.val.remainingAmount, currency)),
+      },
+      HttpStatusCodes.OK
+    )
   })
