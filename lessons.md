@@ -484,3 +484,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-06-15: RunBudgetDO uses dynamic imports for wallet/ledger services since it runs in a
   Durable Object context where service construction differs from the request middleware; keep
   `buildServices()` as an async factory called once in `startRun` and cached for the DO lifetime.
+- 2026-06-19: Run sync events must resolve entitlements before delegating to RunBudgetDO; the
+  `applyRunSyncEvent` use case uses `RunEntitlementResolver` (backed by the SWR-cached
+  `IngestionEntitlementContextLoader` + `IngestionEntitlementRouter`) to validate that the
+  customer has an active entitlement for the `featureSlug`/`eventSlug`, then passes real
+  `entitlement` + `grants` through the DO contract to `EntitlementWindowDO`. The DO is addressed
+  using the standard naming scheme (`${appEnv}:${projectId}:${customerId}:${customerEntitlementId}`)
+  so it shares state with the normal ingestion path.

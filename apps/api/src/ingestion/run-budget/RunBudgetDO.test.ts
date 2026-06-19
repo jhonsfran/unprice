@@ -2,6 +2,40 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 
+/**
+ * Default entitlement config and grants for test fixtures.
+ * These pass the DO's Zod validation and are forwarded to the EntitlementWindowDO mock.
+ */
+const TEST_ENTITLEMENT_FIELDS = {
+  customerEntitlementId: "ce_test_1",
+  entitlement: {
+    billingPeriods: [],
+    creditLinePolicy: "uncapped",
+    customerEntitlementId: "ce_test_1",
+    customerId: "cus_1",
+    effectiveAt: BASE_NOW - 86_400_000,
+    expiresAt: null,
+    featureConfig: { tiers: [{ firstUnit: 1, lastUnit: null, unitPrice: { displayAmount: "0.05", dinpieces: 5000 } }] },
+    featurePlanVersionId: "fpv_1",
+    featureSlug: "tokens",
+    featureType: "usage",
+    meterConfig: { eventSlug: "tokens_used", eventId: "meter_1", aggregationMethod: "sum", aggregationField: "amount" },
+    overageStrategy: "none",
+    projectId: "proj_1",
+    resetConfig: null,
+    subscriptionItemId: null,
+  },
+  grants: [
+    {
+      allowanceUnits: 1000,
+      effectiveAt: BASE_NOW - 86_400_000,
+      expiresAt: null,
+      grantId: "grant_1",
+      priority: 0,
+    },
+  ],
+} as const
+
 type FakeDurableObjectState = {
   alarmAt: number | null
   deletedAlarm: boolean
@@ -168,6 +202,7 @@ describe("RunBudgetDO", () => {
         sourceName: null,
       },
       now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
     }
 
     const first = await durable.applySyncEvent(eventInput)
@@ -229,6 +264,7 @@ describe("RunBudgetDO", () => {
         sourceName: null,
       },
       now: BASE_NOW + 2000,
+      ...TEST_ENTITLEMENT_FIELDS,
     })
 
     expect(result.allowed).toBe(false)
@@ -284,6 +320,7 @@ describe("RunBudgetDO", () => {
         sourceName: null,
       },
       now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
     })
 
     expect(result.allowed).toBe(false)
@@ -331,6 +368,7 @@ describe("RunBudgetDO", () => {
         sourceName: null,
       },
       now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
     })
 
     expect(result.allowed).toBe(true)
@@ -381,6 +419,7 @@ describe("RunBudgetDO", () => {
         sourceName: null,
       },
       now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
     })
 
     const result = await durable.endRun({

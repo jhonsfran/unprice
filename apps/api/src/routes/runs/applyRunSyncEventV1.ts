@@ -2,6 +2,10 @@ import { createRoute } from "@hono/zod-openapi"
 import { newId } from "@unprice/db/utils"
 import { applyRunSyncEventInputSchema, runSyncDecisionSchema } from "@unprice/db/validators"
 import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
+import {
+  IngestionEntitlementContextLoader,
+  IngestionRunEntitlementResolver,
+} from "@unprice/services/ingestion"
 import { RunUseCaseError, applyRunSyncEvent } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -42,11 +46,27 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
     const body = c.req.valid("json")
     const key = await keyAuth(c)
 
-    const { budgetRuns } = c.get("services")
+    const { budgetRuns, entitlement: entitlementService } = c.get("services")
+    const cache = c.get("cache")
+    const logger = c.get("logger")
+    const db = c.get("db")
+
     const runBudget = new CloudflareRunBudgetClient(c.env)
 
+    // Construct the entitlement resolver using existing SWR-cached infrastructure
+    const entitlementContext = new IngestionEntitlementContextLoader({
+      cache,
+      db,
+      entitlementService,
+      logger,
+    })
+    const entitlementResolver = new IngestionRunEntitlementResolver({
+      entitlementContext,
+      logger,
+    })
+
     const result = await applyRunSyncEvent(
-      { services: { budgetRuns }, runBudget },
+      { services: { budgetRuns }, runBudget, entitlementResolver },
       {
         projectId: key.projectId,
         runId,

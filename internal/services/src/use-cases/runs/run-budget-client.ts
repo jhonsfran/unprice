@@ -1,4 +1,5 @@
 import { BaseError, type Result } from "@unprice/error"
+import type { IngestionEntitlement, IngestionGrant } from "../../ingestion/entitlement-context"
 
 export type RunBudgetSummary = {
   runId: string
@@ -66,6 +67,12 @@ export interface RunBudgetClient {
       sourceName: string | null
     }
     now: number
+    /** The resolved customer entitlement ID for correct DO addressing */
+    customerEntitlementId: string
+    /** Full entitlement config for the EntitlementWindowDO */
+    entitlement: IngestionEntitlement & { meterConfig: NonNullable<IngestionEntitlement["meterConfig"]> }
+    /** Active grants for the entitlement */
+    grants: IngestionGrant[]
   }): Promise<Result<RunSyncDecision, RunBudgetError>>
 
   endRun(input: {

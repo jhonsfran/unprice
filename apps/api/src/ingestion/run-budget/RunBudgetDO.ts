@@ -382,18 +382,24 @@ export class RunBudgetDO extends DurableObject {
   }
 
   private async callEntitlementWindow(input: ApplyRunSyncEventInput, remainingAmount: number) {
+    // Address the EntitlementWindowDO using the same naming scheme as the normal ingestion path:
+    // ${appEnv}:${projectId}:${customerId}:${customerEntitlementId}
     const entitlementWindowId = this.runtimeEnv.entitlementwindow.idFromName(
-      `${input.projectId}:${input.customerId}:${input.featureSlug}`
+      `${this.runtimeEnv.APP_ENV}:${input.projectId}:${input.customerId}:${input.customerEntitlementId}`
     )
     const entitlementWindow = this.runtimeEnv.entitlementwindow.get(entitlementWindowId)
 
+    // The entitlement and grants are validated upstream by the use case and pass through
+    // the DO contract as opaque objects. The EntitlementWindowDO re-parses them with its
+    // own applyInputSchema, so the runtime data is correct even though the DO contract
+    // uses looser types for these pass-through fields.
     return entitlementWindow.apply({
       event: { ...input.event, source: input.source },
       idempotencyKey: `${input.idempotencyKey}:ew`,
       projectId: input.projectId,
       customerId: input.customerId,
-      entitlement: {} as never, // EntitlementWindowDO loads its own config
-      grants: [] as never, // EntitlementWindowDO loads its own grants
+      entitlement: input.entitlement as Parameters<typeof entitlementWindow.apply>[0]["entitlement"],
+      grants: input.grants as Parameters<typeof entitlementWindow.apply>[0]["grants"],
       enforceLimit: true,
       now: input.now,
       walletMode: "external_reservation",

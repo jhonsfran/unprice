@@ -1,4 +1,5 @@
 import { Err, Ok, type Result } from "@unprice/error"
+import type { IngestionEntitlement, IngestionGrant } from "@unprice/services/ingestion"
 import type {
   RunBudgetClient,
   RunBudgetError,
@@ -66,6 +67,11 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
       sourceName: string | null
     }
     now: number
+    customerEntitlementId: string
+    entitlement: IngestionEntitlement & {
+      meterConfig: NonNullable<IngestionEntitlement["meterConfig"]>
+    }
+    grants: IngestionGrant[]
   }): Promise<Result<RunSyncDecision, RunBudgetError>> {
     try {
       const decision: RunBudgetDecision = await this.stub(input).applySyncEvent(input)

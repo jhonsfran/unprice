@@ -144,7 +144,11 @@ function createTestApp() {
     c.set("services", {
       budgetRuns: budgetRunsMock,
       customer: customerMock,
+      entitlement: {},
     } as unknown as HonoEnv["Variables"]["services"])
+    c.set("cache", { ingestionPreparedGrantContext: { swr: vi.fn() } } as unknown as HonoEnv["Variables"]["cache"])
+    c.set("logger", { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } as unknown as HonoEnv["Variables"]["logger"])
+    c.set("db", {} as unknown as HonoEnv["Variables"]["db"])
     await next()
   })
 

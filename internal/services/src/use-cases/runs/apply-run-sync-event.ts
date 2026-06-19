@@ -1,12 +1,40 @@
+import type { MeterConfig } from "@unprice/db/validators"
 import type { RunSyncDecision as RunSyncDecisionOutput } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { BudgetRunService } from "../../budget-runs"
+import type { IngestionEntitlement, IngestionGrant } from "../../ingestion/entitlement-context"
+import type { IngestionRejectionReason } from "../../ingestion/interface"
 import type { RunBudgetClient } from "./run-budget-client"
 import { RunUseCaseError } from "./start-run"
+
+/**
+ * Resolves the active entitlement for a given feature slug and customer.
+ * Returns the entitlement config + grants needed by the EntitlementWindowDO,
+ * or a rejection reason if the customer has no valid entitlement.
+ */
+export type RunEntitlementResolver = {
+  resolveForFeature(params: {
+    projectId: string
+    customerId: string
+    featureSlug: string
+    eventSlug: string
+    eventTimestamp: number
+    eventProperties: Record<string, unknown>
+  }): Promise<RunEntitlementResolution>
+}
+
+export type RunEntitlementResolution =
+  | {
+      ok: true
+      entitlement: IngestionEntitlement & { meterConfig: MeterConfig }
+      grants: IngestionGrant[]
+    }
+  | { ok: false; reason: IngestionRejectionReason }
 
 export type ApplyRunSyncEventDeps = {
   services: Pick<{ budgetRuns: BudgetRunService }, "budgetRuns">
   runBudget: RunBudgetClient
+  entitlementResolver: RunEntitlementResolver
 }
 
 export type ApplyRunSyncEventInput = {
@@ -53,7 +81,34 @@ export async function applyRunSyncEvent(
     return Err(new RunUseCaseError("RUN_NOT_FOUND"))
   }
 
-  // Delegate to DO
+  // Resolve entitlement for the feature slug before delegating to the DO
+  const resolution = await deps.entitlementResolver.resolveForFeature({
+    projectId: run.projectId,
+    customerId: run.customerId,
+    featureSlug: input.featureSlug,
+    eventSlug: input.event.slug,
+    eventTimestamp: input.event.timestamp,
+    eventProperties: input.event.properties,
+  })
+
+  if (!resolution.ok) {
+    return Ok({
+      accepted: false,
+      reason: mapEntitlementRejection(resolution.reason),
+      run: {
+        runId: run.id,
+        status: "running",
+        customerId: run.customerId,
+        budgetAmount: 0,
+        consumedAmount: 0,
+        remainingAmount: 0,
+        currency: run.currency,
+        agentId: run.agentId,
+      },
+    })
+  }
+
+  // Delegate to DO with real entitlement data
   const doResult = await deps.runBudget.applySyncEvent({
     projectId: run.projectId,
     customerId: run.customerId,
@@ -63,6 +118,9 @@ export async function applyRunSyncEvent(
     event: input.event,
     source: input.source,
     now: input.now,
+    customerEntitlementId: resolution.entitlement.customerEntitlementId,
+    entitlement: resolution.entitlement,
+    grants: resolution.grants,
   })
 
   if (doResult.err) {
@@ -98,6 +156,25 @@ export async function applyRunSyncEvent(
 
 function canAccessRun(input: { keyCustomerId: string | null; runCustomerId: string }): boolean {
   return input.keyCustomerId === null || input.keyCustomerId === input.runCustomerId
+}
+
+function mapEntitlementRejection(
+  reason: IngestionRejectionReason
+): "insufficient_budget" | "expired" | "not_running" | "entitlement_denied" {
+  switch (reason) {
+    case "NO_MATCHING_ENTITLEMENT":
+    case "UNROUTABLE_EVENT":
+    case "INVALID_ENTITLEMENT_CONFIGURATION":
+    case "INVALID_AGGREGATION_PROPERTIES":
+    case "CUSTOMER_NOT_FOUND":
+    case "LIMIT_EXCEEDED":
+      return "entitlement_denied"
+    case "EVENT_TOO_OLD":
+    case "LATE_EVENT_CLOSED_PERIOD":
+      return "expired"
+    default:
+      return "entitlement_denied"
+  }
 }
 
 function mapRejectionReason(
