@@ -11,6 +11,7 @@ export type RunBudgetSummary = {
 export type RunBudgetStartResult = {
   summary: RunBudgetSummary
   walletReservationId: string
+  walletError?: string
 }
 
 export type RunSyncDecision = {

@@ -34,6 +34,7 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
       return Ok({
         summary,
         walletReservationId: summary.walletReservationId ?? "",
+        walletError: summary.walletError,
       })
     } catch (error) {
       return Err(

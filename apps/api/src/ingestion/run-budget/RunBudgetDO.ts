@@ -46,6 +46,20 @@ export class RunBudgetDO extends DurableObject {
     // Create wallet reservation for the run budget
     const walletResult = await this.createRunReservation(input)
 
+    if (!walletResult.success) {
+      // Wallet has insufficient funds -- return a summary with failed status
+      // instead of throwing, so the caller gets a proper business error.
+      return {
+        runId: input.runId,
+        status: "failed" as RunBudgetSummary["status"],
+        budgetAmount: input.budgetAmount,
+        consumedAmount: 0,
+        remainingAmount: 0,
+        walletReservationId: null,
+        walletError: walletResult.reason,
+      }
+    }
+
     // Persist run state
     await this.db.insert(schema.runState).values({
       runId: input.runId,
@@ -311,7 +325,12 @@ export class RunBudgetDO extends DurableObject {
 
   // --- Private methods ---
 
-  private async createRunReservation(input: StartRunInput) {
+  private async createRunReservation(
+    input: StartRunInput
+  ): Promise<
+    | { success: true; reservationId: string; allocationAmount: number }
+    | { success: false; reason: string }
+  > {
     const { createConnection } = await import("@unprice/db")
     const { WalletService } = await import("@unprice/services/wallet")
     const { LedgerGateway } = await import("@unprice/services/ledger")
@@ -350,8 +369,16 @@ export class RunBudgetDO extends DurableObject {
       },
     })
 
-    if (result.err) throw result.err
-    return result.val
+    if (result.err) {
+      const message = result.err.message ?? "unknown"
+      return { success: false, reason: message }
+    }
+
+    return {
+      success: true,
+      reservationId: result.val.reservationId,
+      allocationAmount: result.val.allocationAmount,
+    }
   }
 
   private async callEntitlementWindow(input: ApplyRunSyncEventInput, remainingAmount: number) {

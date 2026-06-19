@@ -1,6 +1,6 @@
 import { createRoute } from "@hono/zod-openapi"
 import { runSummarySchema, startRunInputSchema } from "@unprice/db/validators"
-import { startRun } from "@unprice/services/use-cases"
+import { RunUseCaseError, startRun } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth, resolveCustomerIdForApiKey } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
@@ -63,6 +63,14 @@ export const registerStartRunV1 = (app: App) =>
     )
 
     if (result.err) {
+      if (result.err instanceof RunUseCaseError && result.err.message === "WALLET_EMPTY") {
+        throw new UnpriceApiError({
+          code: "BAD_REQUEST",
+          message:
+            "Insufficient wallet balance to reserve budget. Top up the customer wallet or reduce the budget amount.",
+        })
+      }
+
       throw new UnpriceApiError({
         code: "INTERNAL_SERVER_ERROR",
         message: result.err.message,

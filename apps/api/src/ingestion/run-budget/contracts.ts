@@ -16,6 +16,7 @@ export const runBudgetSummarySchema = z.object({
   consumedAmount: z.number().int().nonnegative(),
   remainingAmount: z.number().int().nonnegative(),
   walletReservationId: z.string().nullable().optional(),
+  walletError: z.string().optional(),
 })
 
 const sourceSchema = z.object({

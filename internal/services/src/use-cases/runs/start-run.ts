@@ -8,7 +8,7 @@ export class RunUseCaseError extends BaseError {
   public readonly retry = false
   public readonly name = "RunUseCaseError"
 
-  constructor(message: "RUN_NOT_FOUND" | "CUSTOMER_NOT_FOUND" | "BUDGET_ERROR") {
+  constructor(message: "RUN_NOT_FOUND" | "CUSTOMER_NOT_FOUND" | "BUDGET_ERROR" | "WALLET_EMPTY") {
     super({ message })
   }
 }
@@ -71,6 +71,12 @@ export async function startRun(
 
   if (doResult.err) {
     return Err(new RunUseCaseError("BUDGET_ERROR"))
+  }
+
+  // Check if the DO reported a wallet error (e.g. WALLET_EMPTY)
+  const summary = doResult.val.summary
+  if (summary.status === "failed" && doResult.val.walletError) {
+    return Err(new RunUseCaseError("WALLET_EMPTY"))
   }
 
   // 3. Persist the wallet reservation id returned by the DO
