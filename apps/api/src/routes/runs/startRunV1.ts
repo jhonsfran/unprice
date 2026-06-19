@@ -1,6 +1,7 @@
 import { createRoute } from "@hono/zod-openapi"
 import { runSummarySchema, startRunInputSchema } from "@unprice/db/validators"
 import { fromCurrencyMinor, fromLedgerMinor, toCurrencyMinor, toLedgerMinor } from "@unprice/money"
+import { ensureSubscriptionRenewed } from "@unprice/services/subscriptions"
 import { RunUseCaseError, startRun } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth, resolveCustomerIdForApiKey } from "~/auth/key"
@@ -49,7 +50,9 @@ export const registerStartRunV1 = (app: App) =>
     }
 
     // Resolve currency from the customer's active subscription
-    const { customer: customerService } = c.get("services")
+    const { customer: customerService, subscription: subscriptionService } = c.get("services")
+    const logger = c.get("logger")
+
     const subscriptionResult = await customerService.getActiveSubscription({
       customerId: customer.customerId,
       projectId: key.projectId,
@@ -64,7 +67,19 @@ export const registerStartRunV1 = (app: App) =>
       })
     }
 
-    const currency = subscriptionResult.val.activePhase.planVersion.currency
+    const subscription = subscriptionResult.val
+    const currency = subscription.activePhase!.planVersion.currency
+
+    // Ensure the subscription is current before wallet reservation.
+    // If the renewal cron hasn't run yet, this triggers renewal inline
+    // so fresh wallet credits are available for the budget reservation.
+    await ensureSubscriptionRenewed(
+      { subscriptions: subscriptionService, logger },
+      {
+        subscriptionId: subscription.id,
+        projectId: key.projectId,
+      }
+    )
 
     // Convert budgetAmount from currency minor units (cents) to ledger scale
     const budgetAmountLedger = toLedgerMinor(fromCurrencyMinor(body.budgetAmount, currency))
