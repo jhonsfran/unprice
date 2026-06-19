@@ -12,7 +12,10 @@ import type {
 } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { INGESTION_MAX_EVENT_AGE_MS } from "../entitlements"
+import {
+  INGESTION_MAX_EVENT_AGE_MS,
+  extractCurrencyCodeFromFeatureConfig,
+} from "../entitlements"
 import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import type { IngestionRejectionReason } from "./interface"
@@ -20,10 +23,14 @@ import type { IngestionQueueMessage } from "./message"
 
 export type IngestionGrant = {
   allowanceUnits: number | null
+  cadenceEffectiveAt: number
+  cadenceExpiresAt: number | null
+  currencyCode: string
   effectiveAt: number
   expiresAt: number | null
   grantId: string
   priority: number
+  resetConfig: ResetConfig | null
 }
 
 export type IngestionBillingPeriodContext = {
@@ -336,6 +343,12 @@ export function toIngestionEntitlement(
   entitlement: CustomerEntitlementExtended,
   options: { billingPeriods?: IngestionBillingPeriodContext[] } = {}
 ): IngestionEntitlement {
+  const resetConfig =
+    entitlement.featurePlanVersion.resetConfig ??
+    toResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig)
+  const currencyCode =
+    extractCurrencyCodeFromFeatureConfig(entitlement.featurePlanVersion.config) ?? "USD"
+
   return {
     billingPeriods: options.billingPeriods ?? [],
     creditLinePolicy: entitlement.subscriptionPhase?.creditLinePolicy ?? "uncapped",
@@ -349,17 +362,19 @@ export function toIngestionEntitlement(
     featureType: entitlement.featurePlanVersion.featureType,
     grants: (entitlement.grants ?? []).map((grant) => ({
       allowanceUnits: grant.allowanceUnits,
+      cadenceEffectiveAt: entitlement.effectiveAt,
+      cadenceExpiresAt: entitlement.expiresAt,
+      currencyCode,
       effectiveAt: grant.effectiveAt,
       expiresAt: grant.expiresAt,
       grantId: grant.id,
       priority: grant.priority,
+      resetConfig,
     })),
     meterConfig: entitlement.featurePlanVersion.meterConfig ?? null,
     overageStrategy: entitlement.overageStrategy,
     projectId: entitlement.projectId,
-    resetConfig:
-      entitlement.featurePlanVersion.resetConfig ??
-      toResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig),
+    resetConfig,
     subscriptionId: entitlement.subscriptionId,
     subscriptionItemId: entitlement.subscriptionItemId,
   }

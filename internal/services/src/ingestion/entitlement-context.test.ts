@@ -38,10 +38,14 @@ describe("IngestionEntitlementContextLoader", () => {
       grants: [
         {
           allowanceUnits: null,
+          cadenceEffectiveAt: TEST_NOW - 1_000,
+          cadenceExpiresAt: null,
+          currencyCode: "USD",
           effectiveAt: TEST_NOW - 1_000,
           expiresAt: TEST_NOW + 1_000,
           grantId: "grant_unlimited",
           priority: 20,
+          resetConfig: null,
         },
       ],
     })
@@ -65,8 +69,20 @@ describe("IngestionEntitlementContextLoader", () => {
       grants: [
         {
           allowanceUnits: null,
+          cadenceEffectiveAt: entitlement.effectiveAt,
+          cadenceExpiresAt: entitlement.expiresAt,
+          currencyCode: "USD",
+          effectiveAt: TEST_NOW - 1_000,
+          expiresAt: TEST_NOW + 1_000,
           grantId: "grant_unlimited",
           priority: 20,
+          resetConfig: {
+            name: "monthly",
+            resetAnchor: "dayOfCreation",
+            resetInterval: "month",
+            resetIntervalCount: 1,
+            planType: "recurring",
+          },
         },
       ],
       subscriptionId: "sub_123",
