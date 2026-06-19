@@ -1,5 +1,9 @@
 import { Err, Ok, type Result } from "@unprice/error"
-import type { IngestionEntitlement, IngestionGrant } from "@unprice/services/ingestion"
+import {
+  type IngestionEntitlement,
+  type IngestionGrant,
+  buildRunBudgetName,
+} from "@unprice/services/ingestion"
 import type {
   RunBudgetClient,
   RunBudgetError,
@@ -12,7 +16,13 @@ import type { Env } from "~/env"
 import type { RunBudgetDecision } from "./contracts"
 
 export class CloudflareRunBudgetClient implements RunBudgetClient {
-  constructor(private readonly env: Pick<Env, "runbudget">) {}
+  private readonly appEnv: Env["APP_ENV"]
+  private readonly runbudget: Env["runbudget"]
+
+  constructor(env: Pick<Env, "APP_ENV" | "runbudget">) {
+    this.appEnv = env.APP_ENV
+    this.runbudget = env.runbudget
+  }
 
   async startRun(input: {
     projectId: string
@@ -128,9 +138,13 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
   }
 
   private stub(input: { projectId: string; customerId: string; runId: string }) {
-    const id = this.env.runbudget.idFromName(
-      `${input.projectId}:${input.customerId}:${input.runId}`
+    return this.runbudget.getByName(
+      buildRunBudgetName({
+        appEnv: this.appEnv,
+        customerId: input.customerId,
+        projectId: input.projectId,
+        runId: input.runId,
+      })
     )
-    return this.env.runbudget.get(id)
   }
 }

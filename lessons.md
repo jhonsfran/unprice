@@ -147,6 +147,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
   (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
   timestamp.
+- 2026-06-19: RunBudgetDO and EntitlementWindowDO names must include `APP_ENV`; copied data across
+  environments can otherwise route to the same Durable Object name for the same project/customer id.
 
 ## Next.js And Dashboard
 

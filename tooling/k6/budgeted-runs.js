@@ -25,7 +25,9 @@ const BASE_URL = normalizeBaseUrl(__ENV.BASE_URL || "http://localhost:8787")
 const UNPRICE_TOKEN = __ENV.UNPRICE_TOKEN || ""
 const PROJECT_ID = __ENV.PROJECT_ID || ""
 const CUSTOMER_ID = __ENV.CUSTOMER_ID || ""
-const BUDGET_AMOUNT = positiveInteger(__ENV.BUDGET_AMOUNT, 10000)
+// Budget per run in currency minor units (cents). Keep small relative to the
+// wallet cap so multiple concurrent runs can coexist. Default: 100 = $1.00/€1.00.
+const BUDGET_AMOUNT = positiveInteger(__ENV.BUDGET_AMOUNT, 100)
 const CURRENCY = __ENV.CURRENCY || "USD"
 const EVENTS_PER_RUN = positiveInteger(__ENV.EVENTS_PER_RUN, 50)
 const RUNS = positiveInteger(__ENV.RUNS, 10)
@@ -94,7 +96,16 @@ export default function (profile) {
   })
 
   if (!startOk) {
-    fail(`Failed to start run: ${startRes.status} ${startRes.body}`)
+    const body = parseJson(startRes)
+    const message = body?.error?.message || startRes.body
+
+    // Wallet-empty is an expected condition in load tests -- log and skip iteration
+    if (startRes.status === 400 && message.includes("wallet balance")) {
+      console.warn(`[VU${__VU}] Skipping iteration: ${message}`)
+      return
+    }
+
+    fail(`Failed to start run: ${startRes.status} ${message}`)
   }
 
   const run = parseJson(startRes)
@@ -117,6 +128,7 @@ export default function (profile) {
       `/v1/runs/${runId}/events/sync`,
       {
         featureSlug: target.featureSlug,
+        eventSlug: target.eventSlug,
         idempotencyKey: `k6-evt-${runId}-${i}-${randomInteger(100000, 999999)}`,
         properties: buildProperties(target.propertyFields),
       },

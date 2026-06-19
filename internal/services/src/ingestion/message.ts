@@ -77,6 +77,15 @@ export function buildIngestionWindowName(params: {
   )
 }
 
+export function buildRunBudgetName(params: {
+  appEnv: string
+  customerId: string
+  projectId: string
+  runId: string
+}): string {
+  return [params.appEnv, params.projectId, params.customerId, params.runId].join(":")
+}
+
 export function isIngestionEntitlementActiveAt(
   entitlement: Pick<IngestionEntitlement, "effectiveAt" | "expiresAt">,
   timestamp: number
