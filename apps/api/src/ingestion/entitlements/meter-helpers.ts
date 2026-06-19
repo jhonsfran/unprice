@@ -1,6 +1,11 @@
 import type { MeterConfig } from "@unprice/services/entitlements"
-import { deriveMeterKey } from "@unprice/services/entitlements"
+import {
+  deriveMeterKey,
+  extractCurrencyCodeFromFeatureConfig,
+} from "@unprice/services/entitlements"
 import type { ApplyInput, EntitlementConfigInput, MeterIdentity } from "./contracts"
+
+export { extractCurrencyCodeFromFeatureConfig } from "@unprice/services/entitlements"
 
 export function resolveMeterIdentity(entitlement: EntitlementConfigInput): MeterIdentity {
   return {
@@ -9,26 +14,6 @@ export function resolveMeterIdentity(entitlement: EntitlementConfigInput): Meter
     key: deriveMeterKey(entitlement.meterConfig),
     config: entitlement.meterConfig,
   }
-}
-
-export function extractCurrencyCodeFromFeatureConfig(config: unknown): string | null {
-  const currencyFromPrice = extractCurrencyCode(config, "price")
-  if (currencyFromPrice) {
-    return currencyFromPrice
-  }
-
-  if (!isRecord(config) || !Array.isArray(config.tiers)) {
-    return null
-  }
-
-  for (const tier of config.tiers) {
-    const currencyFromTier = extractCurrencyCode(tier, "unitPrice")
-    if (currencyFromTier) {
-      return currencyFromTier
-    }
-  }
-
-  return null
 }
 
 export function readNumericEventField(
@@ -53,30 +38,6 @@ export function readNumericEventField(
   return numericValue
 }
 
-function extractCurrencyCode(input: unknown, priceKey: string): string | null {
-  if (!isRecord(input)) {
-    return null
-  }
-
-  const price = input[priceKey]
-  if (!isRecord(price)) {
-    return null
-  }
-
-  const dinero = price.dinero
-  if (!isRecord(dinero)) {
-    return null
-  }
-
-  const currency = dinero.currency
-  if (!isRecord(currency)) {
-    return null
-  }
-
-  const code = currency.code
-  return typeof code === "string" && code.length > 0 ? code : null
-}
-
 function parseFiniteNumericValue(value: unknown): number | null {
   if (typeof value === "number") {
     return Number.isFinite(value) ? value : null
@@ -93,8 +54,4 @@ function parseFiniteNumericValue(value: unknown): number | null {
 
   const parsedValue = Number(trimmedValue)
   return Number.isFinite(parsedValue) ? parsedValue : null
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }

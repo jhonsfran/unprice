@@ -6833,6 +6833,28 @@ async function loadEntitlementWindowDO() {
       resolveConsumedGrantUnits,
       resolveGrantOverageStrategy,
       validateGrantBatch,
+      extractCurrencyCodeFromFeatureConfig: (config: unknown) => {
+        if (typeof config !== "object" || config === null) return null
+        const rec = config as Record<string, unknown>
+        const price = rec.price as Record<string, unknown> | undefined
+        if (price?.dinero) {
+          const dinero = price.dinero as Record<string, unknown>
+          const currency = dinero.currency as Record<string, unknown> | undefined
+          if (currency?.code && typeof currency.code === "string") return currency.code
+        }
+        if (Array.isArray(rec.tiers)) {
+          for (const tier of rec.tiers) {
+            const t = tier as Record<string, unknown>
+            const unitPrice = t.unitPrice as Record<string, unknown> | undefined
+            if (unitPrice?.dinero) {
+              const d = unitPrice.dinero as Record<string, unknown>
+              const c = d.currency as Record<string, unknown> | undefined
+              if (c?.code && typeof c.code === "string") return c.code
+            }
+          }
+        }
+        return null
+      },
     }
   })
 

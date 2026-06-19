@@ -10,7 +10,26 @@ import {
   computeUsagePriceDeltaExplanation,
   computeUsagePriceDeltaMinor,
   consumeGrantsByPriority,
+  extractCurrencyCodeFromFeatureConfig,
 } from "./grant-consumption"
+
+describe("extractCurrencyCodeFromFeatureConfig", () => {
+  it("returns the direct unit price currency", () => {
+    expect(extractCurrencyCodeFromFeatureConfig(priceConfig("EUR"))).toBe("EUR")
+  })
+
+  it("returns the first tier unit price currency", () => {
+    expect(
+      extractCurrencyCodeFromFeatureConfig({
+        tiers: [{ unitPrice: priceConfig("GBP").price }],
+      })
+    ).toBe("GBP")
+  })
+
+  it("returns null when no pricing currency exists", () => {
+    expect(extractCurrencyCodeFromFeatureConfig({ usageMode: "unit" })).toBeNull()
+  })
+})
 
 describe("consumeGrantsByPriority", () => {
   const now = Date.UTC(2026, 2, 19, 12, 0, 0)
@@ -793,3 +812,25 @@ describe("grant pricing helpers", () => {
     })
   })
 })
+
+function priceConfig(currencyCode: "EUR" | "GBP" | "USD") {
+  const currency = currencyCode === "EUR" ? EUR : currencyCode === "USD" ? USD : undefined
+
+  return {
+    usageMode: "unit",
+    price: {
+      dinero: {
+        amount: 0,
+        currency:
+          currency ??
+          ({
+            code: "GBP",
+            base: 10,
+            exponent: 2,
+          } as const),
+        scale: 2,
+      },
+      displayAmount: "0.00",
+    },
+  }
+}

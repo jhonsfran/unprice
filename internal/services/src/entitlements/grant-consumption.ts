@@ -291,6 +291,54 @@ export function computeUsagePriceDeltaMinor(params: {
   return diffLedgerMinor(afterResult.val.totalPrice.dinero, beforeResult.val.totalPrice.dinero)
 }
 
+export function extractCurrencyCodeFromFeatureConfig(config: unknown): string | null {
+  const currencyFromPrice = extractCurrencyCode(config, "price")
+  if (currencyFromPrice) {
+    return currencyFromPrice
+  }
+
+  if (!isRecord(config) || !Array.isArray(config.tiers)) {
+    return null
+  }
+
+  for (const tier of config.tiers) {
+    const currencyFromTier = extractCurrencyCode(tier, "unitPrice")
+    if (currencyFromTier) {
+      return currencyFromTier
+    }
+  }
+
+  return null
+}
+
+function extractCurrencyCode(input: unknown, priceKey: string): string | null {
+  if (!isRecord(input)) {
+    return null
+  }
+
+  const price = input[priceKey]
+  if (!isRecord(price)) {
+    return null
+  }
+
+  const dinero = price.dinero
+  if (!isRecord(dinero)) {
+    return null
+  }
+
+  const currency = dinero.currency
+  if (!isRecord(currency)) {
+    return null
+  }
+
+  const code = currency.code
+  return typeof code === "string" && code.length > 0 ? code : null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
 export function computeUsagePriceDeltaExplanation(params: {
   priceConfig: ConfigFeatureVersionType
   usageAfter: number
