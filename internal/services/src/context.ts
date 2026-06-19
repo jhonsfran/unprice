@@ -1,7 +1,7 @@
-import { AgentService } from "./agents/service"
 import { AnalyticsService } from "./analytics/service"
 import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
+import { BudgetRunService } from "./budget-runs/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
 import { DomainService } from "./domains/service"
@@ -29,7 +29,7 @@ import { WorkspaceService } from "./workspaces/service"
  * no service creates its own child services.
  */
 export interface ServiceContext {
-  agents: AgentService
+  budgetRuns: BudgetRunService
   analytics: AnalyticsService
   apikeys: ApiKeysService
   customers: CustomerService
@@ -59,7 +59,7 @@ export interface ServiceContext {
  */
 export function createServiceContext(deps: ServiceDeps): ServiceContext {
   // 1. Leaf services (no service deps)
-  const agents = new AgentService({
+  const budgetRuns = new BudgetRunService({
     db: deps.db,
     logger: deps.logger,
   })
@@ -206,7 +206,7 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
   })
 
   return {
-    agents,
+    budgetRuns,
     analytics,
     apikeys,
     customers,
