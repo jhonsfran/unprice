@@ -4,11 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
 import type { HonoEnv } from "~/hono/env"
 
-// --- Route imports (uncomment once route modules exist) ---
-// import { registerStartRunV1 } from "./startRunV1"
-// import { registerApplyRunSyncEventV1 } from "./applyRunSyncEventV1"
-// import { registerEndRunV1 } from "./endRunV1"
-// import { registerGetRunV1 } from "./getRunV1"
+import { RunUseCaseError } from "@unprice/services/use-cases"
+import { registerApplyRunSyncEventV1 } from "./applyRunSyncEventV1"
+import { registerEndRunV1 } from "./endRunV1"
+import { registerGetRunV1 } from "./getRunV1"
+import { registerStartRunV1 } from "./startRunV1"
 
 const authMocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
@@ -26,6 +26,7 @@ const useCaseMocks = vi.hoisted(() => ({
   startRun: vi.fn(),
   applyRunSyncEvent: vi.fn(),
   endRun: vi.fn(),
+  getRun: vi.fn(),
 }))
 
 vi.mock("@unprice/services/use-cases", async (importOriginal) => {
@@ -35,6 +36,7 @@ vi.mock("@unprice/services/use-cases", async (importOriginal) => {
     startRun: useCaseMocks.startRun,
     applyRunSyncEvent: useCaseMocks.applyRunSyncEvent,
     endRun: useCaseMocks.endRun,
+    getRun: useCaseMocks.getRun,
   }
 })
 
@@ -134,11 +136,10 @@ function createTestApp() {
     await next()
   })
 
-  // Register routes once route modules exist:
-  // registerStartRunV1(app)
-  // registerApplyRunSyncEventV1(app)
-  // registerEndRunV1(app)
-  // registerGetRunV1(app)
+  registerStartRunV1(app)
+  registerApplyRunSyncEventV1(app)
+  registerEndRunV1(app)
+  registerGetRunV1(app)
 
   const env = { APP_ENV: "development" }
   const executionCtx = {
@@ -157,7 +158,10 @@ describe("budgeted runs API", () => {
   it("starts a run for the API key default customer without agent creation", async () => {
     // Given an API key with defaultCustomerId
     authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
-    authMocks.resolveCustomerIdForApiKey.mockReturnValue("cus_default")
+    authMocks.resolveCustomerIdForApiKey.mockReturnValue({
+      success: true,
+      customerId: "cus_default",
+    })
 
     const runSummary = {
       runId: "brun_abc123",
@@ -185,6 +189,7 @@ describe("budgeted runs API", () => {
         body: JSON.stringify({
           currency: "USD",
           budgetAmount: 1000,
+          idempotencyKey: "idem_start_1",
           agentId: "my-agent",
         }),
       }),
@@ -205,11 +210,10 @@ describe("budgeted runs API", () => {
   it("rejects a mismatched customerId for a customer-bound API key", async () => {
     // Given an API key bound to customer A (cus_default)
     authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
-    authMocks.resolveCustomerIdForApiKey.mockImplementation(() => {
-      throw new UnpriceApiError({
-        code: "FORBIDDEN",
-        message: "API key is bound to a different customer",
-      })
+    authMocks.resolveCustomerIdForApiKey.mockReturnValue({
+      success: false,
+      code: "customer_forbidden",
+      message: "API key is bound to a different customer",
     })
 
     const { app, env, executionCtx } = createTestApp()
@@ -226,6 +230,7 @@ describe("budgeted runs API", () => {
           customerId: "cus_other",
           currency: "USD",
           budgetAmount: 1000,
+          idempotencyKey: "idem_mismatch_1",
         }),
       }),
       env,
@@ -241,11 +246,10 @@ describe("budgeted runs API", () => {
   it("requires customerId for an unbound API key", async () => {
     // Given an API key without defaultCustomerId
     authMocks.keyAuth.mockResolvedValue(verifiedKeyUnbound)
-    authMocks.resolveCustomerIdForApiKey.mockImplementation(() => {
-      throw new UnpriceApiError({
-        code: "BAD_REQUEST",
-        message: "customerId is required when API key has no default customer",
-      })
+    authMocks.resolveCustomerIdForApiKey.mockReturnValue({
+      success: false,
+      code: "customer_required",
+      message: "customerId is required when API key has no default customer",
     })
 
     const { app, env, executionCtx } = createTestApp()
@@ -261,6 +265,7 @@ describe("budgeted runs API", () => {
         body: JSON.stringify({
           currency: "USD",
           budgetAmount: 1000,
+          idempotencyKey: "idem_unbound_1",
         }),
       }),
       env,
@@ -306,6 +311,7 @@ describe("budgeted runs API", () => {
         },
         body: JSON.stringify({
           featureSlug: "tokens",
+          idempotencyKey: "idem_sync_1",
           id: "evt_1",
           eventSlug: "token_usage",
           timestamp: 1700000000000,
@@ -334,8 +340,11 @@ describe("budgeted runs API", () => {
     authMocks.keyAuth.mockResolvedValue(verifiedKeyBoundToB)
 
     // The run belongs to customer A, but the key is bound to customer B.
-    // The route should reject with 404 or 403.
-    runBudgetMocks.getRunStatus.mockResolvedValue(null)
+    // The use case enforces customer scope and returns RUN_NOT_FOUND.
+    useCaseMocks.getRun.mockResolvedValue({
+      val: undefined,
+      err: new RunUseCaseError("RUN_NOT_FOUND"),
+    })
 
     const { app, env, executionCtx } = createTestApp()
 

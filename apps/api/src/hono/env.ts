@@ -2,9 +2,9 @@ import type { Analytics } from "@unprice/analytics"
 import type { Stats } from "@unprice/analytics/utils"
 import type { Database } from "@unprice/db"
 import type { Logger } from "@unprice/logs"
-import type { AgentService } from "@unprice/services/agents"
 import type { ApiKeysService } from "@unprice/services/apikey"
 import type { BillingService } from "@unprice/services/billing"
+import type { BudgetRunService } from "@unprice/services/budget-runs"
 import type { Cache } from "@unprice/services/cache"
 import type { CustomerService } from "@unprice/services/customers"
 import type { EntitlementService } from "@unprice/services/entitlements"
@@ -22,7 +22,7 @@ import type { IngestionService } from "~/ingestion/service"
  * Domain services — business logic, properly wired via createServiceContext.
  */
 export type DomainServiceContext = {
-  agents: AgentService
+  budgetRuns: BudgetRunService
   customer: CustomerService
   subscription: SubscriptionService
   entitlement: EntitlementService
