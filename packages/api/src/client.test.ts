@@ -43,10 +43,22 @@ describe("Unprice client", () => {
       offset: number
     }>().toMatchTypeOf<OperationInput<"analytics.charges.explain">>()
     expectTypeOf<{
+      invoice_id: string
+      entry_id: string
+    }>().toMatchTypeOf<OperationInput<"analytics.charges.explain">>()
+    expectTypeOf<{
       customer_id: string
       feature_slug: string
       horizon_days: number
     }>().toMatchTypeOf<OperationInput<"analytics.usage.forecast">>()
+    expectTypeOf<{
+      customer_id: string
+      feature_slug: string
+    }>().toMatchTypeOf<OperationInput<"analytics.usage.forecast">>()
+    expectTypeOf<{
+      from_ts: number
+      to_ts: number
+    }>().toMatchTypeOf<OperationInput<"ingestionEvents.status">>()
   })
 
   it("exposes generated resource clients for every public SDK operation", () => {
@@ -167,6 +179,23 @@ describe("Unprice client", () => {
     )
   })
 
+  it("serializes zero-input GET requests without params", async () => {
+    const requests: Request[] = []
+    const client = createClient(async (request) => {
+      requests.push(request.clone())
+      return createJsonResponse({
+        features: [],
+      })
+    })
+
+    const { error } = await client.features.list()
+
+    expect(error).toBeUndefined()
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.method).toBe("GET")
+    expect(requests[0]?.url).toBe("https://example.com/v1/features/list")
+  })
+
   it("sends generated POST operation bodies through the typed OpenAPI transport", async () => {
     const requests: Request[] = []
     const client = createClient(async (request) => {
@@ -199,6 +228,43 @@ describe("Unprice client", () => {
       properties: {
         amount: 42,
       },
+    })
+  })
+
+  it("serializes POST path params separately from request bodies", async () => {
+    const requests: Request[] = []
+    const client = createClient(async (request) => {
+      requests.push(request.clone())
+      return createJsonResponse({
+        accepted: true,
+        reason: "accepted",
+        run: {
+          runId: "run_123",
+          status: "running",
+          budgetAmount: 500,
+          consumedAmount: 10,
+          remainingAmount: 490,
+          currency: "USD",
+          customerId: "cus_123",
+          projectId: "proj_123",
+          agentId: null,
+        },
+      })
+    })
+
+    const { result, error } = await client.runs.consume({
+      runId: "run_123",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_123",
+    })
+
+    expect(error).toBeUndefined()
+    expect(result?.accepted).toBe(true)
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.url).toBe("https://example.com/v1/runs/consume/run_123")
+    await expect(requests[0]?.json()).resolves.toEqual({
+      featureSlug: "tokens",
+      idempotencyKey: "idem_123",
     })
   })
 

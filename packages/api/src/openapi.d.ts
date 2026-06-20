@@ -1036,7 +1036,7 @@ export interface operations {
                      * @default completed
                      * @enum {string}
                      */
-                    status: "completed" | "canceled" | "failed";
+                    status?: "completed" | "canceled" | "failed";
                 };
             };
         };
@@ -1341,7 +1341,7 @@ export interface operations {
                      * @example uncapped
                      * @enum {string}
                      */
-                    creditLinePolicy: "capped" | "uncapped";
+                    creditLinePolicy?: "capped" | "uncapped";
                     /**
                      * @description Optional capped usage credit amount in the currency's smallest unit (for example, cents for USD/EUR). Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.
                      * @example 10000
@@ -1913,28 +1913,28 @@ export interface operations {
                                  * @description Whether usage should be tracked and verified in real-time. When true, usage checks happen synchronously. Default: false
                                  * @default false
                                  */
-                                realtime: boolean;
+                                realtime?: boolean;
                                 /**
                                  * @description Percentage threshold (0-100) at which to notify the customer about approaching usage limits. Default: 95 (notify at 95% usage)
                                  * @default 95
                                  */
-                                notifyUsageThreshold: number;
+                                notifyUsageThreshold?: number;
                                 /**
                                  * @description How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)
                                  * @default none
                                  * @enum {string}
                                  */
-                                overageStrategy: "none" | "last-call" | "always";
+                                overageStrategy?: "none" | "last-call" | "always";
                                 /**
                                  * @description Whether to completely block the customer when they exceed their limit. When true, access is denied until the next billing period. Default: false
                                  * @default false
                                  */
-                                blockCustomer: boolean;
+                                blockCustomer?: boolean;
                                 /**
                                  * @description Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false
                                  * @default false
                                  */
-                                hidden: boolean;
+                                hidden?: boolean;
                                 /** @description Whether this usage feature intentionally uses a billing cadence different from the parent plan. Default: false */
                                 billingCadenceOverride?: boolean;
                                 /** @description Whether this usage feature intentionally uses a reset cadence different from its billing cadence. Default: false */
@@ -1945,7 +1945,7 @@ export interface operations {
                              * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
                              * @default 1
                              */
-                            defaultQuantity: number | null;
+                            defaultQuantity?: number | null;
                             /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
                             limit?: number | null;
                             /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
@@ -3651,28 +3651,28 @@ export interface operations {
                                      * @description Whether usage should be tracked and verified in real-time. When true, usage checks happen synchronously. Default: false
                                      * @default false
                                      */
-                                    realtime: boolean;
+                                    realtime?: boolean;
                                     /**
                                      * @description Percentage threshold (0-100) at which to notify the customer about approaching usage limits. Default: 95 (notify at 95% usage)
                                      * @default 95
                                      */
-                                    notifyUsageThreshold: number;
+                                    notifyUsageThreshold?: number;
                                     /**
                                      * @description How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)
                                      * @default none
                                      * @enum {string}
                                      */
-                                    overageStrategy: "none" | "last-call" | "always";
+                                    overageStrategy?: "none" | "last-call" | "always";
                                     /**
                                      * @description Whether to completely block the customer when they exceed their limit. When true, access is denied until the next billing period. Default: false
                                      * @default false
                                      */
-                                    blockCustomer: boolean;
+                                    blockCustomer?: boolean;
                                     /**
                                      * @description Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false
                                      * @default false
                                      */
-                                    hidden: boolean;
+                                    hidden?: boolean;
                                     /** @description Whether this usage feature intentionally uses a billing cadence different from the parent plan. Default: false */
                                     billingCadenceOverride?: boolean;
                                     /** @description Whether this usage feature intentionally uses a reset cadence different from its billing cadence. Default: false */
@@ -3683,7 +3683,7 @@ export interface operations {
                                  * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
                                  * @default 1
                                  */
-                                defaultQuantity: number | null;
+                                defaultQuantity?: number | null;
                                 /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
                                 limit?: number | null;
                                 /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
@@ -4327,28 +4327,28 @@ export interface operations {
                                      * @description Whether usage should be tracked and verified in real-time. When true, usage checks happen synchronously. Default: false
                                      * @default false
                                      */
-                                    realtime: boolean;
+                                    realtime?: boolean;
                                     /**
                                      * @description Percentage threshold (0-100) at which to notify the customer about approaching usage limits. Default: 95 (notify at 95% usage)
                                      * @default 95
                                      */
-                                    notifyUsageThreshold: number;
+                                    notifyUsageThreshold?: number;
                                     /**
                                      * @description How to handle usage that exceeds the feature limit. Options: 'none' (strict deny), 'last-call' (allow one final call while tokens remain), 'always' (allow and record overage)
                                      * @default none
                                      * @enum {string}
                                      */
-                                    overageStrategy: "none" | "last-call" | "always";
+                                    overageStrategy?: "none" | "last-call" | "always";
                                     /**
                                      * @description Whether to completely block the customer when they exceed their limit. When true, access is denied until the next billing period. Default: false
                                      * @default false
                                      */
-                                    blockCustomer: boolean;
+                                    blockCustomer?: boolean;
                                     /**
                                      * @description Whether to hide this feature from customer-facing displays like pricing pages. Useful for internal or technical features. Default: false
                                      * @default false
                                      */
-                                    hidden: boolean;
+                                    hidden?: boolean;
                                     /** @description Whether this usage feature intentionally uses a billing cadence different from the parent plan. Default: false */
                                     billingCadenceOverride?: boolean;
                                     /** @description Whether this usage feature intentionally uses a reset cadence different from its billing cadence. Default: false */
@@ -4359,7 +4359,7 @@ export interface operations {
                                  * @description Default quantity of this feature included when a customer subscribes. Example: 5 for '5 team members included'. Default: 1
                                  * @default 1
                                  */
-                                defaultQuantity: number | null;
+                                defaultQuantity?: number | null;
                                 /** @description Maximum allowed usage for this feature per billing period. Null or undefined means unlimited. Example: 10000 for 10,000 API calls/month */
                                 limit?: number | null;
                                 /** @description Snapshotted event-native meter configuration for this plan version feature. When present, it is the authoritative source for how usage should be measured */
@@ -4573,10 +4573,10 @@ export interface operations {
                              * @default uncapped
                              * @enum {string}
                              */
-                            creditLinePolicy: "capped" | "uncapped";
+                            creditLinePolicy?: "capped" | "uncapped";
                             creditLineAmount: number | null;
                             /** @default 0 */
-                            trialUnits: number | null;
+                            trialUnits?: number | null;
                             billingAnchor: number;
                             trialEndsAt: number | null;
                             startAt: number;
@@ -4747,9 +4747,9 @@ export interface operations {
                     invoice_id: string;
                     entry_id: string;
                     /** @default 100 */
-                    limit: number;
+                    limit?: number;
                     /** @default 0 */
-                    offset: number;
+                    offset?: number;
                 };
             };
         };
@@ -4948,7 +4948,7 @@ export interface operations {
                     feature_slug: string;
                     period_key?: string;
                     /** @default 14 */
-                    horizon_days: number;
+                    horizon_days?: number;
                 };
             };
         };
@@ -5087,7 +5087,7 @@ export interface operations {
                     /** @enum {string} */
                     state?: "processed" | "rejected" | "failed";
                     /** @default 50 */
-                    limit: number;
+                    limit?: number;
                 };
             };
         };

@@ -99,3 +99,27 @@ type _UsageRecordInputCheck = AssertAssignable<
 >
 
 type _FeaturesListInputCheck = AssertAssignable<OperationInput<"features.list">, EmptyObject>
+
+type _ExplainChargeOptionalDefaultsInputCheck = AssertAssignable<
+  {
+    invoice_id: string
+    entry_id: string
+  },
+  OperationInput<"analytics.charges.explain">
+>
+
+type _ForecastUsageOptionalDefaultsInputCheck = AssertAssignable<
+  {
+    customer_id: string
+    feature_slug: string
+  },
+  OperationInput<"analytics.usage.forecast">
+>
+
+type _IngestionStatusOptionalDefaultsInputCheck = AssertAssignable<
+  {
+    from_ts: number
+    to_ts: number
+  },
+  OperationInput<"ingestionEvents.status">
+>
