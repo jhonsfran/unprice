@@ -212,6 +212,14 @@ describe("public operation contracts", () => {
     expect(sdkPublicOperations).toEqual(expectedSdkPublicOperations)
   })
 
+  it("declares run start idempotency on the request body key", () => {
+    expect(runsStartRoute["x-unprice"].idempotency).toEqual({
+      required: true,
+      location: "body",
+      field: "idempotencyKey",
+    })
+  })
+
   it("does not expose non-public routes in the SDK", () => {
     for (const route of routes.filter(
       (candidate) => candidate["x-unprice"]?.audience !== "public"
