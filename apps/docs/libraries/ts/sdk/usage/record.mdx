@@ -6,7 +6,7 @@ description: "Queue a raw usage event for asynchronous processing"
 <RequestExample>
 
 ```ts
-const { result, error } = await unprice.events.ingest({
+const { result, error } = await unprice.usage.record({
   idempotencyKey: "idem_123",
   eventSlug: "tokens_used",
   customerId: "cus_1234567890",

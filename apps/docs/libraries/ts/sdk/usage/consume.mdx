@@ -6,7 +6,7 @@ description: "Synchronously verify and ingest one feature event"
 <RequestExample>
 
 ```ts
-const { result, error } = await unprice.events.ingestSync({
+const { result, error } = await unprice.usage.consume({
   idempotencyKey: "idem_123",
   eventSlug: "tokens_used",
   featureSlug: "tokens",

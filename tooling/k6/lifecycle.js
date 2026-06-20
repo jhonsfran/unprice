@@ -243,7 +243,7 @@ async function _resolvePlanSlug(sdk) {
     return PLAN_SLUG
   }
 
-  const listVersionsResult = await sdk.plans.listVersions({
+  const listVersionsResult = await sdk.planVersions.list({
     onlyPublished: true,
     onlyLatest: true,
     billingInterval: BILLING_INTERVAL,
@@ -251,11 +251,11 @@ async function _resolvePlanSlug(sdk) {
   })
 
   const isOk = check(listVersionsResult, {
-    "plans.listVersions succeeds": (res) => !res.error && Array.isArray(res.result?.planVersions),
+    "planVersions.list succeeds": (res) => !res.error && Array.isArray(res.result?.planVersions),
   })
 
   if (!isOk || listVersionsResult.error) {
-    fail(`plans.listVersions failed: ${describeSdkError(listVersionsResult)}`)
+    fail(`planVersions.list failed: ${describeSdkError(listVersionsResult)}`)
   }
 
   const planVersions = listVersionsResult.result?.planVersions || []
@@ -306,7 +306,7 @@ async function resolveEntitlementFeatureSlugs(sdk, customerId) {
     }
 
     const hasActivePhase = Boolean(subscriptionResult.result?.activePhase)
-    const entitlementsResult = await sdk.entitlements.get({ customerId })
+    const entitlementsResult = await sdk.access.entitlements.list({ customerId })
 
     if (isRateLimited(entitlementsResult)) {
       sleep(PROVISIONING_POLL_MS / 1000)
@@ -314,7 +314,7 @@ async function resolveEntitlementFeatureSlugs(sdk, customerId) {
     }
 
     const isOk = check(entitlementsResult, {
-      "entitlements.get succeeds": (res) => !res.error && Array.isArray(res.result),
+      "access.entitlements.list succeeds": (res) => !res.error && Array.isArray(res.result),
     })
 
     if (!isOk || entitlementsResult.error) {
@@ -346,7 +346,7 @@ async function resolveUsageTargets(sdk, customerId, featureSlugs) {
     let verifyResult = null
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const result = await sdk.entitlements.verify({ customerId, featureSlug })
+      const result = await sdk.access.check({ customerId, featureSlug })
 
       if (isRateLimited(result)) {
         sleep(PROVISIONING_POLL_MS / 1000)
@@ -492,7 +492,7 @@ export default async function () {
         )
       }
 
-      const usageResult = await sdk.events.ingestSync({
+      const usageResult = await sdk.usage.consume({
         customerId,
         featureSlug: usageTarget.featureSlug,
         eventSlug: usageTarget.eventSlug,
@@ -547,13 +547,13 @@ export default async function () {
   }
 
   for (let i = 0; i < VERIFY_EVENTS_PER_CUSTOMER; i += 1) {
-    const verifyResult = await sdk.entitlements.verify({
+    const verifyResult = await sdk.access.check({
       customerId,
       featureSlug: randomFrom(verifyFeatureSlugs),
     })
 
     check(verifyResult, {
-      "entitlements.verify succeeds": (res) => !res.error && !!res.result,
+      "access.check succeeds": (res) => !res.error && !!res.result,
     })
 
     verifyEventsSent.add(1)

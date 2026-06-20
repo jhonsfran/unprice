@@ -1,0 +1,17 @@
+---
+title: Ingestion event status
+description: Inspect recent ingestion events and failures.
+---
+
+```ts
+const { result, error } = await unprice.ingestionEvents.status({
+  project_id: "proj_123",
+  limit: 50,
+})
+
+if (error) {
+  throw new Error(error.message)
+}
+
+console.log(result)
+```

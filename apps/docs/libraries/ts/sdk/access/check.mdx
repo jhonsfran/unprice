@@ -6,7 +6,7 @@ description: "Check the current feature entitlement status for a customer"
 <RequestExample>
 
 ```ts
-const { result, error } = await unprice.entitlements.verify({
+const { result, error } = await unprice.access.check({
   customerId: "cus_1234567890",
   featureSlug: "tokens"
 });

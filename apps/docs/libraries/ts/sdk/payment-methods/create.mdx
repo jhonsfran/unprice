@@ -6,7 +6,7 @@ description: "Create a payment method for a customer"
 <RequestExample>
 
 ```ts
-const { result, error } = await unprice.payments.methods.create({
+const { result, error } = await unprice.paymentMethods.create({
   customerId: "cus_1234567890",
   paymentProvider: "stripe",
   successUrl: "https://example.com/success",
