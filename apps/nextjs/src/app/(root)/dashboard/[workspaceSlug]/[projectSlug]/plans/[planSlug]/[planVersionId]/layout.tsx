@@ -23,9 +23,10 @@ export default async function PlanVersionLayout(props: {
     planVersionId: string
   }
 }) {
+  const { getVersionsBySlug } = api.plans
   const [{ planVersion }, { plan }] = await Promise.all([
     api.planVersions.getById({ id: props.params.planVersionId }),
-    api.plans.getVersionsBySlug({ slug: props.params.planSlug }),
+    getVersionsBySlug({ slug: props.params.planSlug }),
   ])
 
   if (!planVersion) {

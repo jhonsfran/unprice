@@ -354,14 +354,11 @@ async function resolveUsageTargets(sdk, customerId, featureSlugs) {
       }
 
       const verifyOk = check(result, {
-        "entitlements.verify succeeds during usage target resolution": (res) =>
-          !res.error && !!res.result,
+        "access.check succeeds during usage target resolution": (res) => !res.error && !!res.result,
       })
 
       if (!verifyOk || result.error) {
-        hardFail(
-          `entitlements.verify failed while resolving usage targets: ${describeSdkError(result)}`
-        )
+        hardFail(`access.check failed while resolving usage targets: ${describeSdkError(result)}`)
       }
 
       verifyResult = result
@@ -508,11 +505,11 @@ export default async function () {
       }
 
       const usageOk = check(usageResult, {
-        "events.ingestSync succeeds": (res) => !res.error && !!res.result,
+        "usage.consume succeeds": (res) => !res.error && !!res.result,
       })
 
       if (!usageOk || usageResult.error) {
-        hardFail(`events.ingestSync failed: ${describeSdkError(usageResult)}`)
+        hardFail(`usage.consume failed: ${describeSdkError(usageResult)}`)
       }
 
       if (usageResult.result?.allowed) {
@@ -536,7 +533,7 @@ export default async function () {
         break
       }
 
-      hardFail(`events.ingestSync rejected unexpectedly: ${JSON.stringify(usageResult.result)}`)
+      hardFail(`usage.consume rejected unexpectedly: ${JSON.stringify(usageResult.result)}`)
     }
 
     if (!eventHandled) {

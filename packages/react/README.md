@@ -29,7 +29,7 @@ function UsageButton() {
   return (
     <button
       onClick={() => {
-        void client.events.ingest({
+        void client.usage.record({
           customerId: "cus_123",
           eventSlug: "api_call",
         })

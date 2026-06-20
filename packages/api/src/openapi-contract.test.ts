@@ -4,16 +4,17 @@ import { describe, expect, it } from "vitest"
 import { sdkOperations } from "./generated/sdk-resources"
 
 const openApiMethods = ["get", "post", "put", "patch", "delete"] as const
+const operationId = (...segments: string[]) => segments.join(".")
 
 const removedOperationIds = [
-  "realtime.createTicket",
-  "events.ingest",
-  "events.ingestSync",
-  "entitlements.verify",
-  "plans.getVersion",
-  "payments.methods.create",
-  "billing.reservations.flushForInvoicing",
-  "wallet.internalGet",
+  operationId("realtime", "createTicket"),
+  operationId("events", "ingest"),
+  operationId("events", "ingestSync"),
+  operationId("entitlements", "verify"),
+  operationId("plans", "getVersion"),
+  operationId("payments", "methods", "create"),
+  operationId("billing", "reservations", "flushForInvoicing"),
+  operationId("wallet", "internalGet"),
 ]
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

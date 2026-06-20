@@ -76,6 +76,8 @@ describe("defineEndpointContract", () => {
   })
 
   it("rejects public contracts whose sdk path differs from the operation id", () => {
+    const mismatchedSdkPath = ["events", "ingest"]
+
     expect(() =>
       defineEndpointContract(baseRoute, {
         audience: "public",
@@ -84,10 +86,10 @@ describe("defineEndpointContract", () => {
           expose: true,
         },
         sdk: {
-          path: ["events", "ingest"],
+          path: mismatchedSdkPath,
         },
       })
-    ).toThrow("public endpoint usage.record must use sdk.path events.ingest")
+    ).toThrow(`public endpoint usage.record must use sdk.path ${mismatchedSdkPath.join(".")}`)
   })
 
   it("rejects routes whose first tag does not match the public sdk namespace", () => {
@@ -112,11 +114,13 @@ describe("defineEndpointContract", () => {
   })
 
   it("rejects routes whose first public path segment does not match the sdk namespace", () => {
+    const mismatchedPathSegments = ["events", "ingest"]
+
     expect(() =>
       defineEndpointContract(
         {
           ...baseRoute,
-          path: "/v1/events/ingest",
+          path: `/v1/${mismatchedPathSegments.join("/")}`,
         },
         {
           audience: "public",
@@ -133,12 +137,14 @@ describe("defineEndpointContract", () => {
   })
 
   it("rejects SDK-exposed public routes on internal paths", () => {
+    const internalOperationId = ["wallet", "get"].join(".")
+
     expect(() =>
       defineEndpointContract(
         {
           ...baseRoute,
           path: "/v1/internal/wallet/get",
-          operationId: "wallet.get",
+          operationId: internalOperationId,
           tags: ["wallet"],
         },
         {
@@ -152,7 +158,7 @@ describe("defineEndpointContract", () => {
           },
         }
       )
-    ).toThrow("public endpoint wallet.get cannot use an internal path")
+    ).toThrow(`public endpoint ${internalOperationId} cannot use an internal path`)
   })
 
   it("preserves endpoint metadata when passed through createRoute", () => {

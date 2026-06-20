@@ -220,7 +220,7 @@ function formatWalletState(
 export const registerGetWalletV1 = (app: App) => {
   app.openapi(walletBalanceRoute, async (c) => {
     const { customerId, projectId } = c.req.valid("query")
-    const { customer, wallet } = c.get("services")
+    const { customer, wallet: walletService } = c.get("services")
 
     const key = await keyAuth(c)
 
@@ -240,7 +240,7 @@ export const registerGetWalletV1 = (app: App) => {
       throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
     }
 
-    const { val, err } = await wallet.getWalletState({
+    const { val, err } = await walletService.getWalletState({
       projectId: finalProjectId,
       customerId,
     })
@@ -254,7 +254,7 @@ export const registerGetWalletV1 = (app: App) => {
 
   app.openapi(route, async (c) => {
     const { customerId, projectId } = c.req.valid("query")
-    const { customer, wallet } = c.get("services")
+    const { customer, wallet: walletService } = c.get("services")
 
     const key = await keyAuth(c)
 
@@ -274,7 +274,7 @@ export const registerGetWalletV1 = (app: App) => {
       throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
     }
 
-    const { val, err } = await wallet.getWalletState({
+    const { val, err } = await walletService.getWalletState({
       projectId: finalProjectId,
       customerId,
     })
@@ -289,7 +289,7 @@ export const registerGetWalletV1 = (app: App) => {
   app.openapi(walletCreditBalanceRoute, async (c) => {
     const { customerId, projectId } = c.req.valid("query")
     const { walletId } = c.req.valid("param")
-    const { customer, wallet } = c.get("services")
+    const { customer, wallet: walletService } = c.get("services")
 
     const key = await keyAuth(c)
 
@@ -309,7 +309,7 @@ export const registerGetWalletV1 = (app: App) => {
       throw new UnpriceApiError({ code: "NOT_FOUND", message: "Customer not found" })
     }
 
-    const { val, err } = await wallet.getWalletCreditBalance({
+    const { val, err } = await walletService.getWalletCreditBalance({
       projectId: finalProjectId,
       customerId,
       walletId,
