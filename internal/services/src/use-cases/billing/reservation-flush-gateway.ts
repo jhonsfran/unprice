@@ -67,7 +67,7 @@ export class HttpBillingReservationFlushGateway implements BillingReservationFlu
       return Err(
         new FetchError({
           message: await readErrorMessage(response),
-          retry: response.status >= 500,
+          retry: shouldRetryFlushResponse(response.status),
           context: {
             url: INTERNAL_FLUSH_PATH,
             method: "POST",
@@ -83,6 +83,10 @@ export class HttpBillingReservationFlushGateway implements BillingReservationFlu
 
 function buildInternalFlushUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}${INTERNAL_FLUSH_PATH}`
+}
+
+function shouldRetryFlushResponse(status: number): boolean {
+  return status === 409 || status >= 500
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

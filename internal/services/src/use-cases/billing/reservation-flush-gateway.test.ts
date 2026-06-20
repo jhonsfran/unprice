@@ -59,6 +59,31 @@ describe("HttpBillingReservationFlushGateway", () => {
     })
   })
 
+  it("treats deferred conflict responses as retryable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: "retry later" } }), {
+        status: 409,
+      })
+    )
+    const gateway = new HttpBillingReservationFlushGateway({
+      baseUrl: "https://api.example.test",
+      token: "secret_token",
+      fetch: fetchMock,
+    })
+
+    const result = await gateway.flushForInvoicing(input)
+
+    expect(result.val).toBeUndefined()
+    expect(result.err).toBeInstanceOf(FetchError)
+    expect(result.err?.message).toBe("retry later")
+    expect(result.err?.retry).toBe(true)
+    expect(result.err?.context).toEqual({
+      url: "/v1/internal/billing-reservations/flush-for-invoicing",
+      method: "POST",
+      status: 409,
+    })
+  })
+
   it("maps thrown fetch failures to retryable FetchError", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("network down"))
     const gateway = new HttpBillingReservationFlushGateway({
