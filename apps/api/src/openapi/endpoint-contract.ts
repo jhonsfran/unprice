@@ -53,6 +53,12 @@ function getFirstPublicPathSegment(path: string): string | null {
   return parts[1] ?? null
 }
 
+function isV1InternalPath(path: string): boolean {
+  const parts = path.split("/").filter(Boolean)
+
+  return parts[0] === "v1" && parts[1] === "internal"
+}
+
 function normalizePathSegment(segment: string | null): string | null {
   if (!segment) {
     return null
@@ -76,6 +82,10 @@ export function validateEndpointContract(route: RouteIdentity, contract: Endpoin
 
   if (contract.sdk === false) {
     return
+  }
+
+  if (isV1InternalPath(route.path)) {
+    throw new Error(`public endpoint ${route.operationId} cannot use an internal path`)
   }
 
   const expectedOperationId = sdkPathToOperationId(contract.sdk.path)

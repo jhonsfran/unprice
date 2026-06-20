@@ -1,3 +1,4 @@
+import { createRoute } from "@hono/zod-openapi"
 import { describe, expect, it } from "vitest"
 import { defineEndpointContract } from "./endpoint-contract"
 
@@ -129,6 +130,46 @@ describe("defineEndpointContract", () => {
         }
       )
     ).toThrow("public endpoint usage.record must use first /v1 path segment usage")
+  })
+
+  it("rejects SDK-exposed public routes on internal paths", () => {
+    expect(() =>
+      defineEndpointContract(
+        {
+          ...baseRoute,
+          path: "/v1/internal/wallet/get",
+          operationId: "wallet.get",
+          tags: ["wallet"],
+        },
+        {
+          audience: "public",
+          category: "runtime",
+          docs: {
+            expose: true,
+          },
+          sdk: {
+            path: ["wallet", "get"],
+          },
+        }
+      )
+    ).toThrow("public endpoint wallet.get cannot use an internal path")
+  })
+
+  it("preserves endpoint metadata when passed through createRoute", () => {
+    const contract = {
+      audience: "public",
+      category: "runtime",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["usage", "record"],
+      },
+    } as const
+
+    const route = createRoute(defineEndpointContract(baseRoute, contract))
+
+    expect(route["x-unprice"]).toEqual(contract)
   })
 
   it("allows internal routes with sdk disabled", () => {
