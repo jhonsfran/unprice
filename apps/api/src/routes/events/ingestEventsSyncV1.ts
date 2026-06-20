@@ -5,6 +5,7 @@ import {
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
 import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
+import { ensureSubscriptionRenewed } from "@unprice/services/subscriptions"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -142,11 +143,39 @@ export const registerIngestEventsSyncV1 = (app: App) =>
     })
 
     startTime(c, "ingestFeatureSync")
-    const result = await ingestFeatureSync({
+    let result = await ingestFeatureSync({
       featureSlug: body.featureSlug,
       ingestion,
       message,
-    }).finally(() => endTime(c, "ingestFeatureSync"))
+    })
+
+    // If WALLET_EMPTY, the billing period may have expired without renewal.
+    // Trigger subscription catch-up once and retry.
+    if (!result.allowed && result.rejectionReason === "WALLET_EMPTY") {
+      const { customer: customerService, subscription: subscriptionService } = c.get("services")
+      const subResult = await customerService.getActiveSubscription({
+        customerId,
+        projectId,
+        now: Date.now(),
+      })
+
+      if (subResult.val) {
+        const catchUp = await ensureSubscriptionRenewed(
+          { subscriptions: subscriptionService, logger },
+          { subscriptionId: subResult.val.id, projectId }
+        )
+
+        if (catchUp.renewed) {
+          result = await ingestFeatureSync({
+            featureSlug: body.featureSlug,
+            ingestion,
+            message,
+          })
+        }
+      }
+    }
+
+    endTime(c, "ingestFeatureSync")
 
     return c.json(result, HttpStatusCodes.OK)
   })

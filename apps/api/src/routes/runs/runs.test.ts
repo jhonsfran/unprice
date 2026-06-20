@@ -146,13 +146,22 @@ function createTestApp() {
       customer: customerMock,
       entitlement: {},
       subscription: {
-        getSubscriptionData: vi.fn().mockResolvedValue({ status: "active", renewAt: Date.now() + 86400000 }),
+        getSubscriptionData: vi
+          .fn()
+          .mockResolvedValue({ status: "active", renewAt: Date.now() + 86400000 }),
         renewSubscription: vi.fn(),
         activateWallet: vi.fn(),
       },
     } as unknown as HonoEnv["Variables"]["services"])
-    c.set("cache", { ingestionPreparedGrantContext: { swr: vi.fn() } } as unknown as HonoEnv["Variables"]["cache"])
-    c.set("logger", { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } as unknown as HonoEnv["Variables"]["logger"])
+    c.set("cache", {
+      ingestionPreparedGrantContext: { swr: vi.fn() },
+    } as unknown as HonoEnv["Variables"]["cache"])
+    c.set("logger", {
+      warn: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as HonoEnv["Variables"]["logger"])
     c.set("db", {} as unknown as HonoEnv["Variables"]["db"])
     await next()
   })

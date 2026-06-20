@@ -398,7 +398,9 @@ export class RunBudgetDO extends DurableObject {
       idempotencyKey: `${input.idempotencyKey}:ew`,
       projectId: input.projectId,
       customerId: input.customerId,
-      entitlement: input.entitlement as Parameters<typeof entitlementWindow.apply>[0]["entitlement"],
+      entitlement: input.entitlement as Parameters<
+        typeof entitlementWindow.apply
+      >[0]["entitlement"],
       grants: input.grants as Parameters<typeof entitlementWindow.apply>[0]["grants"],
       enforceLimit: true,
       now: input.now,

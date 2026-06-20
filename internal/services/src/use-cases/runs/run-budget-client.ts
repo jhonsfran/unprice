@@ -70,7 +70,9 @@ export interface RunBudgetClient {
     /** The resolved customer entitlement ID for correct DO addressing */
     customerEntitlementId: string
     /** Full entitlement config for the EntitlementWindowDO */
-    entitlement: IngestionEntitlement & { meterConfig: NonNullable<IngestionEntitlement["meterConfig"]> }
+    entitlement: IngestionEntitlement & {
+      meterConfig: NonNullable<IngestionEntitlement["meterConfig"]>
+    }
     /** Active grants for the entitlement */
     grants: IngestionGrant[]
   }): Promise<Result<RunSyncDecision, RunBudgetError>>

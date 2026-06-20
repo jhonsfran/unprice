@@ -7,10 +7,6 @@ import type {
 import type { CustomerGrantContextReader, IngestionEntitlement } from "./entitlement-context"
 import { resolveCustomerGrantContextWindow } from "./entitlement-context"
 import { IngestionEntitlementRouter } from "./entitlement-routing"
-import {
-  filterIngestionEntitlementsWithValidAggregationPayload,
-  isIngestionEntitlementActiveAt,
-} from "./message"
 
 /**
  * Resolves the active entitlement for a feature slug in the context of a run sync event.

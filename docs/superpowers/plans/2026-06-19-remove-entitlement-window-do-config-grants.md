@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Remove `entitlement_config` and `grants` SQLite tables from `EntitlementWindowDO` while preserving ingestion correctness, enforcement-state verification, run-budget forwarding, wallet recovery, and generated Durable Object migrations.
+**Goal:** Remove `entitlement_config` and `grants` SQLite tables from `EntitlementWindowDO` while preserving ingestion correctness, enforcement-state verification, run-budget forwarding, wallet recovery, existing endpoint catch patterns, and generated Durable Object migrations.
 
-**Architecture:** The service-layer ingestion context becomes the source of truth for entitlement config and fully enriched grants. `EntitlementWindowDO` keeps only mutable durable state: period usage, meter state, wallet reservation, and idempotency. The DO uses caller-provided entitlement/grant input directly for apply, batch apply, and enforcement-state reads, and generated Drizzle migrations drop the redundant tables.
+**Architecture:** The service-layer ingestion context becomes the source of truth for entitlement config and fully enriched grants. `EntitlementWindowDO` keeps only mutable durable state: period usage, meter state, wallet reservation, and idempotency. The DO uses caller-provided entitlement/grant input directly for apply, batch apply, and enforcement-state reads, without adding endpoint retries, extra context loads, or request-path service calls.
 
 **Tech Stack:** TypeScript, Zod, Drizzle durable SQLite, Cloudflare Durable Objects, Vitest, pnpm workspace scripts
 
@@ -24,8 +24,13 @@
 | `apps/api/src/ingestion/entitlements/contracts.test.ts` | Create | Lock the DO contract: enriched grants are retained, legacy grants are rejected, enforcement-state accepts an empty grant array. |
 | `apps/api/src/ingestion/run-budget/contracts.ts` | Modify | Make RunBudgetDO accept and forward enriched grants. |
 | `apps/api/src/ingestion/run-budget/contracts.test.ts` | Modify | Assert run-budget sync input retains enriched grants. |
+| `apps/api/src/ingestion/run-budget/client.ts` | Verify only | Preserve `APP_ENV`-scoped RunBudgetDO names through `buildRunBudgetName()`. |
+| `apps/api/src/ingestion/entitlements/client.ts` | Verify only | Preserve `APP_ENV`-scoped EntitlementWindowDO names through `buildIngestionWindowName()`. |
 | `internal/services/src/ingestion/entitlement-window-applier.ts` | Modify | Require `getEnforcementState(input)` at the service boundary. |
 | `internal/services/src/ingestion/feature-verification.ts` | Verify only | Already passes entitlement, grants, and timestamp into `getEnforcementState()`. |
+| `apps/api/src/routes/events/ingestEventsSyncV1.ts` | Verify only | Preserve existing timestamp error mapping and the single `WALLET_EMPTY` subscription catch-up retry. |
+| `apps/api/src/routes/runs/applyRunSyncEventV1.ts` | Verify only | Preserve current run-sync behavior: resolve entitlement once, no endpoint-level subscription catch-up retry. |
+| `internal/services/src/use-cases/runs/apply-run-sync-event.ts` | Verify only | Preserve the existing run-sync orchestration and avoid adding extra entitlement context loads. |
 | `apps/api/src/ingestion/entitlements/entitlement-window-store.ts` | Modify | Delete config/grant sync/read methods and dead imports. Keep mutable state methods. |
 | `apps/api/src/ingestion/entitlements/EntitlementWindowDO.ts` | Modify | Stop writing/reading config and grants from SQLite; use parsed input directly in apply, batch, and enforcement-state paths. |
 | `apps/api/src/ingestion/entitlements/db/schema.ts` | Modify | Remove `entitlementConfigTable` and `grantsTable` from the durable SQLite schema. |
@@ -41,10 +46,24 @@
 | `internal/services/src/ingestion/feature-verification.test.ts` | Modify | Use enriched grants in verification fixtures. |
 | `internal/services/src/ingestion/entitlement-window-applier.test.ts` | Modify | Use enriched grants in applier fixtures and keep required `getEnforcementState` mock shape. |
 | `internal/services/src/ingestion/entitlement-routing.test.ts` | Modify | Use enriched grants where grant literals are present. |
-| `internal/services/src/ingestion/message.test.ts` | Modify if typecheck fails | Keep default empty grant arrays valid under the new type. |
+| `internal/services/src/ingestion/message.ts` | Verify only | Preserve `APP_ENV`-scoped EntitlementWindowDO and RunBudgetDO name builders. |
+| `internal/services/src/ingestion/message.test.ts` | Modify | Keep `APP_ENV` naming assertions and default empty grant arrays valid under the new type. |
 | `internal/services/src/ingestion/prepared-message-processor.test.ts` | Modify if typecheck fails | Keep default empty grant arrays valid under the new type. |
 | `internal/services/src/ingestion/sync-processor.test.ts` | Modify if typecheck fails | Use enriched grants where grant literals are present. |
 | `internal/services/src/ingestion/subscription-catchup.test.ts` | Modify if typecheck fails | Keep default empty grant arrays valid under the new type. |
+
+---
+
+## Hot-Path Guardrails
+
+This refactor is valid only if it deletes accidental state and does not add request-path work.
+
+- Do not add new `try/catch`, retry, subscription renewal, or catch-up branches to `apps/api/src/routes/runs/applyRunSyncEventV1.ts`.
+- Keep the existing `/v1/events/ingest/sync` catch pattern exactly scoped: timestamp validation maps timestamp errors to `BAD_REQUEST`, `ingestFeatureSync()` maps thrown service errors through `toUnpriceApiError()`, and only `WALLET_EMPTY` triggers one subscription catch-up and one retry.
+- Do not add another `prepareCustomerGrantContext()` call to sync ingestion or run sync. Normal sync and run sync already resolve entitlement context once before entering the DO path.
+- Do not make `EntitlementWindowDO.getEnforcementState()` call services, fetch entitlement context, or read fallback config/grants from SQLite. It must parse required caller input, read only grant consumption state from DO SQLite, and return the same decision shape.
+- Preserve `APP_ENV` in both DO names: `buildIngestionWindowName()` and `buildRunBudgetName()` must continue to produce `${appEnv}:${projectId}:${customerId}:...`.
+- Public endpoint request/response behavior must remain unchanged. This plan changes internal DO contracts and fixtures, not the public run-sync or sync-ingest bodies.
 
 ---
 
@@ -664,23 +683,34 @@ rtk pnpm --filter api test:file src/ingestion/run-budget/contracts.test.ts
 
 Expected: FAIL because `runGrantSchema` strips the enriched fields.
 
-- [ ] **Step 3: Extend `runGrantSchema`**
+- [ ] **Step 3: Reuse the entitlement-window schemas**
 
-In `apps/api/src/ingestion/run-budget/contracts.ts`, replace `runGrantSchema` with:
+In `apps/api/src/ingestion/run-budget/contracts.ts`, keep the `zod` import and add the entitlement-window contract import:
 
 ```typescript
-const runGrantSchema = z.object({
-  allowanceUnits: z.number().finite().nullable(),
-  cadenceEffectiveAt: z.number().finite(),
-  cadenceExpiresAt: z.number().finite().nullable(),
-  currencyCode: z.string().min(1),
-  effectiveAt: z.number().finite(),
-  expiresAt: z.number().finite().nullable(),
-  grantId: z.string().min(1),
-  priority: z.number().int(),
-  resetConfig: z.custom<unknown>((val) => val === null || (val != null && typeof val === "object")),
-})
+import { z } from "zod"
+import { activeGrantSchema, entitlementConfigSchema } from "../entitlements/contracts"
 ```
+
+Delete the local `runGrantSchema` object and replace it with:
+
+```typescript
+/**
+ * Grant shape passed through to the EntitlementWindowDO.
+ */
+const runGrantSchema = activeGrantSchema
+```
+
+Delete the local `runEntitlementConfigSchema` object and replace it with:
+
+```typescript
+/**
+ * Entitlement config passed through to the EntitlementWindowDO.
+ */
+const runEntitlementConfigSchema = entitlementConfigSchema
+```
+
+Do not edit `apps/api/src/routes/runs/applyRunSyncEventV1.ts` or the public run-sync request schema. The route still accepts the public run event body and the use case still resolves entitlement/grants server-side before calling RunBudgetDO.
 
 - [ ] **Step 4: Run focused tests**
 
@@ -691,7 +721,7 @@ rtk pnpm --filter api test:file src/ingestion/run-budget/contracts.test.ts
 rtk pnpm --filter api type-check
 ```
 
-Expected: run-budget contract tests pass. Typecheck may still fail in downstream fixtures until Task 8.
+Expected: run-budget contract tests pass. Typecheck may still fail in downstream fixtures until Task 8. There should be no diff in `apps/api/src/routes/runs/applyRunSyncEventV1.ts`.
 
 - [ ] **Step 5: Commit**
 
@@ -1166,7 +1196,7 @@ rtk pnpm --filter api test:file src/ingestion/entitlements/EntitlementWindowDO.t
 rtk pnpm --filter api type-check
 ```
 
-Expected: DO tests pass after fixture updates. Typecheck may still fail until schema/migration removal from Task 9 is complete.
+Expected: DO tests pass after fixture updates. Typecheck may still fail until schema/migration removal from Task 10 is complete.
 
 - [ ] **Step 11: Commit**
 
@@ -1344,7 +1374,116 @@ rtk git commit -m "test(ingestion): use enriched grant fixtures"
 
 ---
 
-### Task 9: Drop Config And Grant Tables With Generated Migrations
+### Task 9: Lock Run/Sync Hot-Path Guardrails
+
+**Files:**
+- Modify: `internal/services/src/ingestion/message.test.ts`
+- Verify: `internal/services/src/ingestion/message.ts`
+- Verify: `apps/api/src/ingestion/entitlements/client.ts`
+- Verify: `apps/api/src/ingestion/run-budget/client.ts`
+- Verify: `apps/api/src/routes/events/ingestEventsSyncV1.ts`
+- Verify: `apps/api/src/routes/runs/applyRunSyncEventV1.ts`
+- Verify: `internal/services/src/ingestion/sync-processor.ts`
+- Verify: `internal/services/src/ingestion/run-entitlement-resolver.ts`
+- Verify: `internal/services/src/use-cases/runs/apply-run-sync-event.ts`
+
+- [ ] **Step 1: Keep the APP_ENV naming assertions**
+
+In `internal/services/src/ingestion/message.test.ts`, keep or add these tests inside `describe("ingestion entitlement message helpers", () => {`:
+
+```typescript
+  it("routes ingestion windows by customer entitlement id", () => {
+    expect(
+      buildIngestionWindowName({
+        appEnv: "test",
+        projectId: "proj_123",
+        customerId: "cus_123",
+        customerEntitlementId: "ce_123",
+      })
+    ).toBe("test:proj_123:cus_123:ce_123")
+  })
+
+  it("routes run budget windows by app environment and run id", () => {
+    expect(
+      buildRunBudgetName({
+        appEnv: "preview",
+        projectId: "proj_123",
+        customerId: "cus_123",
+        runId: "brun_123",
+      })
+    ).toBe("preview:proj_123:cus_123:brun_123")
+  })
+```
+
+- [ ] **Step 2: Run the message helper test**
+
+Run:
+
+```bash
+rtk pnpm --filter @unprice/services test:file src/ingestion/message.test.ts
+```
+
+Expected: PASS. This locks the `APP_ENV` prefix for both durable object naming helpers.
+
+- [ ] **Step 3: Verify the clients still use the naming helpers**
+
+Run:
+
+```bash
+rtk rg -n "buildIngestionWindowName|buildRunBudgetName|appEnv" apps/api/src/ingestion/entitlements/client.ts apps/api/src/ingestion/run-budget/client.ts internal/services/src/ingestion/message.ts
+```
+
+Expected: `CloudflareEntitlementWindowClient` calls `buildIngestionWindowName()` with `this.appEnv`, `CloudflareRunBudgetClient` calls `buildRunBudgetName()` with `this.appEnv`, and both builder implementations include `appEnv` in the returned name.
+
+- [ ] **Step 4: Verify sync-ingest catch behavior did not expand**
+
+Run:
+
+```bash
+rtk rg -n "validateEventTimestamp|toUnpriceApiError|ensureSubscriptionRenewed|WALLET_EMPTY" apps/api/src/routes/events/ingestEventsSyncV1.ts apps/api/src/routes/runs/applyRunSyncEventV1.ts
+```
+
+Expected:
+
+```text
+apps/api/src/routes/events/ingestEventsSyncV1.ts: contains validateEventTimestamp, toUnpriceApiError, ensureSubscriptionRenewed, and WALLET_EMPTY
+apps/api/src/routes/runs/applyRunSyncEventV1.ts: no ensureSubscriptionRenewed match and no WALLET_EMPTY catch-up branch
+```
+
+- [ ] **Step 5: Verify entitlement context is still resolved once per path**
+
+Run:
+
+```bash
+rtk rg -n "prepareCustomerGrantContext|IngestionEntitlementContextLoader|IngestionRunEntitlementResolver" internal/services/src/ingestion/sync-processor.ts internal/services/src/ingestion/run-entitlement-resolver.ts apps/api/src/routes/runs/applyRunSyncEventV1.ts internal/services/src/use-cases/runs/apply-run-sync-event.ts
+```
+
+Expected: `prepareCustomerGrantContext()` appears in the sync processor and run entitlement resolver only. `applyRunSyncEventV1.ts` constructs one `IngestionEntitlementContextLoader` and one `IngestionRunEntitlementResolver`; the run use case delegates to the resolver and does not load entitlement context again.
+
+- [ ] **Step 6: Verify hot-path route files have no diff**
+
+Run:
+
+```bash
+rtk git diff -- apps/api/src/routes/events/ingestEventsSyncV1.ts apps/api/src/routes/runs/applyRunSyncEventV1.ts internal/services/src/ingestion/sync-processor.ts internal/services/src/use-cases/runs/apply-run-sync-event.ts
+```
+
+Expected: no diff. If this command shows changes, stop and remove them unless they are explicitly required by a failing contract test and reviewed as a separate behavior change.
+
+- [ ] **Step 7: Commit only if Step 1 added missing naming assertions**
+
+If `internal/services/src/ingestion/message.test.ts` changed in this task, run:
+
+```bash
+rtk git add internal/services/src/ingestion/message.test.ts
+rtk git commit -m "test(ingestion): preserve durable object naming guardrails"
+```
+
+Expected: either a small test-only commit or no commit because the assertions already existed.
+
+---
+
+### Task 10: Drop Config And Grant Tables With Generated Migrations
 
 **Files:**
 - Modify: `apps/api/src/ingestion/entitlements/db/schema.ts`
@@ -1463,7 +1602,7 @@ rtk git commit -m "feat(ingestion): drop entitlement window context tables"
 
 ---
 
-### Task 10: Final Verification
+### Task 11: Final Verification
 
 **Files:**
 - Verify all touched files.
@@ -1473,7 +1612,7 @@ rtk git commit -m "feat(ingestion): drop entitlement window context tables"
 Run:
 
 ```bash
-rtk pnpm --filter @unprice/services test:file src/entitlements/grant-consumption.test.ts src/ingestion/entitlement-context.test.ts src/ingestion/feature-verification.test.ts src/ingestion/entitlement-window-applier.test.ts src/ingestion/service.test.ts src/ingestion/entitlement-routing.test.ts src/ingestion/sync-processor.test.ts
+rtk pnpm --filter @unprice/services test:file src/entitlements/grant-consumption.test.ts src/ingestion/entitlement-context.test.ts src/ingestion/feature-verification.test.ts src/ingestion/entitlement-window-applier.test.ts src/ingestion/service.test.ts src/ingestion/entitlement-routing.test.ts src/ingestion/sync-processor.test.ts src/ingestion/message.test.ts
 ```
 
 Expected: PASS.
@@ -1510,7 +1649,19 @@ rtk pnpm --filter api db:check:ingestion:migrations
 
 Expected: PASS with no diff.
 
-- [ ] **Step 5: Run full validation**
+- [ ] **Step 5: Re-run hot-path guardrail checks**
+
+Run:
+
+```bash
+rtk rg -n "validateEventTimestamp|toUnpriceApiError|ensureSubscriptionRenewed|WALLET_EMPTY" apps/api/src/routes/events/ingestEventsSyncV1.ts apps/api/src/routes/runs/applyRunSyncEventV1.ts
+rtk rg -n "prepareCustomerGrantContext|IngestionEntitlementContextLoader|IngestionRunEntitlementResolver" internal/services/src/ingestion/sync-processor.ts internal/services/src/ingestion/run-entitlement-resolver.ts apps/api/src/routes/runs/applyRunSyncEventV1.ts internal/services/src/use-cases/runs/apply-run-sync-event.ts
+rtk git diff -- apps/api/src/routes/events/ingestEventsSyncV1.ts apps/api/src/routes/runs/applyRunSyncEventV1.ts internal/services/src/ingestion/sync-processor.ts internal/services/src/use-cases/runs/apply-run-sync-event.ts
+```
+
+Expected: the catch-up branch still exists only in `/v1/events/ingest/sync`, run sync still has no `WALLET_EMPTY` subscription catch-up branch, entitlement context is still resolved once per path, and the hot-path route/use-case files have no diff.
+
+- [ ] **Step 6: Run full validation**
 
 Run:
 
@@ -1520,7 +1671,7 @@ rtk pnpm validate
 
 Expected: PASS.
 
-- [ ] **Step 6: Inspect final diff**
+- [ ] **Step 7: Inspect final diff**
 
 Run:
 
@@ -1531,7 +1682,7 @@ rtk git diff --stat
 
 Expected: only files named in this plan are changed, plus generated migration artifacts. Existing unrelated changes such as `tooling/k6/budgeted-runs.js` should remain untouched unless the user explicitly asks to include them.
 
-- [ ] **Step 7: Commit final fixes if validation required changes**
+- [ ] **Step 8: Commit final fixes if validation required changes**
 
 ```bash
 rtk git add internal/services/src/entitlements/grant-consumption.ts internal/services/src/entitlements/grant-consumption.test.ts internal/services/src/ingestion apps/api/src/ingestion
@@ -1542,10 +1693,10 @@ rtk git commit -m "test(ingestion): validate entitlement window context table re
 
 ## Self-Review
 
-**Spec coverage:** This plan removes redundant DO-local config/grant persistence, enriches the upstream grant contract, updates normal ingestion and run-budget forwarding, keeps enforcement-state reads input-driven, and uses generated durable SQLite migrations.
+**Spec coverage:** This plan removes redundant DO-local config/grant persistence, enriches the upstream grant contract, updates normal ingestion and run-budget forwarding, keeps enforcement-state reads input-driven, preserves `APP_ENV`-scoped DO naming, preserves existing sync-ingest/run-sync catch patterns, and uses generated durable SQLite migrations.
 
 **Placeholder scan:** The plan avoids banned placeholder terms and open-ended implementation steps. The generated file names are made deterministic by using Drizzle's `--name=drop_config_grants` option.
 
-**Type consistency:** `IngestionGrant`, `activeGrantSchema`, `ActiveGrantInput`, RunBudgetDO `runGrantSchema`, and test helpers all use the same fields: `allowanceUnits`, `cadenceEffectiveAt`, `cadenceExpiresAt`, `currencyCode`, `effectiveAt`, `expiresAt`, `grantId`, `priority`, and `resetConfig`.
+**Type consistency:** `IngestionGrant`, `activeGrantSchema`, `ActiveGrantInput`, RunBudgetDO `runGrantSchema`, and test helpers all use the same fields: `allowanceUnits`, `cadenceEffectiveAt`, `cadenceExpiresAt`, `currencyCode`, `effectiveAt`, `expiresAt`, `grantId`, `priority`, and `resetConfig`. RunBudgetDO reuses `activeGrantSchema` and `entitlementConfigSchema` instead of duplicating the EntitlementWindowDO forwarding contract.
 
-**Tradeoff:** The DO no longer checks immutable entitlement config drift against its previous SQLite snapshot. That check was on the hot path and duplicated the service-layer source of truth. The replacement invariant is stronger at the boundary: every caller must send fully enriched grants, and Zod rejects legacy grant shapes before the DO mutates durable usage state.
+**Tradeoff:** The DO no longer checks immutable entitlement config drift against its previous SQLite snapshot. That check was on the hot path and duplicated the service-layer source of truth. The replacement invariant is stronger at the boundary: every caller must send fully enriched grants, Zod rejects legacy grant shapes before the DO mutates durable usage state, and guardrail checks prevent the refactor from compensating with new endpoint retries or extra context loads.
