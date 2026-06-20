@@ -320,6 +320,16 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## API SDK And Public Contracts
 
+- 2026-06-20: Public Hono routes must use `defineEndpointContract`; for `audience: "public"`,
+  SDK-exposed operations must set `sdk.path` and `operationId` must equal
+  `sdk.path.join(".")` so OpenAPI, docs, and `@unprice/api` resources generate from one
+  product operation. Public routes that should not generate SDK methods must set `sdk: false`.
+- 2026-06-20: Internal and provider-callback API routes must set `audience: "internal"` or
+  `audience: "callback"` plus `sdk: false` and must not be exposed through generated SDK
+  resources.
+- 2026-06-20: Run `pnpm --filter @unprice/api generate` with the API dev server running before
+  SDK contract work is complete; it updates `apps/docs/openapi.json`,
+  `packages/api/src/openapi.d.ts`, and `packages/api/src/generated/sdk-resources.ts` together.
 - 2026-05-08: Public Hono routes callable from `@unprice/api` need SDK-shaped `operationId`s.
 - 2026-05-08: Align first OpenAPI tag and first `/v1` path segment with the SDK namespace.
 - 2026-05-08: Keep SDK resource methods as one-object calls grouped by product concepts.
