@@ -1,7 +1,11 @@
 import type { ApiKeyExtended } from "@unprice/db/validators"
 import { describe, expect, it } from "vitest"
 import { UnpriceApiError } from "~/errors"
-import { isValidApiKeyShape, validateIsAllowedToAccessProject } from "./key"
+import {
+  isValidApiKeyShape,
+  shouldBypassApiKeyRateLimit,
+  validateIsAllowedToAccessProject,
+} from "./key"
 
 const baseKey = {
   projectId: "proj_key",
@@ -75,5 +79,16 @@ describe("isValidApiKeyShape", () => {
     expect(isValidApiKeyShape("sk_test_123")).toBe(false)
     expect(isValidApiKeyShape("unprice_live_123")).toBe(false)
     expect(isValidApiKeyShape("unprice_live_123456789ABCDEFGH0OIlM")).toBe(false)
+  })
+})
+
+describe("shouldBypassApiKeyRateLimit", () => {
+  it("bypasses rate limits for access check, including a trailing slash", () => {
+    expect(shouldBypassApiKeyRateLimit("/v1/access/check")).toBe(true)
+    expect(shouldBypassApiKeyRateLimit("/v1/access/check/")).toBe(true)
+  })
+
+  it("does not keep the old entitlement verify route as the bypass path", () => {
+    expect(shouldBypassApiKeyRateLimit("/v1/entitlements/verify")).toBe(false)
   })
 })

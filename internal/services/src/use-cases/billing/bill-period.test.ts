@@ -646,7 +646,10 @@ describe("billPeriod", () => {
           new FetchError({
             message: "reservation flush deferred",
             retry: true,
-            context: { url: "/v1/billing/reservations/flush-for-invoicing", method: "POST" },
+            context: {
+              url: "/v1/internal/billing-reservations/flush-for-invoicing",
+              method: "POST",
+            },
           })
         )
       ),
