@@ -1,8 +1,12 @@
-# ADR-0003: API Operation Contracts And SDK Surface
+# ADR-0004: API Operation Contracts And SDK Surface
 
 ## Status
 
 Accepted
+
+## Date
+
+2026-06-20
 
 ## Context
 
