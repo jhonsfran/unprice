@@ -1,12 +1,11 @@
-import { Unprice, type paths } from "@unprice/api"
+import { Unprice, type operations } from "@unprice/api"
 
 type ListPlanVersionsRequest =
-  paths["/v1/plans/versions/list"]["post"]["requestBody"]["content"]["application/json"]
+  operations["planVersions.list"]["requestBody"]["content"]["application/json"]
 type ListPlanVersionsResponse =
-  paths["/v1/plans/versions/list"]["post"]["responses"]["200"]["content"]["application/json"]
+  operations["planVersions.list"]["responses"][200]["content"]["application/json"]
 type PlanVersion = ListPlanVersionsResponse["planVersions"][number]
-type SignUpRequest =
-  paths["/v1/customers/sign-up"]["post"]["requestBody"]["content"]["application/json"]
+type SignUpRequest = operations["customers.signUp"]["requestBody"]["content"]["application/json"]
 
 type BillingInterval = NonNullable<ListPlanVersionsRequest["billingInterval"]>
 type Currency = NonNullable<ListPlanVersionsRequest["currency"]>
@@ -132,10 +131,10 @@ async function planPreflight(): Promise<void> {
     ...(CURRENCY ? { currency: CURRENCY as Currency } : {}),
   }
 
-  const { result, error } = await unprice.plans.listVersions(request)
+  const { result, error } = await unprice.planVersions.list(request)
 
-  assert(!error, `plans.listVersions error: ${error?.message}`)
-  assert(!!result, "plans.listVersions result should exist")
+  assert(!error, `planVersions.list error: ${error?.message}`)
+  assert(!!result, "planVersions.list result should exist")
   assert(Array.isArray(result.planVersions), "planVersions should be an array")
   assert(result.planVersions.length > 0, "at least one published latest plan version should exist")
 
@@ -266,11 +265,11 @@ async function entitlementsCheck(): Promise<void> {
   assert(customerId, "customerId should be loaded before checking entitlements")
   assert(selectedPlanVersion, "selected plan version should be loaded before checking entitlements")
 
-  const { result, error } = await unprice.entitlements.get({
+  const { result, error } = await unprice.access.entitlements.list({
     customerId,
   })
 
-  assert(!error, `entitlements.get error: ${error?.message}`)
+  assert(!error, `access.entitlements.list error: ${error?.message}`)
   assert(!!result, "entitlements result should exist")
   assert(Array.isArray(result), "entitlements should be an array")
   assert(result.length > 0, "customer should have at least one entitlement")

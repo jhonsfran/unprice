@@ -21,7 +21,7 @@ export const listPaymentMethods = protectedWorkspaceProcedure
   .query(async (opts) => {
     const { customerId, provider, skipCache } = opts.input
 
-    const result = await unprice.payments.methods.list({
+    const result = await unprice.paymentMethods.list({
       customerId,
       provider,
       skipCache,

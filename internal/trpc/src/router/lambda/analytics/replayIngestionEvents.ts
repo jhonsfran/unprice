@@ -45,7 +45,7 @@ export const replayIngestionEvents = protectedProjectProcedure
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
     const canonicalAuditIds = Array.from(new Set(opts.input.canonicalAuditIds))
-    const { result, error } = await unprice.replayFailedIngestionEvents({
+    const { result, error } = await unprice.ingestionEvents.replay({
       canonical_audit_ids: canonicalAuditIds,
       project_id: opts.ctx.project.id,
     })

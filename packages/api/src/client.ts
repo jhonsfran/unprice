@@ -1,9 +1,19 @@
 import createOpenApiClient, { type Client as OpenApiClient } from "openapi-fetch"
 import { version } from "../package.json"
 import type { ApiError, ErrorResponse } from "./errors"
+import {
+  type GeneratedSdkResources,
+  type SdkOperationId,
+  createGeneratedSdkResources,
+  sdkOperations,
+} from "./generated/sdk-resources"
 import type { paths } from "./openapi"
+import type { OperationInput, OperationResponse } from "./operation-types"
+import type { ApiResult, Result } from "./result"
 import type { Telemetry } from "./telemetry"
 import { getTelemetry } from "./telemetry"
+
+export type { ApiResult, Result }
 
 export type UnpriceOptions = {
   token: string
@@ -73,84 +83,6 @@ export type UnpriceOptions = {
   headers?: Record<string, string>
 }
 
-type JsonContent<TResponse> = TResponse extends {
-  content: {
-    "application/json": infer TContent
-  }
-}
-  ? TContent
-  : never
-
-type JsonRequestBody<TOperation> = TOperation extends {
-  requestBody: {
-    content: {
-      "application/json": infer TBody
-    }
-  }
-}
-  ? TBody
-  : never
-
-type JsonResponse<TOperation, TStatus extends number> = TOperation extends {
-  responses: infer TResponses
-}
-  ? TStatus extends keyof TResponses
-    ? JsonContent<TResponses[TStatus]>
-    : never
-  : never
-
-type PostBody<TPath extends keyof paths> = paths[TPath] extends { post: infer TOperation }
-  ? JsonRequestBody<TOperation>
-  : never
-
-type PostResponse<TPath extends keyof paths, TStatus extends number = 200> = paths[TPath] extends {
-  post: infer TOperation
-}
-  ? JsonResponse<TOperation, TStatus>
-  : never
-
-type WithOptionalFields<TInput, TField extends keyof TInput> = Omit<TInput, TField> &
-  Partial<Pick<TInput, TField>>
-
-type ExplainChargeRequest = WithOptionalFields<
-  PostBody<"/v1/analytics/explain-charge">,
-  "limit" | "offset"
->
-type IngestionStatusRequest = WithOptionalFields<
-  PostBody<"/v1/analytics/ingestion/status">,
-  "limit"
->
-type ForecastUsageRequest = WithOptionalFields<
-  PostBody<"/v1/analytics/forecast-usage">,
-  "horizon_days"
->
-
-type GetResponse<TPath extends keyof paths, TStatus extends number = 200> = paths[TPath] extends {
-  get: infer TOperation
-}
-  ? JsonResponse<TOperation, TStatus>
-  : never
-
-type GetQuery<TPath extends keyof paths> = paths[TPath] extends {
-  get: {
-    parameters: {
-      query: infer TQuery
-    }
-  }
-}
-  ? TQuery
-  : never
-
-type GetPath<TPath extends keyof paths> = paths[TPath] extends {
-  get: {
-    parameters: {
-      path: infer TPathParams
-    }
-  }
-}
-  ? TPathParams
-  : never
-
 type OpenApiResponse<TResult> = Promise<
   | {
       data: TResult
@@ -163,18 +95,6 @@ type OpenApiResponse<TResult> = Promise<
       response: Response
     }
 >
-
-export type ApiResult<TResult> =
-  | {
-      result: TResult
-      error?: never
-    }
-  | {
-      result?: never
-      error: ApiError
-    }
-
-export type Result<TResult> = ApiResult<TResult>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -223,6 +143,19 @@ export class Unprice {
   private readonly headers: Record<string, string>
   private readonly fetchImpl: (input: Request) => Promise<Response>
   private readonly openapi: OpenApiClient<paths>
+  public readonly access: GeneratedSdkResources["access"]
+  public readonly usage: GeneratedSdkResources["usage"]
+  public readonly runs: GeneratedSdkResources["runs"]
+  public readonly customers: GeneratedSdkResources["customers"]
+  public readonly features: GeneratedSdkResources["features"]
+  public readonly planVersions: GeneratedSdkResources["planVersions"]
+  public readonly subscriptions: GeneratedSdkResources["subscriptions"]
+  public readonly paymentMethods: GeneratedSdkResources["paymentMethods"]
+  public readonly wallet: GeneratedSdkResources["wallet"]
+  public readonly walletCredits: GeneratedSdkResources["walletCredits"]
+  public readonly invoices: GeneratedSdkResources["invoices"]
+  public readonly analytics: GeneratedSdkResources["analytics"]
+  public readonly ingestionEvents: GeneratedSdkResources["ingestionEvents"]
   public readonly retry: {
     attempts: number
     backoff: (retryCount: number) => number
@@ -260,6 +193,22 @@ export class Unprice {
       fetch: (request) => this.fetchWithRetry(request),
       headers: this.getHeaders(),
     })
+
+    const resources = createGeneratedSdkResources(this.requestOperation)
+
+    this.access = resources.access
+    this.usage = resources.usage
+    this.runs = resources.runs
+    this.customers = resources.customers
+    this.features = resources.features
+    this.planVersions = resources.planVersions
+    this.subscriptions = resources.subscriptions
+    this.paymentMethods = resources.paymentMethods
+    this.wallet = resources.wallet
+    this.walletCredits = resources.walletCredits
+    this.invoices = resources.invoices
+    this.analytics = resources.analytics
+    this.ingestionEvents = resources.ingestionEvents
   }
 
   private getHeaders(): Record<string, string> {
@@ -370,314 +319,81 @@ export class Unprice {
     }
   }
 
-  public replayFailedIngestionEvents(
-    req: PostBody<"/v1/events/ingest/replay">
-  ): Promise<ApiResult<PostResponse<"/v1/events/ingest/replay">>> {
-    return this.toResult(
-      this.openapi.POST("/v1/events/ingest/replay", {
-        body: req,
-      })
-    )
-  }
+  private splitInputForOperation(
+    operation: (typeof sdkOperations)[SdkOperationId],
+    input: unknown
+  ): {
+    path: Record<string, unknown>
+    rest: Record<string, unknown>
+  } {
+    const source = isRecord(input) ? input : {}
+    const pathParamNames = new Set<string>(operation.pathParams)
+    const path: Record<string, unknown> = {}
+    const rest: Record<string, unknown> = {}
 
-  public get access() {
-    return {
-      update: (
-        req: PostBody<"/v1/access/update">
-      ): Promise<ApiResult<PostResponse<"/v1/access/update">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/access/update", {
-            body: req,
-          })
-        )
-      },
+    for (const [key, value] of Object.entries(source)) {
+      if (pathParamNames.has(key)) {
+        path[key] = value
+      } else {
+        rest[key] = value
+      }
     }
+
+    return { path, rest }
   }
 
-  public get customers() {
-    return {
-      signUp: (
-        req: PostBody<"/v1/customers/sign-up">
-      ): Promise<ApiResult<PostResponse<"/v1/customers/sign-up">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/customers/sign-up", {
-            body: req,
-          })
-        )
-      },
-    }
-  }
+  private requestOperation = <TId extends SdkOperationId>(
+    operationId: TId,
+    input: OperationInput<TId> | undefined
+  ): Promise<ApiResult<OperationResponse<TId>>> => {
+    const operation = sdkOperations[operationId]
+    const method: string = operation.method
+    const { path, rest } = this.splitInputForOperation(operation, input)
+    const pathParams = Object.keys(path).length > 0 ? path : undefined
+    const restParams = Object.keys(rest).length > 0 ? rest : undefined
 
-  public get entitlements() {
-    return {
-      get: (
-        req: PostBody<"/v1/entitlements/get">
-      ): Promise<ApiResult<PostResponse<"/v1/entitlements/get">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/entitlements/get", {
-            body: req,
-          })
-        )
-      },
-
-      verify: (
-        req: PostBody<"/v1/entitlements/verify">
-      ): Promise<ApiResult<PostResponse<"/v1/entitlements/verify">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/entitlements/verify", {
-            body: req,
-          })
-        )
-      },
-    }
-  }
-
-  public get events() {
-    return {
-      ingest: (
-        req: PostBody<"/v1/events/ingest">
-      ): Promise<ApiResult<PostResponse<"/v1/events/ingest", 202>>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/events/ingest", {
-            body: req,
-          })
-        )
-      },
-
-      ingestSync: (
-        req: PostBody<"/v1/events/ingest/sync">
-      ): Promise<ApiResult<PostResponse<"/v1/events/ingest/sync">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/events/ingest/sync", {
-            body: req,
-          })
-        )
-      },
-
-      replayFailedIngestionEvents: (
-        req: PostBody<"/v1/events/ingest/replay">
-      ): Promise<ApiResult<PostResponse<"/v1/events/ingest/replay">>> => {
-        return this.replayFailedIngestionEvents(req)
-      },
-    }
-  }
-
-  public get features() {
-    return {
-      list: (): Promise<ApiResult<GetResponse<"/v1/features/list">>> => {
-        return this.toResult(this.openapi.GET("/v1/features/list"))
-      },
-    }
-  }
-
-  public get plans() {
-    const getVersion = (
-      req: GetPath<"/v1/plans/versions/get/{planVersionId}">
-    ): Promise<ApiResult<GetResponse<"/v1/plans/versions/get/{planVersionId}">>> => {
+    if (method === "GET") {
       return this.toResult(
-        this.openapi.GET("/v1/plans/versions/get/{planVersionId}", {
-          params: {
-            path: req,
-          },
-        })
+        this.openapi.GET(
+          operation.path as never,
+          {
+            params: {
+              ...(pathParams ? { path: pathParams } : {}),
+              ...(restParams ? { query: restParams } : {}),
+            },
+          } as never
+        ) as never
       )
     }
 
-    return {
-      listVersions: (
-        req: PostBody<"/v1/plans/versions/list">
-      ): Promise<ApiResult<PostResponse<"/v1/plans/versions/list">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/plans/versions/list", {
-            body: req,
-          })
-        )
-      },
-      getVersion,
+    if (method === "POST") {
+      return this.toResult(
+        this.openapi.POST(
+          operation.path as never,
+          {
+            params: pathParams
+              ? {
+                  path: pathParams,
+                }
+              : undefined,
+            body: restParams,
+          } as never
+        ) as never
+      )
     }
-  }
 
-  public get payments() {
-    return {
-      methods: {
-        list: (
-          req: PostBody<"/v1/payments/methods/list">
-        ): Promise<ApiResult<PostResponse<"/v1/payments/methods/list">>> => {
-          return this.toResult(
-            this.openapi.POST("/v1/payments/methods/list", {
-              body: req,
-            })
-          )
+    return this.toResult(
+      Promise.resolve({
+        error: {
+          error: {
+            code: "FETCH_ERROR",
+            message: `Unsupported SDK operation method ${method}`,
+            docs: "https://docs.unprice.dev/api-reference/errors",
+            requestId: "N/A",
+          },
         },
-
-        create: (
-          req: PostBody<"/v1/payments/methods/create">
-        ): Promise<ApiResult<PostResponse<"/v1/payments/methods/create">>> => {
-          return this.toResult(
-            this.openapi.POST("/v1/payments/methods/create", {
-              body: req,
-            })
-          )
-        },
-      },
-    }
-  }
-
-  public get subscriptions() {
-    return {
-      get: (
-        req: PostBody<"/v1/subscriptions/get">
-      ): Promise<ApiResult<PostResponse<"/v1/subscriptions/get">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/subscriptions/get", {
-            body: req,
-          })
-        )
-      },
-    }
-  }
-
-  public get analytics() {
-    return {
-      explainCharge: (
-        req: ExplainChargeRequest
-      ): Promise<ApiResult<PostResponse<"/v1/analytics/explain-charge">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/analytics/explain-charge", {
-            body: {
-              ...req,
-              limit: req.limit ?? 100,
-              offset: req.offset ?? 0,
-            },
-          })
-        )
-      },
-      forecastUsage: (
-        req: ForecastUsageRequest
-      ): Promise<ApiResult<PostResponse<"/v1/analytics/forecast-usage">>> => {
-        return this.toResult(
-          this.openapi.POST("/v1/analytics/forecast-usage", {
-            body: {
-              ...req,
-              horizon_days: req.horizon_days ?? 14,
-            },
-          })
-        )
-      },
-      ingestion: {
-        status: (
-          req: IngestionStatusRequest
-        ): Promise<ApiResult<PostResponse<"/v1/analytics/ingestion/status">>> => {
-          return this.toResult(
-            this.openapi.POST("/v1/analytics/ingestion/status", {
-              body: {
-                ...req,
-                limit: req.limit ?? 50,
-              },
-            })
-          )
-        },
-      },
-      usage: {
-        get: (
-          req: PostBody<"/v1/analytics/usage/get">
-        ): Promise<ApiResult<PostResponse<"/v1/analytics/usage/get">>> => {
-          return this.toResult(
-            this.openapi.POST("/v1/analytics/usage/get", {
-              body: req,
-            })
-          )
-        },
-      },
-    }
-  }
-
-  public get wallet() {
-    return {
-      balance: (
-        req: GetQuery<"/v1/wallet/balance">
-      ): Promise<ApiResult<GetResponse<"/v1/wallet/balance">>> => {
-        return this.toResult(
-          this.openapi.GET("/v1/wallet/balance", {
-            params: {
-              query: req,
-            },
-          })
-        )
-      },
-      creditBalance: (
-        req: GetPath<"/v1/wallet/credits/{walletId}/balance"> &
-          GetQuery<"/v1/wallet/credits/{walletId}/balance">
-      ): Promise<ApiResult<GetResponse<"/v1/wallet/credits/{walletId}/balance">>> => {
-        const { walletId, ...query } = req
-
-        return this.toResult(
-          this.openapi.GET("/v1/wallet/credits/{walletId}/balance", {
-            params: {
-              path: { walletId },
-              query,
-            },
-          })
-        )
-      },
-      get: (req: GetQuery<"/v1/wallet">): Promise<ApiResult<GetResponse<"/v1/wallet">>> => {
-        return this.toResult(
-          this.openapi.GET("/v1/wallet", {
-            params: {
-              query: req,
-            },
-          })
-        )
-      },
-    }
-  }
-
-  public get invoices() {
-    return {
-      get: (
-        req: GetPath<"/v1/invoices/{invoiceId}">
-      ): Promise<ApiResult<GetResponse<"/v1/invoices/{invoiceId}">>> => {
-        return this.toResult(
-          this.openapi.GET("/v1/invoices/{invoiceId}", {
-            params: {
-              path: req,
-            },
-          })
-        )
-      },
-    }
-  }
-
-  public get billing() {
-    return {
-      reservations: {
-        flushForInvoicing: (req: {
-          customerId: string
-          subscriptionId: string
-          subscriptionPhaseId: string
-          statementKey: string
-        }): Promise<ApiResult<{ ok: boolean; flushed: number; skipped: number }>> => {
-          const request = new Request(
-            `${this.baseUrl}/v1/billing/reservations/flush-for-invoicing`,
-            {
-              method: "POST",
-              headers: {
-                ...this.getHeaders(),
-                "content-type": "application/json",
-              },
-              body: JSON.stringify(req),
-            }
-          )
-          return this.toResult(
-            this.fetchWithRetry(request).then(async (response) => {
-              if (!response.ok) {
-                return { error: await response.json(), response } as never
-              }
-              return { data: await response.json(), response }
-            })
-          )
-        },
-      },
-    }
+        response: new Response(null, { status: 500 }),
+      })
+    )
   }
 }

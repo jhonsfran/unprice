@@ -3,7 +3,7 @@ import { protectedProjectProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
 
 type CustomerEntitlementsResult = NonNullable<
-  Awaited<ReturnType<typeof unprice.entitlements.get>>["result"]
+  Awaited<ReturnType<typeof unprice.access.entitlements.list>>["result"]
 >
 
 export const getEntitlements = protectedProjectProcedure
@@ -21,7 +21,7 @@ export const getEntitlements = protectedProjectProcedure
     const { customerId } = opts.input
     const { project } = opts.ctx
 
-    const { result, error } = await unprice.entitlements.get({
+    const { result, error } = await unprice.access.entitlements.list({
       customerId,
       projectId: project.id,
     })
