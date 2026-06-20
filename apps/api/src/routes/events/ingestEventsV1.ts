@@ -18,9 +18,10 @@ import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["events"]
+const tags = ["usage"]
 const SAFE_QUEUE_SEND_RETRIES = 3
 const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
 export const INGESTION_TEST_FAILURE_HEADER = "x-unprice-ingestion-test-failure"
@@ -73,25 +74,44 @@ const acceptedSchema = z.object({
   }),
 })
 
-export const route = createRoute({
-  path: "/v1/events/ingest",
-  operationId: "events.ingest",
-  summary: "ingest raw event",
-  description:
-    "Ingest a raw events. All ingested events are reported and a notification will be triggered when the limit is hit.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(rawEventSchema, "The raw event ingestion payload"),
-  },
-  responses: {
-    [HttpStatusCodes.ACCEPTED]: jsonContent(
-      acceptedSchema,
-      "The raw event was accepted for asynchronous processing"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/usage/record",
+      operationId: "usage.record",
+      summary: "ingest raw event",
+      description:
+        "Ingest a raw events. All ingested events are reported and a notification will be triggered when the limit is hit.",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(rawEventSchema, "The raw event ingestion payload"),
+      },
+      responses: {
+        [HttpStatusCodes.ACCEPTED]: jsonContent(
+          acceptedSchema,
+          "The raw event was accepted for asynchronous processing"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "runtime",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["usage", "record"],
+      },
+      idempotency: {
+        required: true,
+        location: "body",
+        field: "idempotencyKey",
+      },
+    }
+  )
+)
 
 export const registerIngestEventsV1 = (app: App) =>
   app.openapi(route, async (c) => {

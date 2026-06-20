@@ -9,28 +9,43 @@ import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { CloudflareRunBudgetClient } from "~/ingestion/run-budget/client"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["runs"]
 
-export const route = createRoute({
-  path: "/v1/runs",
-  operationId: "runs.start",
-  summary: "start a budgeted run",
-  description:
-    "Start a new budgeted run with a budget reservation against a customer. " +
-    "The currency is inherited from the customer's active subscription plan. " +
-    "budgetAmount is in currency minor units (e.g. 500 = $5.00 USD).",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(startRunInputSchema, "The run configuration"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(runSummarySchema, "The budget run summary"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/runs/start",
+      operationId: "runs.start",
+      summary: "start a budgeted run",
+      description:
+        "Start a new budgeted run with a budget reservation against a customer. " +
+        "The currency is inherited from the customer's active subscription plan. " +
+        "budgetAmount is in currency minor units (e.g. 500 = $5.00 USD).",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(startRunInputSchema, "The run configuration"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(runSummarySchema, "The budget run summary"),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "runtime",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["runs", "start"],
+      },
+    }
+  )
+)
 
 export const registerStartRunV1 = (app: App) =>
   app.openapi(route, async (c) => {

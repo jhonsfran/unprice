@@ -11,29 +11,47 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
 const tags = ["customers"]
 
-export const route = createRoute({
-  path: "/v1/customers/sign-up",
-  operationId: "customers.signUp",
-  summary: "sign up",
-  description: "Sign up a customer for a project",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      customerSignUpSchema.openapi({
-        description: "The customer sign up request",
-      }),
-      "Body of the request"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(signUpResponseSchema, "The result of the customer sign up"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/customers/sign-up",
+      operationId: "customers.signUp",
+      summary: "sign up",
+      description: "Sign up a customer for a project",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          customerSignUpSchema.openapi({
+            description: "The customer sign up request",
+          }),
+          "Body of the request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          signUpResponseSchema,
+          "The result of the customer sign up"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["customers", "signUp"],
+      },
+    }
+  )
+)
 
 export type SignUpRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]

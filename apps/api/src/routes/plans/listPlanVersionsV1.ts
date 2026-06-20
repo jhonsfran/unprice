@@ -8,29 +8,44 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
-const tags = ["plans"]
+const tags = ["planVersions"]
 
-export const route = createRoute({
-  path: "/v1/plans/versions/list",
-  operationId: "plans.listVersions",
-  summary: "list all plan versions",
-  description: "List all plan versions for a project",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(getPlanVersionListSchema, "Body of the request"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      z.object({
-        planVersions: getPlanVersionApiResponseSchema.array(),
-      }),
-      "The result of the list plan versions"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/plan-versions/list",
+      operationId: "planVersions.list",
+      summary: "list all plan versions",
+      description: "List all plan versions for a project",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(getPlanVersionListSchema, "Body of the request"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          z.object({
+            planVersions: getPlanVersionApiResponseSchema.array(),
+          }),
+          "The result of the list plan versions"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["planVersions", "list"],
+      },
+    }
+  )
+)
 
 export type GetPlanVersionsResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]

@@ -527,7 +527,7 @@ function buildRequest(
   body: Record<string, unknown> = requestBody,
   headers: Record<string, string> = {}
 ) {
-  return new Request("https://example.com/v1/events/ingest", {
+  return new Request("https://example.com/v1/usage/record", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",

@@ -8,6 +8,7 @@ import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import { safeSendToQueue } from "./ingestEventsV1"
 
@@ -21,20 +22,34 @@ const replayResponseSchema = z.object({
   skipped: z.number().int(),
 })
 
-export const route = createRoute({
-  path: "/v1/events/ingest/replay",
-  operationId: "events.ingest.replay",
-  summary: "replay failed ingestion events",
-  method: "post",
-  tags: ["events"],
-  request: {
-    body: jsonContentRequired(replayRequestSchema, "Replay failed ingestion events"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(replayResponseSchema, "Replay result"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/ingestion-events/replay",
+      operationId: "ingestionEvents.replay",
+      summary: "replay failed ingestion events",
+      method: "post",
+      tags: ["ingestionEvents"],
+      request: {
+        body: jsonContentRequired(replayRequestSchema, "Replay failed ingestion events"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(replayResponseSchema, "Replay result"),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "operations",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["ingestionEvents", "replay"],
+      },
+    }
+  )
+)
 
 export const registerReplayIngestionEventsV1 = (app: App) =>
   app.openapi(route, async (c) => {

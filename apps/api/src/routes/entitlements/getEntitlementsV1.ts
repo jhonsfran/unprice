@@ -9,42 +9,57 @@ import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
-const tags = ["entitlements"]
+const tags = ["access"]
 
-export const route = createRoute({
-  path: "/v1/entitlements/get",
-  operationId: "entitlements.get",
-  summary: "get customer entitlements",
-  description: "Get active customer entitlements with their grants",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      z.object({
-        customerId: z.string().openapi({
-          description: "The customer ID",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
-        }),
-        projectId: z
-          .string()
-          .openapi({
-            description: "The project ID",
-            example: "prj_1H7KQFLr7RepUyQBKdnvY",
-          })
-          .optional(),
-      }),
-      "Body of the request"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      z.array(customerEntitlementSchemaExtended),
-      "The result of the get customer entitlements"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/access/entitlements/list",
+      operationId: "access.entitlements.list",
+      summary: "get customer entitlements",
+      description: "Get active customer entitlements with their grants",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          z.object({
+            customerId: z.string().openapi({
+              description: "The customer ID",
+              example: "cus_1H7KQFLr7RepUyQBKdnvY",
+            }),
+            projectId: z
+              .string()
+              .openapi({
+                description: "The project ID",
+                example: "prj_1H7KQFLr7RepUyQBKdnvY",
+              })
+              .optional(),
+          }),
+          "Body of the request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          z.array(customerEntitlementSchemaExtended),
+          "The result of the get customer entitlements"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["access", "entitlements", "list"],
+      },
+    }
+  )
+)
 
 export type GetEntitlementsRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]

@@ -314,7 +314,7 @@ function createTestApp() {
 }
 
 function buildRequest(body: Record<string, unknown> = requestBody) {
-  return new Request("https://example.com/v1/events/ingest/sync", {
+  return new Request("https://example.com/v1/usage/consume", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",

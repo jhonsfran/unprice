@@ -209,9 +209,9 @@ describe("budgeted runs API", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    // When POST /v1/runs is called without customerId (uses key default)
+    // When POST /v1/runs/start is called without customerId (uses key default)
     const response = await app.fetch(
-      new Request("https://example.com/v1/runs", {
+      new Request("https://example.com/v1/runs/start", {
         method: "POST",
         headers: {
           authorization: "Bearer sk_test",
@@ -252,9 +252,9 @@ describe("budgeted runs API", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    // When POST /v1/runs includes customer B
+    // When POST /v1/runs/start includes customer B
     const response = await app.fetch(
-      new Request("https://example.com/v1/runs", {
+      new Request("https://example.com/v1/runs/start", {
         method: "POST",
         headers: {
           authorization: "Bearer sk_test",
@@ -287,9 +287,9 @@ describe("budgeted runs API", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    // When POST /v1/runs omits customerId
+    // When POST /v1/runs/start omits customerId
     const response = await app.fetch(
-      new Request("https://example.com/v1/runs", {
+      new Request("https://example.com/v1/runs/start", {
         method: "POST",
         headers: {
           authorization: "Bearer sk_test",
@@ -333,9 +333,9 @@ describe("budgeted runs API", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    // When POST /v1/runs/:runId/events/sync is called
+    // When POST /v1/runs/consume/:runId is called
     const response = await app.fetch(
-      new Request("https://example.com/v1/runs/brun_abc123/events/sync", {
+      new Request("https://example.com/v1/runs/consume/brun_abc123", {
         method: "POST",
         headers: {
           authorization: "Bearer sk_test",
@@ -380,9 +380,9 @@ describe("budgeted runs API", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    // When GET /v1/runs/:runId is called
+    // When GET /v1/runs/get/:runId is called
     const response = await app.fetch(
-      new Request("https://example.com/v1/runs/brun_abc123", {
+      new Request("https://example.com/v1/runs/get/brun_abc123", {
         method: "GET",
         headers: { authorization: "Bearer sk_test" },
       }),
@@ -413,9 +413,9 @@ describe("budgeted runs API", () => {
 
     const { app, env, executionCtx } = createTestApp()
 
-    // When POST /v1/runs/:runId/end is called
+    // When POST /v1/runs/end/:runId is called
     const response = await app.fetch(
-      new Request("https://example.com/v1/runs/brun_abc123/end", {
+      new Request("https://example.com/v1/runs/end/brun_abc123", {
         method: "POST",
         headers: {
           authorization: "Bearer sk_test",

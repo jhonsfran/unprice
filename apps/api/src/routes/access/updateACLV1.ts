@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { subscriptionStatusSchema } from "@unprice/db/validators"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -7,38 +6,52 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 import { z } from "zod"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
 const tags = ["access"]
 
-export const route = createRoute({
-  path: "/v1/access/update",
-  operationId: "access.update",
-  summary: "update ACL",
-  description: "Update the ACL for a customer",
-  method: "post",
-  hide: env.NODE_ENV === "production",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      z.object({
-        customerId: z.string().openapi({
-          description: "The customer ID",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
-        }),
-        updates: z.object({
-          customerUsageLimitReached: z.boolean().optional(),
-          customerDisabled: z.boolean().optional(),
-          subscriptionStatus: subscriptionStatusSchema.optional(),
-        }),
-      }),
-      "The updates to the ACL"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(z.object({}), "The result of the update ACL"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/access/update",
+      operationId: "access.update",
+      summary: "update ACL",
+      description: "Update the ACL for a customer",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          z.object({
+            customerId: z.string().openapi({
+              description: "The customer ID",
+              example: "cus_1H7KQFLr7RepUyQBKdnvY",
+            }),
+            updates: z.object({
+              customerUsageLimitReached: z.boolean().optional(),
+              customerDisabled: z.boolean().optional(),
+              subscriptionStatus: subscriptionStatusSchema.optional(),
+            }),
+          }),
+          "The updates to the ACL"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(z.object({}), "The result of the update ACL"),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["access", "update"],
+      },
+    }
+  )
+)
 
 export type UpdateACLRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]

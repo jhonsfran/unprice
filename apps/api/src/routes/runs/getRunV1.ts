@@ -9,30 +9,45 @@ import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { CloudflareRunBudgetClient } from "~/ingestion/run-budget/client"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["runs"]
 
-export const route = createRoute({
-  path: "/v1/runs/{runId}",
-  operationId: "runs.get",
-  summary: "get a budgeted run",
-  description: "Get the current status and budget of a run",
-  method: "get",
-  tags,
-  request: {
-    params: z.object({
-      runId: z.string().min(1).openapi({
-        description: "The run ID",
-        example: "brun_123",
-      }),
-    }),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(runSummarySchema, "The current budget run summary"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/runs/get/{runId}",
+      operationId: "runs.get",
+      summary: "get a budgeted run",
+      description: "Get the current status and budget of a run",
+      method: "get",
+      tags,
+      request: {
+        params: z.object({
+          runId: z.string().min(1).openapi({
+            description: "The run ID",
+            example: "brun_123",
+          }),
+        }),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(runSummarySchema, "The current budget run summary"),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "runtime",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["runs", "get"],
+      },
+    }
+  )
+)
 
 export const registerGetRunV1 = (app: App) =>
   app.openapi(route, async (c) => {

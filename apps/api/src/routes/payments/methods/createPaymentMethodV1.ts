@@ -11,32 +11,47 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
-const tags = ["payments"]
+const tags = ["paymentMethods"]
 
-export const route = createRoute({
-  path: "/v1/payments/methods/create",
-  operationId: "payments.methods.create",
-  summary: "create payment method",
-  description: "Create a payment method for a customer",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      createPaymentMethodSchema.openapi({
-        description: "The customer create payment method request",
-      }),
-      "Body of the request"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      createPaymentMethodResponseSchema,
-      "The result of the customer create payment method"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/payment-methods/create",
+      operationId: "paymentMethods.create",
+      summary: "create payment method",
+      description: "Create a payment method for a customer",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          createPaymentMethodSchema.openapi({
+            description: "The customer create payment method request",
+          }),
+          "Body of the request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          createPaymentMethodResponseSchema,
+          "The result of the customer create payment method"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["paymentMethods", "create"],
+      },
+    }
+  )
+)
 
 export type CreatePaymentMethodRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]

@@ -14,31 +14,51 @@ import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { CloudflareRunBudgetClient } from "~/ingestion/run-budget/client"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["runs"]
 
-export const route = createRoute({
-  path: "/v1/runs/{runId}/events/sync",
-  operationId: "runs.events.sync",
-  summary: "apply sync metered event to a run",
-  description: "Apply a synchronous metered event to a running budget run",
-  method: "post",
-  tags,
-  request: {
-    params: z.object({
-      runId: z.string().min(1).openapi({
-        description: "The run ID",
-        example: "brun_123",
-      }),
-    }),
-    body: jsonContentRequired(applyRunSyncEventInputSchema, "The sync event payload"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(runSyncDecisionSchema, "The sync event decision"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/runs/consume/{runId}",
+      operationId: "runs.consume",
+      summary: "apply sync metered event to a run",
+      description: "Apply a synchronous metered event to a running budget run",
+      method: "post",
+      tags,
+      request: {
+        params: z.object({
+          runId: z.string().min(1).openapi({
+            description: "The run ID",
+            example: "brun_123",
+          }),
+        }),
+        body: jsonContentRequired(applyRunSyncEventInputSchema, "The sync event payload"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(runSyncDecisionSchema, "The sync event decision"),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "runtime",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["runs", "consume"],
+      },
+      idempotency: {
+        required: true,
+        location: "body",
+        field: "idempotencyKey",
+      },
+    }
+  )
+)
 
 export const registerApplyRunSyncEventV1 = (app: App) =>
   app.openapi(route, async (c) => {

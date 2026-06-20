@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { FetchError } from "@unprice/error"
 import { UnPriceCustomerError } from "@unprice/services/customers"
@@ -7,9 +6,10 @@ import { processWebhookEvent } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { UnpriceApiError, openApiErrorResponses, toUnpriceApiError } from "~/errors"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["payments"]
+const tags = ["paymentProviderCallbacks"]
 
 const webhookResponseSchema = z.object({
   received: z.literal(true),
@@ -68,27 +68,39 @@ function getStripeConnectAccountId(payload: unknown): string | null {
   return typeof account === "string" ? account : null
 }
 
-export const route = createRoute({
-  path: "/v1/payments/providers/stripe/connect/webhook",
-  operationId: "payments.providers.stripeConnectWebhook",
-  hide: env.NODE_ENV === "production",
-  summary: "Stripe Connect webhook",
-  description:
-    "Stripe Connect platform webhook endpoint. Verifies the platform Connect signature, maps the connected account to a project, and processes the provider event idempotently.",
-  method: "post",
-  tags,
-  responses: {
-    [HttpStatusCodes.OK]: {
-      content: {
-        "application/json": {
-          schema: webhookResponseSchema,
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/payment-provider-callbacks/stripe-connect/webhook",
+      operationId: "paymentProviderCallbacks.stripeConnectWebhook",
+      hide: true,
+      summary: "Stripe Connect webhook",
+      description:
+        "Stripe Connect platform webhook endpoint. Verifies the platform Connect signature, maps the connected account to a project, and processes the provider event idempotently.",
+      method: "post",
+      tags,
+      responses: {
+        [HttpStatusCodes.OK]: {
+          content: {
+            "application/json": {
+              schema: webhookResponseSchema,
+            },
+          },
+          description: "Webhook accepted and processed idempotently",
         },
+        ...openApiErrorResponses,
       },
-      description: "Webhook accepted and processed idempotently",
     },
-    ...openApiErrorResponses,
-  },
-})
+    {
+      audience: "callback",
+      category: "configuration",
+      docs: {
+        expose: false,
+      },
+      sdk: false,
+    }
+  )
+)
 
 export const registerProviderStripeConnectWebhookV1 = (app: App) =>
   app.openapi(route, async (c) => {

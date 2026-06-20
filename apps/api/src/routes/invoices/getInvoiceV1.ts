@@ -13,6 +13,7 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["invoices"]
@@ -63,27 +64,44 @@ const invoiceResponseSchema = z.object({
   lines: invoiceLineSchema.array(),
 })
 
-export const route = createRoute({
-  path: "/v1/invoices/{invoiceId}",
-  operationId: "invoices.get",
-  summary: "get invoice",
-  description:
-    "Fetch an invoice header along with its line items projected from the ledger. Amounts are at pgledger scale 8 ($1 = 100_000_000). Provider calls convert to currency minor units at the provider boundary.",
-  method: "get",
-  tags,
-  request: {
-    params: z.object({
-      invoiceId: z.string().openapi({
-        description: "The invoice ID",
-        example: "inv_1H7KQFLr7RepUyQBKdnvY",
-      }),
-    }),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(invoiceResponseSchema, "Invoice header + projection lines"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/invoices/get/{invoiceId}",
+      operationId: "invoices.get",
+      summary: "get invoice",
+      description:
+        "Fetch an invoice header along with its line items projected from the ledger. Amounts are at pgledger scale 8 ($1 = 100_000_000). Provider calls convert to currency minor units at the provider boundary.",
+      method: "get",
+      tags,
+      request: {
+        params: z.object({
+          invoiceId: z.string().openapi({
+            description: "The invoice ID",
+            example: "inv_1H7KQFLr7RepUyQBKdnvY",
+          }),
+        }),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          invoiceResponseSchema,
+          "Invoice header + projection lines"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "money",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["invoices", "get"],
+      },
+    }
+  )
+)
 
 export type GetInvoiceResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]

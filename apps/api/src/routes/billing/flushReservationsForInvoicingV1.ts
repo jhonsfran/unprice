@@ -6,9 +6,10 @@ import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { CloudflareEntitlementWindowClient } from "~/ingestion/entitlements/client"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["billing"]
+const tags = ["billingReservations"]
 
 const requestSchema = z.object({
   customerId: z.string().openapi({ description: "Customer id", example: "cus_123" }),
@@ -28,22 +29,35 @@ const responseSchema = z.object({
 export type FlushReservationsForInvoicingRequest = z.infer<typeof requestSchema>
 export type FlushReservationsForInvoicingResponse = z.infer<typeof responseSchema>
 
-const route = createRoute({
-  path: "/v1/billing/reservations/flush-for-invoicing",
-  operationId: "billing.reservations.flushForInvoicing",
-  summary: "flush wallet reservation usage before invoicing",
-  description:
-    "Flushes unflushed consumed usage from active wallet reservations into the ledger for invoicing. Called by the billing service before invoice materialization.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(requestSchema, "Flush reservation request"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(responseSchema, "Flush result"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/internal/billing-reservations/flush-for-invoicing",
+      operationId: "billingReservations.flushForInvoicing",
+      summary: "flush wallet reservation usage before invoicing",
+      description:
+        "Flushes unflushed consumed usage from active wallet reservations into the ledger for invoicing. Called by the billing service before invoice materialization.",
+      method: "post",
+      hide: true,
+      tags,
+      request: {
+        body: jsonContentRequired(requestSchema, "Flush reservation request"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(responseSchema, "Flush result"),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "internal",
+      category: "operations",
+      docs: {
+        expose: false,
+      },
+      sdk: false,
+    }
+  )
+)
 
 export const registerFlushReservationsForInvoicingV1 = (app: App) =>
   app.openapi(route, async (c) => {

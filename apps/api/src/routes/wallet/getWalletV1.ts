@@ -12,6 +12,7 @@ import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["wallet"]
@@ -65,60 +66,107 @@ const walletCreditBalanceParamsSchema = z.object({
   }),
 })
 
-export const walletBalanceRoute = createRoute({
-  path: "/v1/wallet/balance",
-  operationId: "wallet.balance",
-  summary: "get wallet balance",
-  description:
-    "Current customer wallet balance plus active holds and credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.",
-  method: "get",
-  tags,
-  request: {
-    query: walletBalanceQuerySchema,
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(walletResponseSchema, "The wallet balance for a customer"),
-    ...openApiErrorResponses,
-  },
-})
+export const walletBalanceRoute = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/wallet/balance",
+      operationId: "wallet.balance",
+      summary: "get wallet balance",
+      description:
+        "Current customer wallet balance plus active holds and credits. Amounts include both the raw pgledger scale-8 value and customer-facing currency display values.",
+      method: "get",
+      tags,
+      request: {
+        query: walletBalanceQuerySchema,
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          walletResponseSchema,
+          "The wallet balance for a customer"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "money",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["wallet", "balance"],
+      },
+    }
+  )
+)
 
-export const route = createRoute({
-  path: "/v1/wallet",
-  operationId: "wallet.get",
-  summary: "get wallet balance",
-  description:
-    "Compatibility alias for /v1/wallet/balance. Current customer wallet balance plus active holds and credits.",
-  method: "get",
-  tags,
-  request: {
-    query: walletBalanceQuerySchema,
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(walletResponseSchema, "The wallet balance for a customer"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/internal/wallet/get",
+      operationId: "wallet.internalGet",
+      summary: "get wallet balance",
+      description:
+        "Compatibility alias for /v1/wallet/balance. Current customer wallet balance plus active holds and credits.",
+      method: "get",
+      hide: true,
+      tags,
+      request: {
+        query: walletBalanceQuerySchema,
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          walletResponseSchema,
+          "The wallet balance for a customer"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "internal",
+      category: "money",
+      docs: {
+        expose: false,
+      },
+      sdk: false,
+    }
+  )
+)
 
-export const walletCreditBalanceRoute = createRoute({
-  path: "/v1/wallet/credits/{walletId}/balance",
-  operationId: "wallet.creditBalance",
-  summary: "get wallet credit balance",
-  description:
-    "Current balance for one wallet credit owned by the customer. The walletId is the wcr_ ID returned in the wallet balance credits array.",
-  method: "get",
-  tags,
-  request: {
-    params: walletCreditBalanceParamsSchema,
-    query: walletBalanceQuerySchema,
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      walletCreditBalanceResponseSchema,
-      "The balance for one wallet credit"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const walletCreditBalanceRoute = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/wallet-credits/balance/{walletId}",
+      operationId: "walletCredits.balance",
+      summary: "get wallet credit balance",
+      description:
+        "Current balance for one wallet credit owned by the customer. The walletId is the wcr_ ID returned in the wallet balance credits array.",
+      method: "get",
+      tags: ["walletCredits"],
+      request: {
+        params: walletCreditBalanceParamsSchema,
+        query: walletBalanceQuerySchema,
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          walletCreditBalanceResponseSchema,
+          "The balance for one wallet credit"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "money",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["walletCredits", "balance"],
+      },
+    }
+  )
+)
 
 export type GetWalletRequest = z.infer<typeof walletBalanceRoute.request.query>
 export type GetWalletResponse = z.infer<

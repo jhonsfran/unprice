@@ -14,6 +14,7 @@ import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import type { ServiceContext } from "~/hono/env"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import {
   buildIngestionQueueMessage,
@@ -21,7 +22,7 @@ import {
   rawEventSchema,
 } from "./ingestEventsV1"
 
-const tags = ["events"]
+const tags = ["usage"]
 
 const syncEventSchema = rawEventSchema.extend({
   featureSlug: z.string().openapi({
@@ -49,25 +50,44 @@ const syncIngestionResultSchema = z.object({
   }),
 })
 
-export const route = createRoute({
-  path: "/v1/events/ingest/sync",
-  operationId: "events.ingestSync",
-  summary: "ingest raw event synchronously for a feature",
-  description:
-    "Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(syncEventSchema, "The synchronous raw event ingestion payload"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      syncIngestionResultSchema,
-      "The synchronous ingestion result for the targeted feature"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/usage/consume",
+      operationId: "usage.consume",
+      summary: "ingest raw event synchronously for a feature",
+      description:
+        "Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(syncEventSchema, "The synchronous raw event ingestion payload"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          syncIngestionResultSchema,
+          "The synchronous ingestion result for the targeted feature"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "runtime",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["usage", "consume"],
+      },
+      idempotency: {
+        required: true,
+        location: "body",
+        field: "idempotencyKey",
+      },
+    }
+  )
+)
 
 export const registerIngestEventsSyncV1 = (app: App) =>
   app.openapi(route, async (c) => {

@@ -139,7 +139,7 @@ function createTestApp() {
 }
 
 function buildRequest() {
-  return new Request("https://example.com/v1/payments/providers/stripe/webhook/proj_123", {
+  return new Request("https://example.com/v1/payment-provider-callbacks/stripe/webhook/proj_123", {
     method: "POST",
     headers: {
       "content-type": "application/json",

@@ -1,4 +1,3 @@
-import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { paymentProviderSchema } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
@@ -7,9 +6,10 @@ import { processWebhookEvent } from "@unprice/services/use-cases"
 import { z } from "zod"
 import { UnpriceApiError, openApiErrorResponses, toUnpriceApiError } from "~/errors"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["payments"]
+const tags = ["paymentProviderCallbacks"]
 
 const webhookResponseSchema = z.object({
   received: z.literal(true),
@@ -38,36 +38,48 @@ function collectHeaders(headers: Headers): Record<string, string> {
   return result
 }
 
-export const route = createRoute({
-  path: "/v1/payments/providers/{provider}/webhook/{projectId}",
-  operationId: "payments.providers.webhook",
-  hide: env.NODE_ENV === "production",
-  summary: "provider webhook",
-  description:
-    "Generic provider webhook endpoint. Verifies signature, normalizes provider payload, and processes settlement side effects idempotently.",
-  method: "post",
-  tags,
-  request: {
-    params: z.object({
-      provider: paymentProviderSchema,
-      projectId: z.string().openapi({
-        description: "The project id that owns the payment provider configuration",
-        example: "proj_123",
-      }),
-    }),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: {
-      content: {
-        "application/json": {
-          schema: webhookResponseSchema,
-        },
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/payment-provider-callbacks/{provider}/webhook/{projectId}",
+      operationId: "paymentProviderCallbacks.webhook",
+      hide: true,
+      summary: "provider webhook",
+      description:
+        "Generic provider webhook endpoint. Verifies signature, normalizes provider payload, and processes settlement side effects idempotently.",
+      method: "post",
+      tags,
+      request: {
+        params: z.object({
+          provider: paymentProviderSchema,
+          projectId: z.string().openapi({
+            description: "The project id that owns the payment provider configuration",
+            example: "proj_123",
+          }),
+        }),
       },
-      description: "Webhook accepted and processed idempotently",
+      responses: {
+        [HttpStatusCodes.OK]: {
+          content: {
+            "application/json": {
+              schema: webhookResponseSchema,
+            },
+          },
+          description: "Webhook accepted and processed idempotently",
+        },
+        ...openApiErrorResponses,
+      },
     },
-    ...openApiErrorResponses,
-  },
-})
+    {
+      audience: "callback",
+      category: "configuration",
+      docs: {
+        expose: false,
+      },
+      sdk: false,
+    }
+  )
+)
 
 export const registerProviderWebhookV1 = (app: App) =>
   app.openapi(route, async (c) => {

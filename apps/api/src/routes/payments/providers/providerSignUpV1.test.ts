@@ -129,10 +129,13 @@ function createTestApp() {
 }
 
 function buildRequest() {
-  return new Request("https://example.com/v1/payments/providers/stripe/sign-up/sess_123/proj_123", {
-    method: "GET",
-    headers: {
-      "x-forwarded-for": "127.0.0.1",
-    },
-  })
+  return new Request(
+    "https://example.com/v1/payment-provider-callbacks/stripe/sign-up/sess_123/proj_123",
+    {
+      method: "GET",
+      headers: {
+        "x-forwarded-for": "127.0.0.1",
+      },
+    }
+  )
 }

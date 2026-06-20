@@ -8,43 +8,59 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
-const tags = ["payments"]
+const tags = ["paymentMethods"]
 
-export const route = createRoute({
-  path: "/v1/payments/methods/list",
-  operationId: "payments.methods.list",
-  summary: "list payment methods",
-  description: "Get payment methods for a customer",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      z.object({
-        customerId: z.string().openapi({
-          description: "The customer ID",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
-        }),
-        provider: paymentProviderSchema.openapi({
-          description: "The payment provider",
-          example: "stripe",
-        }),
-        skipCache: z.boolean().optional().openapi({
-          description: "Force a fresh provider lookup instead of using the cached payment methods",
-          example: true,
-        }),
-      }),
-      "Body of the request"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      customerPaymentMethodSchema.array(),
-      "The result of the get payment methods"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/payment-methods/list",
+      operationId: "paymentMethods.list",
+      summary: "list payment methods",
+      description: "Get payment methods for a customer",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          z.object({
+            customerId: z.string().openapi({
+              description: "The customer ID",
+              example: "cus_1H7KQFLr7RepUyQBKdnvY",
+            }),
+            provider: paymentProviderSchema.openapi({
+              description: "The payment provider",
+              example: "stripe",
+            }),
+            skipCache: z.boolean().optional().openapi({
+              description:
+                "Force a fresh provider lookup instead of using the cached payment methods",
+              example: true,
+            }),
+          }),
+          "Body of the request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          customerPaymentMethodSchema.array(),
+          "The result of the get payment methods"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["paymentMethods", "list"],
+      },
+    }
+  )
+)
 
 export type ListPaymentMethodsRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]

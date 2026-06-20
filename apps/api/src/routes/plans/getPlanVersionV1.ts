@@ -8,34 +8,49 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
-const tags = ["plans"]
+const tags = ["planVersions"]
 
-export const route = createRoute({
-  path: "/v1/plans/versions/get/{planVersionId}",
-  operationId: "plans.getVersion",
-  summary: "get plan version",
-  description: "Get a plan version by id",
-  method: "get",
-  tags,
-  request: {
-    params: z.object({
-      planVersionId: z.string().openapi({
-        description: "The plan version id",
-        example: "pv_1H7KQFLr7RepUyQBKdnvY",
-      }),
-    }),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      z.object({
-        planVersion: getPlanVersionApiResponseSchema,
-      }),
-      "The result of the get plan version"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/plan-versions/get/{planVersionId}",
+      operationId: "planVersions.get",
+      summary: "get plan version",
+      description: "Get a plan version by id",
+      method: "get",
+      tags,
+      request: {
+        params: z.object({
+          planVersionId: z.string().openapi({
+            description: "The plan version id",
+            example: "pv_1H7KQFLr7RepUyQBKdnvY",
+          }),
+        }),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          z.object({
+            planVersion: getPlanVersionApiResponseSchema,
+          }),
+          "The result of the get plan version"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["planVersions", "get"],
+      },
+    }
+  )
+)
 
 export type GetPlanVersionResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]

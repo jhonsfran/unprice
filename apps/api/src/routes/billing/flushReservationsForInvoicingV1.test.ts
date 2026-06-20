@@ -243,7 +243,7 @@ function createTestApp(options: {
 }
 
 function buildRequest(body: Record<string, unknown>) {
-  return new Request("https://example.com/v1/billing/reservations/flush-for-invoicing", {
+  return new Request("https://example.com/v1/internal/billing-reservations/flush-for-invoicing", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",
