@@ -28,7 +28,6 @@ const CUSTOMER_ID = __ENV.CUSTOMER_ID || ""
 // Budget per run in currency minor units (cents). Keep small relative to the
 // wallet cap so multiple concurrent runs can coexist. Default: 100 = $1.00/€1.00.
 const BUDGET_AMOUNT = positiveInteger(__ENV.BUDGET_AMOUNT, 100)
-const CURRENCY = __ENV.CURRENCY || "USD"
 const EVENTS_PER_RUN = positiveInteger(__ENV.EVENTS_PER_RUN, 50)
 const RUNS = positiveInteger(__ENV.RUNS, 10)
 const VUS = positiveInteger(__ENV.VUS, Math.min(5, RUNS))
@@ -65,7 +64,7 @@ export function setup() {
   }
 
   check(profile, {
-    "entitlements.get returns usage profile": (p) => p.usageEvents.length > 0,
+    "access.entitlements.list returns usage profile": (p) => p.usageEvents.length > 0,
     "usage events have featureSlug": (p) => p.usageEvents.every((e) => e.featureSlug),
   })
 
@@ -77,16 +76,16 @@ export default function (profile) {
   const runIdempotencyKey = `k6-run-${__VU}-${__ITER}-${Date.now()}`
 
   const startRes = postJson(
-    "/v1/runs",
+    "/v1/runs/start",
     {
       customerId: CUSTOMER_ID,
       budgetAmount: BUDGET_AMOUNT,
-      currency: CURRENCY,
       idempotencyKey: runIdempotencyKey,
-      agentId: `k6-agent-vu${__VU}`,
+      workloadType: "agent",
+      workloadId: `k6-agent-vu${__VU}`,
       metadata: { k6_vu: __VU, k6_iter: __ITER },
     },
-    "POST /v1/runs"
+    "POST /v1/runs/start"
   )
 
   startRunDuration.add(startRes.timings.duration)
@@ -125,14 +124,14 @@ export default function (profile) {
     const target = profile.usageEvents[i % profile.usageEvents.length]
 
     const eventRes = postJson(
-      `/v1/runs/${runId}/events/sync`,
+      `/v1/runs/consume/${runId}`,
       {
         featureSlug: target.featureSlug,
         eventSlug: target.eventSlug,
         idempotencyKey: `k6-evt-${runId}-${i}-${randomInteger(100000, 999999)}`,
         properties: buildProperties(target.propertyFields),
       },
-      "POST /v1/runs/:runId/events/sync"
+      "POST /v1/runs/consume/:runId"
     )
 
     syncEventDuration.add(eventRes.timings.duration)
@@ -160,9 +159,9 @@ export default function (profile) {
   // 3. End the run
   const endStatus = denied ? "completed" : "completed"
   const endRes = postJson(
-    `/v1/runs/${runId}/end`,
+    `/v1/runs/end/${runId}`,
     { status: endStatus },
-    "POST /v1/runs/:runId/end"
+    "POST /v1/runs/end/:runId"
   )
 
   endRunDuration.add(endRes.timings.duration)
@@ -182,7 +181,10 @@ export default function (profile) {
   }
 
   // 4. Verify final state via GET
-  const getRes = http.get(`${BASE_URL}/v1/runs/${runId}`, requestParams("GET /v1/runs/:runId"))
+  const getRes = http.get(
+    `${BASE_URL}/v1/runs/get/${runId}`,
+    requestParams("GET /v1/runs/get/:runId")
+  )
 
   check(getRes, {
     "get run (200)": (r) => r.status === 200,

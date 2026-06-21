@@ -57,7 +57,7 @@ export function setup() {
 
 export default function ({ target }) {
   const response = postJson(
-    "/v1/events/ingest",
+    "/v1/usage/record",
     {
       customerId: CUSTOMER_ID,
       eventSlug: target.eventSlug,
@@ -65,7 +65,7 @@ export default function ({ target }) {
       idempotencyKey: nextIdempotencyKey(target.eventSlug),
       properties: buildProperties(target.propertyFields),
     },
-    "POST /v1/events/ingest failure test",
+    "POST /v1/usage/record failure test",
     {
       [FAILURE_HEADER]: FAILURE_HEADER_VALUE,
     }

@@ -2,34 +2,41 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Wire budget-run sync usage into the existing reporting queue and Tinybird analytics path, while adding durable run attribution fields for trace grouping, parent-child run trees, and workload identity.
+**Goal:** Make budget-run sync usage report through the same reporting queue, Tinybird meter-fact path, and ingestion status path as normal usage sync, while adding durable run attribution fields.
 
-**Architecture:** Keep `RunBudgetDO` as the synchronous budget gate, but make it return run-enriched meter facts to the run use case. The run use case must enqueue an `IngestionReportingEnvelope` through the same reporting queue used by normal sync ingestion; the reporting consumer remains the only Tinybird writer. Do not send run sync events through the raw async ingestion queue or the raw R2 write-before-queue path.
+**Architecture:** `RunBudgetDO` stays the synchronous budget gate and delegates rating to `EntitlementWindowDO`, which already produces canonical usage meter facts. The run consume use case decorates those facts with run context, then awaits `IngestionReportingDispatcher.enqueueOutcomes` exactly like `/v1/usage/consume`; the reporting consumer remains the only Tinybird writer. Run sync events must not enter the raw async ingestion queue or raw R2 archival path.
 
-**Tech Stack:** TypeScript, Hono, Zod, Drizzle Postgres, Cloudflare Durable Objects with SQLite, Cloudflare Queues, Tinybird, `@unprice/services/ingestion` reporting envelopes.
+**Tech Stack:** TypeScript, Hono, Zod, Drizzle Postgres, Cloudflare Durable Objects with SQLite, Cloudflare Queues, Tinybird, generated OpenAPI SDK resources.
 
 ---
 
 ## Product Decisions
 
 1. `source_id` keeps its current meaning: the submitter identity, usually the API key id.
-2. `workload_id` is the caller-owned producer label. It replaces `agent_id`.
+2. `workload_id` is the caller-owned producer label. It replaces public `agentId` and analytics `agent_id`.
 3. `workload_type` is optional low-cardinality classification: `"agent" | "workflow" | "job" | "tool" | "custom"`.
 4. `trace_id` groups all runs in one business flow.
 5. `parent_run_id` expresses run tree structure. `trace_id` alone cannot tell parent/child relationships.
-6. Budget-run sync events do not use raw R2 archival. They do create normal reporting audit records with `payload_json = null` and `replayable = false` for processed/rejected outcomes.
+6. Run sync events create normal reporting audit records for processed and rejected outcomes with `payload_json = null` and `replayable = false`.
+7. The public run API keeps the current route paths:
+   - `POST /v1/runs/start`
+   - `POST /v1/runs/consume/{runId}`
+   - `POST /v1/runs/end/{runId}`
+   - `GET /v1/runs/get/{runId}`
+8. `startRunInputSchema` must not accept `currency`; `apps/api/src/routes/runs/startRunV1.ts` derives currency from the customer active subscription.
+9. The SDK already exposes generated `client.runs.*` resources. Do not hand-write run methods in `packages/api/src/client.ts`; regenerate OpenAPI and SDK resources.
 
 ## Target Shape
 
 ```mermaid
 flowchart LR
-  Route["POST /v1/runs/{runId}/events/sync"] --> UseCase["applyRunSyncEvent use case"]
+  Route["POST /v1/runs/consume/{runId}"] --> UseCase["applyRunSyncEvent"]
   UseCase --> Budget["RunBudgetDO"]
   Budget --> Ent["EntitlementWindowDO.apply"]
-  Ent --> Facts["meter facts"]
-  Budget --> EnrichedFacts["meter facts + run context"]
-  EnrichedFacts --> UseCase
-  UseCase --> Reporting["IngestionReportingDispatcher"]
+  Ent --> Facts["canonical meter facts"]
+  Budget --> RunFacts["meter facts + run context"]
+  RunFacts --> UseCase
+  UseCase --> Reporting["IngestionReportingDispatcher.enqueueOutcomes"]
   Reporting --> Queue["INGESTION_REPORTING_QUEUE"]
   Queue --> Consumer["IngestionReportingConsumer"]
   Consumer --> TinybirdFacts["unprice_entitlement_meter_facts"]
@@ -37,128 +44,114 @@ flowchart LR
   Consumer --> Audit["Pipeline/lakehouse audit evidence"]
 ```
 
-No edge should exist from the run sync route to the raw async ingestion queue or raw R2 storage.
+No edge should exist from a run route or run use case to `QUEUE_SHARD_*`, raw async ingestion, raw R2 storage, or direct Tinybird ingestion.
 
 ## File Structure
 
 ### Run Identity
 
-- `internal/db/src/schema/budget-runs.ts`  
-  Owns Postgres persisted run fields: `workloadId`, `workloadType`, `traceId`, `parentRunId`.
+- `internal/db/src/schema/budget-runs.ts`
+  Owns Postgres persisted run fields: `workloadType`, `workloadId`, `traceId`, `parentRunId`.
 
-- `internal/db/src/validators/budget-runs.ts`  
-  Owns public API schemas and response contracts for budget runs.
+- `internal/db/src/validators/budget-runs.ts`
+  Owns public run request and response schemas. It must expose workload fields and must not expose `agentId`.
 
-- `internal/services/src/budget-runs/service.ts`  
-  Persists and loads budget run identity fields.
+- `internal/db/src/validators/budget-runs.test.ts`
+  Locks public validator behavior.
 
-- `apps/api/src/ingestion/run-budget/db/schema.ts`  
+- `internal/services/src/budget-runs/service.ts`
+  Persists and loads run identity fields.
+
+- `internal/services/src/use-cases/runs/start-run.ts`
+  Creates the Postgres row, starts `RunBudgetDO`, and returns public run summaries.
+
+- `internal/services/src/use-cases/runs/get-run.ts`
+  Returns public run summaries with workload attribution.
+
+- `internal/services/src/use-cases/runs/end-run.ts`
+  Ends runs and returns public run summaries with workload attribution.
+
+- `internal/services/src/use-cases/runs/apply-run-sync-event.ts`
+  Resolves entitlement, calls `RunBudgetDO`, updates stored summary, and reports final run sync outcomes.
+
+- `internal/services/src/use-cases/runs/run-budget-client.ts`
+  Defines the service-side `RunBudgetClient` contract, including returned meter facts.
+
+- `apps/api/src/ingestion/run-budget/db/schema.ts`
   Owns Durable Object SQLite hot run state fields.
 
-- `apps/api/src/ingestion/run-budget/contracts.ts`  
-  Owns Durable Object input/output contracts.
+- `apps/api/src/ingestion/run-budget/contracts.ts`
+  Owns Durable Object input/output Zod contracts.
+
+- `apps/api/src/ingestion/run-budget/RunBudgetDO.ts`
+  Gates budget, delegates rating, decorates returned meter facts with run context, and persists idempotent decisions.
+
+- `apps/api/src/ingestion/run-budget/client.ts`
+  Calls the Cloudflare Durable Object and preserves returned meter facts.
 
 ### Analytics Contracts
 
-- `internal/analytics/src/validators.ts`  
-  Owns Tinybird ingest row validation for meter facts and ingestion status events.
+- `internal/analytics/src/validators.ts`
+  Adds nullable run attribution to `entitlementMeterFactSchemaV1` and `ingestionEventSchemaV1`.
 
-- `internal/analytics/datasources/unprice_entitlement_meter_facts.datasource`  
-  Adds nullable run attribution columns for priced facts.
+- `internal/analytics/datasources/unprice_entitlement_meter_facts.datasource`
+  Adds nullable run attribution columns for priced meter facts.
 
-- `internal/analytics/datasources/unprice_ingestion_events.datasource`  
-  Adds nullable run attribution columns for status/audit rows.
+- `internal/analytics/datasources/unprice_ingestion_events.datasource`
+  Adds nullable run attribution columns for status rows.
 
-- `internal/analytics/fixtures/unprice_entitlement_meter_facts.ndjson`  
-  Fixtures include null run attribution for existing rows and non-null attribution for at least one run row.
+- `internal/analytics/fixtures/unprice_entitlement_meter_facts.ndjson`
+  Adds null run fields for existing rows and one non-null run fact row.
 
-- `internal/analytics/fixtures/unprice_ingestion_events.ndjson`  
-  Fixtures include null run attribution for existing rows and non-null attribution for at least one run row.
+- `internal/analytics/fixtures/unprice_ingestion_events.ndjson`
+  Adds null run fields for existing rows and one non-null run status row.
 
 ### Reporting Pipeline
 
-- `internal/services/src/ingestion/message.ts`  
-  Adds optional `runContext` to `IngestionQueueMessage`.
+- `internal/services/src/ingestion/message.ts`
+  Adds optional `runContext` to `IngestionQueueMessage`. Normal usage messages omit it.
 
-- `internal/services/src/ingestion/reporting.ts`  
-  Adds optional run context fields to `IngestionReportingAuditRecord`.
+- `internal/services/src/ingestion/reporting.ts`
+  Adds nullable run context fields to `IngestionReportingAuditRecord`.
 
-- `internal/services/src/ingestion/reporting-envelope.ts`  
+- `internal/services/src/ingestion/reporting-envelope.ts`
   Copies `message.runContext` into audit records and audit payload JSON.
 
-- `apps/api/src/ingestion/reporting/consumer.ts`  
+- `apps/api/src/ingestion/reporting/consumer.ts`
   Copies reporting audit run fields into Tinybird ingestion status rows.
 
-### Run Apply Wire-Up
+### Public Routes And SDK
 
-- `internal/services/src/use-cases/runs/run-budget-client.ts`  
-  Adds `meterFacts` to the run budget apply decision.
+- `apps/api/src/routes/runs/startRunV1.ts`
+  Accepts `workloadId`, `workloadType`, `traceId`, and `parentRunId`; still derives currency from subscription.
 
-- `internal/services/src/use-cases/runs/apply-run-sync-event.ts`  
-  Awaits the reporting queue enqueue before returning the sync decision.
+- `apps/api/src/routes/runs/applyRunSyncEventV1.ts`
+  Builds `requestId`, `receivedAt`, source, timestamp validation, entitlement resolver, run budget client, and reporting dispatcher dependencies.
 
-- `apps/api/src/routes/runs/applyRunSyncEventV1.ts`  
-  Builds `requestId`, `receivedAt`, source, and reporting dispatcher dependencies.
-
-- `apps/api/src/routes/runs/startRunV1.ts`  
-  Accepts `workloadId`, `workloadType`, `traceId`, and `parentRunId`.
-
-### Public Contracts And Docs
+- `apps/api/src/routes/runs/runs.test.ts`
+  Locks route wiring and raw queue/R2 guardrails.
 
 - `packages/api/src/openapi.d.ts`
-- `packages/api/src/client.ts`
-- `docs/budgeted-runs.md`
+  Generated OpenAPI types.
 
-The SDK must expose `runs`, not `agents`.
+- `packages/api/src/generated/sdk-resources.ts`
+  Generated SDK operation map and resource surface.
+
+- `packages/api/src/client.test.ts`
+  Locks generated `client.runs.*` behavior and absence of stale agent fields.
+
+- `docs/budgeted-runs.md`
+  Documents the reporting and replay boundary.
 
 ---
 
-### Task 1: Lock The Public Run Attribution Contract With Failing Tests
+### Task 1: Lock The Current Public Run Contract With Failing Tests
 
 **Files:**
+- Create: `internal/db/src/validators/budget-runs.test.ts`
 - Modify: `apps/api/src/routes/runs/runs.test.ts`
-- Modify: `internal/db/src/validators/budget-runs.ts`
 
-- [ ] **Step 1: Add a failing route contract test for workload and parent run fields**
-
-Append this test in `apps/api/src/routes/runs/runs.test.ts` inside the existing budgeted runs describe block:
-
-```ts
-it("starts a run with workload, trace, and parent attribution", async () => {
-  const response = await app.request("/v1/runs", {
-    method: "POST",
-    headers: {
-      authorization: "Bearer unprice_dev_test",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      budgetAmount: 500,
-      currency: "USD",
-      idempotencyKey: "run_attr_1",
-      workloadType: "agent",
-      workloadId: "research-assistant-v2",
-      traceId: "trace_checkout_123",
-      parentRunId: "brun_parent_123",
-      metadata: {
-        scenario: "checkout",
-      },
-    }),
-  })
-
-  expect(response.status).toBe(200)
-  const body = await response.json()
-  expect(body).toMatchObject({
-    runId: expect.stringMatching(/^brun_/),
-    workloadType: "agent",
-    workloadId: "research-assistant-v2",
-    traceId: "trace_checkout_123",
-    parentRunId: "brun_parent_123",
-  })
-  expect(body).not.toHaveProperty("agentId")
-})
-```
-
-- [ ] **Step 2: Add a failing validator contract test**
+- [ ] **Step 1: Create the validator contract test**
 
 Create `internal/db/src/validators/budget-runs.test.ts`:
 
@@ -167,10 +160,9 @@ import { describe, expect, it } from "vitest"
 import { runSummarySchema, startRunInputSchema } from "./budget-runs"
 
 describe("budget run validators", () => {
-  it("accepts workload, trace, and parent attribution on start", () => {
+  it("accepts workload, trace, and parent attribution on start without currency", () => {
     const input = startRunInputSchema.parse({
       budgetAmount: 100,
-      currency: "USD",
       idempotencyKey: "idem_run_attr",
       workloadType: "workflow",
       workloadId: "checkout-flow",
@@ -178,7 +170,9 @@ describe("budget run validators", () => {
       parentRunId: "brun_parent_123",
     })
 
-    expect(input).toMatchObject({
+    expect(input).toEqual({
+      budgetAmount: 100,
+      idempotencyKey: "idem_run_attr",
       workloadType: "workflow",
       workloadId: "checkout-flow",
       traceId: "trace_123",
@@ -201,8 +195,91 @@ describe("budget run validators", () => {
       parentRunId: null,
     })
 
+    expect(summary).toMatchObject({
+      workloadType: "agent",
+      workloadId: "research-assistant",
+      traceId: "trace_123",
+      parentRunId: null,
+    })
     expect(summary).not.toHaveProperty("agentId")
   })
+})
+```
+
+- [ ] **Step 2: Add a route contract test for current `/v1/runs/start` wiring**
+
+Append this test inside the `describe("budgeted runs API", () => { ... })` block in `apps/api/src/routes/runs/runs.test.ts`:
+
+```ts
+it("starts a run with workload, trace, and parent attribution", async () => {
+  authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
+  authMocks.resolveCustomerIdForApiKey.mockReturnValue({
+    success: true,
+    customerId: "cus_default",
+  })
+
+  useCaseMocks.startRun.mockResolvedValue({
+    val: {
+      runId: "brun_attr123",
+      status: "running",
+      customerId: "cus_default",
+      budgetAmount: 500_000_000,
+      consumedAmount: 0,
+      remainingAmount: 500_000_000,
+      currency: "USD",
+      workloadType: "agent",
+      workloadId: "research-assistant-v2",
+      traceId: "trace_checkout_123",
+      parentRunId: "brun_parent_123",
+    },
+    err: undefined,
+  })
+
+  const { app, env, executionCtx } = createTestApp()
+
+  const response = await app.fetch(
+    new Request("https://example.com/v1/runs/start", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer sk_test",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        budgetAmount: 500,
+        idempotencyKey: "run_attr_1",
+        workloadType: "agent",
+        workloadId: "research-assistant-v2",
+        traceId: "trace_checkout_123",
+        parentRunId: "brun_parent_123",
+        metadata: {
+          scenario: "checkout",
+        },
+      }),
+    }),
+    env,
+    executionCtx
+  )
+
+  expect(response.status).toBe(200)
+  expect(useCaseMocks.startRun).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      workloadType: "agent",
+      workloadId: "research-assistant-v2",
+      traceId: "trace_checkout_123",
+      parentRunId: "brun_parent_123",
+    })
+  )
+
+  const body = await response.json()
+  expect(body).toMatchObject({
+    runId: "brun_attr123",
+    workloadType: "agent",
+    workloadId: "research-assistant-v2",
+    traceId: "trace_checkout_123",
+    parentRunId: "brun_parent_123",
+  })
+  expect(body).not.toHaveProperty("agentId")
 })
 ```
 
@@ -211,55 +288,48 @@ describe("budget run validators", () => {
 Run:
 
 ```bash
-pnpm --filter api test src/routes/runs/runs.test.ts -t "workload, trace, and parent attribution"
-pnpm --filter @unprice/db test src/validators/budget-runs.test.ts
+rtk pnpm --filter @unprice/db test src/validators/budget-runs.test.ts
+rtk pnpm --filter api test src/routes/runs/runs.test.ts -t "workload, trace, and parent attribution"
 ```
 
 Expected:
 
-- The route test fails because `workloadType`, `workloadId`, and `parentRunId` are not in the response.
-- The validator test fails because the schema still accepts `agentId` and does not expose the new fields.
+- The validator test fails because `workloadType`, `workloadId`, and `parentRunId` are not in `startRunInputSchema` or `runSummarySchema`.
+- The route test fails because `startRunV1.ts` does not pass workload fields to `startRun`.
 
 - [ ] **Step 4: Commit the failing tests**
 
 ```bash
-git add apps/api/src/routes/runs/runs.test.ts internal/db/src/validators/budget-runs.test.ts
-git commit -m "test: lock budget run attribution contract"
+rtk git add internal/db/src/validators/budget-runs.test.ts apps/api/src/routes/runs/runs.test.ts
+rtk git commit -m "test: lock budget run workload contract"
 ```
 
 ---
 
-### Task 2: Replace Agent Attribution With Workload Attribution In Run Storage
+### Task 2: Replace Public Agent Attribution With Workload Run Identity
 
 **Files:**
 - Modify: `internal/db/src/schema/budget-runs.ts`
 - Modify: `internal/db/src/validators/budget-runs.ts`
 - Modify: `internal/services/src/budget-runs/service.ts`
 - Modify: `internal/services/src/use-cases/runs/start-run.ts`
-- Modify: `internal/services/src/use-cases/runs/apply-run-sync-event.ts`
-- Modify: `internal/services/src/use-cases/runs/end-run.ts`
 - Modify: `internal/services/src/use-cases/runs/get-run.ts`
+- Modify: `internal/services/src/use-cases/runs/end-run.ts`
+- Modify: `internal/services/src/use-cases/runs/apply-run-sync-event.ts`
 - Modify: `apps/api/src/routes/runs/startRunV1.ts`
 - Modify: `apps/api/src/ingestion/run-budget/contracts.ts`
 - Modify: `apps/api/src/ingestion/run-budget/db/schema.ts`
 - Modify: `apps/api/src/ingestion/run-budget/RunBudgetDO.ts`
 - Modify: `apps/api/src/ingestion/run-budget/client.ts`
-- Generated: `internal/db/src/migrations/*`
-- Generated: `apps/api/src/ingestion/run-budget/drizzle/*`
+- Modify: `apps/api/src/ingestion/run-budget/RunBudgetDO.test.ts`
+- Generate: `internal/db/src/migrations/*`
+- Generate: `apps/api/src/ingestion/run-budget/drizzle/*`
 
-- [ ] **Step 1: Update Postgres run schema fields**
+- [ ] **Step 1: Update the Postgres budget run schema**
 
-In `internal/db/src/schema/budget-runs.ts`, replace `agentId` with `workloadType`, `workloadId`, and `parentRunId`.
+In `internal/db/src/schema/budget-runs.ts`, replace `agentId` with workload fields and add indexes:
 
 ```ts
-export type BudgetRunStatus =
-  | "running"
-  | "completed"
-  | "expired"
-  | "canceled"
-  | "budget_exceeded"
-  | "failed"
-
 export type BudgetRunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
 
 export const budgetRuns = pgTableProject(
@@ -268,6 +338,7 @@ export const budgetRuns = pgTableProject(
     ...projectID,
     customerId: cuid("customer_id").notNull(),
     status: text("status").$type<BudgetRunStatus>().notNull().default("running"),
+    statusReason: text("status_reason"),
     budgetAmount: bigint("budget_amount", { mode: "number" }).notNull(),
     consumedAmount: bigint("consumed_amount", { mode: "number" }).notNull().default(0),
     remainingAmount: bigint("remaining_amount", { mode: "number" }).notNull(),
@@ -308,17 +379,17 @@ export const budgetRuns = pgTableProject(
 )
 ```
 
-- [ ] **Step 2: Update public validators**
+- [ ] **Step 2: Update public run validators**
 
-In `internal/db/src/validators/budget-runs.ts`, use this schema shape:
+In `internal/db/src/validators/budget-runs.ts`, replace the start and summary schemas with this shape. Keep `currency` out of the start request:
 
 ```ts
 export const workloadTypeSchema = z.enum(["agent", "workflow", "job", "tool", "custom"])
 
 export const startRunInputSchema = z.object({
   customerId: z.string().min(1).optional(),
-  budgetAmount: z.number().positive(),
-  currency: z.string().min(3).max(12),
+  /** Budget in currency minor units (cents). e.g. 500 = $5.00 USD. */
+  budgetAmount: z.number().int().positive(),
   idempotencyKey: z.string().min(1),
   workloadType: workloadTypeSchema.nullable().optional(),
   workloadId: z.string().min(1).nullable().optional(),
@@ -332,9 +403,12 @@ export const runSummarySchema = z.object({
   runId: z.string(),
   status: runStatusSchema,
   customerId: z.string(),
-  budgetAmount: z.number(),
-  consumedAmount: z.number(),
-  remainingAmount: z.number(),
+  /** Budget in currency minor units (cents). */
+  budgetAmount: z.number().int(),
+  /** Consumed in currency minor units (cents). */
+  consumedAmount: z.number().int(),
+  /** Remaining in currency minor units (cents). */
+  remainingAmount: z.number().int(),
   currency: z.string(),
   workloadType: workloadTypeSchema.nullable(),
   workloadId: z.string().nullable(),
@@ -343,9 +417,9 @@ export const runSummarySchema = z.object({
 })
 ```
 
-- [ ] **Step 3: Update service create input**
+- [ ] **Step 3: Update the budget run service create input**
 
-In `internal/services/src/budget-runs/service.ts`, change `createRun` input fields and insert values:
+In `internal/services/src/budget-runs/service.ts`, update `createRun` input and insert values:
 
 ```ts
 async createRun(input: {
@@ -403,7 +477,7 @@ async createRun(input: {
 }
 ```
 
-- [ ] **Step 4: Update run use-case summaries**
+- [ ] **Step 4: Update run use-case input and returned summaries**
 
 In `internal/services/src/use-cases/runs/start-run.ts`, update `StartRunResolvedInput`:
 
@@ -423,10 +497,10 @@ export type StartRunResolvedInput = {
 }
 ```
 
-Pass those fields into `budgetRuns.createRun` and `runBudget.startRun`. Return this summary shape:
+Pass those fields into `budgetRuns.createRun` and `runBudget.startRun`. Return this summary shape from `start-run.ts`, `get-run.ts`, `end-run.ts`, and `apply-run-sync-event.ts`:
 
 ```ts
-return Ok({
+{
   runId: run.id,
   status: doResult.val.summary.status,
   customerId: run.customerId,
@@ -434,22 +508,57 @@ return Ok({
   consumedAmount: doResult.val.summary.consumedAmount,
   remainingAmount: doResult.val.summary.remainingAmount,
   currency: run.currency,
-  workloadType: run.workloadType,
-  workloadId: run.workloadId,
-  traceId: run.traceId,
-  parentRunId: run.parentRunId,
-})
+  workloadType: run.workloadType ?? null,
+  workloadId: run.workloadId ?? null,
+  traceId: run.traceId ?? null,
+  parentRunId: run.parentRunId ?? null,
+}
 ```
 
-Apply the same return shape in:
+For `get-run.ts` and entitlement-resolution rejection paths that do not have a `doResult`, use the stored row values:
 
-- `internal/services/src/use-cases/runs/apply-run-sync-event.ts`
-- `internal/services/src/use-cases/runs/end-run.ts`
-- `internal/services/src/use-cases/runs/get-run.ts`
+```ts
+{
+  runId: run.id,
+  status: run.status,
+  customerId: run.customerId,
+  budgetAmount: run.budgetAmount,
+  consumedAmount: run.consumedAmount,
+  remainingAmount: run.remainingAmount,
+  currency: run.currency,
+  workloadType: run.workloadType ?? null,
+  workloadId: run.workloadId ?? null,
+  traceId: run.traceId ?? null,
+  parentRunId: run.parentRunId ?? null,
+}
+```
 
-- [ ] **Step 5: Update Durable Object contracts and SQLite schema**
+- [ ] **Step 5: Update `startRunV1.ts` to pass workload fields**
 
-In `apps/api/src/ingestion/run-budget/contracts.ts`, replace `agentId`:
+In `apps/api/src/routes/runs/startRunV1.ts`, replace the run use-case input object fields:
+
+```ts
+const result = await startRun(
+  { services: { budgetRuns }, runBudget },
+  {
+    projectId: key.projectId,
+    customerId: customer.customerId,
+    budgetAmount: budgetAmountLedger,
+    currency,
+    idempotencyKey: body.idempotencyKey,
+    workloadType: body.workloadType,
+    workloadId: body.workloadId,
+    traceId: body.traceId,
+    parentRunId: body.parentRunId,
+    metadata: body.metadata,
+    expiresAt: body.expiresAt,
+  }
+)
+```
+
+- [ ] **Step 6: Update Durable Object contracts and SQLite schema**
+
+In `apps/api/src/ingestion/run-budget/contracts.ts`, add the shared workload type and update `startRunInputSchema`:
 
 ```ts
 const workloadTypeSchema = z.enum(["agent", "workflow", "job", "tool", "custom"])
@@ -480,9 +589,9 @@ traceId: text("trace_id"),
 parentRunId: text("parent_run_id"),
 ```
 
-- [ ] **Step 6: Update RunBudgetDO start state and wallet metadata**
+- [ ] **Step 7: Update `RunBudgetDO` run state and wallet metadata**
 
-In `apps/api/src/ingestion/run-budget/RunBudgetDO.ts`, update the insert:
+In `apps/api/src/ingestion/run-budget/RunBudgetDO.ts`, insert workload fields into `runState`:
 
 ```ts
 await this.db.insert(schema.runState).values({
@@ -506,7 +615,7 @@ await this.db.insert(schema.runState).values({
 })
 ```
 
-Update wallet reservation metadata:
+Replace reservation metadata:
 
 ```ts
 metadata: {
@@ -518,7 +627,7 @@ metadata: {
 },
 ```
 
-Update release metadata:
+Replace release metadata:
 
 ```ts
 metadata: {
@@ -530,44 +639,42 @@ metadata: {
 },
 ```
 
-- [ ] **Step 7: Regenerate migrations**
+- [ ] **Step 8: Regenerate migrations**
 
 Run:
 
 ```bash
-bin/migrate.dev
-pnpm --filter api db:generate:ingestion:run-budget
-pnpm --filter api db:check:ingestion:migrations
+rtk bin/migrate.dev
+rtk pnpm --filter api db:generate:ingestion:run-budget
+rtk pnpm --filter api db:check:ingestion:migrations
 ```
 
 Expected:
 
-- Postgres migration renames or recreates the current budget-run attribution columns.
+- Postgres migration replaces `agent_id` with `workload_type`, `workload_id`, and `parent_run_id`, while preserving `trace_id`.
 - RunBudgetDO SQLite migration adds `workload_type`, `workload_id`, and `parent_run_id`.
-- `pnpm --filter api db:check:ingestion:migrations` exits 0.
+- Ingestion migration check exits 0.
 
-- [ ] **Step 8: Run tests**
-
-Run:
+- [ ] **Step 9: Run focused tests**
 
 ```bash
-pnpm --filter @unprice/db test src/validators/budget-runs.test.ts
-pnpm --filter api test src/routes/runs/runs.test.ts -t "workload, trace, and parent attribution"
-pnpm --filter api test src/ingestion/run-budget/RunBudgetDO.test.ts
+rtk pnpm --filter @unprice/db test src/validators/budget-runs.test.ts
+rtk pnpm --filter api test src/routes/runs/runs.test.ts -t "workload, trace, and parent attribution"
+rtk pnpm --filter api test src/ingestion/run-budget/RunBudgetDO.test.ts
 ```
 
 Expected: all pass.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add internal/db apps/api/src/ingestion/run-budget internal/services/src/budget-runs internal/services/src/use-cases/runs apps/api/src/routes/runs
-git commit -m "refactor: replace agent attribution with workload run context"
+rtk git add internal/db apps/api/src/ingestion/run-budget internal/services/src/budget-runs internal/services/src/use-cases/runs apps/api/src/routes/runs/startRunV1.ts apps/api/src/routes/runs/runs.test.ts
+rtk git commit -m "refactor: replace agent run attribution with workload context"
 ```
 
 ---
 
-### Task 3: Add Run Attribution Columns To Tinybird Analytics Contracts
+### Task 3: Add Run Attribution Columns To Analytics Contracts
 
 **Files:**
 - Modify: `internal/analytics/src/validators.ts`
@@ -575,11 +682,13 @@ git commit -m "refactor: replace agent attribution with workload run context"
 - Modify: `internal/analytics/datasources/unprice_ingestion_events.datasource`
 - Modify: `internal/analytics/fixtures/unprice_entitlement_meter_facts.ndjson`
 - Modify: `internal/analytics/fixtures/unprice_ingestion_events.ndjson`
-- Modify: `internal/analytics/tests/*.yaml`
+- Modify: `internal/analytics/tests/v1_get_ingestion_live.yaml`
+- Modify: `internal/analytics/tests/v1_get_ingestion_recent.yaml`
+- Modify: `internal/analytics/tests/v1_get_feature_usage*.yaml` if those tests assert full meter fact rows
 
 - [ ] **Step 1: Add shared analytics run fields**
 
-In `internal/analytics/src/validators.ts`, add this near the other reusable schema helpers:
+In `internal/analytics/src/validators.ts`, add this helper near the entitlement/ingestion schemas:
 
 ```ts
 const analyticsRunContextShape = {
@@ -591,44 +700,15 @@ const analyticsRunContextShape = {
 }
 ```
 
-Extend `entitlementMeterFactSchemaV1`:
+Extend `entitlementMeterFactSchemaV1` immediately after `source_name`:
 
 ```ts
-export const entitlementMeterFactSchemaV1 = z.object({
-  event_id: z.string(),
-  idempotency_key: z.string(),
-  workspace_id: z.string(),
-  project_id: z.string(),
-  customer_id: z.string(),
-  environment: z.string(),
-  api_key_id: z.string().nullable().optional(),
-  source_type: z.enum(["api_key", "system", "unknown"]),
-  source_id: z.string(),
-  source_name: z.string().nullable().optional(),
-  ...analyticsRunContextShape,
-  customer_entitlement_id: z.string(),
-  feature_slug: z.string(),
-  period_key: z.string(),
-  event_slug: z.string(),
-  aggregation_method: z.string(),
-  timestamp: z.number().describe("timestamp of the ingested event"),
-  created_at: z.number().describe("timestamp of when the fact row was created"),
-  delta: z.number(),
-  value_after: z.number(),
-  grant_id: z.string(),
-  feature_plan_version_id: z.string().nullable().optional(),
-  amount: z.number().int(),
-  amount_after: z.number().int(),
-  amount_scale: z.literal(LEDGER_SCALE),
-  currency: z.string().length(3),
-  priced_at: z.number().int(),
-  tier_index: z.number().int().nullable(),
-  tier_mode: z.union([z.enum(["volume", "graduated"]), z.null()]),
-  pricing_component_count: z.number().int().nonnegative(),
-})
+source_name: z.string().nullable().optional(),
+...analyticsRunContextShape,
+customer_entitlement_id: z.string(),
 ```
 
-Extend `ingestionEventSchemaV1` the same way after `source_name`:
+Extend `ingestionEventSchemaV1` immediately after `source_name`:
 
 ```ts
 source_name: z.string().nullable().optional(),
@@ -658,55 +738,59 @@ In `internal/analytics/datasources/unprice_ingestion_events.datasource`, add aft
     `workload_id` Nullable(String) `json:$.workload_id`,
 ```
 
-Do not add these fields to the sorting key in this task. Current project/customer/time keys should stay stable.
+Do not add these columns to sorting keys in this task.
 
-- [ ] **Step 3: Add fixtures with null and non-null attribution**
+- [ ] **Step 3: Update fixtures**
 
-For existing fixture rows in both fixture files, add:
+For every existing row in `internal/analytics/fixtures/unprice_entitlement_meter_facts.ndjson` and `internal/analytics/fixtures/unprice_ingestion_events.ndjson`, add these keys with null values:
 
 ```json
 "run_id":null,"trace_id":null,"parent_run_id":null,"workload_type":null,"workload_id":null
 ```
 
-Add one run meter fact row to `internal/analytics/fixtures/unprice_entitlement_meter_facts.ndjson`:
+Append this exact run meter fact row to `internal/analytics/fixtures/unprice_entitlement_meter_facts.ndjson`:
 
 ```json
 {"event_id":"evt_run_001","idempotency_key":"idem_run_001:ew","workspace_id":"ws_1","project_id":"proj_1","customer_id":"cus_1","environment":"test","api_key_id":"key_1","source_type":"api_key","source_id":"key_1","source_name":"Production key","run_id":"brun_001","trace_id":"trace_checkout_001","parent_run_id":null,"workload_type":"agent","workload_id":"research-assistant","customer_entitlement_id":"ce_1","grant_id":"grnt_1","feature_plan_version_id":"fpv_1","feature_slug":"llm-tokens","period_key":"2026-06","event_slug":"llm-tokens","aggregation_method":"sum","timestamp":4070908801000,"created_at":4070908801100,"delta":1200,"value_after":1200,"amount":250000,"amount_after":250000,"amount_scale":8,"currency":"USD","priced_at":4070908801100,"tier_index":0,"tier_mode":"volume","pricing_component_count":1}
 ```
 
-Add one run ingestion status row to `internal/analytics/fixtures/unprice_ingestion_events.ndjson`:
+Append this exact run status row to `internal/analytics/fixtures/unprice_ingestion_events.ndjson`:
 
 ```json
 {"event_id":"evt_run_001","canonical_audit_id":"audit_run_001","payload_hash":"hash_run_001","workspace_id":"ws_1","project_id":"proj_1","customer_id":"cus_1","environment":"test","api_key_id":"key_1","source_type":"api_key","source_id":"key_1","source_name":"Production key","run_id":"brun_001","trace_id":"trace_checkout_001","parent_run_id":null,"workload_type":"agent","workload_id":"research-assistant","event_slug":"llm-tokens","idempotency_key":"idem_run_001","state":"processed","rejection_reason":null,"failure_stage":null,"failure_reason":null,"failure_message":null,"replayable":false,"payload_json":null,"timestamp":4070908801000,"received_at":4070908801000,"handled_at":4070908801100,"created_at":4070908801200}
 ```
 
-- [ ] **Step 4: Add Tinybird test expectations**
+- [ ] **Step 4: Update Tinybird test expectations**
 
-For existing Tinybird endpoint tests that assert full rows, add the five nullable fields. For ingestion status tests, add this row expectation where recent/live rows are asserted:
+For ingestion recent/live endpoint tests that assert full rows, add these fields to the expected run row:
 
 ```json
-{"event_id":"evt_run_001","canonical_audit_id":"audit_run_001","customer_id":"cus_1","event_slug":"llm-tokens","source_type":"api_key","source_id":"key_1","run_id":"brun_001","trace_id":"trace_checkout_001","parent_run_id":null,"workload_type":"agent","workload_id":"research-assistant","state":"processed","rejection_reason":null,"failure_stage":null,"failure_reason":null,"replayable":false,"timestamp":4070908801000,"received_at":4070908801000,"handled_at":4070908801100}
+{"run_id":"brun_001","trace_id":"trace_checkout_001","parent_run_id":null,"workload_type":"agent","workload_id":"research-assistant"}
+```
+
+For existing non-run rows asserted as full objects, add these fields:
+
+```json
+{"run_id":null,"trace_id":null,"parent_run_id":null,"workload_type":null,"workload_id":null}
 ```
 
 - [ ] **Step 5: Run analytics checks**
 
-Run:
-
 ```bash
-pnpm --filter @unprice/analytics typecheck
-tb test run
+rtk pnpm --filter @unprice/analytics typecheck
+rtk tb test run
 ```
 
 Expected:
 
-- TypeScript passes.
-- Tinybird tests pass after fixtures and schemas align.
+- Analytics TypeScript passes.
+- Tinybird tests pass after schemas, fixtures, and expectations align.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add internal/analytics
-git commit -m "feat: add run attribution to analytics rows"
+rtk git add internal/analytics
+rtk git commit -m "feat: add run attribution to analytics rows"
 ```
 
 ---
@@ -741,7 +825,7 @@ Extend `ingestionQueueMessageSchema`:
 runContext: ingestionRunContextSchema.optional(),
 ```
 
-- [ ] **Step 2: Add run fields to reporting audit record schema**
+- [ ] **Step 2: Add run fields to reporting audit records**
 
 In `internal/services/src/ingestion/reporting.ts`, extend `ingestionReportingAuditRecordSchema`:
 
@@ -753,12 +837,34 @@ workloadType: z.enum(["agent", "workflow", "job", "tool", "custom"]).nullable(),
 workloadId: z.string().nullable(),
 ```
 
-- [ ] **Step 3: Copy run context into reporting audit records**
+- [ ] **Step 3: Copy run context into audit records and audit payload JSON**
 
-In `internal/services/src/ingestion/reporting-envelope.ts`, update `buildIngestionReportingAuditRecord`:
+In `internal/services/src/ingestion/reporting-envelope.ts`, add this helper:
 
 ```ts
-const runContext = message.runContext ?? null
+function getMessageRunContext(message: IngestionQueueMessage): {
+  runId: string | null
+  traceId: string | null
+  parentRunId: string | null
+  workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+  workloadId: string | null
+} {
+  const runContext = message.runContext ?? null
+
+  return {
+    runId: runContext?.runId ?? null,
+    traceId: runContext?.traceId ?? null,
+    parentRunId: runContext?.parentRunId ?? null,
+    workloadType: runContext?.workloadType ?? null,
+    workloadId: runContext?.workloadId ?? null,
+  }
+}
+```
+
+In `buildIngestionReportingAuditRecord`, add the copied fields:
+
+```ts
+const runContext = getMessageRunContext(message)
 
 return {
   idempotencyKey: message.idempotencyKey,
@@ -772,11 +878,11 @@ return {
   sourceType: message.source.sourceType,
   sourceId: message.source.sourceId,
   sourceName: message.source.sourceName,
-  runId: runContext?.runId ?? null,
-  traceId: runContext?.traceId ?? null,
-  parentRunId: runContext?.parentRunId ?? null,
-  workloadType: runContext?.workloadType ?? null,
-  workloadId: runContext?.workloadId ?? null,
+  runId: runContext.runId,
+  traceId: runContext.traceId,
+  parentRunId: runContext.parentRunId,
+  workloadType: runContext.workloadType,
+  workloadId: runContext.workloadId,
   status: outcome.state,
   rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
   failureStage: failed ? outcome.failureStage : null,
@@ -792,10 +898,10 @@ return {
 }
 ```
 
-Update `buildIngestionAuditPayload`:
+In `buildIngestionAuditPayload`, add snake-case fields:
 
 ```ts
-const runContext = message.runContext ?? null
+const runContext = getMessageRunContext(message)
 
 return {
   event_date: toEventDate(message.timestamp),
@@ -809,11 +915,11 @@ return {
   source_type: message.source.sourceType,
   source_id: message.source.sourceId,
   source_name: message.source.sourceName,
-  run_id: runContext?.runId ?? null,
-  trace_id: runContext?.traceId ?? null,
-  parent_run_id: runContext?.parentRunId ?? null,
-  workload_type: runContext?.workloadType ?? null,
-  workload_id: runContext?.workloadId ?? null,
+  run_id: runContext.runId,
+  trace_id: runContext.traceId,
+  parent_run_id: runContext.parentRunId,
+  workload_type: runContext.workloadType,
+  workload_id: runContext.workloadId,
   request_id: message.requestId,
   idempotency_key: message.idempotencyKey,
   slug: message.slug,
@@ -828,7 +934,7 @@ return {
 }
 ```
 
-- [ ] **Step 4: Copy reporting audit fields into Tinybird ingestion events**
+- [ ] **Step 4: Publish run fields to Tinybird ingestion status rows**
 
 In `apps/api/src/ingestion/reporting/consumer.ts`, update `buildIngestionEvent`:
 
@@ -866,13 +972,55 @@ return {
 }
 ```
 
-- [ ] **Step 5: Add reporting envelope tests**
+- [ ] **Step 5: Update reporting test builders with null run defaults**
+
+In `apps/api/src/ingestion/reporting/consumer.test.ts`, update `createAuditRecord` to include nullable run fields after `sourceName`:
+
+```ts
+runId: null,
+traceId: null,
+parentRunId: null,
+workloadType: null,
+workloadId: null,
+```
+
+Update `createAuditRecord`'s `auditPayloadJson` default object to include snake-case null fields after `source_name`:
+
+```ts
+run_id: null,
+trace_id: null,
+parent_run_id: null,
+workload_type: null,
+workload_id: null,
+```
+
+Update `createIngestionEvent` to include nullable run fields after `source_name`:
+
+```ts
+run_id: null,
+trace_id: null,
+parent_run_id: null,
+workload_type: null,
+workload_id: null,
+```
+
+Update `createMeterFact` in both `apps/api/src/ingestion/reporting/consumer.test.ts` and `internal/services/src/ingestion/reporting-envelope.test.ts` to include nullable run fields after `source_name`:
+
+```ts
+run_id: null,
+trace_id: null,
+parent_run_id: null,
+workload_type: null,
+workload_id: null,
+```
+
+- [ ] **Step 6: Add reporting envelope test**
 
 In `internal/services/src/ingestion/reporting-envelope.test.ts`, add:
 
 ```ts
 it("copies run context into reporting audit records without making processed rows replayable", async () => {
-  const message = buildMessage({
+  const message = createMessage({
     runContext: {
       runId: "brun_001",
       traceId: "trace_001",
@@ -909,9 +1057,9 @@ it("copies run context into reporting audit records without making processed row
 })
 ```
 
-- [ ] **Step 6: Add reporting consumer tests**
+- [ ] **Step 7: Add reporting consumer test**
 
-In `apps/api/src/ingestion/reporting/consumer.test.ts`, add a test that creates an `auditRecord` with run fields and asserts `ingestIngestionEvents` receives snake-case run fields:
+In `apps/api/src/ingestion/reporting/consumer.test.ts`, add:
 
 ```ts
 it("publishes run attribution to Tinybird ingestion status rows", async () => {
@@ -921,15 +1069,15 @@ it("publishes run attribution to Tinybird ingestion status rows", async () => {
     ingestIngestionEvents,
     ingestMeterFacts,
     publishAuditRecords: vi.fn().mockResolvedValue(undefined),
-    logger: testLogger,
+    logger: createLogger(),
   })
 
   await consumer.consumeBatch({
     messages: [
       {
-        body: buildEnvelope({
+        body: createEnvelope({
           auditRecords: [
-            buildAuditRecord({
+            createAuditRecord({
               runId: "brun_001",
               traceId: "trace_001",
               parentRunId: "brun_parent_001",
@@ -959,27 +1107,25 @@ it("publishes run attribution to Tinybird ingestion status rows", async () => {
 })
 ```
 
-- [ ] **Step 7: Run reporting tests**
-
-Run:
+- [ ] **Step 8: Run reporting tests**
 
 ```bash
-pnpm --filter @unprice/services test src/ingestion/reporting-envelope.test.ts
-pnpm --filter api test src/ingestion/reporting/consumer.test.ts
+rtk pnpm --filter @unprice/services test src/ingestion/reporting-envelope.test.ts
+rtk pnpm --filter api test src/ingestion/reporting/consumer.test.ts
 ```
 
 Expected: all pass.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add internal/services/src/ingestion apps/api/src/ingestion/reporting
-git commit -m "feat: propagate run context through reporting envelopes"
+rtk git add internal/services/src/ingestion apps/api/src/ingestion/reporting
+rtk git commit -m "feat: propagate run context through reporting envelopes"
 ```
 
 ---
 
-### Task 5: Return Run-Enriched Meter Facts From RunBudgetDO
+### Task 5: Return Run-Attributed Meter Facts From `RunBudgetDO`
 
 **Files:**
 - Modify: `apps/api/src/ingestion/run-budget/contracts.ts`
@@ -987,6 +1133,7 @@ git commit -m "feat: propagate run context through reporting envelopes"
 - Modify: `apps/api/src/ingestion/run-budget/client.ts`
 - Modify: `internal/services/src/use-cases/runs/run-budget-client.ts`
 - Modify: `apps/api/src/ingestion/run-budget/RunBudgetDO.test.ts`
+- Modify: `apps/api/src/ingestion/run-budget/contracts.test.ts`
 
 - [ ] **Step 1: Extend run budget decision contracts**
 
@@ -1011,7 +1158,7 @@ export const runBudgetDecisionSchema = z.object({
 })
 ```
 
-In `internal/services/src/use-cases/runs/run-budget-client.ts`, import the type and extend `RunSyncDecision`:
+In `internal/services/src/use-cases/runs/run-budget-client.ts`, add the import and extend `RunSyncDecision`:
 
 ```ts
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
@@ -1030,7 +1177,7 @@ export type RunSyncDecision = {
 }
 ```
 
-- [ ] **Step 2: Add helper to decorate meter facts**
+- [ ] **Step 2: Decorate returned meter facts with run context**
 
 In `apps/api/src/ingestion/run-budget/RunBudgetDO.ts`, add:
 
@@ -1050,9 +1197,9 @@ private withRunContext(
 }
 ```
 
-- [ ] **Step 3: Return decorated facts on accepted apply**
+- [ ] **Step 3: Return decorated facts on accepted and duplicate decisions**
 
-In `RunBudgetDO.applySyncEvent`, replace the accepted path with:
+In `RunBudgetDO.applySyncEvent`, replace the accepted path facts handling:
 
 ```ts
 const rawMeterFacts = entitlementResult.meterFacts ?? []
@@ -1070,24 +1217,17 @@ const decision: RunBudgetDecision = {
 }
 ```
 
-For rejected decisions, include `meterFacts: []`:
+For every rejected `RunBudgetDecision` constructed in `RunBudgetDO.applySyncEvent`, include:
 
 ```ts
-const decision: RunBudgetDecision = {
-  allowed: false,
-  state: "rejected",
-  rejectionReason: entitlementResult.deniedReason as RunBudgetDecision["rejectionReason"],
-  message: entitlementResult.message,
-  budget: this.toSummary(run),
-  meterFacts: [],
-}
+meterFacts: [],
 ```
 
-Also include `meterFacts: []` for non-running run rejection.
+Because the decision is persisted in `run_idempotency.decisionJson`, duplicate requests will replay the same `meterFacts` array from the cached decision.
 
-- [ ] **Step 4: Parse returned decision in the Cloudflare client**
+- [ ] **Step 4: Preserve facts in the Cloudflare client**
 
-In `apps/api/src/ingestion/run-budget/client.ts`, keep the returned facts:
+In `apps/api/src/ingestion/run-budget/client.ts`, return facts from `applySyncEvent`:
 
 ```ts
 return Ok({
@@ -1106,46 +1246,77 @@ In `apps/api/src/ingestion/run-budget/RunBudgetDO.test.ts`, add:
 
 ```ts
 it("returns meter facts decorated with run analytics context", async () => {
-  const durableObject = createRunBudgetDO()
+  const RunBudgetDO = await loadRunBudgetDO()
+  const state = createDurableObjectState()
+  const env = createEnv()
+  const durable = new RunBudgetDO(state, env)
 
-  await durableObject.startRun({
-    projectId: "proj_1",
+  await durable.startRun({
+    runId: "run_1",
     customerId: "cus_1",
-    runId: "brun_001",
-    budgetAmount: 1000,
+    projectId: "proj_1",
     currency: "USD",
-    idempotencyKey: "start_001",
+    budgetAmount: 100_000,
+    idempotencyKey: "idem_start_1",
     workloadType: "agent",
     workloadId: "research-assistant",
     traceId: "trace_001",
     parentRunId: "brun_parent_001",
     metadata: {},
-    now: 4070908800000,
+    now: BASE_NOW,
   })
 
-  mockEntitlementApply.mockResolvedValue({
+  testState.entitlementWindowApply.mockResolvedValue({
     allowed: true,
     meterFacts: [
-      buildMeterFact({
+      {
         event_id: "evt_001",
         idempotency_key: "apply_001:ew",
+        workspace_id: "ws_1",
+        project_id: "proj_1",
+        customer_id: "cus_1",
+        environment: "test",
+        api_key_id: "key_1",
+        source_type: "api_key",
+        source_id: "key_1",
+        source_name: null,
+        customer_entitlement_id: "ce_test_1",
+        grant_id: "grant_1",
+        feature_plan_version_id: "fpv_1",
+        feature_slug: "tokens",
+        period_key: "period_1",
+        event_slug: "tokens_used",
+        aggregation_method: "sum",
+        timestamp: BASE_NOW,
+        created_at: BASE_NOW,
+        delta: 5,
+        value_after: 5,
         amount: 250,
         amount_after: 250,
-      }),
+        amount_scale: 8,
+        currency: "USD",
+        priced_at: BASE_NOW,
+        tier_index: 0,
+        tier_mode: "volume",
+        pricing_component_count: 1,
+        statement_key: "stmt_1",
+        period_start_at: BASE_NOW - 60_000,
+        period_end_at: BASE_NOW + 60_000,
+      },
     ],
   })
 
-  const result = await durableObject.applySyncEvent({
+  const result = await durable.applySyncEvent({
     projectId: "proj_1",
     customerId: "cus_1",
-    runId: "brun_001",
-    featureSlug: "llm-tokens",
+    runId: "run_1",
+    featureSlug: "tokens",
     idempotencyKey: "apply_001",
     event: {
       id: "evt_001",
-      slug: "llm-tokens",
-      timestamp: 4070908800100,
-      properties: { tokens: 1200 },
+      slug: "tokens_used",
+      timestamp: BASE_NOW,
+      properties: { amount: 5 },
     },
     source: {
       workspaceId: "ws_1",
@@ -1153,14 +1324,15 @@ it("returns meter facts decorated with run analytics context", async () => {
       apiKeyId: "key_1",
       sourceType: "api_key",
       sourceId: "key_1",
-      sourceName: "Production key",
+      sourceName: null,
     },
-    now: 4070908800200,
+    now: BASE_NOW,
+    ...TEST_ENTITLEMENT_FIELDS,
   })
 
-  expect(result.meterFacts).toEqual([
+  expect((result as { meterFacts: Record<string, unknown>[] }).meterFacts).toEqual([
     expect.objectContaining({
-      run_id: "brun_001",
+      run_id: "run_1",
       trace_id: "trace_001",
       parent_run_id: "brun_parent_001",
       workload_type: "agent",
@@ -1172,11 +1344,9 @@ it("returns meter facts decorated with run analytics context", async () => {
 
 - [ ] **Step 6: Run RunBudgetDO tests**
 
-Run:
-
 ```bash
-pnpm --filter api test src/ingestion/run-budget/RunBudgetDO.test.ts -t "meter facts decorated with run analytics context"
-pnpm --filter api test src/ingestion/run-budget/contracts.test.ts
+rtk pnpm --filter api test src/ingestion/run-budget/RunBudgetDO.test.ts -t "meter facts decorated with run analytics context"
+rtk pnpm --filter api test src/ingestion/run-budget/contracts.test.ts
 ```
 
 Expected: all pass.
@@ -1184,23 +1354,23 @@ Expected: all pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add apps/api/src/ingestion/run-budget internal/services/src/use-cases/runs/run-budget-client.ts
-git commit -m "feat: return run-attributed meter facts from run budget"
+rtk git add apps/api/src/ingestion/run-budget internal/services/src/use-cases/runs/run-budget-client.ts
+rtk git commit -m "feat: return run-attributed meter facts from run budget"
 ```
 
 ---
 
-### Task 6: Enqueue Run Sync Outcomes Through The Existing Reporting Queue
+### Task 6: Enqueue Run Consume Outcomes Through Existing Reporting
 
 **Files:**
 - Modify: `internal/services/src/use-cases/runs/apply-run-sync-event.ts`
-- Modify: `internal/services/src/use-cases/runs/apply-run-sync-event.test.ts`
+- Create: `internal/services/src/use-cases/runs/apply-run-sync-event.test.ts`
 - Modify: `apps/api/src/routes/runs/applyRunSyncEventV1.ts`
 - Modify: `apps/api/src/routes/runs/runs.test.ts`
 
 - [ ] **Step 1: Extend use-case dependencies and input**
 
-In `internal/services/src/use-cases/runs/apply-run-sync-event.ts`, import:
+In `internal/services/src/use-cases/runs/apply-run-sync-event.ts`, import reporting types:
 
 ```ts
 import type {
@@ -1210,12 +1380,13 @@ import type {
 } from "../../ingestion"
 ```
 
-Update deps:
+Update deps while keeping the entitlement resolver:
 
 ```ts
 export type ApplyRunSyncEventDeps = {
   services: Pick<{ budgetRuns: BudgetRunService }, "budgetRuns">
   runBudget: RunBudgetClient
+  entitlementResolver: RunEntitlementResolver
   reportingDispatcher: IngestionReportingOutcomeDispatcher
 }
 ```
@@ -1249,33 +1420,91 @@ export type ApplyRunSyncEventInput = {
 }
 ```
 
-- [ ] **Step 2: Build reporting message and outcome**
+- [ ] **Step 2: Add reporting message helper**
 
-After `doResult` succeeds and before returning `Ok`, add:
+In `internal/services/src/use-cases/runs/apply-run-sync-event.ts`, add:
 
 ```ts
-const reportingMessage: IngestionQueueMessage = {
-  version: 1,
-  workspaceId: input.source.workspaceId,
-  projectId: run.projectId,
-  customerId: run.customerId,
-  requestId: input.requestId,
-  receivedAt: input.receivedAt,
-  idempotencyKey: input.idempotencyKey,
-  id: input.event.id,
-  slug: input.event.slug,
-  timestamp: input.event.timestamp,
-  properties: input.event.properties,
-  source: input.source,
-  runContext: {
-    runId: run.id,
-    traceId: run.traceId,
-    parentRunId: run.parentRunId,
-    workloadType: run.workloadType,
-    workloadId: run.workloadId,
-  },
+function buildRunReportingMessage(input: ApplyRunSyncEventInput, run: {
+  id: string
+  projectId: string
+  customerId: string
+  workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+  workloadId: string | null
+  traceId: string | null
+  parentRunId: string | null
+}): IngestionQueueMessage {
+  return {
+    version: 1,
+    workspaceId: input.source.workspaceId,
+    projectId: run.projectId,
+    customerId: run.customerId,
+    requestId: input.requestId,
+    receivedAt: input.receivedAt,
+    idempotencyKey: input.idempotencyKey,
+    id: input.event.id,
+    slug: input.event.slug,
+    timestamp: input.event.timestamp,
+    properties: input.event.properties,
+    source: input.source,
+    runContext: {
+      runId: run.id,
+      traceId: run.traceId,
+      parentRunId: run.parentRunId,
+      workloadType: run.workloadType,
+      workloadId: run.workloadId,
+    },
+  }
 }
+```
 
+- [ ] **Step 3: Report entitlement-resolution rejections**
+
+In the `if (!resolution.ok)` branch, enqueue a rejected outcome before returning:
+
+```ts
+const reportingMessage = buildRunReportingMessage(input, run)
+await deps.reportingDispatcher.enqueueOutcomes({
+  customerId: run.customerId,
+  projectId: run.projectId,
+  outcomes: [
+    {
+      message: reportingMessage,
+      outcome: { state: "rejected", rejectionReason: resolution.reason },
+      meterFacts: [],
+    },
+  ],
+})
+```
+
+The returned public decision should keep its current public reason mapping:
+
+```ts
+return Ok({
+  accepted: false,
+  reason: mapEntitlementRejection(resolution.reason),
+  run: {
+    runId: run.id,
+    status: run.status,
+    customerId: run.customerId,
+    budgetAmount: run.budgetAmount,
+    consumedAmount: run.consumedAmount,
+    remainingAmount: run.remainingAmount,
+    currency: run.currency,
+    workloadType: run.workloadType ?? null,
+    workloadId: run.workloadId ?? null,
+    traceId: run.traceId ?? null,
+    parentRunId: run.parentRunId ?? null,
+  },
+})
+```
+
+- [ ] **Step 4: Report RunBudgetDO processed and rejected decisions**
+
+After `doResult` succeeds and after `updateRunSummary`, enqueue the final outcome:
+
+```ts
+const reportingMessage = buildRunReportingMessage(input, run)
 const reportingOutcome: IngestionOutcome = decision.allowed
   ? { state: "processed" }
   : {
@@ -1296,11 +1525,11 @@ await deps.reportingDispatcher.enqueueOutcomes({
 })
 ```
 
-This await is intentional. Sync ingestion must not return success before the reporting enqueue is durable.
+This `await` is intentional. Sync ingestion already waits for reporting enqueue durability before returning; run sync must do the same.
 
-- [ ] **Step 3: Add use-case test for reporting enqueue**
+- [ ] **Step 5: Add use-case test for processed reporting**
 
-Create `internal/services/src/use-cases/runs/apply-run-sync-event.test.ts`:
+Create `internal/services/src/use-cases/runs/apply-run-sync-event.test.ts` with:
 
 ```ts
 import { describe, expect, it, vi } from "vitest"
@@ -1316,6 +1545,10 @@ describe("applyRunSyncEvent", () => {
           id: "brun_001",
           projectId: "proj_1",
           customerId: "cus_1",
+          status: "running",
+          budgetAmount: 1000,
+          consumedAmount: 0,
+          remainingAmount: 1000,
           currency: "USD",
           workloadType: "agent",
           workloadId: "research-assistant",
@@ -1324,6 +1557,16 @@ describe("applyRunSyncEvent", () => {
         })
       ),
       updateRunSummary: vi.fn().mockResolvedValue(Ok({ id: "brun_001" })),
+    }
+    const entitlementResolver = {
+      resolveForFeature: vi.fn().mockResolvedValue({
+        ok: true,
+        entitlement: {
+          customerEntitlementId: "ce_1",
+          meterConfig: { aggregationMethod: "sum", aggregationField: "tokens" },
+        },
+        grants: [{ id: "grant_1" }],
+      }),
     }
     const runBudget = {
       applySyncEvent: vi.fn().mockResolvedValue(
@@ -1381,8 +1624,9 @@ describe("applyRunSyncEvent", () => {
 
     await applyRunSyncEvent(
       {
-        services: { budgetRuns },
-        runBudget,
+        services: { budgetRuns: budgetRuns as never },
+        runBudget: runBudget as never,
+        entitlementResolver: entitlementResolver as never,
         reportingDispatcher: { enqueueOutcomes },
       },
       {
@@ -1439,21 +1683,139 @@ describe("applyRunSyncEvent", () => {
 })
 ```
 
-- [ ] **Step 4: Build reporting dispatcher in the Hono route**
+- [ ] **Step 6: Add use-case test for entitlement rejection reporting**
+
+Append to `internal/services/src/use-cases/runs/apply-run-sync-event.test.ts`:
+
+```ts
+it("enqueues entitlement rejections through ingestion reporting with run context", async () => {
+  const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
+  const budgetRuns = {
+    getRun: vi.fn().mockResolvedValue(
+      Ok({
+        id: "brun_002",
+        projectId: "proj_1",
+        customerId: "cus_1",
+        status: "running",
+        budgetAmount: 1000,
+        consumedAmount: 0,
+        remainingAmount: 1000,
+        currency: "USD",
+        workloadType: "workflow",
+        workloadId: "checkout-flow",
+        traceId: "trace_002",
+        parentRunId: null,
+      })
+    ),
+    updateRunSummary: vi.fn(),
+  }
+  const entitlementResolver = {
+    resolveForFeature: vi.fn().mockResolvedValue({
+      ok: false,
+      reason: "NO_MATCHING_ENTITLEMENT",
+    }),
+  }
+  const runBudget = {
+    applySyncEvent: vi.fn(),
+  }
+
+  const result = await applyRunSyncEvent(
+    {
+      services: { budgetRuns: budgetRuns as never },
+      runBudget: runBudget as never,
+      entitlementResolver: entitlementResolver as never,
+      reportingDispatcher: { enqueueOutcomes },
+    },
+    {
+      projectId: "proj_1",
+      runId: "brun_002",
+      keyCustomerId: "cus_1",
+      featureSlug: "llm-tokens",
+      idempotencyKey: "idem_002",
+      requestId: "req_002",
+      receivedAt: 4070908800000,
+      event: {
+        id: "evt_002",
+        slug: "llm-tokens",
+        timestamp: 4070908800100,
+        properties: { tokens: 1200 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key",
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: 4070908800200,
+    }
+  )
+
+  expect(result.val).toMatchObject({
+    accepted: false,
+    reason: "entitlement_denied",
+  })
+  expect(runBudget.applySyncEvent).not.toHaveBeenCalled()
+  expect(enqueueOutcomes).toHaveBeenCalledWith({
+    customerId: "cus_1",
+    projectId: "proj_1",
+    outcomes: [
+      expect.objectContaining({
+        outcome: { state: "rejected", rejectionReason: "NO_MATCHING_ENTITLEMENT" },
+        meterFacts: [],
+        message: expect.objectContaining({
+          runContext: {
+            runId: "brun_002",
+            traceId: "trace_002",
+            parentRunId: null,
+            workloadType: "workflow",
+            workloadId: "checkout-flow",
+          },
+        }),
+      }),
+    ],
+  })
+})
+```
+
+- [ ] **Step 7: Build reporting dispatcher and timestamp validation in the Hono route**
 
 In `apps/api/src/routes/runs/applyRunSyncEventV1.ts`, add imports:
 
 ```ts
+import {
+  EventTimestampTooFarInFutureError,
+  EventTimestampTooOldError,
+  validateEventTimestamp,
+} from "@unprice/services/entitlements"
 import { IngestionReportingDispatcher } from "@unprice/services/ingestion"
 import { CloudflareReportingQueueClient } from "~/ingestion/reporting/client"
 ```
 
-Inside the route:
+Inside the route, derive request timing and validate the event timestamp before calling the use case:
 
 ```ts
 const requestId = c.get("requestId")
 const receivedAt = c.get("requestStartedAt")
-const logger = c.get("logger")
+const timestamp = body.timestamp ?? receivedAt
+
+try {
+  validateEventTimestamp(timestamp, receivedAt)
+} catch (error) {
+  if (
+    error instanceof EventTimestampTooFarInFutureError ||
+    error instanceof EventTimestampTooOldError
+  ) {
+    throw new UnpriceApiError({
+      code: "BAD_REQUEST",
+      message: error.message,
+    })
+  }
+
+  throw error
+}
+
 const reportingDispatcher = new IngestionReportingDispatcher({
   logger,
   now: () => Date.now(),
@@ -1461,11 +1823,11 @@ const reportingDispatcher = new IngestionReportingDispatcher({
 })
 ```
 
-Pass it to the use case:
+Pass the dispatcher, `requestId`, and `receivedAt` into `applyRunSyncEvent`:
 
 ```ts
 const result = await applyRunSyncEvent(
-  { services: { budgetRuns }, runBudget, reportingDispatcher },
+  { services: { budgetRuns }, runBudget, entitlementResolver, reportingDispatcher },
   {
     projectId: key.projectId,
     runId,
@@ -1475,9 +1837,9 @@ const result = await applyRunSyncEvent(
     requestId,
     receivedAt,
     event: {
-      id: body.id ?? `evt_${Date.now()}`,
+      id: body.id ?? newId("event"),
       slug: body.eventSlug ?? body.featureSlug,
-      timestamp: body.timestamp ?? Date.now(),
+      timestamp,
       properties: body.properties ?? {},
     },
     source: {
@@ -1493,119 +1855,143 @@ const result = await applyRunSyncEvent(
 )
 ```
 
-- [ ] **Step 5: Add route test proving reporting queue is used**
+- [ ] **Step 8: Add route test for reporting dependency wiring**
 
-In `apps/api/src/routes/runs/runs.test.ts`, add:
+In `apps/api/src/routes/runs/runs.test.ts`, update `createTestApp` to set request variables used by the route:
 
 ```ts
-it("enqueues run sync outcomes to the reporting queue and does not use raw async ingestion", async () => {
-  const reportingSend = vi.fn().mockResolvedValue(undefined)
-  testEnv.INGESTION_REPORTING_QUEUE = { send: reportingSend }
-  testEnv.INGESTION_QUEUE = { send: vi.fn() }
+c.set("requestId", "req_test_123")
+c.set("requestStartedAt", 4070908800000)
+```
 
-  const response = await app.request("/v1/runs/brun_001/events/sync", {
-    method: "POST",
-    headers: {
-      authorization: "Bearer unprice_dev_test",
-      "content-type": "application/json",
+Add this route test:
+
+```ts
+it("passes reporting timing fields into run sync use case", async () => {
+  authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
+  useCaseMocks.applyRunSyncEvent.mockResolvedValue({
+    val: {
+      accepted: true,
+      reason: "accepted",
+      run: {
+        runId: "brun_abc123",
+        status: "running",
+        customerId: "cus_default",
+        budgetAmount: 1_000_000_000,
+        consumedAmount: 100_000_000,
+        remainingAmount: 900_000_000,
+        currency: "USD",
+        workloadType: "agent",
+        workloadId: "research-assistant",
+        traceId: "trace_001",
+        parentRunId: null,
+      },
     },
-    body: JSON.stringify({
-      featureSlug: "llm-tokens",
-      idempotencyKey: "idem_run_sync_001",
-      id: "evt_run_sync_001",
-      eventSlug: "llm-tokens",
-      timestamp: 4070908800100,
-      properties: { tokens: 1200 },
-    }),
+    err: undefined,
   })
 
+  const { app, env, executionCtx } = createTestApp()
+
+  const response = await app.fetch(
+    new Request("https://example.com/v1/runs/consume/brun_abc123", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer sk_test",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        featureSlug: "tokens",
+        idempotencyKey: "idem_sync_1",
+        id: "evt_1",
+        eventSlug: "token_usage",
+        timestamp: 4070908800100,
+        properties: { tokens: 100 },
+      }),
+    }),
+    env,
+    executionCtx
+  )
+
   expect(response.status).toBe(200)
-  expect(reportingSend).toHaveBeenCalledWith(
+  expect(useCaseMocks.applyRunSyncEvent).toHaveBeenCalledWith(
     expect.objectContaining({
-      auditRecords: [
-        expect.objectContaining({
-          runId: "brun_001",
-          payloadJson: null,
-          replayable: false,
-        }),
-      ],
-      meterFacts: expect.arrayContaining([
-        expect.objectContaining({
-          run_id: "brun_001",
-        }),
-      ]),
+      reportingDispatcher: expect.objectContaining({
+        enqueueOutcomes: expect.any(Function),
+      }),
+    }),
+    expect.objectContaining({
+      requestId: "req_test_123",
+      receivedAt: 4070908800000,
+      event: expect.objectContaining({
+        timestamp: 4070908800100,
+      }),
     })
   )
-  expect(testEnv.INGESTION_QUEUE.send).not.toHaveBeenCalled()
 })
 ```
 
-- [ ] **Step 6: Run tests**
-
-Run:
+- [ ] **Step 9: Run focused tests**
 
 ```bash
-pnpm --filter @unprice/services test src/use-cases/runs/apply-run-sync-event.test.ts
-pnpm --filter api test src/routes/runs/runs.test.ts -t "reporting queue"
+rtk pnpm --filter @unprice/services test src/use-cases/runs/apply-run-sync-event.test.ts
+rtk pnpm --filter api test src/routes/runs/runs.test.ts -t "reporting timing fields"
 ```
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add internal/services/src/use-cases/runs apps/api/src/routes/runs
-git commit -m "feat: report budget run sync outcomes asynchronously"
+rtk git add internal/services/src/use-cases/runs apps/api/src/routes/runs
+rtk git commit -m "feat: report budget run sync outcomes through ingestion reporting"
 ```
 
 ---
 
-### Task 7: Keep Raw R2 Out Of Budget-Run Sync Events
+### Task 7: Keep Raw R2 And Raw Async Queue Out Of Run Sync
 
 **Files:**
 - Modify: `docs/budgeted-runs.md`
 - Modify: `apps/api/src/routes/runs/runs.test.ts`
-- Inspect: `apps/api/src/routes/events/ingestEventsV1.ts`
-- Inspect: `apps/api/src/routes/events/ingestEventsSyncV1.ts`
 
-- [ ] **Step 1: Document the R2 boundary**
+- [ ] **Step 1: Document the reporting and replay boundary**
 
 Add this section to `docs/budgeted-runs.md`:
 
 ```md
 ## Reporting And Replay
 
-Budget-run sync events use the ingestion reporting queue for analytics. The route waits until the reporting envelope is accepted by `INGESTION_REPORTING_QUEUE`, then the reporting consumer writes status rows and meter facts to Tinybird.
+Budget-run sync events use the ingestion reporting queue for analytics. The route waits until the reporting envelope is accepted by `INGESTION_REPORTING_QUEUE`; then the reporting consumer writes status rows and meter facts to Tinybird.
 
-Budget-run sync events do not write the raw request payload to the raw async ingestion R2 path. R2 raw payload archival belongs to `/v1/events/ingest`, where accepted events are queued for asynchronous processing and may need replay from raw storage. Run sync events are already synchronously applied behind a run idempotency key; processed and rejected outcomes are not replayable and therefore use `payload_json = null`.
+Budget-run sync events do not write the raw request payload to the raw async ingestion R2 path. Raw payload archival belongs to `/v1/usage/record`, where accepted events are queued for asynchronous processing and may need replay from raw storage. Run sync events are already synchronously applied behind a run idempotency key. Processed and rejected run sync outcomes are not replayable and therefore use `payload_json = null`.
 
-If a run sync request fails before a final processed/rejected decision is returned, the client should retry with the same run id and idempotency key. `RunBudgetDO` and `EntitlementWindowDO` replay their idempotent result.
+If a run sync request fails before a final processed or rejected decision is returned, the client should retry with the same run id and idempotency key. `RunBudgetDO` and `EntitlementWindowDO` replay their idempotent result.
 ```
 
-- [ ] **Step 2: Add a static guard test**
+- [ ] **Step 2: Add static guard test**
 
 In `apps/api/src/routes/runs/runs.test.ts`, add:
 
 ```ts
-it("keeps run sync routes out of raw R2 archival code", async () => {
+it("keeps run sync routes out of raw async ingestion and raw R2 archival", async () => {
   const routeSource = await import("node:fs/promises").then((fs) =>
     fs.readFile(new URL("./applyRunSyncEventV1.ts", import.meta.url), "utf8")
   )
 
+  expect(routeSource).not.toContain("QUEUE_SHARD")
+  expect(routeSource).not.toContain("INGESTION_QUEUE")
   expect(routeSource).not.toContain("rawStorage")
   expect(routeSource).not.toContain("RAW_EVENTS")
   expect(routeSource).not.toContain("R2")
-  expect(routeSource).not.toContain("INGESTION_QUEUE")
-  expect(routeSource).toContain("INGESTION_REPORTING_QUEUE")
+  expect(routeSource).toContain("CloudflareReportingQueueClient")
+  expect(routeSource).toContain("IngestionReportingDispatcher")
 })
 ```
 
-- [ ] **Step 3: Run route tests**
-
-Run:
+- [ ] **Step 3: Run guard test**
 
 ```bash
-pnpm --filter api test src/routes/runs/runs.test.ts -t "raw R2 archival"
+rtk pnpm --filter api test src/routes/runs/runs.test.ts -t "raw async ingestion and raw R2 archival"
 ```
 
 Expected: pass.
@@ -1613,103 +1999,50 @@ Expected: pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add docs/budgeted-runs.md apps/api/src/routes/runs/runs.test.ts
-git commit -m "docs: define budget run reporting boundary"
+rtk git add docs/budgeted-runs.md apps/api/src/routes/runs/runs.test.ts
+rtk git commit -m "docs: define budget run reporting boundary"
 ```
 
 ---
 
-### Task 8: Regenerate Public SDK And Remove Stale Agent Contract
+### Task 8: Regenerate OpenAPI And Generated SDK Resources
 
 **Files:**
 - Modify: `packages/api/src/openapi.d.ts`
-- Modify: `packages/api/src/client.ts`
+- Modify: `packages/api/src/generated/sdk-resources.ts`
 - Modify: `packages/api/src/client.test.ts`
 
-- [ ] **Step 1: Regenerate OpenAPI types**
+- [ ] **Step 1: Regenerate public API types and generated resources**
 
 Run:
 
 ```bash
-pnpm --filter @unprice/api generate
+rtk pnpm --filter @unprice/api generate
 ```
 
 Expected:
 
-- `/v1/runs` paths exist.
-- `/v1/agents` paths are absent.
-- Run request types include `workloadType`, `workloadId`, `traceId`, and `parentRunId`.
-- Run response types do not include `agentId`.
+- `packages/api/src/openapi.d.ts` contains `/v1/runs/start`, `/v1/runs/consume/{runId}`, `/v1/runs/end/{runId}`, and `/v1/runs/get/{runId}`.
+- Run start request includes `workloadType`, `workloadId`, `traceId`, and `parentRunId`.
+- Run responses do not include `agentId`.
+- `packages/api/src/generated/sdk-resources.ts` still exposes `runs.start`, `runs.consume`, `runs.end`, and `runs.get`.
 
-- [ ] **Step 2: Add SDK runs resource**
+- [ ] **Step 2: Update SDK tests**
 
-In `packages/api/src/client.ts`, add a `runs` resource:
-
-```ts
-public get runs() {
-  return {
-    start: async (
-      req: PostBody<"/v1/runs">
-    ): Promise<ApiResult<PostResponse<"/v1/runs">>> => {
-      return this.handleResponse(
-        this.openapi.POST("/v1/runs", {
-          body: req,
-        })
-      )
-    },
-
-    applySyncEvent: async (
-      runId: string,
-      req: PostBody<"/v1/runs/{runId}/events/sync">
-    ): Promise<ApiResult<PostResponse<"/v1/runs/{runId}/events/sync">>> => {
-      return this.handleResponse(
-        this.openapi.POST("/v1/runs/{runId}/events/sync", {
-          params: { path: { runId } },
-          body: req,
-        })
-      )
-    },
-
-    end: async (
-      runId: string,
-      req: PostBody<"/v1/runs/{runId}/end">
-    ): Promise<ApiResult<PostResponse<"/v1/runs/{runId}/end">>> => {
-      return this.handleResponse(
-        this.openapi.POST("/v1/runs/{runId}/end", {
-          params: { path: { runId } },
-          body: req,
-        })
-      )
-    },
-
-    get: async (runId: string): Promise<ApiResult<GetResponse<"/v1/runs/{runId}">>> => {
-      return this.handleResponse(
-        this.openapi.GET("/v1/runs/{runId}", {
-          params: { path: { runId } },
-        })
-      )
-    },
-  }
-}
-```
-
-- [ ] **Step 3: Add SDK type test**
-
-In `packages/api/src/client.test.ts`, add:
+In `packages/api/src/client.test.ts`, update the run SDK test to assert generated run methods and workload types:
 
 ```ts
-it("exposes run SDK methods with workload attribution and no agent namespace", () => {
+it("exposes generated run SDK methods with workload attribution and no agents namespace", () => {
   const client = new Unprice({ token: "unprice_dev_test" })
 
   expect(typeof client.runs.start).toBe("function")
-  expect(typeof client.runs.applySyncEvent).toBe("function")
+  expect(typeof client.runs.consume).toBe("function")
   expect(typeof client.runs.end).toBe("function")
   expect(typeof client.runs.get).toBe("function")
   expect("agents" in client).toBe(false)
 
   expectTypeOf(client.runs.start).parameter(0).toMatchTypeOf<{
     budgetAmount: number
-    currency: string
     idempotencyKey: string
     workloadType?: "agent" | "workflow" | "job" | "tool" | "custom" | null
     workloadId?: string | null
@@ -1719,21 +2052,38 @@ it("exposes run SDK methods with workload attribution and no agent namespace", (
 })
 ```
 
-- [ ] **Step 4: Build package**
+Update the run request test that currently expects `agentId` so it sends workload fields:
 
-Run:
+```ts
+const { result, error } = await client.runs.start({
+  budgetAmount: 500,
+  idempotencyKey: "idem_run_1",
+  workloadType: "agent",
+  workloadId: "research-assistant",
+  traceId: "trace_001",
+  parentRunId: null,
+})
+```
+
+For the consume request URL assertion, keep the current generated path:
+
+```ts
+expect(requests[0]?.url).toBe("https://example.com/v1/runs/consume/run_123")
+```
+
+- [ ] **Step 3: Build package**
 
 ```bash
-pnpm --filter @unprice/api build
+rtk pnpm --filter @unprice/api build
 ```
 
 Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add packages/api
-git commit -m "feat: expose budget runs in public sdk"
+rtk git add packages/api
+rtk git commit -m "feat: expose workload run attribution in sdk"
 ```
 
 ---
@@ -1746,60 +2096,61 @@ git commit -m "feat: expose budget runs in public sdk"
 - Inspect: `apps/api/src/ingestion/run-budget/RunBudgetDO.ts`
 - Inspect: `apps/api/src/routes/runs/applyRunSyncEventV1.ts`
 - Inspect: `packages/api/src/openapi.d.ts`
+- Inspect: `packages/api/src/generated/sdk-resources.ts`
 
-- [ ] **Step 1: Search for stale agent attribution in run code**
+- [ ] **Step 1: Search for stale agent attribution in active run code**
 
 Run:
 
 ```bash
-rg -n "agentId|agent_id|/v1/agents|agents\\.runs|unprice_agent_runs|agent_runs" apps internal packages docs/budgeted-runs.md
+rtk rg -n "agentId|agent_id|/v1/agents|agents\\.runs|unprice_agent_runs|agent_runs" apps internal packages docs/budgeted-runs.md
 ```
 
 Expected remaining matches:
 
-- Historical docs under `docs/superpowers/plans/**` or `docs/plans/**`.
+- Historical migrations under `internal/db/src/migrations/**`.
+- Historical docs under `docs/superpowers/plans/**`.
 - No matches in `apps/api/src/routes/runs`.
 - No matches in `internal/db/src/schema/budget-runs.ts`.
+- No matches in `internal/db/src/validators/budget-runs.ts`.
 - No matches in `packages/api/src/openapi.d.ts`.
 
-- [ ] **Step 2: Search for raw async queue usage in run route**
+- [ ] **Step 2: Search for raw async queue or R2 usage in run code**
 
 Run:
 
 ```bash
-rg -n "INGESTION_QUEUE|rawStorage|RAW_EVENTS|R2" apps/api/src/routes/runs internal/services/src/use-cases/runs apps/api/src/ingestion/run-budget
+rtk rg -n "QUEUE_SHARD|INGESTION_QUEUE|rawStorage|RAW_EVENTS|R2" apps/api/src/routes/runs internal/services/src/use-cases/runs apps/api/src/ingestion/run-budget
 ```
 
-Expected:
+Expected: no matches.
 
-- No matches.
-
-- [ ] **Step 3: Search for reporting queue usage in run route**
+- [ ] **Step 3: Search for reporting queue usage in run consume code**
 
 Run:
 
 ```bash
-rg -n "IngestionReportingDispatcher|CloudflareReportingQueueClient|INGESTION_REPORTING_QUEUE|enqueueOutcomes" apps/api/src/routes/runs internal/services/src/use-cases/runs
+rtk rg -n "IngestionReportingDispatcher|CloudflareReportingQueueClient|enqueueOutcomes" apps/api/src/routes/runs internal/services/src/use-cases/runs
 ```
 
 Expected:
 
-- `applyRunSyncEventV1.ts` constructs `IngestionReportingDispatcher`.
-- `apply-run-sync-event.ts` awaits `enqueueOutcomes`.
+- `apps/api/src/routes/runs/applyRunSyncEventV1.ts` constructs `IngestionReportingDispatcher`.
+- `internal/services/src/use-cases/runs/apply-run-sync-event.ts` awaits `enqueueOutcomes`.
 
 - [ ] **Step 4: Run focused verification**
 
 Run:
 
 ```bash
-pnpm --filter @unprice/db test src/validators/budget-runs.test.ts
-pnpm --filter @unprice/services test src/ingestion/reporting-envelope.test.ts
-pnpm --filter @unprice/services test src/use-cases/runs/apply-run-sync-event.test.ts
-pnpm --filter api test src/ingestion/reporting/consumer.test.ts
-pnpm --filter api test src/ingestion/run-budget/RunBudgetDO.test.ts
-pnpm --filter api test src/routes/runs/runs.test.ts
-pnpm --filter @unprice/analytics typecheck
-pnpm --filter @unprice/api build
+rtk pnpm --filter @unprice/db test src/validators/budget-runs.test.ts
+rtk pnpm --filter @unprice/services test src/ingestion/reporting-envelope.test.ts
+rtk pnpm --filter @unprice/services test src/use-cases/runs/apply-run-sync-event.test.ts
+rtk pnpm --filter api test src/ingestion/reporting/consumer.test.ts
+rtk pnpm --filter api test src/ingestion/run-budget/RunBudgetDO.test.ts
+rtk pnpm --filter api test src/routes/runs/runs.test.ts
+rtk pnpm --filter @unprice/analytics typecheck
+rtk pnpm --filter @unprice/api build
 ```
 
 Expected: all pass.
@@ -1809,16 +2160,18 @@ Expected: all pass.
 Run:
 
 ```bash
-pnpm validate
+rtk pnpm validate
 ```
 
 Expected: pass.
 
-- [ ] **Step 6: Commit final cleanup**
+- [ ] **Step 6: Commit final verification cleanup**
+
+Only commit if Step 1 through Step 5 required cleanup changes:
 
 ```bash
-git add .
-git commit -m "chore: verify budget run analytics attribution"
+rtk git add .
+rtk git commit -m "chore: verify budget run analytics attribution"
 ```
 
 ---
@@ -1827,21 +2180,23 @@ git commit -m "chore: verify budget run analytics attribution"
 
 ### Spec Coverage
 
-- Analytics wire-up: Task 6 routes run sync outcomes through `IngestionReportingDispatcher`, and Task 3/4 update Tinybird schemas and reporting records.
-- Same async fact ingestion to Tinybird: Task 6 uses `INGESTION_REPORTING_QUEUE`; Task 4/consumer keep the reporting consumer as the Tinybird writer.
-- Parent grouping: Task 2 adds `parentRunId` in Postgres, DO SQLite, route contracts, and summaries.
-- Trace grouping: Task 2 preserves `traceId`, Task 3/4 carry it to analytics.
-- Agent naming concern: Task 2 replaces `agentId` with `workloadId` and `workloadType`.
-- R2 question: Task 7 documents and tests that run sync events do not use the raw R2 archival path.
+- Keep run analytics the same as usage: Task 6 awaits `IngestionReportingDispatcher.enqueueOutcomes`, matching `IngestionSyncProcessor`.
+- Run sync meter facts use the usage flow: Task 5 preserves `EntitlementWindowDO` meter facts and Task 6 sends them through reporting envelopes.
+- Extra usage fields are nullable run attribution: Task 3 adds only nullable run fields to both Tinybird row families.
+- Workload replaces agent naming: Task 2 changes storage, contracts, routes, DO state, and summaries from `agentId` to workload fields.
+- Trace and parent grouping: Task 2 persists them; Task 3 and Task 4 carry them into analytics.
+- Raw R2 boundary: Task 7 documents and tests that run sync does not touch raw async ingestion or raw R2 archival.
+- Current route paths: Task 1, Task 6, and Task 8 use `/v1/runs/start`, `/v1/runs/consume/{runId}`, `/v1/runs/end/{runId}`, and `/v1/runs/get/{runId}`.
+- Generated SDK reality: Task 8 updates generated OpenAPI and `generated/sdk-resources.ts` rather than hand-writing client methods.
 
 ### Placeholder Scan
 
-The plan contains no forbidden placeholder markers or unspecified implementation steps. Commands and expected outcomes are included for each task.
+This plan avoids forbidden placeholder markers and unspecified method names. The only generated artifacts are explicitly produced by repo commands.
 
 ### Type Consistency
 
-The plan uses these names consistently:
-
-- Public camelCase: `runId`, `traceId`, `parentRunId`, `workloadType`, `workloadId`.
-- Analytics snake_case: `run_id`, `trace_id`, `parent_run_id`, `workload_type`, `workload_id`.
+- Public camelCase fields: `runId`, `traceId`, `parentRunId`, `workloadType`, `workloadId`.
+- Analytics snake_case fields: `run_id`, `trace_id`, `parent_run_id`, `workload_type`, `workload_id`.
 - Submitter identity remains `sourceId` / `source_id`.
+- `RunBudgetClient.applySyncEvent` returns `meterFacts` as `AnalyticsEntitlementMeterFact[]`.
+- Public run start requests do not include `currency`.

@@ -2,16 +2,16 @@ import { fail } from "k6"
 
 export function discoverCustomerUsageProfile({ customerId, projectId, postJson }) {
   const response = postJson(
-    "/v1/entitlements/get",
+    "/v1/access/entitlements/list",
     {
       customerId,
       projectId,
     },
-    "POST /v1/entitlements/get"
+    "POST /v1/access/entitlements/list"
   )
 
   if (response.status !== 200) {
-    fail(`entitlements.get failed: ${response.status} ${response.body}`)
+    fail(`access.entitlements.list failed: ${response.status} ${response.body}`)
   }
 
   const entitlements = parseJson(response)

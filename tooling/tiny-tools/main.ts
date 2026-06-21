@@ -590,7 +590,9 @@ test("analytics: getUsage returns data", async () => {
   if (usageFeature && (result?.usage?.length ?? 0) > 0) {
     const featureUsage = result?.usage?.find((u) => u.feature_slug === usageFeature!.featureSlug)
     if (featureUsage) {
-      console.info(`    ${usageFeature.featureSlug}: value=${featureUsage.value_after}`)
+      console.info(
+        `    ${usageFeature.featureSlug}: usage=${featureUsage.usage}, spending=${featureUsage.spending.display_amount}`
+      )
     }
   }
 })

@@ -318,7 +318,7 @@ async function resolveEntitlementFeatureSlugs(sdk, customerId) {
     })
 
     if (!isOk || entitlementsResult.error) {
-      hardFail(`entitlements.get failed: ${describeSdkError(entitlementsResult)}`)
+      hardFail(`access.entitlements.list failed: ${describeSdkError(entitlementsResult)}`)
     }
 
     const slugs = Array.isArray(entitlementsResult.result)

@@ -320,6 +320,12 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## API SDK And Public Contracts
 
+- 2026-06-21: Tooling that calls `unprice.analytics.usage.get` should consume the public SDK row
+  shape (`usage` plus formatted `spending`), not raw analytics/lake fields such as `value_after`
+  or `amount_after`.
+- 2026-06-21: k6 scripts should follow the generated public SDK operation paths, for example
+  `access.entitlements.list`, `access.check`, `usage.record`, `usage.consume`, and
+  `runs.{start,consume,end,get}`; old product paths can return 404 after API contract updates.
 - 2026-06-20: Public Hono routes must use `defineEndpointContract`; for `audience: "public"`,
   SDK-exposed operations must set `sdk.path` and `operationId` must equal
   `sdk.path.join(".")` so OpenAPI, docs, and `@unprice/api` resources generate from one
