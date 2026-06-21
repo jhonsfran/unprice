@@ -163,6 +163,8 @@ function createTestApp() {
       debug: vi.fn(),
     } as unknown as HonoEnv["Variables"]["logger"])
     c.set("db", {} as unknown as HonoEnv["Variables"]["db"])
+    c.set("requestId", "req_test_123")
+    c.set("requestStartedAt", 4070908800000)
     await next()
   })
 
@@ -422,7 +424,7 @@ describe("budgeted runs API", () => {
           idempotencyKey: "idem_sync_1",
           id: "evt_1",
           eventSlug: "token_usage",
-          timestamp: 1700000000000,
+          timestamp: 4070908800000,
           properties: { tokens: 100 },
         }),
       }),
@@ -441,6 +443,68 @@ describe("budgeted runs API", () => {
         status: "running",
       }),
     })
+  })
+
+  it("passes reporting timing fields into run sync use case", async () => {
+    authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
+    useCaseMocks.applyRunSyncEvent.mockResolvedValue({
+      val: {
+        accepted: true,
+        reason: "accepted",
+        run: {
+          runId: "brun_abc123",
+          status: "running",
+          customerId: "cus_default",
+          budgetAmount: 1_000_000_000,
+          consumedAmount: 100_000_000,
+          remainingAmount: 900_000_000,
+          currency: "USD",
+          workloadType: "agent",
+          workloadId: "research-assistant",
+          traceId: "trace_001",
+          parentRunId: null,
+        },
+      },
+      err: undefined,
+    })
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/runs/consume/brun_abc123", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sk_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          featureSlug: "tokens",
+          idempotencyKey: "idem_sync_1",
+          id: "evt_1",
+          eventSlug: "token_usage",
+          timestamp: 4070908800100,
+          properties: { tokens: 100 },
+        }),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(useCaseMocks.applyRunSyncEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reportingDispatcher: expect.objectContaining({
+          enqueueOutcomes: expect.any(Function),
+        }),
+      }),
+      expect.objectContaining({
+        requestId: "req_test_123",
+        receivedAt: 4070908800000,
+        event: expect.objectContaining({
+          timestamp: 4070908800100,
+        }),
+      })
+    )
   })
 
   it("does not allow a bound customer key to access another customer's run", async () => {

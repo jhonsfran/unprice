@@ -2,8 +2,14 @@ import type { MeterConfig } from "@unprice/db/validators"
 import type { RunSyncDecision as RunSyncDecisionOutput } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { BudgetRunService } from "../../budget-runs"
-import type { IngestionEntitlement, IngestionGrant } from "../../ingestion/entitlement-context"
-import type { IngestionRejectionReason } from "../../ingestion/interface"
+import type {
+  IngestionEntitlement,
+  IngestionGrant,
+  IngestionOutcome,
+  IngestionQueueMessage,
+  IngestionRejectionReason,
+  IngestionReportingOutcomeDispatcher,
+} from "../../ingestion"
 import type { RunBudgetClient } from "./run-budget-client"
 import { RunUseCaseError } from "./start-run"
 
@@ -35,6 +41,7 @@ export type ApplyRunSyncEventDeps = {
   services: Pick<{ budgetRuns: BudgetRunService }, "budgetRuns">
   runBudget: RunBudgetClient
   entitlementResolver: RunEntitlementResolver
+  reportingDispatcher: IngestionReportingOutcomeDispatcher
 }
 
 export type ApplyRunSyncEventInput = {
@@ -43,6 +50,8 @@ export type ApplyRunSyncEventInput = {
   keyCustomerId: string | null
   featureSlug: string
   idempotencyKey: string
+  requestId: string
+  receivedAt: number
   event: {
     id: string
     slug: string
@@ -92,6 +101,19 @@ export async function applyRunSyncEvent(
   })
 
   if (!resolution.ok) {
+    const reportingMessage = buildRunReportingMessage(input, run)
+    await deps.reportingDispatcher.enqueueOutcomes({
+      customerId: run.customerId,
+      projectId: run.projectId,
+      outcomes: [
+        {
+          message: reportingMessage,
+          outcome: { state: "rejected", rejectionReason: resolution.reason },
+          meterFacts: [],
+        },
+      ],
+    })
+
     return Ok({
       accepted: false,
       reason: mapEntitlementRejection(resolution.reason),
@@ -141,6 +163,26 @@ export async function applyRunSyncEvent(
     remainingAmount: decision.budget.remainingAmount,
   })
 
+  const reportingMessage = buildRunReportingMessage(input, run)
+  const reportingOutcome: IngestionOutcome = decision.allowed
+    ? { state: "processed" }
+    : {
+        state: "rejected",
+        rejectionReason: decision.rejectionReason ?? "RUN_BUDGET_EXCEEDED",
+      }
+
+  await deps.reportingDispatcher.enqueueOutcomes({
+    customerId: run.customerId,
+    projectId: run.projectId,
+    outcomes: [
+      {
+        message: reportingMessage,
+        outcome: reportingOutcome,
+        meterFacts: decision.meterFacts,
+      },
+    ],
+  })
+
   return Ok({
     accepted: decision.allowed,
     reason: decision.allowed ? "accepted" : mapRejectionReason(decision.rejectionReason),
@@ -158,6 +200,41 @@ export async function applyRunSyncEvent(
       parentRunId: run.parentRunId ?? null,
     },
   })
+}
+
+function buildRunReportingMessage(
+  input: ApplyRunSyncEventInput,
+  run: {
+    id: string
+    projectId: string
+    customerId: string
+    workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+    workloadId: string | null
+    traceId: string | null
+    parentRunId: string | null
+  }
+): IngestionQueueMessage {
+  return {
+    version: 1,
+    workspaceId: input.source.workspaceId,
+    projectId: run.projectId,
+    customerId: run.customerId,
+    requestId: input.requestId,
+    receivedAt: input.receivedAt,
+    idempotencyKey: input.idempotencyKey,
+    id: input.event.id,
+    slug: input.event.slug,
+    timestamp: input.event.timestamp,
+    properties: input.event.properties,
+    source: input.source,
+    runContext: {
+      runId: run.id,
+      traceId: run.traceId,
+      parentRunId: run.parentRunId,
+      workloadType: run.workloadType,
+      workloadId: run.workloadId,
+    },
+  }
 }
 
 function canAccessRun(input: { keyCustomerId: string | null; runCustomerId: string }): boolean {

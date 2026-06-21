@@ -3,7 +3,13 @@ import { newId } from "@unprice/db/utils"
 import { applyRunSyncEventInputSchema, runSyncDecisionSchema } from "@unprice/db/validators"
 import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
 import {
+  EventTimestampTooFarInFutureError,
+  EventTimestampTooOldError,
+  validateEventTimestamp,
+} from "@unprice/services/entitlements"
+import {
   IngestionEntitlementContextLoader,
+  IngestionReportingDispatcher,
   IngestionRunEntitlementResolver,
 } from "@unprice/services/ingestion"
 import { RunUseCaseError, applyRunSyncEvent } from "@unprice/services/use-cases"
@@ -13,6 +19,7 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { CloudflareReportingQueueClient } from "~/ingestion/reporting/client"
 import { CloudflareRunBudgetClient } from "~/ingestion/run-budget/client"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
@@ -70,6 +77,25 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
     const cache = c.get("cache")
     const logger = c.get("logger")
     const db = c.get("db")
+    const requestId = c.get("requestId")
+    const receivedAt = c.get("requestStartedAt")
+    const timestamp = body.timestamp ?? receivedAt
+
+    try {
+      validateEventTimestamp(timestamp, receivedAt)
+    } catch (error) {
+      if (
+        error instanceof EventTimestampTooFarInFutureError ||
+        error instanceof EventTimestampTooOldError
+      ) {
+        throw new UnpriceApiError({
+          code: "BAD_REQUEST",
+          message: error.message,
+        })
+      }
+
+      throw error
+    }
 
     const runBudget = new CloudflareRunBudgetClient(c.env)
 
@@ -84,19 +110,26 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
       entitlementContext,
       logger,
     })
+    const reportingDispatcher = new IngestionReportingDispatcher({
+      logger,
+      now: () => Date.now(),
+      reportingClient: new CloudflareReportingQueueClient(c.env),
+    })
 
     const result = await applyRunSyncEvent(
-      { services: { budgetRuns }, runBudget, entitlementResolver },
+      { services: { budgetRuns }, runBudget, entitlementResolver, reportingDispatcher },
       {
         projectId: key.projectId,
         runId,
         keyCustomerId: key.defaultCustomerId ?? null,
         featureSlug: body.featureSlug,
         idempotencyKey: body.idempotencyKey,
+        requestId,
+        receivedAt,
         event: {
           id: body.id ?? newId("event"),
           slug: body.eventSlug ?? body.featureSlug,
-          timestamp: body.timestamp ?? Date.now(),
+          timestamp,
           properties: body.properties ?? {},
         },
         source: {
