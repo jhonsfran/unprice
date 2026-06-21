@@ -107,6 +107,7 @@ describe("RunBudgetDO", () => {
       err: null,
       val: { releasedAmount: 0 },
     })
+    testState.persistExpiredRunSummary.mockResolvedValue([{ id: "budget_run_1" }])
     testState.entitlementWindowApply.mockResolvedValue({
       allowed: true,
       meterFacts: [
@@ -552,7 +553,8 @@ describe("RunBudgetDO", () => {
         consumedAmount: 0,
         remainingAmount: 100_000,
         endedAt: expect.any(Date),
-      })
+      }),
+      expect.anything()
     )
 
     await expect(
@@ -567,6 +569,101 @@ describe("RunBudgetDO", () => {
       consumedAmount: 0,
       remainingAmount: 100_000,
     })
+  })
+
+  it("reschedules expiresAt when startRun returns an existing running run", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+    const input = {
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "brun_existing_expiring",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {},
+      expiresAt,
+      now: BASE_NOW,
+    }
+
+    await durable.startRun(input)
+    state.alarmAt = null
+
+    await durable.startRun(input)
+
+    expect(state.alarmAt).toBe(expiresAt)
+    expect(testState.createReservation).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries expired summary persistence after a failed Postgres update", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+
+    testState.persistExpiredRunSummary
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ id: "brun_retry_expiring" }])
+
+    await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      traceId: "trace_expiring_retry_1",
+      parentRunId: null,
+      runId: "brun_retry_expiring",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {},
+      expiresAt,
+      now: BASE_NOW,
+    })
+
+    vi.spyOn(Date, "now").mockReturnValue(expiresAt + 1)
+    await durable.alarm()
+
+    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(1)
+    expect(state.alarmAt).toBe(expiresAt + 1 + 30_000)
+    await expect(
+      durable.getRunStatus({
+        runId: "brun_retry_expiring",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      runId: "brun_retry_expiring",
+      status: "expired",
+      consumedAmount: 0,
+      remainingAmount: 100_000,
+    })
+
+    await durable.alarm()
+
+    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(2)
+    await expect(
+      durable.getRunStatus({
+        runId: "brun_retry_expiring",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      runId: "brun_retry_expiring",
+      status: "expired",
+      consumedAmount: 0,
+      remainingAmount: 100_000,
+    })
+
+    await durable.alarm()
+
+    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(2)
   })
 
   it("endRun calls flush and release, then updates status", async () => {
@@ -749,6 +846,18 @@ function isSqlOperator(where: unknown, operator: string): boolean {
   })
 }
 
+function sqlTextIncludes(where: unknown, text: string): boolean {
+  if (!where || typeof where !== "object") return false
+  const chunks = (where as Record<string, unknown>).queryChunks as unknown[]
+  if (!Array.isArray(chunks)) return false
+
+  return chunks.some((chunk) => {
+    if (!chunk || typeof chunk !== "object") return false
+    const value = (chunk as Record<string, unknown>).value
+    return Array.isArray(value) && value.join("").includes(text)
+  })
+}
+
 /**
  * Evaluate a drizzle sql template expression used in update().set().
  * Handles pattern: sql`${column} + ${number}` → row[column] + number
@@ -869,6 +978,21 @@ function buildFakeDrizzle() {
               r.expiresAt != null &&
               (r.expiresAt as number) > Date.now()
           )
+        }
+
+        if (sqlTextIncludes(where, " OR ")) {
+          return rows.filter((r) => {
+            const expiredAt = r.expiresAt as number | null
+            const isDue = expiredAt != null && expiredAt <= Date.now()
+            const isRunningExpired = (r.status as string) === "running" && isDue
+            const needsPersistRetry =
+              (r.status as string) === "expired" &&
+              r.endedAt != null &&
+              isDue &&
+              !String(r.metadataJson).includes('"expiredSummaryPersistedAt"')
+
+            return isRunningExpired || needsPersistRetry
+          })
         }
 
         // status = 'running' AND expires_at IS NOT NULL AND expires_at <= now
@@ -1004,12 +1128,11 @@ async function loadRunBudgetDO() {
     and: vi.fn((...args: unknown[]) => args),
     createConnection: vi.fn(() => ({
       update: vi.fn(() => ({
-        set: vi.fn((values: unknown) => {
-          testState.persistExpiredRunSummary(values)
-          return {
-            where: vi.fn().mockResolvedValue(undefined),
-          }
-        }),
+        set: vi.fn((values: unknown) => ({
+          where: vi.fn((condition: unknown) => ({
+            returning: vi.fn(() => testState.persistExpiredRunSummary(values, condition)),
+          })),
+        })),
       })),
     })),
     eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),

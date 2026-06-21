@@ -19,6 +19,7 @@ import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
 
 type RunStateRow = typeof schema.runState.$inferSelect
+const EXPIRED_SUMMARY_PERSISTED_AT_KEY = "expiredSummaryPersistedAt"
 
 export class RunBudgetDO extends DurableObject {
   private readonly ready: Promise<void>
@@ -41,7 +42,12 @@ export class RunBudgetDO extends DurableObject {
 
     // Idempotent: if run already exists, return current state
     const existing = await this.loadRun(input.runId)
-    if (existing) return this.toSummary(existing)
+    if (existing) {
+      if (existing.status === "running" && existing.expiresAt) {
+        await this.scheduleAlarmAt(existing.expiresAt)
+      }
+      return this.toSummary(existing)
+    }
 
     // Create wallet reservation for the run budget
     const walletResult = await this.createRunReservation(input)
@@ -285,22 +291,30 @@ export class RunBudgetDO extends DurableObject {
       await this.flushCaptures()
     }
 
-    // Expire runs past their expiry time
+    let hasPersistenceFailures = false
+
+    // Expire runs past their expiry time and retry summaries that failed to persist externally.
     const now = Date.now()
-    const expiredRuns = await this.db.query.runState.findMany({
-      where: sql`${schema.runState.status} = 'running' AND ${schema.runState.expiresAt} IS NOT NULL AND ${schema.runState.expiresAt} <= ${now}`,
-    })
+    const expiredRuns = await this.findExpiredRunsNeedingSummaryPersistence(now)
 
     for (const run of expiredRuns) {
-      const { summary, run: closedRun } = await this.closeRunInStorage({
-        runId: run.runId,
-        customerId: run.customerId,
-        projectId: run.projectId,
-        status: "expired",
-        endedAt: now,
-      })
+      const { summary, run: closedRun } =
+        run.status === "running"
+          ? await this.closeRunInStorage({
+              runId: run.runId,
+              customerId: run.customerId,
+              projectId: run.projectId,
+              status: "expired",
+              endedAt: now,
+            })
+          : { summary: this.toSummary(run), run }
 
-      await this.persistExpiredRunSummary(closedRun, summary)
+      try {
+        await this.persistExpiredRunSummary(closedRun, summary)
+        await this.markExpiredRunSummaryPersisted(closedRun)
+      } catch (_error) {
+        hasPersistenceFailures = true
+      }
     }
 
     // Reschedule for the earliest outstanding capture retry or run expiration.
@@ -308,8 +322,9 @@ export class RunBudgetDO extends DurableObject {
       where: sql`${schema.runCaptureIntents.status} IN ('pending', 'failed') AND ${schema.runCaptureIntents.attemptCount} < 5`,
     })
     const nextCaptureAlarmAt = remaining.length > 0 ? now + 30_000 : null
+    const nextPersistenceRetryAlarmAt = hasPersistenceFailures ? now + 30_000 : null
     const nextExpirationAlarmAt = await this.findNextExpirationAlarmAt(now)
-    const nextAlarmAt = [nextCaptureAlarmAt, nextExpirationAlarmAt]
+    const nextAlarmAt = [nextCaptureAlarmAt, nextPersistenceRetryAlarmAt, nextExpirationAlarmAt]
       .filter((value): value is number => typeof value === "number")
       .sort((a, b) => a - b)[0]
 
@@ -368,7 +383,7 @@ export class RunBudgetDO extends DurableObject {
       logger: false,
     })
 
-    await db
+    const updatedRows = await db
       .update(budgetRuns)
       .set({
         status: "expired",
@@ -378,6 +393,55 @@ export class RunBudgetDO extends DurableObject {
         updatedAt: new Date(),
       })
       .where(andOp(eqOp(budgetRuns.id, run.runId), eqOp(budgetRuns.projectId, run.projectId)))
+      .returning({ id: budgetRuns.id })
+
+    if (updatedRows.length === 0) {
+      throw new Error("BUDGET_RUN_NOT_FOUND")
+    }
+  }
+
+  private async findExpiredRunsNeedingSummaryPersistence(now: number): Promise<RunStateRow[]> {
+    return this.db.query.runState.findMany({
+      where: sql`(
+        ${schema.runState.status} = 'running'
+        AND ${schema.runState.expiresAt} IS NOT NULL
+        AND ${schema.runState.expiresAt} <= ${now}
+      ) OR (
+        ${schema.runState.status} = 'expired'
+        AND ${schema.runState.endedAt} IS NOT NULL
+        AND ${schema.runState.expiresAt} IS NOT NULL
+        AND ${schema.runState.expiresAt} <= ${now}
+        AND ${schema.runState.metadataJson} NOT LIKE '%"expiredSummaryPersistedAt"%'
+      )`,
+    })
+  }
+
+  private async markExpiredRunSummaryPersisted(run: RunStateRow): Promise<void> {
+    const metadata = this.parseRunMetadata(run)
+
+    await this.db
+      .update(schema.runState)
+      .set({
+        metadataJson: JSON.stringify({
+          ...metadata,
+          [EXPIRED_SUMMARY_PERSISTED_AT_KEY]: Date.now(),
+        }),
+      })
+      .where(eq(schema.runState.runId, run.runId))
+  }
+
+  private parseRunMetadata(run: RunStateRow): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(run.metadataJson) as unknown
+
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch (_error) {
+      return {}
+    }
+
+    return {}
   }
 
   private async findNextExpirationAlarmAt(now: number): Promise<number | null> {
