@@ -410,6 +410,203 @@ describe("RunBudgetDO", () => {
     expect(testState.entitlementWindowApply).not.toHaveBeenCalled()
   })
 
+  it("applySyncEvent rejects events after expiresAt without pricing and closes expired", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+    const expiredNow = expiresAt + 1
+
+    await durable.startRun({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_expired_apply",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_expired_apply",
+      metadata: {},
+      expiresAt,
+      now: BASE_NOW,
+    })
+
+    const eventInput = {
+      runId: "run_expired_apply",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_expired_apply",
+      event: {
+        id: "evt_expired_apply",
+        slug: "tokens_used",
+        timestamp: expiredNow,
+        properties: { amount: 1 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: expiredNow,
+      ...TEST_ENTITLEMENT_FIELDS,
+    }
+
+    vi.spyOn(Date, "now").mockReturnValue(expiredNow)
+    const result = await durable.applySyncEvent(eventInput)
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: "rejected",
+      rejectionReason: "RUN_BUDGET_EXCEEDED",
+      budget: {
+        runId: "run_expired_apply",
+        status: "expired",
+        consumedAmount: 0,
+        remainingAmount: 100_000,
+      },
+      meterFacts: [],
+    })
+    expect(result.message).toContain("expired")
+    expect(testState.entitlementWindowApply).not.toHaveBeenCalled()
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
+
+    await expect(
+      durable.getRunStatus({
+        runId: "run_expired_apply",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      status: "expired",
+      consumedAmount: 0,
+      remainingAmount: 100_000,
+    })
+
+    const duplicate = await durable.applySyncEvent(eventInput)
+    expect(duplicate).toEqual(result)
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
+    expect(testState.entitlementWindowApply).not.toHaveBeenCalled()
+
+    await durable.alarm()
+
+    expect(testState.persistExpiredRunSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "expired",
+        consumedAmount: 0,
+        remainingAmount: 100_000,
+      }),
+      expect.anything()
+    )
+  })
+
+  it("applySyncEvent rejects post-expiry usage when capture retry is pending without adding spend", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+    const expiredNow = expiresAt + 1
+
+    await durable.startRun({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_expired_pending_capture",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_expired_pending_capture",
+      metadata: {},
+      expiresAt,
+      now: BASE_NOW,
+    })
+
+    await durable.applySyncEvent({
+      runId: "run_expired_pending_capture",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_before_expiry",
+      event: {
+        id: "evt_before_expiry",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 3 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    testState.entitlementWindowApply.mockClear()
+    testState.captureReservationUsage.mockRejectedValueOnce(new Error("wallet unavailable"))
+    vi.spyOn(Date, "now").mockReturnValue(expiredNow)
+
+    const result = await durable.applySyncEvent({
+      runId: "run_expired_pending_capture",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_after_expiry",
+      event: {
+        id: "evt_after_expiry",
+        slug: "tokens_used",
+        timestamp: expiredNow,
+        properties: { amount: 7 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: expiredNow,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    expect(result).toMatchObject({
+      allowed: false,
+      state: "rejected",
+      rejectionReason: "RUN_BUDGET_EXCEEDED",
+      budget: {
+        runId: "run_expired_pending_capture",
+        status: "running",
+        consumedAmount: 5000,
+        remainingAmount: 95_000,
+      },
+      meterFacts: [],
+    })
+    expect(result.message).toContain("expired")
+    expect(testState.entitlementWindowApply).not.toHaveBeenCalled()
+    expect(testState.captureReservationUsage).toHaveBeenCalledTimes(1)
+
+    await expect(
+      durable.getRunStatus({
+        runId: "run_expired_pending_capture",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      status: "running",
+      consumedAmount: 5000,
+      remainingAmount: 95_000,
+    })
+  })
+
   it("applySyncEvent denies when entitlement window denies", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()

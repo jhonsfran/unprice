@@ -131,6 +131,11 @@ export class RunBudgetDO extends DurableObject {
       await this.persistIdempotency(input.idempotencyKey, input.runId, decision, 0, [])
       return decision
     }
+    if (run.expiresAt !== null && run.expiresAt <= input.now) {
+      const decision = await this.rejectExpiredRun(input, run)
+      await this.persistIdempotency(input.idempotencyKey, input.runId, decision, 0, [])
+      return decision
+    }
 
     // Compute remaining budget
     const remainingAmount = Math.max(0, run.budgetAmount - run.consumedAmount)
@@ -405,6 +410,39 @@ export class RunBudgetDO extends DurableObject {
     return {
       summary: this.toSummary(final),
       run: final,
+    }
+  }
+
+  private async rejectExpiredRun(
+    input: ApplyRunSyncEventInput,
+    run: RunStateRow
+  ): Promise<RunBudgetDecision> {
+    let summary: RunBudgetSummary
+
+    try {
+      const closed = await this.closeRunInStorage({
+        runId: input.runId,
+        customerId: input.customerId,
+        projectId: input.projectId,
+        status: "expired",
+        endedAt: input.now,
+      })
+      summary = closed.summary
+      await this.scheduleAlarm()
+    } catch (error) {
+      if (!(error instanceof RunCapturesPendingError)) {
+        throw error
+      }
+      summary = this.toSummary(run)
+    }
+
+    return {
+      allowed: false,
+      state: "rejected",
+      rejectionReason: "RUN_BUDGET_EXCEEDED",
+      message: `Run expired at ${new Date(run.expiresAt ?? input.now).toISOString()}`,
+      budget: summary,
+      meterFacts: [],
     }
   }
 
