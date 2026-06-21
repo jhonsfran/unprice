@@ -72,6 +72,9 @@ export default async function CustomerPage(props: {
           <TabNavigationLink asChild active>
             <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
           </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/runs`}>Runs</SuperLink>
+          </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4">

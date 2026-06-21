@@ -87,6 +87,9 @@ export default async function CustomerUsagePage({
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
           </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/runs`}>Runs</SuperLink>
+          </TabNavigationLink>
         </div>
       </TabNavigation>
 
