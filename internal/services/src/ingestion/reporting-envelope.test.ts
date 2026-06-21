@@ -211,6 +211,76 @@ describe("ingestion reporting envelope builder", () => {
     expect(failedAuditPayload).not.toHaveProperty("payload_json")
   })
 
+  it("copies run context into reporting audit records without making processed rows replayable", async () => {
+    const message = createMessage({
+      runContext: {
+        runId: "brun_001",
+        traceId: "trace_001",
+        parentRunId: "brun_parent_001",
+        workloadType: "agent",
+        workloadId: "research-assistant",
+      },
+    })
+
+    const record = await buildIngestionReportingAuditRecord({
+      customerId: "cus_1",
+      message,
+      now: () => 4070908801100,
+      outcome: { state: "processed" },
+      projectId: "proj_1",
+    })
+
+    expect(record).toMatchObject({
+      runId: "brun_001",
+      traceId: "trace_001",
+      parentRunId: "brun_parent_001",
+      workloadType: "agent",
+      workloadId: "research-assistant",
+      replayable: false,
+      payloadJson: null,
+    })
+    expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
+      run_id: "brun_001",
+      trace_id: "trace_001",
+      parent_run_id: "brun_parent_001",
+      workload_type: "agent",
+      workload_id: "research-assistant",
+    })
+  })
+
+  it("copies run context into rejected audit payloads without replay payloads", async () => {
+    const message = createMessage({
+      runContext: {
+        runId: "brun_rejected_001",
+        traceId: "trace_rejected_001",
+        parentRunId: "brun_parent_rejected_001",
+        workloadType: "workflow",
+        workloadId: "billing-audit",
+      },
+    })
+
+    const record = await buildIngestionReportingAuditRecord({
+      customerId: message.customerId,
+      message,
+      now: () => HANDLED_AT,
+      outcome: { state: "rejected", rejectionReason: "WALLET_EMPTY" },
+      projectId: message.projectId,
+    })
+
+    expect(record).toMatchObject({
+      payloadJson: null,
+      replayable: false,
+      status: "rejected",
+    })
+    expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
+      run_id: "brun_rejected_001",
+      trace_id: "trace_rejected_001",
+      parent_run_id: "brun_parent_rejected_001",
+      workload_type: "workflow",
+      workload_id: "billing-audit",
+    })
+  })
+
   it("carries meter facts from outcomes into the reporting envelope", async () => {
     const message = createMessage()
     const fact = createMeterFact({ event_id: message.id })
@@ -270,6 +340,11 @@ function createMeterFact(
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",

@@ -19,6 +19,15 @@ export const ingestionReportingAuditRecordSchema = z.object({
   sourceType: z.enum(["api_key", "system", "unknown"]),
   sourceId: z.string(),
   sourceName: z.string().nullable(),
+  runId: z.string().nullable().optional().default(null),
+  traceId: z.string().nullable().optional().default(null),
+  parentRunId: z.string().nullable().optional().default(null),
+  workloadType: z
+    .enum(["agent", "workflow", "job", "tool", "custom"])
+    .nullable()
+    .optional()
+    .default(null),
+  workloadId: z.string().nullable().optional().default(null),
   status: z.enum(["processed", "rejected", "failed"]),
   rejectionReason: z.string().optional(),
   failureStage: z.enum(INGESTION_FAILURE_STAGES).nullable(),

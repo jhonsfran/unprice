@@ -63,6 +63,7 @@ export async function buildIngestionReportingAuditRecord(params: {
   ])
   const failed = outcome.state === "failed"
   const payloadJson = failed ? serializeReplayPayload(message) : null
+  const runContext = getMessageRunContext(message)
   return {
     idempotencyKey: message.idempotencyKey,
     canonicalAuditId,
@@ -75,6 +76,11 @@ export async function buildIngestionReportingAuditRecord(params: {
     sourceType: message.source.sourceType,
     sourceId: message.source.sourceId,
     sourceName: message.source.sourceName,
+    runId: runContext.runId,
+    traceId: runContext.traceId,
+    parentRunId: runContext.parentRunId,
+    workloadType: runContext.workloadType,
+    workloadId: runContext.workloadId,
     status: outcome.state,
     rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
     failureStage: failed ? outcome.failureStage : null,
@@ -97,6 +103,8 @@ export function buildIngestionAuditPayload(
   payloadHash: string,
   handledAt: number
 ): Record<string, unknown> {
+  const runContext = getMessageRunContext(message)
+
   return {
     event_date: toEventDate(message.timestamp),
     schema_version: EVENTS_SCHEMA_VERSION,
@@ -109,6 +117,11 @@ export function buildIngestionAuditPayload(
     source_type: message.source.sourceType,
     source_id: message.source.sourceId,
     source_name: message.source.sourceName,
+    run_id: runContext.runId,
+    trace_id: runContext.traceId,
+    parent_run_id: runContext.parentRunId,
+    workload_type: runContext.workloadType,
+    workload_id: runContext.workloadId,
     request_id: message.requestId,
     idempotency_key: message.idempotencyKey,
     slug: message.slug,
@@ -137,4 +150,22 @@ async function buildReportingEnvelopeId(
 
 function toEventDate(timestamp: number): string {
   return new Date(timestamp).toISOString().slice(0, 10)
+}
+
+function getMessageRunContext(message: IngestionQueueMessage): {
+  runId: string | null
+  traceId: string | null
+  parentRunId: string | null
+  workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+  workloadId: string | null
+} {
+  const runContext = message.runContext ?? null
+
+  return {
+    runId: runContext?.runId ?? null,
+    traceId: runContext?.traceId ?? null,
+    parentRunId: runContext?.parentRunId ?? null,
+    workloadType: runContext?.workloadType ?? null,
+    workloadId: runContext?.workloadId ?? null,
+  }
 }
