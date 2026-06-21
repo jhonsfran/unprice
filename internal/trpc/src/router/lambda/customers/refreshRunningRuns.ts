@@ -41,6 +41,24 @@ export async function refreshRunningRuns(input: {
         return run
       }
 
+      if (live.runId !== run.id) {
+        input.logger.error(new Error("Refreshed run id mismatch"), {
+          project_id: input.projectId,
+          customer_id: input.customerId,
+          run_id: run.id,
+        })
+        return run
+      }
+
+      if (live.currency !== run.currency) {
+        input.logger.error(new Error("Refreshed run currency mismatch"), {
+          project_id: input.projectId,
+          customer_id: input.customerId,
+          run_id: run.id,
+        })
+        return run
+      }
+
       return {
         ...run,
         status: live.status,

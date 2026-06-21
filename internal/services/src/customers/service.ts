@@ -1,5 +1,18 @@
 import type { Analytics } from "@unprice/analytics"
-import { type Database, and, count, eq, getTableColumns, ilike, inArray, or } from "@unprice/db"
+import {
+  type Database,
+  type SQL,
+  and,
+  between,
+  count,
+  eq,
+  getTableColumns,
+  gte,
+  ilike,
+  inArray,
+  lte,
+  or,
+} from "@unprice/db"
 import {
   type BudgetRunStatus,
   budgetRuns,
@@ -723,12 +736,16 @@ export class CustomerService {
             : undefined,
           statusFilters.length > 0 ? inArray(runColumns.status, statusFilters) : undefined,
         ]
-        const whereQuery = withDateFilters<BudgetRun>(
-          expressions,
-          runColumns.startedAt,
-          query.from,
-          query.to
-        )
+        const startedFrom = query.from !== null ? new Date(query.from) : null
+        const startedTo = query.to !== null ? new Date(query.to) : null
+        const whereQuery = and(
+          and(...expressions),
+          startedFrom && startedTo
+            ? between(runColumns.startedAt, startedFrom, startedTo)
+            : undefined,
+          startedFrom ? gte(runColumns.startedAt, startedFrom) : undefined,
+          startedTo ? lte(runColumns.startedAt, startedTo) : undefined
+        ) as SQL<BudgetRun>
         const runQuery = tx.select().from(budgetRuns).$dynamic()
 
         const data = await withPagination(
@@ -737,6 +754,10 @@ export class CustomerService {
           [
             {
               column: runColumns.startedAt,
+              order: "desc",
+            },
+            {
+              column: runColumns.id,
               order: "desc",
             },
           ],

@@ -46,6 +46,7 @@ describe("refreshRunningRuns", () => {
       runId: "brun_running",
       project_id: "proj_123",
     })
+    expect(runsGet).toHaveBeenCalledTimes(1)
   })
 
   it("keeps the Postgres row when live refresh fails", async () => {
@@ -67,6 +68,85 @@ describe("refreshRunningRuns", () => {
       id: "brun_running",
       status: "running",
       consumedAmount: 100,
+    })
+    expect(logger.error).toHaveBeenCalledWith(expect.any(Error), {
+      project_id: "proj_123",
+      customer_id: "cus_123",
+      run_id: "brun_running",
+    })
+  })
+
+  it("keeps the Postgres row when the live run identity does not match", async () => {
+    const running = createRun({ id: "brun_running", status: "running", consumedAmount: 100 })
+    const logger = { error: vi.fn() }
+    const runsGet = vi.fn().mockResolvedValue({
+      result: {
+        runId: "brun_other",
+        status: "running",
+        customerId: "cus_123",
+        budgetAmount: 1000,
+        consumedAmount: 300,
+        remainingAmount: 700,
+        currency: "USD",
+        workloadType: "workflow",
+        workloadId: "daily-research",
+        traceId: "trace_123",
+        parentRunId: null,
+      },
+    })
+
+    const runs = await refreshRunningRuns({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      runs: [running],
+      runsGet,
+      logger,
+    })
+
+    expect(runs[0]).toMatchObject({
+      id: "brun_running",
+      status: "running",
+      consumedAmount: 100,
+    })
+    expect(logger.error).toHaveBeenCalledWith(expect.any(Error), {
+      project_id: "proj_123",
+      customer_id: "cus_123",
+      run_id: "brun_running",
+    })
+  })
+
+  it("keeps the Postgres row when the live run currency does not match", async () => {
+    const running = createRun({ id: "brun_running", status: "running", consumedAmount: 100 })
+    const logger = { error: vi.fn() }
+    const runsGet = vi.fn().mockResolvedValue({
+      result: {
+        runId: "brun_running",
+        status: "running",
+        customerId: "cus_123",
+        budgetAmount: 1000,
+        consumedAmount: 300,
+        remainingAmount: 700,
+        currency: "EUR",
+        workloadType: "workflow",
+        workloadId: "daily-research",
+        traceId: "trace_123",
+        parentRunId: null,
+      },
+    })
+
+    const runs = await refreshRunningRuns({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      runs: [running],
+      runsGet,
+      logger,
+    })
+
+    expect(runs[0]).toMatchObject({
+      id: "brun_running",
+      status: "running",
+      consumedAmount: 100,
+      currency: "USD",
     })
     expect(logger.error).toHaveBeenCalledWith(expect.any(Error), {
       project_id: "proj_123",
