@@ -571,6 +571,100 @@ describe("RunBudgetDO", () => {
     })
   })
 
+  it("defers expiration while capture intents remain retryable", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+    const expiredNow = expiresAt + 1
+
+    testState.captureReservationUsage.mockRejectedValueOnce(
+      new Error("wallet temporarily unavailable")
+    )
+
+    await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      traceId: "trace_expiring_capture_retry_1",
+      parentRunId: null,
+      runId: "brun_expiring_capture_retry",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {},
+      expiresAt,
+      now: BASE_NOW,
+    })
+
+    await durable.applySyncEvent({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "brun_expiring_capture_retry",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_expiring_capture_retry",
+      event: {
+        id: "evt_expiring_capture_retry",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 3 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    vi.spyOn(Date, "now").mockReturnValue(expiredNow)
+    await durable.alarm()
+
+    expect(testState.captureReservationUsage).toHaveBeenCalledTimes(1)
+    expect(testState.persistExpiredRunSummary).not.toHaveBeenCalled()
+    expect(testState.releaseReservation).not.toHaveBeenCalled()
+    await expect(
+      durable.getRunStatus({
+        runId: "brun_expiring_capture_retry",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      runId: "brun_expiring_capture_retry",
+      status: "running",
+      consumedAmount: 5000,
+      remainingAmount: 95_000,
+    })
+    expect(state.alarmAt).toBe(expiredNow + 30_000)
+
+    vi.spyOn(Date, "now").mockReturnValue(expiredNow + 30_000)
+    await durable.alarm()
+
+    expect(testState.captureReservationUsage).toHaveBeenCalledTimes(2)
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
+    expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(1)
+    await expect(
+      durable.getRunStatus({
+        runId: "brun_expiring_capture_retry",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      runId: "brun_expiring_capture_retry",
+      status: "expired",
+      consumedAmount: 5000,
+      remainingAmount: 95_000,
+    })
+  })
+
   it("reschedules expiresAt when startRun returns an existing running run", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
@@ -903,29 +997,45 @@ function extractEqInfo(where: unknown): { field: string; value: unknown } | null
   if (!Array.isArray(chunks) || chunks.length < 4) return null
 
   // Find the column chunk (has .name as a string for the SQL column name)
-  let columnName: string | null = null
-  let paramValue: unknown = undefined
+  const columnNames: string[] = []
+  const paramValues: unknown[] = []
   let foundEquals = false
+  let containsCompositeOperator = false
 
   for (const chunk of chunks) {
     if (!chunk) continue
     if (typeof chunk !== "object") continue
     // Column: has `.name` that is a string and `.columnType` property
     if (typeof chunk.name === "string" && chunk.columnType) {
-      columnName = chunk.name
+      columnNames.push(chunk.name)
     }
     // StringChunk: check for ' = ' operator
-    if (Array.isArray(chunk.value) && chunk.value.includes(" = ")) {
-      foundEquals = true
+    if (Array.isArray(chunk.value)) {
+      const text = chunk.value.join("")
+      if (text.includes(" = ")) {
+        foundEquals = true
+      }
+      if (text.includes(" AND ") || text.includes(" OR ") || text.includes(" IN ")) {
+        containsCompositeOperator = true
+      }
     }
     // Param: has `.value` and `.encoder` properties
-    if ("encoder" in chunk && "value" in chunk) {
-      paramValue = chunk.value
+    if (
+      "value" in chunk &&
+      !Array.isArray(chunk.value) &&
+      !(typeof chunk.name === "string" && chunk.columnType)
+    ) {
+      paramValues.push(chunk.value)
     }
   }
 
-  if (columnName && foundEquals && paramValue !== undefined) {
-    return { field: snakeToCamel(columnName), value: paramValue }
+  if (
+    columnNames.length > 0 &&
+    paramValues.length === 1 &&
+    foundEquals &&
+    !containsCompositeOperator
+  ) {
+    return { field: snakeToCamel(columnNames[columnNames.length - 1]!), value: paramValues[0] }
   }
   return null
 }
@@ -952,6 +1062,31 @@ function sqlTextIncludes(where: unknown, text: string): boolean {
     const value = (chunk as Record<string, unknown>).value
     return Array.isArray(value) && value.join("").includes(text)
   })
+}
+
+function extractSingleParamValue(condition: unknown): unknown {
+  if (!condition || typeof condition !== "object") return undefined
+  const chunks = (condition as Record<string, unknown>).queryChunks as unknown[]
+  if (!Array.isArray(chunks)) return undefined
+
+  const values: unknown[] = []
+  for (const chunk of chunks) {
+    if (!chunk || typeof chunk !== "object") continue
+    if ("queryChunks" in chunk) {
+      const nested = extractSingleParamValue(chunk)
+      if (nested !== undefined) values.push(nested)
+      continue
+    }
+    if (
+      "value" in chunk &&
+      !Array.isArray(chunk.value) &&
+      !(typeof chunk.name === "string" && chunk.columnType)
+    ) {
+      values.push(chunk.value)
+    }
+  }
+
+  return values.length === 1 ? values[0] : undefined
 }
 
 /**
@@ -987,7 +1122,7 @@ function evaluateSetValue(row: Record<string, unknown>, _key: string, value: unk
       operand = chunk
     }
     // Param wrapping a number
-    if ("encoder" in chunk && typeof chunk.value === "number") {
+    if (typeof chunk === "object" && "encoder" in chunk && typeof chunk.value === "number") {
       operand = chunk.value
     }
   }
@@ -1061,11 +1196,11 @@ function buildFakeDrizzle() {
         )
       case "runCaptureIntents":
         // status IN ('pending', 'failed') AND attempt_count < 5
-        return rows.filter(
-          (r) =>
-            ((r.status as string) === "pending" || (r.status as string) === "failed") &&
-            ((r.attemptCount as number) ?? 0) < 5
-        )
+        return rows.filter((r) => {
+          const status = r.status as string
+          const attemptCount = typeof r.attemptCount === "number" ? r.attemptCount : 0
+          return (status === "pending" || status === "failed") && attemptCount < 5
+        })
       case "runState":
         if (isSqlOperator(where, ">")) {
           return rows.filter(
@@ -1167,7 +1302,12 @@ function buildFakeDrizzle() {
     return {
       set: (updates: Record<string, unknown>) => ({
         where: (condition: unknown) => {
-          const eqInfo = extractEqInfo(condition)
+          const eqInfo =
+            extractEqInfo(condition) ??
+            (() => {
+              const value = extractSingleParamValue(condition)
+              return value === undefined ? null : { field: pkField[tableName]!, value }
+            })()
           if (!eqInfo) return Promise.resolve()
 
           for (const row of store.values()) {

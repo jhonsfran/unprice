@@ -20,6 +20,13 @@ import migrations from "./drizzle/migrations"
 
 type RunStateRow = typeof schema.runState.$inferSelect
 
+class RetryableRunCapturesPendingError extends Error {
+  constructor(runId: string) {
+    super(`Retryable capture intents remain for run ${runId}`)
+    this.name = "RetryableRunCapturesPendingError"
+  }
+}
+
 export class RunBudgetDO extends DurableObject {
   private readonly ready: Promise<void>
   private readonly db: DrizzleSqliteDODatabase<typeof schema>
@@ -297,16 +304,30 @@ export class RunBudgetDO extends DurableObject {
     const expiredRuns = await this.findExpiredRunsNeedingSummaryPersistence(now)
 
     for (const run of expiredRuns) {
-      const { summary, run: closedRun } =
-        run.status === "running"
-          ? await this.closeRunInStorage({
-              runId: run.runId,
-              customerId: run.customerId,
-              projectId: run.projectId,
-              status: "expired",
-              endedAt: now,
-            })
-          : { summary: this.toSummary(run), run }
+      let summary: RunBudgetSummary
+      let closedRun: RunStateRow
+
+      if (run.status === "running") {
+        try {
+          const closed = await this.closeRunInStorage({
+            runId: run.runId,
+            customerId: run.customerId,
+            projectId: run.projectId,
+            status: "expired",
+            endedAt: now,
+          })
+          summary = closed.summary
+          closedRun = closed.run
+        } catch (error) {
+          if (error instanceof RetryableRunCapturesPendingError) {
+            continue
+          }
+          throw error
+        }
+      } else {
+        summary = this.toSummary(run)
+        closedRun = run
+      }
 
       try {
         await this.persistExpiredRunSummary(closedRun, summary)
@@ -352,6 +373,10 @@ export class RunBudgetDO extends DurableObject {
 
     const afterFlush = await this.loadRun(input.runId)
     if (!afterFlush) throw new Error("Run state missing after flush")
+
+    if (await this.hasRetryableCaptureIntents(input.runId)) {
+      throw new RetryableRunCapturesPendingError(input.runId)
+    }
 
     if (afterFlush.reservationId) {
       await this.releaseReservation(afterFlush)
@@ -428,6 +453,16 @@ export class RunBudgetDO extends DurableObject {
         expiresAt: null,
       })
       .where(eq(schema.runState.runId, run.runId))
+  }
+
+  private async hasRetryableCaptureIntents(runId: string): Promise<boolean> {
+    const intents = await this.db.query.runCaptureIntents.findMany({
+      where: sql`${schema.runCaptureIntents.status} IN ('pending', 'failed') AND ${schema.runCaptureIntents.attemptCount} < 5`,
+    })
+
+    return intents.some(
+      (intent) => intent.runId === runId || intent.intentKey.startsWith(`run-capture:${runId}:`)
+    )
   }
 
   private async findNextExpirationAlarmAt(now: number): Promise<number | null> {
