@@ -61,6 +61,7 @@ export function DataTable<TData, TValue>({
   // if pageCount is provided, we assume server-side pagination
   // otherwise, we assume client-side pagination done by the library
   const isServerSidePagination = !!pageCount
+  const isServerSideFiltering = filterOptions?.filterServerSide === true
 
   const {
     pagination,
@@ -71,7 +72,7 @@ export function DataTable<TData, TValue>({
     onColumnFiltersChange,
   } = useDataTableUrlState({
     searchColumnId: filterOptions?.filterBy,
-    serverSide: isServerSidePagination,
+    serverSide: isServerSidePagination || isServerSideFiltering,
   })
 
   const table = useReactTable({
@@ -93,11 +94,13 @@ export function DataTable<TData, TValue>({
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
+    ...(isServerSideFiltering
+      ? { manualFiltering: true }
+      : { getFilteredRowModel: getFilteredRowModel() }),
     ...(isServerSidePagination && {
       manualPagination: true,
     }),
