@@ -1,11 +1,12 @@
 import type { RunSummary } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { BudgetRunService } from "../../budget-runs"
+import type { RunBudgetClient } from "./run-budget-client"
 import { RunUseCaseError } from "./start-run"
 
 export type GetRunDeps = {
   services: Pick<{ budgetRuns: BudgetRunService }, "budgetRuns">
-  runBudget?: unknown
+  runBudget?: Pick<RunBudgetClient, "getRunStatus">
 }
 
 export type GetRunInput = {
@@ -33,13 +34,26 @@ export async function getRun(
     return Err(new RunUseCaseError("RUN_NOT_FOUND"))
   }
 
+  const liveSummary =
+    run.status === "running" && deps.runBudget
+      ? await deps.runBudget.getRunStatus({
+          projectId: run.projectId,
+          customerId: run.customerId,
+          runId: run.id,
+        })
+      : null
+
+  if (liveSummary?.err) {
+    return Err(new RunUseCaseError("BUDGET_ERROR"))
+  }
+
   return Ok({
     runId: run.id,
-    status: run.status,
+    status: liveSummary?.val.status ?? run.status,
     customerId: run.customerId,
-    budgetAmount: run.budgetAmount,
-    consumedAmount: run.consumedAmount,
-    remainingAmount: run.remainingAmount,
+    budgetAmount: liveSummary?.val.budgetAmount ?? run.budgetAmount,
+    consumedAmount: liveSummary?.val.consumedAmount ?? run.consumedAmount,
+    remainingAmount: liveSummary?.val.remainingAmount ?? run.remainingAmount,
     currency: run.currency,
     workloadType: run.workloadType ?? null,
     workloadId: run.workloadId ?? null,
