@@ -1,6 +1,8 @@
 import { BaseError, type Result } from "@unprice/error"
 import type { IngestionEntitlement, IngestionGrant } from "../../ingestion/entitlement-context"
 
+type RunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
+
 export type RunBudgetSummary = {
   runId: string
   status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
@@ -40,8 +42,10 @@ export interface RunBudgetClient {
     budgetAmount: number
     currency: string
     idempotencyKey: string
-    agentId?: string | null
+    workloadType?: RunWorkloadType | null
+    workloadId?: string | null
     traceId?: string | null
+    parentRunId?: string | null
     metadata?: Record<string, unknown>
     expiresAt?: number | null
   }): Promise<Result<RunBudgetStartResult, RunBudgetError>>

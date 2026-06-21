@@ -14,6 +14,8 @@ export type BudgetRunStatus =
   | "budget_exceeded"
   | "failed"
 
+export type BudgetRunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
+
 /**
  * Budget run state. One row per run lifecycle.
  *
@@ -34,8 +36,10 @@ export const budgetRuns = pgTableProject(
     currency: text("currency").notNull(),
     walletReservationId: text("wallet_reservation_id"),
     idempotencyKey: text("idempotency_key").notNull(),
-    agentId: text("agent_id"),
+    workloadType: text("workload_type").$type<BudgetRunWorkloadType>(),
+    workloadId: text("workload_id"),
     traceId: text("trace_id"),
+    parentRunId: cuid("parent_run_id"),
     metadata: json("metadata").$type<Record<string, unknown>>().notNull().default({}),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().default(sql`now()`),
@@ -50,6 +54,16 @@ export const budgetRuns = pgTableProject(
       table.customerId
     ),
     projectStatusIdx: index("budget_runs_project_status_idx").on(table.projectId, table.status),
+    projectTraceIdx: index("budget_runs_project_trace_idx").on(table.projectId, table.traceId),
+    projectParentIdx: index("budget_runs_project_parent_idx").on(
+      table.projectId,
+      table.parentRunId
+    ),
+    projectWorkloadIdx: index("budget_runs_project_workload_idx").on(
+      table.projectId,
+      table.workloadType,
+      table.workloadId
+    ),
     idempotencyIdx: uniqueIndex("budget_runs_project_customer_idempotency_idx").on(
       table.projectId,
       table.customerId,

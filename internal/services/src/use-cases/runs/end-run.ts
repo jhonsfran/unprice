@@ -68,6 +68,9 @@ export async function endRun(
     consumedAmount: doResult.val.consumedAmount,
     remainingAmount: doResult.val.remainingAmount,
     currency: run.currency,
-    agentId: run.agentId,
+    workloadType: run.workloadType ?? null,
+    workloadId: run.workloadId ?? null,
+    traceId: run.traceId ?? null,
+    parentRunId: run.parentRunId ?? null,
   })
 }

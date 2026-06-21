@@ -202,7 +202,10 @@ describe("budgeted runs API", () => {
       consumedAmount: 0,
       remainingAmount: 1_000_000_000,
       currency: "USD",
-      agentId: null,
+      workloadType: null,
+      workloadId: null,
+      traceId: null,
+      parentRunId: null,
     }
 
     useCaseMocks.startRun.mockResolvedValue({ val: runSummary, err: undefined })
@@ -220,7 +223,6 @@ describe("budgeted runs API", () => {
         body: JSON.stringify({
           budgetAmount: 1000,
           idempotencyKey: "idem_start_1",
-          agentId: "my-agent",
         }),
       }),
       env,
@@ -381,7 +383,7 @@ describe("budgeted runs API", () => {
     expect(body).toMatchObject({ code: "BAD_REQUEST" })
   })
 
-  it("applies sync usage without customerId or agentId in the request body", async () => {
+  it("applies sync usage without customerId or workload identity in the request body", async () => {
     // Given a running budget run
     authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
 
@@ -396,7 +398,10 @@ describe("budgeted runs API", () => {
         consumedAmount: 100_000_000,
         remainingAmount: 900_000_000,
         currency: "USD",
-        agentId: null,
+        workloadType: null,
+        workloadId: null,
+        traceId: null,
+        parentRunId: null,
       },
     }
 
@@ -477,7 +482,10 @@ describe("budgeted runs API", () => {
       consumedAmount: 300_000_000,
       remainingAmount: 700_000_000,
       currency: "USD",
-      agentId: null,
+      workloadType: null,
+      workloadId: null,
+      traceId: null,
+      parentRunId: null,
     }
 
     useCaseMocks.endRun.mockResolvedValue({ val: finalSummary, err: undefined })

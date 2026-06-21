@@ -15,6 +15,8 @@ import { RunBudgetError as RunBudgetErrorClass } from "@unprice/services/use-cas
 import type { Env } from "~/env"
 import type { RunBudgetDecision } from "./contracts"
 
+type RunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
+
 export class CloudflareRunBudgetClient implements RunBudgetClient {
   private readonly appEnv: Env["APP_ENV"]
   private readonly runbudget: Env["runbudget"]
@@ -31,8 +33,10 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
     budgetAmount: number
     currency: string
     idempotencyKey: string
-    agentId?: string | null
+    workloadType?: RunWorkloadType | null
+    workloadId?: string | null
     traceId?: string | null
+    parentRunId?: string | null
     metadata?: Record<string, unknown>
     expiresAt?: number | null
   }): Promise<Result<RunBudgetStartResult, RunBudgetError>> {

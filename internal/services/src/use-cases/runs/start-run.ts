@@ -4,6 +4,8 @@ import type { Logger } from "@unprice/logs"
 import type { BudgetRunService } from "../../budget-runs"
 import type { RunBudgetClient } from "./run-budget-client"
 
+type RunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
+
 export class RunUseCaseError extends BaseError {
   public readonly retry = false
   public readonly name = "RunUseCaseError"
@@ -19,8 +21,10 @@ export type StartRunResolvedInput = {
   budgetAmount: number
   currency: string
   idempotencyKey: string
-  agentId?: string | null
+  workloadType?: RunWorkloadType | null
+  workloadId?: string | null
   traceId?: string | null
+  parentRunId?: string | null
   metadata?: Record<string, unknown>
   expiresAt?: number | null
 }
@@ -43,8 +47,10 @@ export async function startRun(
     remainingAmount: input.budgetAmount,
     currency: input.currency,
     idempotencyKey: input.idempotencyKey,
-    agentId: input.agentId,
+    workloadType: input.workloadType,
+    workloadId: input.workloadId,
     traceId: input.traceId,
+    parentRunId: input.parentRunId,
     metadata: input.metadata,
     expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
   })
@@ -63,8 +69,10 @@ export async function startRun(
     budgetAmount: input.budgetAmount,
     currency: input.currency,
     idempotencyKey: input.idempotencyKey,
-    agentId: input.agentId,
+    workloadType: input.workloadType,
+    workloadId: input.workloadId,
     traceId: input.traceId,
+    parentRunId: input.parentRunId,
     metadata: input.metadata,
     expiresAt: input.expiresAt,
   })
@@ -116,6 +124,9 @@ export async function startRun(
     consumedAmount: doResult.val.summary.consumedAmount,
     remainingAmount: doResult.val.summary.remainingAmount,
     currency: run.currency,
-    agentId: run.agentId,
+    workloadType: run.workloadType ?? null,
+    workloadId: run.workloadId ?? null,
+    traceId: run.traceId ?? null,
+    parentRunId: run.parentRunId ?? null,
   })
 }

@@ -20,6 +20,8 @@ export const runBudgetSummarySchema = z.object({
   walletError: z.string().optional(),
 })
 
+const workloadTypeSchema = z.enum(["agent", "workflow", "job", "tool", "custom"])
+
 const sourceSchema = z.object({
   workspaceId: z.string().min(1),
   environment: z.string().min(1),
@@ -53,8 +55,10 @@ export const startRunInputSchema = z.object({
   budgetAmount: z.number().int().positive(),
   currency: z.string().min(3).max(12),
   idempotencyKey: z.string().min(1),
-  agentId: z.string().min(1).nullable().optional(),
+  workloadType: workloadTypeSchema.nullable().optional(),
+  workloadId: z.string().min(1).nullable().optional(),
   traceId: z.string().min(1).nullable().optional(),
+  parentRunId: z.string().min(1).nullable().optional(),
   metadata: z.record(z.unknown()).default({}),
   expiresAt: z.number().finite().nullable().optional(),
   now: z.number().finite(),

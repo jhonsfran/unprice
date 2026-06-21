@@ -4,7 +4,10 @@ export const runState = sqliteTable("run_state", {
   runId: text("run_id").primaryKey(),
   projectId: text("project_id").notNull(),
   customerId: text("customer_id").notNull(),
-  agentId: text("agent_id").notNull(),
+  workloadType: text("workload_type"),
+  workloadId: text("workload_id"),
+  traceId: text("trace_id"),
+  parentRunId: text("parent_run_id"),
   reservationId: text("reservation_id"),
   status: text("status").notNull(),
   currency: text("currency").notNull(),
@@ -16,7 +19,6 @@ export const runState = sqliteTable("run_state", {
   endedAt: integer("ended_at"),
   expiresAt: integer("expires_at"),
   lastEventAt: integer("last_event_at"),
-  traceId: text("trace_id"),
   metadataJson: text("metadata_json").notNull().default("{}"),
 })
 

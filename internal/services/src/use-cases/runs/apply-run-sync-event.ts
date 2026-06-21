@@ -97,13 +97,16 @@ export async function applyRunSyncEvent(
       reason: mapEntitlementRejection(resolution.reason),
       run: {
         runId: run.id,
-        status: "running",
+        status: run.status,
         customerId: run.customerId,
-        budgetAmount: 0,
-        consumedAmount: 0,
-        remainingAmount: 0,
+        budgetAmount: run.budgetAmount,
+        consumedAmount: run.consumedAmount,
+        remainingAmount: run.remainingAmount,
         currency: run.currency,
-        agentId: run.agentId,
+        workloadType: run.workloadType ?? null,
+        workloadId: run.workloadId ?? null,
+        traceId: run.traceId ?? null,
+        parentRunId: run.parentRunId ?? null,
       },
     })
   }
@@ -149,7 +152,10 @@ export async function applyRunSyncEvent(
       consumedAmount: decision.budget.consumedAmount,
       remainingAmount: decision.budget.remainingAmount,
       currency: run.currency,
-      agentId: run.agentId,
+      workloadType: run.workloadType ?? null,
+      workloadId: run.workloadId ?? null,
+      traceId: run.traceId ?? null,
+      parentRunId: run.parentRunId ?? null,
     },
   })
 }

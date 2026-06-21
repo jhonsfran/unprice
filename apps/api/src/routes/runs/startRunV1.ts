@@ -115,8 +115,10 @@ export const registerStartRunV1 = (app: App) =>
         budgetAmount: budgetAmountLedger,
         currency,
         idempotencyKey: body.idempotencyKey,
-        agentId: body.agentId,
+        workloadType: body.workloadType,
+        workloadId: body.workloadId,
         traceId: body.traceId,
+        parentRunId: body.parentRunId,
         metadata: body.metadata,
         expiresAt: body.expiresAt,
       }

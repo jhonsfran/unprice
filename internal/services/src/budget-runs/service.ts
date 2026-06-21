@@ -7,6 +7,8 @@ import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache"
 import { cachedQuery } from "../utils/cached-query"
 
+type BudgetRunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
+
 export class BudgetRunServiceError extends BaseError {
   public readonly retry = false
   public readonly name = "BudgetRunServiceError"
@@ -31,8 +33,10 @@ export class BudgetRunService {
     remainingAmount: number
     currency: string
     idempotencyKey: string
-    agentId?: string | null
+    workloadType?: BudgetRunWorkloadType | null
+    workloadId?: string | null
     traceId?: string | null
+    parentRunId?: string | null
     metadata?: Record<string, unknown>
     expiresAt?: Date | null
   }): Promise<Result<BudgetRunRow, BudgetRunServiceError>> {
@@ -50,8 +54,10 @@ export class BudgetRunService {
           remainingAmount: input.remainingAmount,
           currency: input.currency,
           idempotencyKey: input.idempotencyKey,
-          agentId: input.agentId ?? null,
+          workloadType: input.workloadType ?? null,
+          workloadId: input.workloadId ?? null,
           traceId: input.traceId ?? null,
+          parentRunId: input.parentRunId ?? null,
           metadata: input.metadata ?? {},
           expiresAt: input.expiresAt ?? null,
         })

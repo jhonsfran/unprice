@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
+const DO_STARTUP_TEST_TIMEOUT_MS = 15_000
 
 /**
  * Default entitlement config and grants for test fixtures.
@@ -16,9 +17,15 @@ const TEST_ENTITLEMENT_FIELDS = {
     effectiveAt: BASE_NOW - 86_400_000,
     expiresAt: null,
     featureConfig: {
-      tiers: [
-        { firstUnit: 1, lastUnit: null, unitPrice: { displayAmount: "0.05", dinpieces: 5000 } },
-      ],
+      usageMode: "unit",
+      price: {
+        dinero: {
+          amount: 0,
+          currency: { code: "USD", base: 10, exponent: 2 },
+          scale: 2,
+        },
+        displayAmount: "0.00",
+      },
     },
     featurePlanVersionId: "fpv_1",
     featureSlug: "tokens",
@@ -121,59 +128,69 @@ describe("RunBudgetDO", () => {
     vi.resetModules()
   })
 
-  it("startRun creates a wallet reservation and persists run state", async () => {
-    const RunBudgetDO = await loadRunBudgetDO()
-    const state = createDurableObjectState()
-    const env = createEnv()
-    const durable = new RunBudgetDO(state, env)
+  it(
+    "startRun creates a wallet reservation and persists run state",
+    async () => {
+      const RunBudgetDO = await loadRunBudgetDO()
+      const state = createDurableObjectState()
+      const env = createEnv()
+      const durable = new RunBudgetDO(state, env)
 
-    const result = await durable.startRun({
-      agentId: "agent_1",
-      runId: "run_1",
-      customerId: "cus_1",
-      projectId: "proj_1",
-      currency: "USD",
-      budgetAmount: 100_000,
-      idempotencyKey: "idem_start_1",
-      metadata: { test: true },
-      now: BASE_NOW,
-    })
+      const result = await durable.startRun({
+        workloadType: "agent",
+        workloadId: "agent_1",
+        runId: "run_1",
+        customerId: "cus_1",
+        projectId: "proj_1",
+        currency: "USD",
+        budgetAmount: 100_000,
+        idempotencyKey: "idem_start_1",
+        metadata: { test: true },
+        now: BASE_NOW,
+      })
 
-    expect(result).toMatchObject({
-      runId: "run_1",
-      status: "running",
-      budgetAmount: 100_000,
-      consumedAmount: 0,
-      remainingAmount: 100_000,
-    })
-    expect(testState.createReservation).toHaveBeenCalledTimes(1)
-  })
+      expect(result).toMatchObject({
+        runId: "run_1",
+        status: "running",
+        budgetAmount: 100_000,
+        consumedAmount: 0,
+        remainingAmount: 100_000,
+      })
+      expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    },
+    DO_STARTUP_TEST_TIMEOUT_MS
+  )
 
-  it("startRun is idempotent - returns existing run state", async () => {
-    const RunBudgetDO = await loadRunBudgetDO()
-    const state = createDurableObjectState()
-    const env = createEnv()
-    const durable = new RunBudgetDO(state, env)
+  it(
+    "startRun is idempotent - returns existing run state",
+    async () => {
+      const RunBudgetDO = await loadRunBudgetDO()
+      const state = createDurableObjectState()
+      const env = createEnv()
+      const durable = new RunBudgetDO(state, env)
 
-    const input = {
-      agentId: "agent_1",
-      runId: "run_1",
-      customerId: "cus_1",
-      projectId: "proj_1",
-      currency: "USD",
-      budgetAmount: 100_000,
-      idempotencyKey: "idem_start_1",
-      metadata: {},
-      now: BASE_NOW,
-    }
+      const input = {
+        workloadType: "agent",
+        workloadId: "agent_1",
+        runId: "run_1",
+        customerId: "cus_1",
+        projectId: "proj_1",
+        currency: "USD",
+        budgetAmount: 100_000,
+        idempotencyKey: "idem_start_1",
+        metadata: {},
+        now: BASE_NOW,
+      }
 
-    const first = await durable.startRun(input)
-    const second = await durable.startRun(input)
+      const first = await durable.startRun(input)
+      const second = await durable.startRun(input)
 
-    expect(first).toEqual(second)
-    // Wallet reservation only called once
-    expect(testState.createReservation).toHaveBeenCalledTimes(1)
-  })
+      expect(first).toEqual(second)
+      // Wallet reservation only called once
+      expect(testState.createReservation).toHaveBeenCalledTimes(1)
+    },
+    DO_STARTUP_TEST_TIMEOUT_MS
+  )
 
   it("applySyncEvent returns cached decision for duplicate idempotency keys", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
@@ -182,7 +199,8 @@ describe("RunBudgetDO", () => {
     const durable = new RunBudgetDO(state, env)
 
     await durable.startRun({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -194,7 +212,8 @@ describe("RunBudgetDO", () => {
     })
 
     const eventInput = {
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -234,7 +253,8 @@ describe("RunBudgetDO", () => {
     const durable = new RunBudgetDO(state, env)
 
     await durable.startRun({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -247,7 +267,8 @@ describe("RunBudgetDO", () => {
 
     // End the run first
     await durable.endRun({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -256,7 +277,8 @@ describe("RunBudgetDO", () => {
     })
 
     const result = await durable.applySyncEvent({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -300,7 +322,8 @@ describe("RunBudgetDO", () => {
     })
 
     await durable.startRun({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -312,7 +335,8 @@ describe("RunBudgetDO", () => {
     })
 
     const result = await durable.applySyncEvent({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -348,7 +372,8 @@ describe("RunBudgetDO", () => {
     const durable = new RunBudgetDO(state, env)
 
     await durable.startRun({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -360,7 +385,8 @@ describe("RunBudgetDO", () => {
     })
 
     const result = await durable.applySyncEvent({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -398,7 +424,8 @@ describe("RunBudgetDO", () => {
     const durable = new RunBudgetDO(state, env)
 
     await durable.startRun({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -411,7 +438,8 @@ describe("RunBudgetDO", () => {
 
     // Apply some usage
     await durable.applySyncEvent({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -436,7 +464,8 @@ describe("RunBudgetDO", () => {
     })
 
     const result = await durable.endRun({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -459,7 +488,8 @@ describe("RunBudgetDO", () => {
     const durable = new RunBudgetDO(state, env)
 
     await durable.startRun({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -471,7 +501,8 @@ describe("RunBudgetDO", () => {
     })
 
     const status = await durable.getRunStatus({
-      agentId: "agent_1",
+      workloadType: "agent",
+      workloadId: "agent_1",
       runId: "run_1",
       customerId: "cus_1",
       projectId: "proj_1",
@@ -494,7 +525,8 @@ describe("RunBudgetDO", () => {
 
     await expect(
       durable.getRunStatus({
-        agentId: "agent_1",
+        workloadType: "agent",
+        workloadId: "agent_1",
         runId: "nonexistent",
         customerId: "cus_1",
         projectId: "proj_1",

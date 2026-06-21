@@ -65,7 +65,9 @@ export class RunBudgetDO extends DurableObject {
       runId: input.runId,
       projectId: input.projectId,
       customerId: input.customerId,
-      agentId: input.agentId ?? "",
+      workloadType: input.workloadType ?? null,
+      workloadId: input.workloadId ?? null,
+      parentRunId: input.parentRunId ?? null,
       reservationId: walletResult.reservationId,
       status: "running",
       currency: input.currency,
@@ -363,9 +365,11 @@ export class RunBudgetDO extends DurableObject {
       periodEndAt: new Date(input.expiresAt ?? input.now + 24 * 60 * 60 * 1000),
       idempotencyKey: input.idempotencyKey,
       metadata: {
-        agent_id: input.agentId,
         run_id: input.runId,
         trace_id: input.traceId ?? null,
+        parent_run_id: input.parentRunId ?? null,
+        workload_type: input.workloadType ?? null,
+        workload_id: input.workloadId ?? null,
       },
     })
 
@@ -476,7 +480,13 @@ export class RunBudgetDO extends DurableObject {
       reservationId: run.reservationId!,
       closeReason: "period_close",
       idempotencyKey: `release:${run.runId}:${Date.now()}`,
-      metadata: { agent_id: run.agentId, run_id: run.runId },
+      metadata: {
+        run_id: run.runId,
+        trace_id: run.traceId,
+        parent_run_id: run.parentRunId,
+        workload_type: run.workloadType,
+        workload_id: run.workloadId,
+      },
     })
 
     if (result.err) throw result.err
