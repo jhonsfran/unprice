@@ -241,6 +241,77 @@ describe("budgeted runs API", () => {
     })
   })
 
+  it("starts a run with workload, trace, and parent attribution", async () => {
+    authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
+    authMocks.resolveCustomerIdForApiKey.mockReturnValue({
+      success: true,
+      customerId: "cus_default",
+    })
+
+    useCaseMocks.startRun.mockResolvedValue({
+      val: {
+        runId: "brun_attr123",
+        status: "running",
+        customerId: "cus_default",
+        budgetAmount: 500_000_000,
+        consumedAmount: 0,
+        remainingAmount: 500_000_000,
+        currency: "USD",
+        workloadType: "agent",
+        workloadId: "research-assistant-v2",
+        traceId: "trace_checkout_123",
+        parentRunId: "brun_parent_123",
+      },
+      err: undefined,
+    })
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/runs/start", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sk_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          budgetAmount: 500,
+          idempotencyKey: "run_attr_1",
+          workloadType: "agent",
+          workloadId: "research-assistant-v2",
+          traceId: "trace_checkout_123",
+          parentRunId: "brun_parent_123",
+          metadata: {
+            scenario: "checkout",
+          },
+        }),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(useCaseMocks.startRun).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        workloadType: "agent",
+        workloadId: "research-assistant-v2",
+        traceId: "trace_checkout_123",
+        parentRunId: "brun_parent_123",
+      })
+    )
+
+    const body = await response.json()
+    expect(body).toMatchObject({
+      runId: "brun_attr123",
+      workloadType: "agent",
+      workloadId: "research-assistant-v2",
+      traceId: "trace_checkout_123",
+      parentRunId: "brun_parent_123",
+    })
+    expect(body).not.toHaveProperty("agentId")
+  })
+
   it("rejects a mismatched customerId for a customer-bound API key", async () => {
     // Given an API key bound to customer A (cus_default)
     authMocks.keyAuth.mockResolvedValue(verifiedKeyWithDefault)
