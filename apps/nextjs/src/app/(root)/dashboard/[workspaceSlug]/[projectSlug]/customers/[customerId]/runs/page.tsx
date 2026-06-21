@@ -33,6 +33,7 @@ export default async function CustomerRunsPage(props: {
     customerId,
     ...filters,
   })
+  const tablePageCount = Math.max(pageCount, 1)
 
   if (!customer) {
     notFound()
@@ -93,7 +94,7 @@ export default async function CustomerRunsPage(props: {
           }
         >
           <DataTable
-            pageCount={pageCount}
+            pageCount={tablePageCount}
             columns={runsColumns}
             data={runs}
             filterOptions={{

@@ -4,8 +4,8 @@ import type { ColumnDef } from "@tanstack/react-table"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Typography } from "@unprice/ui/typography"
-import { format } from "date-fns"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
+import { formatDate } from "~/lib/dates"
 import { formatRunMoney } from "../format-run-money"
 
 type CustomerRun = RouterOutputs["customers"]["getRuns"]["runs"][number]
@@ -22,6 +22,14 @@ function statusVariant(status: CustomerRun["status"]) {
     default:
       return "default"
   }
+}
+
+function formatRunDate(date: CustomerRun["startedAt"] | CustomerRun["endedAt"]): string {
+  if (!date) {
+    return "-"
+  }
+
+  return `${formatDate(new Date(date).getTime(), "UTC", "yyyy-MM-dd HH:mm:ss")} UTC`
 }
 
 export const columns: ColumnDef<CustomerRun>[] = [
@@ -116,7 +124,7 @@ export const columns: ColumnDef<CustomerRun>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Started" />,
     cell: ({ row }) => (
       <Typography variant="p" affects="removePaddingMargin" className="whitespace-nowrap text-sm">
-        {format(new Date(row.original.startedAt), "PPpp")}
+        {formatRunDate(row.original.startedAt)}
       </Typography>
     ),
     size: 40,
@@ -126,7 +134,7 @@ export const columns: ColumnDef<CustomerRun>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Ended" />,
     cell: ({ row }) => (
       <Typography variant="p" affects="removePaddingMargin" className="whitespace-nowrap text-sm">
-        {row.original.endedAt ? format(new Date(row.original.endedAt), "PPpp") : "-"}
+        {formatRunDate(row.original.endedAt)}
       </Typography>
     ),
     size: 40,
