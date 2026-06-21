@@ -46,9 +46,7 @@
       "indexes": {
         "idx_entitlement_period_usage_period_end_at": {
           "name": "idx_entitlement_period_usage_period_end_at",
-          "columns": [
-            "period_end_at"
-          ],
+          "columns": ["period_end_at"],
           "isUnique": false
         }
       },
@@ -85,9 +83,7 @@
       "indexes": {
         "idx_idempotency_key_batches_created_at": {
           "name": "idx_idempotency_key_batches_created_at",
-          "columns": [
-            "created_at"
-          ],
+          "columns": ["created_at"],
           "isUnique": false
         }
       },

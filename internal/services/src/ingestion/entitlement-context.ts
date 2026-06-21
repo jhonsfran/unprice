@@ -12,10 +12,7 @@ import type {
 } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import {
-  INGESTION_MAX_EVENT_AGE_MS,
-  extractCurrencyCodeFromFeatureConfig,
-} from "../entitlements"
+import { INGESTION_MAX_EVENT_AGE_MS, extractCurrencyCodeFromFeatureConfig } from "../entitlements"
 import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import type { IngestionRejectionReason } from "./interface"

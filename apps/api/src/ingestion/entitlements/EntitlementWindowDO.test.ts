@@ -2931,11 +2931,13 @@ describe("EntitlementWindowDO", () => {
     })
     const input1 = createApplyInput({ limit: 100 })
     await durableObject.apply(input1)
-    expect(await durableObject.getEnforcementState({
-      entitlement: input1.entitlement,
-      grants: input1.grants,
-      now: BASE_NOW,
-    })).toEqual({
+    expect(
+      await durableObject.getEnforcementState({
+        entitlement: input1.entitlement,
+        grants: input1.grants,
+        now: BASE_NOW,
+      })
+    ).toEqual({
       usage: 7,
       limit: 100,
       isLimitReached: false,
@@ -2960,11 +2962,13 @@ describe("EntitlementWindowDO", () => {
       ],
     })
     await durableObject.apply(input2)
-    expect(await durableObject.getEnforcementState({
-      entitlement: input2.entitlement,
-      grants: input2.grants,
-      now: BASE_NOW,
-    })).toEqual({
+    expect(
+      await durableObject.getEnforcementState({
+        entitlement: input2.entitlement,
+        grants: input2.grants,
+        now: BASE_NOW,
+      })
+    ).toEqual({
       usage: 7,
       limit: 7,
       isLimitReached: true,
@@ -2993,11 +2997,13 @@ describe("EntitlementWindowDO", () => {
       ],
     })
     await durableObject.apply(input3)
-    expect(await durableObject.getEnforcementState({
-      entitlement: input3.entitlement,
-      grants: input3.grants,
-      now: BASE_NOW,
-    })).toEqual({
+    expect(
+      await durableObject.getEnforcementState({
+        entitlement: input3.entitlement,
+        grants: input3.grants,
+        now: BASE_NOW,
+      })
+    ).toEqual({
       usage: 3,
       limit: 7,
       isLimitReached: false,
@@ -3029,22 +3035,26 @@ describe("EntitlementWindowDO", () => {
     db.storageReadCounts.grants = 0
     db.storageReadCounts.grantWindows = 0
 
-    expect(await durableObject.getEnforcementState({
-      entitlement: input.entitlement,
-      grants: input.grants,
-      now: BASE_NOW,
-    })).toMatchObject({
+    expect(
+      await durableObject.getEnforcementState({
+        entitlement: input.entitlement,
+        grants: input.grants,
+        now: BASE_NOW,
+      })
+    ).toMatchObject({
       usage: 4,
       limit: 10,
       isLimitReached: false,
     })
     const readsAfterFirstVerify = { ...db.storageReadCounts }
 
-    expect(await durableObject.getEnforcementState({
-      entitlement: input.entitlement,
-      grants: input.grants,
-      now: BASE_NOW,
-    })).toMatchObject({
+    expect(
+      await durableObject.getEnforcementState({
+        entitlement: input.entitlement,
+        grants: input.grants,
+        now: BASE_NOW,
+      })
+    ).toMatchObject({
       usage: 4,
       limit: 10,
       isLimitReached: false,
@@ -3064,11 +3074,13 @@ describe("EntitlementWindowDO", () => {
     await durableObject.apply(input2)
 
     const readsAfterApply = { ...db.storageReadCounts }
-    expect(await durableObject.getEnforcementState({
-      entitlement: input2.entitlement,
-      grants: input2.grants,
-      now: BASE_NOW,
-    })).toMatchObject({
+    expect(
+      await durableObject.getEnforcementState({
+        entitlement: input2.entitlement,
+        grants: input2.grants,
+        now: BASE_NOW,
+      })
+    ).toMatchObject({
       usage: 6,
       limit: 10,
       isLimitReached: false,
@@ -7927,7 +7939,8 @@ function createApplyInput(overrides: Record<string, unknown> = {}) {
             ? grant.amount
             : null,
       cadenceEffectiveAt: Number(grant.cadenceEffectiveAt ?? periodStartAt),
-      cadenceExpiresAt: grant.cadenceExpiresAt != null ? Number(grant.cadenceExpiresAt) : entitlementExpiresAt,
+      cadenceExpiresAt:
+        grant.cadenceExpiresAt != null ? Number(grant.cadenceExpiresAt) : entitlementExpiresAt,
       currencyCode: String(grant.currencyCode ?? currencyCode),
       effectiveAt: Number(grant.effectiveAt),
       expiresAt: grant.expiresAt != null ? Number(grant.expiresAt) : null,
