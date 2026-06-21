@@ -507,6 +507,20 @@ describe("budgeted runs API", () => {
     )
   })
 
+  it("keeps run sync routes out of raw async ingestion and raw R2 archival", async () => {
+    const routeSource = await import("node:fs/promises").then((fs) =>
+      fs.readFile(new URL("./applyRunSyncEventV1.ts", import.meta.url), "utf8")
+    )
+
+    expect(routeSource).not.toContain("QUEUE_SHARD")
+    expect(routeSource).not.toContain("INGESTION_QUEUE")
+    expect(routeSource).not.toContain("rawStorage")
+    expect(routeSource).not.toContain("RAW_EVENTS")
+    expect(routeSource).not.toContain("R2")
+    expect(routeSource).toContain("CloudflareReportingQueueClient")
+    expect(routeSource).toContain("IngestionReportingDispatcher")
+  })
+
   it("does not allow a bound customer key to access another customer's run", async () => {
     // Given a run for customer A and a key bound to customer B
     authMocks.keyAuth.mockResolvedValue(verifiedKeyBoundToB)
