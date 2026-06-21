@@ -1,6 +1,9 @@
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
+import { extendZodWithOpenApi } from "zod-openapi"
 import { budgetRuns } from "../schema/budget-runs"
+
+extendZodWithOpenApi(z)
 
 export const runStatusSchema = z.enum([
   "running",
@@ -11,14 +14,20 @@ export const runStatusSchema = z.enum([
   "failed",
 ])
 
-export const workloadTypeSchema = z.enum(["agent", "workflow", "job", "tool", "custom"])
+const workloadTypes = ["agent", "workflow", "job", "tool", "custom"] as const
+
+export const workloadTypeSchema = z.enum(workloadTypes)
+
+const nullableWorkloadTypeSchema = workloadTypeSchema.nullable().openapi({
+  enum: [...workloadTypes, null],
+})
 
 export const startRunInputSchema = z.object({
   customerId: z.string().min(1).optional(),
   /** Budget in currency minor units (cents). e.g. 500 = $5.00 USD. */
   budgetAmount: z.number().int().positive(),
   idempotencyKey: z.string().min(1),
-  workloadType: workloadTypeSchema.nullable().optional(),
+  workloadType: nullableWorkloadTypeSchema.optional(),
   workloadId: z.string().min(1).nullable().optional(),
   traceId: z.string().min(1).nullable().optional(),
   parentRunId: z.string().min(1).nullable().optional(),
@@ -50,7 +59,7 @@ export const runSummarySchema = z.object({
   /** Remaining in currency minor units (cents). */
   remainingAmount: z.number().int(),
   currency: z.string(),
-  workloadType: workloadTypeSchema.nullable(),
+  workloadType: nullableWorkloadTypeSchema,
   workloadId: z.string().nullable(),
   traceId: z.string().nullable(),
   parentRunId: z.string().nullable(),

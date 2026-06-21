@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Unprice } from "./client"
-import type { OperationInput } from "./operation-types"
+import type { OperationInput, OperationResponse } from "./operation-types"
 
 const createJsonResponse = (body: unknown, init?: ResponseInit) =>
   new Response(JSON.stringify(body), {
@@ -96,6 +96,46 @@ describe("Unprice client", () => {
     expect("payments" in clientRecord).toBe(false)
     expect("billing" in clientRecord).toBe(false)
     expect("agents" in clientRecord).toBe(false)
+  })
+
+  it("exposes generated run SDK methods with workload attribution and no agents namespace", () => {
+    const client = new Unprice({ token: "unprice_dev_test" })
+
+    expect(typeof client.runs.start).toBe("function")
+    expect(typeof client.runs.consume).toBe("function")
+    expect(typeof client.runs.end).toBe("function")
+    expect(typeof client.runs.get).toBe("function")
+    expect("agents" in client).toBe(false)
+
+    expectTypeOf(client.runs.start).parameter(0).toEqualTypeOf<OperationInput<"runs.start">>()
+    expectTypeOf<{
+      budgetAmount: number
+      idempotencyKey: string
+      workloadType: null
+    }>().toMatchTypeOf<OperationInput<"runs.start">>()
+
+    type NullableRunSummary = {
+      runId: string
+      status: "running"
+      customerId: string
+      budgetAmount: number
+      consumedAmount: number
+      remainingAmount: number
+      currency: string
+      workloadType: null
+      workloadId: null
+      traceId: null
+      parentRunId: null
+    }
+
+    expectTypeOf<NullableRunSummary>().toMatchTypeOf<OperationResponse<"runs.start">>()
+    expectTypeOf<{
+      accepted: true
+      reason: "accepted"
+      run: NullableRunSummary
+    }>().toMatchTypeOf<OperationResponse<"runs.consume">>()
+    expectTypeOf<NullableRunSummary>().toMatchTypeOf<OperationResponse<"runs.end">>()
+    expectTypeOf<NullableRunSummary>().toMatchTypeOf<OperationResponse<"runs.get">>()
   })
 
   it("uses openapi-fetch path params, query params, body, and auth headers", async () => {
@@ -231,6 +271,49 @@ describe("Unprice client", () => {
     })
   })
 
+  it("sends generated run start workload attribution through the typed OpenAPI transport", async () => {
+    const requests: Request[] = []
+    const client = createClient(async (request) => {
+      requests.push(request.clone())
+      return createJsonResponse({
+        runId: "run_123",
+        status: "running",
+        budgetAmount: 500,
+        consumedAmount: 0,
+        remainingAmount: 500,
+        currency: "USD",
+        customerId: "cus_123",
+        projectId: "proj_123",
+        workloadType: "agent",
+        workloadId: "research-assistant",
+        traceId: "trace_001",
+        parentRunId: null,
+      })
+    })
+
+    const { result, error } = await client.runs.start({
+      budgetAmount: 500,
+      idempotencyKey: "idem_run_1",
+      workloadType: "agent",
+      workloadId: "research-assistant",
+      traceId: "trace_001",
+      parentRunId: null,
+    })
+
+    expect(error).toBeUndefined()
+    expect(result?.runId).toBe("run_123")
+    expect(requests[0]?.method).toBe("POST")
+    expect(requests[0]?.url).toBe("https://example.com/v1/runs/start")
+    await expect(requests[0]?.json()).resolves.toEqual({
+      budgetAmount: 500,
+      idempotencyKey: "idem_run_1",
+      workloadType: "agent",
+      workloadId: "research-assistant",
+      traceId: "trace_001",
+      parentRunId: null,
+    })
+  })
+
   it("serializes POST path params separately from request bodies", async () => {
     const requests: Request[] = []
     const client = createClient(async (request) => {
@@ -247,7 +330,10 @@ describe("Unprice client", () => {
           currency: "USD",
           customerId: "cus_123",
           projectId: "proj_123",
-          agentId: null,
+          workloadType: "agent",
+          workloadId: "research-assistant",
+          traceId: "trace_001",
+          parentRunId: null,
         },
       })
     })

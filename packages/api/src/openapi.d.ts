@@ -800,8 +800,11 @@ export interface operations {
           customerId?: string
           budgetAmount: number
           idempotencyKey: string
-          agentId?: string | null
+          /** @enum {string|null} */
+          workloadType?: "agent" | "workflow" | "job" | "tool" | "custom" | null
+          workloadId?: string | null
           traceId?: string | null
+          parentRunId?: string | null
           metadata?: {
             [key: string]: unknown
           }
@@ -825,7 +828,11 @@ export interface operations {
             consumedAmount: number
             remainingAmount: number
             currency: string
-            agentId: string | null
+            /** @enum {string|null} */
+            workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+            workloadId: string | null
+            traceId: string | null
+            parentRunId: string | null
           }
         }
       }
@@ -959,7 +966,11 @@ export interface operations {
               consumedAmount: number
               remainingAmount: number
               currency: string
-              agentId: string | null
+              /** @enum {string|null} */
+              workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+              workloadId: string | null
+              traceId: string | null
+              parentRunId: string | null
             }
           }
         }
@@ -1075,7 +1086,11 @@ export interface operations {
             consumedAmount: number
             remainingAmount: number
             currency: string
-            agentId: string | null
+            /** @enum {string|null} */
+            workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+            workloadId: string | null
+            traceId: string | null
+            parentRunId: string | null
           }
         }
       }
@@ -1179,7 +1194,11 @@ export interface operations {
             consumedAmount: number
             remainingAmount: number
             currency: string
-            agentId: string | null
+            /** @enum {string|null} */
+            workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
+            workloadId: string | null
+            traceId: string | null
+            parentRunId: string | null
           }
         }
       }

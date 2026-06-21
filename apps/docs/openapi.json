@@ -499,12 +499,22 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "agentId": {
+                  "workloadType": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": ["agent", "workflow", "job", "tool", "custom", null]
+                  },
+                  "workloadId": {
                     "type": "string",
                     "nullable": true,
                     "minLength": 1
                   },
                   "traceId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1
+                  },
+                  "parentRunId": {
                     "type": "string",
                     "nullable": true,
                     "minLength": 1
@@ -564,7 +574,20 @@
                     "currency": {
                       "type": "string"
                     },
-                    "agentId": {
+                    "workloadType": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": ["agent", "workflow", "job", "tool", "custom", null]
+                    },
+                    "workloadId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "parentRunId": {
                       "type": "string",
                       "nullable": true
                     }
@@ -577,7 +600,10 @@
                     "consumedAmount",
                     "remainingAmount",
                     "currency",
-                    "agentId"
+                    "workloadType",
+                    "workloadId",
+                    "traceId",
+                    "parentRunId"
                   ]
                 }
               }
@@ -795,7 +821,20 @@
                         "currency": {
                           "type": "string"
                         },
-                        "agentId": {
+                        "workloadType": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": ["agent", "workflow", "job", "tool", "custom", null]
+                        },
+                        "workloadId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "traceId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "parentRunId": {
                           "type": "string",
                           "nullable": true
                         }
@@ -808,7 +847,10 @@
                         "consumedAmount",
                         "remainingAmount",
                         "currency",
-                        "agentId"
+                        "workloadType",
+                        "workloadId",
+                        "traceId",
+                        "parentRunId"
                       ]
                     }
                   },
@@ -984,7 +1026,20 @@
                     "currency": {
                       "type": "string"
                     },
-                    "agentId": {
+                    "workloadType": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": ["agent", "workflow", "job", "tool", "custom", null]
+                    },
+                    "workloadId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "parentRunId": {
                       "type": "string",
                       "nullable": true
                     }
@@ -997,7 +1052,10 @@
                     "consumedAmount",
                     "remainingAmount",
                     "currency",
-                    "agentId"
+                    "workloadType",
+                    "workloadId",
+                    "traceId",
+                    "parentRunId"
                   ]
                 }
               }
@@ -1152,7 +1210,20 @@
                     "currency": {
                       "type": "string"
                     },
-                    "agentId": {
+                    "workloadType": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": ["agent", "workflow", "job", "tool", "custom", null]
+                    },
+                    "workloadId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "traceId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "parentRunId": {
                       "type": "string",
                       "nullable": true
                     }
@@ -1165,7 +1236,10 @@
                     "consumedAmount",
                     "remainingAmount",
                     "currency",
-                    "agentId"
+                    "workloadType",
+                    "workloadId",
+                    "traceId",
+                    "parentRunId"
                   ]
                 }
               }
