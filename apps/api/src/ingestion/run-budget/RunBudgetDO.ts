@@ -19,7 +19,6 @@ import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
 
 type RunStateRow = typeof schema.runState.$inferSelect
-const EXPIRED_SUMMARY_PERSISTED_AT_KEY = "expiredSummaryPersistedAt"
 
 export class RunBudgetDO extends DurableObject {
   private readonly ready: Promise<void>
@@ -411,37 +410,17 @@ export class RunBudgetDO extends DurableObject {
         AND ${schema.runState.endedAt} IS NOT NULL
         AND ${schema.runState.expiresAt} IS NOT NULL
         AND ${schema.runState.expiresAt} <= ${now}
-        AND ${schema.runState.metadataJson} NOT LIKE '%"expiredSummaryPersistedAt"%'
       )`,
     })
   }
 
   private async markExpiredRunSummaryPersisted(run: RunStateRow): Promise<void> {
-    const metadata = this.parseRunMetadata(run)
-
     await this.db
       .update(schema.runState)
       .set({
-        metadataJson: JSON.stringify({
-          ...metadata,
-          [EXPIRED_SUMMARY_PERSISTED_AT_KEY]: Date.now(),
-        }),
+        expiresAt: null,
       })
       .where(eq(schema.runState.runId, run.runId))
-  }
-
-  private parseRunMetadata(run: RunStateRow): Record<string, unknown> {
-    try {
-      const parsed = JSON.parse(run.metadataJson) as unknown
-
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>
-      }
-    } catch (_error) {
-      return {}
-    }
-
-    return {}
   }
 
   private async findNextExpirationAlarmAt(now: number): Promise<number | null> {

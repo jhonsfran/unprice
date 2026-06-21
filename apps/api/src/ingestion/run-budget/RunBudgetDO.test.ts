@@ -600,6 +600,44 @@ describe("RunBudgetDO", () => {
     expect(testState.createReservation).toHaveBeenCalledTimes(1)
   })
 
+  it("persists expired summary when user metadata contains retry marker text", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+
+    await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      traceId: "trace_expiring_metadata_1",
+      parentRunId: null,
+      runId: "brun_expiring_metadata",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {
+        note: 'caller metadata mentioning "expiredSummaryPersistedAt"',
+      },
+      expiresAt,
+      now: BASE_NOW,
+    })
+
+    vi.spyOn(Date, "now").mockReturnValue(expiresAt + 1)
+    await durable.alarm()
+
+    expect(testState.persistExpiredRunSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "expired",
+        consumedAmount: 0,
+        remainingAmount: 100_000,
+      }),
+      expect.anything()
+    )
+  })
+
   it("retries expired summary persistence after a failed Postgres update", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
@@ -986,10 +1024,7 @@ function buildFakeDrizzle() {
             const isDue = expiredAt != null && expiredAt <= Date.now()
             const isRunningExpired = (r.status as string) === "running" && isDue
             const needsPersistRetry =
-              (r.status as string) === "expired" &&
-              r.endedAt != null &&
-              isDue &&
-              !String(r.metadataJson).includes('"expiredSummaryPersistedAt"')
+              (r.status as string) === "expired" && r.endedAt != null && isDue
 
             return isRunningExpired || needsPersistRetry
           })
