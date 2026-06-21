@@ -95,7 +95,8 @@ export class RunBudgetDO extends DurableObject {
       where: eq(schema.runIdempotency.idempotencyKey, input.idempotencyKey),
     })
     if (cached) {
-      return JSON.parse(cached.decisionJson) as RunBudgetDecision
+      const decision = JSON.parse(cached.decisionJson) as RunBudgetDecision
+      return { ...decision, meterFacts: decision.meterFacts ?? [] }
     }
 
     // Load run state
@@ -108,6 +109,7 @@ export class RunBudgetDO extends DurableObject {
         rejectionReason: "RUN_BUDGET_EXCEEDED",
         message: `Run is ${run.status}, not running`,
         budget: this.toSummary(run),
+        meterFacts: [],
       }
       await this.persistIdempotency(input.idempotencyKey, input.runId, decision, 0, [])
       return decision
@@ -127,14 +129,17 @@ export class RunBudgetDO extends DurableObject {
         rejectionReason: entitlementResult.deniedReason as RunBudgetDecision["rejectionReason"],
         message: entitlementResult.message,
         budget: this.toSummary(run),
+        meterFacts: [],
       }
       await this.persistIdempotency(input.idempotencyKey, input.runId, decision, 0, [])
       return decision
     }
 
     // Derive priced cost from meter facts
-    const pricedAmount = this.sumPricedAmount(entitlementResult.meterFacts ?? [])
-    const bucketDeltas = this.deriveBucketDeltas(input.runId, entitlementResult.meterFacts ?? [])
+    const rawMeterFacts = entitlementResult.meterFacts ?? []
+    const meterFacts = this.withRunContext(run, rawMeterFacts)
+    const pricedAmount = this.sumPricedAmount(meterFacts)
+    const bucketDeltas = this.deriveBucketDeltas(input.runId, meterFacts)
 
     // Update run spend and buckets in one transaction
     const updatedRun = await this.commitSpend(run, pricedAmount, bucketDeltas, input.now)
@@ -143,6 +148,7 @@ export class RunBudgetDO extends DurableObject {
       allowed: true,
       state: "processed",
       budget: this.toSummary(updatedRun),
+      meterFacts: meterFacts as RunBudgetDecision["meterFacts"],
     }
 
     await this.persistIdempotency(
@@ -490,6 +496,20 @@ export class RunBudgetDO extends DurableObject {
     })
 
     if (result.err) throw result.err
+  }
+
+  private withRunContext(
+    run: RunStateRow,
+    meterFacts: Array<Record<string, unknown>>
+  ): Array<Record<string, unknown>> {
+    return meterFacts.map((fact) => ({
+      ...fact,
+      run_id: run.runId,
+      trace_id: run.traceId ?? null,
+      parent_run_id: run.parentRunId ?? null,
+      workload_type: run.workloadType ?? null,
+      workload_id: run.workloadId ?? null,
+    }))
   }
 
   private sumPricedAmount(meterFacts: Record<string, unknown>[]): number {

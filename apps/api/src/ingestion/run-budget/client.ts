@@ -95,6 +95,7 @@ export class CloudflareRunBudgetClient implements RunBudgetClient {
         rejectionReason: decision.rejectionReason,
         message: decision.message,
         budget: decision.budget,
+        meterFacts: decision.meterFacts ?? [],
       })
     } catch (error) {
       return Err(

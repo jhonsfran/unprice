@@ -57,7 +57,68 @@ describe("run budget contracts", () => {
           remainingAmount: 0,
         },
       })
-    ).toMatchObject({ rejectionReason: "RUN_BUDGET_EXCEEDED" })
+    ).toMatchObject({ rejectionReason: "RUN_BUDGET_EXCEEDED", meterFacts: [] })
+  })
+
+  it("parses run-attributed meter facts on decisions", () => {
+    const parsed = runBudgetDecisionSchema.parse({
+      allowed: true,
+      state: "processed",
+      budget: {
+        runId: "run_123",
+        status: "running",
+        budgetAmount: 1000,
+        consumedAmount: 250,
+        remainingAmount: 750,
+      },
+      meterFacts: [
+        {
+          event_id: "evt_123",
+          idempotency_key: "idem_123:ew",
+          workspace_id: "ws_123",
+          project_id: "proj_123",
+          customer_id: "cus_123",
+          environment: "development",
+          api_key_id: "api_123",
+          source_type: "api_key",
+          source_id: "api_123",
+          source_name: null,
+          run_id: "run_123",
+          trace_id: "trace_123",
+          parent_run_id: null,
+          workload_type: "agent",
+          workload_id: "research-assistant",
+          customer_entitlement_id: "ce_123",
+          grant_id: "grant_123",
+          feature_plan_version_id: "fpv_123",
+          feature_slug: "tokens",
+          period_key: "period_123",
+          event_slug: "tokens_used",
+          aggregation_method: "sum",
+          timestamp: 1_781_503_200_000,
+          created_at: 1_781_503_200_001,
+          delta: 5,
+          value_after: 5,
+          amount: 250,
+          amount_after: 250,
+          amount_scale: 8,
+          currency: "USD",
+          priced_at: 1_781_503_200_001,
+          tier_index: 0,
+          tier_mode: "volume",
+          pricing_component_count: 1,
+        },
+      ],
+    })
+
+    expect(parsed.meterFacts).toEqual([
+      expect.objectContaining({
+        run_id: "run_123",
+        trace_id: "trace_123",
+        workload_type: "agent",
+        workload_id: "research-assistant",
+      }),
+    ])
   })
 
   it("retains enriched grants in run sync input", () => {

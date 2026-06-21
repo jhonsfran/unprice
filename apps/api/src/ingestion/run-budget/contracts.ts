@@ -1,3 +1,4 @@
+import { entitlementMeterFactSchemaV1 } from "@unprice/analytics"
 import { z } from "zod"
 import { activeGrantSchema, entitlementConfigSchema } from "../entitlements/contracts"
 
@@ -103,6 +104,7 @@ export const runBudgetDecisionSchema = z.object({
     .optional(),
   message: z.string().optional(),
   budget: runBudgetSummarySchema,
+  meterFacts: z.array(entitlementMeterFactSchemaV1).default([]),
 })
 
 export type StartRunInput = z.infer<typeof startRunInputSchema>

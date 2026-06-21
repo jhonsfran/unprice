@@ -1,3 +1,4 @@
+import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import { BaseError, type Result } from "@unprice/error"
 import type { IngestionEntitlement, IngestionGrant } from "../../ingestion/entitlement-context"
 
@@ -27,6 +28,7 @@ export type RunSyncDecision = {
     | "RUN_BUDGET_EXCEEDED"
   message?: string
   budget: RunBudgetSummary
+  meterFacts: AnalyticsEntitlementMeterFact[]
 }
 
 export class RunBudgetError extends BaseError {

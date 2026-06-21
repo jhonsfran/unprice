@@ -246,6 +246,102 @@ describe("RunBudgetDO", () => {
     expect(testState.entitlementWindowApply).toHaveBeenCalledTimes(1)
   })
 
+  it("returns meter facts decorated with run analytics context", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+
+    await durable.startRun({
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      workloadType: "agent",
+      workloadId: "research-assistant",
+      traceId: "trace_001",
+      parentRunId: "brun_parent_001",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    testState.entitlementWindowApply.mockResolvedValue({
+      allowed: true,
+      meterFacts: [
+        {
+          event_id: "evt_001",
+          idempotency_key: "apply_001:ew",
+          workspace_id: "ws_1",
+          project_id: "proj_1",
+          customer_id: "cus_1",
+          environment: "test",
+          api_key_id: "key_1",
+          source_type: "api_key",
+          source_id: "key_1",
+          source_name: null,
+          customer_entitlement_id: "ce_test_1",
+          grant_id: "grant_1",
+          feature_plan_version_id: "fpv_1",
+          feature_slug: "tokens",
+          period_key: "period_1",
+          event_slug: "tokens_used",
+          aggregation_method: "sum",
+          timestamp: BASE_NOW,
+          created_at: BASE_NOW,
+          delta: 5,
+          value_after: 5,
+          amount: 250,
+          amount_after: 250,
+          amount_scale: 8,
+          currency: "USD",
+          priced_at: BASE_NOW,
+          tier_index: 0,
+          tier_mode: "volume",
+          pricing_component_count: 1,
+          statement_key: "stmt_1",
+          period_start_at: BASE_NOW - 60_000,
+          period_end_at: BASE_NOW + 60_000,
+        },
+      ],
+    })
+
+    const result = await durable.applySyncEvent({
+      projectId: "proj_1",
+      customerId: "cus_1",
+      runId: "run_1",
+      featureSlug: "tokens",
+      idempotencyKey: "apply_001",
+      event: {
+        id: "evt_001",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 5 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key",
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    expect((result as { meterFacts: Record<string, unknown>[] }).meterFacts).toEqual([
+      expect.objectContaining({
+        run_id: "run_1",
+        trace_id: "trace_001",
+        parent_run_id: "brun_parent_001",
+        workload_type: "agent",
+        workload_id: "research-assistant",
+      }),
+    ])
+  })
+
   it("applySyncEvent denies when run is not in running status", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
@@ -306,6 +402,7 @@ describe("RunBudgetDO", () => {
     expect(result.state).toBe("rejected")
     expect(result.rejectionReason).toBe("RUN_BUDGET_EXCEEDED")
     expect(result.message).toContain("completed")
+    expect(result.meterFacts).toEqual([])
     expect(testState.entitlementWindowApply).not.toHaveBeenCalled()
   })
 
@@ -363,6 +460,7 @@ describe("RunBudgetDO", () => {
     expect(result.allowed).toBe(false)
     expect(result.rejectionReason).toBe("LIMIT_EXCEEDED")
     expect(result.message).toBe("Usage limit exceeded")
+    expect(result.meterFacts).toEqual([])
   })
 
   it("applySyncEvent updates consumed amount and schedules alarm", async () => {
