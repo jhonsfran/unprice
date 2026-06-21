@@ -160,6 +160,71 @@ describe("applyRunSyncEvent", () => {
       ],
     })
   })
+
+  it("reports rejected RunBudgetDO decisions with run context", async () => {
+    const run = createRun({
+      workloadType: "agent",
+      workloadId: "research-assistant",
+      traceId: "trace_rejected_001",
+      parentRunId: "brun_parent_001",
+    })
+    const { deps, enqueueOutcomes, runBudget } = createDeps({
+      run,
+      runBudgetDecision: {
+        allowed: false,
+        state: "rejected",
+        rejectionReason: "RUN_BUDGET_EXCEEDED",
+        budget: {
+          runId: run.id,
+          status: "budget_exceeded",
+          budgetAmount: 1_000_000_000,
+          consumedAmount: 1_000_000_000,
+          remainingAmount: 0,
+        },
+        meterFacts: [],
+      },
+    })
+
+    const input = createInput()
+    const result = await applyRunSyncEvent(deps, input)
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toMatchObject({
+      accepted: false,
+      reason: "insufficient_budget",
+      run: {
+        runId: run.id,
+        status: "budget_exceeded",
+        workloadType: "agent",
+        workloadId: "research-assistant",
+        traceId: "trace_rejected_001",
+        parentRunId: "brun_parent_001",
+      },
+    })
+    expect(runBudget.applySyncEvent).toHaveBeenCalledOnce()
+    expect(enqueueOutcomes).toHaveBeenCalledWith({
+      customerId: run.customerId,
+      projectId: run.projectId,
+      outcomes: [
+        {
+          message: expect.objectContaining({
+            runContext: {
+              runId: run.id,
+              traceId: "trace_rejected_001",
+              parentRunId: "brun_parent_001",
+              workloadType: "agent",
+              workloadId: "research-assistant",
+            },
+          }),
+          outcome: {
+            state: "rejected",
+            rejectionReason: "RUN_BUDGET_EXCEEDED",
+          },
+          meterFacts: [],
+        },
+      ],
+    })
+  })
 })
 
 function createDeps(
