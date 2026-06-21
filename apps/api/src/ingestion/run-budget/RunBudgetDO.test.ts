@@ -704,6 +704,64 @@ describe("RunBudgetDO", () => {
     expect(testState.persistExpiredRunSummary).toHaveBeenCalledTimes(2)
   })
 
+  it("preserves expired status when endRun is called after alarm expiration", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+
+    await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      traceId: "trace_expiring_terminal_1",
+      parentRunId: null,
+      runId: "brun_terminal_expired",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {},
+      expiresAt,
+      now: BASE_NOW,
+    })
+
+    vi.spyOn(Date, "now").mockReturnValue(expiresAt + 1)
+    await durable.alarm()
+
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
+
+    const result = await durable.endRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "brun_terminal_expired",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      status: "completed",
+      endedAt: expiresAt + 5_000,
+    })
+
+    expect(result).toMatchObject({
+      runId: "brun_terminal_expired",
+      status: "expired",
+      consumedAmount: 0,
+      remainingAmount: 100_000,
+    })
+    expect(testState.releaseReservation).toHaveBeenCalledTimes(1)
+
+    await expect(
+      durable.getRunStatus({
+        runId: "brun_terminal_expired",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      runId: "brun_terminal_expired",
+      status: "expired",
+    })
+  })
+
   it("endRun calls flush and release, then updates status", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()

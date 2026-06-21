@@ -341,6 +341,13 @@ export class RunBudgetDO extends DurableObject {
     const run = await this.loadRun(input.runId)
     if (!run) throw new Error("RUN_NOT_FOUND")
 
+    if (run.status !== "running") {
+      return {
+        summary: this.toSummary(run),
+        run,
+      }
+    }
+
     await this.flushCaptures()
 
     const afterFlush = await this.loadRun(input.runId)
