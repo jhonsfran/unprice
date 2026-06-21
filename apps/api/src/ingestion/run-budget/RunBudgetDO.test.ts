@@ -571,7 +571,129 @@ describe("RunBudgetDO", () => {
     })
   })
 
-  it("defers expiration while capture intents remain retryable", async () => {
+  it("retries an existing capture intent with its original flush sequence and amount", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+
+    testState.captureReservationUsage.mockRejectedValueOnce(new Error("wallet write committed"))
+
+    await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      traceId: "trace_capture_snapshot_1",
+      parentRunId: null,
+      runId: "brun_capture_snapshot",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_capture_snapshot",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    await durable.applySyncEvent({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "brun_capture_snapshot",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_capture_snapshot_1",
+      event: {
+        id: "evt_capture_snapshot_1",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 3 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    await durable.flushCaptures()
+
+    testState.entitlementWindowApply.mockResolvedValueOnce({
+      allowed: true,
+      meterFacts: [
+        {
+          amount: 7000,
+          customer_entitlement_id: "ce_1",
+          statement_key: "stmt_1",
+          period_key: "period_1",
+          feature_id: "feat_1",
+          period_start_at: BASE_NOW - 60_000,
+          period_end_at: BASE_NOW + 60_000,
+          currency: "USD",
+        },
+      ],
+    })
+
+    await durable.applySyncEvent({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "brun_capture_snapshot",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_capture_snapshot_2",
+      event: {
+        id: "evt_capture_snapshot_2",
+        slug: "tokens_used",
+        timestamp: BASE_NOW + 1000,
+        properties: { amount: 7 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW + 1000,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    vi.spyOn(Date, "now").mockReturnValue(BASE_NOW + 60_000)
+    await durable.flushCaptures()
+
+    expect(testState.captureReservationUsage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        amount: 5000,
+        flushSeq: BASE_NOW,
+      })
+    )
+    expect(testState.captureReservationUsage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        amount: 5000,
+        flushSeq: BASE_NOW,
+      })
+    )
+
+    await durable.flushCaptures()
+
+    expect(testState.captureReservationUsage).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        amount: 7000,
+        flushSeq: BASE_NOW + 60_000,
+      })
+    )
+  })
+
+  it("defers expiration while capture intents remain unresolved", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
     const env = createEnv()
@@ -660,6 +782,80 @@ describe("RunBudgetDO", () => {
     ).resolves.toMatchObject({
       runId: "brun_expiring_capture_retry",
       status: "expired",
+      consumedAmount: 5000,
+      remainingAmount: 95_000,
+    })
+  })
+
+  it("blocks expiration close while a failed capture intent has exhausted retries", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+    const expiredNow = expiresAt + 1
+
+    testState.captureReservationUsage.mockRejectedValue(new Error("wallet unavailable"))
+
+    await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      traceId: "trace_expiring_capture_exhausted_1",
+      parentRunId: null,
+      runId: "brun_expiring_capture_exhausted",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_capture_exhausted",
+      metadata: {},
+      expiresAt,
+      now: BASE_NOW,
+    })
+
+    await durable.applySyncEvent({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "brun_expiring_capture_exhausted",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_capture_exhausted",
+      event: {
+        id: "evt_capture_exhausted",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 3 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    vi.spyOn(Date, "now").mockReturnValue(expiredNow)
+    await durable.alarm()
+    await durable.alarm()
+    await durable.alarm()
+
+    expect(testState.captureReservationUsage).toHaveBeenCalledTimes(5)
+    expect(testState.persistExpiredRunSummary).not.toHaveBeenCalled()
+    expect(testState.releaseReservation).not.toHaveBeenCalled()
+    await expect(
+      durable.getRunStatus({
+        runId: "brun_expiring_capture_exhausted",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      runId: "brun_expiring_capture_exhausted",
+      status: "running",
       consumedAmount: 5000,
       remainingAmount: 95_000,
     })
@@ -917,7 +1113,11 @@ describe("RunBudgetDO", () => {
     // Capture was called during flush
     expect(testState.captureReservationUsage).toHaveBeenCalled()
     // Release was called
-    expect(testState.releaseReservation).toHaveBeenCalled()
+    expect(testState.releaseReservation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "release:run_1:res_test_123",
+      })
+    )
   })
 
   it("getRunStatus returns the current summary", async () => {
@@ -1195,11 +1395,15 @@ function buildFakeDrizzle() {
           (r) => ((r.consumedAmount as number) ?? 0) > ((r.flushedAmount as number) ?? 0)
         )
       case "runCaptureIntents":
-        // status IN ('pending', 'failed') AND attempt_count < 5
+        // status IN ('pending', 'failed'), optionally scoped to retryable attempts.
         return rows.filter((r) => {
           const status = r.status as string
           const attemptCount = typeof r.attemptCount === "number" ? r.attemptCount : 0
-          return (status === "pending" || status === "failed") && attemptCount < 5
+          const retryableOnly =
+            sqlTextIncludes(where, "attempt_count") && sqlTextIncludes(where, "<")
+          return (
+            (status === "pending" || status === "failed") && (!retryableOnly || attemptCount < 5)
+          )
         })
       case "runState":
         if (isSqlOperator(where, ">")) {
@@ -1263,15 +1467,18 @@ function buildFakeDrizzle() {
     return {
       values: (data: Record<string, unknown>) => {
         const key = data[pk] as string
+        let handledByConflictClause = false
 
-        // Create a Promise that inserts the data (fulfills the await)
         const insertPromise = Promise.resolve().then(() => {
-          store.set(key, { ...data })
+          if (!handledByConflictClause) {
+            store.set(key, { ...data })
+          }
         })
 
-        // Attach conflict handlers that override the default insert
+        // Attach conflict handlers that override the default insert.
         const chainable = Object.assign(insertPromise, {
           onConflictDoUpdate: (opts: { target: unknown; set: Record<string, unknown> }) => {
+            handledByConflictClause = true
             const existing = store.get(key)
             if (existing) {
               for (const [field, val] of Object.entries(opts.set)) {
@@ -1283,6 +1490,7 @@ function buildFakeDrizzle() {
             return Promise.resolve()
           },
           onConflictDoNothing: () => {
+            handledByConflictClause = true
             if (!store.has(key)) {
               store.set(key, { ...data })
             }

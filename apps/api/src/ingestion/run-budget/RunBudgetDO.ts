@@ -19,11 +19,12 @@ import * as schema from "./db/schema"
 import migrations from "./drizzle/migrations"
 
 type RunStateRow = typeof schema.runState.$inferSelect
+type RunCaptureIntentRow = typeof schema.runCaptureIntents.$inferSelect
 
-class RetryableRunCapturesPendingError extends Error {
+class RunCapturesPendingError extends Error {
   constructor(runId: string) {
-    super(`Retryable capture intents remain for run ${runId}`)
-    this.name = "RetryableRunCapturesPendingError"
+    super(`Unresolved capture intents remain for run ${runId}`)
+    this.name = "RunCapturesPendingError"
   }
 }
 
@@ -217,7 +218,10 @@ export class RunBudgetDO extends DurableObject {
 
       const intentKey = `run-capture:${bucket.runId}:${bucket.bucketKey}:${bucket.flushedAmount}`
 
-      // Persist capture intent before external I/O
+      const now = Date.now()
+
+      // Persist capture intent before external I/O. On conflict, keep the original
+      // amount snapshot so wallet replay never changes payload for the same key.
       await this.db
         .insert(schema.runCaptureIntents)
         .values({
@@ -227,17 +231,19 @@ export class RunBudgetDO extends DurableObject {
           amount: pendingAmount,
           status: "pending",
           attemptCount: 0,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+          createdAt: now,
+          updatedAt: now,
         })
         .onConflictDoUpdate({
           target: schema.runCaptureIntents.intentKey,
           set: {
-            amount: pendingAmount,
             status: "pending",
-            updatedAt: Date.now(),
+            updatedAt: now,
           },
         })
+
+      const intent = await this.loadCaptureIntent(intentKey)
+      if (!intent) throw new Error("Run capture intent missing after insert")
 
       try {
         // External wallet capture
@@ -246,9 +252,10 @@ export class RunBudgetDO extends DurableObject {
           projectId: run.projectId,
           customerId: run.customerId,
           currency: run.currency,
-          amount: pendingAmount,
+          amount: intent.amount,
           statementKey: bucket.statementKey,
           idempotencyKey: intentKey,
+          flushSeq: intent.createdAt,
         })
 
         // Mark intent as captured and update bucket flushed amount
@@ -259,14 +266,16 @@ export class RunBudgetDO extends DurableObject {
 
         await this.db
           .update(schema.runSpendBuckets)
-          .set({ flushedAmount: bucket.consumedAmount })
+          .set({
+            flushedAmount: sql`${schema.runSpendBuckets.flushedAmount} + ${intent.amount}`,
+          })
           .where(eq(schema.runSpendBuckets.bucketKey, bucket.bucketKey))
 
         // Update run-level flushed amount
         await this.db
           .update(schema.runState)
           .set({
-            flushedAmount: sql`${schema.runState.flushedAmount} + ${pendingAmount}`,
+            flushedAmount: sql`${schema.runState.flushedAmount} + ${intent.amount}`,
           })
           .where(eq(schema.runState.runId, bucket.runId))
       } catch (error) {
@@ -319,7 +328,7 @@ export class RunBudgetDO extends DurableObject {
           summary = closed.summary
           closedRun = closed.run
         } catch (error) {
-          if (error instanceof RetryableRunCapturesPendingError) {
+          if (error instanceof RunCapturesPendingError) {
             continue
           }
           throw error
@@ -374,8 +383,8 @@ export class RunBudgetDO extends DurableObject {
     const afterFlush = await this.loadRun(input.runId)
     if (!afterFlush) throw new Error("Run state missing after flush")
 
-    if (await this.hasRetryableCaptureIntents(input.runId)) {
-      throw new RetryableRunCapturesPendingError(input.runId)
+    if (await this.hasUnresolvedCaptureIntents(input.runId)) {
+      throw new RunCapturesPendingError(input.runId)
     }
 
     if (afterFlush.reservationId) {
@@ -455,9 +464,9 @@ export class RunBudgetDO extends DurableObject {
       .where(eq(schema.runState.runId, run.runId))
   }
 
-  private async hasRetryableCaptureIntents(runId: string): Promise<boolean> {
+  private async hasUnresolvedCaptureIntents(runId: string): Promise<boolean> {
     const intents = await this.db.query.runCaptureIntents.findMany({
-      where: sql`${schema.runCaptureIntents.status} IN ('pending', 'failed') AND ${schema.runCaptureIntents.attemptCount} < 5`,
+      where: sql`${schema.runCaptureIntents.status} IN ('pending', 'failed')`,
     })
 
     return intents.some(
@@ -570,6 +579,7 @@ export class RunBudgetDO extends DurableObject {
     amount: number
     statementKey: string
     idempotencyKey: string
+    flushSeq: number
   }): Promise<void> {
     const { createConnection } = await import("@unprice/db")
     const { WalletService } = await import("@unprice/services/wallet")
@@ -593,7 +603,7 @@ export class RunBudgetDO extends DurableObject {
       customerId: input.customerId,
       currency: input.currency as "USD" | "EUR",
       reservationId: input.reservationId,
-      flushSeq: Date.now(), // Use timestamp as monotonic seq for run captures
+      flushSeq: input.flushSeq,
       amount: input.amount,
       statementKey: input.statementKey,
       kind: "budget_run_capture",
@@ -628,7 +638,7 @@ export class RunBudgetDO extends DurableObject {
       currency: run.currency as "USD" | "EUR",
       reservationId: run.reservationId!,
       closeReason: "period_close",
-      idempotencyKey: `release:${run.runId}:${Date.now()}`,
+      idempotencyKey: `release:${run.runId}:${run.reservationId}`,
       metadata: {
         run_id: run.runId,
         trace_id: run.traceId,
@@ -773,6 +783,12 @@ export class RunBudgetDO extends DurableObject {
   private async loadRun(runId: string): Promise<RunStateRow | undefined> {
     return this.db.query.runState.findFirst({
       where: eq(schema.runState.runId, runId),
+    })
+  }
+
+  private async loadCaptureIntent(intentKey: string): Promise<RunCaptureIntentRow | undefined> {
+    return this.db.query.runCaptureIntents.findFirst({
+      where: eq(schema.runCaptureIntents.intentKey, intentKey),
     })
   }
 
