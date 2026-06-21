@@ -1170,7 +1170,9 @@ export interface operations {
   }
   "runs.get": {
     parameters: {
-      query?: never
+      query?: {
+        project_id?: string
+      }
       header?: never
       path: {
         runId: string

@@ -113,6 +113,10 @@ describe("Unprice client", () => {
       idempotencyKey: string
       workloadType: null
     }>().toMatchTypeOf<OperationInput<"runs.start">>()
+    expectTypeOf<{
+      runId: string
+      project_id?: string
+    }>().toMatchTypeOf<OperationInput<"runs.get">>()
 
     type NullableRunSummary = {
       runId: string

@@ -4,7 +4,7 @@ import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
 import { RunUseCaseError, getRun } from "@unprice/services/use-cases"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -30,6 +30,12 @@ export const route = createRoute(
             example: "brun_123",
           }),
         }),
+        query: z.object({
+          project_id: z
+            .string()
+            .optional()
+            .openapi({ description: "Project override for main/internal dashboard keys" }),
+        }),
       },
       responses: {
         [HttpStatusCodes.OK]: jsonContent(runSummarySchema, "The current budget run summary"),
@@ -52,7 +58,13 @@ export const route = createRoute(
 export const registerGetRunV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const { runId } = c.req.valid("param")
+    const { project_id: requestedProjectId } = c.req.valid("query")
     const key = await keyAuth(c)
+    const projectId = validateIsAllowedToAccessProject({
+      isMain: (key.project.isMain ?? false) || key.project.workspace.isMain,
+      key,
+      requestedProjectId: requestedProjectId ?? key.projectId,
+    })
 
     const { budgetRuns } = c.get("services")
     const runBudget = new CloudflareRunBudgetClient(c.env)
@@ -60,7 +72,7 @@ export const registerGetRunV1 = (app: App) =>
     const result = await getRun(
       { services: { budgetRuns }, runBudget },
       {
-        projectId: key.projectId,
+        projectId,
         runId,
         keyCustomerId: key.defaultCustomerId ?? null,
       }

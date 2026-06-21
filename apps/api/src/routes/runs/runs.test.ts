@@ -15,11 +15,17 @@ const authMocks = vi.hoisted(() => ({
   resolveCustomerIdForApiKey: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-  resolveContextProjectId: vi.fn((_c: unknown, projectId: string) => projectId),
-  resolveCustomerIdForApiKey: authMocks.resolveCustomerIdForApiKey,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+    resolveContextProjectId: vi.fn((_c: unknown, projectId: string) => projectId),
+    resolveCustomerIdForApiKey: authMocks.resolveCustomerIdForApiKey,
+    validateIsAllowedToAccessProject: actual.validateIsAllowedToAccessProject,
+  }
+})
 
 // Mock the use cases
 const useCaseMocks = vi.hoisted(() => ({
@@ -546,6 +552,65 @@ describe("budgeted runs API", () => {
 
     // Then response is 404 or 403
     expect([403, 404]).toContain(response.status)
+  })
+
+  it("allows a main dashboard key to get a run from an explicitly requested project", async () => {
+    authMocks.keyAuth.mockResolvedValue({
+      ...verifiedKeyUnbound,
+      projectId: "main_proj",
+      project: {
+        ...verifiedKeyUnbound.project,
+        id: "main_proj",
+        isMain: true,
+        workspace: {
+          ...verifiedKeyUnbound.project.workspace,
+          isMain: true,
+        },
+      },
+    })
+
+    useCaseMocks.getRun.mockResolvedValue({
+      val: {
+        runId: "brun_abc123",
+        status: "running",
+        customerId: "cus_default",
+        budgetAmount: 1_000_000_000,
+        consumedAmount: 250_000_000,
+        remainingAmount: 750_000_000,
+        currency: "USD",
+        workloadType: "workflow",
+        workloadId: "daily-research",
+        traceId: "trace_123",
+        parentRunId: null,
+      },
+      err: undefined,
+    })
+
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/runs/get/brun_abc123?project_id=proj_dashboard", {
+        method: "GET",
+        headers: { authorization: "Bearer sk_test" },
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(useCaseMocks.getRun).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        projectId: "proj_dashboard",
+        runId: "brun_abc123",
+        keyCustomerId: null,
+      })
+    )
+    await expect(response.json()).resolves.toMatchObject({
+      budgetAmount: 1000,
+      consumedAmount: 250,
+      remainingAmount: 750,
+    })
   })
 
   it("ends a run and releases the unused reservation", async () => {
