@@ -1,3 +1,4 @@
+import type * as DbSchema from "@unprice/db/schema"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
@@ -73,6 +74,7 @@ const testState = {
   captureReservationUsage: vi.fn(),
   releaseReservation: vi.fn(),
   entitlementWindowApply: vi.fn(),
+  persistExpiredRunSummary: vi.fn(),
   logger: {
     debug: vi.fn(),
     error: vi.fn(),
@@ -90,6 +92,7 @@ describe("RunBudgetDO", () => {
     testState.captureReservationUsage.mockReset()
     testState.releaseReservation.mockReset()
     testState.entitlementWindowApply.mockReset()
+    testState.persistExpiredRunSummary.mockReset()
 
     // Default mocks
     testState.createReservation.mockResolvedValue({
@@ -515,6 +518,57 @@ describe("RunBudgetDO", () => {
     expect(state.alarmAt).toBe(BASE_NOW + 10_000)
   })
 
+  it("schedules expiresAt and persists expired run summary", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const expiresAt = BASE_NOW + 60_000
+
+    await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      traceId: "trace_expiring_1",
+      parentRunId: null,
+      runId: "brun_expiring",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {},
+      expiresAt,
+      now: BASE_NOW,
+    })
+
+    expect(state.alarmAt).toBe(expiresAt)
+
+    vi.spyOn(Date, "now").mockReturnValue(expiresAt + 1)
+    await durable.alarm()
+
+    expect(testState.persistExpiredRunSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "expired",
+        consumedAmount: 0,
+        remainingAmount: 100_000,
+        endedAt: expect.any(Date),
+      })
+    )
+
+    await expect(
+      durable.getRunStatus({
+        runId: "brun_expiring",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      runId: "brun_expiring",
+      status: "expired",
+      consumedAmount: 0,
+      remainingAmount: 100_000,
+    })
+  })
+
   it("endRun calls flush and release, then updates status", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
@@ -662,6 +716,7 @@ function extractEqInfo(where: unknown): { field: string; value: unknown } | null
 
   for (const chunk of chunks) {
     if (!chunk) continue
+    if (typeof chunk !== "object") continue
     // Column: has `.name` that is a string and `.columnType` property
     if (typeof chunk.name === "string" && chunk.columnType) {
       columnName = chunk.name
@@ -680,6 +735,18 @@ function extractEqInfo(where: unknown): { field: string; value: unknown } | null
     return { field: snakeToCamel(columnName), value: paramValue }
   }
   return null
+}
+
+function isSqlOperator(where: unknown, operator: string): boolean {
+  if (!where || typeof where !== "object") return false
+  const chunks = (where as Record<string, unknown>).queryChunks as unknown[]
+  if (!Array.isArray(chunks)) return false
+
+  return chunks.some((chunk) => {
+    if (!chunk || typeof chunk !== "object") return false
+    const value = (chunk as Record<string, unknown>).value
+    return Array.isArray(value) && value.join("").includes(operator)
+  })
 }
 
 /**
@@ -795,6 +862,15 @@ function buildFakeDrizzle() {
             ((r.attemptCount as number) ?? 0) < 5
         )
       case "runState":
+        if (isSqlOperator(where, ">")) {
+          return rows.filter(
+            (r) =>
+              (r.status as string) === "running" &&
+              r.expiresAt != null &&
+              (r.expiresAt as number) > Date.now()
+          )
+        }
+
         // status = 'running' AND expires_at IS NOT NULL AND expires_at <= now
         return rows.filter(
           (r) =>
@@ -925,8 +1001,30 @@ async function loadRunBudgetDO() {
   vi.doMock("./drizzle/migrations", () => ({ default: {} }))
 
   vi.doMock("@unprice/db", () => ({
-    createConnection: vi.fn(() => ({})),
+    and: vi.fn((...args: unknown[]) => args),
+    createConnection: vi.fn(() => ({
+      update: vi.fn(() => ({
+        set: vi.fn((values: unknown) => {
+          testState.persistExpiredRunSummary(values)
+          return {
+            where: vi.fn().mockResolvedValue(undefined),
+          }
+        }),
+      })),
+    })),
+    eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   }))
+
+  vi.doMock("@unprice/db/schema", async (importOriginal) => {
+    const actual = await importOriginal<typeof DbSchema>()
+    return {
+      ...actual,
+      budgetRuns: actual.budgetRuns ?? {
+        id: "budgetRuns.id",
+        projectId: "budgetRuns.projectId",
+      },
+    }
+  })
 
   vi.doMock("@unprice/services/ledger", () => ({
     LedgerGateway: class {},

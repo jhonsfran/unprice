@@ -81,6 +81,10 @@ export class RunBudgetDO extends DurableObject {
       metadataJson: JSON.stringify(input.metadata),
     })
 
+    if (input.expiresAt) {
+      await this.scheduleAlarmAt(input.expiresAt)
+    }
+
     const run = await this.loadRun(input.runId)
     if (!run) throw new Error("Run state missing after startRun insert")
     return this.toSummary(run)
@@ -171,33 +175,8 @@ export class RunBudgetDO extends DurableObject {
     await this.ready
     const input = endRunInputSchema.parse(rawInput)
 
-    const run = await this.loadRun(input.runId)
-    if (!run) throw new Error("RUN_NOT_FOUND")
-
-    // Final flush of all pending captures
-    await this.flushCaptures()
-
-    // Reload state after flush
-    const afterFlush = await this.loadRun(input.runId)
-    if (!afterFlush) throw new Error("Run state missing after flush")
-
-    // Release unused reservation funds
-    if (afterFlush.reservationId) {
-      await this.releaseReservation(afterFlush)
-    }
-
-    // Update status
-    await this.db
-      .update(schema.runState)
-      .set({
-        status: input.status,
-        endedAt: input.endedAt,
-      })
-      .where(eq(schema.runState.runId, input.runId))
-
-    const final = await this.loadRun(input.runId)
-    if (!final) throw new Error("Run state missing after endRun")
-    return this.toSummary(final)
+    const { summary } = await this.closeRunInStorage(input)
+    return summary
   }
 
   async getRunStatus(rawInput: GetRunStatusInput): Promise<RunBudgetSummary> {
@@ -313,25 +292,104 @@ export class RunBudgetDO extends DurableObject {
     })
 
     for (const run of expiredRuns) {
-      await this.endRun({
+      const { summary, run: closedRun } = await this.closeRunInStorage({
         runId: run.runId,
         customerId: run.customerId,
         projectId: run.projectId,
         status: "expired",
         endedAt: now,
       })
+
+      await this.persistExpiredRunSummary(closedRun, summary)
     }
 
-    // Reschedule if there are still pending intents
+    // Reschedule for the earliest outstanding capture retry or run expiration.
     const remaining = await this.db.query.runCaptureIntents.findMany({
       where: sql`${schema.runCaptureIntents.status} IN ('pending', 'failed') AND ${schema.runCaptureIntents.attemptCount} < 5`,
     })
-    if (remaining.length > 0) {
-      await this.scheduleAlarm(30_000) // Retry in 30s
+    const nextCaptureAlarmAt = remaining.length > 0 ? now + 30_000 : null
+    const nextExpirationAlarmAt = await this.findNextExpirationAlarmAt(now)
+    const nextAlarmAt = [nextCaptureAlarmAt, nextExpirationAlarmAt]
+      .filter((value): value is number => typeof value === "number")
+      .sort((a, b) => a - b)[0]
+
+    if (nextAlarmAt) {
+      await this.ctx.storage.setAlarm(nextAlarmAt)
     }
   }
 
   // --- Private methods ---
+
+  private async closeRunInStorage(input: EndRunInput): Promise<{
+    summary: RunBudgetSummary
+    run: RunStateRow
+  }> {
+    const run = await this.loadRun(input.runId)
+    if (!run) throw new Error("RUN_NOT_FOUND")
+
+    await this.flushCaptures()
+
+    const afterFlush = await this.loadRun(input.runId)
+    if (!afterFlush) throw new Error("Run state missing after flush")
+
+    if (afterFlush.reservationId) {
+      await this.releaseReservation(afterFlush)
+    }
+
+    await this.db
+      .update(schema.runState)
+      .set({
+        status: input.status,
+        endedAt: input.endedAt,
+      })
+      .where(eq(schema.runState.runId, input.runId))
+
+    const final = await this.loadRun(input.runId)
+    if (!final) throw new Error("Run state missing after close")
+
+    return {
+      summary: this.toSummary(final),
+      run: final,
+    }
+  }
+
+  private async persistExpiredRunSummary(
+    run: RunStateRow,
+    summary: RunBudgetSummary
+  ): Promise<void> {
+    const { createConnection, eq: eqOp, and: andOp } = await import("@unprice/db")
+    const { budgetRuns } = await import("@unprice/db/schema")
+
+    const db = createConnection({
+      env: this.runtimeEnv.APP_ENV,
+      primaryDatabaseUrl: this.runtimeEnv.DATABASE_URL,
+      read1DatabaseUrl: this.runtimeEnv.DATABASE_READ1_URL,
+      read2DatabaseUrl: this.runtimeEnv.DATABASE_READ2_URL,
+      logger: false,
+    })
+
+    await db
+      .update(budgetRuns)
+      .set({
+        status: "expired",
+        consumedAmount: summary.consumedAmount,
+        remainingAmount: summary.remainingAmount,
+        endedAt: new Date(run.endedAt ?? Date.now()),
+        updatedAt: new Date(),
+      })
+      .where(andOp(eqOp(budgetRuns.id, run.runId), eqOp(budgetRuns.projectId, run.projectId)))
+  }
+
+  private async findNextExpirationAlarmAt(now: number): Promise<number | null> {
+    const runs = await this.db.query.runState.findMany({
+      where: sql`${schema.runState.status} = 'running' AND ${schema.runState.expiresAt} IS NOT NULL AND ${schema.runState.expiresAt} > ${now}`,
+    })
+
+    return runs.reduce<number | null>((next, run) => {
+      if (!run.expiresAt) return next
+      return next === null || run.expiresAt < next ? run.expiresAt : next
+    }, null)
+  }
 
   private async createRunReservation(
     input: StartRunInput
@@ -645,9 +703,13 @@ export class RunBudgetDO extends DurableObject {
   }
 
   private async scheduleAlarm(delayMs = 10_000): Promise<void> {
+    await this.scheduleAlarmAt(Date.now() + delayMs)
+  }
+
+  private async scheduleAlarmAt(timestamp: number): Promise<void> {
     const currentAlarm = await this.ctx.storage.getAlarm()
-    if (!currentAlarm) {
-      await this.ctx.storage.setAlarm(Date.now() + delayMs)
+    if (!currentAlarm || timestamp < currentAlarm) {
+      await this.ctx.storage.setAlarm(timestamp)
     }
   }
 }
