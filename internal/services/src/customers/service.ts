@@ -1,8 +1,15 @@
 import type { Analytics } from "@unprice/analytics"
 import { type Database, and, count, eq, getTableColumns, ilike, inArray, or } from "@unprice/db"
-import { customers, invoices, subscriptions } from "@unprice/db/schema"
+import {
+  type BudgetRunStatus,
+  budgetRuns,
+  customers,
+  invoices,
+  subscriptions,
+} from "@unprice/db/schema"
 import { INVOICE_STATUS, newId, withDateFilters, withPagination } from "@unprice/db/utils"
 import type {
+  BudgetRun,
   Customer,
   CustomerPaymentMethod,
   PaymentProvider,
@@ -649,6 +656,119 @@ export class CustomerService {
     if (err) {
       this.logger.error(err, {
         context: "error getting customer subscriptions",
+        customerId,
+        projectId,
+      })
+      return Err(err)
+    }
+
+    return Ok(val ?? null)
+  }
+
+  public async getCustomerRuns({
+    customerId,
+    projectId,
+    query,
+  }: {
+    customerId: string
+    projectId: string
+    query: SearchParamsDataTable
+  }): Promise<
+    Result<
+      {
+        customer: Customer
+        runs: BudgetRun[]
+        pageCount: number
+      } | null,
+      FetchError
+    >
+  > {
+    const runColumns = getTableColumns(budgetRuns)
+    const runStatusValues = new Set<BudgetRunStatus>([
+      "running",
+      "completed",
+      "expired",
+      "canceled",
+      "budget_exceeded",
+      "failed",
+    ])
+    const filter = `%${query.search ?? ""}%`
+    const statusFilters =
+      query.filters.status?.filter(
+        (value): value is BudgetRunStatus =>
+          typeof value === "string" && runStatusValues.has(value as BudgetRunStatus)
+      ) ?? []
+
+    const { val, err } = await wrapResult(
+      this.db.transaction(async (tx) => {
+        const customer = await tx.query.customers.findFirst({
+          where: (table, { eq, and }) =>
+            and(eq(table.id, customerId), eq(table.projectId, projectId)),
+          orderBy: (table, { desc }) => [desc(table.createdAtM)],
+        })
+
+        if (!customer) {
+          return null
+        }
+
+        const expressions = [
+          eq(runColumns.customerId, customerId),
+          eq(runColumns.projectId, projectId),
+          query.search
+            ? or(
+                ilike(runColumns.id, filter),
+                ilike(runColumns.traceId, filter),
+                ilike(runColumns.workloadId, filter)
+              )
+            : undefined,
+          statusFilters.length > 0 ? inArray(runColumns.status, statusFilters) : undefined,
+        ]
+        const whereQuery = withDateFilters<BudgetRun>(
+          expressions,
+          runColumns.startedAt,
+          query.from,
+          query.to
+        )
+        const runQuery = tx.select().from(budgetRuns).$dynamic()
+
+        const data = await withPagination(
+          runQuery,
+          whereQuery,
+          [
+            {
+              column: runColumns.startedAt,
+              order: "desc",
+            },
+          ],
+          query.page,
+          query.page_size
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(budgetRuns)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        return {
+          customer,
+          runs: data as BudgetRun[],
+          pageCount: Math.ceil(total / query.page_size),
+        }
+      }),
+      (error) =>
+        new FetchError({
+          message: `error getting customer runs: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (err) {
+      this.logger.error(err, {
+        context: "error getting customer runs",
         customerId,
         projectId,
       })
