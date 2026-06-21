@@ -155,6 +155,14 @@ export const featureMetadataSchemaV1 = z.object({
   tags: z.string(),
 })
 
+const analyticsRunContextShape = {
+  run_id: z.string().nullable().optional(),
+  trace_id: z.string().nullable().optional(),
+  parent_run_id: z.string().nullable().optional(),
+  workload_type: z.enum(["agent", "workflow", "job", "tool", "custom"]).nullable().optional(),
+  workload_id: z.string().nullable().optional(),
+}
+
 export const entitlementMeterFactSchemaV1 = z.object({
   event_id: z.string(),
   idempotency_key: z.string(),
@@ -166,6 +174,7 @@ export const entitlementMeterFactSchemaV1 = z.object({
   source_type: z.enum(["api_key", "system", "unknown"]),
   source_id: z.string(),
   source_name: z.string().nullable().optional(),
+  ...analyticsRunContextShape,
   customer_entitlement_id: z.string(),
   feature_slug: z.string(),
   period_key: z.string(),
@@ -199,6 +208,7 @@ export const ingestionEventSchemaV1 = z.object({
   source_type: z.enum(["api_key", "system", "unknown"]),
   source_id: z.string(),
   source_name: z.string().nullable().optional(),
+  ...analyticsRunContextShape,
   event_slug: z.string(),
   idempotency_key: z.string(),
   state: z.enum(["processed", "rejected", "failed"]),
@@ -429,6 +439,11 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
     event_slug: true,
     source_type: true,
     source_id: true,
+    run_id: true,
+    trace_id: true,
+    parent_run_id: true,
+    workload_type: true,
+    workload_id: true,
     state: true,
     rejection_reason: true,
     failure_stage: true,
