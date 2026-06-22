@@ -95,9 +95,7 @@ export default function CreateApiKeyForm(props: {
       onSuccess: (data) => {
         toastAction("success")
         setKey(data.apikey.key ?? null)
-        if (props.isOnboarding) {
-          props.onSuccess?.(data.apikey.key ?? "")
-        }
+        props.onSuccess?.(data.apikey.key ?? "")
       },
     })
   )
@@ -116,6 +114,14 @@ export default function CreateApiKeyForm(props: {
         onSubmit={form.handleSubmit(async (data: CreateApiKey) => await create.mutateAsync(data))}
         className="space-y-6"
       >
+        {key && (
+          <div
+            role="alert"
+            className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning"
+          >
+            Copy this secret now. For security, it will only be shown once.
+          </div>
+        )}
         {key && (
           <motion.div
             className="flex items-center justify-between space-x-2"
@@ -144,166 +150,168 @@ export default function CreateApiKeyForm(props: {
                 {show ? <EyeOff /> : <Eye />}
               </Button>
 
-              <CopyButton value={key} className="size-4 opacity-50" onClick={resetForm} />
+              <CopyButton value={key} className="size-4 opacity-50" />
             </div>
           </motion.div>
         )}
-        <div className="space-y-8">
-          <FormField
-            control={form.control}
-            name="name"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Name</FormLabel>
-                <FormDescription>
-                  Enter a unique name for your token to differentiate it from other tokens.
-                </FormDescription>
-                <FormControl>
-                  <Input {...field} placeholder="api-key-prod" />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+        {!key && (
+          <div className="space-y-8">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Name</FormLabel>
+                  <FormDescription>
+                    Enter a unique name for your token to differentiate it from other tokens.
+                  </FormDescription>
+                  <FormControl>
+                    <Input {...field} placeholder="api-key-prod" />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
-          <FormField
-            control={form.control}
-            name="defaultCustomerId"
-            render={({ field }) => (
-              <FormItem className="flex flex-col">
-                <FormLabel>Default Customer</FormLabel>
-                <FormDescription>
-                  Optional. If set, this customer is used when requests omit `customerId`.
-                </FormDescription>
-                <Popover
-                  modal={true}
-                  open={switcherCustomerOpen}
-                  onOpenChange={setSwitcherCustomerOpen}
-                >
-                  <PopoverTrigger asChild>
-                    <div>
-                      <FormControl>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className={cn("w-full justify-between")}
-                        >
-                          {isCustomersLoading ? (
-                            <LoadingAnimation className="h-4 w-4" variant="dots" />
-                          ) : selectedCustomer ? (
-                            `${selectedCustomer.email} - ${selectedCustomer.name}`
-                          ) : (
-                            "No default customer"
-                          )}
-                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </div>
-                  </PopoverTrigger>
-                  <PopoverContent className="max-h-[--radix-popover-content-available-height] w-[--radix-popover-trigger-width] p-0">
-                    <Command>
-                      <CommandInput placeholder="Search customer..." />
-                      <CommandList className="overflow-hidden">
-                        <CommandEmpty>No customer found.</CommandEmpty>
-                        <FilterScroll>
-                          <CommandGroup>
-                            {isCustomersLoading && <CommandLoading>Loading...</CommandLoading>}
-                            <div className="flex flex-col gap-2 pt-1">
-                              <CommandItem
-                                value="No default customer"
-                                onSelect={() => {
-                                  field.onChange(null)
-                                  setSwitcherCustomerOpen(false)
-                                }}
-                              >
-                                <CheckIcon
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    !field.value ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                No default customer
-                              </CommandItem>
-                              {customers.map((customer) => (
+            <FormField
+              control={form.control}
+              name="defaultCustomerId"
+              render={({ field }) => (
+                <FormItem className="flex flex-col">
+                  <FormLabel>Default Customer</FormLabel>
+                  <FormDescription>
+                    Optional. If set, this customer is used when requests omit `customerId`.
+                  </FormDescription>
+                  <Popover
+                    modal={true}
+                    open={switcherCustomerOpen}
+                    onOpenChange={setSwitcherCustomerOpen}
+                  >
+                    <PopoverTrigger asChild>
+                      <div>
+                        <FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={cn("w-full justify-between")}
+                          >
+                            {isCustomersLoading ? (
+                              <LoadingAnimation className="h-4 w-4" variant="dots" />
+                            ) : selectedCustomer ? (
+                              `${selectedCustomer.email} - ${selectedCustomer.name}`
+                            ) : (
+                              "No default customer"
+                            )}
+                            <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent className="max-h-[--radix-popover-content-available-height] w-[--radix-popover-trigger-width] p-0">
+                      <Command>
+                        <CommandInput placeholder="Search customer..." />
+                        <CommandList className="overflow-hidden">
+                          <CommandEmpty>No customer found.</CommandEmpty>
+                          <FilterScroll>
+                            <CommandGroup>
+                              {isCustomersLoading && <CommandLoading>Loading...</CommandLoading>}
+                              <div className="flex flex-col gap-2 pt-1">
                                 <CommandItem
-                                  value={`${customer.email} ${customer.name} ${customer.id}`}
-                                  key={customer.id}
+                                  value="No default customer"
                                   onSelect={() => {
-                                    field.onChange(customer.id)
+                                    field.onChange(null)
                                     setSwitcherCustomerOpen(false)
                                   }}
                                 >
                                   <CheckIcon
                                     className={cn(
                                       "mr-2 h-4 w-4",
-                                      customer.id === field.value ? "opacity-100" : "opacity-0"
+                                      !field.value ? "opacity-100" : "opacity-0"
                                     )}
                                   />
-                                  {`${customer.email} - ${customer.name}`}
+                                  No default customer
                                 </CommandItem>
-                              ))}
-                            </div>
-                          </CommandGroup>
-                        </FilterScroll>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+                                {customers.map((customer) => (
+                                  <CommandItem
+                                    value={`${customer.email} ${customer.name} ${customer.id}`}
+                                    key={customer.id}
+                                    onSelect={() => {
+                                      field.onChange(customer.id)
+                                      setSwitcherCustomerOpen(false)
+                                    }}
+                                  >
+                                    <CheckIcon
+                                      className={cn(
+                                        "mr-2 h-4 w-4",
+                                        customer.id === field.value ? "opacity-100" : "opacity-0"
+                                      )}
+                                    />
+                                    {`${customer.email} - ${customer.name}`}
+                                  </CommandItem>
+                                ))}
+                              </div>
+                            </CommandGroup>
+                          </FilterScroll>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
-          <FormField
-            control={form.control}
-            name="expiresAt"
-            render={({ field }) => (
-              <FormItem className="flex flex-col">
-                <FormLabel>Expiration date</FormLabel>
-                <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
-                  <PopoverTrigger asChild>
-                    <FormControl>
-                      <Button variant={"outline"} className="pl-3 text-left font-normal">
-                        {field.value ? (
-                          format(field.value, "PPP")
-                        ) : (
-                          <span className="text-muted-foreground">Pick a date</span>
-                        )}
-                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                      </Button>
-                    </FormControl>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={field.value ? new Date(field.value) : undefined}
-                      onSelect={(date) => {
-                        if (!date) {
-                          field.onChange(undefined)
+            <FormField
+              control={form.control}
+              name="expiresAt"
+              render={({ field }) => (
+                <FormItem className="flex flex-col">
+                  <FormLabel>Expiration date</FormLabel>
+                  <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <FormControl>
+                        <Button variant={"outline"} className="pl-3 text-left font-normal">
+                          {field.value ? (
+                            format(field.value, "PPP")
+                          ) : (
+                            <span className="text-muted-foreground">Pick a date</span>
+                          )}
+                          <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                        </Button>
+                      </FormControl>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value ? new Date(field.value) : undefined}
+                        onSelect={(date) => {
+                          if (!date) {
+                            field.onChange(undefined)
+                            setDatePickerOpen(false)
+                            return
+                          }
+                          const midnight = endOfDay(date)
+                          field.onChange(midnight.getTime())
                           setDatePickerOpen(false)
-                          return
+                        }}
+                        disabled={(date) =>
+                          // future dates up to 1 year only
+                          date < new Date() || date > add(new Date(), { years: 1 })
                         }
-                        const midnight = endOfDay(date)
-                        field.onChange(midnight.getTime())
-                        setDatePickerOpen(false)
-                      }}
-                      disabled={(date) =>
-                        // future dates up to 1 year only
-                        date < new Date() || date > add(new Date(), { years: 1 })
-                      }
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-                <FormDescription>
-                  We <b>strongly recommend</b> setting an expiration date for your API key, but you
-                  can also leave it blank to create a permanent key.
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  <FormDescription>
+                    We <b>strongly recommend</b> setting an expiration date for your API key, but
+                    you can also leave it blank to create a permanent key.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        )}
 
         <div className="flex justify-end space-x-4 pt-8">
           {props.skip && (
@@ -318,12 +326,18 @@ export default function CreateApiKeyForm(props: {
               Skip
             </Button>
           )}
-          <SubmitButton
-            type="submit"
-            isSubmitting={form.formState.isSubmitting}
-            isDisabled={form.formState.isSubmitting}
-            label={"Create"}
-          />
+          {key ? (
+            <Button type="button" onClick={resetForm}>
+              Done
+            </Button>
+          ) : (
+            <SubmitButton
+              type="submit"
+              isSubmitting={form.formState.isSubmitting}
+              isDisabled={form.formState.isSubmitting}
+              label={"Create"}
+            />
+          )}
         </div>
       </form>
     </Form>
