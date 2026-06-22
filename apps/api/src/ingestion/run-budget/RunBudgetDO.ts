@@ -21,6 +21,20 @@ import migrations from "./drizzle/migrations"
 type RunStateRow = typeof schema.runState.$inferSelect
 type RunCaptureIntentRow = typeof schema.runCaptureIntents.$inferSelect
 type RunBudgetDbWriter = Pick<DrizzleSqliteDODatabase<typeof schema>, "insert" | "update">
+type RunSpendBucketDelta = {
+  amount: number
+  billingPeriodId: string
+  bucketKey: string
+  currency: string
+  entitlementId: string
+  featureId: string | null
+  featurePlanVersionItemId: string
+  featureSlug: string
+  periodEndAt: number
+  periodStartAt: number
+  quantity: number
+  statementKey: string
+}
 
 class RunCapturesPendingError extends Error {
   constructor(runId: string) {
@@ -162,7 +176,7 @@ export class RunBudgetDO extends DurableObject {
     const rawMeterFacts = entitlementResult.meterFacts ?? []
     const meterFacts = this.withRunContext(run, rawMeterFacts)
     const pricedAmount = this.sumPricedAmount(meterFacts)
-    const bucketDeltas = this.deriveBucketDeltas(input.runId, meterFacts)
+    const bucketDeltas = this.deriveBucketDeltas(input.runId, input.entitlement, meterFacts)
 
     const updatedRun = this.projectRunSpend(run, pricedAmount, input.now)
     const decision: RunBudgetDecision = {
@@ -258,8 +272,12 @@ export class RunBudgetDO extends DurableObject {
           customerId: run.customerId,
           currency: run.currency,
           amount: intent.amount,
+          billingPeriodId: bucket.billingPeriodId,
+          featurePlanVersionItemId: bucket.featurePlanVersionItemId,
+          featureSlug: bucket.featureSlug,
           statementKey: bucket.statementKey,
           idempotencyKey: intentKey,
+          quantity: bucket.quantity,
           flushSeq: intent.createdAt,
         })
 
@@ -615,8 +633,12 @@ export class RunBudgetDO extends DurableObject {
     customerId: string
     currency: string
     amount: number
+    billingPeriodId: string
+    featurePlanVersionItemId: string
+    featureSlug: string
     statementKey: string
     idempotencyKey: string
+    quantity: number
     flushSeq: number
   }): Promise<void> {
     const { createConnection } = await import("@unprice/db")
@@ -643,9 +665,16 @@ export class RunBudgetDO extends DurableObject {
       reservationId: input.reservationId,
       flushSeq: input.flushSeq,
       amount: input.amount,
+      billingPeriodId: input.billingPeriodId,
       statementKey: input.statementKey,
-      kind: "budget_run_capture",
-      metadata: { idempotency_key: input.idempotencyKey },
+      kind: "usage",
+      metadata: {
+        billing_period_id: input.billingPeriodId,
+        feature_plan_version_item_id: input.featurePlanVersionItemId,
+        feature_slug: input.featureSlug,
+        idempotency_key: input.idempotencyKey,
+        quantity: input.quantity,
+      },
       sourceId: input.idempotencyKey,
     })
 
@@ -712,36 +741,79 @@ export class RunBudgetDO extends DurableObject {
 
   private deriveBucketDeltas(
     runId: string,
+    entitlement: ApplyRunSyncEventInput["entitlement"],
     meterFacts: Record<string, unknown>[]
-  ): Array<{
-    bucketKey: string
-    entitlementId: string
-    featureId: string | null
-    statementKey: string
-    periodStartAt: number
-    periodEndAt: number
-    currency: string
-    amount: number
-  }> {
-    return meterFacts.map((fact: Record<string, unknown>) => {
+  ): RunSpendBucketDelta[] {
+    return meterFacts.flatMap((fact: Record<string, unknown>) => {
+      const amount = this.readFactNumber(fact, "amount") ?? 0
+      if (amount <= 0) return []
+
+      const statementKey = this.readFactString(fact, "statement_key")
+      const periodKey = this.readFactString(fact, "period_key") ?? "unknown"
+      const invoiceContext = this.resolveBillingPeriodContext({
+        entitlement,
+        fact,
+        statementKey,
+      })
       const bucketKey = [
         runId,
-        (fact.customer_entitlement_id as string) ?? "unknown",
-        (fact.statement_key as string) ?? "unknown",
-        (fact.period_key as string) ?? "unknown",
+        this.readFactString(fact, "customer_entitlement_id") ?? "unknown",
+        invoiceContext.statementKey,
+        periodKey,
       ].join(":")
 
       return {
         bucketKey,
-        entitlementId: (fact.customer_entitlement_id as string) ?? "unknown",
-        featureId: (fact.feature_id as string) ?? null,
-        statementKey: (fact.statement_key as string) ?? "unknown",
-        periodStartAt: (fact.period_start_at as number) ?? 0,
-        periodEndAt: (fact.period_end_at as number) ?? 0,
-        currency: (fact.currency as string) ?? "USD",
-        amount: (fact.amount as number) ?? 0,
+        billingPeriodId: invoiceContext.billingPeriodId,
+        entitlementId: this.readFactString(fact, "customer_entitlement_id") ?? "unknown",
+        featureId: this.readFactString(fact, "feature_id"),
+        featurePlanVersionItemId: invoiceContext.featurePlanVersionItemId,
+        featureSlug: this.readFactString(fact, "feature_slug") ?? entitlement.featureSlug,
+        statementKey: invoiceContext.statementKey,
+        periodStartAt: this.readFactNumber(fact, "period_start_at") ?? invoiceContext.cycleStartAt,
+        periodEndAt: this.readFactNumber(fact, "period_end_at") ?? invoiceContext.cycleEndAt,
+        quantity: this.readFactNumber(fact, "delta") ?? 0,
+        currency: this.readFactString(fact, "currency") ?? "USD",
+        amount,
       }
     })
+  }
+
+  private readFactString(fact: Record<string, unknown>, key: string): string | null {
+    const value = fact[key]
+    if (typeof value !== "string") return null
+    const trimmed = value.trim()
+    if (trimmed.length === 0 || trimmed.toLowerCase() === "unknown") return null
+    return trimmed
+  }
+
+  private readFactNumber(fact: Record<string, unknown>, key: string): number | null {
+    const value = fact[key]
+    return typeof value === "number" && Number.isFinite(value) ? value : null
+  }
+
+  private resolveBillingPeriodContext(params: {
+    entitlement: ApplyRunSyncEventInput["entitlement"]
+    fact: Record<string, unknown>
+    statementKey: string | null
+  }): ApplyRunSyncEventInput["entitlement"]["billingPeriods"][number] {
+    const eventTimestamp = this.readFactNumber(params.fact, "timestamp")
+    const period = params.entitlement.billingPeriods.find((candidate) => {
+      if (params.statementKey) return candidate.statementKey === params.statementKey
+      return (
+        eventTimestamp !== null &&
+        candidate.cycleStartAt <= eventTimestamp &&
+        eventTimestamp < candidate.cycleEndAt
+      )
+    })
+
+    if (!period) {
+      throw new Error(
+        `Missing billing period invoice context for run spend statement ${params.statementKey ?? "unknown"}`
+      )
+    }
+
+    return period
   }
 
   private projectRunSpend(run: RunStateRow, pricedAmount: number, now: number): RunStateRow {
@@ -758,16 +830,7 @@ export class RunBudgetDO extends DurableObject {
     idempotencyKey: string,
     decision: RunBudgetDecision,
     pricedAmount: number,
-    bucketDeltas: Array<{
-      bucketKey: string
-      entitlementId: string
-      featureId: string | null
-      statementKey: string
-      periodStartAt: number
-      periodEndAt: number
-      currency: string
-      amount: number
-    }>
+    bucketDeltas: RunSpendBucketDelta[]
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
       await this.persistSpend(tx, run, updatedRun, bucketDeltas)
@@ -786,16 +849,7 @@ export class RunBudgetDO extends DurableObject {
     db: RunBudgetDbWriter,
     run: RunStateRow,
     updatedRun: RunStateRow,
-    bucketDeltas: Array<{
-      bucketKey: string
-      entitlementId: string
-      featureId: string | null
-      statementKey: string
-      periodStartAt: number
-      periodEndAt: number
-      currency: string
-      amount: number
-    }>
+    bucketDeltas: RunSpendBucketDelta[]
   ): Promise<void> {
     await db
       .update(schema.runState)
@@ -815,6 +869,10 @@ export class RunBudgetDO extends DurableObject {
           entitlementId: delta.entitlementId,
           featureId: delta.featureId,
           statementKey: delta.statementKey,
+          billingPeriodId: delta.billingPeriodId,
+          featurePlanVersionItemId: delta.featurePlanVersionItemId,
+          featureSlug: delta.featureSlug,
+          quantity: delta.quantity,
           periodStartAt: delta.periodStartAt,
           periodEndAt: delta.periodEndAt,
           currency: delta.currency,

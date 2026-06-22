@@ -158,6 +158,12 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-22: Customer wallet dashboards should distinguish ledger balances from usable display
+  balances; expired-by-time wallet credits can remain in ledger until the sweep runs, so UI
+  availability must derive from non-expired credits and show credit status explicitly.
+- 2026-06-22: Positive wallet `captureReservationUsage` calls must carry billing period and
+  statement context; otherwise `customer.*.consumed` can gain non-invoice-backed
+  `wallet_capture_usage` ledger rows.
 - 2026-06-22: Budget runs do not create separate "run" invoice lines; run sync events report
   meter facts that bill through the subscribed usage features, so inspect feature-period invoices
   and ledger metadata when reconciling run charges.

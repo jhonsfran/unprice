@@ -14,6 +14,10 @@ type WalletCredit = RouterOutputs["customers"]["getWallet"]["wallet"]["credits"]
   currency: RouterOutputs["customers"]["getWallet"]["wallet"]["currency"]
 }
 
+function statusVariant(status: WalletCredit["status"]) {
+  return status === "active" ? "success" : "destructive"
+}
+
 function formatWalletDate(date: WalletCredit["expiresAt"] | WalletCredit["createdAt"]) {
   if (!date) {
     return "Never"
@@ -25,12 +29,14 @@ function formatWalletDate(date: WalletCredit["expiresAt"] | WalletCredit["create
 export const columns: ColumnDef<WalletCredit>[] = [
   {
     accessorKey: "id",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Wallet credit" />,
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Wallet credit" className="pl-4" />
+    ),
     cell: ({ row }) => (
       <Typography
         variant="p"
         affects="removePaddingMargin"
-        className="whitespace-nowrap font-mono text-sm"
+        className="whitespace-nowrap pl-3 font-mono text-sm"
       >
         {row.original.id}
       </Typography>
@@ -51,6 +57,17 @@ export const columns: ColumnDef<WalletCredit>[] = [
     },
   },
   {
+    accessorKey: "status",
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+    cell: ({ row }) => (
+      <Badge variant={statusVariant(row.original.status)}>{row.original.status}</Badge>
+    ),
+    size: 28,
+    filterFn: (row, _id, value) => {
+      return Array.isArray(value) && value.includes(row.original.status)
+    },
+  },
+  {
     accessorKey: "issuedAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Issued" />,
     cell: ({ row }) => (
@@ -59,11 +76,11 @@ export const columns: ColumnDef<WalletCredit>[] = [
     size: 28,
   },
   {
-    accessorKey: "remainingAmount",
+    accessorKey: "usableAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Available" />,
     cell: ({ row }) => (
-      <Badge variant="secondary">
-        {formatWalletMoney(row.original.remainingAmount, row.original.currency)}
+      <Badge variant={row.original.status === "active" ? "secondary" : "outline"}>
+        {formatWalletMoney(row.original.usableAmount, row.original.currency)}
       </Badge>
     ),
     size: 28,

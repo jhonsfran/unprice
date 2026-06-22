@@ -15,6 +15,20 @@
       "when": 1782004658964,
       "tag": "0001_rainy_gwen_stacy",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782122305112,
+      "tag": "0002_equal_morg",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1782122668296,
+      "tag": "0003_milky_the_hand",
+      "breakpoints": true
     }
   ]
 }

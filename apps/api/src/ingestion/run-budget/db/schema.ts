@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 export const runState = sqliteTable("run_state", {
   runId: text("run_id").primaryKey(),
@@ -30,6 +30,10 @@ export const runSpendBuckets = sqliteTable(
     entitlementId: text("entitlement_id").notNull(),
     featureId: text("feature_id"),
     statementKey: text("statement_key").notNull(),
+    billingPeriodId: text("billing_period_id").notNull().default(""),
+    featurePlanVersionItemId: text("feature_plan_version_item_id").notNull().default(""),
+    featureSlug: text("feature_slug").notNull().default(""),
+    quantity: real("quantity").notNull().default(0),
     periodStartAt: integer("period_start_at").notNull(),
     periodEndAt: integer("period_end_at").notNull(),
     currency: text("currency").notNull(),

@@ -526,6 +526,24 @@ export class WalletService {
     if (input.amount < 0) {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
     }
+    const billingPeriodId = input.billingPeriodId?.trim()
+    const statementKey = input.statementKey.trim()
+    if (
+      input.amount > 0 &&
+      (!billingPeriodId || statementKey.length === 0 || statementKey.toLowerCase() === "unknown")
+    ) {
+      return Err(
+        new UnPriceWalletError({
+          message: "WALLET_MISSING_INVOICE_CONTEXT",
+          context: {
+            billingPeriodId: input.billingPeriodId ?? null,
+            projectId: input.projectId,
+            reservationId: input.reservationId,
+            statementKey: input.statementKey,
+          },
+        })
+      )
+    }
 
     const keys = customerAccountKeys(input.customerId)
     const captureMetadata = this.normalizeJsonMetadata(input.metadata)

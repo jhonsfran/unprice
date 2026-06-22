@@ -11,7 +11,15 @@ const DO_STARTUP_TEST_TIMEOUT_MS = 15_000
 const TEST_ENTITLEMENT_FIELDS = {
   customerEntitlementId: "ce_test_1",
   entitlement: {
-    billingPeriods: [],
+    billingPeriods: [
+      {
+        billingPeriodId: "bp_1",
+        cycleEndAt: BASE_NOW + 86_400_000,
+        cycleStartAt: BASE_NOW - 86_400_000,
+        featurePlanVersionItemId: "item_1",
+        statementKey: "stmt_1",
+      },
+    ],
     creditLinePolicy: "uncapped",
     customerEntitlementId: "ce_test_1",
     customerId: "cus_1",
@@ -934,14 +942,25 @@ describe("RunBudgetDO", () => {
       1,
       expect.objectContaining({
         amount: 5000,
+        billingPeriodId: "bp_1",
         flushSeq: BASE_NOW,
+        kind: "usage",
+        metadata: expect.objectContaining({
+          billing_period_id: "bp_1",
+          feature_plan_version_item_id: "item_1",
+          feature_slug: "tokens",
+        }),
+        statementKey: "stmt_1",
       })
     )
     expect(testState.captureReservationUsage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         amount: 5000,
+        billingPeriodId: "bp_1",
         flushSeq: BASE_NOW,
+        kind: "usage",
+        statementKey: "stmt_1",
       })
     )
 
@@ -951,7 +970,10 @@ describe("RunBudgetDO", () => {
       3,
       expect.objectContaining({
         amount: 7000,
+        billingPeriodId: "bp_1",
         flushSeq: BASE_NOW + 60_000,
+        kind: "usage",
+        statementKey: "stmt_1",
       })
     )
   })

@@ -1,6 +1,7 @@
 import {
   currencySchema,
   customerSelectSchema,
+  type WalletCredit,
   walletCreditSelectSchema,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
@@ -22,21 +23,30 @@ export const customerWalletBalancesSchema = z.object({
   consumed: z.number().int(),
 })
 
+export const walletCreditStatusSchema = z.enum(["active", "expired"])
+
+export const customerWalletCreditSchema = walletCreditSelectSchema.extend({
+  status: walletCreditStatusSchema,
+  usableAmount: z.number().int().nonnegative(),
+})
+
 export const getCustomerWalletOutputSchema = z.object({
   customer: customerSelectSchema,
   wallet: z.object({
     currency: currencySchema,
     balances: customerWalletBalancesSchema,
-    credits: walletCreditSelectSchema.array(),
+    credits: customerWalletCreditSchema.array(),
   }),
 })
 
 export type GetCustomerWalletInput = z.infer<typeof getCustomerWalletInputSchema>
 export type GetCustomerWalletOutput = z.infer<typeof getCustomerWalletOutputSchema>
+export type CustomerWalletCredit = z.infer<typeof customerWalletCreditSchema>
 
 export type GetCustomerWalletDeps = {
   services: Pick<ServiceContext, "customers" | "wallet">
   logger: Logger
+  now?: () => Date
 }
 
 export async function getCustomerWallet(
@@ -75,14 +85,50 @@ export async function getCustomerWallet(
     return Err(walletResult.err)
   }
 
+  const now = deps.now?.() ?? new Date()
+  const credits = walletResult.val.credits
+    .map((credit) => toCustomerWalletCredit(credit, now))
+    .sort(compareCustomerWalletCredits)
+  const activeGranted = credits.reduce((sum, credit) => sum + credit.usableAmount, 0)
+
   return Ok(
     getCustomerWalletOutputSchema.parse({
       customer: customerResult.val,
       wallet: {
         currency: customerResult.val.defaultCurrency,
-        balances: walletResult.val.balances,
-        credits: walletResult.val.credits,
+        balances: {
+          ...walletResult.val.balances,
+          granted: activeGranted,
+        },
+        credits,
       },
     })
   )
+}
+
+function toCustomerWalletCredit(credit: WalletCredit, now: Date): CustomerWalletCredit {
+  const status = isExpired(credit, now) ? "expired" : "active"
+
+  return {
+    ...credit,
+    status,
+    usableAmount: status === "active" ? credit.remainingAmount : 0,
+  }
+}
+
+function isExpired(credit: WalletCredit, now: Date): boolean {
+  if (credit.expiredAt) {
+    return true
+  }
+
+  return Boolean(credit.expiresAt && credit.expiresAt.getTime() <= now.getTime())
+}
+
+function compareCustomerWalletCredits(a: CustomerWalletCredit, b: CustomerWalletCredit): number {
+  const createdAtDelta = b.createdAt.getTime() - a.createdAt.getTime()
+  if (createdAtDelta !== 0) {
+    return createdAtDelta
+  }
+
+  return b.id.localeCompare(a.id)
 }

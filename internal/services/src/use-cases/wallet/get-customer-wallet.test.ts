@@ -51,6 +51,10 @@ describe("getCustomerWallet", () => {
       },
     })
     expect(result.val?.wallet.credits.map((credit) => credit.id)).toEqual(["wcr_123"])
+    expect(result.val?.wallet.credits[0]).toMatchObject({
+      status: "active",
+      usableAmount: 500_000_000,
+    })
     expect(wallet.getWalletState).toHaveBeenCalledWith({
       projectId: "proj_123",
       customerId: "cus_123",
@@ -62,6 +66,116 @@ describe("getCustomerWallet", () => {
         customer_id: "cus_123",
       },
     })
+  })
+
+  it("excludes expired credits from display granted balance and marks them expired", async () => {
+    const customer = createCustomer()
+    const activeCredit = createWalletCredit({
+      id: "wcr_active",
+      issuedAmount: 300_000_000,
+      remainingAmount: 300_000_000,
+      expiresAt: new Date("2026-06-23T00:00:00.000Z"),
+    })
+    const expiredCredit = createWalletCredit({
+      id: "wcr_expired",
+      issuedAmount: 200_000_000,
+      remainingAmount: 200_000_000,
+      expiresAt: new Date("2026-06-21T00:00:00.000Z"),
+    })
+    const walletState = createWalletState({
+      balances: {
+        purchased: 100_000_000,
+        granted: 500_000_000,
+        reserved: 0,
+        consumed: 0,
+      },
+      credits: [activeCredit, expiredCredit],
+    })
+    const customers = {
+      getCustomerByIdInProject: vi.fn().mockResolvedValue(Ok(customer)),
+    }
+    const wallet = {
+      getWalletState: vi.fn().mockResolvedValue(Ok(walletState)),
+    }
+
+    const result = await getCustomerWallet(
+      {
+        services: {
+          customers: customers as unknown as CustomerService,
+          wallet: wallet as unknown as WalletService,
+        },
+        logger: createLogger(),
+        now: () => new Date("2026-06-22T00:00:00.000Z"),
+      },
+      {
+        projectId: "proj_123",
+        customerId: "cus_123",
+      }
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.wallet.balances).toMatchObject({
+      purchased: 100_000_000,
+      granted: 300_000_000,
+    })
+    const creditsById = new Map(result.val?.wallet.credits.map((credit) => [credit.id, credit]))
+
+    expect(creditsById.get("wcr_active")).toMatchObject({
+      status: "active",
+      usableAmount: 300_000_000,
+    })
+    expect(creditsById.get("wcr_expired")).toMatchObject({
+      status: "expired",
+      usableAmount: 0,
+    })
+  })
+
+  it("orders credits by creation time newest first", async () => {
+    const customer = createCustomer()
+    const walletState = createWalletState({
+      credits: [
+        createWalletCredit({
+          id: "wcr_old",
+          createdAt: new Date("2026-06-22T10:00:00.000Z"),
+        }),
+        createWalletCredit({
+          id: "wcr_new",
+          createdAt: new Date("2026-06-22T12:00:00.000Z"),
+        }),
+        createWalletCredit({
+          id: "wcr_middle",
+          createdAt: new Date("2026-06-22T11:00:00.000Z"),
+        }),
+      ],
+    })
+    const customers = {
+      getCustomerByIdInProject: vi.fn().mockResolvedValue(Ok(customer)),
+    }
+    const wallet = {
+      getWalletState: vi.fn().mockResolvedValue(Ok(walletState)),
+    }
+
+    const result = await getCustomerWallet(
+      {
+        services: {
+          customers: customers as unknown as CustomerService,
+          wallet: wallet as unknown as WalletService,
+        },
+        logger: createLogger(),
+        now: () => new Date("2026-06-22T13:00:00.000Z"),
+      },
+      {
+        projectId: "proj_123",
+        customerId: "cus_123",
+      }
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.wallet.credits.map((credit) => credit.id)).toEqual([
+      "wcr_new",
+      "wcr_middle",
+      "wcr_old",
+    ])
   })
 
   it("returns null when the customer is not in the project", async () => {
@@ -176,7 +290,7 @@ function createWalletCredit(overrides: Partial<WalletCredit> = {}): WalletCredit
     customerId: "cus_123",
     source: "manual",
     issuedAmount: 500_000_000,
-    remainingAmount: 300_000_000,
+    remainingAmount: 500_000_000,
     expiresAt: null,
     expiredAt: null,
     voidedAt: null,
@@ -187,7 +301,7 @@ function createWalletCredit(overrides: Partial<WalletCredit> = {}): WalletCredit
   } as WalletCredit
 }
 
-function createWalletState(): WalletStateOutput {
+function createWalletState(overrides: Partial<WalletStateOutput> = {}): WalletStateOutput {
   return {
     balances: {
       purchased: 1_000_000_000,
@@ -196,6 +310,7 @@ function createWalletState(): WalletStateOutput {
       consumed: 2_000_000_000,
     },
     credits: [createWalletCredit()],
+    ...overrides,
   }
 }
 

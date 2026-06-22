@@ -91,8 +91,11 @@ export {
   getCustomerWalletInputSchema,
   getCustomerWalletOutputSchema,
   customerWalletBalancesSchema,
+  customerWalletCreditSchema,
+  walletCreditStatusSchema,
 } from "./wallet/get-customer-wallet"
 export type {
+  CustomerWalletCredit,
   GetCustomerWalletDeps,
   GetCustomerWalletInput,
   GetCustomerWalletOutput,

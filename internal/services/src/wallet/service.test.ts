@@ -951,6 +951,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       flushAmount: 2 * DOLLAR,
       refillChunkAmount: 3 * DOLLAR,
       statementKey: "stmt_1",
+      billingPeriodId: "bp_1",
       final: false,
       metadata: {
         requestedBy: "durable_object",
@@ -1025,6 +1026,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       flushSeq: 1,
       amount: 4 * DOLLAR,
       statementKey: "stmt_capture_order",
+      billingPeriodId: "bp_capture_order",
     })
 
     expect(err).toBeUndefined()
@@ -1118,6 +1120,42 @@ describe("WalletService reservation capture, extend, and release", () => {
     ])
   })
 
+  it("rejects invoice-visible captures without billing period context", async () => {
+    const { state, wallet } = buildService()
+    seedReservation(state, {
+      id: "res_missing_invoice_context",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 2 * DOLLAR,
+      consumedAmount: 0,
+      fundingAllocations: [
+        {
+          source: "granted",
+          amount: 2 * DOLLAR,
+          grantSource: "credit_line",
+          walletCreditId: "wcr_credit",
+        },
+      ],
+    })
+    state.balances[keys.reserved] = 2 * DOLLAR
+
+    const { err } = await wallet.captureReservationUsage({
+      projectId,
+      customerId,
+      currency: "USD",
+      reservationId: "res_missing_invoice_context",
+      flushSeq: 1,
+      amount: 2 * DOLLAR,
+      statementKey: "stmt_missing_invoice_context",
+    })
+
+    expect(err?.message).toBe("WALLET_MISSING_INVOICE_CONTEXT")
+    expect(state.transfers).toHaveLength(0)
+    expect(state.fundingLegs.map((leg) => leg.capturedAmount)).toEqual([0])
+    expect(state.reservations[0]?.consumedAmount).toBe(0)
+  })
+
   it("treats changed capture invoice context as a wallet idempotency conflict", async () => {
     const { state, wallet } = buildService()
     seedReservation(state, {
@@ -1196,6 +1234,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       flushSeq: 1,
       amount: 3 * DOLLAR,
       statementKey: "stmt_over_capture",
+      billingPeriodId: "bp_over_capture",
     })
 
     expect(err?.message).toBe("WALLET_INSUFFICIENT_FUNDS")
@@ -1237,6 +1276,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       flushAmount: 1 * DOLLAR, // the unflushed delta
       refillChunkAmount: 0,
       statementKey: "stmt_2",
+      billingPeriodId: "bp_2",
       final: true,
     })
 

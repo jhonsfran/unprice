@@ -17,7 +17,7 @@ export function WalletBalanceSummary({ wallet }: { wallet: CustomerWallet }) {
   const balances: BalanceItem[] = [
     {
       label: "Available",
-      description: "Purchased plus granted funds",
+      description: "Purchased plus usable granted funds",
       amount: available,
       variant: "default",
     },
@@ -29,7 +29,7 @@ export function WalletBalanceSummary({ wallet }: { wallet: CustomerWallet }) {
     },
     {
       label: "Granted",
-      description: "Plan, trial, promo, or manual credits",
+      description: "Non-expired plan, trial, promo, or manual credits",
       amount: wallet.balances.granted,
       variant: "outline",
     },

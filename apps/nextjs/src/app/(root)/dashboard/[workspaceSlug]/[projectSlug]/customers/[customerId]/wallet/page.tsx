@@ -38,6 +38,7 @@ export default async function CustomerWalletPage({
     ...credit,
     currency: wallet.currency,
   }))
+  const walletCreditStatuses = ["active", "expired"] as const
 
   return (
     <DashboardShell
@@ -77,16 +78,16 @@ export default async function CustomerWalletPage({
         <div>
           <div className="flex flex-col px-1 py-4">
             <Typography variant="p" affects="removePaddingMargin">
-              Active wallet credits for this customer
+              Wallet credits for this customer
             </Typography>
           </div>
           <Suspense
             fallback={
               <DataTableSkeleton
-                columnCount={6}
+                columnCount={7}
                 searchableColumnCount={1}
-                filterableColumnCount={1}
-                cellWidths={["18rem", "10rem", "10rem", "10rem", "14rem", "14rem"]}
+                filterableColumnCount={2}
+                cellWidths={["18rem", "10rem", "10rem", "10rem", "10rem", "14rem", "14rem"]}
               />
             }
           >
@@ -98,6 +99,10 @@ export default async function CustomerWalletPage({
                 filterColumns: true,
                 filterSelectors: {
                   source: walletCreditSourceSchema.options.map((value) => ({
+                    value,
+                    label: value,
+                  })),
+                  status: walletCreditStatuses.map((value) => ({
                     value,
                     label: value,
                   })),
