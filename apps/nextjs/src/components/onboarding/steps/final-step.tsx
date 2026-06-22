@@ -10,6 +10,15 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
   const { updateContext, state } = useOnboarding()
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
 
+  const flowData = state?.context?.flowData as
+    | {
+        seededMetrics?: boolean
+        seedMetricsError?: string
+        project?: { slug: string }
+      }
+    | undefined
+  const seededMetrics = flowData?.seededMetrics === true
+
   const router = useRouter()
   return (
     <div className={cn("flex flex-col", className)}>
@@ -18,8 +27,9 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
           You're good to go
         </Typography>
         <Typography variant="p" className="mb-8 w-[640px] max-w-[90vw] animate-title delay-300!">
-          Your dashboard is now seeded with usage and verification metrics from a test customer.
-          Connect a payment provider when you are ready to charge real customers.
+          {seededMetrics
+            ? "Your dashboard is now seeded with usage and verification metrics from a test customer. Connect a payment provider when you are ready to charge real customers."
+            : "Your project is ready. Sample metrics were not fully seeded, so the dashboard may stay empty until real usage is reported."}
         </Typography>
 
         <Button
@@ -36,6 +46,7 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
                 apiKey: undefined,
                 templatePlansCreated: undefined,
                 seededMetrics: undefined,
+                seedMetricsError: undefined,
                 done: true,
               },
             })

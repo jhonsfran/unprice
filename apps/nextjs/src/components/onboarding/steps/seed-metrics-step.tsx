@@ -125,23 +125,35 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
     setIsComplete(false)
   }
 
+  const markSeedFailed = (message: string) => {
+    setErrorMessage(message)
+    updateContext({
+      flowData: {
+        seededMetrics: false,
+        seedMetricsError: message,
+      },
+    })
+  }
+
   const runSeed = async () => {
     resetState()
 
     if (!project?.slug || !planVersionId) {
-      setErrorMessage("Missing project or plan data. Please return to the previous step.")
+      markSeedFailed("Missing project or plan data. Please return to the previous step.")
       return
     }
 
     if (!planVersionData?.planVersion) {
-      setErrorMessage("Plan version not found. Please return to the previous step.")
+      markSeedFailed("Plan version not found. Please return to the previous step.")
       return
     }
 
     if (planFeatures.length === 0) {
-      setErrorMessage("Your plan needs at least one feature before we can seed metrics.")
+      markSeedFailed("Your plan needs at least one feature before we can seed metrics.")
       return
     }
+
+    let seedFailed = false
 
     try {
       setStepStatus("apikey", "working")
@@ -155,7 +167,7 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
 
         if (!apiKey) {
           setStepStatus("apikey", "error")
-          setErrorMessage("Failed to create an API key for seeding metrics.")
+          markSeedFailed("Failed to create an API key for seeding metrics.")
           return
         }
 
@@ -200,7 +212,7 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
 
       if (!customerId) {
         setStepStatus("customer", "error")
-        setErrorMessage("Failed to create a customer for onboarding.")
+        markSeedFailed("Failed to create a customer for onboarding.")
         return
       }
 
@@ -285,8 +297,9 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
 
             if (usageResponse.status !== 202) {
               usageFailed = true
+              seedFailed = true
               const message = await usageResponse.text()
-              setErrorMessage(
+              markSeedFailed(
                 `Ingestion events failed to seed for ${target.featureSlug}. ${message ? `Response: ${message}` : ""}`.trim()
               )
               break
@@ -324,8 +337,9 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
 
           if (!verificationResponse.ok) {
             verificationFailed = true
+            seedFailed = true
             const message = await verificationResponse.text()
-            setErrorMessage(
+            markSeedFailed(
               `Verification events failed to seed. ${message ? `Response: ${message}` : ""}`.trim()
             )
             break
@@ -337,15 +351,21 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
         setStepStatus("verification", verificationFailed ? "error" : "done")
       }
 
+      if (seedFailed) {
+        setIsComplete(false)
+        return
+      }
+
       updateContext({
         flowData: {
           seededMetrics: true,
+          seedMetricsError: undefined,
         },
       })
 
       setIsComplete(true)
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Something went wrong while seeding")
+      markSeedFailed(error instanceof Error ? error.message : "Something went wrong while seeding")
     }
   }
 
