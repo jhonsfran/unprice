@@ -147,7 +147,7 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
           <Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search feature"
+            placeholder="Search features"
             className="pl-8"
             onChange={(e) => {
               setFilter(e.target.value)
@@ -168,7 +168,9 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
                 <FileStack className="h-8 w-8" />
               </EmptyPlaceholder.Icon>
               <EmptyPlaceholder.Title>No features found</EmptyPlaceholder.Title>
-              <EmptyPlaceholder.Description>Create feature</EmptyPlaceholder.Description>
+              <EmptyPlaceholder.Description>
+                No library features match your search.
+              </EmptyPlaceholder.Description>
               <EmptyPlaceholder.Action>
                 <FeatureDialog
                   defaultValues={{

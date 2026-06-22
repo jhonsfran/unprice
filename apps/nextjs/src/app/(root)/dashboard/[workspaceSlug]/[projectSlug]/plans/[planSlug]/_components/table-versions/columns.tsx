@@ -43,7 +43,9 @@ function PlanVersionTitleCell({ row }: { row: { original: PlanVersion } }) {
 
       {row.original.description && (
         <div className="line-clamp-1 hidden text-muted-foreground text-xs md:inline">
-          {`${row.original.description.slice(0, 40)}...`}
+          {row.original.description.length > 40
+            ? `${row.original.description.slice(0, 40)}…`
+            : row.original.description}
         </div>
       )}
     </SuperLink>

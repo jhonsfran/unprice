@@ -86,7 +86,7 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
           <Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
           <Input
             type="search"
-            placeholder="Search feature in plan"
+            placeholder="Search attached features"
             className="pl-8"
             onChange={(e) => setFilter(e.target.value)}
           />
