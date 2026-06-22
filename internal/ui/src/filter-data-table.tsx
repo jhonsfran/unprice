@@ -71,6 +71,8 @@ export interface FilterDataTableProps<TData, TValue> {
   filters?: FilterDataTableFilter[]
   searchColumn?: string
   searchPlaceholder?: string
+  searchValue?: string
+  onSearchValueChange?: (value: string) => void
   emptyTitle?: string
   emptyDescription?: string
   emptyState?: React.ReactNode
@@ -79,6 +81,7 @@ export interface FilterDataTableProps<TData, TValue> {
   getRowClassName?: (row: TData) => string | undefined
   toolbarActions?: FilterDataTableToolbarActions<TData>
   initialColumnVisibility?: VisibilityState
+  initialColumnFilters?: ColumnFiltersState
   hasMore?: boolean
   isLoading?: boolean
   isRefreshing?: boolean
@@ -93,6 +96,8 @@ export function FilterDataTable<TData, TValue>({
   filters = [],
   searchColumn,
   searchPlaceholder = "Search data table...",
+  searchValue: controlledSearchValue,
+  onSearchValueChange,
   emptyTitle = "No results",
   emptyDescription = "There are no rows for the selected filters.",
   emptyState,
@@ -101,6 +106,7 @@ export function FilterDataTable<TData, TValue>({
   getRowClassName,
   toolbarActions,
   initialColumnVisibility,
+  initialColumnFilters,
   hasMore = false,
   isLoading = false,
   isRefreshing = false,
@@ -108,7 +114,9 @@ export function FilterDataTable<TData, TValue>({
   loadingLabel = "Loading rows",
   onLoadMore,
 }: FilterDataTableProps<TData, TValue>) {
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
+    initialColumnFilters ?? []
+  )
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(
     initialColumnVisibility ?? {}
@@ -137,10 +145,11 @@ export function FilterDataTable<TData, TValue>({
     getFacetedUniqueValues: getFacetedUniqueValues(),
   })
 
-  const searchValue =
+  const localSearchValue =
     searchColumn && table.getColumn(searchColumn)
       ? String(table.getColumn(searchColumn)?.getFilterValue() ?? "")
       : ""
+  const searchValue = controlledSearchValue ?? localSearchValue
   const loadMoreRef = React.useRef<HTMLDivElement | null>(null)
   const loadMoreRequestedRef = React.useRef(false)
   const canLoadMore = Boolean(hasMore && onLoadMore)
@@ -215,9 +224,11 @@ export function FilterDataTable<TData, TValue>({
                 <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
                 <Input
                   value={searchValue}
-                  onChange={(event) =>
-                    table.getColumn(searchColumn)?.setFilterValue(event.target.value)
-                  }
+                  onChange={(event) => {
+                    const nextValue = event.target.value
+                    table.getColumn(searchColumn)?.setFilterValue(nextValue)
+                    onSearchValueChange?.(nextValue)
+                  }}
                   placeholder={searchPlaceholder}
                   className="h-10 pl-9"
                 />

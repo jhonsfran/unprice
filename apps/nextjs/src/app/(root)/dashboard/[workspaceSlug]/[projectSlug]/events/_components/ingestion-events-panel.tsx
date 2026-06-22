@@ -288,6 +288,20 @@ export function IngestionEventsPanel() {
         filters={filterOptions}
         searchColumn="eventSlug"
         searchPlaceholder="Search events"
+        searchValue={filters.search ?? ""}
+        onSearchValueChange={(value) => {
+          void setFilters({ search: value || null })
+        }}
+        initialColumnFilters={
+          filters.search
+            ? [
+                {
+                  id: "eventSlug",
+                  value: filters.search,
+                },
+              ]
+            : []
+        }
         emptyTitle={queryError ? "Events could not be loaded" : "No events"}
         emptyDescription={
           queryError?.message ?? "No ingestion events were found for the selected filters."
