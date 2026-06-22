@@ -34,7 +34,7 @@ export default function MobileSidebar({
                 <span className="text-muted-foreground">Quick access to project navigation</span>
               </DrawerDescription>
             </DrawerHeader>
-            <div className="w-full overflow-y-auto pb-4">{children}</div>
+            <div className="flex flex-col gap-2 overflow-y-auto px-4 pt-4 pb-24">{children}</div>
           </div>
         </div>
       </DrawerContent>
