@@ -1,7 +1,7 @@
 import {
+  type WalletCredit,
   currencySchema,
   customerSelectSchema,
-  type WalletCredit,
   walletCreditSelectSchema,
 } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"

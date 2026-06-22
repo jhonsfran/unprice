@@ -5,7 +5,7 @@ import { useEffect } from "react"
 import { type UserJotUser, useUserJot } from "~/hooks/use-userjot"
 
 export function UserJotWrapper({ user }: { user: UserJotUser | null }) {
-  const { setTheme, identify, isReady, hide, show } = useUserJot()
+  const { setTheme, identify, isReady, hide } = useUserJot()
   const { theme } = useTheme()
 
   useEffect(() => {
@@ -22,15 +22,13 @@ export function UserJotWrapper({ user }: { user: UserJotUser | null }) {
     const syncMobileWidget = () => {
       if (media.matches) {
         hide()
-      } else {
-        show()
       }
     }
 
     syncMobileWidget()
     media.addEventListener("change", syncMobileWidget)
     return () => media.removeEventListener("change", syncMobileWidget)
-  }, [hide, show, isReady])
+  }, [hide, isReady])
 
   useEffect(() => {
     if (isReady) {

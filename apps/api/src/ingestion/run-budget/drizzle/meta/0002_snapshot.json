@@ -227,10 +227,7 @@
       "indexes": {
         "run_spend_buckets_run_bucket_idx": {
           "name": "run_spend_buckets_run_bucket_idx",
-          "columns": [
-            "run_id",
-            "bucket_key"
-          ],
+          "columns": ["run_id", "bucket_key"],
           "isUnique": true
         }
       },
