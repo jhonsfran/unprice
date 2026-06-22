@@ -20,7 +20,7 @@
     }
   },
   "devDependencies": {
-    "@types/node": "20.11.24",
+    "@types/node": "24.13.2",
     "@unprice/tsconfig": "workspace:*",
     "typescript": "^5.3.3",
     "vitest": "^2.1.9"

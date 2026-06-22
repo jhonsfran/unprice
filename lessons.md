@@ -415,8 +415,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   before showing an empty state.
 - 2026-05-07: Keep subscription creation drafts open while provider setup runs; refetch with
   `skipCache` and auto-select the first method.
-- 2026-06-13: When commits fail with react-doctor errors, run `npx react-doctor@latest --verbose`
-  in `apps/nextjs`, read the full diagnostics directory it outputs, and fix each rule's root cause.
+- 2026-06-13: When commits fail with react-doctor errors, run `pnpm run doctor`, read the full
+  diagnostics directory it outputs, and fix each rule's root cause.
   Do not suppress rules. Common fixes: move hooks before early returns (rules-of-hooks), derive
   state instead of syncing via useEffect (no-derived-state), hoist `new Intl.*` to module scope
   (js-hoist-intl), use `next/dynamic` for heavy chart libs (prefer-dynamic-import), replace
@@ -436,6 +436,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 
 ## Tests, Tooling, And Docs
 
+- 2026-06-22: `millionco/react-doctor@v2` passes `--scope` during PR scans; keep its
+  `version` input on `react-doctor` 0.5.x or newer. The repo now pins Node 24.17.0, so keep the
+  root `doctor` script and the action on the same Node 24 toolchain. Keep the root script on the
+  installed `react-doctor` binary so pnpm owns native optional dependencies.
 - 2026-05-23: `pnpm --filter <package> test <path>` resolves test filters from the package
   directory; use package-relative paths such as `src/ingestion/...`, not repo-root paths.
 - 2026-05-09: For `docs/plans/**`, use

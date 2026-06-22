@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "engineStrict": true,
   "scripts": {
@@ -91,7 +91,7 @@
     "@tanstack/react-query-devtools": "5.80.3",
     "@types/js-cookie": "^3.0.6",
     "@types/mdx": "^2.0.13",
-    "@types/node": "20.11.24",
+    "@types/node": "24.13.2",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@unprice/tailwind-config": "workspace:*",

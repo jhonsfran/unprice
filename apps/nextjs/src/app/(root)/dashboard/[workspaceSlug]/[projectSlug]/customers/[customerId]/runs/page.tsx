@@ -59,7 +59,7 @@ export default async function CustomerRunsPage(props: {
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/wallet`}>Wallet</SuperLink>
+            <SuperLink href={`${baseUrl}/wallet`}>Wallet & Credits</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>

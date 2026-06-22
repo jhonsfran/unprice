@@ -25,7 +25,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20250121.0",
-    "@types/node": "20.11.24",
+    "@types/node": "24.13.2",
     "@unprice/tsconfig": "workspace:^",
     "dinero.js": "2.0.2",
     "drizzle-kit": "^0.30.5",

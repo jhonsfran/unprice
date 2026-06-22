@@ -29,11 +29,11 @@ runs:
         architecture: "x64"
         cache: 'pip'
 
-    - name: Setup Node 20
+    - name: Setup Node 24
       uses: actions/setup-node@v4
       if: ${{ inputs.ts == 'true' }}
       with:
-        node-version: 20.17.0
+        node-version: 24.17.0
         cache: 'pnpm'
 
     - name: Get pnpm store directory

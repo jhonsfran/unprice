@@ -2,7 +2,7 @@
   "name": "unprice",
   "private": true,
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "workspaces": ["apps/*", "packages/*"],
   "engineStrict": true,
@@ -44,19 +44,20 @@
     "release": "pnpm build && pnpm changeset publish",
     "prepare": "husky",
     "preinstall": "npx only-allow pnpm",
-    "doctor": "npx react-doctor@0.4.0"
+    "doctor": "react-doctor . --scope changed --blocking error --no-score"
   },
   "dependencies": {
     "@biomejs/biome": "1.9.4",
     "@changesets/cli": "^2.27.7",
     "@manypkg/cli": "^0.21.2",
     "@turbo/gen": "^1.12.4",
-    "@types/node": "20.11.24",
+    "@types/node": "24.13.2",
     "cross-env": "^7.0.3",
     "cz-conventional-changelog": "^3.3.0",
     "husky": "^9.1.4",
     "knip": "^5.17.4",
     "lint-staged": "^15.2.9",
+    "react-doctor": "0.5.8",
     "turbo": "2.3.3",
     "typescript": "^5.3.3"
   },

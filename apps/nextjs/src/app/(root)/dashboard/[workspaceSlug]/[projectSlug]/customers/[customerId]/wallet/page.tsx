@@ -15,6 +15,8 @@ import { WalletBalanceSummary } from "../../_components/wallet/wallet-balance-su
 
 export const dynamic = "force-dynamic"
 
+const walletCreditStatuses = ["active", "expired"] as const
+
 export default async function CustomerWalletPage({
   params,
 }: {
@@ -38,7 +40,6 @@ export default async function CustomerWalletPage({
     ...credit,
     currency: wallet.currency,
   }))
-  const walletCreditStatuses = ["active", "expired"] as const
 
   return (
     <DashboardShell
@@ -61,7 +62,7 @@ export default async function CustomerWalletPage({
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild active>
-            <SuperLink href={`${baseUrl}/wallet`}>Wallet</SuperLink>
+            <SuperLink href={`${baseUrl}/wallet`}>Wallet & Credits</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>

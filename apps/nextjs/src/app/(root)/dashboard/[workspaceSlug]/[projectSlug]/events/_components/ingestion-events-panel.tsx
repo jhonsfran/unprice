@@ -36,6 +36,8 @@ const EVENTS_PAGE_SIZE = 50
 const MAX_REPLAY_IDS = 50
 const MAX_STORED_REPLAY_IDS = 500
 
+const TABLE_LOADING_STATE = <EmptyPlaceholder className="min-h-[300px] border-none" isLoading />
+
 function today(): Date {
   return new Date()
 }
@@ -67,7 +69,7 @@ function resolveWindow(
   }
 }
 
-export function IngestionEventsPanel() {
+function useIngestionEventsData() {
   const trpc = useTRPC()
   const { workspaceSlug, projectSlug } = useParams<{
     workspaceSlug: string
@@ -256,13 +258,78 @@ export function IngestionEventsPanel() {
   const isInitialLoading = isLoading && rows.length === 0
   const isRefreshing = isFetching && !isInitialLoading && !isFetchingNextPage
 
+  return {
+    workspaceSlug,
+    projectSlug,
+    freshnessGeneratedAt: firstPage?.freshness.generatedAt,
+    isRefreshing,
+    processed,
+    rejected,
+    failed,
+    total,
+    windowLabel,
+    rows,
+    filterOptions,
+    searchValue: filters.search ?? "",
+    setFilters,
+    initialColumnFilters: filters.search
+      ? [{ id: "eventSlug" as const, value: filters.search }]
+      : [],
+    queryError,
+    isInitialLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    handleLoadMore,
+    handleReplay,
+    replayIsPending: replayMutation.isPending,
+    blockedReplayIds,
+    hasReplayableRows,
+    queuedReplayIds,
+    pendingReplayIds,
+    visibleDetailsEvent,
+    detailsEvent,
+    setDetailsEvent,
+    handleDetailsOpenChange,
+  }
+}
+
+export function IngestionEventsPanel() {
+  const {
+    workspaceSlug,
+    projectSlug,
+    freshnessGeneratedAt,
+    isRefreshing,
+    processed,
+    rejected,
+    failed,
+    total,
+    windowLabel,
+    rows,
+    filterOptions,
+    searchValue,
+    setFilters,
+    initialColumnFilters,
+    queryError,
+    isInitialLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    handleLoadMore,
+    handleReplay,
+    replayIsPending,
+    blockedReplayIds,
+    hasReplayableRows,
+    queuedReplayIds,
+    pendingReplayIds,
+    visibleDetailsEvent,
+    detailsEvent,
+    setDetailsEvent,
+    handleDetailsOpenChange,
+  } = useIngestionEventsData()
+
   return (
     <div className="space-y-6">
       <div className="flex min-h-4 items-center justify-end">
-        <FreshnessIndicator
-          generatedAt={firstPage?.freshness.generatedAt}
-          isFetching={isRefreshing}
-        />
+        <FreshnessIndicator generatedAt={freshnessGeneratedAt} isFetching={isRefreshing} />
       </div>
       <IngestionStatsCards
         processed={processed}
@@ -280,7 +347,7 @@ export function IngestionEventsPanel() {
           queuedReplayIds,
           pendingReplayIds,
           blockedReplayIds,
-          isReplayPending: replayMutation.isPending,
+          isReplayPending: replayIsPending,
           hasReplayableRows,
         })}
         data={rows}
@@ -288,20 +355,11 @@ export function IngestionEventsPanel() {
         filters={filterOptions}
         searchColumn="eventSlug"
         searchPlaceholder="Search events"
-        searchValue={filters.search ?? ""}
+        searchValue={searchValue}
         onSearchValueChange={(value) => {
           void setFilters({ search: value || null })
         }}
-        initialColumnFilters={
-          filters.search
-            ? [
-                {
-                  id: "eventSlug",
-                  value: filters.search,
-                },
-              ]
-            : []
-        }
+        initialColumnFilters={initialColumnFilters}
         emptyTitle={queryError ? "Events could not be loaded" : "No events"}
         emptyDescription={
           queryError?.message ?? "No ingestion events were found for the selected filters."
@@ -319,7 +377,7 @@ export function IngestionEventsPanel() {
             </EmptyPlaceholder.Description>
           </EmptyPlaceholder>
         }
-        loadingState={<EmptyPlaceholder className="min-h-[300px] border-none" isLoading />}
+        loadingState={TABLE_LOADING_STATE}
         getRowClassName={(row) =>
           row.state === "failed"
             ? "bg-destructive/10"
@@ -349,7 +407,7 @@ export function IngestionEventsPanel() {
               type="button"
               variant="outline"
               size="sm"
-              disabled={replayMutation.isPending || isOverReplayLimit}
+              disabled={replayIsPending || isOverReplayLimit}
               onClick={() => {
                 void handleReplay(canonicalAuditIds)
                   .then(() => clearSelection())
@@ -383,8 +441,8 @@ export function IngestionEventsPanel() {
         }
         isReplayPending={
           visibleDetailsEvent
-            ? isReplayQueued(visibleDetailsEvent, pendingReplayIds) || replayMutation.isPending
-            : replayMutation.isPending
+            ? isReplayQueued(visibleDetailsEvent, pendingReplayIds) || replayIsPending
+            : replayIsPending
         }
       />
     </div>
