@@ -42,5 +42,5 @@ export const getWallet = protectedProjectProcedure
       })
     }
 
-    return getCustomerWalletOutputSchema.parse(val)
+    return val
   })

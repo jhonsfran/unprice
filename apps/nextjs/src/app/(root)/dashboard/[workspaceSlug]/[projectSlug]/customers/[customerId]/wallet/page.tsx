@@ -1,43 +1,43 @@
-import { runStatusSchema } from "@unprice/db/validators"
+import { walletCreditSourceSchema } from "@unprice/db/validators"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Typography } from "@unprice/ui/typography"
 import { notFound } from "next/navigation"
-import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
-import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
 import { CustomerActions } from "../../_components/customers/customer-actions"
-import { columns as runsColumns } from "../../_components/runs/table-runs/columns"
+import { columns as walletCreditColumns } from "../../_components/wallet/table-wallet-credits/columns"
+import { WalletBalanceSummary } from "../../_components/wallet/wallet-balance-summary"
 
 export const dynamic = "force-dynamic"
 
-export default async function CustomerRunsPage(props: {
+export default async function CustomerWalletPage({
+  params,
+}: {
   params: {
     workspaceSlug: string
     projectSlug: string
     customerId: string
   }
-  searchParams: SearchParams
 }) {
-  const { params, searchParams } = props
   const { workspaceSlug, projectSlug, customerId } = params
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
-  const filters = dataTableParams(searchParams)
-
-  const { customer, runs, pageCount } = await api.customers.getRuns({
+  const { customer, wallet } = await api.customers.getWallet({
     customerId,
-    ...filters,
   })
-  const tablePageCount = Math.max(pageCount, 1)
 
   if (!customer) {
     notFound()
   }
+
+  const walletCredits = wallet.credits.map((credit) => ({
+    ...credit,
+    currency: wallet.currency,
+  }))
 
   return (
     <DashboardShell
@@ -59,61 +59,53 @@ export default async function CustomerRunsPage(props: {
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild>
+          <TabNavigationLink asChild active>
             <SuperLink href={`${baseUrl}/wallet`}>Wallet</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild active>
+          <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/runs`}>Runs</SuperLink>
           </TabNavigationLink>
         </div>
       </TabNavigation>
-      <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            Budgeted runs for this customer
-          </Typography>
-        </div>
-        <Suspense
-          fallback={
-            <DataTableSkeleton
-              columnCount={9}
-              searchableColumnCount={1}
-              filterableColumnCount={2}
-              cellWidths={[
-                "12rem",
-                "10rem",
-                "12rem",
-                "14rem",
-                "10rem",
-                "10rem",
-                "10rem",
-                "12rem",
-                "12rem",
-              ]}
+
+      <div className="mt-4 flex flex-col gap-6">
+        <WalletBalanceSummary wallet={wallet} />
+
+        <div>
+          <div className="flex flex-col px-1 py-4">
+            <Typography variant="p" affects="removePaddingMargin">
+              Active wallet credits for this customer
+            </Typography>
+          </div>
+          <Suspense
+            fallback={
+              <DataTableSkeleton
+                columnCount={6}
+                searchableColumnCount={1}
+                filterableColumnCount={1}
+                cellWidths={["18rem", "10rem", "10rem", "10rem", "14rem", "14rem"]}
+              />
+            }
+          >
+            <DataTable
+              columns={walletCreditColumns}
+              data={walletCredits}
+              filterOptions={{
+                filterBy: "id",
+                filterColumns: true,
+                filterSelectors: {
+                  source: walletCreditSourceSchema.options.map((value) => ({
+                    value,
+                    label: value,
+                  })),
+                },
+              }}
             />
-          }
-        >
-          <DataTable
-            pageCount={tablePageCount}
-            columns={runsColumns}
-            data={runs}
-            filterOptions={{
-              filterBy: "id",
-              filterColumns: true,
-              filterDateRange: true,
-              filterServerSide: true,
-              filterSelectors: {
-                status: runStatusSchema.options.map((value) => ({
-                  value,
-                  label: value,
-                })),
-              },
-            }}
-          />
-        </Suspense>
+          </Suspense>
+        </div>
       </div>
     </DashboardShell>
   )
