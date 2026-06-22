@@ -67,7 +67,7 @@ export function DeleteProject({
           </DialogTrigger>
           {!!isMain && (
             <span className="mr-auto px-2 text-muted-foreground text-xs">
-              You can not delete the main project.
+              You cannot delete the main project.
             </span>
           )}
           <DialogContent>
@@ -77,7 +77,7 @@ export function DeleteProject({
             </DialogHeader>
             <div className="flex items-center font-bold text-destructive">
               <Warning className="mr-2 h-6 w-6" />
-              <p>This action can not be reverted</p>
+              <p>This action cannot be undone.</p>
             </div>
             <DialogFooter>
               <DialogClose asChild>

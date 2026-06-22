@@ -287,7 +287,7 @@ export function IngestionEventsPanel() {
         getRowId={(row) => row.canonicalAuditId}
         filters={filterOptions}
         searchColumn="eventSlug"
-        searchPlaceholder="Search events..."
+        searchPlaceholder="Search events"
         emptyTitle={queryError ? "Events could not be loaded" : "No events"}
         emptyDescription={
           queryError?.message ?? "No ingestion events were found for the selected filters."

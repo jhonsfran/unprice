@@ -109,14 +109,14 @@ export const columns: ColumnDef<PlanVersion>[] = [
   {
     accessorKey: "subs",
     enableResizing: true,
-    header: ({ column }) => <DataTableColumnHeader column={column} title="subs" />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Subscribers" />,
     cell: ({ row }) => <Badge>{row.original.subscriptions}</Badge>,
     size: 20,
   },
   {
     accessorKey: "interval",
     enableResizing: true,
-    header: ({ column }) => <DataTableColumnHeader column={column} title="interval" />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Billing interval" />,
     cell: ({ row }) => <Badge>{row.original.billingConfig.name}</Badge>,
     size: 20,
   },
@@ -185,7 +185,7 @@ export const columns: ColumnDef<PlanVersion>[] = [
   {
     accessorKey: "planType",
     enableResizing: true,
-    header: ({ column }) => <DataTableColumnHeader column={column} title="plan Type" />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Plan type" />,
     cell: ({ row }) => <Badge className="text-xs">{row.original.billingConfig.planType}</Badge>,
     size: 40,
   },

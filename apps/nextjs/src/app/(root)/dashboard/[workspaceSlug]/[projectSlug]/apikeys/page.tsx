@@ -32,7 +32,7 @@ export default async function ApiKeysPage(props: {
       header={
         <HeaderTab
           title="API Keys"
-          description="All the apis of the system"
+          description="Manage project API keys and default customer access."
           action={<NewApiKeyDialog />}
         />
       }

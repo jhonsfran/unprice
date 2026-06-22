@@ -62,7 +62,7 @@ export function TransferProjectToPersonal({
 
           {!!isMain && (
             <span className="mr-auto px-2 text-muted-foreground text-xs">
-              You can not transfer the main project.
+              You cannot transfer the main project.
             </span>
           )}
           <DialogContent>

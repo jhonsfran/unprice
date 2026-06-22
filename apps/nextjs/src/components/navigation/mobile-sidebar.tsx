@@ -31,7 +31,7 @@ export default function MobileSidebar({
             <DrawerHeader className="w-full">
               <DrawerTitle>Menu</DrawerTitle>
               <DrawerDescription>
-                <span className="text-muted-foreground">Quick access to</span>
+                <span className="text-muted-foreground">Quick access to project navigation</span>
               </DrawerDescription>
             </DrawerHeader>
             <div className="w-full overflow-y-auto pb-4">{children}</div>

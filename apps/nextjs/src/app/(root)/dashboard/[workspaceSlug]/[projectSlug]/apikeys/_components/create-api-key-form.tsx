@@ -259,7 +259,7 @@ export default function CreateApiKeyForm(props: {
             name="expiresAt"
             render={({ field }) => (
               <FormItem className="flex flex-col">
-                <FormLabel>Exiration date</FormLabel>
+                <FormLabel>Expiration date</FormLabel>
                 <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                   <PopoverTrigger asChild>
                     <FormControl>
@@ -296,8 +296,8 @@ export default function CreateApiKeyForm(props: {
                   </PopoverContent>
                 </Popover>
                 <FormDescription>
-                  We <b>strongly recommend</b> you setting an expiration date for your API key, but
-                  you can also leave it blank to create a permanent key.
+                  We <b>strongly recommend</b> setting an expiration date for your API key, but you
+                  can also leave it blank to create a permanent key.
                 </FormDescription>
                 <FormMessage />
               </FormItem>

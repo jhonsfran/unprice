@@ -564,7 +564,7 @@ export function MeterConfigFormField({
                 >
                   <Command>
                     {shouldShowEventSearch ? (
-                      <CommandInput className="h-9 py-2 text-sm" placeholder="Search events..." />
+                      <CommandInput className="h-9 py-2 text-sm" placeholder="Search events" />
                     ) : null}
                     <CommandList className="overflow-hidden">
                       <CommandEmpty>No events found.</CommandEmpty>
