@@ -103,6 +103,11 @@ export default async function CustomerWalletPage({
             <DataTable
               columns={walletCreditColumns}
               data={walletCredits}
+              emptyState={{
+                title: "No wallet credits",
+                description: "This customer has no issued, active, or expired wallet credits yet.",
+              }}
+              hidePaginationWhenEmpty
               filterOptions={{
                 filterBy: "id",
                 filterColumns: true,

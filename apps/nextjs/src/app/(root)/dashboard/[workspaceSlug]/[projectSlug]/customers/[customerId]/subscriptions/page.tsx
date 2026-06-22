@@ -107,6 +107,11 @@ export default async function CustomerPage({
           <DataTable
             columns={columns}
             data={customer.subscriptions}
+            emptyState={{
+              title: "No subscriptions",
+              description: "This customer does not have an active or historical subscription yet.",
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "customerId",
               filterColumns: true,

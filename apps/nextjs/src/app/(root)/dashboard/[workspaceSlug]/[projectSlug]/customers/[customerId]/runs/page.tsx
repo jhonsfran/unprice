@@ -33,7 +33,6 @@ export default async function CustomerRunsPage(props: {
     customerId,
     ...filters,
   })
-  const tablePageCount = Math.max(pageCount, 1)
 
   if (!customer) {
     notFound()
@@ -97,9 +96,14 @@ export default async function CustomerRunsPage(props: {
           }
         >
           <DataTable
-            pageCount={tablePageCount}
+            pageCount={pageCount}
             columns={runsColumns}
             data={runs}
+            emptyState={{
+              title: "No runs",
+              description: "Budgeted runs will appear after usage is evaluated for this customer.",
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "id",
               filterColumns: true,

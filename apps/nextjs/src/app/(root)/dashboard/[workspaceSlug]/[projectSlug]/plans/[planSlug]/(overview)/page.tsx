@@ -135,6 +135,12 @@ export default async function PlanPage({
           <DataTable
             columns={columns}
             data={plan.versions}
+            emptyState={{
+              title: "No versions",
+              description:
+                "Create a draft version to configure pricing and features for this plan.",
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "title",
               filterColumns: true,

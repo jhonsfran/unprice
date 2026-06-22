@@ -112,6 +112,12 @@ export default async function CustomerPage(props: {
             pageCount={pageCount}
             columns={invoicesColumns}
             data={invoices}
+            emptyState={{
+              title: "No invoices",
+              description:
+                "Invoices will appear here after this customer has billable subscriptions.",
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "id",
               filterColumns: true,

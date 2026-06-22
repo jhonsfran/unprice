@@ -51,6 +51,12 @@ export default async function ApiKeysPage(props: {
           pageCount={pageCount}
           columns={columns}
           data={apikeys}
+          emptyState={{
+            title: "No API keys",
+            description:
+              "Create an API key when you are ready to call this project from an application.",
+          }}
+          hidePaginationWhenEmpty
           filterOptions={{
             filterBy: "name",
             filterColumns: true,
