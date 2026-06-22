@@ -6,12 +6,15 @@ import type { Env } from "~/env"
 import {
   type ApplyRunSyncEventInput,
   type EndRunInput,
+  type FlushRunBudgetCapturesForInvoicingInput,
+  type FlushRunBudgetCapturesForInvoicingResult,
   type GetRunStatusInput,
   type RunBudgetDecision,
   type RunBudgetSummary,
   type StartRunInput,
   applyRunSyncEventInputSchema,
   endRunInputSchema,
+  flushRunBudgetCapturesForInvoicingInputSchema,
   getRunStatusInputSchema,
   startRunInputSchema,
 } from "./contracts"
@@ -222,18 +225,60 @@ export class RunBudgetDO extends DurableObject {
   /** Flush pending captures to wallet. Called by alarm and endRun. */
   async flushCaptures(): Promise<void> {
     await this.ready
+    await this.flushCaptureBuckets()
+  }
 
-    // Get all unflushed buckets
-    const buckets = await this.db.query.runSpendBuckets.findMany({
-      where: sql`${schema.runSpendBuckets.consumedAmount} > ${schema.runSpendBuckets.flushedAmount}`,
+  /** Flush pending captures for one invoice statement before invoice materialization. */
+  async flushCapturesForInvoicing(
+    rawInput: FlushRunBudgetCapturesForInvoicingInput
+  ): Promise<FlushRunBudgetCapturesForInvoicingResult> {
+    await this.ready
+    const input = flushRunBudgetCapturesForInvoicingInputSchema.parse(rawInput)
+    const result = await this.flushCaptureBuckets({
+      failOnCaptureError: true,
+      statementKey: input.statementKey,
+      billingPeriodIds: input.billingPeriodIds,
     })
 
+    return {
+      ok: true,
+      ...result,
+    }
+  }
+
+  private async flushCaptureBuckets(filter?: {
+    billingPeriodIds?: string[]
+    failOnCaptureError?: boolean
+    statementKey?: string
+  }): Promise<{ flushed: number; skipped: number }> {
+    const billingPeriodIds = new Set(filter?.billingPeriodIds ?? [])
+
+    // Get all unflushed buckets
+    const unfilteredBuckets = await this.db.query.runSpendBuckets.findMany({
+      where: sql`${schema.runSpendBuckets.consumedAmount} > ${schema.runSpendBuckets.flushedAmount}`,
+    })
+    const buckets = unfilteredBuckets.filter((bucket) => {
+      if (!filter?.statementKey && billingPeriodIds.size === 0) return true
+      return (
+        bucket.statementKey === filter?.statementKey ||
+        (bucket.billingPeriodId.length > 0 && billingPeriodIds.has(bucket.billingPeriodId))
+      )
+    })
+
+    let flushed = 0
+    let skipped = 0
     for (const bucket of buckets) {
       const pendingAmount = bucket.consumedAmount - bucket.flushedAmount
-      if (pendingAmount <= 0) continue
+      if (pendingAmount <= 0) {
+        skipped++
+        continue
+      }
 
       const run = await this.loadRun(bucket.runId)
-      if (!run?.reservationId) continue
+      if (!run?.reservationId) {
+        skipped++
+        continue
+      }
 
       const intentKey = `run-capture:${bucket.runId}:${bucket.bucketKey}:${bucket.flushedAmount}`
 
@@ -312,8 +357,19 @@ export class RunBudgetDO extends DurableObject {
             updatedAt: Date.now(),
           })
           .where(eq(schema.runCaptureIntents.intentKey, intentKey))
+
+        if (filter?.failOnCaptureError) {
+          throw error
+        }
+
+        skipped++
+        continue
       }
+
+      flushed++
     }
+
+    return { flushed, skipped }
   }
 
   /** Alarm handler: retry failed captures and expire runs. */

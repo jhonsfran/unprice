@@ -978,6 +978,156 @@ describe("RunBudgetDO", () => {
     )
   })
 
+  it("flushes only matching statement buckets for invoicing", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const entitlementWithTwoPeriods = {
+      ...TEST_ENTITLEMENT_FIELDS,
+      entitlement: {
+        ...TEST_ENTITLEMENT_FIELDS.entitlement,
+        billingPeriods: [
+          ...TEST_ENTITLEMENT_FIELDS.entitlement.billingPeriods,
+          {
+            billingPeriodId: "bp_2",
+            cycleEndAt: BASE_NOW + 172_800_000,
+            cycleStartAt: BASE_NOW + 86_400_000,
+            featurePlanVersionItemId: "item_1",
+            statementKey: "stmt_2",
+          },
+        ],
+      },
+    }
+
+    testState.entitlementWindowApply
+      .mockResolvedValueOnce({
+        allowed: true,
+        meterFacts: [
+          {
+            amount: 5000,
+            customer_entitlement_id: "ce_1",
+            statement_key: "stmt_1",
+            period_key: "period_1",
+            feature_id: "feat_1",
+            period_start_at: BASE_NOW - 60_000,
+            period_end_at: BASE_NOW + 60_000,
+            currency: "USD",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        allowed: true,
+        meterFacts: [
+          {
+            amount: 7000,
+            customer_entitlement_id: "ce_1",
+            statement_key: "stmt_2",
+            period_key: "period_2",
+            feature_id: "feat_1",
+            period_start_at: BASE_NOW + 86_400_000,
+            period_end_at: BASE_NOW + 172_800_000,
+            currency: "USD",
+          },
+        ],
+      })
+
+    await durable.startRun({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      traceId: "trace_invoice_flush_1",
+      parentRunId: null,
+      runId: "brun_invoice_flush",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_invoice_flush",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    await durable.applySyncEvent({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "brun_invoice_flush",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_invoice_flush_1",
+      event: {
+        id: "evt_invoice_flush_1",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 5 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...entitlementWithTwoPeriods,
+    })
+
+    await durable.applySyncEvent({
+      workloadType: "workflow",
+      workloadId: "daily-research",
+      runId: "brun_invoice_flush",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_invoice_flush_2",
+      event: {
+        id: "evt_invoice_flush_2",
+        slug: "tokens_used",
+        timestamp: BASE_NOW + 86_400_000,
+        properties: { amount: 7 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW + 86_400_000,
+      ...entitlementWithTwoPeriods,
+    })
+
+    const invoicingFlush = await durable.flushCapturesForInvoicing({
+      statementKey: "stmt_1",
+      billingPeriodIds: ["bp_1"],
+    })
+
+    expect(invoicingFlush).toEqual({ ok: true, flushed: 1, skipped: 0 })
+    expect(testState.captureReservationUsage).toHaveBeenCalledTimes(1)
+    expect(testState.captureReservationUsage).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        amount: 5000,
+        billingPeriodId: "bp_1",
+        statementKey: "stmt_1",
+      })
+    )
+
+    await durable.flushCaptures()
+
+    expect(testState.captureReservationUsage).toHaveBeenCalledTimes(2)
+    expect(testState.captureReservationUsage).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        amount: 7000,
+        billingPeriodId: "bp_2",
+        statementKey: "stmt_2",
+      })
+    )
+  })
+
   it("defers expiration while capture intents remain unresolved", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
@@ -1939,6 +2089,7 @@ async function loadRunBudgetDO() {
       endRun: (input: unknown) => Promise<unknown>
       getRunStatus: (input: unknown) => Promise<unknown>
       flushCaptures: () => Promise<void>
+      flushCapturesForInvoicing: (input: unknown) => Promise<unknown>
       alarm: () => Promise<void>
     }
   }

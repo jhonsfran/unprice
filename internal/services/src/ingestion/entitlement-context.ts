@@ -1,4 +1,4 @@
-import { type Database, and, eq, gt, inArray, lte, ne } from "@unprice/db"
+import { type Database, and, eq, gt, inArray, lte } from "@unprice/db"
 import { billingPeriods } from "@unprice/db/schema"
 import type {
   BillingConfig,
@@ -309,7 +309,7 @@ export class IngestionEntitlementContextLoader {
           eq(billingPeriods.projectId, params.projectId),
           eq(billingPeriods.customerId, params.customerId),
           inArray(billingPeriods.subscriptionItemId, subscriptionItemIds),
-          ne(billingPeriods.status, "voided"),
+          eq(billingPeriods.status, "pending"),
           lte(billingPeriods.cycleStartAt, params.endAt),
           gt(billingPeriods.cycleEndAt, params.startAt)
         )

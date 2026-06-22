@@ -23,6 +23,10 @@ vi.mock("~/ingestion/entitlements/client", () => ({
   },
 }))
 
+const runBudgetMocks = vi.hoisted(() => ({
+  getByName: vi.fn(),
+}))
+
 import { registerFlushReservationsForInvoicingV1 } from "./flushReservationsForInvoicingV1"
 
 const verifiedKey = {
@@ -181,10 +185,48 @@ describe("flushReservationsForInvoicingV1 route", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ ok: true, flushed: 0, skipped: 1 })
   })
+
+  it("flushes matching run-budget captures before invoice materialization", async () => {
+    const flushCapturesForInvoicing = vi
+      .fn()
+      .mockResolvedValue({ ok: true, flushed: 2, skipped: 0 })
+    Object.defineProperty(flushCapturesForInvoicing, "call", {
+      value: vi.fn(() => {
+        throw new Error('Could not serialize object of type "DurableObject"')
+      }),
+    })
+    runBudgetMocks.getByName.mockReturnValue({ flushCapturesForInvoicing })
+
+    const { app, env, executionCtx } = createTestApp({
+      billingPeriods: [{ cycleStartAt: 1_778_000_000_000, id: "bp_123" }],
+      budgetRuns: [{ id: "brun_123" }],
+      entitlements: [],
+    })
+
+    const response = await app.fetch(
+      buildRequest({
+        customerId: "cus_123",
+        subscriptionId: "sub_123",
+        subscriptionPhaseId: "phase_123",
+        statementKey: "stmt_123",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true, flushed: 2, skipped: 0 })
+    expect(runBudgetMocks.getByName).toHaveBeenCalledWith("development:proj_123:cus_123:brun_123")
+    expect(flushCapturesForInvoicing).toHaveBeenCalledWith({
+      statementKey: "stmt_123",
+      billingPeriodIds: ["bp_123"],
+    })
+  })
 })
 
 function createTestApp(options: {
-  billingPeriods: Array<{ id: string }>
+  billingPeriods: Array<{ cycleStartAt?: number; id: string }>
+  budgetRuns?: Array<{ id: string }>
   entitlements: Array<{ id: string; subscriptionId: string; subscriptionPhaseId: string }>
 }) {
   const app = new OpenAPIHono<HonoEnv>()
@@ -212,7 +254,14 @@ function createTestApp(options: {
     c.set("db", {
       query: {
         billingPeriods: {
-          findMany: vi.fn().mockResolvedValue(options.billingPeriods),
+          findMany: vi
+            .fn()
+            .mockResolvedValue(
+              options.billingPeriods.map((period) => ({ cycleStartAt: 0, ...period }))
+            ),
+        },
+        budgetRuns: {
+          findMany: vi.fn().mockResolvedValue(options.budgetRuns ?? []),
         },
       },
     })
@@ -232,6 +281,7 @@ function createTestApp(options: {
   const env = {
     APP_ENV: "development",
     entitlementwindow: {},
+    runbudget: { getByName: runBudgetMocks.getByName },
   }
 
   const executionCtx = {

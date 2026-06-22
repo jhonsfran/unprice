@@ -96,6 +96,17 @@ export const getRunStatusInputSchema = z.object({
   projectId: z.string().min(1),
 })
 
+export const flushRunBudgetCapturesForInvoicingInputSchema = z.object({
+  statementKey: z.string().min(1),
+  billingPeriodIds: z.array(z.string().min(1)).default([]),
+})
+
+export const flushRunBudgetCapturesForInvoicingResultSchema = z.object({
+  ok: z.literal(true),
+  flushed: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+})
+
 export const runBudgetDecisionSchema = z.object({
   allowed: z.boolean(),
   state: z.enum(["processed", "rejected"]),
@@ -111,5 +122,11 @@ export type StartRunInput = z.infer<typeof startRunInputSchema>
 export type ApplyRunSyncEventInput = z.infer<typeof applyRunSyncEventInputSchema>
 export type EndRunInput = z.infer<typeof endRunInputSchema>
 export type GetRunStatusInput = z.infer<typeof getRunStatusInputSchema>
+export type FlushRunBudgetCapturesForInvoicingInput = z.infer<
+  typeof flushRunBudgetCapturesForInvoicingInputSchema
+>
+export type FlushRunBudgetCapturesForInvoicingResult = z.infer<
+  typeof flushRunBudgetCapturesForInvoicingResultSchema
+>
 export type RunBudgetDecision = z.infer<typeof runBudgetDecisionSchema>
 export type RunBudgetSummary = z.infer<typeof runBudgetSummarySchema>

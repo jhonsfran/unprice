@@ -524,3 +524,7 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `EntitlementWindowDO`. The DO is addressed using the standard naming scheme
   (`${appEnv}:${projectId}:${customerId}:${customerEntitlementId}`) so it shares state with the
   normal ingestion path.
+- 2026-06-22: Invoice-time wallet reservation flushing must include both EntitlementWindowDO and
+  RunBudgetDO pending capture buckets for the statement key before invoice totals are projected.
+- 2026-06-22: Ingestion billing-period context should expose only `pending` periods; allowing
+  `invoiced` periods lets late events create wallet ledger captures after the invoice is frozen.
