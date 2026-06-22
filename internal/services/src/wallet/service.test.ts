@@ -1682,7 +1682,7 @@ describe("WalletService.getWalletState", () => {
   it("returns the four sub-account balances and active credits ordered by expiry", async () => {
     const { state, wallet } = buildService()
     state.balances[keys.purchased] = 10 * DOLLAR
-    state.balances[keys.granted] = 4 * DOLLAR
+    state.balances[keys.granted] = 2 * DOLLAR
     state.balances[keys.reserved] = 1 * DOLLAR
     state.balances[keys.consumed] = 25 * DOLLAR
 
@@ -1691,7 +1691,7 @@ describe("WalletService.getWalletState", () => {
       customerId,
       projectId,
       issuedAmount: 3 * DOLLAR,
-      remainingAmount: 3 * DOLLAR,
+      remainingAmount: 1 * DOLLAR,
       expiresAt: new Date("2026-12-01"),
     })
     seedGrant(state, {
@@ -1701,6 +1701,38 @@ describe("WalletService.getWalletState", () => {
       issuedAmount: 2 * DOLLAR,
       remainingAmount: 1 * DOLLAR,
       expiresAt: new Date("2026-02-01"),
+    })
+    seedReservation(state, {
+      id: "res_consumed_soon",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 1 * DOLLAR,
+      consumedAmount: 1 * DOLLAR,
+      fundingAllocations: [
+        {
+          source: "granted",
+          amount: 1 * DOLLAR,
+          grantSource: "manual",
+          walletCreditId: "wcr_soon",
+        },
+      ],
+    })
+    seedReservation(state, {
+      id: "res_consumed_far",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 2 * DOLLAR,
+      consumedAmount: 2 * DOLLAR,
+      fundingAllocations: [
+        {
+          source: "granted",
+          amount: 2 * DOLLAR,
+          grantSource: "manual",
+          walletCreditId: "wcr_far",
+        },
+      ],
     })
     // Inactive — must NOT appear in the result.
     seedGrant(state, {
@@ -1717,11 +1749,15 @@ describe("WalletService.getWalletState", () => {
     expect(err).toBeUndefined()
     expect(val?.balances).toEqual({
       purchased: 10 * DOLLAR,
-      granted: 4 * DOLLAR,
+      granted: 2 * DOLLAR,
       reserved: 1 * DOLLAR,
       consumed: 25 * DOLLAR,
     })
     expect(val?.credits.map((g) => g.id)).toEqual(["wcr_soon", "wcr_far"])
+    expect(val?.credits.map((g) => ({ id: g.id, consumedAmount: g.consumedAmount }))).toEqual([
+      { id: "wcr_soon", consumedAmount: 1 * DOLLAR },
+      { id: "wcr_far", consumedAmount: 2 * DOLLAR },
+    ])
   })
 
   it("returns zeros and empty credits for an untouched customer", async () => {

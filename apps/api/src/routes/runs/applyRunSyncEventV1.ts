@@ -11,6 +11,7 @@ import {
   IngestionEntitlementContextLoader,
   IngestionReportingDispatcher,
   IngestionRunEntitlementResolver,
+  IngestionSubscriptionCatchUp,
 } from "@unprice/services/ingestion"
 import { RunUseCaseError, applyRunSyncEvent } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
@@ -73,7 +74,11 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
     const body = c.req.valid("json")
     const key = await keyAuth(c)
 
-    const { budgetRuns, entitlement: entitlementService } = c.get("services")
+    const {
+      budgetRuns,
+      entitlement: entitlementService,
+      subscription: subscriptionService,
+    } = c.get("services")
     const cache = c.get("cache")
     const logger = c.get("logger")
     const db = c.get("db")
@@ -109,6 +114,10 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
     const entitlementResolver = new IngestionRunEntitlementResolver({
       entitlementContext,
       logger,
+      subscriptionCatchUp: new IngestionSubscriptionCatchUp({
+        logger,
+        subscriptions: subscriptionService,
+      }),
     })
     const reportingDispatcher = new IngestionReportingDispatcher({
       logger,

@@ -1,4 +1,4 @@
-import { type Database, and, asc, eq, gt, isNull, or, sql } from "@unprice/db"
+import { type Database, and, asc, eq, gt, inArray, isNull, or, sql } from "@unprice/db"
 import {
   entitlementReservationFundingLegs,
   entitlementReservations,
@@ -233,9 +233,13 @@ export interface WalletBalances {
   consumed: number
 }
 
+export type WalletCreditWithConsumption = WalletCredit & {
+  consumedAmount: number
+}
+
 export interface WalletStateOutput {
   balances: WalletBalances
-  credits: WalletCredit[]
+  credits: WalletCreditWithConsumption[]
 }
 
 const GRANT_SOURCE_TO_PLATFORM: Record<WalletCreditSource, PlatformFundingKind> = {
@@ -1396,9 +1400,14 @@ export class WalletService {
         }),
       ])
 
+      const creditsWithConsumption = await this.withCreditConsumption({
+        credits,
+        projectId: input.projectId,
+      })
+
       return Ok({
         balances: { purchased, granted, reserved, consumed },
-        credits,
+        credits: creditsWithConsumption,
       })
     } catch (error) {
       return this.handleUnexpected("wallet.get_state_failed", error, {
@@ -1428,6 +1437,37 @@ export class WalletService {
         walletId: input.walletId,
       })
     }
+  }
+
+  private async withCreditConsumption(input: {
+    credits: WalletCredit[]
+    projectId: string
+  }): Promise<WalletCreditWithConsumption[]> {
+    if (input.credits.length === 0) {
+      return []
+    }
+
+    const creditIds = input.credits.map((credit) => credit.id)
+    const fundingLegs = await this.db.query.entitlementReservationFundingLegs.findMany({
+      where: and(
+        eq(entitlementReservationFundingLegs.projectId, input.projectId),
+        inArray(entitlementReservationFundingLegs.walletCreditId, creditIds)
+      ),
+    })
+    const consumedByCredit = new Map<string, number>()
+
+    for (const leg of fundingLegs) {
+      if (!leg.walletCreditId) continue
+      consumedByCredit.set(
+        leg.walletCreditId,
+        (consumedByCredit.get(leg.walletCreditId) ?? 0) + leg.capturedAmount
+      )
+    }
+
+    return input.credits.map((credit) => ({
+      ...credit,
+      consumedAmount: consumedByCredit.get(credit.id) ?? 0,
+    }))
   }
 
   // -------------------------------------------------------------------------

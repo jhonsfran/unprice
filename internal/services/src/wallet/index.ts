@@ -45,6 +45,7 @@ export {
   type SettleTopUpInput,
   type SettleTopUpOutput,
   type WalletBalances,
+  type WalletCreditWithConsumption,
   type WalletDeps,
   type WalletStateOutput,
   type WalletTransferInput,

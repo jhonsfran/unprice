@@ -84,10 +84,19 @@ export default async function CustomerWalletPage({
           <Suspense
             fallback={
               <DataTableSkeleton
-                columnCount={7}
+                columnCount={8}
                 searchableColumnCount={1}
                 filterableColumnCount={2}
-                cellWidths={["18rem", "10rem", "10rem", "10rem", "10rem", "14rem", "14rem"]}
+                cellWidths={[
+                  "18rem",
+                  "10rem",
+                  "10rem",
+                  "10rem",
+                  "10rem",
+                  "10rem",
+                  "14rem",
+                  "14rem",
+                ]}
               />
             }
           >

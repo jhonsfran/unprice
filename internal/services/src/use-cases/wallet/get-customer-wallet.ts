@@ -9,7 +9,7 @@ import type { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
-import type { UnPriceWalletError } from "../../wallet"
+import type { UnPriceWalletError, WalletCreditWithConsumption } from "../../wallet"
 
 export const getCustomerWalletInputSchema = z.object({
   projectId: z.string(),
@@ -26,6 +26,7 @@ export const customerWalletBalancesSchema = z.object({
 export const walletCreditStatusSchema = z.enum(["active", "expired"])
 
 export const customerWalletCreditSchema = walletCreditSelectSchema.extend({
+  consumedAmount: z.number().int().nonnegative(),
   status: walletCreditStatusSchema,
   usableAmount: z.number().int().nonnegative(),
 })
@@ -106,7 +107,10 @@ export async function getCustomerWallet(
   )
 }
 
-function toCustomerWalletCredit(credit: WalletCredit, now: Date): CustomerWalletCredit {
+function toCustomerWalletCredit(
+  credit: WalletCreditWithConsumption,
+  now: Date
+): CustomerWalletCredit {
   const status = isExpired(credit, now) ? "expired" : "active"
 
   return {

@@ -1,9 +1,9 @@
-import type { Customer, WalletCredit } from "@unprice/db/validators"
+import type { Customer } from "@unprice/db/validators"
 import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 import type { CustomerService } from "../../customers/service"
-import type { WalletService, WalletStateOutput } from "../../wallet"
+import type { WalletCreditWithConsumption, WalletService, WalletStateOutput } from "../../wallet"
 import { UnPriceWalletError } from "../../wallet"
 import { getCustomerWallet } from "./get-customer-wallet"
 
@@ -52,6 +52,7 @@ describe("getCustomerWallet", () => {
     })
     expect(result.val?.wallet.credits.map((credit) => credit.id)).toEqual(["wcr_123"])
     expect(result.val?.wallet.credits[0]).toMatchObject({
+      consumedAmount: 0,
       status: "active",
       usableAmount: 500_000_000,
     })
@@ -121,10 +122,12 @@ describe("getCustomerWallet", () => {
     const creditsById = new Map(result.val?.wallet.credits.map((credit) => [credit.id, credit]))
 
     expect(creditsById.get("wcr_active")).toMatchObject({
+      consumedAmount: 0,
       status: "active",
       usableAmount: 300_000_000,
     })
     expect(creditsById.get("wcr_expired")).toMatchObject({
+      consumedAmount: 0,
       status: "expired",
       usableAmount: 0,
     })
@@ -283,12 +286,15 @@ function createCustomer(overrides: Partial<Customer> = {}): Customer {
   } as Customer
 }
 
-function createWalletCredit(overrides: Partial<WalletCredit> = {}): WalletCredit {
+function createWalletCredit(
+  overrides: Partial<WalletCreditWithConsumption> = {}
+): WalletCreditWithConsumption {
   return {
     id: "wcr_123",
     projectId: "proj_123",
     customerId: "cus_123",
     source: "manual",
+    consumedAmount: 0,
     issuedAmount: 500_000_000,
     remainingAmount: 500_000_000,
     expiresAt: null,
@@ -298,7 +304,7 @@ function createWalletCredit(overrides: Partial<WalletCredit> = {}): WalletCredit
     metadata: null,
     createdAt: new Date("2026-06-22T10:00:00.000Z"),
     ...overrides,
-  } as WalletCredit
+  } as WalletCreditWithConsumption
 }
 
 function createWalletState(overrides: Partial<WalletStateOutput> = {}): WalletStateOutput {

@@ -76,6 +76,16 @@ export const columns: ColumnDef<WalletCredit>[] = [
     size: 28,
   },
   {
+    accessorKey: "consumedAmount",
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Consumed" />,
+    cell: ({ row }) => (
+      <Badge variant="outline">
+        {formatWalletMoney(row.original.consumedAmount, row.original.currency)}
+      </Badge>
+    ),
+    size: 28,
+  },
+  {
     accessorKey: "usableAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Available" />,
     cell: ({ row }) => (

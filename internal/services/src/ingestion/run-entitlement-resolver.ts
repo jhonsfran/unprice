@@ -4,9 +4,23 @@ import type {
   RunEntitlementResolution,
   RunEntitlementResolver,
 } from "../use-cases/runs/apply-run-sync-event"
-import type { CustomerGrantContextReader, IngestionEntitlement } from "./entitlement-context"
+import type {
+  CustomerGrantContextReader,
+  IngestionEntitlement,
+  PreparedCustomerGrantContext,
+} from "./entitlement-context"
 import { resolveCustomerGrantContextWindow } from "./entitlement-context"
 import { IngestionEntitlementRouter } from "./entitlement-routing"
+import type { IngestionQueueMessage } from "./message"
+
+type RunSubscriptionCatchUp = {
+  catchUpForPreparedGroup(params: {
+    candidateEntitlements: IngestionEntitlement[]
+    customerId: string
+    messages: IngestionQueueMessage[]
+    projectId: string
+  }): Promise<{ changed: boolean; caughtUpSubscriptionIds: string[] }>
+}
 
 /**
  * Resolves the active entitlement for a feature slug in the context of a run sync event.
@@ -15,13 +29,16 @@ import { IngestionEntitlementRouter } from "./entitlement-routing"
 export class IngestionRunEntitlementResolver implements RunEntitlementResolver {
   private readonly entitlementContext: CustomerGrantContextReader
   private readonly router: IngestionEntitlementRouter
+  private readonly subscriptionCatchUp?: RunSubscriptionCatchUp
 
   constructor(opts: {
     entitlementContext: CustomerGrantContextReader
     logger: Pick<Logger, "error" | "warn">
+    subscriptionCatchUp?: RunSubscriptionCatchUp
   }) {
     this.entitlementContext = opts.entitlementContext
     this.router = new IngestionEntitlementRouter({ logger: opts.logger })
+    this.subscriptionCatchUp = opts.subscriptionCatchUp
   }
 
   async resolveForFeature(params: {
@@ -35,47 +52,92 @@ export class IngestionRunEntitlementResolver implements RunEntitlementResolver {
     const { projectId, customerId, featureSlug, eventSlug, eventTimestamp, eventProperties } =
       params
 
-    // Load candidate entitlements (SWR-cached, ~sub-ms on hit)
-    const contextWindow = resolveCustomerGrantContextWindow({
-      earliestTimestamp: eventTimestamp,
-      latestTimestamp: eventTimestamp,
+    const message = buildRunEntitlementMessage({
+      customerId,
+      eventProperties,
+      eventSlug,
+      eventTimestamp,
+      projectId,
     })
 
-    const preparedContext = await this.entitlementContext.prepareCustomerGrantContext({
+    const preparedContext = await this.loadPreparedContext({
       customerId,
+      eventTimestamp,
       projectId,
-      ...contextWindow,
     })
 
     if (preparedContext.rejectionReason) {
       return { ok: false, reason: preparedContext.rejectionReason }
     }
 
-    // Route to the matching entitlement for this feature slug + event slug
-    const routingResult = this.router.resolveSyncFeatureEntitlements({
-      candidateEntitlements: preparedContext.candidateEntitlements,
+    const resolution = this.routePreparedContext({
       featureSlug,
-      message: {
-        slug: eventSlug,
-        timestamp: eventTimestamp,
-        properties: eventProperties,
-        // Fields required by IngestionQueueMessage type but only used for logging
-        version: 1 as const,
-        workspaceId: "",
-        projectId,
-        customerId,
-        requestId: "",
-        receivedAt: eventTimestamp,
-        idempotencyKey: "",
-        id: "",
-        source: {
-          environment: "",
-          apiKeyId: null,
-          sourceType: "system" as const,
-          sourceId: "",
-          sourceName: null,
-        },
-      },
+      message,
+      preparedContext,
+    })
+
+    if (
+      !resolution.ok ||
+      this.subscriptionCatchUp === undefined ||
+      hasBillingPeriodCovering(resolution.entitlement, eventTimestamp)
+    ) {
+      return resolution
+    }
+
+    const catchUp = await this.subscriptionCatchUp.catchUpForPreparedGroup({
+      candidateEntitlements: preparedContext.candidateEntitlements,
+      customerId,
+      messages: [message],
+      projectId,
+    })
+
+    if (!catchUp.changed) {
+      return resolution
+    }
+
+    const refreshedContext = await this.loadPreparedContext({
+      customerId,
+      eventTimestamp,
+      projectId,
+    })
+
+    if (refreshedContext.rejectionReason) {
+      return { ok: false, reason: refreshedContext.rejectionReason }
+    }
+
+    return this.routePreparedContext({
+      featureSlug,
+      message,
+      preparedContext: refreshedContext,
+    })
+  }
+
+  private loadPreparedContext(params: {
+    customerId: string
+    eventTimestamp: number
+    projectId: string
+  }): Promise<PreparedCustomerGrantContext> {
+    const contextWindow = resolveCustomerGrantContextWindow({
+      earliestTimestamp: params.eventTimestamp,
+      latestTimestamp: params.eventTimestamp,
+    })
+
+    return this.entitlementContext.prepareCustomerGrantContext({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      ...contextWindow,
+    })
+  }
+
+  private routePreparedContext(params: {
+    featureSlug: string
+    message: IngestionQueueMessage
+    preparedContext: PreparedCustomerGrantContext
+  }): RunEntitlementResolution {
+    const routingResult = this.router.resolveSyncFeatureEntitlements({
+      candidateEntitlements: params.preparedContext.candidateEntitlements,
+      featureSlug: params.featureSlug,
+      message: params.message,
     })
 
     if (routingResult.err) {
@@ -97,4 +159,40 @@ export class IngestionRunEntitlementResolver implements RunEntitlementResolver {
       grants: entitlement.grants,
     }
   }
+}
+
+function buildRunEntitlementMessage(params: {
+  customerId: string
+  eventProperties: Record<string, unknown>
+  eventSlug: string
+  eventTimestamp: number
+  projectId: string
+}): IngestionQueueMessage {
+  return {
+    slug: params.eventSlug,
+    timestamp: params.eventTimestamp,
+    properties: params.eventProperties,
+    // Fields required by IngestionQueueMessage type but only used for routing/logging here.
+    version: 1,
+    workspaceId: "",
+    projectId: params.projectId,
+    customerId: params.customerId,
+    requestId: "",
+    receivedAt: params.eventTimestamp,
+    idempotencyKey: "",
+    id: "",
+    source: {
+      environment: "",
+      apiKeyId: null,
+      sourceType: "system",
+      sourceId: "",
+      sourceName: null,
+    },
+  }
+}
+
+function hasBillingPeriodCovering(entitlement: IngestionEntitlement, eventTimestamp: number) {
+  return entitlement.billingPeriods.some(
+    (period) => period.cycleStartAt <= eventTimestamp && eventTimestamp < period.cycleEndAt
+  )
 }

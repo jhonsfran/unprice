@@ -161,6 +161,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-22: Customer wallet dashboards should distinguish ledger balances from usable display
   balances; expired-by-time wallet credits can remain in ledger until the sweep runs, so UI
   availability must derive from non-expired credits and show credit status explicitly.
+- 2026-06-22: Per-credit wallet consumption should come from
+  `entitlement_reservation_funding_legs.captured_amount` grouped by `wallet_credit_id`; do not
+  infer it from issued minus usable balance, because expired unused credits would look consumed.
 - 2026-06-22: Positive wallet `captureReservationUsage` calls must carry billing period and
   statement context; otherwise `customer.*.consumed` can gain non-invoice-backed
   `wallet_capture_usage` ledger rows.
@@ -515,8 +518,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `buildServices()` as an async factory called once in `startRun` and cached for the DO lifetime.
 - 2026-06-19: Run sync events must resolve entitlements before delegating to RunBudgetDO; the
   `applyRunSyncEvent` use case uses `RunEntitlementResolver` (backed by the SWR-cached
-  `IngestionEntitlementContextLoader` + `IngestionEntitlementRouter`) to validate that the
-  customer has an active entitlement for the `featureSlug`/`eventSlug`, then passes real
-  `entitlement` + `grants` through the DO contract to `EntitlementWindowDO`. The DO is addressed
-  using the standard naming scheme (`${appEnv}:${projectId}:${customerId}:${customerEntitlementId}`)
-  so it shares state with the normal ingestion path.
+  `IngestionEntitlementContextLoader` + `IngestionEntitlementRouter` + subscription catch-up) to
+  validate that the customer has an active entitlement and billing-period invoice context for the
+  `featureSlug`/`eventSlug`, then passes real `entitlement` + `grants` through the DO contract to
+  `EntitlementWindowDO`. The DO is addressed using the standard naming scheme
+  (`${appEnv}:${projectId}:${customerId}:${customerEntitlementId}`) so it shares state with the
+  normal ingestion path.
