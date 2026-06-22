@@ -134,6 +134,16 @@ type OptimizedBatchWalletRetryOutcome =
 
 type BatchReservationGrowthResult = ReservationGrowthResult | { kind: "max_outstanding_reached" }
 
+class ExternalReservationBudgetExceededError extends Error {
+  constructor(
+    readonly totalCost: number,
+    readonly remainingAmount: number
+  ) {
+    super(`Priced cost ${totalCost} exceeds run remaining amount ${remainingAmount}`)
+    this.name = "ExternalReservationBudgetExceededError"
+  }
+}
+
 type OptimizedBatchWalletDiagnostics = {
   emptyAfterRefillEventIds: string[]
   emptyAfterRefillLastRemainingAmount: number | null
@@ -1389,77 +1399,84 @@ export class EntitlementWindowDO extends DurableObject {
       overageStrategy,
     } = params
 
-    return this.db.transaction((tx) => {
-      // Double-check idempotency inside the transaction
-      const cachedResult = this.store.lookupCachedIdempotencyResult(idempotencyKey)
-      if (cachedResult) {
-        metrics.duplicateCount = 1
-        return cachedResult
-      }
-
-      // Apply the meter event and price it (same as standard mode)
-      let pricedFacts: PricedFact[]
-      try {
-        pricedFacts = this.applyAndPriceSingleApplyEvent(tx, {
-          activeGrants,
-          createdAt,
-          entitlement,
-          input,
-          meter,
-          metrics,
-          overageStrategy,
-        })
-      } catch (error) {
-        if (error instanceof EntitlementWindowLimitExceededError) {
-          const deniedResult = this.persistDeniedApplyResult({
-            idempotencyKey,
-            createdAt,
-            deniedReason: "LIMIT_EXCEEDED",
-            message: error.message,
-          })
-          metrics.idempotencyInsertCount = 1
-          return deniedResult
+    try {
+      return this.db.transaction((tx) => {
+        // Double-check idempotency inside the transaction
+        const cachedResult = this.store.lookupCachedIdempotencyResult(idempotencyKey)
+        if (cachedResult) {
+          metrics.duplicateCount = 1
+          return cachedResult
         }
-        throw error
-      }
 
-      // Compare priced cost against external reservation remaining amount
-      const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
-      const remainingAmount = input.externalReservation?.remainingAmount ?? 0
+        // Apply the meter event and price it (same as standard mode)
+        let pricedFacts: PricedFact[]
+        try {
+          pricedFacts = this.applyAndPriceSingleApplyEvent(tx, {
+            activeGrants,
+            createdAt,
+            entitlement,
+            input,
+            meter,
+            metrics,
+            overageStrategy,
+          })
+        } catch (error) {
+          if (error instanceof EntitlementWindowLimitExceededError) {
+            const deniedResult = this.persistDeniedApplyResult({
+              idempotencyKey,
+              createdAt,
+              deniedReason: "LIMIT_EXCEEDED",
+              message: error.message,
+            })
+            metrics.idempotencyInsertCount = 1
+            return deniedResult
+          }
+          throw error
+        }
 
-      if (totalCost > remainingAmount) {
+        // Compare priced cost against external reservation remaining amount
+        const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+        const remainingAmount = input.externalReservation?.remainingAmount ?? 0
+
+        if (totalCost > remainingAmount) {
+          throw new ExternalReservationBudgetExceededError(totalCost, remainingAmount)
+        }
+
+        // Build meter facts and persist allowed result (no wallet I/O)
+        const meterFacts = pricedFacts.map((pricedFact) =>
+          this.buildMeterFactPayload({
+            createdAt,
+            input,
+            meter,
+            pricedFact,
+          })
+        )
+
+        const idempotencyEntry = this.persistAllowedSingleApplyResult(tx, {
+          createdAt,
+          idempotencyKey,
+          meterFacts,
+          metrics,
+        })
+
+        this.store.recordBatchIdempotencyResults([idempotencyEntry])
+        this.schedulePostCommitAlarm()
+
+        return { allowed: true, meterFacts } as ApplyResult
+      })
+    } catch (error) {
+      if (error instanceof ExternalReservationBudgetExceededError) {
         const deniedResult = this.persistDeniedApplyResult({
           idempotencyKey,
           createdAt,
           deniedReason: "RUN_BUDGET_EXCEEDED",
-          message: `Priced cost ${totalCost} exceeds run remaining amount ${remainingAmount}`,
+          message: error.message,
         })
         metrics.idempotencyInsertCount = 1
         return deniedResult
       }
-
-      // Build meter facts and persist allowed result (no wallet I/O)
-      const meterFacts = pricedFacts.map((pricedFact) =>
-        this.buildMeterFactPayload({
-          createdAt,
-          input,
-          meter,
-          pricedFact,
-        })
-      )
-
-      const idempotencyEntry = this.persistAllowedSingleApplyResult(tx, {
-        createdAt,
-        idempotencyKey,
-        meterFacts,
-        metrics,
-      })
-
-      this.store.recordBatchIdempotencyResults([idempotencyEntry])
-      this.schedulePostCommitAlarm()
-
-      return { allowed: true, meterFacts } as ApplyResult
-    })
+      throw error
+    }
   }
 
   private resolveCachedSingleApplyReplay(params: {

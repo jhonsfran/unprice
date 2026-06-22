@@ -6337,6 +6337,8 @@ describe("EntitlementWindowDO", () => {
     expect(testState.createReservation).not.toHaveBeenCalled()
     expect(testState.captureReservationUsage).not.toHaveBeenCalled()
     expect(testState.flushReservation).not.toHaveBeenCalled()
+    expect(db.meterWindowRows.get(DEFAULT_METER_KEY)).toBeUndefined()
+    expect(db.grantWindowRows.size).toBe(0)
     // Denial is persisted in idempotency
     expect(readIdempotencyEntry(db, "idem_123")).toMatchObject({
       allowed: false,

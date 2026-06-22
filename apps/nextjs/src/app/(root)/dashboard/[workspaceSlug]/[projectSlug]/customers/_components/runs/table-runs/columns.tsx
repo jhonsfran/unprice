@@ -35,12 +35,12 @@ function formatRunDate(date: CustomerRun["startedAt"] | CustomerRun["endedAt"]):
 export const columns: ColumnDef<CustomerRun>[] = [
   {
     accessorKey: "id",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Run" />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Run" className="pl-4" />,
     cell: ({ row }) => (
       <Typography
         variant="p"
         affects="removePaddingMargin"
-        className="whitespace-nowrap font-mono text-sm"
+        className="whitespace-nowrap pl-3 font-mono text-sm"
       >
         {row.original.id}
       </Typography>
@@ -78,20 +78,6 @@ export const columns: ColumnDef<CustomerRun>[] = [
     size: 48,
   },
   {
-    accessorKey: "traceId",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Trace" />,
-    cell: ({ row }) => (
-      <Typography
-        variant="p"
-        affects="removePaddingMargin"
-        className="max-w-44 truncate font-mono text-xs"
-      >
-        {row.original.traceId ?? "-"}
-      </Typography>
-    ),
-    size: 36,
-  },
-  {
     accessorKey: "budgetAmount",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Budget" />,
     cell: ({ row }) => (
@@ -105,16 +91,6 @@ export const columns: ColumnDef<CustomerRun>[] = [
     cell: ({ row }) => (
       <Badge variant="outline">
         {formatRunMoney(row.original.consumedAmount, row.original.currency)}
-      </Badge>
-    ),
-    size: 28,
-  },
-  {
-    accessorKey: "remainingAmount",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Remaining" />,
-    cell: ({ row }) => (
-      <Badge variant="outline">
-        {formatRunMoney(row.original.remainingAmount, row.original.currency)}
       </Badge>
     ),
     size: 28,

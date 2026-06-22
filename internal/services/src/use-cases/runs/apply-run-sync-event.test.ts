@@ -1,9 +1,9 @@
 import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import type { MeterConfig } from "@unprice/db/validators"
-import { Ok } from "@unprice/error"
+import { Err, Ok } from "@unprice/error"
 import { LEDGER_SCALE } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
-import type { BudgetRunService } from "../../budget-runs"
+import { type BudgetRunService, BudgetRunServiceError } from "../../budget-runs"
 import type {
   IngestionEntitlement,
   IngestionGrant,
@@ -225,6 +225,17 @@ describe("applyRunSyncEvent", () => {
       ],
     })
   })
+
+  it("returns a budget error without reporting when the summary update fails", async () => {
+    const { deps, enqueueOutcomes } = createDeps({
+      updateRunSummaryResult: Err(new BudgetRunServiceError({ message: "summary update failed" })),
+    })
+
+    const result = await applyRunSyncEvent(deps, createInput())
+
+    expect(result.err?.message).toBe("BUDGET_ERROR")
+    expect(enqueueOutcomes).not.toHaveBeenCalled()
+  })
 })
 
 function createDeps(
@@ -232,11 +243,12 @@ function createDeps(
     entitlementResolution?: Awaited<ReturnType<RunEntitlementResolver["resolveForFeature"]>>
     run?: ReturnType<typeof createRun>
     runBudgetDecision?: Awaited<ReturnType<RunBudgetClient["applySyncEvent"]>>["val"]
+    updateRunSummaryResult?: Awaited<ReturnType<BudgetRunService["updateRunSummary"]>>
   } = {}
 ) {
   const run = overrides.run ?? createRun()
   const getRun = vi.fn().mockResolvedValue(Ok(run))
-  const updateRunSummary = vi.fn().mockResolvedValue(Ok(run))
+  const updateRunSummary = vi.fn().mockResolvedValue(overrides.updateRunSummaryResult ?? Ok(run))
   const applySyncEvent = vi.fn<RunBudgetClient["applySyncEvent"]>().mockResolvedValue(
     Ok(
       overrides.runBudgetDecision ?? {

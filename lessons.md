@@ -158,6 +158,11 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-06-22: Budget runs do not create separate "run" invoice lines; run sync events report
+  meter facts that bill through the subscribed usage features, so inspect feature-period invoices
+  and ledger metadata when reconciling run charges.
+- 2026-06-22: External-reservation entitlement applies must roll back meter/grant writes before
+  caching `RUN_BUDGET_EXCEEDED`; only accepted run events should advance usage state.
 - 2026-06-13: Dashboard-initiated provider return URLs should resolve from
   `window.location.origin` at submit/click time; `APP_DOMAIN` is only safe for canonical host links
   and can point at localhost when public env defaults leak into preview/prod bundles.

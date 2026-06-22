@@ -74,6 +74,7 @@ const testState = {
   captureReservationUsage: vi.fn(),
   releaseReservation: vi.fn(),
   entitlementWindowApply: vi.fn(),
+  failRunIdempotencyInsert: false,
   persistExpiredRunSummary: vi.fn(),
   logger: {
     debug: vi.fn(),
@@ -92,6 +93,7 @@ describe("RunBudgetDO", () => {
     testState.captureReservationUsage.mockReset()
     testState.releaseReservation.mockReset()
     testState.entitlementWindowApply.mockReset()
+    testState.failRunIdempotencyInsert = false
     testState.persistExpiredRunSummary.mockReset()
 
     // Default mocks
@@ -714,6 +716,70 @@ describe("RunBudgetDO", () => {
     expect(result.budget.remainingAmount).toBe(95_000)
     // Alarm scheduled since consumedAmount > flushedAmount
     expect(state.alarmAt).toBe(BASE_NOW + 10_000)
+  })
+
+  it("rolls back spend when accepted decision idempotency fails", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+
+    await durable.startRun({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    const eventInput = {
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_1",
+      event: {
+        id: "evt_1",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 3 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    }
+
+    testState.failRunIdempotencyInsert = true
+    await expect(durable.applySyncEvent(eventInput)).rejects.toThrow(
+      "run idempotency insert failed"
+    )
+
+    const afterFailure = await durable.getRunStatus({
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+    })
+    expect(afterFailure.consumedAmount).toBe(0)
+
+    testState.failRunIdempotencyInsert = false
+    const retry = await durable.applySyncEvent(eventInput)
+
+    expect(retry.allowed).toBe(true)
+    expect(retry.budget.consumedAmount).toBe(5000)
   })
 
   it("schedules expiresAt and persists expired run summary", async () => {
@@ -1567,6 +1633,30 @@ function buildFakeDrizzle() {
     runIdempotency: "idempotencyKey",
   }
 
+  function cloneTables() {
+    const snapshot: Record<string, Map<string, Record<string, unknown>>> = {}
+    for (const [name, store] of Object.entries(tables)) {
+      snapshot[name] = new Map([...store.entries()].map(([key, row]) => [key, { ...row }]))
+    }
+    return snapshot
+  }
+
+  function restoreTables(snapshot: Record<string, Map<string, Record<string, unknown>>>) {
+    for (const [name, store] of Object.entries(snapshot)) {
+      const table = tables[name]!
+      table.clear()
+      for (const [key, row] of store.entries()) {
+        table.set(key, { ...row })
+      }
+    }
+  }
+
+  function assertInsertAllowed(tableName: string) {
+    if (tableName === "runIdempotency" && testState.failRunIdempotencyInsert) {
+      throw new Error("run idempotency insert failed")
+    }
+  }
+
   /**
    * Filter rows for findMany. For sql template conditions we apply
    * table-specific heuristic logic.
@@ -1668,6 +1758,7 @@ function buildFakeDrizzle() {
 
         const insertPromise = Promise.resolve().then(() => {
           if (!handledByConflictClause) {
+            assertInsertAllowed(tableName)
             store.set(key, { ...data })
           }
         })
@@ -1676,6 +1767,7 @@ function buildFakeDrizzle() {
         const chainable = Object.assign(insertPromise, {
           onConflictDoUpdate: (opts: { target: unknown; set: Record<string, unknown> }) => {
             handledByConflictClause = true
+            assertInsertAllowed(tableName)
             const existing = store.get(key)
             if (existing) {
               for (const [field, val] of Object.entries(opts.set)) {
@@ -1688,6 +1780,7 @@ function buildFakeDrizzle() {
           },
           onConflictDoNothing: () => {
             handledByConflictClause = true
+            assertInsertAllowed(tableName)
             if (!store.has(key)) {
               store.set(key, { ...data })
             }
@@ -1729,7 +1822,7 @@ function buildFakeDrizzle() {
     }
   }
 
-  return {
+  const db = {
     query: {
       runState: buildQueryTable("runState"),
       runSpendBuckets: buildQueryTable("runSpendBuckets"),
@@ -1739,7 +1832,18 @@ function buildFakeDrizzle() {
     insert: (table: unknown) => buildInsert(table),
     update: (table: unknown) => buildUpdate(table),
     run: (_sql: unknown) => Promise.resolve(),
+    transaction: async <T>(callback: (tx: unknown) => Promise<T> | T): Promise<T> => {
+      const snapshot = cloneTables()
+      try {
+        return await callback(db)
+      } catch (error) {
+        restoreTables(snapshot)
+        throw error
+      }
+    },
   }
+
+  return db
 }
 
 async function loadRunBudgetDO() {

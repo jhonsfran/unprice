@@ -30,6 +30,7 @@ vi.mock("~/auth/key", async (importOriginal) => {
 // Mock the use cases
 const useCaseMocks = vi.hoisted(() => ({
   startRun: vi.fn(),
+  startRunForCustomerSubscription: vi.fn(),
   applyRunSyncEvent: vi.fn(),
   endRun: vi.fn(),
   getRun: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("@unprice/services/use-cases", async (importOriginal) => {
   return {
     ...actual,
     startRun: useCaseMocks.startRun,
+    startRunForCustomerSubscription: useCaseMocks.startRunForCustomerSubscription,
     applyRunSyncEvent: useCaseMocks.applyRunSyncEvent,
     endRun: useCaseMocks.endRun,
     getRun: useCaseMocks.getRun,
@@ -216,7 +218,10 @@ describe("budgeted runs API", () => {
       parentRunId: null,
     }
 
-    useCaseMocks.startRun.mockResolvedValue({ val: runSummary, err: undefined })
+    useCaseMocks.startRunForCustomerSubscription.mockResolvedValue({
+      val: runSummary,
+      err: undefined,
+    })
 
     const { app, env, executionCtx } = createTestApp()
 
@@ -258,7 +263,7 @@ describe("budgeted runs API", () => {
       customerId: "cus_default",
     })
 
-    useCaseMocks.startRun.mockResolvedValue({
+    useCaseMocks.startRunForCustomerSubscription.mockResolvedValue({
       val: {
         runId: "brun_attr123",
         status: "running",
@@ -301,9 +306,10 @@ describe("budgeted runs API", () => {
     )
 
     expect(response.status).toBe(200)
-    expect(useCaseMocks.startRun).toHaveBeenCalledWith(
+    expect(useCaseMocks.startRunForCustomerSubscription).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        budgetAmountCurrencyMinor: 500,
         workloadType: "agent",
         workloadId: "research-assistant-v2",
         traceId: "trace_checkout_123",

@@ -20,6 +20,7 @@ import migrations from "./drizzle/migrations"
 
 type RunStateRow = typeof schema.runState.$inferSelect
 type RunCaptureIntentRow = typeof schema.runCaptureIntents.$inferSelect
+type RunBudgetDbWriter = Pick<DrizzleSqliteDODatabase<typeof schema>, "insert" | "update">
 
 class RunCapturesPendingError extends Error {
   constructor(runId: string) {
@@ -128,12 +129,12 @@ export class RunBudgetDO extends DurableObject {
         budget: this.toSummary(run),
         meterFacts: [],
       }
-      await this.persistIdempotency(input.idempotencyKey, input.runId, decision, 0, [])
+      await this.persistIdempotency(this.db, input.idempotencyKey, input.runId, decision, 0, [])
       return decision
     }
     if (run.expiresAt !== null && run.expiresAt <= input.now) {
       const decision = await this.rejectExpiredRun(input, run)
-      await this.persistIdempotency(input.idempotencyKey, input.runId, decision, 0, [])
+      await this.persistIdempotency(this.db, input.idempotencyKey, input.runId, decision, 0, [])
       return decision
     }
 
@@ -153,7 +154,7 @@ export class RunBudgetDO extends DurableObject {
         budget: this.toSummary(run),
         meterFacts: [],
       }
-      await this.persistIdempotency(input.idempotencyKey, input.runId, decision, 0, [])
+      await this.persistIdempotency(this.db, input.idempotencyKey, input.runId, decision, 0, [])
       return decision
     }
 
@@ -163,9 +164,7 @@ export class RunBudgetDO extends DurableObject {
     const pricedAmount = this.sumPricedAmount(meterFacts)
     const bucketDeltas = this.deriveBucketDeltas(input.runId, meterFacts)
 
-    // Update run spend and buckets in one transaction
-    const updatedRun = await this.commitSpend(run, pricedAmount, bucketDeltas, input.now)
-
+    const updatedRun = this.projectRunSpend(run, pricedAmount, input.now)
     const decision: RunBudgetDecision = {
       allowed: true,
       state: "processed",
@@ -173,9 +172,10 @@ export class RunBudgetDO extends DurableObject {
       meterFacts: meterFacts as RunBudgetDecision["meterFacts"],
     }
 
-    await this.persistIdempotency(
+    await this.commitSpendAndIdempotency(
+      run,
+      updatedRun,
       input.idempotencyKey,
-      input.runId,
       decision,
       pricedAmount,
       bucketDeltas
@@ -744,8 +744,19 @@ export class RunBudgetDO extends DurableObject {
     })
   }
 
-  private async commitSpend(
+  private projectRunSpend(run: RunStateRow, pricedAmount: number, now: number): RunStateRow {
+    return {
+      ...run,
+      consumedAmount: run.consumedAmount + pricedAmount,
+      lastEventAt: now,
+    }
+  }
+
+  private async commitSpendAndIdempotency(
     run: RunStateRow,
+    updatedRun: RunStateRow,
+    idempotencyKey: string,
+    decision: RunBudgetDecision,
     pricedAmount: number,
     bucketDeltas: Array<{
       bucketKey: string
@@ -756,22 +767,47 @@ export class RunBudgetDO extends DurableObject {
       periodEndAt: number
       currency: string
       amount: number
-    }>,
-    now: number
-  ): Promise<RunStateRow> {
-    // Update run consumed amount
-    const newConsumed = run.consumedAmount + pricedAmount
-    await this.db
+    }>
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.persistSpend(tx, run, updatedRun, bucketDeltas)
+      await this.persistIdempotency(
+        tx,
+        idempotencyKey,
+        run.runId,
+        decision,
+        pricedAmount,
+        bucketDeltas
+      )
+    })
+  }
+
+  private async persistSpend(
+    db: RunBudgetDbWriter,
+    run: RunStateRow,
+    updatedRun: RunStateRow,
+    bucketDeltas: Array<{
+      bucketKey: string
+      entitlementId: string
+      featureId: string | null
+      statementKey: string
+      periodStartAt: number
+      periodEndAt: number
+      currency: string
+      amount: number
+    }>
+  ): Promise<void> {
+    await db
       .update(schema.runState)
       .set({
-        consumedAmount: newConsumed,
-        lastEventAt: now,
+        consumedAmount: updatedRun.consumedAmount,
+        lastEventAt: updatedRun.lastEventAt,
       })
       .where(eq(schema.runState.runId, run.runId))
 
     // Upsert spend buckets
     for (const delta of bucketDeltas) {
-      await this.db
+      await db
         .insert(schema.runSpendBuckets)
         .values({
           bucketKey: delta.bucketKey,
@@ -794,18 +830,17 @@ export class RunBudgetDO extends DurableObject {
           },
         })
     }
-
-    return { ...run, consumedAmount: newConsumed, lastEventAt: now }
   }
 
   private async persistIdempotency(
+    db: RunBudgetDbWriter,
     idempotencyKey: string,
     runId: string,
     decision: RunBudgetDecision,
     pricedAmount: number,
     bucketDeltas: unknown[]
   ): Promise<void> {
-    await this.db
+    await db
       .insert(schema.runIdempotency)
       .values({
         idempotencyKey,

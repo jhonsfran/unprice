@@ -1,7 +1,10 @@
-import type { RunSummary } from "@unprice/db/validators"
+import type { RunLedgerSummary } from "@unprice/db/validators"
 import { BaseError, Err, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import type { BudgetRunService } from "../../budget-runs"
+import type { CustomerService } from "../../customers/service"
+import { type SyncCatchUpService, ensureSubscriptionRenewed } from "../../subscriptions"
 import type { RunBudgetClient } from "./run-budget-client"
 
 type RunWorkloadType = "agent" | "workflow" | "job" | "tool" | "custom"
@@ -10,7 +13,14 @@ export class RunUseCaseError extends BaseError {
   public readonly retry = false
   public readonly name = "RunUseCaseError"
 
-  constructor(message: "RUN_NOT_FOUND" | "CUSTOMER_NOT_FOUND" | "BUDGET_ERROR" | "WALLET_EMPTY") {
+  constructor(
+    message:
+      | "RUN_NOT_FOUND"
+      | "CUSTOMER_NOT_FOUND"
+      | "SUBSCRIPTION_REQUIRED"
+      | "BUDGET_ERROR"
+      | "WALLET_EMPTY"
+  ) {
     super({ message })
   }
 }
@@ -35,10 +45,79 @@ export type StartRunDeps = {
   logger?: Logger
 }
 
+export type StartRunForCustomerSubscriptionInput = Omit<
+  StartRunResolvedInput,
+  "budgetAmount" | "currency"
+> & {
+  budgetAmountCurrencyMinor: number
+}
+
+export type StartRunForCustomerSubscriptionDeps = {
+  services: {
+    budgetRuns: BudgetRunService
+    customer: Pick<CustomerService, "getActiveSubscription">
+    subscription: SyncCatchUpService
+  }
+  runBudget: RunBudgetClient
+  logger?: Pick<Logger, "info" | "warn">
+  now?: () => number
+}
+
+const noopSubscriptionLogger: Pick<Logger, "info" | "warn"> = {
+  info: () => {},
+  warn: () => {},
+}
+
+export async function startRunForCustomerSubscription(
+  deps: StartRunForCustomerSubscriptionDeps,
+  input: StartRunForCustomerSubscriptionInput
+): Promise<Result<RunLedgerSummary, RunUseCaseError>> {
+  const now = deps.now?.() ?? Date.now()
+  const subscriptionResult = await deps.services.customer.getActiveSubscription({
+    customerId: input.customerId,
+    projectId: input.projectId,
+    now,
+  })
+
+  const subscription = subscriptionResult.val
+  const activePhase = subscription?.activePhase
+
+  if (subscriptionResult.err || !subscription || !activePhase) {
+    return Err(new RunUseCaseError("SUBSCRIPTION_REQUIRED"))
+  }
+
+  await ensureSubscriptionRenewed(
+    {
+      subscriptions: deps.services.subscription,
+      logger: deps.logger ?? noopSubscriptionLogger,
+    },
+    {
+      subscriptionId: subscription.id,
+      projectId: input.projectId,
+      now,
+    }
+  )
+
+  const currency = activePhase.planVersion.currency
+  const budgetAmount = toLedgerMinor(fromCurrencyMinor(input.budgetAmountCurrencyMinor, currency))
+
+  return startRun(
+    {
+      services: { budgetRuns: deps.services.budgetRuns },
+      runBudget: deps.runBudget,
+    },
+    {
+      ...input,
+      budgetAmount,
+      currency,
+    }
+  )
+}
+
 export async function startRun(
   deps: StartRunDeps,
   input: StartRunResolvedInput
-): Promise<Result<RunSummary, RunUseCaseError>> {
+): Promise<Result<RunLedgerSummary, RunUseCaseError>> {
   // 1. Create or fetch the Postgres budget_runs row by idempotency key
   const createResult = await deps.services.budgetRuns.createRun({
     projectId: input.projectId,
@@ -61,6 +140,12 @@ export async function startRun(
 
   const run = createResult.val
 
+  if (run.status === "failed") {
+    return Err(
+      new RunUseCaseError(run.statusReason?.startsWith("wallet:") ? "WALLET_EMPTY" : "BUDGET_ERROR")
+    )
+  }
+
   // 2. Call RunBudgetDO with the canonical run id
   const doResult = await deps.runBudget.startRun({
     projectId: input.projectId,
@@ -79,7 +164,7 @@ export async function startRun(
 
   if (doResult.err) {
     // Mark the Postgres row as failed so it doesn't sit orphaned in "running"
-    await deps.services.budgetRuns.updateRunSummary({
+    const updateResult = await deps.services.budgetRuns.updateRunSummary({
       projectId: input.projectId,
       runId: run.id,
       status: "failed",
@@ -88,6 +173,9 @@ export async function startRun(
       remainingAmount: 0,
       endedAt: new Date(),
     })
+    if (updateResult.err) {
+      return Err(new RunUseCaseError("BUDGET_ERROR"))
+    }
     return Err(new RunUseCaseError("BUDGET_ERROR"))
   }
 
@@ -95,7 +183,7 @@ export async function startRun(
   const summary = doResult.val.summary
   if (summary.status === "failed" && doResult.val.walletError) {
     // Mark the Postgres row as failed before returning the business error
-    await deps.services.budgetRuns.updateRunSummary({
+    const updateResult = await deps.services.budgetRuns.updateRunSummary({
       projectId: input.projectId,
       runId: run.id,
       status: "failed",
@@ -104,16 +192,22 @@ export async function startRun(
       remainingAmount: 0,
       endedAt: new Date(),
     })
+    if (updateResult.err) {
+      return Err(new RunUseCaseError("BUDGET_ERROR"))
+    }
     return Err(new RunUseCaseError("WALLET_EMPTY"))
   }
 
   // 3. Persist the wallet reservation id returned by the DO
   if (doResult.val.walletReservationId) {
-    await deps.services.budgetRuns.updateRunReservation({
+    const reservationResult = await deps.services.budgetRuns.updateRunReservation({
       projectId: input.projectId,
       runId: run.id,
       walletReservationId: doResult.val.walletReservationId,
     })
+    if (reservationResult.err) {
+      return Err(new RunUseCaseError("BUDGET_ERROR"))
+    }
   }
 
   return Ok({

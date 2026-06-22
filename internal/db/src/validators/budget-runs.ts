@@ -48,21 +48,48 @@ export const endRunInputSchema = z.object({
   status: z.enum(["completed", "canceled", "failed"]).default("completed"),
 })
 
-export const runSummarySchema = z.object({
+const runSummaryCommonShape = {
   runId: z.string(),
   status: runStatusSchema,
   customerId: z.string(),
-  /** Budget in currency minor units (cents). */
-  budgetAmount: z.number().int(),
-  /** Consumed in currency minor units (cents). */
-  consumedAmount: z.number().int(),
-  /** Remaining in currency minor units (cents). */
-  remainingAmount: z.number().int(),
   currency: z.string(),
   workloadType: nullableWorkloadTypeSchema,
   workloadId: z.string().nullable(),
   traceId: z.string().nullable(),
   parentRunId: z.string().nullable(),
+}
+
+export const runLedgerSummarySchema = z.object({
+  ...runSummaryCommonShape,
+  budgetAmount: z.number().int().describe("Budget in pgledger scale 8."),
+  consumedAmount: z.number().int().describe("Consumed amount in pgledger scale 8."),
+  remainingAmount: z.number().int().describe("Remaining amount in pgledger scale 8."),
+})
+
+export const runSummarySchema = z.object({
+  ...runSummaryCommonShape,
+  budgetAmount: z.number().int().openapi({
+    description: "Budget in currency minor units (cents).",
+  }),
+  consumedAmount: z.number().int().openapi({
+    description: "Consumed in currency minor units (cents).",
+  }),
+  remainingAmount: z.number().int().openapi({
+    description: "Remaining in currency minor units (cents).",
+  }),
+})
+
+export const runLedgerSyncDecisionSchema = z.object({
+  accepted: z.boolean(),
+  reason: z.enum([
+    "accepted",
+    "duplicate",
+    "insufficient_budget",
+    "expired",
+    "not_running",
+    "entitlement_denied",
+  ]),
+  run: runLedgerSummarySchema,
 })
 
 export const runSyncDecisionSchema = z.object({
@@ -85,5 +112,7 @@ export type BudgetRun = z.infer<typeof budgetRunSelectSchema>
 export type StartRunInput = z.infer<typeof startRunInputSchema>
 export type ApplyRunSyncEventInput = z.infer<typeof applyRunSyncEventInputSchema>
 export type EndRunInput = z.infer<typeof endRunInputSchema>
+export type RunLedgerSummary = z.infer<typeof runLedgerSummarySchema>
+export type RunLedgerSyncDecision = z.infer<typeof runLedgerSyncDecisionSchema>
 export type RunSummary = z.infer<typeof runSummarySchema>
 export type RunSyncDecision = z.infer<typeof runSyncDecisionSchema>

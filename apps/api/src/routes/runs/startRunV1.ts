@@ -1,8 +1,7 @@
 import { createRoute } from "@hono/zod-openapi"
 import { runSummarySchema, startRunInputSchema } from "@unprice/db/validators"
-import { fromCurrencyMinor, fromLedgerMinor, toCurrencyMinor, toLedgerMinor } from "@unprice/money"
-import { ensureSubscriptionRenewed } from "@unprice/services/subscriptions"
-import { RunUseCaseError, startRun } from "@unprice/services/use-cases"
+import { fromLedgerMinor, toCurrencyMinor } from "@unprice/money"
+import { RunUseCaseError, startRunForCustomerSubscription } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { keyAuth, resolveCustomerIdForApiKey } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
@@ -69,51 +68,25 @@ export const registerStartRunV1 = (app: App) =>
       })
     }
 
-    // Resolve currency from the customer's active subscription
     const { customer: customerService, subscription: subscriptionService } = c.get("services")
     const logger = c.get("logger")
-
-    const subscriptionResult = await customerService.getActiveSubscription({
-      customerId: customer.customerId,
-      projectId: key.projectId,
-      now: Date.now(),
-    })
-
-    if (subscriptionResult.err || !subscriptionResult.val?.activePhase) {
-      throw new UnpriceApiError({
-        code: "BAD_REQUEST",
-        message:
-          "Customer has no active subscription. A subscription with an active plan is required to start a budgeted run.",
-      })
-    }
-
-    const subscription = subscriptionResult.val
-    const currency = subscription.activePhase!.planVersion.currency
-
-    // Ensure the subscription is current before wallet reservation.
-    // If the renewal cron hasn't run yet, this triggers renewal inline
-    // so fresh wallet credits are available for the budget reservation.
-    await ensureSubscriptionRenewed(
-      { subscriptions: subscriptionService, logger },
-      {
-        subscriptionId: subscription.id,
-        projectId: key.projectId,
-      }
-    )
-
-    // Convert budgetAmount from currency minor units (cents) to ledger scale
-    const budgetAmountLedger = toLedgerMinor(fromCurrencyMinor(body.budgetAmount, currency))
-
     const { budgetRuns } = c.get("services")
     const runBudget = new CloudflareRunBudgetClient(c.env)
 
-    const result = await startRun(
-      { services: { budgetRuns }, runBudget },
+    const result = await startRunForCustomerSubscription(
+      {
+        services: {
+          budgetRuns,
+          customer: customerService,
+          subscription: subscriptionService,
+        },
+        runBudget,
+        logger,
+      },
       {
         projectId: key.projectId,
         customerId: customer.customerId,
-        budgetAmount: budgetAmountLedger,
-        currency,
+        budgetAmountCurrencyMinor: body.budgetAmount,
         idempotencyKey: body.idempotencyKey,
         workloadType: body.workloadType,
         workloadId: body.workloadId,
@@ -125,6 +98,14 @@ export const registerStartRunV1 = (app: App) =>
     )
 
     if (result.err) {
+      if (result.err instanceof RunUseCaseError && result.err.message === "SUBSCRIPTION_REQUIRED") {
+        throw new UnpriceApiError({
+          code: "BAD_REQUEST",
+          message:
+            "Customer has no active subscription. A subscription with an active plan is required to start a budgeted run.",
+        })
+      }
+
       if (result.err instanceof RunUseCaseError && result.err.message === "WALLET_EMPTY") {
         throw new UnpriceApiError({
           code: "BAD_REQUEST",
@@ -140,6 +121,7 @@ export const registerStartRunV1 = (app: App) =>
     }
 
     // Convert response amounts from ledger scale back to currency minor units
+    const { currency } = result.val
     return c.json(
       {
         ...result.val,

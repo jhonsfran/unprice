@@ -1,5 +1,5 @@
 import type { MeterConfig } from "@unprice/db/validators"
-import type { RunSyncDecision as RunSyncDecisionOutput } from "@unprice/db/validators"
+import type { RunLedgerSyncDecision as RunSyncDecisionOutput } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { BudgetRunService } from "../../budget-runs"
 import type {
@@ -155,13 +155,16 @@ export async function applyRunSyncEvent(
   const decision = doResult.val
 
   // Update stored summary
-  await deps.services.budgetRuns.updateRunSummary({
+  const summaryUpdateResult = await deps.services.budgetRuns.updateRunSummary({
     projectId: run.projectId,
     runId: run.id,
     status: decision.budget.status,
     consumedAmount: decision.budget.consumedAmount,
     remainingAmount: decision.budget.remainingAmount,
   })
+  if (summaryUpdateResult.err) {
+    return Err(new RunUseCaseError("BUDGET_ERROR"))
+  }
 
   const reportingMessage = buildRunReportingMessage(input, run)
   const reportingOutcome: IngestionOutcome = decision.allowed

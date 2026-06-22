@@ -80,6 +80,12 @@ export class IngestionService {
       now,
       reportingClient: opts.reportingClient ?? noopReportingClient,
     })
+    const subscriptionCatchUp = opts.subscriptions
+      ? new IngestionSubscriptionCatchUp({
+          logger: opts.logger,
+          subscriptions: opts.subscriptions,
+        })
+      : undefined
     this.syncProcessor = new IngestionSyncProcessor({
       entitlementContext,
       entitlementRouter,
@@ -87,13 +93,8 @@ export class IngestionService {
       messageOutcomes,
       now,
       reportingDispatcher,
+      subscriptionCatchUp,
     })
-    const subscriptionCatchUp = opts.subscriptions
-      ? new IngestionSubscriptionCatchUp({
-          logger: opts.logger,
-          subscriptions: opts.subscriptions,
-        })
-      : undefined
     this.customerGroupProcessor = new IngestionCustomerGroupProcessor({
       entitlementContext,
       enableTestFailureInjection: opts.enableTestFailureInjection,

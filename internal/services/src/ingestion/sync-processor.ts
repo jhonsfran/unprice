@@ -11,10 +11,15 @@ import type { IngestionOutcome, IngestionRejectionReason, IngestionSyncResult } 
 import type { IngestionQueueMessage } from "./message"
 import { type IngestionMessageOutcomes, toSyncResult } from "./message-outcomes"
 import type { IngestionReportingOutcomeDispatcher } from "./reporting-dispatcher"
+import type { IngestionSubscriptionCatchUp } from "./subscription-catchup"
 
 type SyncEntitlementResolution =
   | { kind: "resolved"; entitlement: IngestionEntitlement }
   | { kind: "rejected"; rejectionReason: IngestionRejectionReason }
+
+type PreparedSyncApplyResult =
+  | { state: "processed"; meterFacts: MessageOutcome["meterFacts"] }
+  | { state: "rejected"; messageText?: string; rejectionReason: IngestionRejectionReason }
 
 export class IngestionSyncProcessor {
   private readonly entitlementContext: CustomerGrantContextReader
@@ -23,6 +28,7 @@ export class IngestionSyncProcessor {
   private readonly messageOutcomes: IngestionMessageOutcomes
   private readonly now: () => number
   private readonly reportingDispatcher: IngestionReportingOutcomeDispatcher
+  private readonly subscriptionCatchUp?: IngestionSubscriptionCatchUp
 
   constructor(opts: {
     entitlementContext: CustomerGrantContextReader
@@ -31,6 +37,7 @@ export class IngestionSyncProcessor {
     messageOutcomes: IngestionMessageOutcomes
     now: () => number
     reportingDispatcher: IngestionReportingOutcomeDispatcher
+    subscriptionCatchUp?: IngestionSubscriptionCatchUp
   }) {
     this.entitlementContext = opts.entitlementContext
     this.entitlementRouter = opts.entitlementRouter
@@ -38,6 +45,7 @@ export class IngestionSyncProcessor {
     this.messageOutcomes = opts.messageOutcomes
     this.now = opts.now
     this.reportingDispatcher = opts.reportingDispatcher
+    this.subscriptionCatchUp = opts.subscriptionCatchUp
   }
 
   public async ingestFeatureSync(params: {
@@ -56,13 +64,10 @@ export class IngestionSyncProcessor {
       return staleRejection
     }
 
-    const preparedContext = await this.entitlementContext.prepareCustomerGrantContext({
+    const preparedContext = await this.prepareSyncContext({
       customerId,
+      message,
       projectId,
-      ...resolveCustomerGrantContextWindow({
-        earliestTimestamp: message.timestamp,
-        latestTimestamp: message.timestamp,
-      }),
     })
 
     if (preparedContext.rejectionReason) {
@@ -74,18 +79,90 @@ export class IngestionSyncProcessor {
       })
     }
 
+    const applyResult = await this.applyPreparedSyncMessage({
+      featureSlug,
+      message,
+      preparedContext,
+    })
+    if (
+      applyResult.state === "processed" ||
+      applyResult.rejectionReason !== "WALLET_EMPTY" ||
+      this.subscriptionCatchUp === undefined
+    ) {
+      return this.reportPreparedSyncApplyResult({
+        message,
+        result: applyResult,
+      })
+    }
+
+    const catchUp = await this.subscriptionCatchUp.catchUpForPreparedGroup({
+      candidateEntitlements: preparedContext.candidateEntitlements,
+      customerId,
+      messages: [message],
+      projectId,
+    })
+    if (!catchUp.changed) {
+      return this.reportPreparedSyncApplyResult({
+        message,
+        result: applyResult,
+      })
+    }
+
+    const refreshedContext = await this.prepareSyncContext({
+      customerId,
+      message,
+      projectId,
+    })
+    if (refreshedContext.rejectionReason) {
+      return this.rejectSyncMessage({
+        customerId,
+        message,
+        projectId,
+        rejectionReason: refreshedContext.rejectionReason,
+      })
+    }
+
+    const refreshedResult = await this.applyPreparedSyncMessage({
+      featureSlug,
+      message,
+      preparedContext: refreshedContext,
+    })
+    return this.reportPreparedSyncApplyResult({
+      message,
+      result: refreshedResult,
+    })
+  }
+
+  private prepareSyncContext(params: {
+    customerId: string
+    message: IngestionQueueMessage
+    projectId: string
+  }): Promise<PreparedCustomerGrantContext> {
+    return this.entitlementContext.prepareCustomerGrantContext({
+      customerId: params.customerId,
+      projectId: params.projectId,
+      ...resolveCustomerGrantContextWindow({
+        earliestTimestamp: params.message.timestamp,
+        latestTimestamp: params.message.timestamp,
+      }),
+    })
+  }
+
+  private async applyPreparedSyncMessage(params: {
+    featureSlug: string
+    message: IngestionQueueMessage
+    preparedContext: PreparedCustomerGrantContext
+  }): Promise<PreparedSyncApplyResult> {
+    const { featureSlug, message, preparedContext } = params
+    const { customerId, projectId } = message
+
     const entitlementResolution = this.resolveSyncEntitlement({
       candidateEntitlements: preparedContext.candidateEntitlements,
       featureSlug,
       message,
     })
     if (entitlementResolution.kind === "rejected") {
-      return this.rejectSyncMessage({
-        customerId,
-        message,
-        projectId,
-        rejectionReason: entitlementResolution.rejectionReason,
-      })
+      return { state: "rejected", rejectionReason: entitlementResolution.rejectionReason }
     }
 
     const applyResult = await this.entitlementWindowApplier.apply({
@@ -97,18 +174,35 @@ export class IngestionSyncProcessor {
     })
 
     if (!applyResult.allowed) {
-      return this.rejectSyncMessage({
-        customerId,
-        message,
-        projectId,
+      return {
+        state: "rejected",
         rejectionReason: applyResult.deniedReason ?? "LIMIT_EXCEEDED",
         messageText: applyResult.message,
+      }
+    }
+
+    return { state: "processed", meterFacts: applyResult.meterFacts }
+  }
+
+  private reportPreparedSyncApplyResult(params: {
+    message: IngestionQueueMessage
+    result: PreparedSyncApplyResult
+  }): Promise<IngestionSyncResult> {
+    const { message, result } = params
+
+    if (result.state === "processed") {
+      return this.reportProcessedSyncMessage({
+        message,
+        meterFacts: result.meterFacts,
       })
     }
 
-    return this.reportProcessedSyncMessage({
+    return this.rejectSyncMessage({
+      customerId: message.customerId,
       message,
-      meterFacts: applyResult.meterFacts,
+      messageText: result.messageText,
+      projectId: message.projectId,
+      rejectionReason: result.rejectionReason,
     })
   }
 

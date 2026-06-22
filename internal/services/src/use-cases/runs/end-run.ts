@@ -1,4 +1,4 @@
-import type { RunSummary } from "@unprice/db/validators"
+import type { RunLedgerSummary } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { BudgetRunService } from "../../budget-runs"
 import type { RunBudgetClient } from "./run-budget-client"
@@ -19,7 +19,7 @@ export type EndRunInput = {
 export async function endRun(
   deps: EndRunDeps,
   input: EndRunInput
-): Promise<Result<RunSummary, RunUseCaseError>> {
+): Promise<Result<RunLedgerSummary, RunUseCaseError>> {
   const runResult = await deps.services.budgetRuns.getRun({
     projectId: input.projectId,
     runId: input.runId,
@@ -51,7 +51,7 @@ export async function endRun(
   }
 
   // Persist final summary
-  await deps.services.budgetRuns.updateRunSummary({
+  const summaryUpdateResult = await deps.services.budgetRuns.updateRunSummary({
     projectId: run.projectId,
     runId: run.id,
     status: input.status === "failed" ? "failed" : doResult.val.status,
@@ -59,6 +59,9 @@ export async function endRun(
     remainingAmount: doResult.val.remainingAmount,
     endedAt: new Date(),
   })
+  if (summaryUpdateResult.err) {
+    return Err(new RunUseCaseError("BUDGET_ERROR"))
+  }
 
   return Ok({
     runId: run.id,

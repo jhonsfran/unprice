@@ -1,4 +1,4 @@
-import type { RunSummary } from "@unprice/db/validators"
+import type { RunLedgerSummary } from "@unprice/db/validators"
 import { Err, Ok, type Result } from "@unprice/error"
 import type { BudgetRunService } from "../../budget-runs"
 import type { RunBudgetClient } from "./run-budget-client"
@@ -18,7 +18,7 @@ export type GetRunInput = {
 export async function getRun(
   deps: GetRunDeps,
   input: GetRunInput
-): Promise<Result<RunSummary, RunUseCaseError>> {
+): Promise<Result<RunLedgerSummary, RunUseCaseError>> {
   const runResult = await deps.services.budgetRuns.getRun({
     projectId: input.projectId,
     runId: input.runId,
