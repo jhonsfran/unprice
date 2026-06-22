@@ -195,9 +195,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     >
       <DropdownMenu onOpenChange={setIsOpen} open={isOpen}>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="h-8 w-8 p-0">
-            <span className="sr-only">Open menu</span>
-            <Ellipsis className="h-4 w-4" />
+          <Button variant="ghost" size="icon" className="size-8">
+            <Ellipsis className="size-4" aria-hidden="true" />
+            <span className="sr-only">Open row actions</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
@@ -255,7 +255,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               ) : (
                 "No default customer"
               )}
-              <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
             </Button>
           </PopoverTrigger>
           <PopoverContent className="max-h-[--radix-popover-content-available-height] w-[--radix-popover-trigger-width] p-0">
