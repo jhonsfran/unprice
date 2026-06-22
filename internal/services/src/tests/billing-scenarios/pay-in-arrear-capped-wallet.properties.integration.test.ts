@@ -199,9 +199,13 @@ async function runCappedWalletPropertyCase(usage: number) {
     refillChunkAmount: 0,
     statementKey,
     final: true,
+    billingPeriodId: "bp_test_arrear_capped_events_jan",
     effectiveAt: new Date(feb1),
     sourceId: "bp_test_arrear_capped_events_jan:item_test_arrear_capped_events",
-    metadata: { owner: "p0-b-property" },
+    metadata: {
+      feature_plan_version_item_id: "item_test_arrear_capped_events",
+      owner: "p0-b-property",
+    },
   })
   expect(flush.err).toBeUndefined()
   expect(flush.val).toMatchObject({
@@ -241,7 +245,7 @@ async function runCappedWalletPropertyCase(usage: number) {
   await expectReservationClosed(reservationId, expectedUsageAmount)
   await expectWalletCredit(remainingCreditLine)
   await expectLedgerSources()
-  expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+  expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
 }
 
 describe("P0-B pay_in_arrear capped wallet properties", () => {
@@ -394,7 +398,7 @@ async function expectLedgerSources() {
     ORDER BY source_type
   `)
   expect(sources.rows).toEqual([
-    { count: 2, source_type: "subscription_billing_period_charge_v1" },
+    { count: 1, source_type: "subscription_billing_period_charge_v1" },
     { count: 1, source_type: "wallet_adjust" },
     { count: 1, source_type: "wallet_capture_usage" },
     { count: 1, source_type: "wallet_reserve_granted" },
@@ -409,7 +413,7 @@ async function expectLedgerSources() {
     ORDER BY source_type
   `)
   expect(statementSources.rows).toEqual([
-    { count: 2, source_type: "subscription_billing_period_charge_v1" },
+    { count: 1, source_type: "subscription_billing_period_charge_v1" },
     { count: 1, source_type: "wallet_capture_usage" },
   ])
 }

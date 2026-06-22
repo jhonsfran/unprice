@@ -158,6 +158,7 @@ describe("wallet credit expiration sweep DB lifecycle", () => {
       projectId,
       refillChunkAmount: 0,
       reservationId,
+      billingPeriodId: "bp_wallet_sweep",
       statementKey: "stmt_wallet_sweep",
     })
     expect(flush.err).toBeUndefined()

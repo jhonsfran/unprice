@@ -83,8 +83,34 @@ export async function billPeriod({
       .limit(1)
 
     if (nextPending) {
+      if (nextPending.invoiceAt <= now) {
+        return {
+          phasesProcessed: 0,
+          subscription,
+        }
+      }
+
       const nextInvoiceDate = new Date(nextPending.invoiceAt).toLocaleString()
       throw new Error(`Cannot invoice subscription, next invoice date is at ${nextInvoiceDate}`)
+    }
+
+    const [lastInvoiced] = await db
+      .select({ id: billingPeriods.id })
+      .from(billingPeriods)
+      .where(
+        and(
+          eq(billingPeriods.status, "invoiced"),
+          eq(billingPeriods.projectId, subscription.projectId),
+          eq(billingPeriods.subscriptionId, subscription.id)
+        )
+      )
+      .limit(1)
+
+    if (lastInvoiced) {
+      return {
+        phasesProcessed: 0,
+        subscription,
+      }
     }
 
     throw new Error("Cannot invoice subscription, there are no pending billing periods to invoice")

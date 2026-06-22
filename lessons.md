@@ -167,6 +167,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-22: Positive wallet `captureReservationUsage` calls must carry billing period and
   statement context; otherwise `customer.*.consumed` can gain non-invoice-backed
   `wallet_capture_usage` ledger rows.
+- 2026-06-22: Invoice-visible wallet captures must also carry
+  `feature_plan_version_item_id`; `billPeriod` uses it with `billing_period_id` to avoid
+  re-rating already captured capped-wallet usage.
 - 2026-06-22: Budget runs do not create separate "run" invoice lines; run sync events report
   meter facts that bill through the subscribed usage features, so inspect feature-period invoices
   and ledger metadata when reconciling run charges.
