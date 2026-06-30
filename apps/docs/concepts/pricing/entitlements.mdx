@@ -30,7 +30,7 @@ Check if a customer has access to a feature before doing work.
 Checking before performing an action lets you fail gracefully when the customer is not entitled to the feature.
 
 ```typescript
-const { result, error } = await unprice.entitlements.verify({
+const { result, error } = await unprice.access.check({
   customerId: "cust_123",
   featureSlug: "ai-generations"
 });
@@ -45,7 +45,7 @@ if (result?.allowed) {
 Ingest usage and verify access in a single call. This is the most common way to enforce metered features.
 
 ```typescript
-const { result, error } = await unprice.events.ingestSync({
+const { result, error } = await unprice.usage.consume({
   idempotencyKey: "unique-uuid-here",
   eventSlug: "api_request",
   customerId: "cust_123",

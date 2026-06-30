@@ -46,16 +46,15 @@ const InviteEmail = (props: {
               </Heading>
 
               <Text className="m-0 mb-[32px] text-[#a1a1aa] text-[16px] leading-[1.5]">
-                {inviterName} has invited you to collaborate on {workspaceName} using Unprice's
-                adaptive monetization platform.
+                {inviterName} has invited you to collaborate on {workspaceName} on Unprice —
+                open-source PriceOps infrastructure for usage-based SaaS.
               </Text>
 
               <Text className="m-0 mb-[32px] text-[18px] text-white">Hello {inviteeName},</Text>
 
               <Text className="m-0 mb-[32px] text-[#a1a1aa] text-[16px] leading-[1.6]">
-                Join your team to start building modern pricing infrastructure together. Unprice
-                provides the tools you need to implement flexible, developer-friendly monetization
-                solutions for your SaaS.
+                Join your team to meter usage, enforce entitlements, budget expensive runs, and
+                explain every invoice from one inspectable money path.
               </Text>
             </Section>
 
@@ -122,7 +121,7 @@ const InviteEmail = (props: {
               </Text>
 
               <Text className="m-0 text-center text-[#ffffff] text-[12px] leading-[16px]">
-                © 2025 Unprice, Inc.
+                © 2026 Unprice, Inc.
               </Text>
             </Section>
           </Container>

@@ -53,14 +53,14 @@ export function setup() {
 export default function (profile) {
   const usageRequests = profile.usageEvents.map((event) =>
     postJsonRequest(
-      "/v1/events/ingest",
+      "/v1/usage/record",
       {
         customerId: CUSTOMER_ID,
         eventSlug: event.eventSlug,
         idempotencyKey: nextIdempotencyKey(event.eventSlug),
         properties: buildProperties(event.propertyFields),
       },
-      "POST /v1/events/ingest"
+      "POST /v1/usage/record"
     )
   )
   const verifyRequests = shouldVerifyThisIteration()
@@ -93,7 +93,7 @@ function discoverCustomerProfile() {
   })
 
   check(profile, {
-    "entitlements.get returns usage profile": (result) => result.usageEvents.length > 0,
+    "access.entitlements.list returns usage profile": (result) => result.usageEvents.length > 0,
   })
 
   return profile
@@ -110,12 +110,12 @@ function postJsonRequest(path, body, name) {
 function buildVerifyRequests(featureSlugs) {
   return featureSlugs.map((featureSlug) =>
     postJsonRequest(
-      "/v1/entitlements/verify",
+      "/v1/access/check",
       {
         customerId: CUSTOMER_ID,
         featureSlug,
       },
-      "POST /v1/entitlements/verify"
+      "POST /v1/access/check"
     )
   )
 }

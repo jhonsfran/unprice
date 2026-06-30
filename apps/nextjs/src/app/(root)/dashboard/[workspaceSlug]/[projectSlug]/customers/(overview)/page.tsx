@@ -91,6 +91,11 @@ export default async function ProjectUsersPage(props: {
             pageCount={pageCount}
             columns={columns}
             data={customers}
+            emptyState={{
+              title: "No customers",
+              description: "Create a customer or send one through the API to start tracking usage.",
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "email",
               filterColumns: true,

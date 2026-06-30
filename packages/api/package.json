@@ -26,13 +26,16 @@
     "clean": "rm -rf .turbo node_modules dist",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "generate": "openapi-typescript http://localhost:8787/openapi.json -o ./src/openapi.d.ts",
+    "generate:openapi": "curl -fsS http://localhost:8787/openapi.json | node -e \"let input = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (chunk) => { input += chunk }); process.stdin.on('end', () => { require('node:fs').writeFileSync('../../apps/docs/openapi.json', JSON.stringify(JSON.parse(input), null, 2) + '\\n') })\" && pnpm biome format ../../apps/docs/openapi.json --write",
+    "generate:types": "openapi-typescript ../../apps/docs/openapi.json -o ./src/openapi.d.ts --default-non-nullable false",
+    "generate:resources": "node ./scripts/generate-sdk-resources.mjs ../../apps/docs/openapi.json ./src/generated/sdk-resources.ts",
+    "generate": "pnpm generate:openapi && pnpm generate:types && pnpm generate:resources",
     "build:generate": "rm -rf dist && pnpm generate && tsup",
     "build": "rm -rf dist && tsup",
     "dev": "tsup --watch"
   },
   "devDependencies": {
-    "@types/node": "20.11.24",
+    "@types/node": "24.13.2",
     "openapi-typescript": "7.0.0-next.7",
     "tsup": "^8.4.0",
     "typescript": "^5.3.3",

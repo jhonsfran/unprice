@@ -8,42 +8,57 @@ import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
 const tags = ["subscriptions"]
 
-export const route = createRoute({
-  path: "/v1/subscriptions/get",
-  operationId: "subscriptions.get",
-  summary: "get subscription",
-  description: "Get subscription with the active phase for a customer",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(
-      z.object({
-        customerId: z.string().openapi({
-          description: "The customer ID",
-          example: "cus_1H7KQFLr7RepUyQBKdnvY",
-        }),
-        projectId: z
-          .string()
-          .openapi({
-            description: "The project ID",
-            example: "prj_1H7KQFLr7RepUyQBKdnvY",
-          })
-          .optional(),
-      }),
-      "Body of the request"
-    ),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      subscriptionCacheSchema,
-      "The result of the get subscription"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/subscriptions/get",
+      operationId: "subscriptions.get",
+      summary: "get subscription",
+      description: "Get subscription with the active phase for a customer",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          z.object({
+            customerId: z.string().openapi({
+              description: "The customer ID",
+              example: "cus_1H7KQFLr7RepUyQBKdnvY",
+            }),
+            projectId: z
+              .string()
+              .openapi({
+                description: "The project ID",
+                example: "prj_1H7KQFLr7RepUyQBKdnvY",
+              })
+              .optional(),
+          }),
+          "Body of the request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          subscriptionCacheSchema,
+          "The result of the get subscription"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["subscriptions", "get"],
+      },
+    }
+  )
+)
 
 export type GetSubscriptionRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]

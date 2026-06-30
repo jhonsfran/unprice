@@ -1,10 +1,7 @@
-import { Button } from "@unprice/ui/button"
-import { Pencil } from "lucide-react"
 import { notFound } from "next/navigation"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
-import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
-import { ProjectDialog } from "../../_components/project-dialog"
+import { ProjectSettingsHeader } from "./_components/project-settings-header"
 
 export default async function ProjectSettingsLayout(props: {
   children: React.ReactNode
@@ -19,22 +16,7 @@ export default async function ProjectSettingsLayout(props: {
   }
 
   return (
-    <DashboardShell
-      header={
-        <HeaderTab
-          title="General Settings"
-          description="Manage your project settings"
-          action={
-            <ProjectDialog defaultValues={project}>
-              <Button variant={"outline"}>
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit Project
-              </Button>
-            </ProjectDialog>
-          }
-        />
-      }
-    >
+    <DashboardShell header={<ProjectSettingsHeader project={project} />}>
       {props.children}
     </DashboardShell>
   )

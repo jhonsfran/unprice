@@ -85,7 +85,7 @@ const unprice = new Unprice({
   baseUrl: env.UNPRICE_API_URL
 })
 
-const { result, error } = await unprice.payments.methods.list({
+const { result, error } = await unprice.paymentMethods.list({
   customerId: "cus_123",
   provider: "stripe"
 });

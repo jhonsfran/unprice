@@ -5,6 +5,7 @@ import type {
   Stats,
   Usage,
 } from "@unprice/analytics"
+import type { budgetRuns } from "@unprice/db/schema"
 import type {
   ApiKeyExtended,
   CurrentUsage,
@@ -42,8 +43,11 @@ export type WorkspaceGuardCache = {
 
 export type CustomersProjectCache = Pick<Customer, "id" | "name" | "email" | "projectId" | "isMain">
 
+export type BudgetRunCache = typeof budgetRuns.$inferSelect
+
 export type CacheNamespaces = {
   apiKeyByHash: ApiKeyExtended | null
+  budgetRun: BudgetRunCache | null
   customersProject: CustomersProjectCache[] | null
   customerSubscription: SubscriptionCache | null
   customer: CustomerCache | null

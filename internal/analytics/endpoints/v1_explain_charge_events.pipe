@@ -74,7 +74,7 @@ SQL >
       source_type,
       source_id
     FROM deduped_explain_charge_events_node
-    ORDER BY timestamp ASC, created_at ASC, event_id ASC, customer_entitlement_id ASC, grant_id ASC, idempotency_key ASC
+    ORDER BY timestamp ASC, created_at ASC, idempotency_key ASC, event_id ASC, customer_entitlement_id ASC, grant_id ASC
     LIMIT {{ Int32(limit, 100) }}
     OFFSET {{ Int32(offset, 0) }}
 

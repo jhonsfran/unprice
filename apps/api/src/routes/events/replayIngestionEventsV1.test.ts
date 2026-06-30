@@ -350,7 +350,7 @@ function buildRequest(
     headers.set("authorization", "Bearer sk_test")
   }
 
-  return new Request("https://example.com/v1/events/ingest/replay", {
+  return new Request("https://example.com/v1/ingestion-events/replay", {
     method: "POST",
     headers,
     body: JSON.stringify(body),

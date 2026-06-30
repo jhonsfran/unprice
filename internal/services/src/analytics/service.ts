@@ -128,22 +128,22 @@ export class AnalyticsService {
       totalPlans: {
         total: totalPlans?.count ?? 0,
         title: "Total Plans",
-        description: `created in the last ${preparedInterval.label}`,
+        description: `created in the last ${preparedInterval.durationLabel}`,
       },
       totalSubscriptions: {
         total: totalSubscriptions?.count ?? 0,
         title: "Total Subscriptions",
-        description: `created in the last ${preparedInterval.label}`,
+        description: `created in the last ${preparedInterval.durationLabel}`,
       },
       totalPlanVersions: {
         total: totalPlanVersions?.count ?? 0,
         title: "Total Plan Versions",
-        description: `created in the last ${preparedInterval.label}`,
+        description: `created in the last ${preparedInterval.durationLabel}`,
       },
       totalFeatures: {
         total: totalFeatures?.count ?? 0,
         title: "Total Features",
-        description: `created in the last ${preparedInterval.label}`,
+        description: `created in the last ${preparedInterval.durationLabel}`,
       },
     } as OverviewStats)
   }
@@ -210,23 +210,23 @@ export class AnalyticsService {
       newSignups: {
         total: 0,
         title: "New Signups",
-        description: `in the last ${preparedInterval.label}`,
+        description: `in the last ${preparedInterval.durationLabel}`,
       },
       totalRevenue: {
         total: 0,
-        title: "Total Revenue",
-        description: `in the last ${preparedInterval.label}`,
+        title: "Recognized revenue",
+        description: `in the last ${preparedInterval.durationLabel}`,
         unit: currencySymbol(defaultCurrency),
       },
       newSubscriptions: {
         total: 0,
         title: "New Subscriptions",
-        description: `in the last ${preparedInterval.label}`,
+        description: `in the last ${preparedInterval.durationLabel}`,
       },
       newCustomers: {
         total: 0,
         title: "New Customers",
-        description: `in the last ${preparedInterval.label}`,
+        description: `in the last ${preparedInterval.durationLabel}`,
       },
     }
 

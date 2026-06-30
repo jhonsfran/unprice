@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
-import { Unprice, type paths } from "@unprice/api"
+import { Unprice, type operations } from "@unprice/api"
 
 type GetEntitlementsResponse =
-  paths["/v1/entitlements/get"]["post"]["responses"]["200"]["content"]["application/json"]
+  operations["access.entitlements.list"]["responses"][200]["content"]["application/json"]
 type CustomerEntitlement = GetEntitlementsResponse[number]
 type MeterConfig = NonNullable<CustomerEntitlement["featurePlanVersion"]["meterConfig"]>
 type AggregationMethod = MeterConfig["aggregationMethod"]
@@ -212,11 +212,11 @@ test("subscription: is active", async () => {
 })
 
 test("entitlements: fetches list", async () => {
-  const { result, error } = await unprice.entitlements.get({
+  const { result, error } = await unprice.access.entitlements.list({
     customerId: CUSTOMER_ID,
   })
 
-  assert(!error, `getEntitlements error: ${error?.message}`)
+  assert(!error, `access.entitlements.list error: ${error?.message}`)
   assert(!!result, "entitlements result should exist")
   assert(Array.isArray(result), "entitlements should be an array")
   assert((result?.length ?? 0) > 0, "customer should have at least 1 entitlement")
@@ -245,7 +245,7 @@ test("verification: verify all entitlements", async () => {
   assert(entitlements.length > 0, "no entitlements loaded (did previous test fail?)")
 
   for (const ent of entitlements) {
-    const { result, error } = await unprice.entitlements.verify({
+    const { result, error } = await unprice.access.check({
       customerId: CUSTOMER_ID,
       featureSlug: ent.featureSlug,
     })
@@ -278,7 +278,7 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
   }
 
   // 1. Verify before ingestion
-  const before = await unprice.entitlements.verify({
+  const before = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -300,7 +300,7 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
   assert(props !== null, "could not build ingestion properties")
 
   // 3. Sync ingest
-  const ingestResult = await unprice.events.ingestSync({
+  const ingestResult = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
     featureSlug: usageFeature.featureSlug,
@@ -317,7 +317,7 @@ test("sync-ingestion: ingest and verify usage delta", async () => {
   assert(ingestResult.result?.allowed === true, `ingestSync rejected: ${rejectionReason}`)
 
   // 4. Verify after ingestion — usage should have changed
-  const after = await unprice.entitlements.verify({
+  const after = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -352,7 +352,7 @@ test("async-ingestion: ingest and poll for eventual consistency", async () => {
   }
 
   // 1. Verify before
-  const before = await unprice.entitlements.verify({
+  const before = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -370,7 +370,7 @@ test("async-ingestion: ingest and poll for eventual consistency", async () => {
   })
   assert(props !== null, "could not build ingestion properties")
 
-  const ingestResult = await unprice.events.ingest({
+  const ingestResult = await unprice.usage.record({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
     properties: props!,
@@ -388,7 +388,7 @@ test("async-ingestion: ingest and poll for eventual consistency", async () => {
   while (Date.now() < deadline) {
     await sleep(500)
 
-    const check = await unprice.entitlements.verify({
+    const check = await unprice.access.check({
       customerId: CUSTOMER_ID,
       featureSlug: usageFeature.featureSlug,
     })
@@ -421,7 +421,7 @@ test("idempotency: duplicate key is deduplicated", async () => {
   }
 
   // 1. Verify baseline
-  const before = await unprice.entitlements.verify({
+  const before = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -440,7 +440,7 @@ test("idempotency: duplicate key is deduplicated", async () => {
   assert(props !== null, "could not build ingestion properties")
 
   // 2. Send the same event twice with the same idempotency key
-  const first = await unprice.events.ingestSync({
+  const first = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
     featureSlug: usageFeature.featureSlug,
@@ -449,7 +449,7 @@ test("idempotency: duplicate key is deduplicated", async () => {
   })
   assert(!first.error, `first ingest error: ${first.error?.message}`)
 
-  const second = await unprice.events.ingestSync({
+  const second = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
     featureSlug: usageFeature.featureSlug,
@@ -460,7 +460,7 @@ test("idempotency: duplicate key is deduplicated", async () => {
   assert(!second.error, `second ingest error: ${second.error?.message}`)
 
   // 3. Verify usage increased only once
-  const after = await unprice.entitlements.verify({
+  const after = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -493,7 +493,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
   }
 
   // 1. Check current state
-  const check = await unprice.entitlements.verify({
+  const check = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: usageFeature.featureSlug,
   })
@@ -516,7 +516,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
     })
 
     if (props) {
-      const res = await unprice.events.ingestSync({
+      const res = await unprice.usage.consume({
         customerId: CUSTOMER_ID,
         eventSlug: usageFeature.eventSlug,
         featureSlug: usageFeature.featureSlug,
@@ -524,7 +524,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
         idempotencyKey: randomUUID(),
       })
 
-      assert(!res.error, `ingestSync error: ${res.error?.message}`)
+      assert(!res.error, `usage.consume error: ${res.error?.message}`)
       assert(res.result?.allowed === false, "expected rejection when limit already reached")
       assert(
         res.result?.rejectionReason === "LIMIT_EXCEEDED",
@@ -553,7 +553,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
   })
   assert(props !== null, "could not build ingestion properties")
 
-  const res = await unprice.events.ingestSync({
+  const res = await unprice.usage.consume({
     customerId: CUSTOMER_ID,
     eventSlug: usageFeature.eventSlug,
     featureSlug: usageFeature.featureSlug,
@@ -561,7 +561,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
     idempotencyKey: randomUUID(),
   })
 
-  assert(!res.error, `ingestSync error: ${res.error?.message}`)
+  assert(!res.error, `usage.consume error: ${res.error?.message}`)
 
   // depending on overage strategy this might be allowed (last-call) or rejected
   if (res.result?.allowed === false) {
@@ -576,7 +576,7 @@ test("limit-enforcement: sync ingest rejects when limit exceeded", async () => {
 })
 
 test("analytics: getUsage returns data", async () => {
-  const { result, error } = await unprice.usage.get({
+  const { result, error } = await unprice.analytics.usage.get({
     customer_id: CUSTOMER_ID,
     range: "24h",
   })
@@ -590,14 +590,16 @@ test("analytics: getUsage returns data", async () => {
   if (usageFeature && (result?.usage?.length ?? 0) > 0) {
     const featureUsage = result?.usage?.find((u) => u.feature_slug === usageFeature!.featureSlug)
     if (featureUsage) {
-      console.info(`    ${usageFeature.featureSlug}: value=${featureUsage.value_after}`)
+      console.info(
+        `    ${usageFeature.featureSlug}: usage=${featureUsage.usage}, spending=${featureUsage.spending.display_amount}`
+      )
     }
   }
 })
 
 test("verification: non-existent feature returns proper error", async () => {
   const fakeSlug = `fake_feature_${Date.now()}`
-  const { result, error } = await unprice.entitlements.verify({
+  const { result, error } = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: fakeSlug,
   })
@@ -624,7 +626,7 @@ test("verification: non-existent feature returns proper error", async () => {
 
 test("verification: non-existent customer returns proper error", async () => {
   const fakeCustomer = `cus_fake_${Date.now()}`
-  const { result, error } = await unprice.entitlements.verify({
+  const { result, error } = await unprice.access.check({
     customerId: fakeCustomer,
     featureSlug: entitlements[0]?.featureSlug ?? "any",
   })

@@ -38,6 +38,12 @@ export interface FilterOptionDataTable {
   >
 }
 
+interface DataTableEmptyState {
+  title: string
+  description: string
+  icon?: React.ComponentType<{ className?: string }>
+}
+
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
@@ -45,6 +51,8 @@ interface DataTableProps<TData, TValue> {
   className?: string
   pageCount?: number
   error?: string
+  emptyState?: DataTableEmptyState
+  hidePaginationWhenEmpty?: boolean
 }
 
 export function DataTable<TData, TValue>({
@@ -54,13 +62,18 @@ export function DataTable<TData, TValue>({
   className,
   pageCount,
   error,
+  emptyState,
+  hidePaginationWhenEmpty,
 }: DataTableProps<TData, TValue>) {
   const [rowSelection, setRowSelection] = React.useState({})
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
 
   // if pageCount is provided, we assume server-side pagination
   // otherwise, we assume client-side pagination done by the library
-  const isServerSidePagination = !!pageCount
+  const safePageCount =
+    typeof pageCount === "number" && Number.isFinite(pageCount) ? Math.max(pageCount, 1) : undefined
+  const isServerSidePagination = typeof safePageCount === "number"
+  const isServerSideFiltering = filterOptions?.filterServerSide === true
 
   const {
     pagination,
@@ -71,13 +84,13 @@ export function DataTable<TData, TValue>({
     onColumnFiltersChange,
   } = useDataTableUrlState({
     searchColumnId: filterOptions?.filterBy,
-    serverSide: isServerSidePagination,
+    serverSide: isServerSidePagination || isServerSideFiltering,
   })
 
   const table = useReactTable({
     data,
     columns,
-    ...(isServerSidePagination && { pageCount }),
+    ...(isServerSidePagination && { pageCount: safePageCount }),
     state: {
       sorting,
       pagination,
@@ -93,15 +106,20 @@ export function DataTable<TData, TValue>({
     onColumnVisibilityChange: setColumnVisibility,
     onPaginationChange,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
+    ...(isServerSideFiltering
+      ? { manualFiltering: true }
+      : { getFilteredRowModel: getFilteredRowModel() }),
     ...(isServerSidePagination && {
       manualPagination: true,
     }),
   })
+
+  const hasRows = table.getRowModel().rows.length > 0
+  const EmptyIcon = emptyState?.icon ?? AlertTriangle
 
   return (
     <div className={cn("w-full space-y-4 overflow-auto", className)}>
@@ -163,13 +181,15 @@ export function DataTable<TData, TValue>({
                 <TableCell colSpan={table.getAllColumns().length} className="h-24 p-4 text-center">
                   <EmptyPlaceholder className="min-h-[300px]">
                     <EmptyPlaceholder.Icon>
-                      <AlertTriangle className="h-8 w-8" />
+                      <EmptyIcon className="size-8" />
                     </EmptyPlaceholder.Icon>
                     <EmptyPlaceholder.Title>
-                      {error ? "Ups, something went wrong" : "No Results"}
+                      {error ? "Something went wrong" : (emptyState?.title ?? "No results")}
                     </EmptyPlaceholder.Title>
                     <EmptyPlaceholder.Description>
-                      {error ? error : "There are no results for the selected filters."}
+                      {error
+                        ? error
+                        : (emptyState?.description ?? "No rows match the current filters.")}
                     </EmptyPlaceholder.Description>
                   </EmptyPlaceholder>
                 </TableCell>
@@ -178,7 +198,7 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
-      <DataTablePagination table={table} />
+      {(!hidePaginationWhenEmpty || hasRows) && <DataTablePagination table={table} />}
     </div>
   )
 }

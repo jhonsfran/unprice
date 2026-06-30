@@ -19,22 +19,24 @@ export default function MobileSidebar({
       <DrawerTrigger asChild>
         <Button
           variant="ghost"
-          aria-label="open sidebar"
+          aria-label="Open navigation menu"
           className="group flex items-center rounded-md p-2 font-medium text-sm"
         >
-          <MoreVertical className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <MoreVertical className="size-4 shrink-0" aria-hidden="true" />
         </Button>
       </DrawerTrigger>
       <DrawerContent className="w-full">
         <div className="p-4 pb-0">
-          <div className="flex flex-col items-center space-x-2">
+          <div className="flex flex-col items-center gap-2">
             <DrawerHeader className="w-full">
               <DrawerTitle>Menu</DrawerTitle>
               <DrawerDescription>
-                <span className="text-muted-foreground">Quick access to</span>
+                <span className="text-muted-foreground">Quick access to project navigation</span>
               </DrawerDescription>
             </DrawerHeader>
-            <div className="w-full overflow-y-auto pb-4">{children}</div>
+            <div className="flex w-full flex-col gap-2 overflow-y-auto px-4 pt-4 pb-24">
+              {children}
+            </div>
           </div>
         </div>
       </DrawerContent>

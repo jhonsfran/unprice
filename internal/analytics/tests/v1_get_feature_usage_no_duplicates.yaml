@@ -9,3 +9,15 @@
   parameters: project_id=p1&customer_id=c1&feature_slugs=f4&start=4070908700000&end=4070909100000
   expected_result: |
     {"project_id":"p1","customer_id":"c1","feature_slug":"f4","latest":3}
+
+- name: uses_idempotency_order_for_equal_timestamp_batch_rows
+  description: Verifies raw latest reads follow ingestion order when timestamp and created_at tie
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f_tie&start=4070909000000&end=4070909100000
+  expected_result: |
+    {"project_id":"p1","customer_id":"c1","feature_slug":"f_tie","latest":15}
+
+- name: sums_latest_allocations_for_same_visible_feature
+  description: Verifies raw latest reads include every entitlement/grant allocation
+  parameters: project_id=p1&customer_id=c1&feature_slugs=f_multi&start=4070909000000&end=4070909100000
+  expected_result: |
+    {"project_id":"p1","customer_id":"c1","feature_slug":"f_multi","latest":15}

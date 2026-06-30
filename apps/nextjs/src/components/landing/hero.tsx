@@ -61,22 +61,25 @@ export default function Hero() {
       initial="hidden"
       animate="visible"
     >
+      <m.div
+        className="mb-4 flex flex-wrap items-center justify-center gap-x-2 text-background-text text-lg sm:text-xl"
+        variants={itemVariants}
+      >
+        Your product is smart, but your pricing is{" "}
+        {isMounted && (
+          <WordRotate
+            className="italic"
+            words={["hardcoded", "brittle", "static", "manual"]}
+            shadowColor={theme === "dark" ? "white" : "black"}
+          />
+        )}
+      </m.div>
       <m.h1
         id="hero-title"
         className="inline-block bg-clip-text p-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-7xl"
         variants={itemVariants}
       >
-        <Balancer>
-          Your product is smart,
-          <br /> but your pricing is{" "}
-          {isMounted && (
-            <WordRotate
-              className="italic"
-              words={["hardcoded", "brittle", "static", "manual"]}
-              shadowColor={theme === "dark" ? "white" : "black"}
-            />
-          )}
-        </Balancer>
+        <Balancer>Stop runaway usage before it runs.</Balancer>
       </m.h1>
       <m.p
         className="mx-auto mt-6 max-w-2xl px-6 text-background-text text-lg"
@@ -84,19 +87,19 @@ export default function Hero() {
       >
         <br />
         <br />
-        <b>The PriceOps Infrastructure for SaaS.</b> Decouple your pricing logic from your codebase.
-        By treating pricing as infrastructure, you eliminate the engineering bottleneck preventing
-        revenue growth.
+        <b>Open-source PriceOps infrastructure for usage-based SaaS.</b> Put a real-time budget
+        around your most expensive action, reject over-budget work in the request path, and explain
+        every invoice line from the same money path.
         <br />
         <br />
-        Test pricing models in minutes, not months. Ship usage-based, tiered, or hybrid models with
-        a single integration. As you deploy Unprice, you’ll notice how quickly "billing tickets"
-        disappear from your backlog.
+        "Unprice" means un-hardcoding pricing: move plan logic, limits, and counters out of your app
+        into one inspectable runtime. Ship usage-based, tiered, or hybrid models from a single
+        integration.
         <br />
         <br />
         <span className="text-sm italic opacity-70">
-          We integrate with billing engines like Stripe and Paddle. Unprice makes them
-          swappable—change providers without touching code.
+          Bring your own payments. Stripe-first today, with a provider model designed to extend to
+          Paddle, Lemon Squeezy, and others.
         </span>
       </m.p>
       <m.div

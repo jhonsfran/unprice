@@ -13,6 +13,8 @@ export function DataTablePagination<TData>({
   table,
   pageSizeOptions = [1, 10, 20, 30, 40, 50],
 }: DataTablePaginationProps<TData>) {
+  const pageCount = Math.max(table.getPageCount(), 1)
+
   return (
     <div className="flex w-full flex-col-reverse items-center justify-between gap-4 overflow-auto p-1 sm:flex-row sm:gap-8">
       <div className="flex-1 whitespace-nowrap text-muted-foreground text-sm">
@@ -41,7 +43,7 @@ export function DataTablePagination<TData>({
           </Select>
         </div>
         <div className="flex items-center justify-center font-medium text-sm">
-          Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
+          Page {Math.min(table.getState().pagination.pageIndex + 1, pageCount)} of {pageCount}
         </div>
         <div className="flex items-center space-x-2">
           <Button
@@ -85,7 +87,7 @@ export function DataTablePagination<TData>({
             size="icon"
             className="hidden size-8 lg:flex"
             onClick={() => {
-              table.setPageIndex(table.getPageCount() - 1)
+              table.setPageIndex(pageCount - 1)
             }}
             disabled={!table.getCanNextPage()}
           >

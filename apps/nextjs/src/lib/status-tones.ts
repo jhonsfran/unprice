@@ -42,7 +42,7 @@ const statusTones: Record<string, StatusTone> = {
   draft: "default",
   failed: "danger",
   inactive: "danger",
-  latest: "default",
+  latest: "info",
   paid: "success",
   pending: "warning",
   published: "success",

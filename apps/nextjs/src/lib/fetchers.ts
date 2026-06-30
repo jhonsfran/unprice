@@ -35,7 +35,7 @@ export const getPageData = cache(async (domain: string, skipCache = false) => {
 async function fetchPlansData(planVersionIds: string[]) {
   if (planVersionIds.length === 0) return []
 
-  const plansUnpriceResponse = await unprice.plans.listVersions({
+  const plansUnpriceResponse = await unprice.planVersions.list({
     planVersionIds,
   })
 

@@ -1,0 +1,17 @@
+---
+title: Replay ingestion events
+description: Replay failed ingestion events by canonical audit id.
+---
+
+```ts
+const { result, error } = await unprice.ingestionEvents.replay({
+  project_id: "proj_123",
+  canonical_audit_ids: ["audit_123"],
+})
+
+if (error) {
+  throw new Error(error.message)
+}
+
+console.log(result)
+```

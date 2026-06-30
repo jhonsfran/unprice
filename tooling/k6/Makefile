@@ -9,3 +9,7 @@ lifecycle:
 ingestion-failures:
 	pnpm build:ingestion-failures
 	sh ./scripts/run-k6.sh dist/ingestion-failures.js
+
+budgeted-runs:
+	pnpm build:budgeted-runs
+	sh ./scripts/run-k6.sh dist/budgeted-runs.js

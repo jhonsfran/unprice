@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
-import { Unprice, type paths } from "@unprice/api"
+import { Unprice, type operations } from "@unprice/api"
 
 type GetEntitlementsResponse =
-  paths["/v1/entitlements/get"]["post"]["responses"]["200"]["content"]["application/json"]
+  operations["access.entitlements.list"]["responses"][200]["content"]["application/json"]
 type CustomerEntitlement = GetEntitlementsResponse[number]
 type MeterConfig = NonNullable<CustomerEntitlement["featurePlanVersion"]["meterConfig"]>
 type AggregationMethod = MeterConfig["aggregationMethod"]
@@ -288,11 +288,11 @@ async function step(name: string, fn: () => Promise<void>): Promise<void> {
 }
 
 async function discoverUsageFeature(): Promise<void> {
-  const { result, error } = await unprice.entitlements.get({
+  const { result, error } = await unprice.access.entitlements.list({
     customerId: CUSTOMER_ID,
   })
 
-  assert(!error, `getEntitlements error: ${error?.message}`)
+  assert(!error, `access.entitlements.list error: ${error?.message}`)
   assert(!!result, "entitlements result should exist")
   assert(Array.isArray(result), "entitlements should be an array")
   assert(result.length > 0, "customer should have at least one entitlement")
@@ -344,7 +344,7 @@ async function trySelectUsageFeature(
   feature: UsageFeature,
   opts: { requireAllowed: boolean }
 ): Promise<boolean> {
-  const { result, error } = await unprice.entitlements.verify({
+  const { result, error } = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: feature.featureSlug,
   })
@@ -387,7 +387,7 @@ async function ingestUsageAmounts(usageAmounts: number[], label: string): Promis
   for (const [index, usageAmount] of usageAmounts.entries()) {
     const properties = buildIngestionProperties(usageAmount, selectedUsageFeature)
     const idempotencyKey = randomUUID()
-    const { result, error } = await unprice.events.ingestSync({
+    const { result, error } = await unprice.usage.consume({
       customerId: CUSTOMER_ID,
       eventSlug: selectedUsageFeature.eventSlug,
       featureSlug: selectedUsageFeature.featureSlug,
@@ -396,11 +396,11 @@ async function ingestUsageAmounts(usageAmounts: number[], label: string): Promis
       idempotencyKey,
     })
 
-    assert(!error, `${label} ingestSync error: ${error?.message}`)
-    assert(!!result, `${label} ingestSync result should exist`)
+    assert(!error, `${label} usage.consume error: ${error?.message}`)
+    assert(!!result, `${label} usage.consume result should exist`)
     assert(
       result.allowed === true,
-      `${label} ingestSync rejected at event ${index + 1}/${usageAmounts.length}: ${
+      `${label} usage.consume rejected at event ${index + 1}/${usageAmounts.length}: ${
         result.rejectionReason ?? "unknown reason"
       }`
     )
@@ -467,7 +467,7 @@ async function verifyUsageDelta(
 ): Promise<void> {
   assert(selectedUsageFeature, "usage feature should be selected before verifying usage")
 
-  const { result, error } = await unprice.entitlements.verify({
+  const { result, error } = await unprice.access.check({
     customerId: CUSTOMER_ID,
     featureSlug: selectedUsageFeature.featureSlug,
   })

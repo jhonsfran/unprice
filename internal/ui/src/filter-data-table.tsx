@@ -16,14 +16,23 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { CalendarDays, Check, Loader2, Search, X } from "lucide-react"
+import { CalendarDays, Check, Loader2, Search, SlidersHorizontal, X } from "lucide-react"
 import * as React from "react"
 import type { DateRange } from "react-day-picker"
 import { Badge } from "./badge"
 import { Button } from "./button"
 import { Calendar } from "./calendar"
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "./drawer"
 import { Input } from "./input"
 import { Popover, PopoverContent, PopoverTrigger } from "./popover"
+import { ScrollArea } from "./scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./table"
 import { cn } from "./utils"
 
@@ -40,6 +49,8 @@ export type FilterDataTableFilter =
       id: string
       label: string
       options: FilterDataTableOption[]
+      value?: string[]
+      onChange?: (values: string[]) => void
       defaultOpen?: boolean
       showCounts?: boolean
       hideEmptyOptions?: boolean
@@ -70,17 +81,23 @@ export interface FilterDataTableProps<TData, TValue> {
   filters?: FilterDataTableFilter[]
   searchColumn?: string
   searchPlaceholder?: string
+  searchValue?: string
+  onSearchValueChange?: (value: string) => void
   emptyTitle?: string
   emptyDescription?: string
+  emptyState?: React.ReactNode
+  loadingState?: React.ReactNode
   getRowId?: (row: TData, index: number) => string
   getRowClassName?: (row: TData) => string | undefined
   toolbarActions?: FilterDataTableToolbarActions<TData>
   initialColumnVisibility?: VisibilityState
+  initialColumnFilters?: ColumnFiltersState
   hasMore?: boolean
   isLoading?: boolean
   isRefreshing?: boolean
   isLoadingMore?: boolean
   loadingLabel?: string
+  presentation?: "default" | "workbench"
   onLoadMore?: () => void | Promise<void>
 }
 
@@ -90,20 +107,28 @@ export function FilterDataTable<TData, TValue>({
   filters = [],
   searchColumn,
   searchPlaceholder = "Search data table...",
+  searchValue: controlledSearchValue,
+  onSearchValueChange,
   emptyTitle = "No results",
   emptyDescription = "There are no rows for the selected filters.",
+  emptyState,
+  loadingState,
   getRowId,
   getRowClassName,
   toolbarActions,
   initialColumnVisibility,
+  initialColumnFilters,
   hasMore = false,
   isLoading = false,
   isRefreshing = false,
   isLoadingMore = false,
   loadingLabel = "Loading rows",
+  presentation = "default",
   onLoadMore,
 }: FilterDataTableProps<TData, TValue>) {
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(
+    initialColumnFilters ?? []
+  )
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(
     initialColumnVisibility ?? {}
@@ -132,13 +157,27 @@ export function FilterDataTable<TData, TValue>({
     getFacetedUniqueValues: getFacetedUniqueValues(),
   })
 
-  const searchValue =
-    searchColumn && table.getColumn(searchColumn)
-      ? String(table.getColumn(searchColumn)?.getFilterValue() ?? "")
-      : ""
+  const searchColumnModel = searchColumn ? table.getColumn(searchColumn) : undefined
+  const localSearchValue = searchColumnModel ? String(searchColumnModel.getFilterValue() ?? "") : ""
+  const searchValue = controlledSearchValue ?? localSearchValue
+  const canSearch = Boolean(searchColumnModel || onSearchValueChange)
+
+  React.useEffect(() => {
+    if (controlledSearchValue === undefined || !searchColumnModel) {
+      return
+    }
+
+    const currentValue = String(searchColumnModel.getFilterValue() ?? "")
+    if (currentValue !== controlledSearchValue) {
+      searchColumnModel.setFilterValue(controlledSearchValue)
+    }
+  }, [controlledSearchValue, searchColumnModel])
+
   const loadMoreRef = React.useRef<HTMLDivElement | null>(null)
   const loadMoreRequestedRef = React.useRef(false)
   const canLoadMore = Boolean(hasMore && onLoadMore)
+  const isWorkbench = presentation === "workbench"
+  const viewportClassName = isWorkbench ? "h-[560px]" : "h-[calc(80vh-3.5rem)]"
   const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original)
   const computedToolbarActions =
     typeof toolbarActions === "function"
@@ -176,7 +215,12 @@ export function FilterDataTable<TData, TValue>({
   }, [canLoadMore, isLoadingMore, onLoadMore])
 
   return (
-    <div className="relative overflow-hidden rounded-md border bg-background">
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-md border bg-background",
+        isWorkbench && "border-border/60 bg-card/20"
+      )}
+    >
       <div
         className={cn(
           "pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-primary/55 to-transparent transition-opacity duration-300",
@@ -185,42 +229,59 @@ export function FilterDataTable<TData, TValue>({
       />
       <div
         className={cn(
-          "grid min-h-[520px] transition-opacity duration-300 motion-reduce:transition-none md:grid-cols-[260px_minmax(0,1fr)]",
+          "grid min-h-[520px] transition-opacity duration-300 motion-reduce:transition-none",
+          isWorkbench ? "md:grid-cols-[228px_minmax(0,1fr)]" : "md:grid-cols-[260px_minmax(0,1fr)]",
           isRefreshing ? "opacity-90" : "opacity-100"
         )}
       >
-        <aside className="border-border border-b bg-muted/30 md:border-r md:border-b-0">
-          <div className="flex h-14 items-center border-b px-4 font-medium text-sm">Filters</div>
-          <div className="space-y-1 p-2 [&>*:last-child]:border-b-0">
-            {filters.map((filter) =>
-              filter.type === "checkbox" ? (
-                <CheckboxFilter key={filter.id} table={table} filter={filter} />
-              ) : (
-                <DateFilter key={filter.id} filter={filter} />
-              )
+        <aside
+          className={cn(
+            "hidden border-border md:block md:border-r",
+            isWorkbench ? "bg-background/45" : "bg-muted/30"
+          )}
+        >
+          <div
+            className={cn(
+              "flex items-center border-b px-4",
+              isWorkbench
+                ? "h-12 font-medium text-muted-foreground text-xs"
+                : "h-14 font-medium text-sm"
             )}
+          >
+            Filters
           </div>
+          <ScrollArea className={viewportClassName}>
+            <FilterList table={table} filters={filters} presentation={presentation} />
+          </ScrollArea>
         </aside>
         <section className="min-w-0">
-          <div className="flex h-14 items-center gap-2 border-b px-2">
-            {searchColumn && table.getColumn(searchColumn) ? (
+          <div
+            className={cn(
+              "flex shrink-0 flex-col gap-2 border-b sm:flex-row sm:items-center",
+              isWorkbench ? "h-12 bg-card/20 px-2 py-1.5" : "min-h-14 px-2 py-2"
+            )}
+          >
+            <MobileFilterDrawer table={table} filters={filters} presentation={presentation} />
+            {canSearch ? (
               <div className="relative min-w-0 flex-1">
                 <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
                 <Input
                   value={searchValue}
-                  onChange={(event) =>
-                    table.getColumn(searchColumn)?.setFilterValue(event.target.value)
-                  }
+                  onChange={(event) => {
+                    const nextValue = event.target.value
+                    searchColumnModel?.setFilterValue(nextValue)
+                    onSearchValueChange?.(nextValue)
+                  }}
                   placeholder={searchPlaceholder}
-                  className="h-10 pl-9"
+                  className={cn("pl-9", isWorkbench ? "h-8" : "h-10")}
                 />
               </div>
             ) : null}
             {computedToolbarActions}
           </div>
-          <div className="overflow-auto">
+          <ScrollArea className={viewportClassName}>
             <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
-              <TableHeader>
+              <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
                 {table.getHeaderGroups().map((headerGroup) => (
                   <TableRow key={headerGroup.id}>
                     {headerGroup.headers.map((header) => {
@@ -258,11 +319,13 @@ export function FilterDataTable<TData, TValue>({
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={columns.length} className="h-48 text-center">
-                      <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
-                        <Loader2 className="size-4 animate-spin" />
-                        <span>{loadingLabel}</span>
-                      </div>
+                    <TableCell colSpan={columns.length} className="h-48 p-4 text-center">
+                      {loadingState ?? (
+                        <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
+                          <Loader2 className="size-4 animate-spin" />
+                          <span>{loadingLabel}</span>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ) : table.getRowModel().rows.length > 0 ? (
@@ -281,11 +344,13 @@ export function FilterDataTable<TData, TValue>({
                   ))
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={columns.length} className="h-48 text-center">
-                      <div className="space-y-1">
-                        <p className="font-medium text-sm">{emptyTitle}</p>
-                        <p className="text-muted-foreground text-sm">{emptyDescription}</p>
-                      </div>
+                    <TableCell colSpan={columns.length} className="h-48 p-4 text-center">
+                      {emptyState ?? (
+                        <div className="space-y-1">
+                          <p className="font-medium text-sm">{emptyTitle}</p>
+                          <p className="text-muted-foreground text-sm">{emptyDescription}</p>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 )}
@@ -318,22 +383,91 @@ export function FilterDataTable<TData, TValue>({
                 </Button>
               </div>
             ) : null}
-          </div>
+          </ScrollArea>
         </section>
       </div>
     </div>
   )
 }
 
+function FilterList<TData>({
+  table,
+  filters,
+  presentation,
+}: {
+  table: TanStackTable<TData>
+  filters: FilterDataTableFilter[]
+  presentation: "default" | "workbench"
+}) {
+  return (
+    <div className="flex flex-col gap-1 p-2 [&>*:last-child]:border-b-0">
+      {filters.length === 0 ? (
+        <p className="px-2 py-3 text-muted-foreground text-sm">No filters available.</p>
+      ) : null}
+      {filters.map((filter) =>
+        filter.type === "checkbox" ? (
+          <CheckboxFilter
+            key={filter.id}
+            table={table}
+            filter={filter}
+            presentation={presentation}
+          />
+        ) : (
+          <DateFilter key={filter.id} filter={filter} presentation={presentation} />
+        )
+      )}
+    </div>
+  )
+}
+
+function MobileFilterDrawer<TData>({
+  table,
+  filters,
+  presentation,
+}: {
+  table: TanStackTable<TData>
+  filters: FilterDataTableFilter[]
+  presentation: "default" | "workbench"
+}) {
+  if (filters.length === 0) {
+    return null
+  }
+
+  return (
+    <Drawer>
+      <DrawerTrigger asChild>
+        <Button type="button" variant="outline" size="sm" className="h-10 shrink-0 gap-2 md:hidden">
+          <SlidersHorizontal className="size-4" aria-hidden="true" />
+          Filters
+        </Button>
+      </DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>Filters</DrawerTitle>
+          <DrawerDescription>Narrow the visible rows without leaving this table.</DrawerDescription>
+        </DrawerHeader>
+        <ScrollArea className="max-h-[60vh]">
+          <FilterList table={table} filters={filters} presentation={presentation} />
+        </ScrollArea>
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
 function CheckboxFilter<TData>({
   table,
   filter,
+  presentation,
 }: {
   table: TanStackTable<TData>
   filter: Extract<FilterDataTableFilter, { type: "checkbox" }>
+  presentation: "default" | "workbench"
 }) {
+  const isWorkbench = presentation === "workbench"
   const column = table.getColumn(filter.id)
-  const selectedValues = new Set((column?.getFilterValue() as string[] | undefined) ?? [])
+  const selectedValues = new Set(
+    filter.value ?? (column?.getFilterValue() as string[] | undefined) ?? []
+  )
   const facetedUniqueValues = column?.getFacetedUniqueValues()
   const options = filter.options
     .map((option) => {
@@ -353,9 +487,16 @@ function CheckboxFilter<TData>({
     .filter((option) => !option.hidden)
 
   return (
-    <div className="border-b py-3">
-      <div className="mb-2 px-2 font-medium text-sm">{filter.label}</div>
-      <div className="space-y-1">
+    <div className="border-border/60 border-b py-3">
+      <div
+        className={cn(
+          "mb-2 px-2 font-medium",
+          isWorkbench ? "text-muted-foreground text-xs" : "text-sm"
+        )}
+      >
+        {filter.label}
+      </div>
+      <div className="flex flex-col gap-1">
         {options.length === 0 ? (
           <p className="px-2 py-1 text-muted-foreground text-sm">
             {filter.emptyOptionsLabel ?? "No options"}
@@ -366,15 +507,25 @@ function CheckboxFilter<TData>({
             <button
               key={option.value}
               type="button"
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-sm hover:bg-muted/60"
+              className={cn(
+                "flex w-full items-center gap-2 px-2 text-left text-sm transition-colors hover:bg-muted/60 motion-reduce:transition-none",
+                isWorkbench ? "rounded-md py-1.5" : "rounded-sm py-1"
+              )}
               onClick={() => {
+                const nextSelectedValues = new Set(selectedValues)
+
                 if (option.checked) {
-                  selectedValues.delete(option.value)
+                  nextSelectedValues.delete(option.value)
                 } else {
-                  selectedValues.add(option.value)
+                  nextSelectedValues.add(option.value)
                 }
-                const next = Array.from(selectedValues)
-                column?.setFilterValue(next.length > 0 ? next : undefined)
+
+                const next = Array.from(nextSelectedValues)
+                if (filter.onChange) {
+                  filter.onChange(next)
+                } else {
+                  column?.setFilterValue(next.length > 0 ? next : undefined)
+                }
               }}
             >
               <FilterCheckboxMark checked={option.checked} />
@@ -382,7 +533,10 @@ function CheckboxFilter<TData>({
                 {option.label}
               </span>
               {option.showsCount ? (
-                <Badge variant="secondary" className="font-mono text-xs">
+                <Badge
+                  variant={isWorkbench ? "outline" : "secondary"}
+                  className="font-mono text-xs"
+                >
                   {option.count}
                 </Badge>
               ) : null}
@@ -406,13 +560,31 @@ function FilterCheckboxMark({ checked }: { checked: boolean }) {
   )
 }
 
-function DateFilter({ filter }: { filter: Extract<FilterDataTableFilter, { type: "date" }> }) {
+function DateFilter({
+  filter,
+  presentation,
+}: {
+  filter: Extract<FilterDataTableFilter, { type: "date" }>
+  presentation: "default" | "workbench"
+}) {
+  const isWorkbench = presentation === "workbench"
+
   return (
-    <div className="border-b py-3">
-      <div className="mb-2 px-2 font-medium text-sm">{filter.label}</div>
+    <div className="border-border/60 border-b py-3">
+      <div
+        className={cn(
+          "mb-2 px-2 font-medium",
+          isWorkbench ? "text-muted-foreground text-xs" : "text-sm"
+        )}
+      >
+        {filter.label}
+      </div>
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="outline" className="mx-2 w-[calc(100%-1rem)] justify-start">
+          <Button
+            variant="outline"
+            className={cn("mx-2 w-[calc(100%-1rem)] justify-start", isWorkbench && "h-8")}
+          >
             <CalendarDays className="mr-2 size-4" />
             {formatDateRange(filter.value)}
           </Button>

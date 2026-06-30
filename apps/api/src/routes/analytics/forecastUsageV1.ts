@@ -6,6 +6,7 @@ import { keyAuth } from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["analytics"]
@@ -17,21 +18,35 @@ export const forecastUsageApiRequestSchema = z.object({
   horizon_days: z.number().int().min(1).max(31).optional().default(14),
 })
 
-export const route = createRoute({
-  path: "/v1/analytics/forecast-usage",
-  operationId: "analytics.forecastUsage",
-  summary: "forecast usage",
-  description: "Project customer feature usage from recent Tinybird usage aggregates.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(forecastUsageApiRequestSchema, "Forecast usage request"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(forecastUsageOutputSchema, "Forecast usage response"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/analytics/usage/forecast",
+      operationId: "analytics.usage.forecast",
+      summary: "forecast usage",
+      description: "Project customer feature usage from recent Tinybird usage aggregates.",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(forecastUsageApiRequestSchema, "Forecast usage request"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(forecastUsageOutputSchema, "Forecast usage response"),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "analytics",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["analytics", "usage", "forecast"],
+      },
+    }
+  )
+)
 
 export type ForecastUsageApiRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]

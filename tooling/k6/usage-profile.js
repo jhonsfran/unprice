@@ -2,16 +2,16 @@ import { fail } from "k6"
 
 export function discoverCustomerUsageProfile({ customerId, projectId, postJson }) {
   const response = postJson(
-    "/v1/entitlements/get",
+    "/v1/access/entitlements/list",
     {
       customerId,
       projectId,
     },
-    "POST /v1/entitlements/get"
+    "POST /v1/access/entitlements/list"
   )
 
   if (response.status !== 200) {
-    fail(`entitlements.get failed: ${response.status} ${response.body}`)
+    fail(`access.entitlements.list failed: ${response.status} ${response.body}`)
   }
 
   const entitlements = parseJson(response)
@@ -21,7 +21,7 @@ export function discoverCustomerUsageProfile({ customerId, projectId, postJson }
   }
 
   const featureSlugs = []
-  const usageEventFieldsByEventSlug = new Map()
+  const usageEventsByKey = new Map()
 
   for (const entitlement of entitlements) {
     const featureSlug = getFeatureSlug(entitlement)
@@ -36,7 +36,9 @@ export function discoverCustomerUsageProfile({ customerId, projectId, postJson }
       continue
     }
 
-    const propertyFields = usageEventFieldsByEventSlug.get(meterConfig.eventSlug) ?? []
+    const key = `${meterConfig.eventSlug}:${featureSlug ?? "unknown"}`
+    const existing = usageEventsByKey.get(key)
+    const propertyFields = existing?.propertyFields ?? []
 
     if (meterConfig.aggregationMethod !== "count") {
       if (!meterConfig.aggregationField) {
@@ -50,7 +52,11 @@ export function discoverCustomerUsageProfile({ customerId, projectId, postJson }
       }
     }
 
-    usageEventFieldsByEventSlug.set(meterConfig.eventSlug, propertyFields)
+    usageEventsByKey.set(key, {
+      eventSlug: meterConfig.eventSlug,
+      featureSlug: featureSlug ?? meterConfig.eventSlug,
+      propertyFields,
+    })
   }
 
   if (featureSlugs.length === 0) {
@@ -59,10 +65,7 @@ export function discoverCustomerUsageProfile({ customerId, projectId, postJson }
 
   return {
     featureSlugs: unique(featureSlugs),
-    usageEvents: [...usageEventFieldsByEventSlug.entries()].map(([eventSlug, propertyFields]) => ({
-      eventSlug,
-      propertyFields,
-    })),
+    usageEvents: [...usageEventsByKey.values()],
   }
 }
 

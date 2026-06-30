@@ -40,9 +40,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="h-8 w-8 p-0 data-[state=open]:bg-accent">
-            <span className="sr-only">Open menu</span>
-            <MoreHorizontal className="h-4 w-4" />
+          <Button variant="ghost" size="icon" className="size-8 data-[state=open]:bg-accent">
+            <MoreHorizontal className="size-4" aria-hidden="true" />
+            <span className="sr-only">Open row actions</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

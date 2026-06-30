@@ -20,12 +20,12 @@ const features = [
   },
   {
     name: "Verify and report",
-    description: "Verify and report on your feature usage, billing, signals and more.",
+    description: "Check entitlements, report usage, and budget expensive runs before they execute.",
     icon: Check,
   },
   {
-    name: "Data and Insights",
-    description: "Get insights into your users and their behavior from data.",
+    name: "Usage evidence",
+    description: "Trace every charge back to rated usage events and ledger captures.",
     icon: BarChart,
   },
 ]
@@ -68,19 +68,21 @@ export default function CodeExample() {
     >
       <m.h2
         variants={itemVariants}
-        id="features-title"
+        id="developers-title"
         className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
         Built by developers, <br /> for developers
       </m.h2>
       <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        The biggest constraint to iterate on pricing is the engineering effort and the risk of
-        losing customers. Unprice solves those two issues and gives you the developer experience to
-        implement once and forget about it. Pricing logic belongs to business teams, not backlogs.
+        You own the request path, so you should own pricing without scattering revenue logic through
+        product code. Unprice gives you a single integration: meter usage, check entitlements,
+        budget expensive runs, and reserve credits — then change packaging without rewriting the
+        money path.
         <br />
         <br />
-        When pricing changes don't require deployments, revenue experiments become as routine as
-        feature flags. Your code stays clean. Your business moves fast.
+        When pricing logic lives in one inspectable runtime instead of your codebase, you can stop
+        over-budget work before it runs and explain any invoice line from the same usage trail. Your
+        code stays clean. Your margins stay protected.
         <br />
         <br />
         <div className="flex justify-end">

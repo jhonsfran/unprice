@@ -8,20 +8,20 @@ import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId } from "~/auth/key"
+import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKey } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import type { ServiceContext } from "~/hono/env"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import {
   buildIngestionQueueMessage,
   logEventTooOldRejection,
   rawEventSchema,
-  resolveRequestCustomerId,
 } from "./ingestEventsV1"
 
-const tags = ["events"]
+const tags = ["usage"]
 
 const syncEventSchema = rawEventSchema.extend({
   featureSlug: z.string().openapi({
@@ -49,25 +49,44 @@ const syncIngestionResultSchema = z.object({
   }),
 })
 
-export const route = createRoute({
-  path: "/v1/events/ingest/sync",
-  operationId: "events.ingestSync",
-  summary: "ingest raw event synchronously for a feature",
-  description:
-    "Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(syncEventSchema, "The synchronous raw event ingestion payload"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      syncIngestionResultSchema,
-      "The synchronous ingestion result for the targeted feature"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/usage/consume",
+      operationId: "usage.consume",
+      summary: "ingest raw event synchronously for a feature",
+      description:
+        "Validate and synchronously ingest a raw event for one feature slug. This is useful when you want to enforce exact limits from a ingestion.",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(syncEventSchema, "The synchronous raw event ingestion payload"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          syncIngestionResultSchema,
+          "The synchronous ingestion result for the targeted feature"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "runtime",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["usage", "consume"],
+      },
+      idempotency: {
+        required: true,
+        location: "body",
+        field: "idempotencyKey",
+      },
+    }
+  )
+)
 
 export const registerIngestEventsSyncV1 = (app: App) =>
   app.openapi(route, async (c) => {
@@ -79,17 +98,19 @@ export const registerIngestEventsSyncV1 = (app: App) =>
     const logger = c.get("logger")
 
     const key = await keyAuth(c)
-    const customerId = resolveRequestCustomerId({
+    const customer = resolveCustomerIdForApiKey({
       explicitCustomerId: body.customerId,
       defaultCustomerId: key.defaultCustomerId,
     })
 
-    if (!customerId) {
+    if (!customer.success) {
       throw new UnpriceApiError({
-        code: "BAD_REQUEST",
-        message: "customerId is required when the API key has no default customer binding",
+        code: customer.code === "customer_forbidden" ? "FORBIDDEN" : "BAD_REQUEST",
+        message: customer.message,
       })
     }
+
+    const customerId = customer.customerId
 
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
@@ -145,7 +166,8 @@ export const registerIngestEventsSyncV1 = (app: App) =>
       featureSlug: body.featureSlug,
       ingestion,
       message,
-    }).finally(() => endTime(c, "ingestFeatureSync"))
+    })
+    endTime(c, "ingestFeatureSync")
 
     return c.json(result, HttpStatusCodes.OK)
   })

@@ -106,15 +106,14 @@ describe("ingestion reporting envelope builder", () => {
       source_name: null,
       state: "rejected",
       rejection_reason: "WALLET_EMPTY",
+      failure_stage: null,
+      failure_reason: null,
+      failure_message: null,
+      replayable: false,
+      payload_json: null,
       canonical_audit_id: record.canonicalAuditId,
       payload_hash: record.payloadHash,
     })
-    const rejectedPayload = JSON.parse(record.auditPayloadJson)
-    expect(rejectedPayload).not.toHaveProperty("failure_stage")
-    expect(rejectedPayload).not.toHaveProperty("failure_reason")
-    expect(rejectedPayload).not.toHaveProperty("failure_message")
-    expect(rejectedPayload).not.toHaveProperty("replayable")
-    expect(rejectedPayload).not.toHaveProperty("payload_json")
   })
 
   it("includes payload_json only for failed reporting audit records", async () => {
@@ -161,13 +160,12 @@ describe("ingestion reporting envelope builder", () => {
     })
     expect(JSON.parse(processedRecord.auditPayloadJson)).toMatchObject({
       state: "processed",
+      failure_stage: null,
+      failure_reason: null,
+      failure_message: null,
+      replayable: false,
+      payload_json: null,
     })
-    const processedPayload = JSON.parse(processedRecord.auditPayloadJson)
-    expect(processedPayload).not.toHaveProperty("failure_stage")
-    expect(processedPayload).not.toHaveProperty("failure_reason")
-    expect(processedPayload).not.toHaveProperty("failure_message")
-    expect(processedPayload).not.toHaveProperty("replayable")
-    expect(processedPayload).not.toHaveProperty("payload_json")
     expect(rejectedRecord.payloadJson).toBeNull()
     expect(rejectedRecord).toMatchObject({
       status: "rejected",
@@ -180,13 +178,12 @@ describe("ingestion reporting envelope builder", () => {
     expect(JSON.parse(rejectedRecord.auditPayloadJson)).toMatchObject({
       state: "rejected",
       rejection_reason: "WALLET_EMPTY",
+      failure_stage: null,
+      failure_reason: null,
+      failure_message: null,
+      replayable: false,
+      payload_json: null,
     })
-    const rejectedPayload2 = JSON.parse(rejectedRecord.auditPayloadJson)
-    expect(rejectedPayload2).not.toHaveProperty("failure_stage")
-    expect(rejectedPayload2).not.toHaveProperty("failure_reason")
-    expect(rejectedPayload2).not.toHaveProperty("failure_message")
-    expect(rejectedPayload2).not.toHaveProperty("replayable")
-    expect(rejectedPayload2).not.toHaveProperty("payload_json")
 
     expect(failedRecord).toMatchObject({
       status: "failed",
@@ -203,12 +200,82 @@ describe("ingestion reporting envelope builder", () => {
     expect(failedAuditPayload).not.toHaveProperty("rejection_reason")
     expect(failedAuditPayload).toMatchObject({
       state: "failed",
+      failure_stage: "rating_fact",
+      failure_reason: "raw_ingestion_queue_processing_failed",
+      failure_message: "apply failed",
+      replayable: true,
+      payload_json: JSON.stringify(message),
     })
-    expect(failedAuditPayload).not.toHaveProperty("failure_stage")
-    expect(failedAuditPayload).not.toHaveProperty("failure_reason")
-    expect(failedAuditPayload).not.toHaveProperty("failure_message")
-    expect(failedAuditPayload).not.toHaveProperty("replayable")
-    expect(failedAuditPayload).not.toHaveProperty("payload_json")
+  })
+
+  it("copies run context into reporting audit records without making processed rows replayable", async () => {
+    const message = createMessage({
+      runContext: {
+        runId: "brun_001",
+        traceId: "trace_001",
+        parentRunId: "brun_parent_001",
+        workloadType: "agent",
+        workloadId: "research-assistant",
+      },
+    })
+
+    const record = await buildIngestionReportingAuditRecord({
+      customerId: "cus_1",
+      message,
+      now: () => 4070908801100,
+      outcome: { state: "processed" },
+      projectId: "proj_1",
+    })
+
+    expect(record).toMatchObject({
+      runId: "brun_001",
+      traceId: "trace_001",
+      parentRunId: "brun_parent_001",
+      workloadType: "agent",
+      workloadId: "research-assistant",
+      replayable: false,
+      payloadJson: null,
+    })
+    expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
+      run_id: "brun_001",
+      trace_id: "trace_001",
+      parent_run_id: "brun_parent_001",
+      workload_type: "agent",
+      workload_id: "research-assistant",
+    })
+  })
+
+  it("copies run context into rejected audit payloads without replay payloads", async () => {
+    const message = createMessage({
+      runContext: {
+        runId: "brun_rejected_001",
+        traceId: "trace_rejected_001",
+        parentRunId: "brun_parent_rejected_001",
+        workloadType: "workflow",
+        workloadId: "billing-audit",
+      },
+    })
+
+    const record = await buildIngestionReportingAuditRecord({
+      customerId: message.customerId,
+      message,
+      now: () => HANDLED_AT,
+      outcome: { state: "rejected", rejectionReason: "WALLET_EMPTY" },
+      projectId: message.projectId,
+    })
+
+    expect(record).toMatchObject({
+      payloadJson: null,
+      replayable: false,
+      status: "rejected",
+    })
+    expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
+      run_id: "brun_rejected_001",
+      trace_id: "trace_rejected_001",
+      parent_run_id: "brun_parent_rejected_001",
+      workload_type: "workflow",
+      workload_id: "billing-audit",
+    })
   })
 
   it("carries meter facts from outcomes into the reporting envelope", async () => {
@@ -270,6 +337,11 @@ function createMeterFact(
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",

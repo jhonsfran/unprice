@@ -7,28 +7,28 @@ import { AnimatedBeamDemo } from "./animated-beam-demo"
 
 const PillarsOfPriceOps = [
   {
-    title: "Adaptive Revenue Engine",
-    icon: <BarChart className="h-5 w-5" />,
-    description:
-      "Launch any model—usage-based, seat-based, or hybrid—in real-time. Stop guessing and start iterating.",
-    practice: "Pricing is a product surface. Treat it like one.",
-  },
-  {
-    title: "Engineering Independence",
-    icon: <TrendingUp className="h-5 w-5" />,
-    description:
-      "Release the billing burden from your backlog. Run pricing experiments and change plans instantly, allowing developers to focus on core product value.",
-    practice: "Pricing logic belongs to business teams. Not backlogs.",
-  },
-  {
-    title: "Vendor Freedom",
+    title: "Spend Safety",
     icon: <DollarSign className="h-5 w-5" />,
     description:
-      "Realize that vendor lock-in is a choice, not a necessity. Swap providers (Stripe, Paddle) with complete transparency and zero code changes.",
-    practice: "Payments are infrastructure, not dependencies.",
+      "Put a real-time budget around your most expensive action. Reject over-budget customer or workload spend in the request path, before the work runs.",
+    practice: "Stop the cost before it's created.",
   },
   {
-    title: "Transparent Standard",
+    title: "Runtime Control",
+    icon: <TrendingUp className="h-5 w-5" />,
+    description:
+      "Pricing is a runtime decision, not a page or an end-of-cycle job. Check access and consume usage while the request is still in flight.",
+    practice: "Decide while the request is in flight.",
+  },
+  {
+    title: "Explainable Money Path",
+    icon: <BarChart className="h-5 w-5" />,
+    description:
+      "Usage, entitlements, budgets, credits, and invoices share one evidence trail. Trace every charge back to rated events and ledger captures.",
+    practice: "Every charge has evidence.",
+  },
+  {
+    title: "Open & Inspectable",
     icon: <Code className="h-5 w-5" />,
     description:
       "Monetization is too critical to be a black box. Build on an open AGPL-core: transparent, auditable, and owned by you.",
@@ -80,39 +80,38 @@ export default function PillarsPriceOps() {
         The Solution: PriceOps
       </m.h2>
       <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        Unprice is the foundation of a new category: <b>PriceOps Infrastructure</b>. It’s the
-        abstraction layer that transforms pricing from a "hardcoded nightmare" into your sharpest
-        growth engine.
+        Unprice is open-source <b>PriceOps infrastructure</b> for usage-based SaaS. It’s the runtime
+        layer that moves pricing out of your codebase and into the request path.
         <br />
         <br />
         <b>What is PriceOps?</b>
         <br />
-        PriceOps is the methodology of treating pricing as a dynamic product feature rather than a
-        static configuration. It gives you the power to handle pricing like a billion-dollar SaaS,
-        right from day one.
+        PriceOps is the practice of operating pricing as live infrastructure — metering,
+        entitlements, budgets, credits, and invoice evidence run as one inspectable system in the
+        request path, the way DevOps operates deploys and FinOps operates cloud spend.
         <br />
         <br />
         <b>Why PriceOps Matters?</b>
         <br />
         <ul className="my-4 list-disc pl-10">
           <li>
-            <span className="font-semibold">Zero Engineering Latency:</span> Launch new experiments
-            in minutes. If you have an idea for a new plan at 10 AM, it should be live by 10:05 AM.
+            <span className="font-semibold">Spend safety:</span> reject over-budget customer or
+            workload spend before the expensive work runs, not after the invoice.
           </li>
           <li>
-            <span className="font-semibold">Hyper-Segmentation:</span> Tailor pricing for different
-            segments, regions, or AI usage patterns without breaking your codebase.
+            <span className="font-semibold">Runtime decisions:</span> check entitlement and budget
+            while the request is in flight, across usage-based, tiered, and hybrid models.
           </li>
           <li>
-            <span className="font-semibold">Value-Based Capture:</span> Automatically track usage
-            and charge for the actual value you deliver, increasing LTV and reducing churn.
+            <span className="font-semibold">Explainable money path:</span> trace every charge back
+            to rated usage events and ledger captures from one evidence trail.
           </li>
         </ul>
         <br />
         Stop treating pricing as a Secondary Artifact.
         <br />
         <br />
-        <b>The future of SaaS is Adaptive.</b>
+        <b>For usage-based SaaS, pricing is a runtime decision.</b>
       </m.div>
 
       <m.div variants={itemVariants} className="my-28 flex justify-center">

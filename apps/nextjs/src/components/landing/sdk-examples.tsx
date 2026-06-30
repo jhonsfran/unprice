@@ -18,7 +18,7 @@ const unprice = new Unprice({
 })
 
 // verify access to a feature
-const { result, error } = await unprice.entitlements.verify({
+const { result, error } = await unprice.access.check({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   featureSlug: "feature-1",
 })
@@ -39,7 +39,7 @@ const unprice = new Unprice({
 })
 
 // ingest usage event for a feature
-const { result, error } = await unprice.events.ingestSync({
+const { result, error } = await unprice.usage.consume({
   idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
   eventSlug: "feature-1",
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
@@ -82,7 +82,7 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.entitlements.get({
+} = await unprice.access.entitlements.list({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
 })
 
@@ -100,7 +100,7 @@ const unprice = new Unprice({
 const {
   result,
   error,
-} = await unprice.wallet.get({
+} = await unprice.wallet.balance({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
 })
 `,
@@ -150,7 +150,7 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.payments.methods.list({
+const { result, error } = await unprice.paymentMethods.list({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   provider: "stripe",
 })
@@ -161,7 +161,7 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.payments.methods.create({
+const { result, error } = await unprice.paymentMethods.create({
   paymentProvider: "stripe",
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   successUrl: "http://your-app.com/dashboard",
@@ -174,7 +174,7 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const { result, error } = await unprice.plans.listVersions({
+const { result, error } = await unprice.planVersions.list({
   billingInterval: "month",
   currency: "USD",
 })
@@ -183,11 +183,11 @@ const { result, error } = await unprice.plans.listVersions({
   fetch: {
     verifyEntitlement:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/entitlements/verify" +
+      "${baseUrl}/v1/access/check" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n  }),\n})',
     ingestUsage:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/events/ingest/sync" +
+      "${baseUrl}/v1/usage/consume" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",\n    eventSlug: "feature-1",\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n    properties: {\n      usage: 30,\n    },\n  }),\n})',
     signUp:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
@@ -195,11 +195,11 @@ const { result, error } = await unprice.plans.listVersions({
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    name: "John Doe",\n    email: "seb@unprice.dev",\n    planVersionId: "plan_version_1",\n    successUrl: "http://your-app.com/dashboard",\n    cancelUrl: "http://your-app.com/failed",\n  }),\n})',
     getEntitlements:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/entitlements/get" +
+      "${baseUrl}/v1/access/entitlements/list" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n  }),\n})',
     getWallet:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/wallet?customerId=cus_1GTzSGrapiBW1QwCL3Fcn" +
+      "${baseUrl}/v1/wallet/balance?customerId=cus_1GTzSGrapiBW1QwCL3Fcn" +
       '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
     getSubscription:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
@@ -211,15 +211,15 @@ const { result, error } = await unprice.plans.listVersions({
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    project_id: "project_1GTzSGrapiBW1QwCL3Fcn",\n    customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    range: "30d",\n  }),\n})',
     getPaymentMethods:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/payments/methods/list" +
+      "${baseUrl}/v1/payment-methods/list" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    provider: "stripe",\n  }),\n})',
     createPaymentMethod:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/payments/methods/create" +
+      "${baseUrl}/v1/payment-methods/create" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    paymentProvider: "stripe",\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    successUrl: "http://your-app.com/dashboard",\n    cancelUrl: "http://your-app.com/failed",\n  }),\n})',
     listVersions:
       'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/plans/versions/list" +
+      "${baseUrl}/v1/plan-versions/list" +
       '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    billingInterval: "month",\n    currency: "USD",\n  }),\n})',
   },
 }

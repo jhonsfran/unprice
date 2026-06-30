@@ -58,6 +58,11 @@ describe("IngestionReportingConsumer", () => {
         source_type: "api_key",
         source_id: "key_123",
         source_name: null,
+        run_id: null,
+        trace_id: null,
+        parent_run_id: null,
+        workload_type: null,
+        workload_id: null,
         event_slug: "usage.recorded",
         idempotency_key: "idem_123",
         state: "processed",
@@ -186,6 +191,52 @@ describe("IngestionReportingConsumer", () => {
         failure_message: "EntitlementWindowBatchReservationBootstrapRequired",
         replayable: true,
         payload_json: payloadJson,
+      }),
+    ])
+  })
+
+  it("publishes run attribution to Tinybird ingestion status rows", async () => {
+    const ingestIngestionEvents = vi
+      .fn()
+      .mockResolvedValue({ successful_rows: 1, quarantined_rows: 0 })
+    const ingestMeterFacts = vi.fn().mockResolvedValue({ successful_rows: 0, quarantined_rows: 0 })
+    const consumer = new IngestionReportingConsumer({
+      ingestIngestionEvents,
+      ingestMeterFacts,
+      publishAuditRecords: vi.fn().mockResolvedValue(undefined),
+      logger: createLogger() as never,
+    })
+
+    await consumer.consumeBatch({
+      messages: [
+        {
+          body: createEnvelope({
+            auditRecords: [
+              createAuditRecord({
+                runId: "brun_001",
+                traceId: "trace_001",
+                parentRunId: "brun_parent_001",
+                workloadType: "agent",
+                workloadId: "research-assistant",
+              }),
+            ],
+            meterFacts: [],
+          }),
+          ack: vi.fn(),
+          retry: vi.fn(),
+        },
+      ],
+    })
+
+    expect(ingestIngestionEvents).toHaveBeenCalledWith([
+      expect.objectContaining({
+        run_id: "brun_001",
+        trace_id: "trace_001",
+        parent_run_id: "brun_parent_001",
+        workload_type: "agent",
+        workload_id: "research-assistant",
+        payload_json: null,
+        replayable: false,
       }),
     ])
   })
@@ -565,6 +616,11 @@ function createAuditRecord(
     sourceType: "api_key",
     sourceId: "key_123",
     sourceName: null,
+    runId: null,
+    traceId: null,
+    parentRunId: null,
+    workloadType: null,
+    workloadId: null,
     status: "processed",
     failureStage: null,
     failureReason: null,
@@ -585,6 +641,11 @@ function createAuditRecord(
       source_type: "api_key",
       source_id: "key_123",
       source_name: null,
+      run_id: null,
+      trace_id: null,
+      parent_run_id: null,
+      workload_type: null,
+      workload_id: null,
       request_id: "req_123",
       idempotency_key: "idem_123",
       slug: "usage.recorded",
@@ -627,6 +688,11 @@ function createAuditPayloadJson(input: {
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
     request_id: "req_123",
     idempotency_key: "idem_123",
     slug: input.slug,
@@ -660,6 +726,11 @@ function createIngestionEvent(
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
     event_slug: "usage.recorded",
     idempotency_key: "idem_123",
     state: "processed",
@@ -691,6 +762,11 @@ function createMeterFact(
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",

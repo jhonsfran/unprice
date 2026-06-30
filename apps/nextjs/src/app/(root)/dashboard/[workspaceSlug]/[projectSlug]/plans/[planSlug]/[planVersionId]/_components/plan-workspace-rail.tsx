@@ -38,7 +38,7 @@ export function PlanWorkspaceRail({
   ]
 
   return (
-    <div className="flex flex-col gap-6 p-4">
+    <div className="flex w-full flex-col gap-6 border-t bg-muted/20 p-4 lg:min-h-full lg:rounded-r-lg lg:border-t-0">
       <section className="flex flex-col gap-3">
         <SectionTitle>Customer preview</SectionTitle>
         <PricingCard planVersion={planVersion} className="w-full" showPublish={false} />
@@ -49,7 +49,7 @@ export function PlanWorkspaceRail({
       <section className="flex flex-col gap-3">
         <SectionTitle>Plan settings</SectionTitle>
 
-        <div className="rounded-md border bg-background-bgSubtle">
+        <div className="rounded-md border bg-card">
           {items.map(([label, value], i) => (
             <div
               key={label}
@@ -58,7 +58,7 @@ export function PlanWorkspaceRail({
                 i < items.length - 1 && "border-b"
               )}
             >
-              <span className="text-muted-foreground">{label}</span>
+              <span className="text-foreground/70">{label}</span>
               <span className="font-mono text-foreground">{value}</span>
             </div>
           ))}

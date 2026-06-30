@@ -177,12 +177,12 @@ async function step(name: string, fn: () => Promise<void>): Promise<void> {
 }
 
 async function verifyCappedEntitlement(): Promise<void> {
-  const { result, error } = await unprice.entitlements.get({
+  const { result, error } = await unprice.access.entitlements.list({
     customerId: CUSTOMER_ID,
     ...(PROJECT_ID ? { projectId: PROJECT_ID } : {}),
   })
 
-  assert(!error, `entitlements.get error: ${error?.message}`)
+  assert(!error, `access.entitlements.list error: ${error?.message}`)
   assert(!!result, "entitlements result should exist")
   assert(Array.isArray(result), "entitlements result should be an array")
 
@@ -197,12 +197,12 @@ async function verifyCappedEntitlement(): Promise<void> {
 }
 
 async function fetchWallet(): Promise<void> {
-  const { result, error } = await unprice.wallet.get({
+  const { result, error } = await unprice.wallet.balance({
     customerId: CUSTOMER_ID,
     ...(PROJECT_ID ? { projectId: PROJECT_ID } : {}),
   })
 
-  assert(!error, `wallet.get error: ${error?.message}`)
+  assert(!error, `wallet.balance error: ${error?.message}`)
   assert(!!result, "wallet result should exist")
   assertWalletSnapshot(result)
 

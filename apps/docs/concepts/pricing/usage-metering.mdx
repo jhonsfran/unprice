@@ -126,7 +126,7 @@ Examples:
 For these metrics, report usage directly from the request path as the action happens.
 
 ```ts
-const { result, error } = await unprice.events.ingestSync({
+const { result, error } = await unprice.usage.consume({
   idempotencyKey: request.id,
   eventSlug: "api_request",
   customerId: "cus_1234567890",
@@ -207,7 +207,7 @@ async function syncActiveSeats(customerId: string) {
 
   const activeSeats = row[0]?.active_seats ?? 0;
 
-  await unprice.events.ingest({
+  await unprice.usage.record({
     idempotencyKey: `active-seats:${customerId}:${new Date().toISOString().slice(0, 13)}`,
     eventSlug: "active_seats_snapshot",
     customerId,
@@ -266,4 +266,4 @@ This keeps your billing architecture consistent:
 Next steps:
 
 - Read [Entitlements](/concepts/pricing/entitlements) to understand how features become customer access rules.
-- Read [Ingest Sync](/libraries/ts/sdk/events/ingest-sync) for the SDK contract and request shape.
+- Read [Usage consume](/libraries/ts/sdk/usage/consume) for the SDK contract and request shape.

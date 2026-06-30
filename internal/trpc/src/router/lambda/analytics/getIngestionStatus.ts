@@ -23,12 +23,17 @@ export const getIngestionStatus = protectedProjectProcedure
       cursor: getIngestionStatusCursorSchema.nullish(),
       filter: z
         .object({
-          sourceId: z.string().optional(),
-          eventSlug: z.string().optional(),
-          state: z.enum(["processed", "rejected", "failed"]).optional(),
+          customerIds: z.array(z.string()).optional(),
+          eventSlugs: z.array(z.string()).optional(),
+          sourceIds: z.array(z.string()).optional(),
+          sourceTypes: z.array(z.string()).optional(),
+          rejectionReasons: z.array(z.string()).optional(),
+          states: z.array(z.enum(["processed", "rejected", "failed"])).optional(),
+          search: z.string().optional(),
         })
         .optional()
         .default({}),
+      includeFacets: z.boolean().optional().default(false),
       limit: z.number().int().min(1).max(100).optional().default(50),
     })
   )
@@ -44,6 +49,7 @@ export const getIngestionStatus = protectedProjectProcedure
         window: opts.input.window,
         cursor: opts.input.cursor,
         filter: opts.input.filter,
+        includeFacets: opts.input.includeFacets,
         limit: opts.input.limit,
       }
     )

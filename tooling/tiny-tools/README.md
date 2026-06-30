@@ -77,7 +77,7 @@ Ingestion tests (`sync-ingestion`, `async-ingestion`, `idempotency`, `limit-enfo
 | Test | What it checks |
 |---|---|
 | `entitlements: customer has capped wallet-backed entitlement` | A capped entitlement exists, which means wallet-backed usage is expected |
-| `wallet: returns current available balance` | `wallet.get` returns display-ready `available` and `held` amounts |
+| `wallet: returns current available balance` | `wallet.balance` returns display-ready `available` and `held` amounts |
 | `wallet: credits reconcile to available balance` | Active credit availability does not exceed wallet availability |
 
 ## Exit codes

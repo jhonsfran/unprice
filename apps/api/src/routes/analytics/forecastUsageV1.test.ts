@@ -244,7 +244,7 @@ function createTestApp({
 }
 
 function buildRequest(body: Record<string, unknown>) {
-  return new Request("https://example.com/v1/analytics/forecast-usage", {
+  return new Request("https://example.com/v1/analytics/usage/forecast", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",

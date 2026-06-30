@@ -75,7 +75,7 @@ SQL >
       amount_scale,
       customer_entitlement_id,
       grant_id,
-      argMax(amount_after, tuple(timestamp, created_at, event_id, idempotency_key)) AS latest_amount_after
+      argMax(amount_after, tuple(timestamp, created_at, idempotency_key)) AS latest_amount_after
     FROM deduped_explain_charge_summary_node
     GROUP BY project_id, customer_id, feature_slug, scope_key, currency, amount_scale, customer_entitlement_id, grant_id
 

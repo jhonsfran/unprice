@@ -1,0 +1,434 @@
+---
+title: "List Plan Versions"
+description: "List all plan versions for a project"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.planVersions.list({
+  onlyPublished: true,
+  onlyEnterprisePlan: false,
+  onlyLatest: true,
+  billingInterval: "month",
+  currency: "USD"
+});
+
+if (error) {
+  // handle potential network or bad request error
+  // a link to our docs will be in the `error.docs` field
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "planVersions": [
+    {
+      "id": "pv_1234567890",
+      "projectId": "project_1234567890",
+      "createdAtM": 1678900000,
+      "updatedAtM": 1678900000,
+      "planId": "plan_1234567890",
+      "description": "Description of the plan version",
+      "latest": true,
+      "title": "Plan Version Title",
+      "tags": ["tag1", "tag2"],
+      "active": true,
+      "status": "published",
+      "publishedAt": 1678900000,
+      "publishedBy": "user_1234567890",
+      "archived": false,
+      "archivedAt": null,
+      "archivedBy": null,
+      "paymentProvider": "stripe",
+      "dueBehaviour": "immediate",
+      "currency": "USD",
+      "billingConfig": {
+        "name": "Monthly",
+        "billingInterval": "month",
+        "billingIntervalCount": 1,
+        "billingAnchor": "dayOfCreation",
+        "planType": "recurring"
+      },
+      "whenToBill": "start",
+      "gracePeriod": 0,
+      "collectionMethod": "charge_automatically",
+      "trialDays": 0,
+      "autoRenew": true,
+      "metadata": {},
+      "paymentMethodRequired": true,
+      "version": 1,
+      "plan": {
+        "id": "plan_1234567890",
+        "projectId": "project_1234567890",
+        "createdAtM": 1678900000,
+        "updatedAtM": 1678900000,
+        "slug": "plan-slug",
+        "active": true,
+        "description": "Description of the plan",
+        "metadata": {
+          "externalId": "ext_123"
+        },
+        "defaultPlan": false,
+        "enterprisePlan": false
+      },
+      "planFeatures": [
+        {
+          "id": "pf_1234567890",
+          "projectId": "project_1234567890",
+          "createdAtM": 1678900000,
+          "updatedAtM": 1678900000,
+          "planVersionId": "pv_1234567890",
+          "featureId": "feat_1234567890",
+          "featureType": "usage",
+          "config": {},
+          "metadata": {},
+          "meterConfig": {
+            "eventId": "event_1234567890",
+            "eventSlug": "llm_completion",
+            "aggregationMethod": "sum",
+            "aggregationField": "input_tokens"
+          },
+          "order": 1,
+          "hidden": false,
+          "feature": {
+            "id": "feat_1234567890",
+            "projectId": "project_1234567890",
+            "createdAtM": 1678900000,
+            "updatedAtM": 1678900000,
+            "slug": "feature-slug",
+            "code": "FEATURE_CODE",
+            "title": "Feature Title",
+            "description": "Feature Description"
+          }
+        }
+      ],
+      "flatPrice": "10.00"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="onlyPublished" type="boolean">
+    Whether to include only published plan versions
+</ParamField>
+
+<ParamField body="onlyEnterprisePlan" type="boolean">
+    Whether to include only enterprise plan versions
+</ParamField>
+
+<ParamField body="onlyLatest" type="boolean">
+    Whether to include only the latest plan version
+</ParamField>
+
+<ParamField body="billingInterval" type="string" enum="month,year,day,minute,onetime">
+    The billing interval to filter the plan versions
+</ParamField>
+
+<ParamField body="currency" type="string" enum="USD,EUR">
+    The currency to filter the plan versions
+</ParamField>
+
+## Response
+
+<ResponseField name="planVersions" type="array" required>
+    Array of plan versions
+</ResponseField>
+
+<ResponseField name="planVersions[].id" type="string" required>
+    The ID of the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].projectId" type="string" required>
+    The ID of the project
+</ResponseField>
+
+<ResponseField name="planVersions[].createdAtM" type="number" required>
+    The creation timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].updatedAtM" type="number" required>
+    The last update timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].planId" type="string" required>
+    The ID of the plan
+</ResponseField>
+
+<ResponseField name="planVersions[].description" type="string" required>
+    The description of the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].latest" type="boolean">
+    Whether this is the latest version
+</ResponseField>
+
+<ResponseField name="planVersions[].title" type="string" required>
+    The title of the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].tags" type="array">
+    Array of tags for the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].active" type="boolean">
+    Whether the plan version is active
+</ResponseField>
+
+<ResponseField name="planVersions[].status" type="string" enum="draft,published">
+    The status of the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].publishedAt" type="number">
+    The publication timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].publishedBy" type="string">
+    The ID of the user who published the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].archived" type="boolean" required>
+    Whether the plan version is archived
+</ResponseField>
+
+<ResponseField name="planVersions[].archivedAt" type="number">
+    The archive timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].archivedBy" type="string">
+    The ID of the user who archived the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].paymentProvider" type="string" required>
+    The payment provider for the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].dueBehaviour" type="string" required>
+    The due behavior for the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].currency" type="string" required>
+    The currency for the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].billingConfig" type="object" required>
+    The billing configuration for the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].billingConfig.name" type="string" required>
+    The name of the billing configuration
+</ResponseField>
+
+<ResponseField name="planVersions[].billingConfig.billingInterval" type="string" enum="month,year,day,minute,onetime" required>
+    The billing interval
+</ResponseField>
+
+<ResponseField name="planVersions[].billingConfig.billingIntervalCount" type="number" required>
+    The number of intervals
+</ResponseField>
+
+<ResponseField name="planVersions[].billingConfig.billingAnchor" type="number|string" required>
+    The billing anchor (number or "dayOfCreation")
+</ResponseField>
+
+<ResponseField name="planVersions[].billingConfig.planType" type="string" enum="recurring,onetime" required>
+    The type of plan
+</ResponseField>
+
+<ResponseField name="planVersions[].whenToBill" type="string" required>
+    When to bill the customer
+</ResponseField>
+
+<ResponseField name="planVersions[].gracePeriod" type="number" required>
+    The grace period in days
+</ResponseField>
+
+<ResponseField name="planVersions[].collectionMethod" type="string" required>
+    The collection method
+</ResponseField>
+
+<ResponseField name="planVersions[].trialDays" type="number" required>
+    The number of trial days
+</ResponseField>
+
+<ResponseField name="planVersions[].autoRenew" type="boolean" required>
+    Whether the plan auto-renews
+</ResponseField>
+
+<ResponseField name="planVersions[].metadata" type="object" required>
+    Additional metadata for the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].paymentMethodRequired" type="boolean" required>
+    Whether a payment method is required
+</ResponseField>
+
+<ResponseField name="planVersions[].version" type="number" required>
+    The version number
+</ResponseField>
+
+<ResponseField name="planVersions[].plan" type="object" required>
+    The plan information
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.id" type="string" required>
+    The ID of the plan
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.projectId" type="string" required>
+    The ID of the project
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.createdAtM" type="number" required>
+    The creation timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.updatedAtM" type="number" required>
+    The last update timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.slug" type="string" required>
+    The slug of the plan
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.active" type="boolean">
+    Whether the plan is active
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.description" type="string" required>
+    The description of the plan
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.metadata" type="object">
+    Additional metadata for the plan
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.metadata.externalId" type="string">
+    The external ID of the plan
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.defaultPlan" type="boolean">
+    Whether this is the default plan
+</ResponseField>
+
+<ResponseField name="planVersions[].plan.enterprisePlan" type="boolean">
+    Whether this is an enterprise plan
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures" type="array" required>
+    Array of plan features
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].id" type="string" required>
+    The ID of the plan feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].projectId" type="string" required>
+    The ID of the project
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].createdAtM" type="number" required>
+    The creation timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].updatedAtM" type="number" required>
+    The last update timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].planVersionId" type="string" required>
+    The ID of the plan version
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].featureId" type="string" required>
+    The ID of the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].featureType" type="string" enum="flat,tier,package,usage" required>
+    The type of feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].config" type="object" required>
+    The configuration for the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].metadata" type="object" required>
+    Additional metadata for the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig" type="object">
+    Snapshotted meter configuration for usage features
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig.eventId" type="string">
+    The reusable project event linked to this meter snapshot
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig.eventSlug" type="string">
+    The immutable SDK event slug snapshotted into this plan version feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig.aggregationMethod" type="string">
+    The aggregation method used to measure usage for this feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].meterConfig.aggregationField" type="string">
+    The numeric event payload property used when the aggregation method requires one
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].order" type="number" required>
+    The order of the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].hidden" type="boolean" required>
+    Whether the feature is hidden
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature" type="object" required>
+    The feature information
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature.id" type="string" required>
+    The ID of the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature.projectId" type="string" required>
+    The ID of the project
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature.createdAtM" type="number" required>
+    The creation timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature.updatedAtM" type="number" required>
+    The last update timestamp
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature.slug" type="string" required>
+    The slug of the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature.code" type="string" required>
+    The code of the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature.title" type="string" required>
+    The title of the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].planFeatures[].feature.description" type="string" required>
+    The description of the feature
+</ResponseField>
+
+<ResponseField name="planVersions[].flatPrice" type="string" required>
+    The flat price of the plan version
+</ResponseField>

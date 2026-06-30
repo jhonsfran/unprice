@@ -1,5 +1,4 @@
-import type { ConfigFeatureVersionType, OverageStrategy, ResetConfig } from "@unprice/db/validators"
-import type { GrantConsumptionState, MeterConfig } from "@unprice/services/entitlements"
+import type { GrantConsumptionState } from "@unprice/services/entitlements"
 import { DO_IDEMPOTENCY_TTL_MS, computeGrantPeriodBucket } from "@unprice/services/entitlements"
 import { asc, desc, eq, inArray, lt } from "drizzle-orm"
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite"
@@ -12,10 +11,8 @@ import {
 } from "./constants"
 import type {
   ActiveGrantInput,
-  ApplyGrantInput,
   ApplyResult,
   BatchIdempotencyEntry,
-  EntitlementConfigInput,
   WalletReservationSnapshot,
 } from "./contracts"
 import {
@@ -23,17 +20,14 @@ import {
   compactGrantConsumptionStateListSchema,
 } from "./contracts"
 import {
-  entitlementConfigTable,
   entitlementPeriodUsageTable,
-  grantsTable,
   idempotencyKeyBatchesTable,
   meterStateTable,
   type schema,
   walletReservationTable,
 } from "./db/schema"
-import { extractCurrencyCodeFromFeatureConfig } from "./meter-helpers"
 import type { MeterStateDraft } from "./meter-state-adapter"
-import { jsonEquals, minNullableExpiry, unique } from "./utils"
+import { unique } from "./utils"
 
 // ---------------------------------------------------------------------------
 // Public pure helpers
@@ -167,246 +161,6 @@ export class EntitlementWindowStore {
         statementKey: params.statementKey ?? null,
       })
       .run()
-  }
-
-  // -------------------------------------------------------------------
-  // Entitlement config
-  // -------------------------------------------------------------------
-
-  syncEntitlementConfig(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    params: {
-      createdAt: number
-      entitlement: EntitlementConfigInput
-    }
-  ): void {
-    const existing = tx
-      .select({
-        customerEntitlementId: entitlementConfigTable.customerEntitlementId,
-        projectId: entitlementConfigTable.projectId,
-        customerId: entitlementConfigTable.customerId,
-        effectiveAt: entitlementConfigTable.effectiveAt,
-        expiresAt: entitlementConfigTable.expiresAt,
-        featureConfig: entitlementConfigTable.featureConfig,
-        featurePlanVersionId: entitlementConfigTable.featurePlanVersionId,
-        featureSlug: entitlementConfigTable.featureSlug,
-        meterConfig: entitlementConfigTable.meterConfig,
-        overageStrategy: entitlementConfigTable.overageStrategy,
-        resetConfig: entitlementConfigTable.resetConfig,
-      })
-      .from(entitlementConfigTable)
-      .where(
-        eq(entitlementConfigTable.customerEntitlementId, params.entitlement.customerEntitlementId)
-      )
-      .get()
-
-    const values = {
-      customerEntitlementId: params.entitlement.customerEntitlementId,
-      projectId: params.entitlement.projectId,
-      customerId: params.entitlement.customerId,
-      effectiveAt: params.entitlement.effectiveAt,
-      expiresAt: params.entitlement.expiresAt,
-      featureConfig: params.entitlement.featureConfig,
-      featurePlanVersionId: params.entitlement.featurePlanVersionId,
-      featureSlug: params.entitlement.featureSlug,
-      meterConfig: params.entitlement.meterConfig,
-      overageStrategy: params.entitlement.overageStrategy,
-      resetConfig: params.entitlement.resetConfig ?? null,
-      updatedAt: params.createdAt,
-    }
-
-    if (existing) {
-      this.assertImmutableEntitlementConfig(existing, params.entitlement)
-
-      const nextExpiresAt = minNullableExpiry(existing.expiresAt ?? null, values.expiresAt)
-      if (nextExpiresAt !== (existing.expiresAt ?? null)) {
-        tx.update(entitlementConfigTable)
-          .set({
-            expiresAt: nextExpiresAt,
-            updatedAt: params.createdAt,
-          })
-          .where(
-            eq(
-              entitlementConfigTable.customerEntitlementId,
-              params.entitlement.customerEntitlementId
-            )
-          )
-          .run()
-        this.onStateChanged()
-      }
-      return
-    }
-
-    tx.insert(entitlementConfigTable)
-      .values({
-        ...values,
-        addedAt: params.createdAt,
-      })
-      .run()
-    this.onStateChanged()
-  }
-
-  assertImmutableEntitlementConfig(
-    existing: {
-      customerEntitlementId: string
-      projectId: string
-      customerId: string
-      effectiveAt: number
-      featureConfig: ConfigFeatureVersionType
-      featurePlanVersionId: string
-      featureSlug: string
-      meterConfig: MeterConfig
-      overageStrategy: OverageStrategy
-      resetConfig: ResetConfig | null
-    },
-    incoming: EntitlementConfigInput
-  ): void {
-    const mismatches: string[] = []
-
-    if (existing.customerEntitlementId !== incoming.customerEntitlementId) {
-      mismatches.push("customerEntitlementId")
-    }
-    if (existing.projectId !== incoming.projectId) mismatches.push("projectId")
-    if (existing.customerId !== incoming.customerId) mismatches.push("customerId")
-    if (existing.effectiveAt !== incoming.effectiveAt) mismatches.push("effectiveAt")
-    if (existing.featurePlanVersionId !== incoming.featurePlanVersionId) {
-      mismatches.push("featurePlanVersionId")
-    }
-    if (existing.featureSlug !== incoming.featureSlug) mismatches.push("featureSlug")
-    if (existing.overageStrategy !== incoming.overageStrategy) mismatches.push("overageStrategy")
-    if (!jsonEquals(existing.featureConfig, incoming.featureConfig)) {
-      mismatches.push("featureConfig")
-    }
-    if (!jsonEquals(existing.meterConfig, incoming.meterConfig)) {
-      mismatches.push("meterConfig")
-    }
-    if (!jsonEquals(existing.resetConfig ?? null, incoming.resetConfig ?? null)) {
-      mismatches.push("resetConfig")
-    }
-
-    if (mismatches.length > 0) {
-      throw new Error(
-        `Immutable entitlement config changed for ${incoming.customerEntitlementId}: ${mismatches.join(", ")}`
-      )
-    }
-  }
-
-  readEntitlementConfig(tx: DrizzleSqliteDODatabase<typeof schema>): EntitlementConfigInput | null {
-    const row = tx
-      .select({
-        customerEntitlementId: entitlementConfigTable.customerEntitlementId,
-        projectId: entitlementConfigTable.projectId,
-        customerId: entitlementConfigTable.customerId,
-        effectiveAt: entitlementConfigTable.effectiveAt,
-        expiresAt: entitlementConfigTable.expiresAt,
-        featureConfig: entitlementConfigTable.featureConfig,
-        featurePlanVersionId: entitlementConfigTable.featurePlanVersionId,
-        featureSlug: entitlementConfigTable.featureSlug,
-        meterConfig: entitlementConfigTable.meterConfig,
-        overageStrategy: entitlementConfigTable.overageStrategy,
-        resetConfig: entitlementConfigTable.resetConfig,
-      })
-      .from(entitlementConfigTable)
-      .get()
-
-    if (!row) {
-      return null
-    }
-
-    return {
-      billingPeriods: [],
-      creditLinePolicy: "uncapped",
-      customerEntitlementId: row.customerEntitlementId,
-      projectId: row.projectId,
-      customerId: row.customerId,
-      effectiveAt: row.effectiveAt,
-      expiresAt: row.expiresAt ?? null,
-      featureConfig: row.featureConfig,
-      featurePlanVersionId: row.featurePlanVersionId,
-      featureSlug: row.featureSlug,
-      featureType: "usage",
-      meterConfig: row.meterConfig,
-      overageStrategy: row.overageStrategy,
-      resetConfig: row.resetConfig ?? null,
-      subscriptionItemId: null,
-    }
-  }
-
-  // -------------------------------------------------------------------
-  // Grants
-  // -------------------------------------------------------------------
-
-  syncGrants(
-    tx: DrizzleSqliteDODatabase<typeof schema>,
-    params: {
-      customerEntitlementId: string
-      createdAt: number
-      grants: ApplyGrantInput[]
-    }
-  ): void {
-    for (const grant of params.grants) {
-      const existing = tx
-        .select({
-          grantId: grantsTable.grantId,
-          expiresAt: grantsTable.expiresAt,
-        })
-        .from(grantsTable)
-        .where(eq(grantsTable.grantId, grant.grantId))
-        .get()
-
-      if (existing) {
-        const nextExpiresAt = minNullableExpiry(existing.expiresAt ?? null, grant.expiresAt)
-        if (nextExpiresAt !== (existing.expiresAt ?? null)) {
-          tx.update(grantsTable)
-            .set({ expiresAt: nextExpiresAt })
-            .where(eq(grantsTable.grantId, grant.grantId))
-            .run()
-          this.onStateChanged()
-        }
-      } else {
-        tx.insert(grantsTable)
-          .values({
-            grantId: grant.grantId,
-            customerEntitlementId: params.customerEntitlementId,
-            allowanceUnits: grant.allowanceUnits,
-            effectiveAt: grant.effectiveAt,
-            expiresAt: grant.expiresAt,
-            priority: grant.priority,
-            addedAt: params.createdAt,
-          })
-          .run()
-        this.onStateChanged()
-      }
-    }
-  }
-
-  readGrants(tx: DrizzleSqliteDODatabase<typeof schema>): ActiveGrantInput[] {
-    const entitlement = this.readEntitlementConfig(tx)
-    if (!entitlement) {
-      return []
-    }
-
-    return tx
-      .select({
-        grantId: grantsTable.grantId,
-        allowanceUnits: grantsTable.allowanceUnits,
-        effectiveAt: grantsTable.effectiveAt,
-        expiresAt: grantsTable.expiresAt,
-        priority: grantsTable.priority,
-      })
-      .from(grantsTable)
-      .all()
-      .map((row) => ({
-        allowanceUnits: row.allowanceUnits ?? null,
-        cadenceEffectiveAt: entitlement.effectiveAt,
-        cadenceExpiresAt: entitlement.expiresAt,
-        currencyCode: extractCurrencyCodeFromFeatureConfig(entitlement.featureConfig) ?? "USD",
-        effectiveAt: row.effectiveAt,
-        expiresAt: row.expiresAt ?? null,
-        grantId: row.grantId,
-        priority: row.priority,
-        resetConfig: entitlement.resetConfig ?? null,
-      }))
   }
 
   // -------------------------------------------------------------------

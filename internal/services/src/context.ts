@@ -1,6 +1,8 @@
+import { env } from "../env"
 import { AnalyticsService } from "./analytics/service"
 import { ApiKeysService } from "./apikey/service"
 import { BillingService } from "./billing/service"
+import { BudgetRunService } from "./budget-runs/service"
 import { CustomerService } from "./customers/service"
 import type { ServiceDeps } from "./deps"
 import { DomainService } from "./domains/service"
@@ -16,8 +18,7 @@ import { ProjectService } from "./projects/service"
 import { RatingService } from "./rating/service"
 import { DrizzleSubscriptionRepository } from "./subscriptions/repository.drizzle"
 import { SubscriptionService } from "./subscriptions/service"
-import { SdkBillingReservationFlushGateway } from "./use-cases/billing/reservation-flush-gateway"
-import { unprice } from "./utils/unprice"
+import { HttpBillingReservationFlushGateway } from "./use-cases/billing/reservation-flush-gateway"
 import { WalletService } from "./wallet"
 import { WorkspaceService } from "./workspaces/service"
 
@@ -28,6 +29,7 @@ import { WorkspaceService } from "./workspaces/service"
  * no service creates its own child services.
  */
 export interface ServiceContext {
+  budgetRuns: BudgetRunService
   analytics: AnalyticsService
   apikeys: ApiKeysService
   customers: CustomerService
@@ -57,6 +59,13 @@ export interface ServiceContext {
  */
 export function createServiceContext(deps: ServiceDeps): ServiceContext {
   // 1. Leaf services (no service deps)
+  const budgetRuns = new BudgetRunService({
+    db: deps.db,
+    logger: deps.logger,
+    cache: deps.cache,
+    waitUntil: deps.waitUntil,
+  })
+
   const ledger = new LedgerGateway({
     db: deps.db,
     logger: deps.logger,
@@ -195,10 +204,14 @@ export function createServiceContext(deps: ServiceDeps): ServiceContext {
     ratingService: rating,
     ledgerService: ledger,
     walletService: wallet,
-    reservationFlushGateway: new SdkBillingReservationFlushGateway(unprice),
+    reservationFlushGateway: new HttpBillingReservationFlushGateway({
+      baseUrl: env.UNPRICE_API_URL,
+      token: env.UNPRICE_API_KEY,
+    }),
   })
 
   return {
+    budgetRuns,
     analytics,
     apikeys,
     customers,

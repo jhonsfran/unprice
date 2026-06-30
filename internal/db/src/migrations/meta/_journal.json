@@ -71,6 +71,34 @@
       "when": 1780767166925,
       "tag": "0009_cloudy_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781539588939,
+      "tag": "0010_colorful_kitty_pryde",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781872036584,
+      "tag": "0011_sturdy_masque",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781873628100,
+      "tag": "0012_opposite_virginia_dare",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1782004536485,
+      "tag": "0013_lean_rockslide",
+      "breakpoints": true
     }
   ]
 }

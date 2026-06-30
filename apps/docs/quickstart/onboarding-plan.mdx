@@ -37,7 +37,7 @@ const unprice = new Unprice({
 Before performing an action, check if the customer has access and if they have enough balance for the specific operation.
 
 ```typescript
-const { result } = await unprice.entitlements.verify({
+const { result } = await unprice.access.check({
   customerId: "cust_123",
   featureSlug: "ai-generations"
 });
@@ -46,7 +46,7 @@ if (result?.allowed) {
   // 1. Perform your operation...
 
   // 2. Then report the usage to update their balance
-  await unprice.events.ingestSync({
+  await unprice.usage.consume({
     idempotencyKey: "unique-id-for-this-request",
     eventSlug: "ai_generation",
     customerId: "cust_123",

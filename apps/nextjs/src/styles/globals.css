@@ -219,7 +219,11 @@
 }
 
 @media screen and (prefers-reduced-motion: reduce) {
-  .animate {
+  .animate,
+  .animate-logo,
+  .animate-content,
+  .animate-button,
+  .animate-title {
     animation: none !important;
   }
 }

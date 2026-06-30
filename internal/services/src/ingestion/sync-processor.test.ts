@@ -147,6 +147,79 @@ describe("IngestionSyncProcessor", () => {
     })
   })
 
+  it("runs subscription catch-up and retries WALLET_EMPTY sync denials", async () => {
+    const beforeCatchUp = createEntitlement({
+      customerEntitlementId: "ce_before",
+      subscriptionId: "sub_123",
+    })
+    const afterCatchUp = createEntitlement({
+      customerEntitlementId: "ce_after",
+      subscriptionId: "sub_123",
+    })
+    const apply = vi
+      .fn()
+      .mockResolvedValueOnce({
+        allowed: false,
+        deniedReason: "WALLET_EMPTY",
+        message: "wallet empty",
+      })
+      .mockResolvedValueOnce({
+        allowed: true,
+        meterFacts: [],
+      })
+    const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
+    const prepareCustomerGrantContext = vi
+      .fn()
+      .mockResolvedValueOnce({ candidateEntitlements: [beforeCatchUp] })
+      .mockResolvedValueOnce({ candidateEntitlements: [afterCatchUp] })
+    const catchUpForPreparedGroup = vi.fn().mockResolvedValue({
+      changed: true,
+      caughtUpSubscriptionIds: ["sub_123"],
+    })
+    const processor = createProcessor({
+      apply,
+      enqueueOutcomes,
+      prepareCustomerGrantContext,
+      subscriptionCatchUp: { catchUpForPreparedGroup },
+    })
+    const message = createMessage()
+
+    const result = await processor.ingestFeatureSync({
+      featureSlug: beforeCatchUp.featureSlug,
+      message,
+    })
+
+    expect(result).toEqual({
+      allowed: true,
+      state: "processed",
+    })
+    expect(catchUpForPreparedGroup).toHaveBeenCalledWith({
+      candidateEntitlements: [beforeCatchUp],
+      customerId: message.customerId,
+      messages: [message],
+      projectId: message.projectId,
+    })
+    expect(prepareCustomerGrantContext).toHaveBeenCalledTimes(2)
+    expect(apply).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        entitlement: afterCatchUp,
+      })
+    )
+    expect(enqueueOutcomes).toHaveBeenCalledTimes(1)
+    expect(enqueueOutcomes).toHaveBeenCalledWith({
+      customerId: message.customerId,
+      projectId: message.projectId,
+      outcomes: [
+        {
+          message,
+          outcome: { state: "processed" },
+          meterFacts: [],
+        },
+      ],
+    })
+  })
+
   it("propagates reporting enqueue failures after successful apply", async () => {
     const entitlement = createEntitlement()
     const apply = vi.fn().mockResolvedValue({ allowed: true })
@@ -177,6 +250,9 @@ function createProcessor(
       rejectionReason?: "CUSTOMER_NOT_FOUND" | "NO_MATCHING_ENTITLEMENT"
     }
     prepareCustomerGrantContext?: ReturnType<typeof vi.fn>
+    subscriptionCatchUp?: {
+      catchUpForPreparedGroup: ReturnType<typeof vi.fn>
+    }
   } = {}
 ) {
   const logger = createLogger()
@@ -197,6 +273,7 @@ function createProcessor(
     reportingDispatcher: {
       enqueueOutcomes: overrides.enqueueOutcomes ?? vi.fn().mockResolvedValue(undefined),
     },
+    subscriptionCatchUp: overrides.subscriptionCatchUp as never,
   })
 }
 

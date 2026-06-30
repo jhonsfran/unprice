@@ -1,0 +1,59 @@
+- name: ingestion_facets_returns_scoped_window_facets
+  description: Returns full-window facet counts for a scoped customer
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&limit=10
+  expected_result: |
+    {"facet":"state","value":"processed","event_count":2}
+    {"facet":"state","value":"rejected","event_count":2}
+    {"facet":"state","value":"failed","event_count":1}
+    {"facet":"event_slug","value":"usage.recorded","event_count":3}
+    {"facet":"event_slug","value":"entitlement.checked","event_count":1}
+    {"facet":"event_slug","value":"llm-tokens","event_count":1}
+    {"facet":"source_type","value":"api_key","event_count":4}
+    {"facet":"source_type","value":"system","event_count":1}
+    {"facet":"rejection_reason","value":"customer_not_found","event_count":1}
+    {"facet":"rejection_reason","value":"missing_required_property","event_count":1}
+    {"facet":"customer_id","value":"cus_1","event_count":5}
+
+- name: ingestion_facets_returns_project_wide_customers
+  description: Returns customer facets across a project when customer_id is omitted
+  parameters: project_id=proj_1&from_ts=4070908800000&to_ts=4070995200000&filter_customer_ids=cus_2&limit=10
+  expected_result: |
+    {"facet":"state","value":"processed","event_count":1}
+    {"facet":"event_slug","value":"usage.recorded","event_count":1}
+    {"facet":"source_type","value":"api_key","event_count":1}
+    {"facet":"customer_id","value":"cus_2","event_count":1}
+
+- name: ingestion_facets_filters_by_source_ids
+  description: Returns facet counts for selected source identifiers
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&source_ids=key_1&limit=10
+  expected_result: |
+    {"facet":"state","value":"processed","event_count":2}
+    {"facet":"state","value":"failed","event_count":1}
+    {"facet":"state","value":"rejected","event_count":1}
+    {"facet":"event_slug","value":"usage.recorded","event_count":3}
+    {"facet":"event_slug","value":"llm-tokens","event_count":1}
+    {"facet":"source_type","value":"api_key","event_count":4}
+    {"facet":"rejection_reason","value":"missing_required_property","event_count":1}
+    {"facet":"customer_id","value":"cus_1","event_count":4}
+
+- name: ingestion_facets_filters_by_state
+  description: Returns facet counts after applying state filters
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&states=rejected&limit=10
+  expected_result: |
+    {"facet":"state","value":"rejected","event_count":2}
+    {"facet":"event_slug","value":"entitlement.checked","event_count":1}
+    {"facet":"event_slug","value":"usage.recorded","event_count":1}
+    {"facet":"source_type","value":"api_key","event_count":1}
+    {"facet":"source_type","value":"system","event_count":1}
+    {"facet":"rejection_reason","value":"customer_not_found","event_count":1}
+    {"facet":"rejection_reason","value":"missing_required_property","event_count":1}
+    {"facet":"customer_id","value":"cus_1","event_count":2}
+
+- name: ingestion_facets_filters_by_search
+  description: Returns facet counts after applying search filters
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&search=failed&limit=10
+  expected_result: |
+    {"facet":"state","value":"failed","event_count":1}
+    {"facet":"event_slug","value":"usage.recorded","event_count":1}
+    {"facet":"source_type","value":"api_key","event_count":1}
+    {"facet":"customer_id","value":"cus_1","event_count":1}

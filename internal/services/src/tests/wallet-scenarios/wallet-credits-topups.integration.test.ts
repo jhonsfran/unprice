@@ -321,6 +321,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       projectId,
       refillChunkAmount: 0,
       reservationId,
+      billingPeriodId: "bp_wallet_credit_test",
       statementKey: "stmt_wallet_credit_test",
     })
 
@@ -650,6 +651,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       projectId,
       refillChunkAmount: 0,
       reservationId,
+      billingPeriodId: "bp_wallet_mixed",
       statementKey: "stmt_wallet_mixed",
     })
 
@@ -722,6 +724,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       projectId,
       refillChunkAmount: 0,
       reservationId,
+      billingPeriodId: "bp_wallet_final_recovery",
       statementKey: "stmt_wallet_final_recovery",
     })
     expect(finalFlush.err).toBeUndefined()
@@ -741,6 +744,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       projectId,
       refillChunkAmount: 0,
       reservationId,
+      billingPeriodId: "bp_wallet_final_recovery",
       statementKey: "stmt_wallet_final_recovery",
     })
     expect(replay.err).toBeUndefined()
@@ -814,6 +818,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       customerId,
       flushSeq: 1,
       amount: 1 * euro,
+      billingPeriodId: "bp_wallet_command_idempotency_capture",
       projectId,
       reservationId,
       statementKey: "stmt_wallet_command_idempotency_capture",
@@ -825,6 +830,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       customerId,
       flushSeq: 1,
       amount: 1 * euro,
+      billingPeriodId: "bp_wallet_command_idempotency_capture",
       projectId,
       reservationId,
       statementKey: "stmt_wallet_command_idempotency_capture",
@@ -836,6 +842,7 @@ describe("wallet credits and top-ups DB-backed lifecycle", () => {
       customerId,
       flushSeq: 1,
       amount: 2 * euro,
+      billingPeriodId: "bp_wallet_command_idempotency_capture",
       projectId,
       reservationId,
       statementKey: "stmt_wallet_command_idempotency_capture",

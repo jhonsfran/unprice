@@ -8,6 +8,13 @@
       "when": 1780931447028,
       "tag": "0000_odd_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1781893522847,
+      "tag": "0001_drop_config_grants",
+      "breakpoints": true
     }
   ]
 }

@@ -22,10 +22,14 @@ const authMocks = vi.hoisted(() => ({
   resolveContextProjectId: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-  resolveContextProjectId: authMocks.resolveContextProjectId,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+    resolveContextProjectId: authMocks.resolveContextProjectId,
+  }
+})
 
 import { registerIngestEventsSyncV1 } from "./ingestEventsSyncV1"
 
@@ -44,7 +48,7 @@ const requestBody = {
 const verifiedKey = {
   id: "key_123",
   projectId: "proj_123",
-  defaultCustomerId: "cus_default_123",
+  defaultCustomerId: "cus_123",
   project: {
     id: "proj_123",
     workspaceId: "ws_123",
@@ -148,11 +152,11 @@ describe("ingestEventsSyncV1 route", () => {
     })
   })
 
-  it("uses explicit customerId from body even when key has a different default", async () => {
+  it("returns 403 when explicit customerId differs from the customer-bound API key", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(requestBody.timestamp))
 
-    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+    const { app, env, executionCtx } = createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -163,13 +167,13 @@ describe("ingestEventsSyncV1 route", () => {
       executionCtx
     )
 
-    expect(response.status).toBe(200)
-    expect(ingestFeatureSync).toHaveBeenCalledWith({
-      featureSlug: "api_calls",
-      message: expect.objectContaining({
-        customerId: "cus_explicit_999",
-      }),
-    })
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "FORBIDDEN",
+        message: "This API key is bound to a different customer",
+      })
+    )
   })
 
   it("returns 400 when customerId is omitted and key has no default binding", async () => {
@@ -310,7 +314,7 @@ function createTestApp() {
 }
 
 function buildRequest(body: Record<string, unknown> = requestBody) {
-  return new Request("https://example.com/v1/events/ingest/sync", {
+  return new Request("https://example.com/v1/usage/consume", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",

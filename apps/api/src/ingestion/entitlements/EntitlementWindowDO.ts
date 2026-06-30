@@ -134,6 +134,16 @@ type OptimizedBatchWalletRetryOutcome =
 
 type BatchReservationGrowthResult = ReservationGrowthResult | { kind: "max_outstanding_reached" }
 
+class ExternalReservationBudgetExceededError extends Error {
+  constructor(
+    readonly totalCost: number,
+    readonly remainingAmount: number
+  ) {
+    super(`Priced cost ${totalCost} exceeds run remaining amount ${remainingAmount}`)
+    this.name = "ExternalReservationBudgetExceededError"
+  }
+}
+
 type OptimizedBatchWalletDiagnostics = {
   emptyAfterRefillEventIds: string[]
   emptyAfterRefillLastRemainingAmount: number | null
@@ -637,25 +647,11 @@ export class EntitlementWindowDO extends DurableObject {
     createdAt: number,
     idempotencyKeys: string[]
   ): OptimizedBatchSetup {
+    const entitlement = input.entitlement
+    const grants = input.grants
+    const meter = resolveMeterIdentity(entitlement)
+
     return this.db.transaction((tx) => {
-      this.store.syncEntitlementConfig(tx, {
-        entitlement: input.entitlement,
-        createdAt,
-      })
-      this.store.syncGrants(tx, {
-        customerEntitlementId: input.entitlement.customerEntitlementId,
-        grants: input.grants,
-        createdAt,
-      })
-
-      const entitlement = this.store.readEntitlementConfig(tx)
-      if (!entitlement) {
-        throw new Error("No entitlement config found after sync")
-      }
-
-      const grants = this.store.readGrants(tx)
-      const meter = resolveMeterIdentity(entitlement)
-
       return {
         cachedResults: this.store.lookupCachedIdempotencyResults(idempotencyKeys),
         entitlement,
@@ -1274,6 +1270,7 @@ export class EntitlementWindowDO extends DurableObject {
     const input = applyInputSchema.parse(rawInput)
     const idempotencyKey = input.idempotencyKey
     const createdAt = Date.now()
+    const walletMode = input.walletMode ?? "standard"
     const { activeGrants, creditLinePolicy, entitlement, meter, overageStrategy } =
       this.prepareSingleApplyContext(input, createdAt)
 
@@ -1288,6 +1285,7 @@ export class EntitlementWindowDO extends DurableObject {
       input,
       meter,
     })
+    wideEvent.wallet_mode = walletMode
 
     let result: ApplyResult | undefined
     let thrown: unknown
@@ -1315,6 +1313,21 @@ export class EntitlementWindowDO extends DurableObject {
       if (lateDenial) {
         result = lateDenial
         return lateDenial
+      }
+
+      if (walletMode === "external_reservation") {
+        const externalResult = this.executeSingleApplyExternalReservation({
+          activeGrants,
+          createdAt,
+          entitlement,
+          idempotencyKey,
+          input,
+          meter,
+          metrics,
+          overageStrategy,
+        })
+        result = externalResult
+        return externalResult
       }
 
       const bootstrap = await this.handleSingleApplyReservationBootstrap({
@@ -1358,6 +1371,111 @@ export class EntitlementWindowDO extends DurableObject {
         thrown,
         wideEvent,
       })
+    }
+  }
+
+  // External reservation mode: prices the event and enforces entitlement limits
+  // but does NOT create/manage wallet reservations. Instead, it compares the
+  // priced cost against the caller-provided externalReservation.remainingAmount.
+  // Used by RunBudgetDO which manages its own run-level budget.
+  private executeSingleApplyExternalReservation(params: {
+    activeGrants: ActiveGrantInput[]
+    createdAt: number
+    entitlement: EntitlementConfigInput
+    idempotencyKey: string
+    input: ApplyInput
+    meter: MeterIdentity
+    metrics: SingleApplyExecutionMetrics
+    overageStrategy: OverageStrategy
+  }): ApplyResult {
+    const {
+      activeGrants,
+      createdAt,
+      entitlement,
+      idempotencyKey,
+      input,
+      meter,
+      metrics,
+      overageStrategy,
+    } = params
+
+    try {
+      return this.db.transaction((tx) => {
+        // Double-check idempotency inside the transaction
+        const cachedResult = this.store.lookupCachedIdempotencyResult(idempotencyKey)
+        if (cachedResult) {
+          metrics.duplicateCount = 1
+          return cachedResult
+        }
+
+        // Apply the meter event and price it (same as standard mode)
+        let pricedFacts: PricedFact[]
+        try {
+          pricedFacts = this.applyAndPriceSingleApplyEvent(tx, {
+            activeGrants,
+            createdAt,
+            entitlement,
+            input,
+            meter,
+            metrics,
+            overageStrategy,
+          })
+        } catch (error) {
+          if (error instanceof EntitlementWindowLimitExceededError) {
+            const deniedResult = this.persistDeniedApplyResult({
+              idempotencyKey,
+              createdAt,
+              deniedReason: "LIMIT_EXCEEDED",
+              message: error.message,
+            })
+            metrics.idempotencyInsertCount = 1
+            return deniedResult
+          }
+          throw error
+        }
+
+        // Compare priced cost against external reservation remaining amount
+        const totalCost = pricedFacts.reduce((sum, { amountMinor }) => sum + amountMinor, 0)
+        const remainingAmount = input.externalReservation?.remainingAmount ?? 0
+
+        if (totalCost > remainingAmount) {
+          throw new ExternalReservationBudgetExceededError(totalCost, remainingAmount)
+        }
+
+        // Build meter facts and persist allowed result (no wallet I/O)
+        const meterFacts = pricedFacts.map((pricedFact) =>
+          this.buildMeterFactPayload({
+            createdAt,
+            input,
+            meter,
+            pricedFact,
+          })
+        )
+
+        const idempotencyEntry = this.persistAllowedSingleApplyResult(tx, {
+          createdAt,
+          idempotencyKey,
+          meterFacts,
+          metrics,
+        })
+
+        this.store.recordBatchIdempotencyResults([idempotencyEntry])
+        this.schedulePostCommitAlarm()
+
+        return { allowed: true, meterFacts } as ApplyResult
+      })
+    } catch (error) {
+      if (error instanceof ExternalReservationBudgetExceededError) {
+        const deniedResult = this.persistDeniedApplyResult({
+          idempotencyKey,
+          createdAt,
+          deniedReason: "RUN_BUDGET_EXCEEDED",
+          message: error.message,
+        })
+        metrics.idempotencyInsertCount = 1
+        return deniedResult
+      }
+      throw error
     }
   }
 
@@ -1480,38 +1598,19 @@ export class EntitlementWindowDO extends DurableObject {
     return { result: deniedResult, usesWalletReservation }
   }
 
-  private prepareSingleApplyContext(input: ApplyInput, createdAt: number): SingleApplyContext {
-    const activeGrants = this.db.transaction((tx) => {
-      this.store.syncEntitlementConfig(tx, {
-        entitlement: input.entitlement,
-        createdAt,
-      })
-      this.store.syncGrants(tx, {
-        customerEntitlementId: input.entitlement.customerEntitlementId,
-        grants: input.grants,
-        createdAt,
-      })
-      return resolveActiveGrants(this.store.readGrants(tx), input.event.timestamp)
-    })
+  private prepareSingleApplyContext(input: ApplyInput, _createdAt: number): SingleApplyContext {
+    const activeGrants = resolveActiveGrants(input.grants, input.event.timestamp)
 
     if (activeGrants.length === 0) {
-      // Ingestion resolves active grants before calling this DO. If the local
-      // replay yields none, the payload is inconsistent and should fail loudly
-      // instead of being cached as a business denial.
       throw new Error("No active grants found for event timestamp")
-    }
-
-    const entitlement = this.store.readEntitlementConfig(this.db)
-    if (!entitlement) {
-      throw new Error("No entitlement config found after sync")
     }
 
     return {
       activeGrants,
       creditLinePolicy: input.entitlement.creditLinePolicy,
-      entitlement,
-      meter: resolveMeterIdentity(entitlement),
-      overageStrategy: entitlement.overageStrategy,
+      entitlement: input.entitlement,
+      meter: resolveMeterIdentity(input.entitlement),
+      overageStrategy: input.entitlement.overageStrategy,
     }
   }
 
@@ -2159,17 +2258,17 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   public async getEnforcementState(
-    rawInput?: EnforcementStateInput
+    rawInput: EnforcementStateInput
   ): Promise<EnforcementStateResult> {
     await this.ready
 
-    const input = rawInput ? enforcementStateInputSchema.parse(rawInput) : null
-    const timestamp = input?.now ?? Date.now()
+    const input = enforcementStateInputSchema.parse(rawInput)
+    const timestamp = input.now
     const snapshot = this.readEnforcementStateSnapshot(input, timestamp)
     const { entitlement, states } = snapshot
     const activeGrants = resolveActiveGrants(snapshot.grants, timestamp)
 
-    if (!entitlement || activeGrants.length === 0) {
+    if (activeGrants.length === 0) {
       return {
         usage: 0,
         limit: null,
@@ -3517,38 +3616,24 @@ export class EntitlementWindowDO extends DurableObject {
   }
 
   private readEnforcementStateSnapshot(
-    input: EnforcementStateInput | null,
+    input: EnforcementStateInput,
     timestamp: number
   ): EnforcementStateCache {
-    const inputSignature = input ? this.enforcementStateInputSignature(input, timestamp) : null
+    const inputSignature = this.enforcementStateInputSignature(input, timestamp)
 
     if (
       this.enforcementStateCache &&
-      (input === null || this.enforcementStateCache.inputSignature === inputSignature)
+      this.enforcementStateCache.inputSignature === inputSignature
     ) {
       return this.enforcementStateCache
     }
 
-    const syncedAt = Date.now()
     const snapshot = this.db.transaction((tx) => {
-      if (input) {
-        this.store.syncEntitlementConfig(tx, {
-          entitlement: input.entitlement,
-          createdAt: syncedAt,
-        })
-        this.store.syncGrants(tx, {
-          customerEntitlementId: input.entitlement.customerEntitlementId,
-          grants: input.grants,
-          createdAt: syncedAt,
-        })
-      }
-
-      const entitlement = this.store.readEntitlementConfig(tx)
-      const grants = this.store.readGrants(tx)
+      const grants = input.grants
       const activeGrants = resolveActiveGrants(grants, timestamp)
 
       return {
-        entitlement,
+        entitlement: input.entitlement,
         grants,
         inputSignature,
         states: this.store.readGrantStatesForActiveGrants(tx, activeGrants, timestamp),
@@ -3563,18 +3648,7 @@ export class EntitlementWindowDO extends DurableObject {
     const bucketKeys = [
       ...new Set(
         input.grants
-          .map(
-            (grant) =>
-              computeGrantPeriodBucket(
-                {
-                  ...grant,
-                  cadenceEffectiveAt: input.entitlement.effectiveAt,
-                  cadenceExpiresAt: input.entitlement.expiresAt,
-                  resetConfig: input.entitlement.resetConfig ?? null,
-                },
-                timestamp
-              )?.bucketKey
-          )
+          .map((grant) => computeGrantPeriodBucket(grant, timestamp)?.bucketKey)
           .filter((key): key is string => typeof key === "string" && key.length > 0)
       ),
     ].sort()

@@ -17,7 +17,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/node": "20.11.24",
+    "@types/node": "24.13.2",
     "@unprice/tsconfig": "workspace:*",
     "h3": "^1.11.1",
     "nitropack": "^2.10.4",

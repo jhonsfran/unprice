@@ -1,0 +1,25 @@
+NODE features_usage_allocations_hourly_mv_node
+SQL >
+    SELECT
+        toStartOfHour(fromUnixTimestamp64Milli(timestamp, 'UTC')) AS date,
+        project_id,
+        customer_id,
+        customer_entitlement_id,
+        grant_id,
+        period_key,
+        feature_slug,
+        argMaxState(value_after, tuple(timestamp, created_at, idempotency_key)) AS value,
+        argMaxState(amount_after, tuple(timestamp, created_at, idempotency_key)) AS amount_after,
+        argMaxState(currency, tuple(timestamp, created_at, idempotency_key)) AS currency
+    FROM unprice_entitlement_meter_facts
+    GROUP BY
+        date,
+        project_id,
+        customer_id,
+        customer_entitlement_id,
+        grant_id,
+        period_key,
+        feature_slug
+
+TYPE MATERIALIZED
+DATASOURCE unprice_feature_usage_allocations_hourly_mv

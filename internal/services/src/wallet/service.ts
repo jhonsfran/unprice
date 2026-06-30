@@ -1,4 +1,4 @@
-import { type Database, and, asc, eq, gt, isNull, or, sql } from "@unprice/db"
+import { type Database, and, asc, eq, gt, inArray, isNull, or, sql } from "@unprice/db"
 import {
   entitlementReservationFundingLegs,
   entitlementReservations,
@@ -63,12 +63,18 @@ export interface WalletTransferInput {
   idempotencyKey: string
 }
 
+export type ReservationOwner =
+  | { type: "entitlement_window"; id: string }
+  | { type: "agent_run"; id: string }
+
 export interface CreateReservationInput {
   projectId: string
   customerId: string
   currency: Currency
-  entitlementId: string
+  entitlementId: string | null
+  owner?: ReservationOwner
   requestedAmount: number
+  minimumAllocationAmount?: number
   refillThresholdBps: number
   refillChunkAmount: number
   periodStartAt: Date
@@ -227,9 +233,13 @@ export interface WalletBalances {
   consumed: number
 }
 
+export type WalletCreditWithConsumption = WalletCredit & {
+  consumedAmount: number
+}
+
 export interface WalletStateOutput {
   balances: WalletBalances
-  credits: WalletCredit[]
+  credits: WalletCreditWithConsumption[]
 }
 
 const GRANT_SOURCE_TO_PLATFORM: Record<WalletCreditSource, PlatformFundingKind> = {
@@ -339,6 +349,16 @@ export class WalletService {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
     }
 
+    const owner =
+      input.owner ??
+      (input.entitlementId
+        ? ({ type: "entitlement_window", id: input.entitlementId } as const)
+        : null)
+
+    if (!owner) {
+      return Err(new UnPriceWalletError({ message: "WALLET_INVALID_RESERVATION_OWNER" }))
+    }
+
     const keys = customerAccountKeys(input.customerId)
     const reservationMetadata = this.normalizeJsonMetadata(input.metadata)
 
@@ -364,7 +384,8 @@ export class WalletService {
       const existing = await (tx as Transaction).query.entitlementReservations.findFirst({
         where: and(
           eq(entitlementReservations.projectId, input.projectId),
-          eq(entitlementReservations.entitlementId, input.entitlementId),
+          eq(entitlementReservations.ownerType, owner.type),
+          eq(entitlementReservations.ownerId, owner.id),
           eq(entitlementReservations.periodStartAt, input.periodStartAt),
           isNull(entitlementReservations.reconciledAt)
         ),
@@ -392,6 +413,12 @@ export class WalletService {
       const purchasedDrained = Math.max(0, Math.min(stillNeeded, purchasedBalance))
 
       const allocationAmount = grantedDrained + purchasedDrained
+
+      const minimumAllocationAmount = input.minimumAllocationAmount ?? 0
+      if (minimumAllocationAmount > 0 && allocationAmount < minimumAllocationAmount) {
+        return Err(new UnPriceWalletError({ message: "WALLET_EMPTY" }))
+      }
+
       const reservationId = newId("entitlement_reservation")
       const reserveLedgerSourceId = `${input.idempotencyKey}:${reservationId}`
       const fundingAllocations: FundingAllocation[] = [
@@ -419,6 +446,8 @@ export class WalletService {
             drain_source: "granted",
             reservation_id: reservationId,
             entitlement_id: input.entitlementId,
+            reservation_owner_type: owner.type,
+            reservation_owner_id: owner.id,
             grant_ids: grantAllocations
               .map((allocation) => allocation.walletCreditId)
               .filter((id): id is string => !!id),
@@ -443,6 +472,8 @@ export class WalletService {
             drain_source: "purchased",
             reservation_id: reservationId,
             entitlement_id: input.entitlementId,
+            reservation_owner_type: owner.type,
+            reservation_owner_id: owner.id,
             idempotency_key: input.idempotencyKey,
           },
         })
@@ -457,6 +488,8 @@ export class WalletService {
         id: reservationId,
         projectId: input.projectId,
         customerId: input.customerId,
+        ownerType: owner.type,
+        ownerId: owner.id,
         entitlementId: input.entitlementId,
         allocationAmount,
         consumedAmount: 0,
@@ -496,6 +529,24 @@ export class WalletService {
   ): Promise<Result<CaptureReservationUsageOutput, UnPriceWalletError>> {
     if (input.amount < 0) {
       return Err(new UnPriceWalletError({ message: "WALLET_INVALID_AMOUNT" }))
+    }
+    const billingPeriodId = input.billingPeriodId?.trim()
+    const statementKey = input.statementKey.trim()
+    if (
+      input.amount > 0 &&
+      (!billingPeriodId || statementKey.length === 0 || statementKey.toLowerCase() === "unknown")
+    ) {
+      return Err(
+        new UnPriceWalletError({
+          message: "WALLET_MISSING_INVOICE_CONTEXT",
+          context: {
+            billingPeriodId: input.billingPeriodId ?? null,
+            projectId: input.projectId,
+            reservationId: input.reservationId,
+            statementKey: input.statementKey,
+          },
+        })
+      )
     }
 
     const keys = customerAccountKeys(input.customerId)
@@ -1349,9 +1400,14 @@ export class WalletService {
         }),
       ])
 
+      const creditsWithConsumption = await this.withCreditConsumption({
+        credits,
+        projectId: input.projectId,
+      })
+
       return Ok({
         balances: { purchased, granted, reserved, consumed },
-        credits,
+        credits: creditsWithConsumption,
       })
     } catch (error) {
       return this.handleUnexpected("wallet.get_state_failed", error, {
@@ -1381,6 +1437,37 @@ export class WalletService {
         walletId: input.walletId,
       })
     }
+  }
+
+  private async withCreditConsumption(input: {
+    credits: WalletCredit[]
+    projectId: string
+  }): Promise<WalletCreditWithConsumption[]> {
+    if (input.credits.length === 0) {
+      return []
+    }
+
+    const creditIds = input.credits.map((credit) => credit.id)
+    const fundingLegs = await this.db.query.entitlementReservationFundingLegs.findMany({
+      where: and(
+        eq(entitlementReservationFundingLegs.projectId, input.projectId),
+        inArray(entitlementReservationFundingLegs.walletCreditId, creditIds)
+      ),
+    })
+    const consumedByCredit = new Map<string, number>()
+
+    for (const leg of fundingLegs) {
+      if (!leg.walletCreditId) continue
+      consumedByCredit.set(
+        leg.walletCreditId,
+        (consumedByCredit.get(leg.walletCreditId) ?? 0) + leg.capturedAmount
+      )
+    }
+
+    return input.credits.map((credit) => ({
+      ...credit,
+      consumedAmount: consumedByCredit.get(credit.id) ?? 0,
+    }))
   }
 
   // -------------------------------------------------------------------------

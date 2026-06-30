@@ -34,13 +34,14 @@ export function ExplainChargeSheet({
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const trpc = useTRPC()
+  const { explainCharge } = trpc.analytics
   const {
     data: explanationData,
     error: explanationError,
     isLoading: explanationLoading,
     isFetching: explanationFetching,
   } = useQuery(
-    trpc.analytics.explainCharge.queryOptions(
+    explainCharge.queryOptions(
       {
         invoiceId: invoice.id,
         entryId: line.entryId,

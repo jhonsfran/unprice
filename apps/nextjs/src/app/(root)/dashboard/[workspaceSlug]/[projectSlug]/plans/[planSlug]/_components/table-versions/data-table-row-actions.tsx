@@ -51,9 +51,9 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
     <Dialog onOpenChange={setIsOpenDialog} open={isOpenDialog}>
       <DropdownMenu onOpenChange={setIsOpen} open={isOpen}>
         <DropdownMenuTrigger asChild>
-          <Button aria-haspopup="true" size="icon" variant="ghost">
-            <MoreVertical className="h-4 w-4" />
-            <span className="sr-only">Toggle menu</span>
+          <Button variant="ghost" size="icon" className="size-8">
+            <MoreVertical className="size-4" aria-hidden="true" />
+            <span className="sr-only">Open row actions</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">

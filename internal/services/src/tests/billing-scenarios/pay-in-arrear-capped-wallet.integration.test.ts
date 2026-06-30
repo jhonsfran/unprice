@@ -229,9 +229,11 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
       refillChunkAmount: 0,
       statementKey,
       final: true,
+      billingPeriodId: usageBillingPeriodId,
       effectiveAt: new Date(feb1),
       sourceId: "bp_test_arrear_capped_events_jan:item_test_arrear_capped_events",
       metadata: {
+        feature_plan_version_item_id: usageSubscriptionItemId,
         owner: "p0-b-integration",
       },
     })
@@ -278,7 +280,7 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
     await expectInvoiceLineAmounts(ledger, [9_900_000_000, usageAmount])
     await expectReservationClosed(reservationId)
     await expectLedgerSources()
-    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(1)
+    expect(analytics.getUsageBillingFeatures).toHaveBeenCalledTimes(0)
   })
 
   it("P0-B treats plan-included wallet captures as included invoice usage", async () => {
@@ -465,9 +467,13 @@ describe("P0-B pay_in_arrear capped wallet workflow", () => {
       refillChunkAmount: 0,
       statementKey,
       final: true,
+      billingPeriodId: usageBillingPeriodId,
       effectiveAt: new Date(feb1),
       sourceId: `${usageBillingPeriodId}:${usageSubscriptionItemId}`,
-      metadata: { owner: "p0-b-flush-gateway-integration" },
+      metadata: {
+        feature_plan_version_item_id: usageSubscriptionItemId,
+        owner: "p0-b-flush-gateway-integration",
+      },
     })
 
     // Use a fake gateway that confirms it was called
@@ -622,7 +628,7 @@ async function expectLedgerSources() {
     ORDER BY source_type
   `)
   expect(sources.rows).toEqual([
-    { count: 2, source_type: "subscription_billing_period_charge_v1" },
+    { count: 1, source_type: "subscription_billing_period_charge_v1" },
     { count: 1, source_type: "wallet_adjust" },
     { count: 1, source_type: "wallet_capture_usage" },
     { count: 1, source_type: "wallet_reserve_granted" },
@@ -635,5 +641,5 @@ async function expectLedgerSources() {
     WHERE i.project_id = ${projectId}
       AND i.statement_key = ${statementKey}
   `)
-  expect(statementEntries.rows).toEqual([{ count: 6 }])
+  expect(statementEntries.rows).toEqual([{ count: 4 }])
 }

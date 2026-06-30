@@ -9,6 +9,7 @@ import serveEmojiFavicon from "stoker/middlewares/serve-emoji-favicon"
 
 export { DurableObjectProject } from "~/project/do"
 export { EntitlementWindowDO } from "~/ingestion/entitlements/EntitlementWindowDO"
+export { RunBudgetDO } from "~/ingestion/run-budget/RunBudgetDO"
 
 import { registerUpdateACLV1 } from "./routes/access/updateACLV1"
 import { registerExplainChargeV1 } from "./routes/analytics/explainChargeV1"
@@ -32,6 +33,10 @@ import { registerProviderStripeConnectWebhookV1 } from "./routes/payments/provid
 import { registerProviderWebhookV1 } from "./routes/payments/providers/providerWebhookV1"
 import { registerGetPlanVersionV1 } from "./routes/plans/getPlanVersionV1"
 import { registerListPlanVersionsV1 } from "./routes/plans/listPlanVersionsV1"
+import { registerApplyRunSyncEventV1 } from "./routes/runs/applyRunSyncEventV1"
+import { registerEndRunV1 } from "./routes/runs/endRunV1"
+import { registerGetRunV1 } from "./routes/runs/getRunV1"
+import { registerStartRunV1 } from "./routes/runs/startRunV1"
 import { registerGetSubscriptionV1 } from "./routes/subscriptions/getSubscriptionV1"
 
 import { env } from "cloudflare:workers"
@@ -141,6 +146,12 @@ app.use(
 
 // Access routes
 registerUpdateACLV1(app)
+
+// Run routes
+registerStartRunV1(app)
+registerApplyRunSyncEventV1(app)
+registerEndRunV1(app)
+registerGetRunV1(app)
 
 // Billing routes
 registerFlushReservationsForInvoicingV1(app)

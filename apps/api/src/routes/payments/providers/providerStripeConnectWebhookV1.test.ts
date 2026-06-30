@@ -259,7 +259,7 @@ function createTestApp(opts?: { paymentProviderConfig?: Record<string, unknown> 
 }
 
 function buildRequest() {
-  return new Request("https://example.com/v1/payments/providers/stripe/connect/webhook", {
+  return new Request("https://example.com/v1/payment-provider-callbacks/stripe-connect/webhook", {
     method: "POST",
     headers: {
       "content-type": "application/json",

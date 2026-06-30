@@ -15,3 +15,21 @@
   parameters: project_id=p1&customer_id=c1&period_key=period_mv&feature_slugs=f_period&start=4039372800000&end=4107542400000
   expected_result: |
     {"project_id":"p1","customer_id":"c1","feature_slug":"f_period","usage":20,"amount_after":2000000000,"currency":"USD"}
+
+- name: returns_full_period_when_only_period_key_is_provided
+  description: Verifies period-key lookups are not clipped to the default recent window
+  parameters: project_id=p1&customer_id=c1&period_key=period_mv&feature_slugs=f_period
+  expected_result: |
+    {"project_id":"p1","customer_id":"c1","feature_slug":"f_period","usage":20,"amount_after":2000000000,"currency":"USD"}
+
+- name: uses_idempotency_order_for_equal_timestamp_batch_rows
+  description: Verifies equal timestamp/created_at rows use ingestion order instead of event_id order
+  parameters: project_id=p1&customer_id=c1&period_key=period_tie&feature_slugs=f_tie&start=4070908800000&end=4070912400000
+  expected_result: |
+    {"project_id":"p1","customer_id":"c1","feature_slug":"f_tie","usage":15,"amount_after":1500000000,"currency":"USD"}
+
+- name: sums_latest_allocations_for_same_visible_feature
+  description: Verifies feature totals include every entitlement/grant allocation for the period
+  parameters: project_id=p1&customer_id=c1&period_key=period_multi&feature_slugs=f_multi&start=4070908800000&end=4070912400000
+  expected_result: |
+    {"project_id":"p1","customer_id":"c1","feature_slug":"f_multi","usage":15,"amount_after":1500000000,"currency":"USD"}

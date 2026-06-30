@@ -48,6 +48,6 @@ export { renewPeriod } from "./renew-period"
 export { settlePrepaidInvoiceToWallet } from "./settle-invoice"
 export {
   createNoopBillingReservationFlushGateway,
-  SdkBillingReservationFlushGateway,
+  HttpBillingReservationFlushGateway,
 } from "./reservation-flush-gateway"
 export type { BillingReservationFlushGateway } from "./reservation-flush-gateway"

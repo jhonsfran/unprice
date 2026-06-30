@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { IngestionEntitlement } from "./entitlement-context"
 import {
   buildIngestionWindowName,
+  buildRunBudgetName,
   filterIngestionEntitlementsWithValidAggregationPayload,
   ingestionQueueMessageSchema,
   isIngestionEntitlementActiveAt,
@@ -54,6 +55,17 @@ describe("ingestion entitlement message helpers", () => {
         customerEntitlementId: "ce_123",
       })
     ).toBe("test:proj_123:cus_123:ce_123")
+  })
+
+  it("routes run budget windows by app environment and run id", () => {
+    expect(
+      buildRunBudgetName({
+        appEnv: "preview",
+        projectId: "proj_123",
+        customerId: "cus_123",
+        runId: "brun_123",
+      })
+    ).toBe("preview:proj_123:cus_123:brun_123")
   })
 
   it("requires source identity on ingestion queue messages", () => {

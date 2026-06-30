@@ -1,5 +1,5 @@
-import { type Database, and, eq, sql } from "@unprice/db"
-import { customerEntitlements } from "@unprice/db/schema"
+import { type Database, and, asc, eq, sql } from "@unprice/db"
+import { billingPeriods, customerEntitlements } from "@unprice/db/schema"
 import { type Dinero, isZero, newId, toSnapshot } from "@unprice/db/utils"
 import { calculateDateAt } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
@@ -64,6 +64,57 @@ export async function billPeriod({
     subscriptionId: subscription.id,
     now,
   })
+
+  // If no periods are ready to invoice, check whether there are future pending
+  // periods and report the next invoice date — similar to how renewal rejects
+  // early attempts with "subscription will be renewed at <date>".
+  if (periodItemsGroups.length === 0) {
+    const [nextPending] = await db
+      .select({ invoiceAt: billingPeriods.invoiceAt })
+      .from(billingPeriods)
+      .where(
+        and(
+          eq(billingPeriods.status, "pending"),
+          eq(billingPeriods.projectId, subscription.projectId),
+          eq(billingPeriods.subscriptionId, subscription.id)
+        )
+      )
+      .orderBy(asc(billingPeriods.invoiceAt))
+      .limit(1)
+
+    if (nextPending) {
+      if (nextPending.invoiceAt <= now) {
+        return {
+          phasesProcessed: 0,
+          subscription,
+        }
+      }
+
+      const nextInvoiceDate = new Date(nextPending.invoiceAt).toLocaleString()
+      throw new Error(`Cannot invoice subscription, next invoice date is at ${nextInvoiceDate}`)
+    }
+
+    const [lastInvoiced] = await db
+      .select({ id: billingPeriods.id })
+      .from(billingPeriods)
+      .where(
+        and(
+          eq(billingPeriods.status, "invoiced"),
+          eq(billingPeriods.projectId, subscription.projectId),
+          eq(billingPeriods.subscriptionId, subscription.id)
+        )
+      )
+      .limit(1)
+
+    if (lastInvoiced) {
+      return {
+        phasesProcessed: 0,
+        subscription,
+      }
+    }
+
+    throw new Error("Cannot invoice subscription, there are no pending billing periods to invoice")
+  }
 
   logger.info(`Invoicing for ${periodItemsGroups.length} periodItemsGroups`)
 

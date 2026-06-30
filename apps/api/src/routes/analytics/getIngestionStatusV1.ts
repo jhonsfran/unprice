@@ -10,9 +10,10 @@ import { keyAuth } from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["analytics"]
+const tags = ["ingestionEvents"]
 
 export const getIngestionStatusApiRequestSchema = z
   .object({
@@ -30,24 +31,41 @@ export const getIngestionStatusApiRequestSchema = z
     path: ["to_ts"],
   })
 
-export const route = createRoute({
-  path: "/v1/analytics/ingestion/status",
-  operationId: "analytics.ingestion.status",
-  summary: "get ingestion status",
-  description: "Get live ingestion status for a project or customer in a requested window.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(getIngestionStatusApiRequestSchema, "Get ingestion status request"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      getIngestionStatusOutputSchema,
-      "Get ingestion status response"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/ingestion-events/status",
+      operationId: "ingestionEvents.status",
+      summary: "get ingestion status",
+      description: "Get live ingestion status for a project or customer in a requested window.",
+      method: "post",
+      tags,
+      request: {
+        body: jsonContentRequired(
+          getIngestionStatusApiRequestSchema,
+          "Get ingestion status request"
+        ),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          getIngestionStatusOutputSchema,
+          "Get ingestion status response"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "operations",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["ingestionEvents", "status"],
+      },
+    }
+  )
+)
 
 export type GetIngestionStatusApiRequest = z.infer<
   (typeof route.request.body)["content"]["application/json"]["schema"]
@@ -83,10 +101,11 @@ export const registerGetIngestionStatusV1 = (app: App) =>
         },
         cursor,
         filter: {
-          sourceId,
-          eventSlug,
-          state,
+          ...(sourceId ? { sourceIds: [sourceId] } : {}),
+          ...(eventSlug ? { eventSlugs: [eventSlug] } : {}),
+          ...(state ? { states: [state] } : {}),
         },
+        includeFacets: true,
         limit,
       }
     )

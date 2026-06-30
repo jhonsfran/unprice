@@ -9,25 +9,40 @@ import { keyAuth } from "~/auth/key"
 import { UnpriceApiError } from "~/errors/http"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import { getProjectFeaturesResponseSchema } from "~/project/interface"
 
 const tags = ["features"]
 
-export const route = createRoute({
-  path: "/v1/features/list",
-  operationId: "features.list",
-  summary: "get features",
-  description: "Get features for a project",
-  method: "get",
-  tags,
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(
-      getProjectFeaturesResponseSchema,
-      "The result of the get features"
-    ),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/features/list",
+      operationId: "features.list",
+      summary: "get features",
+      description: "Get features for a project",
+      method: "get",
+      tags,
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          getProjectFeaturesResponseSchema,
+          "The result of the get features"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "public",
+      category: "configuration",
+      docs: {
+        expose: true,
+      },
+      sdk: {
+        path: ["features", "list"],
+      },
+    }
+  )
+)
 
 export type GetFeaturesResponse = z.infer<
   (typeof route.responses)[200]["content"]["application/json"]["schema"]

@@ -1,43 +1,58 @@
-import { env } from "cloudflare:workers"
 import { createRoute } from "@hono/zod-openapi"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth, resolveContextProjectId } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
-import { entitlementWindowStatusSchema } from "~/ingestion/entitlements/EntitlementWindowDO"
 import { CloudflareEntitlementWindowClient } from "~/ingestion/entitlements/client"
+import { entitlementWindowStatusSchema } from "~/ingestion/entitlements/contracts"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["events"]
+const tags = ["entitlementWindows"]
 
-const route = createRoute({
-  path: "/v1/entitlements/status",
-  operationId: "events.entitlementWindowStatus",
-  summary: "inspect entitlement window operational status",
-  // this endpoint is not public
-  hide: env.NODE_ENV === "production",
-  description:
-    "Returns a non-mutating operational status snapshot for a specific entitlement window durable object.",
-  method: "get",
-  tags,
-  request: {
-    query: z.object({
-      entitlementId: z.string().openapi({
-        description: "Customer entitlement id",
-        example: "ce_123",
-      }),
-      customerId: z.string().openapi({
-        description: "Customer id",
-        example: "cus_123",
-      }),
-    }),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(entitlementWindowStatusSchema, "Entitlement window status"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/internal/entitlement-windows/status",
+      operationId: "entitlementWindows.status",
+      summary: "inspect entitlement window operational status",
+      // this endpoint is not public
+      hide: true,
+      description:
+        "Returns a non-mutating operational status snapshot for a specific entitlement window durable object.",
+      method: "get",
+      tags,
+      request: {
+        query: z.object({
+          entitlementId: z.string().openapi({
+            description: "Customer entitlement id",
+            example: "ce_123",
+          }),
+          customerId: z.string().openapi({
+            description: "Customer id",
+            example: "cus_123",
+          }),
+        }),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(
+          entitlementWindowStatusSchema,
+          "Entitlement window status"
+        ),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "internal",
+      category: "operations",
+      docs: {
+        expose: false,
+      },
+      sdk: false,
+    }
+  )
+)
 
 export const registerGetEntitlementWindowStatusV1 = (app: App) =>
   app.openapi(route, async (c) => {

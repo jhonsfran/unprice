@@ -306,7 +306,7 @@ function createTestApp() {
 }
 
 function buildRequest(body: Record<string, unknown>) {
-  return new Request("https://example.com/v1/analytics/explain-charge", {
+  return new Request("https://example.com/v1/analytics/charges/explain", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",

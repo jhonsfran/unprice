@@ -1416,10 +1416,14 @@ describe("IngestionService entitlement routing", () => {
         grants: [
           {
             allowanceUnits: 7,
+            cadenceEffectiveAt: Date.UTC(2026, 2, 1),
+            cadenceExpiresAt: null,
+            currencyCode: "USD",
             effectiveAt: Date.UTC(2026, 2, 1),
             expiresAt: null,
             grantId: `grant_${featureType}`,
             priority: 10,
+            resetConfig: null,
           },
         ],
         meterConfig: null,
@@ -1720,6 +1724,11 @@ function createReportingAuditRecord(
     sourceType: "api_key",
     sourceId: "key_123",
     sourceName: null,
+    runId: null,
+    traceId: null,
+    parentRunId: null,
+    workloadType: null,
+    workloadId: null,
     status: "processed",
     failureStage: null,
     failureReason: null,
@@ -1747,6 +1756,11 @@ function createReportingMeterFact(
     source_type: "api_key",
     source_id: "key_123",
     source_name: null,
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
     customer_entitlement_id: "ce_123",
     feature_slug: "api_calls",
     period_key: "2026-03",
@@ -1872,10 +1886,14 @@ function toGrantRecords(entitlement: IngestionEntitlement) {
       : [
           {
             allowanceUnits: 100,
+            cadenceEffectiveAt: entitlement.effectiveAt,
+            cadenceExpiresAt: entitlement.expiresAt,
+            currencyCode: "USD",
             effectiveAt: entitlement.effectiveAt,
             expiresAt: entitlement.expiresAt,
             grantId: `${entitlement.customerEntitlementId}_grant`,
             priority: 10,
+            resetConfig: null,
           },
         ]
 

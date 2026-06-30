@@ -1,4 +1,5 @@
 import { createRoute } from "@hono/zod-openapi"
+import { buildRunBudgetName } from "@unprice/services/ingestion"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
 import { keyAuth } from "~/auth/key"
@@ -6,9 +7,10 @@ import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { CloudflareEntitlementWindowClient } from "~/ingestion/entitlements/client"
+import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
-const tags = ["billing"]
+const tags = ["billingReservations"]
 
 const requestSchema = z.object({
   customerId: z.string().openapi({ description: "Customer id", example: "cus_123" }),
@@ -28,22 +30,35 @@ const responseSchema = z.object({
 export type FlushReservationsForInvoicingRequest = z.infer<typeof requestSchema>
 export type FlushReservationsForInvoicingResponse = z.infer<typeof responseSchema>
 
-const route = createRoute({
-  path: "/v1/billing/reservations/flush-for-invoicing",
-  operationId: "billing.reservations.flushForInvoicing",
-  summary: "flush wallet reservation usage before invoicing",
-  description:
-    "Flushes unflushed consumed usage from active wallet reservations into the ledger for invoicing. Called by the billing service before invoice materialization.",
-  method: "post",
-  tags,
-  request: {
-    body: jsonContentRequired(requestSchema, "Flush reservation request"),
-  },
-  responses: {
-    [HttpStatusCodes.OK]: jsonContent(responseSchema, "Flush result"),
-    ...openApiErrorResponses,
-  },
-})
+export const route = createRoute(
+  defineEndpointContract(
+    {
+      path: "/v1/internal/billing-reservations/flush-for-invoicing",
+      operationId: "billingReservations.flushForInvoicing",
+      summary: "flush wallet reservation usage before invoicing",
+      description:
+        "Flushes unflushed consumed usage from active wallet reservations into the ledger for invoicing. Called by the billing service before invoice materialization.",
+      method: "post",
+      hide: true,
+      tags,
+      request: {
+        body: jsonContentRequired(requestSchema, "Flush reservation request"),
+      },
+      responses: {
+        [HttpStatusCodes.OK]: jsonContent(responseSchema, "Flush result"),
+        ...openApiErrorResponses,
+      },
+    },
+    {
+      audience: "internal",
+      category: "operations",
+      docs: {
+        expose: false,
+      },
+      sdk: false,
+    }
+  )
+)
 
 export const registerFlushReservationsForInvoicingV1 = (app: App) =>
   app.openapi(route, async (c) => {
@@ -63,9 +78,13 @@ export const registerFlushReservationsForInvoicingV1 = (app: App) =>
           eqOp(table.subscriptionId, subscriptionId),
           eqOp(table.statementKey, statementKey)
         ),
-      columns: { id: true },
+      columns: { cycleStartAt: true, id: true },
     })
     const billingPeriodIds = billingPeriodRows.map((r) => r.id)
+    const earliestCycleStartAt =
+      billingPeriodRows.length > 0
+        ? Math.min(...billingPeriodRows.map((period) => period.cycleStartAt))
+        : null
 
     // Find active customer entitlements for this subscription phase
     const entitlementsResult = await entitlement.getCustomerEntitlementsForCustomer({
@@ -86,10 +105,6 @@ export const registerFlushReservationsForInvoicingV1 = (app: App) =>
     const phaseEntitlements = entitlementsResult.val.filter(
       (e) => e.subscriptionId === subscriptionId && e.subscriptionPhaseId === subscriptionPhaseId
     )
-
-    if (phaseEntitlements.length === 0) {
-      return c.json({ ok: true, flushed: 0, skipped: 0 }, HttpStatusCodes.OK)
-    }
 
     const windowClient = new CloudflareEntitlementWindowClient({
       APP_ENV: c.env.APP_ENV,
@@ -139,6 +154,59 @@ export const registerFlushReservationsForInvoicingV1 = (app: App) =>
         }
         // statement_mismatch is not retriable but not fatal for the batch
         skipped++
+      }
+    }
+
+    const budgetRunRows =
+      earliestCycleStartAt === null
+        ? []
+        : await db.query.budgetRuns.findMany({
+            where: (table, { and: andOp, eq: eqOp, gt: gtOp, gte: gteOp, ne: neOp }) =>
+              andOp(
+                eqOp(table.projectId, projectId),
+                eqOp(table.customerId, customerId),
+                neOp(table.status, "failed"),
+                gtOp(table.consumedAmount, 0),
+                gteOp(table.updatedAt, new Date(earliestCycleStartAt))
+              ),
+            columns: { id: true },
+          })
+
+    for (const run of budgetRunRows) {
+      const stub = c.env.runbudget.getByName(
+        buildRunBudgetName({
+          appEnv: c.env.APP_ENV,
+          projectId,
+          customerId,
+          runId: run.id,
+        })
+      ) as {
+        flushCapturesForInvoicing?: (input: {
+          statementKey: string
+          billingPeriodIds: string[]
+        }) => Promise<{ ok: true; flushed: number; skipped: number }>
+      }
+
+      if (!stub.flushCapturesForInvoicing) {
+        skipped++
+        continue
+      }
+
+      try {
+        const result = await stub.flushCapturesForInvoicing({
+          statementKey,
+          billingPeriodIds,
+        })
+        flushed += result.flushed
+        skipped += result.skipped
+      } catch (error) {
+        throw new UnpriceApiError({
+          code: "INTERNAL_SERVER_ERROR",
+          message:
+            error instanceof Error
+              ? `Run budget reservation flush failed: ${error.message}`
+              : "Run budget reservation flush failed",
+        })
       }
     }
 

@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation"
-import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { api } from "~/trpc/server"
 import { InvoiceActions } from "../../../_components/invoices/invoice-actions"
@@ -26,17 +25,14 @@ export default async function InvoicePage({
   }
 
   return (
-    <DashboardShell
-      header={
-        <HeaderTab
-          title={"INVOICE"}
-          description={`Invoice date: ${invoice.statementDateString}`}
-          label={invoice.status}
-          id={invoice.id}
-          action={<InvoiceActions invoice={invoice} />}
-        />
-      }
-    >
+    <>
+      <HeaderTab
+        title={"INVOICE"}
+        description={`Invoice date: ${invoice.statementDateString}`}
+        label={invoice.status}
+        id={invoice.id}
+        action={<InvoiceActions invoice={invoice} />}
+      />
       <div className="mt-4 flex flex-col gap-4 px-1 py-4">
         <InvoiceDetails invoice={invoice} />
         <InvoiceTable
@@ -45,6 +41,6 @@ export default async function InvoicePage({
           projectSlug={params.projectSlug}
         />
       </div>
-    </DashboardShell>
+    </>
   )
 }

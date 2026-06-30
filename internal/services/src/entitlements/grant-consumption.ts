@@ -1,4 +1,5 @@
 import {
+  type BillingConfig,
   type ConfigFeatureVersionType,
   type OverageStrategy,
   type ResetConfig,
@@ -57,6 +58,16 @@ export type GrantConsumptionResult<TGrant extends GrantConsumptionGrant> = {
 export type GrantPolicyGrant = GrantConsumptionGrant & {
   currencyCode: string
   overageStrategy: OverageStrategy
+}
+
+export function toGrantResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
+  return {
+    name: billingConfig.name,
+    resetInterval: billingConfig.billingInterval,
+    resetIntervalCount: billingConfig.billingIntervalCount,
+    resetAnchor: "dayOfCreation",
+    planType: billingConfig.planType,
+  }
 }
 
 export function consumeGrantsByPriority<TGrant extends GrantConsumptionGrant>(params: {
@@ -289,6 +300,54 @@ export function computeUsagePriceDeltaMinor(params: {
   }
 
   return diffLedgerMinor(afterResult.val.totalPrice.dinero, beforeResult.val.totalPrice.dinero)
+}
+
+export function extractCurrencyCodeFromFeatureConfig(config: unknown): string | null {
+  const currencyFromPrice = extractCurrencyCode(config, "price")
+  if (currencyFromPrice) {
+    return currencyFromPrice
+  }
+
+  if (!isRecord(config) || !Array.isArray(config.tiers)) {
+    return null
+  }
+
+  for (const tier of config.tiers) {
+    const currencyFromTier = extractCurrencyCode(tier, "unitPrice")
+    if (currencyFromTier) {
+      return currencyFromTier
+    }
+  }
+
+  return null
+}
+
+function extractCurrencyCode(input: unknown, priceKey: string): string | null {
+  if (!isRecord(input)) {
+    return null
+  }
+
+  const price = input[priceKey]
+  if (!isRecord(price)) {
+    return null
+  }
+
+  const dinero = price.dinero
+  if (!isRecord(dinero)) {
+    return null
+  }
+
+  const currency = dinero.currency
+  if (!isRecord(currency)) {
+    return null
+  }
+
+  const code = currency.code
+  return typeof code === "string" && code.length > 0 ? code : null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }
 
 export function computeUsagePriceDeltaExplanation(params: {

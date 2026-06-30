@@ -50,65 +50,72 @@ afterEach(() => {
 
 describe("getIngestionStatusV1 route", () => {
   it("returns computed customer ingestion status", async () => {
-    const { app, env, executionCtx, getIngestionLive, getIngestionRejections, getIngestionRecent } =
-      createTestApp({
-        liveRows: [
-          {
-            second: "2026-06-05 12:00:00",
-            processed: 2,
-            rejected: 1,
-            failed: 0,
-            total: 3,
-          },
-          {
-            second: "2026-06-05 12:00:01",
-            processed: 1,
-            rejected: 0,
-            failed: 0,
-            total: 1,
-          },
-        ],
-        rejectionRows: [
-          {
-            rejection_reason: "missing_entitlement",
-            event_slug: "usage.recorded",
-            source_id: "src_1",
-            source_type: "api_key",
-            event_count: 1,
-            last_seen_at: fromTs + 5_000,
-          },
-          {
-            rejection_reason: "wrong_source",
-            event_slug: "usage.recorded",
-            source_id: "src_2",
-            source_type: "api_key",
-            event_count: 4,
-            last_seen_at: fromTs + 4_000,
-          },
-        ],
-        recentRows: [
-          makeRecentEvent({
-            event_id: "evt_1",
-            canonical_audit_id: "audit_1",
-            state: "processed",
-            rejection_reason: null,
-            handled_at: fromTs + 5_500,
-          }),
-          makeRecentEvent({
-            event_id: "evt_2",
-            canonical_audit_id: "audit_2",
-            source_id: "src_2",
-            state: "rejected",
-            rejection_reason: "wrong_source",
-            handled_at: fromTs + 5_250,
-          }),
-          makeRecentEvent({
-            event_id: "evt_3",
-            canonical_audit_id: "audit_3",
-            handled_at: fromTs - 1,
-          }),
-        ],
-      })
+    const {
+      app,
+      env,
+      executionCtx,
+      getIngestionLive,
+      getIngestionRejections,
+      getIngestionRecent,
+      getIngestionFacets,
+    } = createTestApp({
+      liveRows: [
+        {
+          second: "2026-06-05 12:00:00",
+          processed: 2,
+          rejected: 1,
+          failed: 0,
+          total: 3,
+        },
+        {
+          second: "2026-06-05 12:00:01",
+          processed: 1,
+          rejected: 0,
+          failed: 0,
+          total: 1,
+        },
+      ],
+      rejectionRows: [
+        {
+          rejection_reason: "missing_entitlement",
+          event_slug: "usage.recorded",
+          source_id: "src_1",
+          source_type: "api_key",
+          event_count: 1,
+          last_seen_at: fromTs + 5_000,
+        },
+        {
+          rejection_reason: "wrong_source",
+          event_slug: "usage.recorded",
+          source_id: "src_2",
+          source_type: "api_key",
+          event_count: 4,
+          last_seen_at: fromTs + 4_000,
+        },
+      ],
+      recentRows: [
+        makeRecentEvent({
+          event_id: "evt_1",
+          canonical_audit_id: "audit_1",
+          state: "processed",
+          rejection_reason: null,
+          handled_at: fromTs + 5_500,
+        }),
+        makeRecentEvent({
+          event_id: "evt_2",
+          canonical_audit_id: "audit_2",
+          source_id: "src_2",
+          state: "rejected",
+          rejection_reason: "wrong_source",
+          handled_at: fromTs + 5_250,
+        }),
+        makeRecentEvent({
+          event_id: "evt_3",
+          canonical_audit_id: "audit_3",
+          handled_at: fromTs - 1,
+        }),
+      ],
+    })
 
     const response = await app.fetch(
       buildRequest({
@@ -188,6 +195,7 @@ describe("getIngestionStatusV1 route", () => {
           handledAt: fromTs + 5_500,
         },
       ],
+      facets: emptyFacets(),
       nextCursor: null,
       answer:
         "4 events were observed in the requested window for customer cus_123 (1780000000000 to 1780000010000). 3 were processed, 1 were rejected, and 0 failed, for a 75% success rate.",
@@ -234,16 +242,16 @@ describe("getIngestionStatusV1 route", () => {
       customer_id: "cus_123",
       from_ts: fromTs,
       to_ts: toTs,
-      source_id: "src_1",
-      event_slug: "usage.recorded",
+      source_ids: ["src_1"],
+      event_slugs: ["usage.recorded"],
     })
     expect(getIngestionRejections).toHaveBeenCalledWith({
       project_id: "proj_123",
       customer_id: "cus_123",
       from_ts: fromTs,
       to_ts: toTs,
-      source_id: "src_1",
-      event_slug: "usage.recorded",
+      source_ids: ["src_1"],
+      event_slugs: ["usage.recorded"],
       limit: 2,
     })
     expect(getIngestionRecent).toHaveBeenCalledWith({
@@ -251,9 +259,18 @@ describe("getIngestionStatusV1 route", () => {
       customer_id: "cus_123",
       from_ts: fromTs,
       to_ts: toTs,
-      source_id: "src_1",
-      event_slug: "usage.recorded",
+      source_ids: ["src_1"],
+      event_slugs: ["usage.recorded"],
       limit: 3,
+    })
+    expect(getIngestionFacets).toHaveBeenCalledWith({
+      project_id: "proj_123",
+      customer_id: "cus_123",
+      from_ts: fromTs,
+      to_ts: toTs,
+      source_ids: ["src_1"],
+      event_slugs: ["usage.recorded"],
+      limit: 50,
     })
   })
 
@@ -302,6 +319,7 @@ describe("getIngestionStatusV1 route", () => {
       live: [],
       rejections: [],
       recentEvents: [],
+      facets: emptyFacets(),
       nextCursor: null,
       answer: "No events were observed in the requested window for customer cus_empty.",
       confidence: "low",
@@ -369,25 +387,26 @@ describe("getIngestionStatusV1 route", () => {
   })
 
   it("returns project-wide ingestion status when customer_id is omitted", async () => {
-    const { app, env, executionCtx, getIngestionLive, getIngestionRecent } = createTestApp({
-      liveRows: [
-        {
-          second: "2026-06-05 12:00:00",
-          processed: 1,
-          rejected: 0,
-          failed: 0,
-          total: 1,
-        },
-      ],
-      recentRows: [
-        makeRecentEvent({
-          event_id: "evt_project",
-          customer_id: "cus_456",
-          state: "processed",
-          handled_at: fromTs + 5_500,
-        }),
-      ],
-    })
+    const { app, env, executionCtx, getIngestionLive, getIngestionRecent, getIngestionFacets } =
+      createTestApp({
+        liveRows: [
+          {
+            second: "2026-06-05 12:00:00",
+            processed: 1,
+            rejected: 0,
+            failed: 0,
+            total: 1,
+          },
+        ],
+        recentRows: [
+          makeRecentEvent({
+            event_id: "evt_project",
+            customer_id: "cus_456",
+            state: "processed",
+            handled_at: fromTs + 5_500,
+          }),
+        ],
+      })
 
     const response = await app.fetch(
       buildRequest({
@@ -418,21 +437,29 @@ describe("getIngestionStatusV1 route", () => {
       project_id: "proj_123",
       from_ts: fromTs,
       to_ts: toTs,
-      state: "processed",
+      states: ["processed"],
     })
     expect(getIngestionRecent).toHaveBeenCalledWith({
       project_id: "proj_123",
       from_ts: fromTs,
       to_ts: toTs,
-      state: "processed",
+      states: ["processed"],
       cursor_handled_at: fromTs + 8_000,
       cursor_canonical_audit_id: "audit_cursor",
       limit: 6,
     })
+    expect(getIngestionFacets).toHaveBeenCalledWith({
+      project_id: "proj_123",
+      from_ts: fromTs,
+      to_ts: toTs,
+      states: ["processed"],
+      limit: 50,
+    })
   })
 
   it("accepts failed state filters", async () => {
-    const { app, env, executionCtx, getIngestionLive, getIngestionRecent } = createTestApp()
+    const { app, env, executionCtx, getIngestionLive, getIngestionRecent, getIngestionFacets } =
+      createTestApp()
 
     const response = await app.fetch(
       buildRequest({
@@ -451,15 +478,23 @@ describe("getIngestionStatusV1 route", () => {
       customer_id: "cus_123",
       from_ts: fromTs,
       to_ts: toTs,
-      state: "failed",
+      states: ["failed"],
     })
     expect(getIngestionRecent).toHaveBeenCalledWith({
       project_id: "proj_123",
       customer_id: "cus_123",
       from_ts: fromTs,
       to_ts: toTs,
-      state: "failed",
+      states: ["failed"],
       limit: 51,
+    })
+    expect(getIngestionFacets).toHaveBeenCalledWith({
+      project_id: "proj_123",
+      customer_id: "cus_123",
+      from_ts: fromTs,
+      to_ts: toTs,
+      states: ["failed"],
+      limit: 50,
     })
   })
 })
@@ -469,6 +504,7 @@ function createTestApp(
     liveRows?: Array<Record<string, unknown>>
     rejectionRows?: Array<Record<string, unknown>>
     recentRows?: Array<Record<string, unknown>>
+    facetRows?: Array<Record<string, unknown>>
     liveError?: Error
   } = {}
 ) {
@@ -487,6 +523,7 @@ function createTestApp(
   })
   const getIngestionRejections = vi.fn().mockResolvedValue({ data: options.rejectionRows ?? [] })
   const getIngestionRecent = vi.fn().mockResolvedValue({ data: options.recentRows ?? [] })
+  const getIngestionFacets = vi.fn().mockResolvedValue({ data: options.facetRows ?? [] })
 
   app.use(timing())
 
@@ -503,6 +540,7 @@ function createTestApp(
       getIngestionLive,
       getIngestionRejections,
       getIngestionRecent,
+      getIngestionFacets,
     } as unknown as Analytics)
 
     await next()
@@ -519,11 +557,19 @@ function createTestApp(
     waitUntil: vi.fn(),
   } as unknown as ExecutionContext
 
-  return { app, env, executionCtx, getIngestionLive, getIngestionRejections, getIngestionRecent }
+  return {
+    app,
+    env,
+    executionCtx,
+    getIngestionLive,
+    getIngestionRejections,
+    getIngestionRecent,
+    getIngestionFacets,
+  }
 }
 
 function buildRequest(body: Record<string, unknown>) {
-  return new Request("https://example.com/v1/analytics/ingestion/status", {
+  return new Request("https://example.com/v1/ingestion-events/status", {
     method: "POST",
     headers: {
       authorization: "Bearer sk_test",
@@ -551,5 +597,15 @@ function makeRecentEvent(overrides: Record<string, unknown> = {}) {
     received_at: fromTs + 100,
     handled_at: fromTs + 1_000,
     ...overrides,
+  }
+}
+
+function emptyFacets() {
+  return {
+    states: [],
+    eventSlugs: [],
+    sourceTypes: [],
+    rejectionReasons: [],
+    customers: [],
   }
 }

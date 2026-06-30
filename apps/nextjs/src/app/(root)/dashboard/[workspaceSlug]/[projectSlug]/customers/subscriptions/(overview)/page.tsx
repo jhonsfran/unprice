@@ -100,6 +100,11 @@ export default async function PlanSubscriptionsPage({
           <DataTable
             columns={columns}
             data={subscriptions}
+            emptyState={{
+              title: "No subscriptions",
+              description: "Subscriptions will appear here after customers are assigned to plans.",
+            }}
+            hidePaginationWhenEmpty
             filterOptions={{
               filterBy: "customerId",
               filterColumns: true,

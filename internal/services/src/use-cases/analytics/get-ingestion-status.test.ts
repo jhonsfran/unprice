@@ -1,4 +1,5 @@
 import type {
+  IngestionFacetRow,
   IngestionLiveRow,
   IngestionRecentEventRow,
   IngestionRejectionRow,
@@ -33,6 +34,7 @@ describe("getIngestionStatus", () => {
     expect(analytics.getIngestionLive).not.toHaveBeenCalled()
     expect(analytics.getIngestionRejections).not.toHaveBeenCalled()
     expect(analytics.getIngestionRecent).not.toHaveBeenCalled()
+    expect(analytics.getIngestionFacets).not.toHaveBeenCalled()
   })
 
   it("returns Tinybird failures as fetch errors", async () => {
@@ -148,7 +150,18 @@ describe("getIngestionStatus", () => {
       ],
       rejectionRows: [
         rejectionRow({ source_id: "src_1", event_slug: "usage.recorded", event_count: 1 }),
-        rejectionRow({ source_id: "src_2", event_slug: "usage.recorded", event_count: 5 }),
+        rejectionRow({
+          source_id: "src_2",
+          source_type: "system",
+          event_slug: "usage.recorded",
+          event_count: 5,
+        }),
+        rejectionRow({
+          source_id: "src_3",
+          source_type: "api_key",
+          event_slug: "usage.recorded",
+          event_count: 8,
+        }),
         rejectionRow({ source_id: "src_1", event_slug: "other.event", event_count: 7 }),
       ],
       recentRows: [
@@ -161,8 +174,15 @@ describe("getIngestionStatus", () => {
         recentEvent({
           event_id: "evt_wrong_source",
           source_id: "src_2",
+          source_type: "system",
           event_slug: "usage.recorded",
           handled_at: fromTs + 5_000,
+        }),
+        recentEvent({
+          event_id: "evt_wrong_source_id",
+          source_id: "src_3",
+          event_slug: "usage.recorded",
+          handled_at: fromTs + 5_500,
         }),
         recentEvent({
           event_id: "evt_wrong_slug",
@@ -176,9 +196,11 @@ describe("getIngestionStatus", () => {
     const result = await getIngestionStatus(deps, {
       ...baseInput(),
       filter: {
-        sourceId: "src_1",
-        eventSlug: "usage.recorded",
+        eventSlugs: ["usage.recorded"],
+        sourceIds: ["src_1"],
+        sourceTypes: ["api_key"],
       },
+      includeFacets: true,
       limit: 5,
     })
 
@@ -188,16 +210,18 @@ describe("getIngestionStatus", () => {
       customer_id: "cus_1",
       from_ts: fromTs,
       to_ts: toTs,
-      source_id: "src_1",
-      event_slug: "usage.recorded",
+      event_slugs: ["usage.recorded"],
+      source_ids: ["src_1"],
+      source_types: ["api_key"],
     })
     expect(analytics.getIngestionRejections).toHaveBeenCalledWith({
       project_id: "proj_1",
       customer_id: "cus_1",
       from_ts: fromTs,
       to_ts: toTs,
-      source_id: "src_1",
-      event_slug: "usage.recorded",
+      event_slugs: ["usage.recorded"],
+      source_ids: ["src_1"],
+      source_types: ["api_key"],
       limit: 5,
     })
     expect(analytics.getIngestionRecent).toHaveBeenCalledWith({
@@ -205,9 +229,20 @@ describe("getIngestionStatus", () => {
       customer_id: "cus_1",
       from_ts: fromTs,
       to_ts: toTs,
-      source_id: "src_1",
-      event_slug: "usage.recorded",
+      event_slugs: ["usage.recorded"],
+      source_ids: ["src_1"],
+      source_types: ["api_key"],
       limit: 6,
+    })
+    expect(analytics.getIngestionFacets).toHaveBeenCalledWith({
+      project_id: "proj_1",
+      customer_id: "cus_1",
+      from_ts: fromTs,
+      to_ts: toTs,
+      event_slugs: ["usage.recorded"],
+      source_ids: ["src_1"],
+      source_types: ["api_key"],
+      limit: 50,
     })
     expect(result.val?.rejections).toEqual([
       {
@@ -254,7 +289,7 @@ describe("getIngestionStatus", () => {
       ...baseInput(),
       customerId: undefined,
       filter: {
-        state: "processed",
+        states: ["processed"],
       },
     })
 
@@ -263,14 +298,22 @@ describe("getIngestionStatus", () => {
       project_id: "proj_1",
       from_ts: fromTs,
       to_ts: toTs,
-      state: "processed",
+      states: ["processed"],
     })
     expect(analytics.getIngestionRecent).toHaveBeenCalledWith({
       project_id: "proj_1",
       from_ts: fromTs,
       to_ts: toTs,
-      state: "processed",
+      states: ["processed"],
       limit: 51,
+    })
+    expect(analytics.getIngestionFacets).not.toHaveBeenCalled()
+    expect(result.val?.facets).toEqual({
+      states: [],
+      eventSlugs: [],
+      sourceTypes: [],
+      rejectionReasons: [],
+      customers: [],
     })
     expect(result.val?.recentEvents).toEqual([
       expect.objectContaining({
@@ -280,6 +323,42 @@ describe("getIngestionStatus", () => {
       }),
     ])
     expect(result.val?.answer).toContain("project proj_1")
+  })
+
+  it("returns full-window facets separately from paginated recent events", async () => {
+    const { deps } = makeDeps({
+      recentRows: [
+        recentEvent({
+          event_id: "evt_page_1",
+          customer_id: "cus_page",
+          event_slug: "page.only",
+          handled_at: fromTs + 4_000,
+        }),
+      ],
+      facetRows: [
+        facetRow({ facet: "state", value: "processed", event_count: 20 }),
+        facetRow({ facet: "state", value: "rejected", event_count: 3 }),
+        facetRow({ facet: "event_slug", value: "usage.recorded", event_count: 18 }),
+        facetRow({ facet: "source_type", value: "api_key", event_count: 18 }),
+        facetRow({ facet: "rejection_reason", value: "RUN_BUDGET_EXCEEDED", event_count: 3 }),
+        facetRow({ facet: "customer_id", value: "cus_full_window", event_count: 12 }),
+      ],
+    })
+
+    const result = await getIngestionStatus(deps, baseInput({ includeFacets: true, limit: 1 }))
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.recentEvents.map((event) => event.eventSlug)).toEqual(["page.only"])
+    expect(result.val?.facets).toEqual({
+      states: [
+        { value: "processed", count: 20 },
+        { value: "rejected", count: 3 },
+      ],
+      eventSlugs: [{ value: "usage.recorded", count: 18 }],
+      sourceTypes: [{ value: "api_key", count: 18 }],
+      rejectionReasons: [{ value: "RUN_BUDGET_EXCEEDED", count: 3 }],
+      customers: [{ value: "cus_full_window", count: 12 }],
+    })
   })
 
   it("returns a composite cursor and passes it to Tinybird for the next page", async () => {
@@ -339,6 +418,7 @@ function baseInput(overrides: Partial<GetIngestionStatusInput> = {}): GetIngesti
       to: toTs,
     },
     filter: {},
+    includeFacets: false,
     limit: 50,
     ...overrides,
   }
@@ -350,6 +430,7 @@ function makeDeps(
     liveRows?: IngestionLiveRow[]
     rejectionRows?: IngestionRejectionRow[]
     recentRows?: IngestionRecentEventRow[]
+    facetRows?: IngestionFacetRow[]
     liveError?: Error
   } = {}
 ): { deps: GetIngestionStatusDeps; analytics: GetIngestionStatusDeps["analytics"] } {
@@ -363,6 +444,7 @@ function makeDeps(
     }),
     getIngestionRejections: vi.fn(() => Promise.resolve({ data: options.rejectionRows ?? [] })),
     getIngestionRecent: vi.fn(() => Promise.resolve({ data: options.recentRows ?? [] })),
+    getIngestionFacets: vi.fn(() => Promise.resolve({ data: options.facetRows ?? [] })),
   } as unknown as GetIngestionStatusDeps["analytics"]
 
   return {
@@ -382,6 +464,15 @@ function rejectionRow(overrides: Partial<IngestionRejectionRow> = {}): Ingestion
     source_type: "api_key",
     event_count: 1,
     last_seen_at: fromTs + 2_200,
+    ...overrides,
+  }
+}
+
+function facetRow(overrides: Partial<IngestionFacetRow> = {}): IngestionFacetRow {
+  return {
+    facet: "state",
+    value: "processed",
+    event_count: 1,
     ...overrides,
   }
 }

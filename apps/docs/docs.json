@@ -98,75 +98,21 @@
         "tab": "SDKs",
         "groups": [
           {
-            "group": "Official Libraries",
-            "icon": "code",
+            "group": "TypeScript SDK",
             "pages": [
-              {
-                "group": "@unprice/api",
-                "pages": [
-                  "libraries/ts/sdk/overview",
-                  {
-                    "group": "Customers",
-                    "pages": ["libraries/ts/sdk/customers/signup"]
-                  },
-                  {
-                    "group": "Access",
-                    "pages": ["libraries/ts/sdk/access/update"]
-                  },
-                  {
-                    "group": "Entitlements",
-                    "pages": [
-                      "libraries/ts/sdk/entitlements/get",
-                      "libraries/ts/sdk/entitlements/verify"
-                    ]
-                  },
-                  {
-                    "group": "Events",
-                    "pages": [
-                      "libraries/ts/sdk/events/ingest",
-                      "libraries/ts/sdk/events/ingest-sync"
-                    ]
-                  },
-                  {
-                    "group": "Features",
-                    "pages": ["libraries/ts/sdk/features/list"]
-                  },
-                  {
-                    "group": "Invoices",
-                    "pages": ["libraries/ts/sdk/invoices/get"]
-                  },
-                  {
-                    "group": "Payments",
-                    "pages": [
-                      "libraries/ts/sdk/payments/list-methods",
-                      "libraries/ts/sdk/payments/create-method"
-                    ]
-                  },
-                  {
-                    "group": "Plans",
-                    "pages": [
-                      "libraries/ts/sdk/plans/get-version",
-                      "libraries/ts/sdk/plans/list-versions"
-                    ]
-                  },
-                  {
-                    "group": "Realtime",
-                    "pages": ["libraries/ts/sdk/realtime/create-ticket"]
-                  },
-                  {
-                    "group": "Subscriptions",
-                    "pages": ["libraries/ts/sdk/subscriptions/get"]
-                  },
-                  {
-                    "group": "Usage",
-                    "pages": ["libraries/ts/sdk/usage/get"]
-                  },
-                  {
-                    "group": "Wallet",
-                    "pages": ["libraries/ts/sdk/wallet/get"]
-                  }
-                ]
-              }
+              "libraries/ts/sdk/overview",
+              "libraries/ts/sdk/usage/record",
+              "libraries/ts/sdk/usage/consume",
+              "libraries/ts/sdk/access/check",
+              "libraries/ts/sdk/access/list-entitlements",
+              "libraries/ts/sdk/plan-versions/list",
+              "libraries/ts/sdk/plan-versions/get",
+              "libraries/ts/sdk/payment-methods/list",
+              "libraries/ts/sdk/payment-methods/create",
+              "libraries/ts/sdk/ingestion-events/status",
+              "libraries/ts/sdk/ingestion-events/replay",
+              "libraries/ts/sdk/wallet/get",
+              "libraries/ts/sdk/usage/get"
             ]
           }
         ]

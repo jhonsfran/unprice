@@ -64,7 +64,7 @@ const TabsDashboard = ({
     <TabNavigation className="gap-1" variant="solid">
       <TabNavigationLink active={activeTab === "overview"} asChild>
         <SuperLink href={`${baseUrl}/dashboard${allParams ? `?${allParams}` : ""}`}>
-          Usage{" "}
+          Overview{" "}
           <Kbd abbrTitle="1" className="ml-2">
             1
           </Kbd>

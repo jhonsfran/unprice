@@ -1,0 +1,1 @@
+ALTER TABLE `run_spend_buckets` ADD `billing_period_id` text DEFAULT '' NOT NULL;

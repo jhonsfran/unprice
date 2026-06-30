@@ -6,7 +6,7 @@ import { cn } from "@unprice/ui/utils"
 const variants = cva("", {
   variants: {
     variant: {
-      default: "bg-primary",
+      default: "dark:bg-primary bg-[#ab6400]",
       destructive: "bg-destructive",
       secondary: "bg-secondary",
     },

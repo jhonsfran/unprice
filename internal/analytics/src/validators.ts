@@ -155,6 +155,14 @@ export const featureMetadataSchemaV1 = z.object({
   tags: z.string(),
 })
 
+const analyticsRunContextShape = {
+  run_id: z.string().nullable().optional(),
+  trace_id: z.string().nullable().optional(),
+  parent_run_id: z.string().nullable().optional(),
+  workload_type: z.enum(["agent", "workflow", "job", "tool", "custom"]).nullable().optional(),
+  workload_id: z.string().nullable().optional(),
+}
+
 export const entitlementMeterFactSchemaV1 = z.object({
   event_id: z.string(),
   idempotency_key: z.string(),
@@ -166,6 +174,7 @@ export const entitlementMeterFactSchemaV1 = z.object({
   source_type: z.enum(["api_key", "system", "unknown"]),
   source_id: z.string(),
   source_name: z.string().nullable().optional(),
+  ...analyticsRunContextShape,
   customer_entitlement_id: z.string(),
   feature_slug: z.string(),
   period_key: z.string(),
@@ -199,6 +208,7 @@ export const ingestionEventSchemaV1 = z.object({
   source_type: z.enum(["api_key", "system", "unknown"]),
   source_id: z.string(),
   source_name: z.string().nullable().optional(),
+  ...analyticsRunContextShape,
   event_slug: z.string(),
   idempotency_key: z.string(),
   state: z.enum(["processed", "rejected", "failed"]),
@@ -382,26 +392,31 @@ export const ingestionStatusWindowQuerySchema = z.object({
 
 export const ingestionStateFilterSchema = z.enum(["processed", "rejected", "failed"])
 
-export const ingestionLiveQuerySchema = ingestionStatusWindowQuerySchema.extend({
+const ingestionStatusFilterQuerySchema = ingestionStatusWindowQuerySchema.extend({
+  filter_customer_ids: z.array(z.string()).optional(),
+  event_slugs: z.array(z.string()).optional(),
   source_id: z.string().optional(),
-  event_slug: z.string().optional(),
-  state: ingestionStateFilterSchema.optional(),
+  source_ids: z.array(z.string()).optional(),
+  source_types: z.array(z.string()).optional(),
+  rejection_reasons: z.array(z.string()).optional(),
+  states: z.array(ingestionStateFilterSchema).optional(),
+  search: z.string().optional(),
 })
 
-export const ingestionRejectionsQuerySchema = ingestionStatusWindowQuerySchema.extend({
-  source_id: z.string().optional(),
-  event_slug: z.string().optional(),
-  state: ingestionStateFilterSchema.optional(),
+export const ingestionLiveQuerySchema = ingestionStatusFilterQuerySchema
+
+export const ingestionRejectionsQuerySchema = ingestionStatusFilterQuerySchema.extend({
   limit: z.number().int().min(1).max(100).default(50),
 })
 
-export const ingestionRecentQuerySchema = ingestionStatusWindowQuerySchema.extend({
-  source_id: z.string().optional(),
-  event_slug: z.string().optional(),
-  state: ingestionStateFilterSchema.optional(),
+export const ingestionRecentQuerySchema = ingestionStatusFilterQuerySchema.extend({
   cursor_handled_at: z.number().int().optional(),
   cursor_canonical_audit_id: z.string().optional(),
   limit: z.number().int().min(1).max(101).default(50),
+})
+
+export const ingestionFacetsQuerySchema = ingestionStatusFilterQuerySchema.extend({
+  limit: z.number().int().min(1).max(100).default(50),
 })
 
 export const ingestionLiveRowSchema = z.object({
@@ -421,6 +436,12 @@ export const ingestionRejectionRowSchema = z.object({
   last_seen_at: z.number().int(),
 })
 
+export const ingestionFacetRowSchema = z.object({
+  facet: z.enum(["state", "event_slug", "source_type", "rejection_reason", "customer_id"]),
+  value: z.string(),
+  event_count: z.number().int().nonnegative(),
+})
+
 export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
   .pick({
     event_id: true,
@@ -429,6 +450,11 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
     event_slug: true,
     source_type: true,
     source_id: true,
+    run_id: true,
+    trace_id: true,
+    parent_run_id: true,
+    workload_type: true,
+    workload_id: true,
     state: true,
     rejection_reason: true,
     failure_stage: true,
@@ -604,6 +630,7 @@ export type ExplainChargeSummaryRow = z.infer<typeof explainChargeSummaryRowSche
 export type IngestionLiveRow = z.infer<typeof ingestionLiveRowSchema>
 export type IngestionRejectionRow = z.infer<typeof ingestionRejectionRowSchema>
 export type IngestionRecentEventRow = z.infer<typeof ingestionRecentEventRowSchema>
+export type IngestionFacetRow = z.infer<typeof ingestionFacetRowSchema>
 export type IngestionReplayPayloadRow = z.infer<typeof ingestionReplayPayloadRowSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>

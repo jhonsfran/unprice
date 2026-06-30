@@ -21,7 +21,7 @@ import { ChevronDown, ExternalLink } from "lucide-react"
 
 import { SITES_BASE_DOMAIN } from "@unprice/config"
 import type { Page } from "@unprice/db/validators"
-import Link from "next/link"
+import { SuperLink } from "~/components/super-link"
 import { PageForm } from "./page-form"
 import { PagePublish } from "./page-publish"
 
@@ -63,10 +63,10 @@ export function PageActions({
           </DialogTrigger>
 
           <DropdownMenuItem>
-            <Link href={`${domain}`} target="_blank" className="flex items-center">
+            <SuperLink href={`${domain}`} target="_blank" className="flex items-center">
               See page
               <ExternalLink className="ml-2 h-4 w-4" />
-            </Link>
+            </SuperLink>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

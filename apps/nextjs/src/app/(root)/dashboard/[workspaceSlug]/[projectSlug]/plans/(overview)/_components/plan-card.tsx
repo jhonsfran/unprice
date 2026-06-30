@@ -20,7 +20,6 @@ import {
   DropdownMenuTrigger,
 } from "@unprice/ui/dropdown-menu"
 import { cn } from "@unprice/ui/utils"
-import { PropagationStopper } from "~/components/prevent-propagation"
 import { SuperLink } from "~/components/super-link"
 import { PlanForm } from "../../_components/plan-form"
 
@@ -33,71 +32,69 @@ export function PlanCard(props: {
   const { versions, ...rest } = plan
 
   return (
-    <SuperLink href={`/${props.workspaceSlug}/${props.projectSlug}/plans/${plan.slug}`}>
-      <Card className="overflow-hidden hover:border-background-borderHover">
-        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
-          <div className="space-y-4">
-            <CardTitle className={"line-clamp-1"}>
-              <div className="flex items-center space-x-3">
-                <span>{plan.title}</span>
-                {plan.defaultPlan && (
-                  <div className="inline-flex items-center font-mono font-semibold text-info text-xs">
-                    <span className="flex h-2 w-2 rounded-full bg-info" />
-                    <span className="ml-1">{"default"}</span>
-                  </div>
-                )}
-                {plan.enterprisePlan && (
-                  <div className="inline-flex items-center font-mono font-semibold text-info text-xs">
-                    <span className="flex h-2 w-2 rounded-full bg-info" />
-                    <span className="ml-1">{"enterprise"}</span>
-                  </div>
-                )}
-              </div>
-            </CardTitle>
-            <CardDescription className="line-clamp-2 h-10">{plan.description}</CardDescription>
-          </div>
-          <div className="flex items-center space-x-1">
-            <PropagationStopper>
-              <Dialog>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant={"link"} className="h-5 p-0">
-                      <MoreVertical className="h-5 w-5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-[200px]" forceMount>
-                    <DropdownMenuLabel>Plan Actions</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
+    <Card className="relative overflow-hidden hover:border-background-borderHover">
+      <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+        <SuperLink
+          href={`/${props.workspaceSlug}/${props.projectSlug}/plans/${plan.slug}`}
+          className="min-w-0 flex-1 after:absolute after:inset-0"
+        >
+          <CardTitle className="line-clamp-1">
+            <div className="flex items-center space-x-3">
+              <span>{plan.title}</span>
+              {plan.defaultPlan && (
+                <div className="inline-flex items-center font-mono font-semibold text-info text-xs">
+                  <span className="flex h-2 w-2 rounded-full bg-info" />
+                  <span className="ml-1">{"default"}</span>
+                </div>
+              )}
+              {plan.enterprisePlan && (
+                <div className="inline-flex items-center font-mono font-semibold text-info text-xs">
+                  <span className="flex h-2 w-2 rounded-full bg-info" />
+                  <span className="ml-1">{"enterprise"}</span>
+                </div>
+              )}
+            </div>
+          </CardTitle>
+          <CardDescription className="line-clamp-2 h-10">{plan.description}</CardDescription>
+        </SuperLink>
+        <Dialog>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="relative z-10 size-8">
+                <MoreVertical className="size-4" aria-hidden="true" />
+                <span className="sr-only">Open plan actions</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-[200px]" forceMount>
+              <DropdownMenuLabel>Plan Actions</DropdownMenuLabel>
+              <DropdownMenuSeparator />
 
-                    <DialogTrigger asChild>
-                      <DropdownMenuItem>
-                        <Settings className="mr-2 h-4 w-4" />
-                        Edit plan
-                      </DropdownMenuItem>
-                    </DialogTrigger>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+              <DialogTrigger asChild>
+                <DropdownMenuItem>
+                  <Settings className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Edit plan
+                </DropdownMenuItem>
+              </DialogTrigger>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-                <DialogContent className="max-h-screen overflow-y-scroll">
-                  <DialogHeader>
-                    <DialogTitle>Plan Form</DialogTitle>
+          <DialogContent className="max-h-screen overflow-y-scroll">
+            <DialogHeader>
+              <DialogTitle>Plan Form</DialogTitle>
 
-                    <DialogDescription>Modify the plan details below.</DialogDescription>
-                  </DialogHeader>
-                  <PlanForm defaultValues={rest} />
-                </DialogContent>
-              </Dialog>
-            </PropagationStopper>
-          </div>
-        </CardHeader>
-        <CardFooter className="flex flex-row justify-between space-x-4 text-muted-foreground text-sm">
-          <div className="flex items-center text-muted-foreground text-xs">
-            <GalleryHorizontalEnd className="mr-2 h-3 w-3" />
-            {versions.length === 0 ? "no" : versions.length} versions published
-          </div>
-        </CardFooter>
-      </Card>
-    </SuperLink>
+              <DialogDescription>Modify the plan details below.</DialogDescription>
+            </DialogHeader>
+            <PlanForm defaultValues={rest} />
+          </DialogContent>
+        </Dialog>
+      </CardHeader>
+      <CardFooter className="flex flex-row justify-between space-x-4 text-muted-foreground text-sm">
+        <div className="flex items-center text-muted-foreground text-xs">
+          <GalleryHorizontalEnd className="mr-2 h-3 w-3" aria-hidden="true" />
+          {versions.length === 0 ? "no" : versions.length} versions published
+        </div>
+      </CardFooter>
+    </Card>
   )
 }
 

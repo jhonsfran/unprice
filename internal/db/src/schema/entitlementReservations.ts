@@ -34,14 +34,20 @@ import { walletCredits } from "./walletCredits"
  *   - `reconciled_at` set when the reservation is released; NULL = active.
  */
 export type EntitlementReservationMetadata = Record<string, unknown>
+export type EntitlementReservationOwnerType = "entitlement_window" | "agent_run"
 
 export const entitlementReservations = pgTableProject(
   "entitlement_reservations",
   {
     ...projectID,
     customerId: cuid("customer_id").notNull(),
+    ownerType: text("owner_type")
+      .$type<EntitlementReservationOwnerType>()
+      .notNull()
+      .default("entitlement_window"),
+    ownerId: cuid("owner_id").notNull(),
     // Customer entitlements own the window; grants are allowance chunks under it.
-    entitlementId: cuid("entitlement_id").notNull(),
+    entitlementId: cuid("entitlement_id"),
     // Total amount ever moved into reserved for this period.
     allocationAmount: bigint("allocation_amount", { mode: "number" }).notNull(),
     // Mirror of DO-side consumed counter, synced on each flush.
@@ -63,13 +69,13 @@ export const entitlementReservations = pgTableProject(
       columns: [table.id, table.projectId],
       name: "entitlement_reservations_pkey",
     }),
-    // At most one *active* reservation per (project, entitlement, period).
+    // At most one *active* reservation per (project, ownerType, ownerId, period).
     // The partial predicate is essential: a closed (reconciled) reservation
     // shouldn't block re-bootstrapping a new one for the same period — that
     // happens after a final flush (limit-exceeded close, inactivity, etc.)
     // followed by a fresh apply() on the DO.
-    entitlementPeriod: uniqueIndex("entitlement_reservations_entitlement_period_idx")
-      .on(table.projectId, table.entitlementId, table.periodStartAt)
+    ownerPeriod: uniqueIndex("entitlement_reservations_owner_period_idx")
+      .on(table.projectId, table.ownerType, table.ownerId, table.periodStartAt)
       .where(sql`${table.reconciledAt} IS NULL`),
     customerId: index("entitlement_reservations_customer_idx").on(
       table.projectId,

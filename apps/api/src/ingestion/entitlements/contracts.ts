@@ -71,10 +71,12 @@ export class EntitlementWindowReservationUnderfundedError extends Error {
   }
 }
 
-export type DeniedReason = Extract<
-  IngestionRejectionReason,
-  "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
->
+export type DeniedReason =
+  | Extract<
+      IngestionRejectionReason,
+      "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD"
+    >
+  | "RUN_BUDGET_EXCEEDED"
 
 export type ApplyResult = {
   allowed: boolean
@@ -169,10 +171,14 @@ const resetConfigSnapshotSchema = z.custom<ResetConfig>(
 
 export const activeGrantSchema = z.object({
   allowanceUnits: z.number().finite().nullable(),
+  cadenceEffectiveAt: z.number().finite(),
+  cadenceExpiresAt: z.number().finite().nullable(),
+  currencyCode: z.string().min(1),
   effectiveAt: z.number().finite(),
   expiresAt: z.number().finite().nullable(),
   grantId: z.string().min(1),
   priority: z.number().int(),
+  resetConfig: resetConfigSnapshotSchema.nullable(),
 })
 
 export const entitlementConfigSchema = z.object({
@@ -212,6 +218,12 @@ export const applyInputSchema = z.object({
   grants: z.array(activeGrantSchema).min(1),
   enforceLimit: z.boolean(),
   now: z.number().finite(),
+  walletMode: z.enum(["standard", "external_reservation"]).optional(),
+  externalReservation: z
+    .object({
+      remainingAmount: z.number().int().nonnegative(),
+    })
+    .optional(),
 })
 
 const applyBatchEventSchema = rawEventSchema.extend({
@@ -237,10 +249,12 @@ export const batchIdempotencyEntrySchema = z.object({
   createdAt: z.number().finite(),
   allowed: z.boolean(),
   deniedReason: z
-    .enum(["LIMIT_EXCEEDED", "WALLET_EMPTY", "LATE_EVENT_CLOSED_PERIOD"] satisfies readonly [
-      DeniedReason,
-      ...DeniedReason[],
-    ])
+    .enum([
+      "LIMIT_EXCEEDED",
+      "WALLET_EMPTY",
+      "LATE_EVENT_CLOSED_PERIOD",
+      "RUN_BUDGET_EXCEEDED",
+    ] satisfies readonly [DeniedReason, ...DeniedReason[]])
     .nullable(),
   denyMessage: z.string().nullable(),
   meterFacts: z.array(entitlementMeterFactSchemaV1).optional().default([]),
@@ -261,9 +275,10 @@ export const compactGrantConsumptionStateSchema = z.object({
 export const compactGrantConsumptionStateListSchema = z.array(compactGrantConsumptionStateSchema)
 
 export type BatchIdempotencyEntry = z.infer<typeof batchIdempotencyEntrySchema>
+export type ActiveGrantInput = z.infer<typeof activeGrantSchema>
+export type ApplyGrantInput = ActiveGrantInput
 export type ApplyInput = z.infer<typeof applyInputSchema>
 export type ApplyBatchInput = z.infer<typeof applyBatchInputSchema>
-export type ApplyGrantInput = z.infer<typeof activeGrantSchema>
 export type ApplyBatchResultRow = ApplyResult & { correlationKey: string; idempotencyKey: string }
 
 export type ApplyBatchMetrics = {
@@ -342,13 +357,6 @@ export const entitlementWindowStatusSchema = z.object({
 export type EntitlementWindowStatus = z.infer<typeof entitlementWindowStatusSchema>
 export type EnforcementStateInput = z.infer<typeof enforcementStateInputSchema>
 
-export type ActiveGrantInput = ApplyGrantInput & {
-  cadenceEffectiveAt: number
-  cadenceExpiresAt: number | null
-  currencyCode: string
-  resetConfig: ResetConfig | null
-}
-
 export type EntitlementConfigInput = z.infer<typeof entitlementConfigSchema>
 export type EntitlementCreditLinePolicy = CreditLinePolicy
 
@@ -424,9 +432,9 @@ export type EnforcementStateResult = {
 }
 
 export type EnforcementStateCache = {
-  entitlement: EntitlementConfigInput | null
+  entitlement: EntitlementConfigInput
   grants: ActiveGrantInput[]
-  inputSignature: string | null
+  inputSignature: string
   states: GrantConsumptionState[]
 }
 

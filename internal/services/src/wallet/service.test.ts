@@ -402,7 +402,7 @@ function seedReservation(
     id: string
     customerId: string
     projectId: string
-    entitlementId: string
+    entitlementId: string | null
     fundingAllocations?: SeedFundingAllocation[]
   }
 ): FakeReservation {
@@ -765,6 +765,155 @@ describe("WalletService.createReservation", () => {
     expect(grantUpdates[0]!.set).toEqual({ remainingAmount: 0 })
     expect(grantUpdates[1]!.set).toEqual({ remainingAmount: 2 * DOLLAR })
   })
+
+  it("creates an agent-run-owned reservation without an entitlement id", async () => {
+    const { state, wallet } = buildService()
+    seedGrant(state, {
+      id: "wcr_agent",
+      customerId,
+      projectId,
+      source: "promo",
+      issuedAmount: 10 * DOLLAR,
+      remainingAmount: 10 * DOLLAR,
+      expiresAt: new Date("2026-12-01"),
+      createdAt: new Date("2026-01-01"),
+    })
+    state.balances[keys.granted] = 10 * DOLLAR
+    state.balances[keys.purchased] = 0
+
+    const { val, err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: null,
+      owner: { type: "agent_run", id: "run_123" },
+      requestedAmount: 5 * DOLLAR,
+      minimumAllocationAmount: 5 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      idempotencyKey: "reserve-agent-run-123",
+    })
+
+    expect(err).toBeUndefined()
+    expect(val).toMatchObject({
+      allocationAmount: expect.any(Number),
+    })
+    expect(state.inserts).toContainEqual(
+      expect.objectContaining({
+        table: "entitlementReservations",
+        values: expect.objectContaining({
+          entitlementId: null,
+          ownerType: "agent_run",
+          ownerId: "run_123",
+        }),
+      })
+    )
+  })
+
+  it("fails a strict reservation before moving funds when available balance is short", async () => {
+    const { state, wallet } = buildService()
+    seedGrant(state, {
+      id: "wcr_short",
+      customerId,
+      projectId,
+      source: "promo",
+      issuedAmount: 2 * DOLLAR,
+      remainingAmount: 2 * DOLLAR,
+      expiresAt: new Date("2026-12-01"),
+      createdAt: new Date("2026-01-01"),
+    })
+    state.balances[keys.granted] = 2 * DOLLAR
+    state.balances[keys.purchased] = 0
+
+    const { val, err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: null,
+      owner: { type: "agent_run", id: "run_strict" },
+      requestedAmount: 5 * DOLLAR,
+      minimumAllocationAmount: 5 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      idempotencyKey: "reserve-agent-run-short",
+    })
+
+    expect(err?.message).toBe("WALLET_EMPTY")
+    expect(val).toBeUndefined()
+    expect(state.transfers).toHaveLength(0)
+    expect(
+      state.inserts.filter((insert) => insert.table === "entitlementReservations")
+    ).toHaveLength(0)
+  })
+
+  it("dedupes active reservations by owner and period", async () => {
+    const { state, wallet } = buildService()
+    state.balances[keys.granted] = 10 * DOLLAR
+    // Seed an existing active reservation with owner-based identity
+    seedReservation(state, {
+      id: "eres_existing",
+      customerId,
+      projectId,
+      entitlementId: null,
+      ownerType: "agent_run",
+      ownerId: "run_existing",
+      allocationAmount: 5 * DOLLAR,
+      consumedAmount: 0,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      createdAt: new Date(),
+      reconciledAt: null,
+      metadata: null,
+    })
+
+    const { val, err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: null,
+      owner: { type: "agent_run", id: "run_existing" },
+      requestedAmount: 5 * DOLLAR,
+      minimumAllocationAmount: 5 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      idempotencyKey: "reserve-agent-run-existing",
+    })
+
+    expect(err).toBeUndefined()
+    expect(val).toMatchObject({
+      reservationId: "eres_existing",
+      allocationAmount: 5 * DOLLAR,
+      reused: "active",
+    })
+  })
+
+  it("returns WALLET_INVALID_RESERVATION_OWNER when no owner can be resolved", async () => {
+    const { wallet } = buildService()
+
+    const { err } = await wallet.createReservation({
+      projectId,
+      customerId,
+      currency: "USD",
+      entitlementId: null,
+      // no owner field, and entitlementId is null → cannot derive owner
+      requestedAmount: 5 * DOLLAR,
+      refillThresholdBps: 2000,
+      refillChunkAmount: 1 * DOLLAR,
+      periodStartAt: new Date("2026-06-15T00:00:00.000Z"),
+      periodEndAt: new Date("2026-06-16T00:00:00.000Z"),
+      idempotencyKey: "reserve-no-owner",
+    })
+
+    expect(err?.message).toBe("WALLET_INVALID_RESERVATION_OWNER")
+  })
 })
 
 describe("WalletService reservation capture, extend, and release", () => {
@@ -802,6 +951,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       flushAmount: 2 * DOLLAR,
       refillChunkAmount: 3 * DOLLAR,
       statementKey: "stmt_1",
+      billingPeriodId: "bp_1",
       final: false,
       metadata: {
         requestedBy: "durable_object",
@@ -876,6 +1026,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       flushSeq: 1,
       amount: 4 * DOLLAR,
       statementKey: "stmt_capture_order",
+      billingPeriodId: "bp_capture_order",
     })
 
     expect(err).toBeUndefined()
@@ -969,6 +1120,42 @@ describe("WalletService reservation capture, extend, and release", () => {
     ])
   })
 
+  it("rejects invoice-visible captures without billing period context", async () => {
+    const { state, wallet } = buildService()
+    seedReservation(state, {
+      id: "res_missing_invoice_context",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 2 * DOLLAR,
+      consumedAmount: 0,
+      fundingAllocations: [
+        {
+          source: "granted",
+          amount: 2 * DOLLAR,
+          grantSource: "credit_line",
+          walletCreditId: "wcr_credit",
+        },
+      ],
+    })
+    state.balances[keys.reserved] = 2 * DOLLAR
+
+    const { err } = await wallet.captureReservationUsage({
+      projectId,
+      customerId,
+      currency: "USD",
+      reservationId: "res_missing_invoice_context",
+      flushSeq: 1,
+      amount: 2 * DOLLAR,
+      statementKey: "stmt_missing_invoice_context",
+    })
+
+    expect(err?.message).toBe("WALLET_MISSING_INVOICE_CONTEXT")
+    expect(state.transfers).toHaveLength(0)
+    expect(state.fundingLegs.map((leg) => leg.capturedAmount)).toEqual([0])
+    expect(state.reservations[0]?.consumedAmount).toBe(0)
+  })
+
   it("treats changed capture invoice context as a wallet idempotency conflict", async () => {
     const { state, wallet } = buildService()
     seedReservation(state, {
@@ -1047,6 +1234,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       flushSeq: 1,
       amount: 3 * DOLLAR,
       statementKey: "stmt_over_capture",
+      billingPeriodId: "bp_over_capture",
     })
 
     expect(err?.message).toBe("WALLET_INSUFFICIENT_FUNDS")
@@ -1088,6 +1276,7 @@ describe("WalletService reservation capture, extend, and release", () => {
       flushAmount: 1 * DOLLAR, // the unflushed delta
       refillChunkAmount: 0,
       statementKey: "stmt_2",
+      billingPeriodId: "bp_2",
       final: true,
     })
 
@@ -1493,7 +1682,7 @@ describe("WalletService.getWalletState", () => {
   it("returns the four sub-account balances and active credits ordered by expiry", async () => {
     const { state, wallet } = buildService()
     state.balances[keys.purchased] = 10 * DOLLAR
-    state.balances[keys.granted] = 4 * DOLLAR
+    state.balances[keys.granted] = 2 * DOLLAR
     state.balances[keys.reserved] = 1 * DOLLAR
     state.balances[keys.consumed] = 25 * DOLLAR
 
@@ -1502,7 +1691,7 @@ describe("WalletService.getWalletState", () => {
       customerId,
       projectId,
       issuedAmount: 3 * DOLLAR,
-      remainingAmount: 3 * DOLLAR,
+      remainingAmount: 1 * DOLLAR,
       expiresAt: new Date("2026-12-01"),
     })
     seedGrant(state, {
@@ -1512,6 +1701,38 @@ describe("WalletService.getWalletState", () => {
       issuedAmount: 2 * DOLLAR,
       remainingAmount: 1 * DOLLAR,
       expiresAt: new Date("2026-02-01"),
+    })
+    seedReservation(state, {
+      id: "res_consumed_soon",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 1 * DOLLAR,
+      consumedAmount: 1 * DOLLAR,
+      fundingAllocations: [
+        {
+          source: "granted",
+          amount: 1 * DOLLAR,
+          grantSource: "manual",
+          walletCreditId: "wcr_soon",
+        },
+      ],
+    })
+    seedReservation(state, {
+      id: "res_consumed_far",
+      customerId,
+      projectId,
+      entitlementId: "ent_1",
+      allocationAmount: 2 * DOLLAR,
+      consumedAmount: 2 * DOLLAR,
+      fundingAllocations: [
+        {
+          source: "granted",
+          amount: 2 * DOLLAR,
+          grantSource: "manual",
+          walletCreditId: "wcr_far",
+        },
+      ],
     })
     // Inactive — must NOT appear in the result.
     seedGrant(state, {
@@ -1528,11 +1749,15 @@ describe("WalletService.getWalletState", () => {
     expect(err).toBeUndefined()
     expect(val?.balances).toEqual({
       purchased: 10 * DOLLAR,
-      granted: 4 * DOLLAR,
+      granted: 2 * DOLLAR,
       reserved: 1 * DOLLAR,
       consumed: 25 * DOLLAR,
     })
     expect(val?.credits.map((g) => g.id)).toEqual(["wcr_soon", "wcr_far"])
+    expect(val?.credits.map((g) => ({ id: g.id, consumedAmount: g.consumedAmount }))).toEqual([
+      { id: "wcr_soon", consumedAmount: 1 * DOLLAR },
+      { id: "wcr_far", consumedAmount: 2 * DOLLAR },
+    ])
   })
 
   it("returns zeros and empty credits for an untouched customer", async () => {

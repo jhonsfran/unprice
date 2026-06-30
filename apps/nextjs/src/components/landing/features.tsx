@@ -12,15 +12,15 @@ import { Marquee } from "./marquee"
 const files = [
   {
     name: "FREE",
-    body: "Unprice is free to use. You can begin to experience the power of PriceOps in minutes.",
+    body: "Unprice is open source under AGPL-3.0 and free to self-host. Meter usage and enforce budgets from day one.",
   },
   {
     name: "PRO",
-    body: "Unprice Pro unlocks advanced capabilities, allowing your business to scale with confidence.",
+    body: "Unprice Pro adds a commercial license and support for teams running pricing in production.",
   },
   {
     name: "ENTERPRISE",
-    body: "Unprice Enterprise is a tailored foundation, architected specifically for your unique business needs.",
+    body: "Unprice Enterprise adds dedicated support for teams that can't open-source their changes.",
   },
 ]
 
@@ -71,7 +71,7 @@ const features = [
   {
     Icon: Share2Icon,
     name: "Analytics",
-    description: "Track events, see how your customers are using your product. Get insights.",
+    description: "Track usage events and trace charges back to rated usage and ledger evidence.",
     href: `${DOCS_DOMAIN}/features/analytics`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-2",
@@ -100,10 +100,10 @@ export const Features = () => {
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-16">
       <h2
-        id="features-title"
+        id="capabilities-title"
         className="mt-2 inline-block bg-clip-text py-2 pb-8 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
-        Features Overview
+        One runtime for every pricing model
       </h2>
       <BentoGrid>
         {features.map((feature, idx) => (

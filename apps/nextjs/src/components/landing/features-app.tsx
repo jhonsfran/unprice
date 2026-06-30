@@ -1,19 +1,20 @@
 "use client"
 
 import { m } from "framer-motion"
+import { MoneyPath } from "./money-path"
 
 const stats = [
   {
-    name: "Edge Entitlements",
-    value: "<100ms",
+    name: "Entitlement & budget checks",
+    value: "Request-path",
   },
   {
-    name: "Event Processing",
-    value: "100k+/s",
+    name: "Reject over-budget work",
+    value: "Pre-spend",
   },
   {
-    name: "Global Regions",
-    value: "Multi-region",
+    name: "AGPL-3.0 + commercial",
+    value: "Open-core",
   },
 ]
 
@@ -57,25 +58,30 @@ export function FeaturesApp() {
       whileInView="visible"
       viewport={{ once: true, margin: "-100px" }}
       variants={containerVariants}
-      aria-labelledby="features-title"
+      aria-labelledby="request-path-title"
       className="mx-auto w-full max-w-6xl px-6 py-16"
     >
       <m.h2
         variants={itemVariants}
-        id="features-title"
+        id="request-path-title"
         className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
-        Built for Mission-Critical Revenue
+        Built for the request path
       </m.h2>
 
       <m.p
         variants={itemVariants}
         className="mt-6 text-justify text-background-text text-lg leading-7"
       >
-        PriceOps isn't just about strategy—it's about performance. Your monetization layer shouldn't
-        be a bottleneck. Unprice is architected to handle high-volume event metering and low latency
-        entitlement checks at the edge.
+        PriceOps isn't only about strategy — it's about where the decision happens. Your
+        monetization layer should run where the cost is created: in the request path, before
+        expensive work executes. Unprice checks entitlement and budget, reserves credits, and
+        rejects over-budget work in line, then keeps the evidence to explain the invoice later.
       </m.p>
+
+      <m.div variants={itemVariants} className="mt-12">
+        <MoneyPath />
+      </m.div>
 
       <m.dl
         variants={statsContainerVariants}

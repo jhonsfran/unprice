@@ -1,0 +1,95 @@
+---
+title: "Verify"
+description: "Check the current feature entitlement status for a customer"
+---
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.access.check({
+  customerId: "cus_1234567890",
+  featureSlug: "tokens"
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "allowed": true,
+  "featureSlug": "tokens",
+  "usage": 42,
+  "limit": 100,
+  "spending": {
+    "ledgerAmount": 4200000000,
+    "currency": "USD",
+    "displayAmount": "$42",
+    "scale": 8
+  }
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="customerId" type="string" required>
+    The customer ID to check.
+</ParamField>
+
+<ParamField body="featureSlug" type="string" required>
+    The feature slug to verify.
+</ParamField>
+
+<ParamField body="timestamp" type="number">
+    Optional epoch-millisecond timestamp for a recent point-in-time check.
+</ParamField>
+
+## Response
+
+<ResponseField name="allowed" type="boolean" required>
+    Whether the feature is usable for the customer at the requested timestamp.
+</ResponseField>
+
+<ResponseField name="featureSlug" type="string" required>
+    The feature slug that was verified.
+</ResponseField>
+
+<ResponseField name="rejectionReason" type="string">
+    Why the feature is not usable. Omitted when `allowed` is `true`.
+</ResponseField>
+
+<ResponseField name="usage" type="number">
+    Current usage for usage-based features.
+</ResponseField>
+
+<ResponseField name="limit" type="number">
+    Configured limit for usage-based features, or `null` when unlimited.
+</ResponseField>
+
+<ResponseField name="spending" type="object">
+    Current priced usage spend for usage-based features.
+</ResponseField>
+
+<ResponseField name="spending.ledgerAmount" type="number">
+    Current spend in ledger scale units.
+</ResponseField>
+
+<ResponseField name="spending.currency" type="string">
+    ISO currency code for the spend.
+</ResponseField>
+
+<ResponseField name="spending.displayAmount" type="string">
+    Ready-to-render localized spend, such as `$42`.
+</ResponseField>
+
+<ResponseField name="spending.scale" type="number">
+    Decimal scale for `ledgerAmount`. Currently `8`.
+</ResponseField>
