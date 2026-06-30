@@ -115,9 +115,12 @@ export function UsageDashboardView({
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1.5">
-            <CardTitle>{mode === "customer" ? "Customer usage" : "Usage Dashboard"}</CardTitle>
+            <CardTitle>
+              {mode === "customer" ? "Customer usage evidence" : "Usage and spend evidence"}
+            </CardTitle>
             <CardDescription>
-              Usage for this {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
+              Latest feature usage and ledger display amounts for this{" "}
+              {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
             </CardDescription>
             <FreshnessIndicator generatedAt={data.freshness.generatedAt} isFetching={isFetching} />
           </div>
@@ -132,32 +135,37 @@ export function UsageDashboardView({
       >
         <div className="grid gap-3 md:grid-cols-4">
           <MetricCard
-            label="Features with usage"
+            label="Features reporting"
             icon={<Layers3 className="h-4 w-4 text-muted-foreground" />}
             value={String(data.summary.featureCount)}
+            helper="Feature slugs with usage in this interval"
           />
           <MetricCard
-            label="Total usage"
+            label="Latest usage total"
             icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
             value={nFormatter(data.summary.totalLatestUsage, { digits: 1 })}
+            helper="Latest cumulative usage across reporting features"
           />
           <MetricCard
-            label="Consumed amount"
+            label="Ledger consumed"
             icon={<Coins className="h-4 w-4 text-muted-foreground" />}
             value={formatSpendingSummary(data.summary.spending)}
+            helper="Display amount from ledger-scale usage spend"
             truncate
           />
           {mode === "customer" ? (
             <MetricCard
-              label="Number of invoices"
+              label="Invoices"
               icon={<ReceiptText className="h-4 w-4 text-muted-foreground" />}
               value={String(invoiceCount ?? 0)}
+              helper="Invoices connected to this customer"
             />
           ) : (
             <MetricCard
               label="Selected interval"
               icon={<CalendarRange className="h-4 w-4 text-muted-foreground" />}
               value={intervalLabel}
+              helper="Dashboard range used for usage evidence"
               capitalize
             />
           )}
@@ -186,12 +194,14 @@ function MetricCard({
   label,
   icon,
   value,
+  helper,
   truncate = false,
   capitalize = false,
 }: {
   label: string
   icon: ReactNode
   value: string
+  helper: string
   truncate?: boolean
   capitalize?: boolean
 }) {
@@ -210,6 +220,7 @@ function MetricCard({
       >
         {value}
       </p>
+      <p className="mt-1 text-muted-foreground text-xs">{helper}</p>
     </div>
   )
 }
@@ -224,9 +235,9 @@ function UsageFeatureTable({
   return (
     <div className="overflow-hidden rounded-md border border-border/60">
       <div className="grid grid-cols-[minmax(0,1fr)_6rem_7rem] items-center gap-4 bg-muted/40 px-4 py-2.5">
-        <p className="text-muted-foreground text-xs uppercase">Feature</p>
-        <p className="text-right text-muted-foreground text-xs uppercase">Usage</p>
-        <p className="text-right text-muted-foreground text-xs uppercase">Consumed</p>
+        <p className="text-muted-foreground text-xs uppercase">Feature slug</p>
+        <p className="text-right text-muted-foreground text-xs uppercase">Latest usage</p>
+        <p className="text-right text-muted-foreground text-xs uppercase">Ledger used</p>
       </div>
       <div className="divide-y divide-border">
         {features.map((feature) => {
@@ -267,9 +278,9 @@ function TopConsumersTable({
     <div className="overflow-hidden rounded-md border border-border/60">
       <div className="grid grid-cols-[auto_minmax(0,1fr)_6rem_7rem] items-center gap-3 bg-muted/40 px-4 py-2.5">
         <Users className="h-3.5 w-3.5 text-muted-foreground" />
-        <p className="text-muted-foreground text-xs uppercase">Top consumers</p>
+        <p className="text-muted-foreground text-xs uppercase">Top consumers by spend</p>
         <p className="text-right text-muted-foreground text-xs uppercase">Usage</p>
-        <p className="text-right text-muted-foreground text-xs uppercase">Consumed</p>
+        <p className="text-right text-muted-foreground text-xs uppercase">Ledger used</p>
       </div>
       <div className="divide-y divide-border">
         {consumers.map((consumer, index) => (
@@ -302,15 +313,15 @@ function UsageDashboardErrorState({ error }: { error: string }) {
   return (
     <Card className="border-muted/60">
       <CardHeader>
-        <CardTitle>Usage Dashboard</CardTitle>
-        <CardDescription>Usage analytics could not be loaded right now.</CardDescription>
+        <CardTitle>Usage evidence</CardTitle>
+        <CardDescription>Usage and ledger display amounts could not be loaded.</CardDescription>
       </CardHeader>
       <CardContent className="pt-4 pb-6">
         <EmptyPlaceholder className="min-h-[220px]">
           <EmptyPlaceholder.Icon>
             <TriangleAlert className="h-8 w-8 opacity-60" />
           </EmptyPlaceholder.Icon>
-          <EmptyPlaceholder.Title>Unable to load usage</EmptyPlaceholder.Title>
+          <EmptyPlaceholder.Title>Unable to load usage evidence</EmptyPlaceholder.Title>
           <EmptyPlaceholder.Description>{error}</EmptyPlaceholder.Description>
         </EmptyPlaceholder>
       </CardContent>
@@ -334,9 +345,12 @@ function UsageDashboardEmptyState({
       <CardHeader>
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1.5">
-            <CardTitle>{mode === "customer" ? "Customer usage" : "Usage Dashboard"}</CardTitle>
+            <CardTitle>
+              {mode === "customer" ? "Customer usage evidence" : "Usage and spend evidence"}
+            </CardTitle>
             <CardDescription>
-              Usage for this {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
+              Latest feature usage and ledger display amounts for this{" "}
+              {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
             </CardDescription>
             <FreshnessIndicator generatedAt={generatedAt} isFetching={isFetching} />
           </div>
@@ -350,7 +364,7 @@ function UsageDashboardEmptyState({
           </EmptyPlaceholder.Icon>
           <EmptyPlaceholder.Title>No usage data yet</EmptyPlaceholder.Title>
           <EmptyPlaceholder.Description>
-            Usage appears here once feature consumption is reported.
+            Record usage events with feature slugs. Rejected or failed events appear in Events.
           </EmptyPlaceholder.Description>
         </EmptyPlaceholder>
       </CardContent>

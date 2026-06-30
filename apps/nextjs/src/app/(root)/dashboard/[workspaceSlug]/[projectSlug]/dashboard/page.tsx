@@ -11,6 +11,8 @@ import { UsageStats, UsageStatsSkeleton } from "./_components/usage-stats"
 
 export const dynamic = "force-dynamic"
 
+const INGESTION_HEALTH_WINDOW_MS = 60 * 60 * 1000
+
 export default async function DashboardOverview(props: {
   params: { workspaceSlug: string; projectSlug: string }
   searchParams: SearchParams
@@ -18,8 +20,21 @@ export default async function DashboardOverview(props: {
   const { projectSlug, workspaceSlug } = props.params
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
   const filter = intervalParams(props.searchParams)
+  const now = Date.now()
 
   batchPrefetch([
+    trpc.analytics.getIngestionStatus.queryOptions(
+      {
+        window: {
+          from: now - INGESTION_HEALTH_WINDOW_MS,
+          to: now,
+        },
+        limit: 5,
+      },
+      {
+        staleTime: 15 * 1000,
+      }
+    ),
     trpc.analytics.getOverviewStats.queryOptions(
       {
         interval: filter.intervalFilter,

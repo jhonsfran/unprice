@@ -1,85 +1,79 @@
-import { cn } from "./utils/index"
+import { cn } from "@unprice/ui/utils"
 
 interface UnpriceLogoProps {
   size?: "xs" | "sm" | "md" | "lg" | "xl"
   variant?: "full" | "icon" | "wordmark"
   theme?: "dark" | "light"
+  /** Render the active knob in ink instead of amber (for monochrome contexts). */
+  monochrome?: boolean
   className?: string
 }
+
+// Icon is optically sized to the wordmark's cap height so the mark sits as a
+// peer to the letters, not a billboard beside them.
+const sizes = {
+  xs: { text: 13, gap: 5 },
+  sm: { text: 17, gap: 6 },
+  md: { text: 24, gap: 8 },
+  lg: { text: 38, gap: 11 },
+  xl: { text: 56, gap: 18 },
+}
+
+const AMBER = "#f5b62b"
 
 export default function UnpriceLogo({
   size = "md",
   variant = "full",
   theme = "dark",
+  monochrome = false,
   className = "",
 }: UnpriceLogoProps) {
-  // 1. SCALING SYSTEM
-  // We use a 24px grid as the base (size "sm").
-  // All other sizes scale from this ratio to ensure pixel perfection.
-  const sizes = {
-    // xs: Gap reduced 4px -> 3px
-    xs: { px: 16, text: 12, gap: 3 },
+  const { text, gap } = sizes[size]
+  const px = Math.round(text * 1.04)
 
-    // sm: Gap reduced 6px -> 4px
-    sm: { px: 24, text: 16, gap: 4 },
+  const ink = theme === "dark" ? "#fafafa" : "#0a0a0a"
 
-    // md: Gap reduced 8px -> 5px (The critical fix)
-    md: { px: 32, text: 24, gap: 5 },
-
-    // lg: Gap reduced 10px -> 8px
-    lg: { px: 48, text: 38, gap: 8 },
-
-    // xl: Gap reduced 12px -> 10px
-    xl: { px: 64, text: 48, gap: 10 },
+  // An app-icon-quality monogram: a solid amber tile with a bold geometric "u"
+  // (unprice) on it. The mark is an identity, not a UI widget — the product
+  // thesis lives in the words. Reads as a finished product at any size.
+  const IconMark = () => {
+    const glyph = monochrome ? ink : "#0a0a0a"
+    return (
+      <svg
+        width={px}
+        height={px}
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        role="img"
+        aria-label="Unprice logo"
+      >
+        {/* Tile — amber in brand contexts, ink when monochrome */}
+        {!monochrome && <rect x="0" y="0" width="24" height="24" rx="6" fill={AMBER} />}
+        {/* Bold "u" — the right stem rises taller than the left: a quiet nod to
+            growth/upside, and the trait that makes the silhouette ownable. */}
+        <path
+          d="M7.5 7.5 L7.5 13 A4.5 4.5 0 0 0 16.5 13 L16.5 4.5"
+          stroke={monochrome ? ink : glyph}
+          strokeWidth="3.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      </svg>
+    )
   }
 
-  const { px, text, gap } = sizes[size]
-
-  // 2. COLOR SYSTEM
-  // Pure Black & White. No greys, no accents. High contrast only.
-  const colors = {
-    dark: { primary: "#ffc53d" },
-    light: { primary: "#000000" },
-  }
-  const { primary } = colors[theme]
-
-  // 3. THE "PLATFORM" ICON
-  // Designed on a 24x24 pixel grid for mathematical purity.
-  // The shape is 18px wide x 17px high (Optical Square).
-  // Stroke width is 3px (Matches font-weight 600).
-  const IconMark = () => (
-    <svg
-      width={px}
-      height={px}
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      role="img"
-      aria-label="Unprice Logo"
-    >
-      {/* Left Pillar */}
-      <rect x="3" y="4" width="3" height="16" fill={primary} />
-      {/* Right Pillar */}
-      <rect x="18" y="4" width="3" height="16" fill={primary} />
-      {/* The Foundation (Bottom) */}
-      <rect x="3" y="17" width="18" height="3" fill={primary} />
-    </svg>
-  )
-
-  // 4. THE WORDMARK
-  // Uses system fonts to feel native (San Francisco/Inter).
-  // Tracking is tight (-0.03em) for authority.
   const Wordmark = () => (
     <span
       style={{
         fontSize: `${text}px`,
-        color: primary,
-        fontFamily:
-          "-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-        fontWeight: 600, // Matches the 3px stroke of the icon
-        letterSpacing: "-0.03em", // Tight tracking for "Tech" feel
+        color: ink,
+        fontWeight: 600,
+        letterSpacing: "-0.04em",
         lineHeight: 1,
       }}
+      className="font-sans"
     >
       unprice
     </span>
@@ -87,7 +81,7 @@ export default function UnpriceLogo({
 
   if (variant === "icon") {
     return (
-      <div className={cn("flex", className)}>
+      <div className={cn("inline-flex", className)}>
         <IconMark />
       </div>
     )
@@ -95,37 +89,16 @@ export default function UnpriceLogo({
 
   if (variant === "wordmark") {
     return (
-      <div className={className}>
+      <div className={cn("inline-flex", className)}>
         <Wordmark />
       </div>
     )
   }
 
   return (
-    <div className={cn("flex items-center", className)} style={{ gap: `${gap}px` }}>
+    <div className={cn("inline-flex items-center", className)} style={{ gap: `${gap}px` }}>
       <IconMark />
       <Wordmark />
     </div>
-  )
-}
-
-// When the logo is Black on White (inverted), it visually "shrinks."
-// We increase the stroke weight by ~15% (3px -> 3.5px) to compensate.
-export function UnpriceFavicon() {
-  return (
-    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Solid White Background */}
-      <rect width="32" height="32" rx="4" fill="#FFFFFF" />
-
-      {/* Black Symbol with Thicker Stroke (Optical Compensation) */}
-      <g fill="#000000">
-        {/* Left - Thicker (4px vs 3px) */}
-        <rect x="4" y="5" width="4" height="22" />
-        {/* Right - Thicker */}
-        <rect x="24" y="5" width="4" height="22" />
-        {/* Bottom - Thicker */}
-        <rect x="4" y="23" width="24" height="4" />
-      </g>
-    </svg>
   )
 }
