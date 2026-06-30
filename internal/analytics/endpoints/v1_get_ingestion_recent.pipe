@@ -59,6 +59,8 @@ SQL >
       AND latest_handled_at < {{ Int64(to_ts) }}
       {% if defined(filter_customer_ids) %} AND customer_id IN {{ Array(filter_customer_ids, 'String') }} {% end %}
       {% if defined(event_slugs) %} AND event_slug IN {{ Array(event_slugs, 'String') }} {% end %}
+      {% if defined(source_id) %} AND source_id = {{ String(source_id) }} {% end %}
+      {% if defined(source_ids) %} AND source_id IN {{ Array(source_ids, 'String') }} {% end %}
       {% if defined(source_types) %} AND source_type IN {{ Array(source_types, 'String') }} {% end %}
       {% if defined(rejection_reasons) %} AND rejection_reason IN {{ Array(rejection_reasons, 'String') }} {% end %}
       {% if defined(states) %} AND state IN {{ Array(states, 'String') }} {% end %}

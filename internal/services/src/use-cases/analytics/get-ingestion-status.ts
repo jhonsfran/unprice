@@ -29,6 +29,7 @@ const ingestionStatusFilterSchema = z
   .object({
     customerIds: z.array(z.string()).optional(),
     eventSlugs: z.array(z.string()).optional(),
+    sourceIds: z.array(z.string()).optional(),
     sourceTypes: z.array(z.string()).optional(),
     rejectionReasons: z.array(z.string()).optional(),
     states: z.array(ingestionStateSchema).optional(),
@@ -342,6 +343,14 @@ function matchesFilter(row: FilterableIngestionRow, filter: IngestionStatusFilte
   }
 
   if (
+    hasValues(filter.sourceIds) &&
+    row.source_id !== undefined &&
+    !filter.sourceIds.includes(row.source_id)
+  ) {
+    return false
+  }
+
+  if (
     hasValues(filter.sourceTypes) &&
     row.source_type !== undefined &&
     !filter.sourceTypes.includes(row.source_type)
@@ -386,6 +395,7 @@ function matchesFilter(row: FilterableIngestionRow, filter: IngestionStatusFilte
 function toTinybirdFilter(filter: IngestionStatusFilter): {
   filter_customer_ids?: string[]
   event_slugs?: string[]
+  source_ids?: string[]
   source_types?: string[]
   rejection_reasons?: string[]
   states?: (typeof ingestionStates)[number][]
@@ -393,6 +403,7 @@ function toTinybirdFilter(filter: IngestionStatusFilter): {
 } {
   const customerIds = compactStringValues(filter.customerIds)
   const eventSlugs = compactStringValues(filter.eventSlugs)
+  const sourceIds = compactStringValues(filter.sourceIds)
   const sourceTypes = compactStringValues(filter.sourceTypes)
   const rejectionReasons = compactStringValues(filter.rejectionReasons)
   const search = filter.search?.trim()
@@ -400,6 +411,7 @@ function toTinybirdFilter(filter: IngestionStatusFilter): {
   return {
     ...(customerIds ? { filter_customer_ids: customerIds } : {}),
     ...(eventSlugs ? { event_slugs: eventSlugs } : {}),
+    ...(sourceIds ? { source_ids: sourceIds } : {}),
     ...(sourceTypes ? { source_types: sourceTypes } : {}),
     ...(rejectionReasons ? { rejection_reasons: rejectionReasons } : {}),
     ...(hasValues(filter.states) ? { states: filter.states } : {}),

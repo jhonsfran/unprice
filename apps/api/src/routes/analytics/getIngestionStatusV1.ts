@@ -101,9 +101,9 @@ export const registerGetIngestionStatusV1 = (app: App) =>
         },
         cursor,
         filter: {
-          sourceId,
-          eventSlug,
-          state,
+          ...(sourceId ? { sourceIds: [sourceId] } : {}),
+          ...(eventSlug ? { eventSlugs: [eventSlug] } : {}),
+          ...(state ? { states: [state] } : {}),
         },
         limit,
       }

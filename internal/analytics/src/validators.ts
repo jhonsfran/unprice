@@ -395,6 +395,8 @@ export const ingestionStateFilterSchema = z.enum(["processed", "rejected", "fail
 const ingestionStatusFilterQuerySchema = ingestionStatusWindowQuerySchema.extend({
   filter_customer_ids: z.array(z.string()).optional(),
   event_slugs: z.array(z.string()).optional(),
+  source_id: z.string().optional(),
+  source_ids: z.array(z.string()).optional(),
   source_types: z.array(z.string()).optional(),
   rejection_reasons: z.array(z.string()).optional(),
   states: z.array(ingestionStateFilterSchema).optional(),

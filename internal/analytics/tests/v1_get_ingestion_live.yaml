@@ -8,20 +8,44 @@
     {"second":"2099-01-01 00:00:03.000","processed":0,"rejected":1,"failed":0,"total":1}
     {"second":"2099-01-01 00:00:06.000","processed":0,"rejected":0,"failed":1,"total":1}
 
-- name: ingestion_live_filters_by_source
-  description: Returns scoped counts for one ingestion source without duplicate delivery
+- name: ingestion_live_filters_by_source_type
+  description: Returns scoped counts for one ingestion source type without duplicate delivery
     inflation
-  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&source_id=key_1
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&source_types=api_key
   expected_result: |
     {"second":"2099-01-01 00:00:01.000","processed":2,"rejected":0,"failed":0,"total":2}
     {"second":"2099-01-01 00:00:02.000","processed":0,"rejected":1,"failed":0,"total":1}
     {"second":"2099-01-01 00:00:06.000","processed":0,"rejected":0,"failed":1,"total":1}
 
-- name: ingestion_live_filters_by_event_slug
-  description: Returns scoped counts for one event slug without wrong-project rows
-  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&event_slug=entitlement.checked
+- name: ingestion_live_filters_by_source_ids
+  description: Returns scoped counts for selected source identifiers
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&source_ids=system
   expected_result: |
     {"second":"2099-01-01 00:00:03.000","processed":0,"rejected":1,"failed":0,"total":1}
+
+- name: ingestion_live_filters_by_legacy_source_id
+  description: Keeps the direct source_id filter compatible for Tinybird callers
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&source_id=system
+  expected_result: |
+    {"second":"2099-01-01 00:00:03.000","processed":0,"rejected":1,"failed":0,"total":1}
+
+- name: ingestion_live_filters_by_event_slug
+  description: Returns scoped counts for one event slug without wrong-project rows
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&event_slugs=entitlement.checked
+  expected_result: |
+    {"second":"2099-01-01 00:00:03.000","processed":0,"rejected":1,"failed":0,"total":1}
+
+- name: ingestion_live_filters_by_state
+  description: Returns scoped counts for one terminal ingestion state
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&states=failed
+  expected_result: |
+    {"second":"2099-01-01 00:00:06.000","processed":0,"rejected":0,"failed":1,"total":1}
+
+- name: ingestion_live_filters_by_search
+  description: Returns scoped counts for searchable ingestion identifiers
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&search=failed
+  expected_result: |
+    {"second":"2099-01-01 00:00:06.000","processed":0,"rejected":0,"failed":1,"total":1}
 
 - name: ingestion_live_project_wide_counts
   description: Returns processed and rejected counts across customers when customer_id is omitted

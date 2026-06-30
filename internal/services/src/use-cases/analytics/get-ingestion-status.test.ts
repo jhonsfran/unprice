@@ -156,6 +156,12 @@ describe("getIngestionStatus", () => {
           event_slug: "usage.recorded",
           event_count: 5,
         }),
+        rejectionRow({
+          source_id: "src_3",
+          source_type: "api_key",
+          event_slug: "usage.recorded",
+          event_count: 8,
+        }),
         rejectionRow({ source_id: "src_1", event_slug: "other.event", event_count: 7 }),
       ],
       recentRows: [
@@ -173,6 +179,12 @@ describe("getIngestionStatus", () => {
           handled_at: fromTs + 5_000,
         }),
         recentEvent({
+          event_id: "evt_wrong_source_id",
+          source_id: "src_3",
+          event_slug: "usage.recorded",
+          handled_at: fromTs + 5_500,
+        }),
+        recentEvent({
           event_id: "evt_wrong_slug",
           source_id: "src_1",
           event_slug: "other.event",
@@ -185,6 +197,7 @@ describe("getIngestionStatus", () => {
       ...baseInput(),
       filter: {
         eventSlugs: ["usage.recorded"],
+        sourceIds: ["src_1"],
         sourceTypes: ["api_key"],
       },
       limit: 5,
@@ -197,6 +210,7 @@ describe("getIngestionStatus", () => {
       from_ts: fromTs,
       to_ts: toTs,
       event_slugs: ["usage.recorded"],
+      source_ids: ["src_1"],
       source_types: ["api_key"],
     })
     expect(analytics.getIngestionRejections).toHaveBeenCalledWith({
@@ -205,6 +219,7 @@ describe("getIngestionStatus", () => {
       from_ts: fromTs,
       to_ts: toTs,
       event_slugs: ["usage.recorded"],
+      source_ids: ["src_1"],
       source_types: ["api_key"],
       limit: 5,
     })
@@ -214,6 +229,7 @@ describe("getIngestionStatus", () => {
       from_ts: fromTs,
       to_ts: toTs,
       event_slugs: ["usage.recorded"],
+      source_ids: ["src_1"],
       source_types: ["api_key"],
       limit: 6,
     })
@@ -223,6 +239,7 @@ describe("getIngestionStatus", () => {
       from_ts: fromTs,
       to_ts: toTs,
       event_slugs: ["usage.recorded"],
+      source_ids: ["src_1"],
       source_types: ["api_key"],
       limit: 50,
     })

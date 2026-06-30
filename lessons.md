@@ -44,6 +44,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-23: Tinybird deploy can reject rollup backfills when a modified raw datasource has a
   shorter TTL than existing materialized targets; preserve history with `FORWARD_QUERY` on the
   rollup datasources instead of shortening their TTLs.
+- 2026-06-30: When Tinybird endpoints, datasources, materializations, or fixtures change, add or
+  update the matching `internal/analytics/tests/*.yaml` coverage and run `tb build` plus
+  `tb test run` so existing endpoint expectations still pass.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
   and `amount_after` for cumulative spend.
 - 2026-05-08: Sync ingest idempotency must re-enter entitlement apply replay, not synthesize a

@@ -13,6 +13,30 @@
     {"rejection_reason":"customer_not_found","event_slug":"entitlement.checked","source_id":"system","source_type":"system","event_count":1,"last_seen_at":4070908803200}
     {"rejection_reason":"missing_required_property","event_slug":"usage.recorded","source_id":"key_1","source_type":"api_key","event_count":1,"last_seen_at":4070908802200}
 
+- name: ingestion_rejections_filters_by_source_type
+  description: Returns rejection groups for one source type
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&source_types=system
+  expected_result: |
+    {"rejection_reason":"customer_not_found","event_slug":"entitlement.checked","source_id":"system","source_type":"system","event_count":1,"last_seen_at":4070908803200}
+
+- name: ingestion_rejections_filters_by_source_ids
+  description: Returns rejection groups for selected source identifiers
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&source_ids=system
+  expected_result: |
+    {"rejection_reason":"customer_not_found","event_slug":"entitlement.checked","source_id":"system","source_type":"system","event_count":1,"last_seen_at":4070908803200}
+
+- name: ingestion_rejections_filters_by_rejection_reason
+  description: Returns rejection groups for one rejection reason
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&rejection_reasons=missing_required_property
+  expected_result: |
+    {"rejection_reason":"missing_required_property","event_slug":"usage.recorded","source_id":"key_1","source_type":"api_key","event_count":1,"last_seen_at":4070908802200}
+
+- name: ingestion_rejections_filters_by_search
+  description: Returns rejection groups matching searchable identifiers
+  parameters: project_id=proj_1&customer_id=cus_1&from_ts=4070908800000&to_ts=4070995200000&search=customer
+  expected_result: |
+    {"rejection_reason":"customer_not_found","event_slug":"entitlement.checked","source_id":"system","source_type":"system","event_count":1,"last_seen_at":4070908803200}
+
 - name: ingestion_rejections_excludes_stale_non_rejected_status
   description: Does not report a stale failed status after the canonical id is processed
   parameters: project_id=proj_1&customer_id=cus_1&from_ts=4071081600000&to_ts=4071168000000
