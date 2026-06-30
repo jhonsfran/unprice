@@ -2,22 +2,20 @@
 
 import { useInfiniteQuery, useMutation } from "@tanstack/react-query"
 import { Button } from "@unprice/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { FilterDataTable } from "@unprice/ui/filter-data-table"
 import { toast } from "@unprice/ui/sonner"
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  RotateCcw,
-  TriangleAlert,
-  XCircle,
-} from "lucide-react"
+import { AlertTriangle, RotateCcw } from "lucide-react"
 import { useParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { DateRange } from "react-day-picker"
 import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
-import { NumberTicker } from "~/components/analytics/number-ticker"
+import {
+  type SelectedIngestionFilter,
+  getSelectedIngestionQueryFilter,
+} from "~/components/analytics/ingestion-events-filter-model"
+import { IngestionHealthStrip } from "~/components/analytics/ingestion-health-strip"
+import { RejectionReasonsPanel } from "~/components/analytics/rejection-reasons-panel"
+import { RequestPathSparkline } from "~/components/analytics/request-path-sparkline"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { useFilterDataTable } from "~/hooks/use-filter-datatable"
 import { manipulateDate } from "~/lib/dates"
@@ -81,6 +79,8 @@ function useIngestionEventsData() {
   const replayStorageKey = `unprice:events:replay-queued:${workspaceSlug}:${projectSlug}`
   const [queuedReplayIds, setQueuedReplayIds] = useState<ReadonlySet<string>>(() => new Set())
   const [pendingReplayIds, setPendingReplayIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [selectedIngestionFilter, setSelectedIngestionFilter] =
+    useState<SelectedIngestionFilter | null>(null)
   const hasExplicitDateRange = filters.from !== null || filters.to !== null
   const queryWindow = useMemo(
     () => resolveWindow(filters.from, filters.to, rollingNow),
@@ -136,6 +136,7 @@ function useIngestionEventsData() {
     trpc.analytics.getIngestionStatus.infiniteQueryOptions(
       {
         window: queryWindow,
+        filter: getSelectedIngestionQueryFilter(selectedIngestionFilter),
         limit: EVENTS_PAGE_SIZE,
       },
       {
@@ -248,11 +249,6 @@ function useIngestionEventsData() {
     [dateRange, rows, setFilters]
   )
 
-  const processed = firstPage?.totals.processed ?? 0
-  const rejected = firstPage?.totals.rejected ?? 0
-  const failed = firstPage?.totals.failed ?? 0
-  const total = firstPage?.totals.total ?? 0
-
   const windowLabel = computeWindowLabel(queryWindow.from, queryWindow.to)
 
   const isInitialLoading = isLoading && rows.length === 0
@@ -263,10 +259,9 @@ function useIngestionEventsData() {
     projectSlug,
     freshnessGeneratedAt: firstPage?.freshness.generatedAt,
     isRefreshing,
-    processed,
-    rejected,
-    failed,
-    total,
+    status: firstPage,
+    selectedIngestionFilter,
+    setSelectedIngestionFilter,
     windowLabel,
     rows,
     filterOptions,
@@ -299,10 +294,9 @@ export function IngestionEventsPanel() {
     projectSlug,
     freshnessGeneratedAt,
     isRefreshing,
-    processed,
-    rejected,
-    failed,
-    total,
+    status,
+    selectedIngestionFilter,
+    setSelectedIngestionFilter,
     windowLabel,
     rows,
     filterOptions,
@@ -331,13 +325,45 @@ export function IngestionEventsPanel() {
       <div className="flex min-h-4 items-center justify-end">
         <FreshnessIndicator generatedAt={freshnessGeneratedAt} isFetching={isRefreshing} />
       </div>
-      <IngestionStatsCards
-        processed={processed}
-        rejected={rejected}
-        failed={failed}
-        total={total}
-        windowLabel={windowLabel}
-      />
+      {status ? (
+        <>
+          <IngestionHealthStrip
+            status={status}
+            isFetching={isRefreshing}
+            title="Ingestion health"
+            description={`Events ${windowLabel}. Rejections are business denials; failures need recovery.`}
+          />
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <RequestPathSparkline live={status.live} />
+            <RejectionReasonsPanel
+              rejections={status.rejections}
+              onSelectFilter={(selection) => {
+                setSelectedIngestionFilter(selection)
+                void setFilters({ search: selection.search })
+              }}
+            />
+          </div>
+        </>
+      ) : null}
+      {selectedIngestionFilter ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          <span>
+            Showing rejected events for{" "}
+            <span className="font-mono">{selectedIngestionFilter.label}</span>
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setSelectedIngestionFilter(null)
+              void setFilters({ search: null })
+            }}
+          >
+            Clear filter
+          </Button>
+        </div>
+      ) : null}
       <FilterDataTable
         columns={buildIngestionEventsColumns({
           workspaceSlug,
@@ -445,73 +471,6 @@ export function IngestionEventsPanel() {
             : replayIsPending
         }
       />
-    </div>
-  )
-}
-
-function IngestionStatsCards({
-  processed,
-  rejected,
-  failed,
-  total,
-  windowLabel,
-}: {
-  processed: number
-  rejected: number
-  failed: number
-  total: number
-  windowLabel: string
-}) {
-  return (
-    <div className="grid gap-4 md:grid-cols-4">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="font-medium text-sm">Processed</CardTitle>
-          <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="font-bold text-2xl">
-            <NumberTicker value={processed} decimalPlaces={0} startValue={0} />
-          </div>
-          <p className="text-muted-foreground text-xs">{windowLabel}</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="font-medium text-sm">Rejected</CardTitle>
-          <XCircle className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="font-bold text-2xl">
-            <NumberTicker value={rejected} decimalPlaces={0} startValue={0} />
-          </div>
-          <p className="text-muted-foreground text-xs">{windowLabel}</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="font-medium text-sm">Failed</CardTitle>
-          <TriangleAlert className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="font-bold text-2xl">
-            <NumberTicker value={failed} decimalPlaces={0} startValue={0} />
-          </div>
-          <p className="text-muted-foreground text-xs">{windowLabel}</p>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="font-medium text-sm">Total</CardTitle>
-          <Activity className="h-4 w-4 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="font-bold text-2xl">
-            <NumberTicker value={total} decimalPlaces={0} startValue={0} />
-          </div>
-          <p className="text-muted-foreground text-xs">{windowLabel}</p>
-        </CardContent>
-      </Card>
     </div>
   )
 }

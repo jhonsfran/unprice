@@ -298,6 +298,17 @@ export function buildIngestionEventsFilters(
       value: customerId,
     }))
 
+  const rejectionReasonOptions = Array.from(
+    new Set(
+      rows.map((row) => row.rejectionReason).filter((value): value is string => Boolean(value))
+    )
+  )
+    .sort()
+    .map((rejectionReason) => ({
+      label: rejectionReason,
+      value: rejectionReason,
+    }))
+
   return [
     dateFilter,
     {
@@ -316,6 +327,15 @@ export function buildIngestionEventsFilters(
       hideEmptyOptions: true,
       emptyOptionsLabel: "No sources for the selected filters",
       options: sourceTypeOptions,
+    },
+    {
+      type: "checkbox",
+      id: "rejectionReason",
+      label: "Rejection reason",
+      showCounts: true,
+      hideEmptyOptions: true,
+      emptyOptionsLabel: "No rejection reasons for the selected filters",
+      options: rejectionReasonOptions,
     },
     {
       type: "checkbox",

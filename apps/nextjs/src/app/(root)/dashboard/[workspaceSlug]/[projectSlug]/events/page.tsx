@@ -1,3 +1,4 @@
+import { Skeleton } from "@unprice/ui/skeleton"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
@@ -23,19 +24,13 @@ export default async function ProjectEventsPage(_props: {
       <HydrateClient>
         <Suspense
           fallback={
-            <div className="space-y-6">
-              <div className="grid gap-4 md:grid-cols-4">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div
-                    key={`skeleton-${
-                      // biome-ignore lint/suspicious/noArrayIndexKey: static skeleton
-                      i
-                    }`}
-                    className="h-[100px] animate-pulse rounded-lg border bg-muted/20"
-                  />
-                ))}
+            <div className="flex flex-col gap-6">
+              <Skeleton className="h-[250px] rounded-lg" />
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <Skeleton className="h-[340px] rounded-lg" />
+                <Skeleton className="h-[340px] rounded-lg" />
               </div>
-              <div className="h-[520px] animate-pulse rounded-md border bg-muted/10" />
+              <Skeleton className="h-[520px] rounded-md" />
             </div>
           }
         >
