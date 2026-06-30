@@ -20,6 +20,7 @@ import { type ReactNode, useMemo } from "react"
 import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
+import { MoneyPath } from "~/components/landing/money-path"
 import { SuperLink } from "~/components/super-link"
 import { ProgressBar } from "./progress"
 import { type UsageChartPoint, buildUsageChartConfig } from "./usage-chart-config"
@@ -359,9 +360,9 @@ function UsageDashboardEmptyState({
       </CardHeader>
       <CardContent className="py-6">
         <EmptyPlaceholder className="min-h-[520px] transition-opacity duration-300">
-          <EmptyPlaceholder.Icon>
-            <BarChart3 className="h-8 w-8 opacity-40 motion-safe:animate-pulse" />
-          </EmptyPlaceholder.Icon>
+          <div className="w-full max-w-4xl">
+            <MoneyPath />
+          </div>
           <EmptyPlaceholder.Title>No usage data yet</EmptyPlaceholder.Title>
           <EmptyPlaceholder.Description>
             Record usage events with feature slugs. Rejected or failed events appear in Events.
