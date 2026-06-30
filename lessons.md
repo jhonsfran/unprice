@@ -50,6 +50,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-30: When Tinybird endpoints, datasources, materializations, or fixtures change, add or
   update the matching `internal/analytics/tests/*.yaml` coverage and run `tb build` plus
   `tb test run` so existing endpoint expectations still pass.
+- 2026-07-01: Tinybird endpoints that `UNION ALL` per-group buckets need a final outer
+  `ORDER BY`; subquery order only limits each bucket and does not make the combined output stable.
 - 2026-05-08: `entitlement_meter_facts` needs no synthetic `id`; use `amount` for event spend
   and `amount_after` for cumulative spend.
 - 2026-05-08: Sync ingest idempotency must re-enter entitlement apply replay, not synthesize a

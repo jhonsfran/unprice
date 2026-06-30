@@ -55,7 +55,7 @@ SQL >
         )
       {% end %}
 
-NODE ingestion_facets_node
+NODE raw_ingestion_facets
 SQL >
     %
     SELECT
@@ -139,5 +139,24 @@ SQL >
       ORDER BY event_count DESC, value ASC
       LIMIT {{ Int32(limit, 50) }}
     )
+
+NODE ingestion_facets_node
+SQL >
+    SELECT
+      facet,
+      value,
+      event_count
+    FROM raw_ingestion_facets
+    ORDER BY
+      multiIf(
+        facet = 'state', 1,
+        facet = 'event_slug', 2,
+        facet = 'source_type', 3,
+        facet = 'rejection_reason', 4,
+        facet = 'customer_id', 5,
+        99
+      ),
+      event_count DESC,
+      value ASC
 
 TYPE endpoint
