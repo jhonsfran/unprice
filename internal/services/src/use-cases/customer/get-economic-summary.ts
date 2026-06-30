@@ -64,8 +64,8 @@ export async function getCustomerEconomicSummary(
   const input = getCustomerEconomicSummaryInputSchema.parse(rawInput)
 
   const result = await wrapResult(
-    deps.db.transaction(async (tx) => {
-      const customer = await tx.query.customers.findFirst({
+    (async () => {
+      const customer = await deps.db.query.customers.findFirst({
         columns: {
           id: true,
         },
@@ -79,7 +79,7 @@ export async function getCustomerEconomicSummary(
 
       const [totalRuns, runningRuns, budgetExceededRuns, totalInvoices, paidInvoices] =
         await Promise.all([
-          tx
+          deps.db
             .select({ count: count() })
             .from(budgetRuns)
             .where(
@@ -88,7 +88,7 @@ export async function getCustomerEconomicSummary(
                 eq(budgetRuns.projectId, input.projectId)
               )
             ),
-          tx
+          deps.db
             .select({ count: count() })
             .from(budgetRuns)
             .where(
@@ -98,7 +98,7 @@ export async function getCustomerEconomicSummary(
                 eq(budgetRuns.status, "running")
               )
             ),
-          tx
+          deps.db
             .select({ count: count() })
             .from(budgetRuns)
             .where(
@@ -108,7 +108,7 @@ export async function getCustomerEconomicSummary(
                 eq(budgetRuns.status, "budget_exceeded")
               )
             ),
-          tx
+          deps.db
             .select({ count: count() })
             .from(invoices)
             .where(
@@ -117,7 +117,7 @@ export async function getCustomerEconomicSummary(
                 eq(invoices.projectId, input.projectId)
               )
             ),
-          tx
+          deps.db
             .select({ count: count() })
             .from(invoices)
             .where(
@@ -137,7 +137,7 @@ export async function getCustomerEconomicSummary(
         totalInvoices: getCount(totalInvoices[0]),
         paidInvoices: getCount(paidInvoices[0]),
       })
-    }),
+    })(),
     (error) =>
       new FetchError({
         message: `error getting customer economic summary: ${error.message}`,
