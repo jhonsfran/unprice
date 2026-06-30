@@ -16,7 +16,7 @@ export const iconsOverviewStats = {
 
 export const OverviewStatsSkeleton = ({ isLoading }: { isLoading?: boolean }) => {
   const skeletonStats = [
-    { title: "Total Revenue" },
+    { title: "Recognized revenue" },
     { title: "New Signups" },
     { title: "New Subscriptions" },
     { title: "New Customers" },
@@ -74,6 +74,13 @@ const OverviewStats = () => {
           isFetching ? "opacity-90" : "opacity-100"
         )}
       >
+        <div className="mb-3 flex flex-col gap-1">
+          <p className="font-medium text-sm">Growth evidence</p>
+          <p className="text-muted-foreground text-xs">
+            Supporting business context. Operational health and spend evidence above are the primary
+            dashboard state.
+          </p>
+        </div>
         <StatsCards stats={statsCards} />
       </div>
     </div>

@@ -214,7 +214,7 @@ export class AnalyticsService {
       },
       totalRevenue: {
         total: 0,
-        title: "Total Revenue",
+        title: "Recognized revenue",
         description: `in the last ${preparedInterval.durationLabel}`,
         unit: currencySymbol(defaultCurrency),
       },

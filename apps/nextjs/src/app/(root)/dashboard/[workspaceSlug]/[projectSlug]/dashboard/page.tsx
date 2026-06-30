@@ -1,17 +1,17 @@
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
+import { buildIngestionHealthInput } from "~/components/analytics/ingestion-health-query"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
+import { OperationalHealth, OperationalHealthSkeleton } from "./_components/operational-health"
 import OverviewStats, { OverviewStatsSkeleton } from "./_components/overview-stats"
 import TabsDashboard from "./_components/tabs-dashboard"
 import { UsageStats, UsageStatsSkeleton } from "./_components/usage-stats"
 
 export const dynamic = "force-dynamic"
-
-const INGESTION_HEALTH_WINDOW_MS = 60 * 60 * 1000
 
 export default async function DashboardOverview(props: {
   params: { workspaceSlug: string; projectSlug: string }
@@ -21,20 +21,12 @@ export default async function DashboardOverview(props: {
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
   const filter = intervalParams(props.searchParams)
   const now = Date.now()
+  const healthInput = buildIngestionHealthInput({ now })
 
   batchPrefetch([
-    trpc.analytics.getIngestionStatus.queryOptions(
-      {
-        window: {
-          from: now - INGESTION_HEALTH_WINDOW_MS,
-          to: now,
-        },
-        limit: 5,
-      },
-      {
-        staleTime: 15 * 1000,
-      }
-    ),
+    trpc.analytics.getIngestionStatus.queryOptions(healthInput, {
+      staleTime: 15 * 1000,
+    }),
     trpc.analytics.getOverviewStats.queryOptions(
       {
         interval: filter.intervalFilter,
@@ -61,14 +53,19 @@ export default async function DashboardOverview(props: {
         <IntervalFilter className="ml-auto" />
       </div>
       <HydrateClient>
-        <div className="min-h-[150px]">
-          <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
-            <OverviewStats />
+        <div className="min-h-[250px]">
+          <Suspense fallback={<OperationalHealthSkeleton />}>
+            <OperationalHealth initialNow={now} />
           </Suspense>
         </div>
         <div className="min-h-[520px]">
           <Suspense fallback={<UsageStatsSkeleton />}>
             <UsageStats />
+          </Suspense>
+        </div>
+        <div className="min-h-[150px]">
+          <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
+            <OverviewStats />
           </Suspense>
         </div>
       </HydrateClient>
