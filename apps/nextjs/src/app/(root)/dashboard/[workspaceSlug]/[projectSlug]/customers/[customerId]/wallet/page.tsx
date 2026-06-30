@@ -1,15 +1,10 @@
 import { walletCreditSourceSchema } from "@unprice/db/validators"
-import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Typography } from "@unprice/ui/typography"
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
-import { DashboardShell } from "~/components/layout/dashboard-shell"
-import HeaderTab from "~/components/layout/header-tab"
-import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
-import { CustomerActions } from "../../_components/customers/customer-actions"
 import { columns as walletCreditColumns } from "../../_components/wallet/table-wallet-credits/columns"
 import { WalletBalanceSummary } from "../../_components/wallet/wallet-balance-summary"
 
@@ -26,8 +21,7 @@ export default async function CustomerWalletPage({
     customerId: string
   }
 }) {
-  const { workspaceSlug, projectSlug, customerId } = params
-  const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
+  const { customerId } = params
   const { customer, wallet } = await api.customers.getWallet({
     customerId,
   })
@@ -42,91 +36,50 @@ export default async function CustomerWalletPage({
   }))
 
   return (
-    <DashboardShell
-      header={
-        <HeaderTab
-          title={customer.email}
-          description={customer.description}
-          label={customer.active ? "active" : "inactive"}
-          id={customer.id}
-          action={<CustomerActions customer={customer} />}
-        />
-      }
-    >
-      <TabNavigation>
-        <div className="flex items-center">
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}`}>Overview</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild active>
-            <SuperLink href={`${baseUrl}/wallet`}>Wallet & Credits</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/runs`}>Runs</SuperLink>
-          </TabNavigationLink>
+    <div className="mt-4 flex flex-col gap-6">
+      <WalletBalanceSummary wallet={wallet} />
+
+      <div>
+        <div className="flex flex-col px-1 py-4">
+          <Typography variant="p" affects="removePaddingMargin">
+            Wallet credits for this customer
+          </Typography>
         </div>
-      </TabNavigation>
-
-      <div className="mt-4 flex flex-col gap-6">
-        <WalletBalanceSummary wallet={wallet} />
-
-        <div>
-          <div className="flex flex-col px-1 py-4">
-            <Typography variant="p" affects="removePaddingMargin">
-              Wallet credits for this customer
-            </Typography>
-          </div>
-          <Suspense
-            fallback={
-              <DataTableSkeleton
-                columnCount={8}
-                searchableColumnCount={1}
-                filterableColumnCount={2}
-                cellWidths={[
-                  "18rem",
-                  "10rem",
-                  "10rem",
-                  "10rem",
-                  "10rem",
-                  "10rem",
-                  "14rem",
-                  "14rem",
-                ]}
-              />
-            }
-          >
-            <DataTable
-              columns={walletCreditColumns}
-              data={walletCredits}
-              emptyState={{
-                title: "No wallet credits",
-                description: "This customer has no issued, active, or expired wallet credits yet.",
-              }}
-              hidePaginationWhenEmpty
-              filterOptions={{
-                filterBy: "id",
-                filterColumns: true,
-                filterSelectors: {
-                  source: walletCreditSourceSchema.options.map((value) => ({
-                    value,
-                    label: value,
-                  })),
-                  status: walletCreditStatuses.map((value) => ({
-                    value,
-                    label: value,
-                  })),
-                },
-              }}
+        <Suspense
+          fallback={
+            <DataTableSkeleton
+              columnCount={8}
+              searchableColumnCount={1}
+              filterableColumnCount={2}
+              cellWidths={["18rem", "10rem", "10rem", "10rem", "10rem", "10rem", "14rem", "14rem"]}
             />
-          </Suspense>
-        </div>
+          }
+        >
+          <DataTable
+            columns={walletCreditColumns}
+            data={walletCredits}
+            emptyState={{
+              title: "No wallet credits",
+              description: "This customer has no issued, active, or expired wallet credits yet.",
+            }}
+            hidePaginationWhenEmpty
+            filterOptions={{
+              filterBy: "id",
+              filterColumns: true,
+              filterSelectors: {
+                source: walletCreditSourceSchema.options.map((value) => ({
+                  value,
+                  label: value,
+                })),
+                status: walletCreditStatuses.map((value) => ({
+                  value,
+                  label: value,
+                })),
+              },
+            }}
+          />
+        </Suspense>
       </div>
-    </DashboardShell>
+    </div>
   )
 }

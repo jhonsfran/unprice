@@ -1,17 +1,9 @@
-import { Button } from "@unprice/ui/button"
-import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
-import { CodeApiSheet } from "~/components/code-api-sheet"
-import { DashboardShell } from "~/components/layout/dashboard-shell"
-import HeaderTab from "~/components/layout/header-tab"
-import { SuperLink } from "~/components/super-link"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, api, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
-import { CustomerActions } from "../../_components/customers/customer-actions"
 import {
   CustomerMetricsPanel,
   CustomerMetricsPanelSkeleton,
@@ -30,8 +22,7 @@ export default async function CustomerUsagePage({
   }
   searchParams: SearchParams
 }) {
-  const { workspaceSlug, projectSlug, customerId } = params
-  const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
+  const { customerId } = params
   const filter = intervalParams(searchParams)
 
   const { customer } = await api.customers.getSubscriptions({
@@ -55,52 +46,10 @@ export default async function CustomerUsagePage({
   ])
 
   return (
-    <DashboardShell
-      header={
-        <HeaderTab
-          title={customer.email}
-          description={customer.description}
-          label={customer.active ? "active" : "inactive"}
-          id={customer.id}
-          action={
-            <div className="flex items-center gap-2">
-              <CodeApiSheet defaultMethod="getUsage">
-                <Button variant={"ghost"}>
-                  <Code className="mr-2 h-4 w-4" />
-                  API
-                </Button>
-              </CodeApiSheet>
-              <CustomerActions customer={customer} />
-            </div>
-          }
-        />
-      }
-    >
-      <TabNavigation>
-        <div className="flex items-center">
-          <TabNavigationLink asChild active>
-            <SuperLink href={`${baseUrl}`}>Overview</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/wallet`}>Wallet & Credits</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/invoices`}>Invoices</SuperLink>
-          </TabNavigationLink>
-          <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/runs`}>Runs</SuperLink>
-          </TabNavigationLink>
-        </div>
-      </TabNavigation>
-
-      <HydrateClient>
-        <Suspense fallback={<CustomerMetricsPanelSkeleton />}>
-          <CustomerMetricsPanel customerId={customerId} invoiceCount={customer.invoices.length} />
-        </Suspense>
-      </HydrateClient>
-    </DashboardShell>
+    <HydrateClient>
+      <Suspense fallback={<CustomerMetricsPanelSkeleton />}>
+        <CustomerMetricsPanel customerId={customerId} invoiceCount={customer.invoices.length} />
+      </Suspense>
+    </HydrateClient>
   )
 }
