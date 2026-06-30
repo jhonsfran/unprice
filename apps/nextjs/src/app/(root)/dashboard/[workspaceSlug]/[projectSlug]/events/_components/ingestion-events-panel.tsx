@@ -46,6 +46,16 @@ const INGESTION_STATES = ["processed", "rejected", "failed"] as const
 const INGESTION_SUMMARY_METRICS = ["Success", "Processed", "Rejected", "Failed", "Attention"]
 
 const TABLE_LOADING_STATE = <EmptyPlaceholder className="min-h-[300px] border-none" isLoading />
+const INGESTION_SUMMARY_SKELETON_BADGES = (
+  <>
+    <Skeleton className="h-5 w-20" />
+    <Skeleton className="h-5 w-20" />
+  </>
+)
+const INGESTION_SUMMARY_SKELETON_ACTIONS = <Skeleton className="h-4 w-48" />
+const INGESTION_SUMMARY_SKELETON_VALUE = <Skeleton className="h-7 w-16" />
+const INGESTION_SUMMARY_SKELETON_HELPER = <Skeleton className="h-3 w-24" />
+const INGESTION_SUMMARY_SKELETON_ICON = <Skeleton className="size-4 rounded-full" />
 
 function today(): Date {
   return new Date()
@@ -518,22 +528,17 @@ function IngestionEventsSummarySkeleton({ windowLabel }: { windowLabel: string }
       <EvidenceSection
         title="Ingestion health"
         description={`Events ${windowLabel}. Rejections are business denials; failures need recovery.`}
-        badges={
-          <>
-            <Skeleton className="h-5 w-20" />
-            <Skeleton className="h-5 w-20" />
-          </>
-        }
-        actions={<Skeleton className="h-4 w-48" />}
+        badges={INGESTION_SUMMARY_SKELETON_BADGES}
+        actions={INGESTION_SUMMARY_SKELETON_ACTIONS}
       >
         <EvidenceMetricStrip className="md:grid-cols-5">
           {INGESTION_SUMMARY_METRICS.map((label) => (
             <EvidenceMetricTile
               key={label}
               label={label}
-              value={<Skeleton className="h-7 w-16" />}
-              helper={<Skeleton className="h-3 w-24" />}
-              icon={<Skeleton className="size-4 rounded-full" />}
+              value={INGESTION_SUMMARY_SKELETON_VALUE}
+              helper={INGESTION_SUMMARY_SKELETON_HELPER}
+              icon={INGESTION_SUMMARY_SKELETON_ICON}
             />
           ))}
         </EvidenceMetricStrip>

@@ -19,14 +19,17 @@ export const iconsOverviewStats = {
   newCustomers: Users,
 }
 
-export const OverviewStatsSkeleton = ({ isLoading }: { isLoading?: boolean }) => {
-  const skeletonStats = [
-    { title: "Recognized revenue" },
-    { title: "New Signups" },
-    { title: "New Subscriptions" },
-    { title: "New Customers" },
-  ]
+const OVERVIEW_SKELETON_STATS = [
+  { title: "Recognized revenue" },
+  { title: "New Signups" },
+  { title: "New Subscriptions" },
+  { title: "New Customers" },
+]
+const OVERVIEW_STATS_LOADING_VALUE = <Skeleton className="h-6 w-20" />
+const OVERVIEW_STATS_SKELETON_HELPER = <Skeleton className="h-3 w-28" />
+const OVERVIEW_STATS_SKELETON_ICON = <Skeleton className="size-4 shrink-0" />
 
+export const OverviewStatsSkeleton = ({ isLoading }: { isLoading?: boolean }) => {
   return (
     <EvidenceSection
       title="Growth evidence"
@@ -35,13 +38,13 @@ export const OverviewStatsSkeleton = ({ isLoading }: { isLoading?: boolean }) =>
       contentClassName="mt-3"
     >
       <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
-        {skeletonStats.map((stat) => (
+        {OVERVIEW_SKELETON_STATS.map((stat) => (
           <EvidenceMetricTile
             key={stat.title}
             label={stat.title}
-            value={isLoading ? <Skeleton className="h-6 w-20" /> : "0"}
-            helper={<Skeleton className="h-3 w-28" />}
-            icon={<Skeleton className="size-4 shrink-0" />}
+            value={isLoading ? OVERVIEW_STATS_LOADING_VALUE : "0"}
+            helper={OVERVIEW_STATS_SKELETON_HELPER}
+            icon={OVERVIEW_STATS_SKELETON_ICON}
           />
         ))}
       </EvidenceMetricStrip>

@@ -4,6 +4,7 @@ import { Badge } from "@unprice/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
 import { AlertTriangle, CheckCircle2, CircleSlash, ShieldAlert, XCircle } from "lucide-react"
+import { type ReactNode, useMemo } from "react"
 import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { NumberTicker } from "~/components/analytics/number-ticker"
 import { EvidenceMetricStrip, EvidenceMetricTile, EvidenceSection } from "./evidence-panel"
@@ -43,6 +44,8 @@ export function IngestionHealthStrip({
   const successTone = getSuccessTone(status)
   const attentionCount = getAttentionCount(status)
   const actionMessages = getActionMessages(status, { showNoEventsAction })
+  const pipelineLabel = getPipelineLabel(status)
+  const enforcementLabel = getEnforcementLabel(status)
   const metrics = (
     <EvidenceMetricStrip className="md:grid-cols-5">
       <EvidenceMetricTile
@@ -96,24 +99,16 @@ export function IngestionHealthStrip({
 
   if (presentation === "section") {
     return (
-      <EvidenceSection
+      <IngestionHealthEvidenceSection
+        status={status}
+        isFetching={isFetching}
         title={title}
         description={description}
-        badges={
-          <>
-            <Badge variant={pipelineTone}>{getPipelineLabel(status)}</Badge>
-            <Badge variant={enforcementTone}>{getEnforcementLabel(status)}</Badge>
-          </>
-        }
-        actions={
-          <FreshnessIndicator generatedAt={status.freshness.generatedAt} isFetching={isFetching} />
-        }
-        isRefreshing={isFetching}
         className={className}
       >
         {metrics}
         {actionPanel}
-      </EvidenceSection>
+      </IngestionHealthEvidenceSection>
     )
   }
 
@@ -130,8 +125,8 @@ export function IngestionHealthStrip({
           <div className="flex flex-col gap-1.5">
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle>{title}</CardTitle>
-              <Badge variant={pipelineTone}>{getPipelineLabel(status)}</Badge>
-              <Badge variant={enforcementTone}>{getEnforcementLabel(status)}</Badge>
+              <Badge variant={pipelineTone}>{pipelineLabel}</Badge>
+              <Badge variant={enforcementTone}>{enforcementLabel}</Badge>
             </div>
             <CardDescription>{description}</CardDescription>
           </div>
@@ -143,5 +138,52 @@ export function IngestionHealthStrip({
         {actionPanel}
       </CardContent>
     </Card>
+  )
+}
+
+function IngestionHealthEvidenceSection({
+  status,
+  isFetching,
+  title,
+  description,
+  className,
+  children,
+}: {
+  status: IngestionStatus
+  isFetching: boolean
+  title: string
+  description: string
+  className?: string
+  children: ReactNode
+}) {
+  const pipelineTone = getPipelineTone(status)
+  const enforcementTone = getEnforcementTone(status)
+  const pipelineLabel = getPipelineLabel(status)
+  const enforcementLabel = getEnforcementLabel(status)
+  const badges = useMemo(
+    () => (
+      <>
+        <Badge variant={pipelineTone}>{pipelineLabel}</Badge>
+        <Badge variant={enforcementTone}>{enforcementLabel}</Badge>
+      </>
+    ),
+    [enforcementLabel, enforcementTone, pipelineLabel, pipelineTone]
+  )
+  const actions = useMemo(
+    () => <FreshnessIndicator generatedAt={status.freshness.generatedAt} isFetching={isFetching} />,
+    [isFetching, status.freshness.generatedAt]
+  )
+
+  return (
+    <EvidenceSection
+      title={title}
+      description={description}
+      badges={badges}
+      actions={actions}
+      isRefreshing={isFetching}
+      className={className}
+    >
+      {children}
+    </EvidenceSection>
   )
 }

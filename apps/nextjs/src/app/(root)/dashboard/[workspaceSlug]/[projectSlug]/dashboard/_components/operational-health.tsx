@@ -23,6 +23,20 @@ const OPERATIONAL_HEALTH_SKELETON_METRICS = [
   "attention",
 ]
 
+const OPERATIONAL_HEALTH_SKELETON_TITLE = <Skeleton className="h-5 w-44" />
+const OPERATIONAL_HEALTH_SKELETON_BADGES = (
+  <>
+    <Skeleton className="h-5 w-20" />
+    <Skeleton className="h-5 w-24" />
+  </>
+)
+const OPERATIONAL_HEALTH_SKELETON_DESCRIPTION = <Skeleton className="h-4 w-[34rem] max-w-full" />
+const OPERATIONAL_HEALTH_SKELETON_ACTIONS = <Skeleton className="h-4 w-48" />
+const OPERATIONAL_HEALTH_SKELETON_LABEL = <Skeleton className="h-3 w-20" />
+const OPERATIONAL_HEALTH_SKELETON_VALUE = <Skeleton className="h-6 w-12" />
+const OPERATIONAL_HEALTH_SKELETON_HELPER = <Skeleton className="h-3 w-24" />
+const OPERATIONAL_HEALTH_SKELETON_ICON = <Skeleton className="size-4" />
+
 function buildEmptyIngestionStatus(
   input: ReturnType<typeof buildIngestionHealthInput>
 ): IngestionStatus {
@@ -105,24 +119,19 @@ export function OperationalHealth({ initialNow }: { initialNow: number }) {
 export function OperationalHealthSkeleton() {
   return (
     <EvidenceSection
-      title={<Skeleton className="h-5 w-44" />}
-      badges={
-        <>
-          <Skeleton className="h-5 w-20" />
-          <Skeleton className="h-5 w-24" />
-        </>
-      }
-      description={<Skeleton className="h-4 w-[34rem] max-w-full" />}
-      actions={<Skeleton className="h-4 w-48" />}
+      title={OPERATIONAL_HEALTH_SKELETON_TITLE}
+      badges={OPERATIONAL_HEALTH_SKELETON_BADGES}
+      description={OPERATIONAL_HEALTH_SKELETON_DESCRIPTION}
+      actions={OPERATIONAL_HEALTH_SKELETON_ACTIONS}
     >
       <EvidenceMetricStrip className="md:grid-cols-5">
         {OPERATIONAL_HEALTH_SKELETON_METRICS.map((metric) => (
           <EvidenceMetricTile
             key={metric}
-            label={<Skeleton className="h-3 w-20" />}
-            value={<Skeleton className="h-6 w-12" />}
-            helper={<Skeleton className="h-3 w-24" />}
-            icon={<Skeleton className="size-4" />}
+            label={OPERATIONAL_HEALTH_SKELETON_LABEL}
+            value={OPERATIONAL_HEALTH_SKELETON_VALUE}
+            helper={OPERATIONAL_HEALTH_SKELETON_HELPER}
+            icon={OPERATIONAL_HEALTH_SKELETON_ICON}
           />
         ))}
       </EvidenceMetricStrip>

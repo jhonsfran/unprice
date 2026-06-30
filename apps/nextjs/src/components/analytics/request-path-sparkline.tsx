@@ -1,15 +1,11 @@
 "use client"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "@unprice/ui/chart"
+import type { ChartConfig } from "@unprice/ui/chart"
+import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
 import { format } from "date-fns"
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Suspense, lazy } from "react"
 import { EvidenceFrame, EvidenceSection } from "./evidence-panel"
 import type { IngestionStatus } from "./ingestion-health-model"
 
@@ -18,6 +14,85 @@ const chartConfig = {
   rejected: { label: "Rejected", color: "var(--chart-3)" },
   failed: { label: "Failed", color: "var(--chart-5)" },
 } satisfies ChartConfig
+
+type RequestPathChartProps = {
+  live: IngestionStatus["live"]
+  window: IngestionStatus["window"]
+  framed?: boolean
+}
+
+const LazyRequestPathChartContent = lazy(async () => {
+  const [{ ChartContainer, ChartTooltip, ChartTooltipContent }, Recharts] = await Promise.all([
+    import("@unprice/ui/chart"),
+    import("recharts"),
+  ])
+  const { CartesianGrid, Line, LineChart, XAxis, YAxis } = Recharts
+
+  function RequestPathChartContent({ live, window, framed = false }: RequestPathChartProps) {
+    const chart = (
+      <ChartContainer
+        config={chartConfig}
+        className={cn(framed ? "h-full" : "h-[220px]", "w-full")}
+      >
+        <LineChart accessibilityLayer data={live} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
+          <CartesianGrid vertical={false} className="stroke-muted" />
+          <XAxis
+            dataKey="second"
+            axisLine={false}
+            tickLine={false}
+            tickMargin={10}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+            minTickGap={36}
+            tickFormatter={(value) => formatRequestPathTick(value, window)}
+          />
+          <YAxis
+            axisLine={false}
+            tickLine={false}
+            tickMargin={10}
+            tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
+          />
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                indicator="line"
+                labelFormatter={(value) => formatRequestPathTooltip(value)}
+              />
+            }
+          />
+          <Line
+            type="monotone"
+            dataKey="processed"
+            stroke="var(--color-processed)"
+            strokeWidth={2}
+            dot={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="rejected"
+            stroke="var(--color-rejected)"
+            strokeWidth={2}
+            dot={false}
+          />
+          <Line
+            type="monotone"
+            dataKey="failed"
+            stroke="var(--color-failed)"
+            strokeWidth={2}
+            dot={false}
+          />
+        </LineChart>
+      </ChartContainer>
+    )
+
+    if (!framed) {
+      return chart
+    }
+
+    return <EvidenceFrame className="px-2 py-3">{chart}</EvidenceFrame>
+  }
+
+  return { default: RequestPathChartContent }
+})
 
 export function RequestPathSparkline({
   live,
@@ -59,15 +134,7 @@ export function RequestPathSparkline({
   )
 }
 
-function RequestPathChart({
-  live,
-  window,
-  framed = false,
-}: {
-  live: IngestionStatus["live"]
-  window: IngestionStatus["window"]
-  framed?: boolean
-}) {
+function RequestPathChart({ live, window, framed = false }: RequestPathChartProps) {
   if (live.length === 0) {
     return (
       <EvidenceFrame
@@ -82,63 +149,23 @@ function RequestPathChart({
     )
   }
 
-  const chart = (
-    <ChartContainer config={chartConfig} className={cn(framed ? "h-full" : "h-[220px]", "w-full")}>
-      <LineChart accessibilityLayer data={live} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-        <CartesianGrid vertical={false} className="stroke-muted" />
-        <XAxis
-          dataKey="second"
-          axisLine={false}
-          tickLine={false}
-          tickMargin={10}
-          tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-          minTickGap={36}
-          tickFormatter={(value) => formatRequestPathTick(value, window)}
-        />
-        <YAxis
-          axisLine={false}
-          tickLine={false}
-          tickMargin={10}
-          tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
-        />
-        <ChartTooltip
-          content={
-            <ChartTooltipContent
-              indicator="line"
-              labelFormatter={(value) => formatRequestPathTooltip(value)}
-            />
-          }
-        />
-        <Line
-          type="monotone"
-          dataKey="processed"
-          stroke="var(--color-processed)"
-          strokeWidth={2}
-          dot={false}
-        />
-        <Line
-          type="monotone"
-          dataKey="rejected"
-          stroke="var(--color-rejected)"
-          strokeWidth={2}
-          dot={false}
-        />
-        <Line
-          type="monotone"
-          dataKey="failed"
-          stroke="var(--color-failed)"
-          strokeWidth={2}
-          dot={false}
-        />
-      </LineChart>
-    </ChartContainer>
+  return (
+    <Suspense fallback={<RequestPathChartFallback framed={framed} />}>
+      <LazyRequestPathChartContent live={live} window={window} framed={framed} />
+    </Suspense>
   )
+}
 
+function RequestPathChartFallback({ framed }: { framed: boolean }) {
   if (!framed) {
-    return chart
+    return <Skeleton className="h-[220px] w-full rounded-md" />
   }
 
-  return <EvidenceFrame className="px-2 py-3">{chart}</EvidenceFrame>
+  return (
+    <EvidenceFrame className="px-2 py-3">
+      <Skeleton className="h-full w-full rounded-none" />
+    </EvidenceFrame>
+  )
 }
 
 function formatRequestPathTick(value: unknown, window: IngestionStatus["window"]): string {

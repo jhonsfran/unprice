@@ -59,63 +59,63 @@ describe("getIngestionStatusV1 route", () => {
       getIngestionRecent,
       getIngestionFacets,
     } = createTestApp({
-        liveRows: [
-          {
-            second: "2026-06-05 12:00:00",
-            processed: 2,
-            rejected: 1,
-            failed: 0,
-            total: 3,
-          },
-          {
-            second: "2026-06-05 12:00:01",
-            processed: 1,
-            rejected: 0,
-            failed: 0,
-            total: 1,
-          },
-        ],
-        rejectionRows: [
-          {
-            rejection_reason: "missing_entitlement",
-            event_slug: "usage.recorded",
-            source_id: "src_1",
-            source_type: "api_key",
-            event_count: 1,
-            last_seen_at: fromTs + 5_000,
-          },
-          {
-            rejection_reason: "wrong_source",
-            event_slug: "usage.recorded",
-            source_id: "src_2",
-            source_type: "api_key",
-            event_count: 4,
-            last_seen_at: fromTs + 4_000,
-          },
-        ],
-        recentRows: [
-          makeRecentEvent({
-            event_id: "evt_1",
-            canonical_audit_id: "audit_1",
-            state: "processed",
-            rejection_reason: null,
-            handled_at: fromTs + 5_500,
-          }),
-          makeRecentEvent({
-            event_id: "evt_2",
-            canonical_audit_id: "audit_2",
-            source_id: "src_2",
-            state: "rejected",
-            rejection_reason: "wrong_source",
-            handled_at: fromTs + 5_250,
-          }),
-          makeRecentEvent({
-            event_id: "evt_3",
-            canonical_audit_id: "audit_3",
-            handled_at: fromTs - 1,
-          }),
-        ],
-      })
+      liveRows: [
+        {
+          second: "2026-06-05 12:00:00",
+          processed: 2,
+          rejected: 1,
+          failed: 0,
+          total: 3,
+        },
+        {
+          second: "2026-06-05 12:00:01",
+          processed: 1,
+          rejected: 0,
+          failed: 0,
+          total: 1,
+        },
+      ],
+      rejectionRows: [
+        {
+          rejection_reason: "missing_entitlement",
+          event_slug: "usage.recorded",
+          source_id: "src_1",
+          source_type: "api_key",
+          event_count: 1,
+          last_seen_at: fromTs + 5_000,
+        },
+        {
+          rejection_reason: "wrong_source",
+          event_slug: "usage.recorded",
+          source_id: "src_2",
+          source_type: "api_key",
+          event_count: 4,
+          last_seen_at: fromTs + 4_000,
+        },
+      ],
+      recentRows: [
+        makeRecentEvent({
+          event_id: "evt_1",
+          canonical_audit_id: "audit_1",
+          state: "processed",
+          rejection_reason: null,
+          handled_at: fromTs + 5_500,
+        }),
+        makeRecentEvent({
+          event_id: "evt_2",
+          canonical_audit_id: "audit_2",
+          source_id: "src_2",
+          state: "rejected",
+          rejection_reason: "wrong_source",
+          handled_at: fromTs + 5_250,
+        }),
+        makeRecentEvent({
+          event_id: "evt_3",
+          canonical_audit_id: "audit_3",
+          handled_at: fromTs - 1,
+        }),
+      ],
+    })
 
     const response = await app.fetch(
       buildRequest({
