@@ -361,7 +361,7 @@ function UsageDashboardEmptyState({
       <CardContent className="py-6">
         <EmptyPlaceholder className="min-h-[520px] transition-opacity duration-300">
           <div className="w-full max-w-4xl">
-            <MoneyPath />
+            <MoneyPath className="text-left" />
           </div>
           <EmptyPlaceholder.Title>No usage data yet</EmptyPlaceholder.Title>
           <EmptyPlaceholder.Description>
