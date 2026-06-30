@@ -128,6 +128,9 @@ patterns. Keep it cheap to load and useful.
   the reporting consumer; avoid parallel service-level status writes that can split evidence.
 - 2026-06-05: Lakehouse registry fields with `required: false` and `defaultValue: null` should
   parse explicit `null`, because reporting payloads send nullable optional columns.
+- 2026-07-01: R2 Pipeline audit records are parsed through the lakehouse registry before send; when
+  reporting payloads gain customer-visible fields, update `internal/lakehouse/src/registry.ts` and
+  `apps/api/scripts/schemas/events.json` together or the fields are stripped before R2.
 - 2026-05-17: Async ingestion in-flight result correlation must use per-message keys; keep
   `idempotencyKey` only for audit/dedupe identity.
 - 2026-06-10: EntitlementWindowDO batch wallet retries must discard in-memory staged plans before

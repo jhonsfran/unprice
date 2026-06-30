@@ -104,6 +104,8 @@ export function buildIngestionAuditPayload(
   handledAt: number
 ): Record<string, unknown> {
   const runContext = getMessageRunContext(message)
+  const failed = outcome.state === "failed"
+  const payloadJson = failed ? serializeReplayPayload(message) : null
 
   return {
     event_date: toEventDate(message.timestamp),
@@ -130,6 +132,11 @@ export function buildIngestionAuditPayload(
     handled_at: handledAt,
     state: outcome.state,
     rejection_reason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
+    failure_stage: failed ? outcome.failureStage : null,
+    failure_reason: failed ? outcome.failureReason : null,
+    failure_message: failed ? (outcome.failureMessage ?? null) : null,
+    replayable: failed ? outcome.replayable : false,
+    payload_json: payloadJson,
     properties: message.properties,
     canonical_audit_id: canonicalAuditId,
     payload_hash: payloadHash,

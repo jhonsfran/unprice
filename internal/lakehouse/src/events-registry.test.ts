@@ -13,8 +13,8 @@ describe("lakehouse events registry", () => {
 
     expect(schema.source).toBe("events")
     expect(schema.firstVersion).toBe(1)
-    expect(schema.currentVersion).toBe(3)
-    expect(getLakehouseSourceCurrentVersion("events")).toBe(3)
+    expect(schema.currentVersion).toBe(4)
+    expect(getLakehouseSourceCurrentVersion("events")).toBe(4)
     expect(schema.fields.some((field) => field.name === "schema_version" && field.required)).toBe(
       true
     )
@@ -29,6 +29,16 @@ describe("lakehouse events registry", () => {
           name: "source_id",
           required: false,
           addedInVersion: 3,
+        }),
+        expect.objectContaining({
+          name: "run_id",
+          required: false,
+          addedInVersion: 4,
+        }),
+        expect.objectContaining({
+          name: "payload_json",
+          required: false,
+          addedInVersion: 4,
         }),
       ])
     )
@@ -49,6 +59,67 @@ describe("lakehouse events registry", () => {
         }),
       ]),
     })
+  })
+
+  it("parses run-attributed failed events for sync reporting evidence", () => {
+    const payloadJson = JSON.stringify({
+      version: 1,
+      projectId: "proj_123",
+      customerId: "cus_123",
+      idempotencyKey: "idem_failed",
+      id: "evt_failed",
+      slug: "tokens_used",
+      timestamp: Date.UTC(2026, 2, 19, 10, 0, 0),
+      properties: { amount: 1 },
+    })
+
+    expect(
+      parseLakehouseEvent("events", {
+        event_date: "2026-03-19",
+        schema_version: 4,
+        id: "evt_failed",
+        project_id: "proj_123",
+        customer_id: "cus_123",
+        workspace_id: "ws_123",
+        environment: "test",
+        api_key_id: "key_123",
+        source_type: "api_key",
+        source_id: "key_123",
+        source_name: null,
+        run_id: "brun_123",
+        trace_id: "trace_123",
+        parent_run_id: "brun_parent_123",
+        workload_type: "agent",
+        workload_id: "research-assistant",
+        request_id: "req_123",
+        idempotency_key: "idem_failed",
+        slug: "tokens_used",
+        timestamp: Date.UTC(2026, 2, 19, 10, 0, 0),
+        received_at: Date.UTC(2026, 2, 19, 10, 0, 1),
+        handled_at: Date.UTC(2026, 2, 19, 10, 0, 2),
+        state: "failed",
+        failure_stage: "rating_fact",
+        failure_reason: "raw_ingestion_queue_processing_failed",
+        failure_message: "apply failed",
+        replayable: true,
+        payload_json: payloadJson,
+        properties: {
+          amount: 1,
+        },
+        canonical_audit_id: "audit_failed",
+        payload_hash: "hash_failed",
+      })
+    ).toEqual(
+      expect.objectContaining({
+        schema_version: 4,
+        run_id: "brun_123",
+        workload_id: "research-assistant",
+        state: "failed",
+        failure_stage: "rating_fact",
+        replayable: true,
+        payload_json: payloadJson,
+      })
+    )
   })
 
   it("parses a valid events record from the registry schema", () => {

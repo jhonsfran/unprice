@@ -56,6 +56,31 @@
       "required": false
     },
     {
+      "name": "run_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "trace_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "parent_run_id",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "workload_type",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "workload_id",
+      "type": "string",
+      "required": false
+    },
+    {
       "name": "request_id",
       "type": "string",
       "required": true
@@ -92,6 +117,31 @@
     },
     {
       "name": "rejection_reason",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "failure_stage",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "failure_reason",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "failure_message",
+      "type": "string",
+      "required": false
+    },
+    {
+      "name": "replayable",
+      "type": "bool",
+      "required": false
+    },
+    {
+      "name": "payload_json",
       "type": "string",
       "required": false
     },
