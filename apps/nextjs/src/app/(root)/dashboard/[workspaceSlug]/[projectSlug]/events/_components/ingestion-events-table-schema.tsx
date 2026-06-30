@@ -272,6 +272,7 @@ export function buildIngestionEventsColumns(params: {
           {row.original.rejectionReason ?? "none"}
         </span>
       ),
+      filterFn: (row, id, value) => Array.isArray(value) && value.includes(row.getValue(id)),
       size: 220,
     },
     {
