@@ -19,19 +19,14 @@ export default async function CustomerDetailLayout({
   const { workspaceSlug, projectSlug, customerId } = params
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
 
-  const [{ customer }, walletResult] = await Promise.all([
-    api.customers.getSubscriptions({ customerId }),
-    api.customers.getWallet({ customerId }),
-  ])
+  const { customer } = await api.customers.getSubscriptions({ customerId })
 
-  if (!customer || !walletResult.customer) {
+  if (!customer) {
     notFound()
   }
 
   return (
-    <DashboardShell
-      header={<CustomerEconomicHeader customer={customer} wallet={walletResult.wallet} />}
-    >
+    <DashboardShell header={<CustomerEconomicHeader customer={customer} />}>
       <CustomerTabs baseUrl={baseUrl} />
       {children}
     </DashboardShell>

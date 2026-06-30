@@ -1,17 +1,19 @@
-import type { RouterOutputs } from "@unprice/trpc/routes"
+import type { RouterInputs, RouterOutputs } from "@unprice/trpc/routes"
 
 export type IngestionStatus = RouterOutputs["analytics"]["getIngestionStatus"]
 export type IngestionRejection = IngestionStatus["rejections"][number]
 
-export type IngestionQueryFilter = {
-  state?: "processed" | "rejected" | "failed"
-  sourceId?: string
-  eventSlug?: string
-}
+export type IngestionQueryFilter = NonNullable<
+  RouterInputs["analytics"]["getIngestionStatus"]["filter"]
+>
 
 export type IngestionTone = "default" | "success" | "warning" | "destructive"
 
 const NON_ACTION_MESSAGES = new Set(["No immediate action required."])
+
+type ActionMessageOptions = {
+  showNoEventsAction?: boolean
+}
 
 export function formatSuccessRate(successRate: number): string {
   return `${(successRate * 100).toFixed(1)}%`
@@ -61,7 +63,14 @@ export function getEnforcementLabel(status: Pick<IngestionStatus, "totals">): st
   return "no denials"
 }
 
-export function getActionMessages(status: Pick<IngestionStatus, "nextActions">): string[] {
+export function getActionMessages(
+  status: Pick<IngestionStatus, "nextActions" | "totals">,
+  { showNoEventsAction = true }: ActionMessageOptions = {}
+): string[] {
+  if (!showNoEventsAction && status.totals.total === 0) {
+    return []
+  }
+
   return status.nextActions.filter((message) => !NON_ACTION_MESSAGES.has(message))
 }
 

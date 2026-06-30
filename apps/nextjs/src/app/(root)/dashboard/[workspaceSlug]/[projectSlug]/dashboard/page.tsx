@@ -1,3 +1,4 @@
+import { prepareInterval } from "@unprice/analytics"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { buildIngestionHealthInput } from "~/components/analytics/ingestion-health-query"
@@ -21,7 +22,8 @@ export default async function DashboardOverview(props: {
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
   const filter = intervalParams(props.searchParams)
   const now = Date.now()
-  const healthInput = buildIngestionHealthInput({ now })
+  const interval = prepareInterval(filter.intervalFilter)
+  const healthInput = buildIngestionHealthInput({ now, intervalMs: interval.intervalMs })
 
   batchPrefetch([
     trpc.analytics.getIngestionStatus.queryOptions(healthInput, {
@@ -53,19 +55,21 @@ export default async function DashboardOverview(props: {
         <IntervalFilter className="ml-auto" />
       </div>
       <HydrateClient>
-        <div className="min-h-[250px]">
+        <div className="min-h-[170px]">
           <Suspense fallback={<OperationalHealthSkeleton />}>
             <OperationalHealth initialNow={now} />
           </Suspense>
         </div>
-        <div className="min-h-[520px]">
-          <Suspense fallback={<UsageStatsSkeleton />}>
-            <UsageStats />
-          </Suspense>
-        </div>
+
         <div className="min-h-[150px]">
           <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
             <OverviewStats />
+          </Suspense>
+        </div>
+
+        <div className="min-h-[520px]">
+          <Suspense fallback={<UsageStatsSkeleton />}>
+            <UsageStats />
           </Suspense>
         </div>
       </HydrateClient>

@@ -71,12 +71,13 @@ export default function Belief() {
           You shouldn’t reconstruct a disputed charge by hand.
           <br />
           <br />
-          Stop runaway usage before it runs. Explain every invoice from the same money path. Build on
-          code you can read, at any scale.
+          Stop runaway usage before it runs. Explain every invoice from the same money path. Build
+          on code you can read, at any scale.
           <br />
           <br />
           <span className="font-bold italic">
-            For usage-based SaaS, pricing is a runtime decision. We’re here to make that the default.
+            For usage-based SaaS, pricing is a runtime decision. We’re here to make that the
+            default.
           </span>
           <br />
           <br />

@@ -32,8 +32,21 @@ SQL >
     WHERE latest_handled_at >= {{ Int64(from_ts) }}
       AND latest_handled_at < {{ Int64(to_ts) }}
       AND state = 'rejected'
-      {% if defined(source_id) %} AND source_id = {{ String(source_id) }} {% end %}
-      {% if defined(event_slug) %} AND event_slug = {{ String(event_slug) }} {% end %}
+      {% if defined(filter_customer_ids) %} AND customer_id IN {{ Array(filter_customer_ids, 'String') }} {% end %}
+      {% if defined(event_slugs) %} AND event_slug IN {{ Array(event_slugs, 'String') }} {% end %}
+      {% if defined(source_types) %} AND source_type IN {{ Array(source_types, 'String') }} {% end %}
+      {% if defined(rejection_reasons) %} AND rejection_reason IN {{ Array(rejection_reasons, 'String') }} {% end %}
+      {% if defined(states) %} AND state IN {{ Array(states, 'String') }} {% end %}
+      {% if defined(search) %}
+        AND (
+          positionCaseInsensitive(canonical_audit_id, {{ String(search) }}) > 0
+          OR positionCaseInsensitive(customer_id, {{ String(search) }}) > 0
+          OR positionCaseInsensitive(event_slug, {{ String(search) }}) > 0
+          OR positionCaseInsensitive(source_type, {{ String(search) }}) > 0
+          OR positionCaseInsensitive(source_id, {{ String(search) }}) > 0
+          OR positionCaseInsensitive(coalesce(rejection_reason, ''), {{ String(search) }}) > 0
+        )
+      {% end %}
     GROUP BY rejection_reason, event_slug, source_id, source_type
     ORDER BY event_count DESC, last_seen_at DESC
     LIMIT {{ Int32(limit, 50) }}

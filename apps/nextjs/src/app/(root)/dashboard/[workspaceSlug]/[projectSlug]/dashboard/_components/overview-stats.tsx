@@ -1,9 +1,14 @@
 "use client"
 
 import { useSuspenseQuery } from "@tanstack/react-query"
-import { cn } from "@unprice/ui/utils"
+import { Skeleton } from "@unprice/ui/skeleton"
 import { Activity, DollarSign, Users } from "lucide-react"
-import StatsCards, { StatsSkeleton } from "~/components/analytics/stats-cards"
+import {
+  EvidenceMetricStrip,
+  EvidenceMetricTile,
+  EvidenceSection,
+} from "~/components/analytics/evidence-panel"
+import { NumberTicker } from "~/components/analytics/number-ticker"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useTRPC } from "~/trpc/client"
 
@@ -23,9 +28,24 @@ export const OverviewStatsSkeleton = ({ isLoading }: { isLoading?: boolean }) =>
   ]
 
   return (
-    <div className="min-h-[150px]">
-      <StatsSkeleton stats={skeletonStats} isLoading={isLoading} />
-    </div>
+    <EvidenceSection
+      title="Growth evidence"
+      description="Supporting business context."
+      className="min-h-[132px]"
+      contentClassName="mt-3"
+    >
+      <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
+        {skeletonStats.map((stat) => (
+          <EvidenceMetricTile
+            key={stat.title}
+            label={stat.title}
+            value={isLoading ? <Skeleton className="h-6 w-20" /> : "0"}
+            helper={<Skeleton className="h-3 w-28" />}
+            icon={<Skeleton className="size-4 shrink-0" />}
+          />
+        ))}
+      </EvidenceMetricStrip>
+    </EvidenceSection>
   )
 }
 
@@ -59,31 +79,38 @@ const OverviewStats = () => {
   })
 
   return (
-    <div className="relative min-h-[150px]">
-      <div
-        suppressHydrationWarning
-        className={cn(
-          "pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/55 to-transparent transition-opacity duration-300",
-          isFetching ? "opacity-100" : "opacity-0"
-        )}
-      />
-      <div
-        suppressHydrationWarning
-        className={cn(
-          "transition-opacity duration-300 motion-reduce:transition-none",
-          isFetching ? "opacity-90" : "opacity-100"
-        )}
-      >
-        <div className="mb-3 flex flex-col gap-1">
-          <p className="font-medium text-sm">Growth evidence</p>
-          <p className="text-muted-foreground text-xs">
-            Supporting business context. Operational health and spend evidence above are the primary
-            dashboard state.
-          </p>
-        </div>
-        <StatsCards stats={statsCards} />
-      </div>
-    </div>
+    <EvidenceSection
+      title="Growth evidence"
+      description="Supporting business context."
+      isRefreshing={isFetching}
+      className="min-h-[150px]"
+      contentClassName="mt-3"
+    >
+      <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
+        {statsCards.map((stat) => {
+          const hasDecimalPlaces = stat.total % 1 !== 0
+
+          return (
+            <EvidenceMetricTile
+              key={stat.title}
+              label={stat.title}
+              value={
+                <div className="flex items-baseline gap-1.5">
+                  <NumberTicker
+                    value={stat.total}
+                    decimalPlaces={hasDecimalPlaces ? 2 : 0}
+                    startValue={0}
+                  />
+                  {stat.unit && <span>{stat.unit}</span>}
+                </div>
+              }
+              helper={stat.description}
+              icon={<stat.icon className="mt-0.5 size-4 shrink-0" />}
+            />
+          )
+        })}
+      </EvidenceMetricStrip>
+    </EvidenceSection>
   )
 }
 

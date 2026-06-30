@@ -103,8 +103,8 @@ export default function PillarsPriceOps() {
             while the request is in flight, across usage-based, tiered, and hybrid models.
           </li>
           <li>
-            <span className="font-semibold">Explainable money path:</span> trace every charge back to
-            rated usage events and ledger captures from one evidence trail.
+            <span className="font-semibold">Explainable money path:</span> trace every charge back
+            to rated usage events and ledger captures from one evidence trail.
           </li>
         </ul>
         <br />

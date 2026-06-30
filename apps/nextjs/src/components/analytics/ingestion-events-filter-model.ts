@@ -11,11 +11,12 @@ export function buildSelectedRejectionFilter(
 ): SelectedIngestionFilter {
   return {
     query: {
-      state: "rejected",
-      eventSlug: rejection.eventSlug,
-      sourceId: rejection.sourceId,
+      states: ["rejected"],
+      eventSlugs: [rejection.eventSlug],
+      sourceTypes: [rejection.sourceType],
+      ...(rejection.rejectionReason ? { rejectionReasons: [rejection.rejectionReason] } : {}),
     },
-    search: rejection.eventSlug,
+    search: null,
     label: `${rejection.eventSlug} / ${rejection.sourceType}`,
   }
 }

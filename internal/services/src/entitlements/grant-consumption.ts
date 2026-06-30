@@ -1,4 +1,5 @@
 import {
+  type BillingConfig,
   type ConfigFeatureVersionType,
   type OverageStrategy,
   type ResetConfig,
@@ -57,6 +58,16 @@ export type GrantConsumptionResult<TGrant extends GrantConsumptionGrant> = {
 export type GrantPolicyGrant = GrantConsumptionGrant & {
   currencyCode: string
   overageStrategy: OverageStrategy
+}
+
+export function toGrantResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
+  return {
+    name: billingConfig.name,
+    resetInterval: billingConfig.billingInterval,
+    resetIntervalCount: billingConfig.billingIntervalCount,
+    resetAnchor: "dayOfCreation",
+    planType: billingConfig.planType,
+  }
 }
 
 export function consumeGrantsByPriority<TGrant extends GrantConsumptionGrant>(params: {

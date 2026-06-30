@@ -392,26 +392,29 @@ export const ingestionStatusWindowQuerySchema = z.object({
 
 export const ingestionStateFilterSchema = z.enum(["processed", "rejected", "failed"])
 
-export const ingestionLiveQuerySchema = ingestionStatusWindowQuerySchema.extend({
-  source_id: z.string().optional(),
-  event_slug: z.string().optional(),
-  state: ingestionStateFilterSchema.optional(),
+const ingestionStatusFilterQuerySchema = ingestionStatusWindowQuerySchema.extend({
+  filter_customer_ids: z.array(z.string()).optional(),
+  event_slugs: z.array(z.string()).optional(),
+  source_types: z.array(z.string()).optional(),
+  rejection_reasons: z.array(z.string()).optional(),
+  states: z.array(ingestionStateFilterSchema).optional(),
+  search: z.string().optional(),
 })
 
-export const ingestionRejectionsQuerySchema = ingestionStatusWindowQuerySchema.extend({
-  source_id: z.string().optional(),
-  event_slug: z.string().optional(),
-  state: ingestionStateFilterSchema.optional(),
+export const ingestionLiveQuerySchema = ingestionStatusFilterQuerySchema
+
+export const ingestionRejectionsQuerySchema = ingestionStatusFilterQuerySchema.extend({
   limit: z.number().int().min(1).max(100).default(50),
 })
 
-export const ingestionRecentQuerySchema = ingestionStatusWindowQuerySchema.extend({
-  source_id: z.string().optional(),
-  event_slug: z.string().optional(),
-  state: ingestionStateFilterSchema.optional(),
+export const ingestionRecentQuerySchema = ingestionStatusFilterQuerySchema.extend({
   cursor_handled_at: z.number().int().optional(),
   cursor_canonical_audit_id: z.string().optional(),
   limit: z.number().int().min(1).max(101).default(50),
+})
+
+export const ingestionFacetsQuerySchema = ingestionStatusFilterQuerySchema.extend({
+  limit: z.number().int().min(1).max(100).default(50),
 })
 
 export const ingestionLiveRowSchema = z.object({
@@ -429,6 +432,12 @@ export const ingestionRejectionRowSchema = z.object({
   source_type: z.string(),
   event_count: z.number().int().nonnegative(),
   last_seen_at: z.number().int(),
+})
+
+export const ingestionFacetRowSchema = z.object({
+  facet: z.enum(["state", "event_slug", "source_type", "rejection_reason", "customer_id"]),
+  value: z.string(),
+  event_count: z.number().int().nonnegative(),
 })
 
 export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
@@ -619,6 +628,7 @@ export type ExplainChargeSummaryRow = z.infer<typeof explainChargeSummaryRowSche
 export type IngestionLiveRow = z.infer<typeof ingestionLiveRowSchema>
 export type IngestionRejectionRow = z.infer<typeof ingestionRejectionRowSchema>
 export type IngestionRecentEventRow = z.infer<typeof ingestionRecentEventRowSchema>
+export type IngestionFacetRow = z.infer<typeof ingestionFacetRowSchema>
 export type IngestionReplayPayloadRow = z.infer<typeof ingestionReplayPayloadRowSchema>
 export type AnalyticsFeatureMetadata = z.infer<typeof featureMetadataSchemaV1>
 export type AnalyticsVerification = z.infer<typeof featureVerificationSchemaV1>

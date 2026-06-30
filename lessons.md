@@ -6,6 +6,7 @@ patterns. Keep it cheap to load and useful.
 ## How To Use
 
 - Read before non-trivial code, test, docs, migration, billing, or architecture work.
+- If you need to run the project, always use bin/startup dev
 - New lessons must be dated, repo-specific, and short: 1-3 bullets per entry.
 - Use "When X, do Y; watch Z". Include files or commands only when they prevent repeats.
 - Update an existing section instead of adding duplicate narrative.
@@ -155,6 +156,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-06-30: Customer current-access entitlement usage should query Tinybird with computed grant
+  `period_key` values; exact subscription `start/end` windows can drop hourly rollup buckets and
+  hide fresh usage for short entitlement periods.
 - 2026-06-13: Public `generateStaticParams` paths must not call session helpers or live database
   queries; return `[]` for dynamic ISR routes so `next build` does not depend on request scope or
   preview database reachability.

@@ -31,9 +31,10 @@ export default function Cta() {
               </h3>
               <p className="mx-auto mt-4 max-w-2xl text-background-text text-lg">
                 <Balancer>
-                  Unprice is open-source PriceOps infrastructure for usage-based SaaS. Pick your most
-                  expensive action, put a real-time budget around it, and explain every invoice from
-                  the same money path. The core is open source — build on it, or help us shape it.
+                  Unprice is open-source PriceOps infrastructure for usage-based SaaS. Pick your
+                  most expensive action, put a real-time budget around it, and explain every invoice
+                  from the same money path. The core is open source — build on it, or help us shape
+                  it.
                 </Balancer>
               </p>
             </m.div>

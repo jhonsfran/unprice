@@ -6,10 +6,10 @@ import { SuperLink } from "~/components/super-link"
 
 const tabs = [
   { label: "Overview", href: "" },
-  { label: "Subscriptions", href: "/subscriptions" },
-  { label: "Wallet & Credits", href: "/wallet" },
-  { label: "Invoices", href: "/invoices" },
+  { label: "Wallets & Credits", href: "/wallet" },
   { label: "Runs", href: "/runs" },
+  { label: "Subscriptions", href: "/subscriptions" },
+  { label: "Invoices", href: "/invoices" },
 ] as const
 
 export function CustomerTabs({ baseUrl }: { baseUrl: string }) {

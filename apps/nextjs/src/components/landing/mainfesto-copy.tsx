@@ -47,8 +47,8 @@ export default function MainfestoCopy() {
         By invoice time, the expensive work already ran
       </m.h2>
       <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        For usage-based products, pricing is not a static configuration. It’s a decision your app has
-        to make while the request is still in flight.
+        For usage-based products, pricing is not a static configuration. It’s a decision your app
+        has to make while the request is still in flight.
         <br />
         <br />
         <b>The trap:</b> a customer triggers your most expensive action — an LLM call, a data job, a
@@ -61,15 +61,16 @@ export default function MainfestoCopy() {
         <br />
         <br />
         Pricing runs in the request path. Check entitlement, check budget, reserve credits, and
-        reject over-budget work before it runs — then explain every charge from the same usage trail.
+        reject over-budget work before it runs — then explain every charge from the same usage
+        trail.
         <br />
         <br />
         The market demands this shift. Usage-based and AI products can’t let a single customer or
         workload turn into <b>uncapped cost.</b>
         <br />
         <br />
-        Why do margins slip? Often it’s the gap between when usage happens and when pricing reacts. In
-        a static system, you find out at invoice time. In a runtime system, you decide before the
+        Why do margins slip? Often it’s the gap between when usage happens and when pricing reacts.
+        In a static system, you find out at invoice time. In a runtime system, you decide before the
         cost exists.
         <br />
         <br />

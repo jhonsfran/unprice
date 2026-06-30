@@ -1,7 +1,6 @@
 import { type Database, and, eq, gt, inArray, lte } from "@unprice/db"
 import { billingPeriods } from "@unprice/db/schema"
 import type {
-  BillingConfig,
   ConfigFeatureVersionType,
   CreditLinePolicy,
   CustomerEntitlementExtended,
@@ -12,7 +11,11 @@ import type {
 } from "@unprice/db/validators"
 import { FetchError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { INGESTION_MAX_EVENT_AGE_MS, extractCurrencyCodeFromFeatureConfig } from "../entitlements"
+import {
+  INGESTION_MAX_EVENT_AGE_MS,
+  extractCurrencyCodeFromFeatureConfig,
+  toGrantResetConfigFromBillingConfig,
+} from "../entitlements"
 import type { EntitlementService } from "../entitlements/service"
 import { cachedQuery } from "../utils/cached-query"
 import type { IngestionRejectionReason } from "./interface"
@@ -342,7 +345,7 @@ export function toIngestionEntitlement(
 ): IngestionEntitlement {
   const resetConfig =
     entitlement.featurePlanVersion.resetConfig ??
-    toResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig)
+    toGrantResetConfigFromBillingConfig(entitlement.featurePlanVersion.billingConfig)
   const currencyCode =
     extractCurrencyCodeFromFeatureConfig(entitlement.featurePlanVersion.config) ?? "USD"
 
@@ -379,14 +382,4 @@ export function toIngestionEntitlement(
 
 function isUsageEntitlement(entitlement: IngestionEntitlement): boolean {
   return entitlement.featureType === "usage" && Boolean(entitlement.meterConfig)
-}
-
-function toResetConfigFromBillingConfig(billingConfig: BillingConfig): ResetConfig {
-  return {
-    name: billingConfig.name,
-    resetInterval: billingConfig.billingInterval,
-    resetIntervalCount: billingConfig.billingIntervalCount,
-    planType: billingConfig.planType,
-    resetAnchor: "dayOfCreation",
-  }
 }

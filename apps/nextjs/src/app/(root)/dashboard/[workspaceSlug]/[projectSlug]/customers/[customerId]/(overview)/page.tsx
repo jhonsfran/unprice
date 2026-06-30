@@ -4,8 +4,10 @@ import { Suspense } from "react"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, api, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
-import { CustomerMoneyPathSummary } from "../_components/customer-money-path-summary"
+import { CustomerCurrentAccess } from "../_components/customer-current-access"
 import {
+  CustomerEvidenceSummary,
+  CustomerEvidenceSummarySkeleton,
   CustomerMetricsPanel,
   CustomerMetricsPanelSkeleton,
 } from "../_components/usage/customer-metrics-panel"
@@ -27,11 +29,11 @@ export default async function CustomerUsagePage({
   const filter = intervalParams(searchParams)
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
 
-  const [{ customer }, walletResult, entitlementsResult, economicSummary] = await Promise.all([
+  const [{ customer }, walletResult, economicSummary, currentAccess] = await Promise.all([
     api.customers.getSubscriptions({ customerId }),
     api.customers.getWallet({ customerId }),
-    api.customers.getEntitlements({ customerId }),
     api.customers.getEconomicSummary({ customerId }),
+    api.customers.getCurrentAccess({ customerId }),
   ])
 
   if (!customer) {
@@ -52,19 +54,22 @@ export default async function CustomerUsagePage({
 
   return (
     <div className="flex flex-col gap-6">
-      <CustomerMoneyPathSummary
-        baseUrl={baseUrl}
-        customer={customer}
-        wallet={walletResult.wallet}
-        entitlements={entitlementsResult.entitlements}
-        summary={economicSummary}
-      />
       <HydrateClient>
-        <Suspense fallback={<CustomerMetricsPanelSkeleton />}>
-          <CustomerMetricsPanel
+        <Suspense fallback={<CustomerEvidenceSummarySkeleton />}>
+          <CustomerEvidenceSummary
             customerId={customerId}
-            invoiceCount={economicSummary.invoiceCounts.total}
+            baseUrl={baseUrl}
+            runCounts={economicSummary.runCounts}
+            invoiceCounts={economicSummary.invoiceCounts}
           />
+        </Suspense>
+        <CustomerCurrentAccess
+          access={currentAccess}
+          wallet={walletResult.wallet}
+          subscriptionsHref={`${baseUrl}/subscriptions`}
+        />
+        <Suspense fallback={<CustomerMetricsPanelSkeleton />}>
+          <CustomerMetricsPanel customerId={customerId} />
         </Suspense>
       </HydrateClient>
     </div>

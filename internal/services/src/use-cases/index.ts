@@ -11,6 +11,18 @@ export type {
   GetCustomerEconomicSummaryOutput,
 } from "./customer/get-economic-summary"
 export {
+  customerCurrentAccessEntitlementSchema,
+  customerCurrentAccessPlanSchema,
+  getCustomerCurrentAccess,
+  getCustomerCurrentAccessInputSchema,
+  getCustomerCurrentAccessOutputSchema,
+} from "./customer/get-current-access"
+export type {
+  GetCustomerCurrentAccessDeps,
+  GetCustomerCurrentAccessInput,
+  GetCustomerCurrentAccessOutput,
+} from "./customer/get-current-access"
+export {
   getFailedIngestionEventPayload,
   getFailedIngestionEventPayloadInputSchema,
   getFailedIngestionEventPayloadOutputSchema,

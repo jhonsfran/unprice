@@ -75,8 +75,9 @@ export default function CodeExample() {
       </m.h2>
       <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
         You own the request path, so you should own pricing without scattering revenue logic through
-        product code. Unprice gives you a single integration: meter usage, check entitlements, budget
-        expensive runs, and reserve credits — then change packaging without rewriting the money path.
+        product code. Unprice gives you a single integration: meter usage, check entitlements,
+        budget expensive runs, and reserve credits — then change packaging without rewriting the
+        money path.
         <br />
         <br />
         When pricing logic lives in one inspectable runtime instead of your codebase, you can stop
