@@ -4,6 +4,7 @@ import { Suspense } from "react"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, api, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
+import { CustomerMoneyPathSummary } from "../_components/customer-money-path-summary"
 import {
   CustomerMetricsPanel,
   CustomerMetricsPanelSkeleton,
@@ -22,12 +23,16 @@ export default async function CustomerUsagePage({
   }
   searchParams: SearchParams
 }) {
-  const { customerId } = params
+  const { workspaceSlug, projectSlug, customerId } = params
   const filter = intervalParams(searchParams)
+  const baseUrl = `/${workspaceSlug}/${projectSlug}/customers/${customerId}`
 
-  const { customer } = await api.customers.getSubscriptions({
-    customerId,
-  })
+  const [{ customer }, walletResult, entitlementsResult, economicSummary] = await Promise.all([
+    api.customers.getSubscriptions({ customerId }),
+    api.customers.getWallet({ customerId }),
+    api.customers.getEntitlements({ customerId }),
+    api.customers.getEconomicSummary({ customerId }),
+  ])
 
   if (!customer) {
     notFound()
@@ -46,10 +51,22 @@ export default async function CustomerUsagePage({
   ])
 
   return (
-    <HydrateClient>
-      <Suspense fallback={<CustomerMetricsPanelSkeleton />}>
-        <CustomerMetricsPanel customerId={customerId} invoiceCount={customer.invoices.length} />
-      </Suspense>
-    </HydrateClient>
+    <div className="flex flex-col gap-6">
+      <CustomerMoneyPathSummary
+        baseUrl={baseUrl}
+        customer={customer}
+        wallet={walletResult.wallet}
+        entitlements={entitlementsResult.entitlements}
+        summary={economicSummary}
+      />
+      <HydrateClient>
+        <Suspense fallback={<CustomerMetricsPanelSkeleton />}>
+          <CustomerMetricsPanel
+            customerId={customerId}
+            invoiceCount={economicSummary.invoiceCounts.total}
+          />
+        </Suspense>
+      </HydrateClient>
+    </div>
   )
 }

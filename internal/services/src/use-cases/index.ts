@@ -1,6 +1,16 @@
 export { createPlan } from "./plan/create"
 export { signUp } from "./customer/sign-up"
 export {
+  getCustomerEconomicSummary,
+  getCustomerEconomicSummaryInputSchema,
+  getCustomerEconomicSummaryOutputSchema,
+} from "./customer/get-economic-summary"
+export type {
+  GetCustomerEconomicSummaryDeps,
+  GetCustomerEconomicSummaryInput,
+  GetCustomerEconomicSummaryOutput,
+} from "./customer/get-economic-summary"
+export {
   getFailedIngestionEventPayload,
   getFailedIngestionEventPayloadInputSchema,
   getFailedIngestionEventPayloadOutputSchema,
