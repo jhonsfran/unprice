@@ -1,12 +1,13 @@
 import { cn } from "@unprice/ui/utils"
 import type { VariantProps } from "class-variance-authority"
 import { cva } from "class-variance-authority"
+import type { ReactNode } from "react"
 
 type Notification = {
   name: string
   description: string
-  icon: string
-  color: string
+  icon: ReactNode
+  iconClassName?: string
   time: string
   href?: string
 }
@@ -37,7 +38,14 @@ export interface NotificationProps
   extends Notification,
     VariantProps<typeof notificationVariants> {}
 
-export const Notification = ({ name, description, icon, color, time, size }: NotificationProps) => {
+export const Notification = ({
+  name,
+  description,
+  icon,
+  iconClassName,
+  time,
+  size,
+}: NotificationProps) => {
   return (
     <figure className={cn(notificationVariants({ size }))}>
       <div
@@ -46,20 +54,13 @@ export const Notification = ({ name, description, icon, color, time, size }: Not
         })}
       >
         <div
-          className={cn("flex size-10 items-center justify-center rounded-2xl", {
-            "size-8": size === "sm",
-          })}
-          style={{
-            backgroundColor: color,
-          }}
+          className={cn(
+            "flex size-10 items-center justify-center rounded-2xl text-white",
+            { "size-8": size === "sm" },
+            iconClassName
+          )}
         >
-          <span
-            className={cn("text-lg", {
-              "text-sm": size === "sm",
-            })}
-          >
-            {icon}
-          </span>
+          {icon}
         </div>
         <div className="flex flex-col overflow-hidden">
           <figcaption

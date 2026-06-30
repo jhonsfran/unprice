@@ -1,38 +1,38 @@
 "use client"
 
 import { cn } from "@unprice/ui/utils"
+import { Activity, Ban, Receipt, ShieldCheck } from "lucide-react"
 import { AnimatedList } from "./animated-list"
 import { Notification } from "./notification"
 
 let notifications = [
   {
-    name: "Payment received",
-    description: "Unrpice",
+    name: "Usage metered",
+    description: "events.report",
     time: "15m ago",
-
-    icon: "💸",
-    color: "#00C9A7",
+    icon: <Activity className="size-5" />,
+    iconClassName: "bg-info text-info-foreground",
   },
   {
-    name: "User signed up",
-    description: "Unrpice",
+    name: "Entitlement allowed",
+    description: "access.check",
     time: "10m ago",
-    icon: "👤",
-    color: "#FFB800",
+    icon: <ShieldCheck className="size-5" />,
+    iconClassName: "bg-success-solid text-white",
   },
   {
-    name: "Verification",
-    description: "Unrpice",
+    name: "Over-budget call blocked",
+    description: "budget.exceeded",
     time: "5m ago",
-    icon: "💬",
-    color: "#FF3D71",
+    icon: <Ban className="size-5" />,
+    iconClassName: "bg-danger-solid text-white",
   },
   {
-    name: "Usage report",
-    description: "Unrpice",
+    name: "Invoice explained",
+    description: "invoice.explain",
     time: "2m ago",
-    icon: "🗞️",
-    color: "#1E86FF",
+    icon: <Receipt className="size-5" />,
+    iconClassName: "bg-primary text-primary-foreground",
   },
 ]
 

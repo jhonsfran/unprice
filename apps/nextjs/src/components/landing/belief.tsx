@@ -51,39 +51,36 @@ export default function Belief() {
       </m.h2>
       <m.div variants={itemVariants} className="mt-6 space-y-4">
         <p className="text-justify text-lg leading-8">
-          We believe SaaS founders and AI builders deserve full control over the value they create.
+          We believe the team that owns the request path should own pricing — without scattering
+          revenue logic through product code.
           <br />
           <br />
-          Static plans, vendor lock-in, and engineering bottlenecks are relics of a previous era.
-          PriceOps is your strategic advantage. Transparency is your security.
+          Black-box billing, after-the-fact metering, and plan logic frozen in your codebase are
+          relics of a slower era. PriceOps is your control surface. Open source is your guarantee.
           <br />
           <br />
           We’re not here to tweak pricing around the edges.
           <br />
-          We’re here to architect the entire monetization stack from the ground up.
+          We’re here to put the money decision where the cost is created: the request path.
           <br />
           <br />
-          You don’t need permission to innovate.
+          You shouldn’t need a deployment to change a price.
           <br />
-          You don’t need to guess your tiers.
+          You shouldn’t discover an over-budget customer at invoice time.
           <br />
-          You don’t need to wait for a deployment to change a price.
-          <br />
-          <br />
-          Some companies discover they've been leaving money on the table for years. Others find
-          they can test new models in days instead of quarters. What would change if pricing moved
-          as fast as your product?
+          You shouldn’t reconstruct a disputed charge by hand.
           <br />
           <br />
-          Experience PriceOps — built on your terms, with fully transparent code and at any scale.
+          Stop runaway usage before it runs. Explain every invoice from the same money path. Build on
+          code you can read, at any scale.
           <br />
           <br />
           <span className="font-bold italic">
-            Pricing is the most neglected growth lever in SaaS. We're here to change that.
+            For usage-based SaaS, pricing is a runtime decision. We’re here to make that the default.
           </span>
           <br />
           <br />
-          <span className="font-bold italic">Unprice, the PriceOps Infrastructure.</span>
+          <span className="font-bold italic">Unprice — open-source PriceOps infrastructure.</span>
         </p>
       </m.div>
       <m.div

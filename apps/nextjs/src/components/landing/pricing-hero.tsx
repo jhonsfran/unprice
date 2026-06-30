@@ -553,7 +553,7 @@ function InvoicePanel({
   })
 
   return (
-    <div className="h-full rounded-lg border border-background-border bg-background-base p-6 font-sans shadow-sm">
+    <div className="h-full rounded-lg border border-background-border bg-background-base p-6 font-primary shadow-sm">
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="mb-1 flex items-center gap-2">
@@ -1019,8 +1019,8 @@ function FeatureRow({
 // ============================================
 
 export function PricingHero({
-  headline = "Control Usage. Control Revenue.",
-  description = "Click any feature to report usage. Watch limits protect your customers.",
+  headline = "Put a budget around the expensive action.",
+  description = "Report usage and watch over-budget calls get blocked before they run.",
   docsLinkText = "Read the Docs",
   accentColor,
   discountThreshold = 10,
@@ -1253,7 +1253,7 @@ export function PricingHero({
       <div className="w-full">
         {/* Header */}
         <header className="mx-auto mb-8 max-w-2xl text-center">
-          <h1
+          <h2
             id="hero-headline"
             className={cn(
               "mb-3 text-balance font-bold text-3xl tracking-[-0.04em] transition-colors duration-500 md:text-4xl lg:text-5xl",
@@ -1267,7 +1267,7 @@ export function PricingHero({
             )}
           >
             {dynamicHeadline}
-          </h1>
+          </h2>
           <p className="mb-3 font-mono text-background-text text-sm md:text-base">
             {dynamicDescription}
           </p>

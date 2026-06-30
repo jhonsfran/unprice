@@ -38,32 +38,35 @@ export default function PriceOpsSection() {
       initial="hidden"
       animate={isInView ? "visible" : "hidden"}
       variants={containerVariants}
-      aria-labelledby="code-example-title"
+      aria-labelledby="runtime-decision-title"
       className="mx-auto w-full max-w-6xl px-6 py-16"
     >
       <m.h2
         variants={itemVariants}
-        id="features-title"
+        id="runtime-decision-title"
         className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
-        PriceOps Infrastructure
+        Pricing is a runtime decision
       </m.h2>
       <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        Most SaaS companies leave 30-50% of revenue on the table because pricing is hardcoded into
-        their codebase.
+        For usage-based products, pricing is not a page or an end-of-cycle invoice job. By the time
+        billing runs, the expensive work already happened: the LLM call, the data job, the costly
+        API, the multi-minute workflow.
         <br />
         <br />
-        You know the friction: complex feature gating logic, and the "quarterly review" that turns
-        into a sprint-draining migration. That era is ending.
+        You know the friction: usage tables, Redis counters, cron reconciliation, and plan logic
+        scattered across product code. When a customer or workload runs over budget, the cost is
+        already created — and a disputed invoice means tracing the path from event to counter to
+        billing line by hand.
         <br />
         <br />
-        Today, value is dynamic. As your product ships daily, the gap between your innovation and
-        your billing infrastructure widens. Every day you wait is revenue left behind.
+        PriceOps treats pricing as live infrastructure. Unprice puts the decision in the request
+        path: check entitlement, check budget, reserve credits, and reject over-budget work before
+        it runs — then explain every invoice line from the same money path.
         <br />
         <br />
-        We believe pricing is the most underutilized growth lever in SaaS. It's time to stop
-        treating revenue as a config file and start treating it as a product surface. Experience the
-        control of iterating on pricing without blocking engineering.
+        Stop treating revenue as a config file. Decide whether expensive usage should happen at all,
+        before it costs you money.
         <div className="mt-10 flex justify-end">
           <Link href={`${BASE_URL}/manifesto`}>
             <Button variant="outline">Read more</Button>

@@ -3,32 +3,42 @@ import { siteConfig } from "~/constants/layout"
 
 export const runtime = "edge"
 
-// Simplified Logo for Satori (no filters)
-const SimpleLogo = ({ size = 80, color = "#ffc53d" }: { size?: number; color?: string }) => (
+// Brand bracket mark for Satori (no filters). Matches internal/ui/src/unprice.tsx:
+// a pair of brackets in paper ink cradling the amber signal dot.
+const BracketMark = ({ size = 80 }: { size?: number }) => (
   <svg
     width={size}
     height={size}
-    viewBox="0 0 24 24"
+    viewBox="0 0 32 32"
     fill="none"
     xmlns="http://www.w3.org/2000/svg"
     role="img"
-    aria-label="Unprice Logo"
+    aria-label="Unprice"
   >
-    {/* Left Pillar */}
-    <rect x="3" y="4" width="3" height="16" fill={color} />
-    {/* Right Pillar */}
-    <rect x="18" y="4" width="3" height="16" fill={color} />
-    {/* The Foundation (Bottom) */}
-    <rect x="3" y="17" width="18" height="3" fill={color} />
+    <path
+      d="M13.5 6 L8 6 L8 26 L13.5 26"
+      stroke="#fafafa"
+      strokeWidth="3.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      fill="none"
+    />
+    <path
+      d="M18.5 6 L24 6 L24 26 L18.5 26"
+      stroke="#fafafa"
+      strokeWidth="3.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      fill="none"
+    />
+    <circle cx="16" cy="16" r="3.3" fill="#ffc53d" />
   </svg>
 )
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const title = searchParams.get("title") || siteConfig.name
-  const description =
-    searchParams.get("description") ||
-    "Unprice, PriceOps infrastructure for SaaS. Stop hardcoding your revenue."
+  const description = searchParams.get("description") || siteConfig.description
   const rawLogoUrl = searchParams.get("logo")
 
   // Validate logoUrl is HTTPS and optionally from trusted domains
@@ -53,7 +63,7 @@ export async function GET(req: Request) {
     return new Response("Failed to load fonts for OG image generation.", { status: 500 })
   }
 
-  // Default Pluto landing page OG image
+  // Default Unprice landing page OG image
   return new ImageResponse(
     <div
       style={{
@@ -90,13 +100,13 @@ export async function GET(req: Request) {
             style={{ width: "80px", height: "80px", borderRadius: "12px", objectFit: "contain" }}
           />
         ) : (
-          <SimpleLogo size={80} color="#ffc53d" />
+          <BracketMark size={80} />
         )}
         <span
           style={{
             fontSize: "60px",
             fontWeight: 600,
-            color: "#ffc53d",
+            color: "#fafafa",
             letterSpacing: "-0.03em",
             lineHeight: 1,
             textTransform:
@@ -121,58 +131,32 @@ export async function GET(req: Request) {
         {description}
       </div>
 
-      {/* Feature highlights - only show for Unprice main site */}
+      {/* Money-path highlights - only show for Unprice main site */}
       {!logoUrl && (
         <div
           style={{
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: "40px",
+            gap: "24px",
             flexWrap: "wrap",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              backgroundColor: "#222221",
-              padding: "16px 24px",
-              borderRadius: "12px",
-              border: "1px solid #374151",
-            }}
-          >
-            <span style={{ fontSize: "24px", marginRight: "12px" }}>📊</span>
-            <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Track usage</span>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              backgroundColor: "#222221",
-              padding: "16px 24px",
-              borderRadius: "12px",
-              border: "1px solid #374151",
-            }}
-          >
-            <span style={{ fontSize: "24px", marginRight: "12px" }}>💸</span>
-            <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Iterate prices</span>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              backgroundColor: "#222221",
-              padding: "16px 24px",
-              borderRadius: "12px",
-              border: "1px solid #374151",
-            }}
-          >
-            <span style={{ fontSize: "24px", marginRight: "12px" }}>⚡</span>
-            <span style={{ fontSize: "20px", color: "#e5e7eb" }}>Real-time insights</span>
-          </div>
+          {["Meter usage", "Budget the request", "Explain the invoice"].map((label) => (
+            <div
+              key={label}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                backgroundColor: "#222221",
+                padding: "16px 24px",
+                borderRadius: "12px",
+                border: "1px solid #2c2b29",
+              }}
+            >
+              <span style={{ fontSize: "22px", color: "#e5e7eb" }}>{label}</span>
+            </div>
+          ))}
         </div>
       )}
 

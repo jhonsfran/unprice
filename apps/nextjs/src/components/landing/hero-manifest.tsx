@@ -43,29 +43,31 @@ export default function HeroManifest() {
           className="inline-block p-2 font-bold text-2xl text-background-textContrast tracking-tighter sm:text-6xl md:text-7xl"
           variants={itemVariants}
         >
-          <Balancer>PriceOps Infrastructure</Balancer>
+          <Balancer>Pricing is a runtime decision</Balancer>
         </m.h1>
         <m.p
           className="mt-20 max-w-2xl px-4 text-center text-background-text text-lg md:px-0"
           variants={itemVariants}
         >
           SaaS pricing was built for a static era. Hardcoded tiers, manual feature gating, and
-          quarterly pricing reviews are relics. You know that world is ending.
+          end-of-cycle invoices are relics. For usage-based products, that model breaks the moment
+          usage gets expensive.
           <br />
           <br />
           <span className="font-bold italic">The market has already shifted.</span>
           <br />
           <br />
-          Today, users demand personalized value. While your product ships daily, your pricing
-          infrastructure often remains frozen. The gap between your innovation and your monetization
-          is where revenue is lost.
+          Today a single customer, job, workflow, tool, or agent can cross a budget before anyone
+          reaches the invoice. By the time billing runs, the expensive work already happened — and
+          the cost is already created.
           <br />
           <br />
-          Static pricing isn’t just outdated. It’s technical debt that bleeds value.
+          Static pricing isn’t just outdated. It’s a margin risk you can’t see until the invoice.
           <br />
           <br />
-          In a world where AI shifts the horizon overnight, pricing must be an{" "}
-          <span className="font-bold italic">adaptive engine</span>, not a static config.
+          So pricing has to move into the request path: a{" "}
+          <span className="font-bold italic">runtime decision</span> that stops expensive usage
+          before it runs, not a static config.
         </m.p>
       </m.section>
       <UnpriceManifesto />

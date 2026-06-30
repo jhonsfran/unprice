@@ -20,7 +20,7 @@ export default function Home() {
         <Hero />
         <PricingHero
           headline="Test out unprice now."
-          description="Notice how 1,000,000 events transform into one perfect invoice. Experience the clarity of the metering engine below."
+          description="Report usage, watch hard limits block over-budget calls, and see events become one explainable invoice. This is the runtime, live."
           docsLinkText="Read the Docs"
         />
         <PriceOpsSection />

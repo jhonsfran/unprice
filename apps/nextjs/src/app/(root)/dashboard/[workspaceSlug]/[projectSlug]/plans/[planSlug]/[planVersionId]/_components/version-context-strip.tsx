@@ -76,7 +76,7 @@ function VersionChip({
       <span className={cn("size-1.5 shrink-0 rounded-full", dotClass)} aria-hidden="true" />
       <span>v{v.version}</span>
       {v.latest && (
-        <span className="font-normal font-sans text-[10px] text-muted-foreground uppercase tracking-wide">
+        <span className="font-normal font-primary text-[10px] text-muted-foreground uppercase tracking-wide">
           latest
         </span>
       )}

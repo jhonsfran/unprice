@@ -50,9 +50,10 @@ budget, wallet, and invoice details are the product.
 Use color semantically and sparingly.
 
 - Neutral base: surfaces, borders, text, and dense tables.
-- Blue or cyan: live request path, selected technical context, developer actions.
+- Amber (`primary`): brand and primary actions. Not a status color.
+- Blue: live request path, selected technical context, developer actions.
 - Green: accepted, processed, paid, healthy, available.
-- Amber: near-limit, pending, delayed, warning, retryable.
+- Orange: near-limit, pending, delayed, warning, retryable.
 - Red: denied, rejected, failed, budget exceeded, destructive.
 - Muted gray: inactive, empty, archived, historical.
 
@@ -161,15 +162,34 @@ Respect reduced motion.
 
 The first viewport should show product truth, not abstract category art.
 
+Signature visual: the money path is Unprice's one ownable visual idea. Render request -> meter ->
+entitlement -> budget -> wallet -> invoice as a literal, inspectable flow, with the budget
+allow/deny decision as the hero moment. Reuse it across hero, docs, empty states, and explainers so
+the brand is recognizable by its legibility of state, not by decoration.
+
+Implemented as a reusable component:
+[`apps/nextjs/src/components/landing/money-path.tsx`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/components/landing/money-path.tsx)
+(`MoneyPath`), currently rendered in the "Built for the request path" section. It is static and
+token-driven (no decorative motion) and renders the allow/deny decision as two outcome states. Reuse
+this component rather than re-drawing the path; extend it for docs and empty states.
+
 Recommended hero concept:
 
 ```mermaid
 flowchart LR
   App["App request"] --> Unprice["Unprice runtime"]
-  Unprice --> Decision["allow / deny"]
+  Unprice --> Budget["budget check"]
+  Budget --> Decision["allow / deny before it runs"]
   Unprice --> Evidence["usage + spend evidence"]
   Evidence --> Invoice["invoice line"]
 ```
+
+Recommended hero copy:
+
+- Headline: Stop runaway usage before it runs.
+- Subheadline: Open-source PriceOps infrastructure for usage-based SaaS. Put a real-time budget
+  around your most expensive action, reject over-budget work in the request path, and explain every
+  invoice line from the same money path.
 
 Hero copy should make the brand/product explicit. Prefer product screenshots, generated product
 scenes, or request-path visuals over generic SaaS illustrations.

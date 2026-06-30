@@ -27,13 +27,13 @@ export default function Cta() {
                 id="cta-title"
                 className="inline-block bg-clip-text p-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-6xl"
               >
-                Unprice, the PriceOps Infrastructure.
+                Put a budget around the expensive action.
               </h3>
               <p className="mx-auto mt-4 max-w-2xl text-background-text text-lg">
                 <Balancer>
-                  The future of PriceOps is being built now. You can be part of the foundation.
-                  Experience the difference of a decoupled revenue engine, and help us shape the
-                  evolution of SaaS monetization.
+                  Unprice is open-source PriceOps infrastructure for usage-based SaaS. Pick your most
+                  expensive action, put a real-time budget around it, and explain every invoice from
+                  the same money path. The core is open source — build on it, or help us shape it.
                 </Balancer>
               </p>
             </m.div>

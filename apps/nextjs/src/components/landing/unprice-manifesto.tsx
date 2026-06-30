@@ -23,30 +23,30 @@ interface SectionData {
 // Define sections with precise geometric positions
 const sections: Record<SectionKey, SectionData> = {
   growth: {
-    title: "PriceOps Autonomy",
+    title: "Spend Safety",
     icon: <TrendingUp className="h-full w-full p-3" />,
     description:
-      "Your engineering team should be decoupled from your growth strategy. Launch experiments at the click of a button, with zero dev effort.",
+      "Put a real-time budget around your most expensive action. Reject over-budget customer or workload spend in the request path, before the work runs.",
     color: "bg-background-background",
     position: {
       angle: 270, // Top (270 degrees from right horizontal)
     },
   },
   billing: {
-    title: "Sovereign Revenue",
+    title: "Bring Your Own Payments",
     icon: <DollarSign className="h-full w-full p-3" />,
     description:
-      "We use billing engines like Stripe and Paddle — we don't replace them. Unprice makes them swappable. Decouple billing providers from your app code. Swap Stripe for Paddle or run multiple gateways without a single deployment.",
+      "Unprice owns the runtime money path; your provider still captures payment. Stripe-first today, with a provider model designed to extend to Paddle, Lemon Squeezy, and others.",
     color: "bg-background-background",
     position: {
       angle: 30, // Bottom left (30 degrees from right horizontal)
     },
   },
   data: {
-    title: "Adaptive Engine",
+    title: "Runtime Decisions",
     icon: <BarChart className="h-full w-full p-3" />,
     description:
-      "Data-driven is just the start. You need an adaptive layer that evolves your pricing in real-time based on customer value.",
+      "Pricing is a runtime decision. Check entitlement, check budget, and consume usage while the request is in flight — not at invoice time.",
     color: "bg-background-background",
     position: {
       angle: 150, // Bottom right (150 degrees from right horizontal)

@@ -33,7 +33,7 @@ export default async function OverviewVersionPage({
 
   return (
     <DragDrop>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_300px] lg:gap-0 lg:divide-x lg:rounded-lg lg:border">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_320px] lg:gap-0 lg:divide-x lg:rounded-lg lg:border">
         {/* ── Left: feature library ───────────────────────────── */}
         <aside className="flex min-h-0 flex-col">
           <div className="flex h-[70px] items-center justify-between px-4">
@@ -67,8 +67,8 @@ export default async function OverviewVersionPage({
         </main>
 
         {/* ── Right: customer preview + plan settings ─────────── */}
-        <aside className="min-h-0">
-          <div className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <aside className="min-h-0 bg-muted/20 lg:rounded-r-lg">
+          <div className="lg:sticky lg:top-4 lg:h-full lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
             <PlanWorkspaceRail planVersion={planVersion} />
           </div>
         </aside>

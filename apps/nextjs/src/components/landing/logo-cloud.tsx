@@ -8,7 +8,7 @@ export default function LogoCloud() {
       className="mx-auto flex w-full max-w-6xl animate-slide-up-fade flex-col items-center justify-center gap-y-6 px-6 py-16 text-center"
       style={{ animationDuration: "1500ms" }}
     >
-      <p className="font-semibold text-xl tracking-tighter">Made with the best tools ❤️</p>
+      <p className="font-semibold text-xl tracking-tighter">Built on tools we trust</p>
       <br />
       <div className="grid grid-cols-2 gap-10 gap-y-6 md:grid-cols-4 md:gap-x-20">
         {Object.entries(Logos).map(([key, Logo]) => (
