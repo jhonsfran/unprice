@@ -8,7 +8,6 @@ import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, batchPrefetch, trpc } from "~/trpc/server"
 import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import { OperationalHealth, OperationalHealthSkeleton } from "./_components/operational-health"
-import OverviewStats, { OverviewStatsSkeleton } from "./_components/overview-stats"
 import TabsDashboard from "./_components/tabs-dashboard"
 import { UsageStats, UsageStatsSkeleton } from "./_components/usage-stats"
 
@@ -29,14 +28,6 @@ export default async function DashboardOverview(props: {
     trpc.analytics.getIngestionStatus.queryOptions(healthInput, {
       staleTime: 15 * 1000,
     }),
-    trpc.analytics.getOverviewStats.queryOptions(
-      {
-        interval: filter.intervalFilter,
-      },
-      {
-        ...ANALYTICS_CONFIG_REALTIME,
-      }
-    ),
     trpc.analytics.getUsageDashboard.queryOptions(
       {
         range: filter.intervalFilter,
@@ -58,12 +49,6 @@ export default async function DashboardOverview(props: {
         <div className="min-h-[170px]">
           <Suspense fallback={<OperationalHealthSkeleton />}>
             <OperationalHealth initialNow={now} />
-          </Suspense>
-        </div>
-
-        <div className="min-h-[150px]">
-          <Suspense fallback={<OverviewStatsSkeleton isLoading={true} />}>
-            <OverviewStats />
           </Suspense>
         </div>
 

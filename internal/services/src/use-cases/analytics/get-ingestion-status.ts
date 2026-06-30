@@ -61,6 +61,7 @@ export const getIngestionStatusInputSchema = z.object({
   window: getIngestionStatusWindowSchema,
   cursor: getIngestionStatusCursorSchema.nullish(),
   filter: ingestionStatusFilterSchema,
+  includeFacets: z.boolean().default(false),
   limit: z.number().int().min(1).max(100).default(50),
 })
 
@@ -157,6 +158,14 @@ export async function getIngestionStatus(
   }
   const filterQuery = toTinybirdFilter(input.filter)
 
+  const facetsPromise = input.includeFacets
+    ? deps.analytics.getIngestionFacets({
+        ...baseWindowQuery,
+        ...filterQuery,
+        limit: 50,
+      })
+    : Promise.resolve({ data: [] as IngestionFacetRow[] })
+
   const analyticsResult = await wrapResult(
     Promise.all([
       deps.analytics.getIngestionLive({
@@ -174,11 +183,7 @@ export async function getIngestionStatus(
         ...toTinybirdCursor(input.cursor),
         limit: input.limit + 1,
       }),
-      deps.analytics.getIngestionFacets({
-        ...baseWindowQuery,
-        ...filterQuery,
-        limit: 50,
-      }),
+      facetsPromise,
     ]),
     (error) =>
       new FetchError({

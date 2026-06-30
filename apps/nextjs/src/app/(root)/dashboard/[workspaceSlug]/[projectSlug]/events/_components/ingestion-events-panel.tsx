@@ -164,6 +164,7 @@ function useIngestionEventsData() {
       {
         window: queryWindow,
         filter: ingestionQueryFilter,
+        includeFacets: true,
         limit: EVENTS_PAGE_SIZE,
       },
       {
@@ -542,6 +543,7 @@ function IngestionEventsSummarySkeleton({ windowLabel }: { windowLabel: string }
             />
           ))}
         </EvidenceMetricStrip>
+        <IngestionActionSlotSkeleton />
       </EvidenceSection>
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <EvidenceSection
@@ -556,7 +558,7 @@ function IngestionEventsSummarySkeleton({ windowLabel }: { windowLabel: string }
         </EvidenceSection>
         <EvidenceSection
           title="Top rejection reasons"
-          description="Business denials grouped by reason, event, and source type."
+          description="Business denials grouped by reason, event, and source."
           contentClassName="mt-3"
           titleClassName="text-base"
         >
@@ -568,6 +570,14 @@ function IngestionEventsSummarySkeleton({ windowLabel }: { windowLabel: string }
         </EvidenceSection>
       </div>
     </>
+  )
+}
+
+function IngestionActionSlotSkeleton() {
+  return (
+    <div aria-hidden="true" className="rounded-md border border-border/60 bg-card/40 px-3 py-2">
+      <Skeleton className="h-5 w-full max-w-xl" />
+    </div>
   )
 }
 

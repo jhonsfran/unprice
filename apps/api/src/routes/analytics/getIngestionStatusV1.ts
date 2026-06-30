@@ -105,6 +105,7 @@ export const registerGetIngestionStatusV1 = (app: App) =>
           ...(eventSlug ? { eventSlugs: [eventSlug] } : {}),
           ...(state ? { states: [state] } : {}),
         },
+        includeFacets: true,
         limit,
       }
     )

@@ -46,7 +46,7 @@ SQL >
             AND date < fromUnixTimestamp64Milli({{ Int64(end) }})
         {% elif defined(interval_days) %}
             AND date >= toStartOfDay(today() - {{ Int32(interval_days) }})
-        {% else %}
+        {% elif not defined(period_key) %}
             AND date >= toStartOfDay(today() - 7)
         {% end %}
     {% if defined(customer_id) %} GROUP BY project_id, customer_id, customer_entitlement_id, grant_id, period_key, feature_slug {% else %} GROUP BY project_id, customer_entitlement_id, grant_id, period_key, feature_slug {% end %}

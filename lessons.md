@@ -13,6 +13,9 @@ patterns. Keep it cheap to load and useful.
 - Do not record secrets, customer data, or one-off local noise.
 - Architecture rule changes need an ADR link.
 - You need to use nvm use to install the proper node version of the project
+- 2026-06-30: The repo pins `pnpm@10.28.0`; if the Codex runtime resolves `pnpm` to 11.x,
+  use the pinned/Corepack pnpm instead. pnpm 11 ignores the root `pnpm` config, can report
+  lockfile config mismatch, and may purge `node_modules` before tests run.
 - Before adding a helper, utility, or repeated row shape, search the repo for an established
   pattern first; reuse or extract the canonical path instead of duplicating logic.
 - Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.

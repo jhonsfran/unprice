@@ -43,6 +43,9 @@ export function IngestionHealthStrip({
   const enforcementTone = getEnforcementTone(status)
   const successTone = getSuccessTone(status)
   const attentionCount = getAttentionCount(status)
+  const processedCount = status.totals.processed
+  const rejectedCount = status.totals.rejected
+  const failedCount = status.totals.failed
   const actionMessages = getActionMessages(status, { showNoEventsAction })
   const pipelineLabel = getPipelineLabel(status)
   const enforcementLabel = getEnforcementLabel(status)
@@ -57,28 +60,32 @@ export function IngestionHealthStrip({
       />
       <EvidenceMetricTile
         label="Processed"
-        value={<NumberTicker value={status.totals.processed} decimalPlaces={0} startValue={0} />}
+        value={
+          <NumberTicker value={processedCount} decimalPlaces={0} startValue={processedCount} />
+        }
         helper="accepted events"
         tone="success"
         icon={<CheckCircle2 className="size-4" />}
       />
       <EvidenceMetricTile
         label="Rejected"
-        value={<NumberTicker value={status.totals.rejected} decimalPlaces={0} startValue={0} />}
+        value={<NumberTicker value={rejectedCount} decimalPlaces={0} startValue={rejectedCount} />}
         helper="business denials"
         tone={status.totals.rejected > 0 ? "warning" : "default"}
         icon={<CircleSlash className="size-4" />}
       />
       <EvidenceMetricTile
         label="Failed"
-        value={<NumberTicker value={status.totals.failed} decimalPlaces={0} startValue={0} />}
+        value={<NumberTicker value={failedCount} decimalPlaces={0} startValue={failedCount} />}
         helper="system failures"
         tone={status.totals.failed > 0 ? "destructive" : "default"}
         icon={<XCircle className="size-4" />}
       />
       <EvidenceMetricTile
         label="Attention"
-        value={<NumberTicker value={attentionCount} decimalPlaces={0} startValue={0} />}
+        value={
+          <NumberTicker value={attentionCount} decimalPlaces={0} startValue={attentionCount} />
+        }
         helper="rejected + failed"
         tone={attentionCount > 0 ? "warning" : "success"}
         icon={<AlertTriangle className="size-4" />}

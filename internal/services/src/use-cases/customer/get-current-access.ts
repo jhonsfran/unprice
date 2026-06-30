@@ -412,13 +412,11 @@ async function loadUsageByFeaturePeriodKey({
 }
 
 function sumGrantAllowance(grants: Array<{ allowanceUnits: number | null }>): number | null {
-  const finiteGrants = grants.filter((grant) => grant.allowanceUnits !== null)
-
-  if (finiteGrants.length === 0) {
+  if (grants.length === 0 || grants.some((grant) => grant.allowanceUnits === null)) {
     return null
   }
 
-  return finiteGrants.reduce((total, grant) => total + (grant.allowanceUnits ?? 0), 0)
+  return grants.reduce((total, grant) => total + (grant.allowanceUnits ?? 0), 0)
 }
 
 function buildUsagePeriodPlan({

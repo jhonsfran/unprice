@@ -33,6 +33,7 @@ export const getIngestionStatus = protectedProjectProcedure
         })
         .optional()
         .default({}),
+      includeFacets: z.boolean().optional().default(false),
       limit: z.number().int().min(1).max(100).optional().default(50),
     })
   )
@@ -48,6 +49,7 @@ export const getIngestionStatus = protectedProjectProcedure
         window: opts.input.window,
         cursor: opts.input.cursor,
         filter: opts.input.filter,
+        includeFacets: opts.input.includeFacets,
         limit: opts.input.limit,
       }
     )

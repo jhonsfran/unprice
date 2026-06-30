@@ -104,6 +104,30 @@ describe("getCustomerCurrentAccess", () => {
     expect(analytics.getFeaturesUsagePeriod).not.toHaveBeenCalled()
     expect(result.val?.entitlements[0]?.currentUsage).toBeNull()
   })
+
+  it("treats any unlimited grant as unlimited allowance", async () => {
+    const entitlement = usageEntitlement({
+      featureSlug: "events",
+      featureTitle: "Events",
+      grantId: "grant_events",
+      grantAllowances: [100, null],
+      limit: null,
+    })
+    const { deps } = makeDeps({
+      entitlements: [entitlement],
+    })
+
+    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.entitlements[0]).toEqual(
+      expect.objectContaining({
+        featureSlug: "events",
+        grantAllowance: null,
+        limit: null,
+      })
+    )
+  })
 })
 
 function makeDeps({
@@ -176,12 +200,16 @@ function usageEntitlement({
   id = "ce_events",
   featureSlug,
   featureTitle,
+  grantAllowances = [10_000],
   grantId,
+  limit = 10_000,
 }: {
   id?: string
   featureSlug: string
   featureTitle: string
+  grantAllowances?: Array<number | null>
   grantId: string
+  limit?: number | null
 }) {
   return {
     id,
@@ -199,7 +227,7 @@ function usageEntitlement({
       projectId,
       featureType: "usage",
       unitOfMeasure: featureSlug.slice(0, -1) || "unit",
-      limit: 10_000,
+      limit,
       meterConfig: { aggregationMethod: "count" },
       resetConfig: resetEveryFiveMinutes,
       billingConfig: billingEveryFiveMinutes,
@@ -209,18 +237,16 @@ function usageEntitlement({
         title: featureTitle,
       },
     },
-    grants: [
-      {
-        id: grantId,
-        projectId,
-        customerEntitlementId: id,
-        type: "subscription",
-        priority: 0,
-        allowanceUnits: 10_000,
-        effectiveAt: entitlementEffectiveAt,
-        expiresAt: null,
-      },
-    ],
+    grants: grantAllowances.map((allowanceUnits, index) => ({
+      id: grantAllowances.length === 1 ? grantId : `${grantId}_${index + 1}`,
+      projectId,
+      customerEntitlementId: id,
+      type: "subscription",
+      priority: 0,
+      allowanceUnits,
+      effectiveAt: entitlementEffectiveAt,
+      expiresAt: null,
+    })),
   }
 }
 

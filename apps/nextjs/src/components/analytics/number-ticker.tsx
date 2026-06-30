@@ -28,6 +28,7 @@ export function NumberTicker({
   ...props
 }: NumberTickerProps) {
   const ref = useRef<HTMLSpanElement>(null)
+  const initialValue = direction === "down" ? value : startValue
   const motionValue = useMotionValue(direction === "down" ? value : startValue)
   const springValue = useSpring(motionValue, {
     damping: 20,
@@ -47,19 +48,15 @@ export function NumberTicker({
   useEffect(() => {
     const unsubscribe = springValue.on("change", (latest: number) => {
       if (ref.current) {
-        const formattedValue = withFormatter
-          ? isTime
-            ? nFormatterTime(latest, { digits: decimalPlaces })
-            : nFormatter(latest, { digits: decimalPlaces })
-          : Intl.NumberFormat("en-US", {
-              minimumFractionDigits: decimalPlaces,
-              maximumFractionDigits: decimalPlaces,
-            }).format(Number(latest.toFixed(decimalPlaces)))
-        ref.current.textContent = formattedValue
+        ref.current.textContent = formatTickerValue(latest, {
+          decimalPlaces,
+          isTime,
+          withFormatter,
+        })
       }
     })
     return () => unsubscribe()
-  }, [springValue, decimalPlaces])
+  }, [decimalPlaces, isTime, springValue, withFormatter])
 
   return (
     <span
@@ -67,7 +64,27 @@ export function NumberTicker({
       className={cn("inline-block tabular-nums tracking-wider", className)}
       {...props}
     >
-      {startValue}
+      {formatTickerValue(initialValue, { decimalPlaces, isTime, withFormatter })}
     </span>
   )
+}
+
+function formatTickerValue(
+  value: number,
+  {
+    decimalPlaces,
+    isTime,
+    withFormatter,
+  }: Pick<NumberTickerProps, "decimalPlaces" | "isTime" | "withFormatter">
+): string {
+  if (withFormatter) {
+    return isTime
+      ? nFormatterTime(value, { digits: decimalPlaces })
+      : nFormatter(value, { digits: decimalPlaces })
+  }
+
+  return Intl.NumberFormat("en-US", {
+    minimumFractionDigits: decimalPlaces,
+    maximumFractionDigits: decimalPlaces,
+  }).format(Number(value.toFixed(decimalPlaces)))
 }

@@ -200,6 +200,7 @@ describe("getIngestionStatus", () => {
         sourceIds: ["src_1"],
         sourceTypes: ["api_key"],
       },
+      includeFacets: true,
       limit: 5,
     })
 
@@ -306,6 +307,14 @@ describe("getIngestionStatus", () => {
       states: ["processed"],
       limit: 51,
     })
+    expect(analytics.getIngestionFacets).not.toHaveBeenCalled()
+    expect(result.val?.facets).toEqual({
+      states: [],
+      eventSlugs: [],
+      sourceTypes: [],
+      rejectionReasons: [],
+      customers: [],
+    })
     expect(result.val?.recentEvents).toEqual([
       expect.objectContaining({
         eventId: "evt_project",
@@ -336,7 +345,7 @@ describe("getIngestionStatus", () => {
       ],
     })
 
-    const result = await getIngestionStatus(deps, baseInput({ limit: 1 }))
+    const result = await getIngestionStatus(deps, baseInput({ includeFacets: true, limit: 1 }))
 
     expect(result.err).toBeUndefined()
     expect(result.val?.recentEvents.map((event) => event.eventSlug)).toEqual(["page.only"])
@@ -409,6 +418,7 @@ function baseInput(overrides: Partial<GetIngestionStatusInput> = {}): GetIngesti
       to: toTs,
     },
     filter: {},
+    includeFacets: false,
     limit: 50,
     ...overrides,
   }
