@@ -124,20 +124,22 @@ export default function CreateApiKeyForm(props: {
         )}
         {key && (
           <motion.div
-            className="flex items-center justify-between space-x-2"
+            className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-background-bgSubtle px-3 py-2"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
           >
-            <span className={cn("font-mono")}>
+            <span className={cn("min-w-0 flex-1 truncate font-mono text-sm")}>
               {show
                 ? key
                 : `${key.split("_")[0]}_${key.split("_")[1]}_${key.split("_")[2]!.replace(/./g, "*")}`}
             </span>
             <div className="flex items-center gap-2">
               <Button
+                type="button"
                 variant="ghost"
-                className="h-4 w-4 p-0 opacity-50"
+                size="icon"
+                className="size-8 opacity-70"
                 disabled={show}
                 onClick={() => {
                   setShow(true)
@@ -150,7 +152,7 @@ export default function CreateApiKeyForm(props: {
                 {show ? <EyeOff /> : <Eye />}
               </Button>
 
-              <CopyButton value={key} className="size-4 opacity-50" />
+              <CopyButton value={key} className="size-4 opacity-70" />
             </div>
           </motion.div>
         )}

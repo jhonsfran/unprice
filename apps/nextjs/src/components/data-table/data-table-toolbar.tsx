@@ -60,16 +60,16 @@ export function DataTableToolbar<TData>({ table, filterOptions }: DataTableToolb
   })
 
   return (
-    <div className="hidden items-center justify-between md:flex">
-      <div className="flex flex-1 items-center space-x-2">
+    <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
         {table.getColumn(filterBy) && (
           <Input
-            placeholder={`filter by ${filterBy}`}
+            placeholder={`Filter by ${filterBy}`}
             value={(table.getColumn(filterBy)?.getFilterValue() as string) ?? ""}
             onChange={(event) => {
               table.getColumn(filterBy)?.setFilterValue(event.target.value)
             }}
-            className="h-8 w-[150px] bg-background lg:w-[250px]"
+            className="h-8 w-full bg-background sm:w-[220px] lg:w-[250px]"
           />
         )}
         {filterSelectors}
@@ -81,13 +81,13 @@ export function DataTableToolbar<TData>({ table, filterOptions }: DataTableToolb
             className="h-8 px-2 lg:px-3"
           >
             Reset
-            <XCircle className="ml-2 h-4 w-4" />
+            <XCircle className="ml-2 size-4" />
           </Button>
         )}
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {filterOptions?.filterDateRange && (
-          <DateRangePicker triggerSize="sm" triggerClassName="ml-auto w-56 sm:w-60" align="end" />
+          <DateRangePicker triggerSize="sm" triggerClassName="w-full sm:w-60" align="end" />
         )}
         {filterOptions?.filterColumns && <DataTableViewOptions table={table} />}
       </div>

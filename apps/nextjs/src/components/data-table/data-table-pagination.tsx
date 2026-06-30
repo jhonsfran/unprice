@@ -87,7 +87,7 @@ export function DataTablePagination<TData>({
             size="icon"
             className="hidden size-8 lg:flex"
             onClick={() => {
-              table.setPageIndex(table.getPageCount() - 1)
+              table.setPageIndex(pageCount - 1)
             }}
             disabled={!table.getCanNextPage()}
           >

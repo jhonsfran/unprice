@@ -16,12 +16,20 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-import { CalendarDays, Check, Loader2, Search, X } from "lucide-react"
+import { CalendarDays, Check, Loader2, Search, SlidersHorizontal, X } from "lucide-react"
 import * as React from "react"
 import type { DateRange } from "react-day-picker"
 import { Badge } from "./badge"
 import { Button } from "./button"
 import { Calendar } from "./calendar"
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "./drawer"
 import { Input } from "./input"
 import { Popover, PopoverContent, PopoverTrigger } from "./popover"
 import { ScrollArea } from "./scroll-area"
@@ -150,6 +158,23 @@ export function FilterDataTable<TData, TValue>({
       ? String(table.getColumn(searchColumn)?.getFilterValue() ?? "")
       : ""
   const searchValue = controlledSearchValue ?? localSearchValue
+
+  React.useEffect(() => {
+    if (controlledSearchValue === undefined || !searchColumn) {
+      return
+    }
+
+    const column = table.getColumn(searchColumn)
+    if (!column) {
+      return
+    }
+
+    const currentValue = String(column.getFilterValue() ?? "")
+    if (currentValue !== controlledSearchValue) {
+      column.setFilterValue(controlledSearchValue)
+    }
+  }, [controlledSearchValue, searchColumn, table])
+
   const loadMoreRef = React.useRef<HTMLDivElement | null>(null)
   const loadMoreRequestedRef = React.useRef(false)
   const canLoadMore = Boolean(hasMore && onLoadMore)
@@ -203,22 +228,15 @@ export function FilterDataTable<TData, TValue>({
           isRefreshing ? "opacity-90" : "opacity-100"
         )}
       >
-        <aside className="border-border border-b bg-muted/30 md:border-r md:border-b-0">
+        <aside className="hidden border-border bg-muted/30 md:block md:border-r">
           <div className="flex h-14 items-center border-b px-4 font-medium text-sm">Filters</div>
           <ScrollArea className="h-[calc(80vh-3.5rem)]">
-            <div className="space-y-1 p-2 [&>*:last-child]:border-b-0">
-              {filters.map((filter) =>
-                filter.type === "checkbox" ? (
-                  <CheckboxFilter key={filter.id} table={table} filter={filter} />
-                ) : (
-                  <DateFilter key={filter.id} filter={filter} />
-                )
-              )}
-            </div>
+            <FilterList table={table} filters={filters} />
           </ScrollArea>
         </aside>
         <section className="min-w-0">
-          <div className="flex h-14 shrink-0 items-center gap-2 border-b px-2">
+          <div className="flex min-h-14 shrink-0 flex-col gap-2 border-b px-2 py-2 sm:flex-row sm:items-center">
+            <MobileFilterDrawer table={table} filters={filters} />
             {searchColumn && table.getColumn(searchColumn) ? (
               <div className="relative min-w-0 flex-1">
                 <Search className="-translate-y-1/2 absolute top-1/2 left-3 size-4 text-muted-foreground" />
@@ -344,6 +362,61 @@ export function FilterDataTable<TData, TValue>({
         </section>
       </div>
     </div>
+  )
+}
+
+function FilterList<TData>({
+  table,
+  filters,
+}: {
+  table: TanStackTable<TData>
+  filters: FilterDataTableFilter[]
+}) {
+  return (
+    <div className="space-y-1 p-2 [&>*:last-child]:border-b-0">
+      {filters.length === 0 ? (
+        <p className="px-2 py-3 text-muted-foreground text-sm">No filters available.</p>
+      ) : null}
+      {filters.map((filter) =>
+        filter.type === "checkbox" ? (
+          <CheckboxFilter key={filter.id} table={table} filter={filter} />
+        ) : (
+          <DateFilter key={filter.id} filter={filter} />
+        )
+      )}
+    </div>
+  )
+}
+
+function MobileFilterDrawer<TData>({
+  table,
+  filters,
+}: {
+  table: TanStackTable<TData>
+  filters: FilterDataTableFilter[]
+}) {
+  if (filters.length === 0) {
+    return null
+  }
+
+  return (
+    <Drawer>
+      <DrawerTrigger asChild>
+        <Button type="button" variant="outline" size="sm" className="h-10 shrink-0 gap-2 md:hidden">
+          <SlidersHorizontal className="size-4" aria-hidden="true" />
+          Filters
+        </Button>
+      </DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>Filters</DrawerTitle>
+          <DrawerDescription>Narrow the visible rows without leaving this table.</DrawerDescription>
+        </DrawerHeader>
+        <ScrollArea className="max-h-[60vh]">
+          <FilterList table={table} filters={filters} />
+        </ScrollArea>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
