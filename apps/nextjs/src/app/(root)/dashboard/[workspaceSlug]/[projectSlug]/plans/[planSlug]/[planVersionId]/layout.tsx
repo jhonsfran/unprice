@@ -50,7 +50,7 @@ export default async function PlanVersionLayout(props: {
             label={headerLabel}
             action={
               <div className="flex items-center gap-2">
-                <CodeApiSheet defaultMethod="listVersions">
+                <CodeApiSheet defaultMethod="listPlanVersions">
                   <Button variant={"ghost"}>
                     <Code className="mr-2 h-4 w-4" />
                     API

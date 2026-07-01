@@ -42,7 +42,7 @@ export default async function ProjectUsersPage(props: {
           description="Create customers and inspect subscriptions, wallets, invoices, and runs."
           action={
             <div className="flex items-center gap-2">
-              <CodeApiSheet defaultMethod="signUp">
+              <CodeApiSheet defaultMethod="signUpCustomer">
                 <Button variant={"ghost"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
@@ -66,6 +66,9 @@ export default async function ProjectUsersPage(props: {
           </TabNavigationLink>
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
+          </TabNavigationLink>
+          <TabNavigationLink asChild>
+            <SuperLink href={`${baseUrl}/runs`}>Runs</SuperLink>
           </TabNavigationLink>
         </div>
       </TabNavigation>
@@ -94,7 +97,15 @@ export default async function ProjectUsersPage(props: {
             emptyState={{
               title: "No customers yet",
               description:
-                "Customers will appear after signup or API creation. Record usage to build evidence.",
+                "Customers will appear after signup or API creation. Create a customer before recording usage, subscriptions, wallets, invoices, and runs.",
+              action: (
+                <CodeApiSheet defaultMethod="signUpCustomer">
+                  <Button size="sm" variant="outline">
+                    <Code className="mr-2 size-4" />
+                    Create via API
+                  </Button>
+                </CodeApiSheet>
+              ),
             }}
             hidePaginationWhenEmpty
             filterOptions={{

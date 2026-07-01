@@ -143,8 +143,9 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
       return { start: fullStart, end, periodsPassed: 0 }
     }
 
-    // Default behavior (non-minute or count=1): stub from paid start to first anchor
-    const start = paidPeriodStart
+    // Default behavior (non-minute or count=1): stub from paid start to first anchor.
+    // The service window must never include time before the phase/grant exists.
+    const start = rawPaidPeriodStart
     const end = Math.min(
       firstPaidCycleStart.getTime(),
       effectiveEndDate ?? Number.POSITIVE_INFINITY
@@ -162,7 +163,7 @@ export function calculateCycleWindow(params: CalculateCycleWindowParams): CycleW
   }
 
   // --- 6. Construct, Cap, and Return the Final Window ---
-  const start = currentCycleStart.getTime()
+  const start = Math.max(currentCycleStart.getTime(), rawPaidPeriodStart)
   const end = Math.min(nextCycleStart.getTime(), effectiveEndDate ?? Number.POSITIVE_INFINITY)
 
   return { start, end, periodsPassed }

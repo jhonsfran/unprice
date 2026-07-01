@@ -209,6 +209,7 @@ function createdPeriods() {
         cycleStartAt: number
         invoiceAt: number
         statementKey: string
+        subscriptionPhaseId: string
         subscriptionItemId: string
       }>
     }
@@ -370,6 +371,66 @@ describe("BillingService._generateBillingPeriods", () => {
     })
   })
 
+  it("starts a mid-cycle replacement phase at its actual start and gives it a separate statement", async () => {
+    const originalPhaseStart = new Date("2026-07-01T00:00:00.000Z").getTime()
+    const changeAt = new Date("2026-07-01T14:38:19.928Z").getTime()
+    const nextPhaseStart = changeAt + 1
+    const generateNow = new Date("2026-07-01T14:45:00.000Z").getTime()
+
+    const originalPhase = makePhase({
+      id: "phase_original",
+      startAt: originalPhaseStart,
+      endAt: changeAt,
+      billingAnchor: 1,
+      items: [makeItem("item_original")],
+    })
+    const enterprisePhase = makePhase({
+      id: "phase_enterprise",
+      startAt: nextPhaseStart,
+      endAt: null,
+      billingAnchor: 1,
+      planVersion: {
+        whenToBill: "pay_in_advance",
+        currency: "USD",
+        collectionMethod: "charge_automatically",
+        billingConfig: makeBillingConfig("year", "annual"),
+      },
+      items: [makeItem("item_enterprise", { billingConfig: makeBillingConfig("year", "annual") })],
+    })
+    const { billing } = makeBillingService({ phases: [originalPhase, enterprisePhase] })
+
+    const result = await generateBillingPeriods(billing, {
+      subscriptionId: "sub_1",
+      projectId: "proj_1",
+      now: generateNow,
+    })
+
+    expect(result.err).toBeUndefined()
+
+    const periods = createdPeriods()
+    const originalPeriod = periods.find(
+      (period) => period.subscriptionPhaseId === "phase_original"
+    )
+    const enterprisePeriod = periods.find(
+      (period) => period.subscriptionPhaseId === "phase_enterprise"
+    )
+
+    expect(originalPeriod).toEqual(
+      expect.objectContaining({
+        cycleStartAt: originalPhaseStart,
+        cycleEndAt: changeAt,
+        invoiceAt: originalPhaseStart,
+      })
+    )
+    expect(enterprisePeriod).toEqual(
+      expect.objectContaining({
+        cycleStartAt: nextPhaseStart,
+        invoiceAt: nextPhaseStart,
+      })
+    )
+    expect(enterprisePeriod?.statementKey).not.toBe(originalPeriod?.statementKey)
+  })
+
   it("materializes mixed annual, monthly, daily, and hourly cadence periods with interval-specific anchor semantics", async () => {
     const phase = makePhase({
       startAt: GENERATION_ANCHOR_START,
@@ -410,14 +471,14 @@ describe("BillingService._generateBillingPeriods", () => {
 
     expect(byItem.get("item_annual")?.[0]).toEqual(
       expect.objectContaining({
-        cycleStartAt: new Date("2026-03-01T00:00:00Z").getTime(),
+        cycleStartAt: GENERATION_ANCHOR_START,
         cycleEndAt: new Date("2027-03-01T00:00:00Z").getTime(),
         invoiceAt: new Date("2027-03-01T00:00:00Z").getTime(),
       })
     )
     expect(byItem.get("item_monthly")?.[0]).toEqual(
       expect.objectContaining({
-        cycleStartAt: new Date("2026-03-01T00:00:00Z").getTime(),
+        cycleStartAt: GENERATION_ANCHOR_START,
         cycleEndAt: new Date("2026-04-01T00:00:00Z").getTime(),
         invoiceAt: new Date("2026-04-01T00:00:00Z").getTime(),
       })
@@ -425,7 +486,7 @@ describe("BillingService._generateBillingPeriods", () => {
     expect(byItem.get("item_daily")).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          cycleStartAt: new Date("2026-03-01T00:00:00Z").getTime(),
+          cycleStartAt: GENERATION_ANCHOR_START,
           cycleEndAt: new Date("2026-03-01T01:00:00Z").getTime(),
         }),
         expect.objectContaining({

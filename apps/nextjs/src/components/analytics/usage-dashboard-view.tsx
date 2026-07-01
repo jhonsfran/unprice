@@ -3,15 +3,17 @@
 import { nFormatter } from "@unprice/db/utils"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
+import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { cn } from "@unprice/ui/utils"
-import { BarChart3, Coins, Layers3, ReceiptText, TriangleAlert, Users } from "lucide-react"
+import { BarChart3, Code, Coins, Layers3, ReceiptText, TriangleAlert, Users } from "lucide-react"
 import dynamic from "next/dynamic"
 import { useMemo } from "react"
 import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
+import { CodeApiSheet } from "~/components/code-api-sheet"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { SuperLink } from "~/components/super-link"
 import { ProgressBar } from "./progress"
@@ -404,8 +406,16 @@ function UsageDashboardEmptyState({
             </EmptyPlaceholder.Icon>
             <EmptyPlaceholder.Title>No usage data yet</EmptyPlaceholder.Title>
             <EmptyPlaceholder.Description>
-              Record usage events with feature slugs. Rejected or failed events appear in Events.
+              Usage evidence appears after your app records usage events for metered features.
             </EmptyPlaceholder.Description>
+            <EmptyPlaceholder.Action>
+              <CodeApiSheet defaultMethod="recordUsage">
+                <Button size="sm">
+                  <Code className="mr-2 size-4" />
+                  Record usage
+                </Button>
+              </CodeApiSheet>
+            </EmptyPlaceholder.Action>
           </EmptyPlaceholder>
         </CardContent>
       </Card>

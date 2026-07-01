@@ -1,8 +1,11 @@
 import { runStatusSchema } from "@unprice/db/validators"
+import { Button } from "@unprice/ui/button"
 import { Typography } from "@unprice/ui/typography"
+import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
+import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { dataTableParams } from "~/lib/searchParams"
@@ -42,15 +45,14 @@ export default async function CustomerRunsPage(props: {
       <Suspense
         fallback={
           <DataTableSkeleton
-            columnCount={9}
+            columnCount={8}
             searchableColumnCount={1}
             filterableColumnCount={2}
             cellWidths={[
-              "12rem",
+              "16rem",
               "10rem",
-              "12rem",
+              "20rem",
               "14rem",
-              "10rem",
               "10rem",
               "10rem",
               "12rem",
@@ -64,12 +66,21 @@ export default async function CustomerRunsPage(props: {
           columns={runsColumns}
           data={runs}
           emptyState={{
-            title: "No runs",
-            description: "Budgeted runs will appear after usage is evaluated for this customer.",
+            title: "No budgeted runs",
+            description:
+              "Runs will appear after your app starts a budgeted workload for this customer.",
+            action: (
+              <CodeApiSheet defaultMethod="startBudgetedRun">
+                <Button size="sm">
+                  <Code className="mr-2 size-4" />
+                  Start budgeted run
+                </Button>
+              </CodeApiSheet>
+            ),
           }}
           hidePaginationWhenEmpty
           filterOptions={{
-            filterBy: "id",
+            filterBy: "customerId",
             filterColumns: true,
             filterDateRange: true,
             filterServerSide: true,

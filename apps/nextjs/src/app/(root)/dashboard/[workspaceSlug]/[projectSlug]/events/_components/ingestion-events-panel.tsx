@@ -2,12 +2,12 @@
 
 import { Button } from "@unprice/ui/button"
 import { FilterDataTable } from "@unprice/ui/filter-data-table"
-import { AlertTriangle, RotateCcw } from "lucide-react"
+import { AlertTriangle, Code, RotateCcw } from "lucide-react"
 import { IngestionHealthStrip } from "~/components/analytics/ingestion-health-strip"
 import { RejectionReasonsPanel } from "~/components/analytics/rejection-reasons-panel"
 import { RequestPathSparkline } from "~/components/analytics/request-path-sparkline"
+import { CodeApiSheet } from "~/components/code-api-sheet"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
-import { EventsTimeWindowFilter } from "./events-time-window-filter"
 import { IngestionEventDetailsSheet } from "./ingestion-event-details-sheet"
 import { IngestionEventsSummarySkeleton } from "./ingestion-events-summary-skeleton"
 import { buildIngestionEventsColumns } from "./ingestion-events-table-schema"
@@ -22,8 +22,6 @@ export function IngestionEventsPanel() {
     isRefreshing,
     status,
     windowLabel,
-    dateRange,
-    handleDateRangeChange,
     rows,
     filterOptions,
     handleRejectionFilterSelect,
@@ -48,9 +46,6 @@ export function IngestionEventsPanel() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex justify-end">
-        <EventsTimeWindowFilter value={dateRange} onChange={handleDateRangeChange} />
-      </div>
       {status ? (
         <>
           <IngestionHealthStrip
@@ -99,7 +94,8 @@ export function IngestionEventsPanel() {
         }}
         emptyTitle={queryError ? "Events could not be loaded" : "No events"}
         emptyDescription={
-          queryError?.message ?? "No ingestion events were found for the selected filters."
+          queryError?.message ??
+          "Events appear after your app records or consumes usage. Clear filters to inspect existing evidence."
         }
         emptyState={
           <EmptyPlaceholder className="min-h-[520px] border-none">
@@ -110,8 +106,27 @@ export function IngestionEventsPanel() {
               {queryError ? "Events could not be loaded" : "No events"}
             </EmptyPlaceholder.Title>
             <EmptyPlaceholder.Description>
-              {queryError?.message ?? "No ingestion events were found for the selected filters."}
+              {queryError?.message ??
+                "Events appear after your app records or consumes usage. Clear filters to inspect existing evidence."}
             </EmptyPlaceholder.Description>
+            {!queryError && (
+              <EmptyPlaceholder.Action>
+                <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
+                  <CodeApiSheet defaultMethod="recordUsage">
+                    <Button size="sm">
+                      <Code className="mr-2 size-4" />
+                      Record usage
+                    </Button>
+                  </CodeApiSheet>
+                  <CodeApiSheet defaultMethod="consumeUsage">
+                    <Button size="sm" variant="outline">
+                      <Code className="mr-2 size-4" />
+                      Consume usage
+                    </Button>
+                  </CodeApiSheet>
+                </div>
+              </EmptyPlaceholder.Action>
+            )}
           </EmptyPlaceholder>
         }
         loadingState={TABLE_LOADING_STATE}

@@ -221,16 +221,15 @@ export function calculateProration(params: {
   }
 
   const { billingInterval, billingIntervalCount } = billingConfig
-  const normalizedServiceStart = normalizeBillingStartForInterval(serviceStart, billingInterval)
   const normalizedEffectiveStartDate = normalizeBillingStartForInterval(
     effectiveStartDate,
     billingInterval
   )
 
-  if (serviceEnd <= normalizedServiceStart) {
+  if (serviceEnd <= serviceStart) {
     return {
       prorationFactor: 0,
-      referenceCycleStart: normalizedServiceStart,
+      referenceCycleStart: serviceStart,
       referenceCycleEnd: serviceEnd,
     }
   }
@@ -294,7 +293,7 @@ export function calculateProration(params: {
     return { prorationFactor: 0, referenceCycleStart, referenceCycleEnd }
   }
 
-  const windowDuration = serviceEnd - normalizedServiceStart
+  const windowDuration = serviceEnd - serviceStart
   const prorationFactor = Math.min(1, Math.max(0, windowDuration / fullCycleDuration))
 
   return { prorationFactor, referenceCycleStart, referenceCycleEnd }

@@ -5,7 +5,19 @@ import { useTheme } from "next-themes"
 import { Highlight, themes } from "prism-react-renderer"
 import { useMounted } from "~/hooks/use-mounted"
 
-export function CodeEditor({ codeBlock, language }: { codeBlock: string; language: string }) {
+export function CodeEditor({
+  codeBlock,
+  language,
+  className,
+  lineNumberClassName,
+  codeClassName,
+}: {
+  codeBlock: string
+  language: string
+  className?: string
+  lineNumberClassName?: string
+  codeClassName?: string
+}) {
   const { theme } = useTheme()
   const isMounted = useMounted()
 
@@ -17,10 +29,10 @@ export function CodeEditor({ codeBlock, language }: { codeBlock: string; languag
       language={language}
       theme={theme === "dark" ? themes.nightOwl : themes.nightOwlLight}
     >
-      {({ className, style, tokens, getLineProps, getTokenProps }) => {
+      {({ className: prismClassName, style, tokens, getLineProps, getTokenProps }) => {
         return (
           <pre
-            className={cn("h-full overflow-x-auto text-sm", className)}
+            className={cn("h-full overflow-x-auto text-sm leading-6", prismClassName, className)}
             style={{ ...style, background: "transparent" }}
           >
             {tokens.map((line, i) => {
@@ -31,10 +43,15 @@ export function CodeEditor({ codeBlock, language }: { codeBlock: string; languag
 
               return (
                 <div key={i.toString()} {...lineProps} className="table-row">
-                  <span className="table-cell select-none pr-4 text-right text-background-line">
+                  <span
+                    className={cn(
+                      "table-cell select-none pr-4 text-right text-background-line",
+                      lineNumberClassName
+                    )}
+                  >
                     {i + 1}
                   </span>
-                  <span className="table-cell whitespace-pre">
+                  <span className={cn("table-cell whitespace-pre", codeClassName)}>
                     {line.map((token, j) => {
                       const { key: tokenKey, ...tokenProps } = getTokenProps({
                         token,

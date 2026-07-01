@@ -3,9 +3,13 @@
 import { Button } from "@unprice/ui/button"
 import { Calendar } from "@unprice/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
+import { cn } from "@unprice/ui/utils"
 import { format } from "date-fns"
 import { CalendarDays, X } from "lucide-react"
+import { useCallback, useMemo } from "react"
 import type { DateRange } from "react-day-picker"
+import { useFilterDataTable } from "~/hooks/use-filter-datatable"
+import { manipulateDate } from "~/lib/dates"
 
 function today(): Date {
   return new Date()
@@ -20,14 +24,16 @@ function oneMonthAgo(): Date {
 export function EventsTimeWindowFilter({
   value,
   onChange,
+  className,
 }: {
   value?: DateRange
   onChange: (range: DateRange | undefined) => void
+  className?: string
 }) {
   const hasExplicitValue = Boolean(value?.from || value?.to)
 
   return (
-    <div className="flex items-center gap-2">
+    <div className={cn("flex items-center gap-2", className)}>
       <Popover>
         <PopoverTrigger asChild>
           <Button
@@ -67,6 +73,38 @@ export function EventsTimeWindowFilter({
       ) : null}
     </div>
   )
+}
+
+export function EventsTimeWindowFilterAction({ className }: { className?: string }) {
+  const [filters, setFilters] = useFilterDataTable()
+  const value = useMemo<DateRange | undefined>(
+    () =>
+      filters.from || filters.to
+        ? {
+            from: filters.from ? new Date(filters.from) : undefined,
+            to: filters.to ? new Date(filters.to) : undefined,
+          }
+        : undefined,
+    [filters.from, filters.to]
+  )
+
+  const handleChange = useCallback(
+    (range: DateRange | undefined) => {
+      if (!range) {
+        void setFilters({ from: null, to: null })
+        return
+      }
+
+      const next = manipulateDate(range)
+      void setFilters({
+        from: next.from,
+        to: next.to,
+      })
+    },
+    [setFilters]
+  )
+
+  return <EventsTimeWindowFilter className={className} value={value} onChange={handleChange} />
 }
 
 function formatDateRangeLabel(range?: DateRange): string {

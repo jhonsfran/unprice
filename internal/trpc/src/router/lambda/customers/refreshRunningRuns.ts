@@ -5,19 +5,20 @@ import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 
 type RunsGet = (input: { runId: string; project_id?: string }) => Promise<ApiResult<RunSummary>>
 
-export async function refreshRunningRuns(input: {
-  customerId: string
+export async function refreshRunningRuns<T extends BudgetRun>(input: {
+  customerId?: string
   projectId: string
-  runs: BudgetRun[]
+  runs: T[]
   runsGet: RunsGet
   logger: Pick<Logger, "error">
-}): Promise<BudgetRun[]> {
+}): Promise<T[]> {
   return Promise.all(
     input.runs.map(async (run) => {
       if (run.status !== "running") {
         return run
       }
 
+      const expectedCustomerId = input.customerId ?? run.customerId
       const { result: live, error } = await input.runsGet({
         runId: run.id,
         project_id: input.projectId,
@@ -26,16 +27,16 @@ export async function refreshRunningRuns(input: {
       if (error || !live) {
         input.logger.error(new Error(error?.message ?? "Failed to refresh running run"), {
           project_id: input.projectId,
-          customer_id: input.customerId,
+          customer_id: expectedCustomerId,
           run_id: run.id,
         })
         return run
       }
 
-      if (live.customerId !== input.customerId) {
+      if (live.customerId !== expectedCustomerId) {
         input.logger.error(new Error("Refreshed run customer mismatch"), {
           project_id: input.projectId,
-          customer_id: input.customerId,
+          customer_id: expectedCustomerId,
           run_id: run.id,
         })
         return run
@@ -44,7 +45,7 @@ export async function refreshRunningRuns(input: {
       if (live.runId !== run.id) {
         input.logger.error(new Error("Refreshed run id mismatch"), {
           project_id: input.projectId,
-          customer_id: input.customerId,
+          customer_id: expectedCustomerId,
           run_id: run.id,
         })
         return run
@@ -53,7 +54,7 @@ export async function refreshRunningRuns(input: {
       if (live.currency !== run.currency) {
         input.logger.error(new Error("Refreshed run currency mismatch"), {
           project_id: input.projectId,
-          customer_id: input.customerId,
+          customer_id: expectedCustomerId,
           run_id: run.id,
         })
         return run
@@ -65,7 +66,7 @@ export async function refreshRunningRuns(input: {
         budgetAmount: toLedgerMinor(fromCurrencyMinor(live.budgetAmount, live.currency)),
         consumedAmount: toLedgerMinor(fromCurrencyMinor(live.consumedAmount, live.currency)),
         remainingAmount: toLedgerMinor(fromCurrencyMinor(live.remainingAmount, live.currency)),
-      }
+      } as T
     })
   )
 }

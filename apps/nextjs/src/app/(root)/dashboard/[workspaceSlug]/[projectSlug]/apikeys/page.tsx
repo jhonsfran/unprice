@@ -55,6 +55,7 @@ export default async function ApiKeysPage(props: {
             title: "No API keys",
             description:
               "Create an API key before your application checks access, records usage, or starts budgeted runs.",
+            action: <NewApiKeyDialog />,
           }}
           hidePaginationWhenEmpty
           filterOptions={{

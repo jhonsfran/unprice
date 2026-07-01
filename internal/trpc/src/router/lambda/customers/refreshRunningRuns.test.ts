@@ -76,6 +76,51 @@ describe("refreshRunningRuns", () => {
     })
   })
 
+  it("uses each row customer when refreshing project-wide runs", async () => {
+    const running = {
+      ...createRun({ id: "brun_running", status: "running" }),
+      customer: {
+        id: "cus_123",
+        projectId: "proj_123",
+        email: "customer@example.com",
+        name: "Example Customer",
+      },
+    }
+    const logger = { error: vi.fn() }
+    const runsGet = vi.fn().mockResolvedValue({
+      result: {
+        runId: "brun_running",
+        status: "completed",
+        customerId: "cus_123",
+        budgetAmount: 1000,
+        consumedAmount: 300,
+        remainingAmount: 700,
+        currency: "USD",
+        workloadType: "workflow",
+        workloadId: "daily-research",
+        traceId: "trace_123",
+        parentRunId: null,
+      },
+    })
+
+    const runs = await refreshRunningRuns({
+      projectId: "proj_123",
+      runs: [running],
+      runsGet,
+      logger,
+    })
+
+    expect(runs[0]).toMatchObject({
+      id: "brun_running",
+      status: "completed",
+      customer: {
+        id: "cus_123",
+        email: "customer@example.com",
+      },
+    })
+    expect(logger.error).not.toHaveBeenCalled()
+  })
+
   it("keeps the Postgres row when the live run identity does not match", async () => {
     const running = createRun({ id: "brun_running", status: "running", consumedAmount: 100 })
     const logger = { error: vi.fn() }

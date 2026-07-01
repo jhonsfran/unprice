@@ -1,6 +1,6 @@
 # Language And Vocabulary
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 Status: proposed internal standard. This document defines how Unprice should speak in product UI,
 marketing pages, docs, SDK examples, emails, support copy, and sales material. It complements the
@@ -68,7 +68,7 @@ Use this voice everywhere:
 Good:
 
 - "Authorize paid usage before it runs."
-- "Explain an invoice line from rated usage events and ledger captures."
+- "Explain an invoice line from pricing, usage, wallet, and ledger evidence."
 - "Keep existing customers on the plan version they bought."
 - "Retry with the same idempotency key."
 - "A run labels workload spend; the customer remains the economic actor."
@@ -104,7 +104,7 @@ economic actor that holds subscriptions, budgets, wallets, and invoices.
 | `PriceOps` | `price ops`, `PricingOps` | Category term. Define on first cold touch. |
 | `open-source PriceOps infrastructure` | `open source billing platform` | Use when describing category. |
 | `request path` | `request-path` as a noun | Hyphenate only as modifier: `request-path decision`. |
-| `money path` | `revenue flow` | The inspectable path from usage to invoice evidence. |
+| `money path` | `revenue flow` | The inspectable path from pricing decision to invoice evidence. |
 | `commercial authorization` | `pricing control engine` | Mechanism: deciding whether paid usage is commercially allowed. |
 | `paid action` | `monetized action` | Broad product action that may be entitled, metered, budgeted, credited, or invoiced. |
 | `budgeted run` | `agent run` as the generic term | Agents are one possible workload label. |
@@ -127,7 +127,7 @@ Use these nouns consistently.
 | `commercial authorization` | The allow/deny decision that checks entitlement, budget, credits, meter rules, and plan version while a request is in flight | "Commercial authorization belongs in the request path." |
 | `runtime decision` | Shorter generic phrase for commercial authorization when the context is already clear | "Pricing is a runtime decision." |
 | `request path` | The path where the buyer's app calls Unprice before work runs | "Check budget in the request path." |
-| `money path` | The connected path from request to plan version, meter, entitlement, budget, wallet, ledger, and invoice | "Explain invoices from the same money path." |
+| `money path` | The connected path from request to plan version, pricing rule, meter, entitlement, budget, wallet, ledger, and invoice | "Explain invoices from the same money path." |
 | `plan` | Commercial package authored by the team | "Create a plan to define features and defaults." |
 | `plan version` | Publishable version of a plan that customers can be pinned to | "Keep customers on the plan version they bought." |
 | `feature` | Sellable or gateable capability in a plan | "Attach meter configuration to usage features." |
@@ -240,10 +240,11 @@ Use:
 - "Authorize paid usage before it runs."
 - "Prove every charge after it bills."
 - "Put a budget and evidence trail around the expensive action."
+- "One paid action in one afternoon."
 - "Pricing is a runtime decision and an evidence trail."
 - "Keep entitlements separate from subscriptions."
 - "Your Redis counter is not a budget."
-- "Explain every invoice line from usage and ledger evidence."
+- "Explain every invoice line from pricing, usage, wallet, and ledger evidence."
 - "Stripe-first today, provider-extensible by design."
 
 Avoid:
@@ -378,8 +379,8 @@ Primary CTAs should name the concrete first step.
 
 | Context | Preferred CTA | Avoid |
 | --- | --- | --- |
-| Homepage primary | "Authorize paid usage" | "Start pricing" |
-| Homepage secondary | "Explore the request-path SDK" | "Learn more" |
+| Homepage primary | "Start with one paid action" | "Start pricing" |
+| Homepage secondary | "Watch the workflow demo" or "Explore the request-path SDK" | "Learn more" |
 | Docs secondary | "Read the integration guide" | "Read more" |
 | GitHub/community | "Star on GitHub" | "Join us" |
 | Dashboard empty plan state | "Create plan" | "Launch model" |
@@ -397,6 +398,9 @@ Examples:
 
 - "Create plan"
 - "Publish plan version"
+- "Start with one paid action"
+- "Map my paid action"
+- "Watch the workflow demo"
 - "Authorize paid usage"
 - "Replay selected"
 - "Explain charge"
@@ -411,6 +415,7 @@ Examples:
 - Unprice is open-source PriceOps infrastructure for usage-based SaaS.
 - Authorize paid usage before it runs.
 - Prove every charge after it bills.
+- One paid action in one afternoon.
 - Put a budget and evidence trail around the expensive action.
 - Pricing is not a page. Pricing is a runtime decision and an evidence trail.
 - The request path is the new pricing surface.
@@ -463,7 +468,7 @@ Use this table when reviewing existing copy.
 
 | Replace | With | Why |
 | --- | --- | --- |
-| "Start pricing" | "Authorize paid usage", "Budget my expensive action", or "Create plan" | Names the first valuable action. |
+| "Start pricing" | "Start with one paid action", "Map my paid action", "Authorize paid usage", "Budget my expensive action", or "Create plan" | Names the first valuable action. |
 | "Learn more" | "Explore the SDK", "Read the docs", "See API reference" | Says what the user gets. |
 | "Manage your customers" | "Create customers and inspect subscriptions, entitlements, wallets, invoices, and runs." | Shows customer as economic actor. |
 | "Revenue architecture" | "plans, plan versions, features, meters, and limits" | Uses product nouns. |
@@ -490,9 +495,11 @@ Before:
 
 After:
 
-> Authorize paid usage
+> Start with one paid action
 
-Alternative:
+Alternatives:
+
+> Authorize paid usage
 
 > Budget my expensive action
 

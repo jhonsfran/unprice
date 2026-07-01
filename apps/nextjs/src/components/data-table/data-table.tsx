@@ -42,6 +42,7 @@ interface DataTableEmptyState {
   title: string
   description: string
   icon?: React.ComponentType<{ className?: string }>
+  action?: React.ReactNode
 }
 
 interface DataTableProps<TData, TValue> {
@@ -122,7 +123,7 @@ export function DataTable<TData, TValue>({
   const EmptyIcon = emptyState?.icon ?? AlertTriangle
 
   return (
-    <div className={cn("w-full space-y-4 overflow-auto", className)}>
+    <div className={cn("flex w-full flex-col gap-4 overflow-auto", className)}>
       <DataTableToolbar table={table} filterOptions={filterOptions} />
       <div className="overflow-hidden rounded-md border">
         <Table>
@@ -191,6 +192,9 @@ export function DataTable<TData, TValue>({
                         ? error
                         : (emptyState?.description ?? "No rows match the current filters.")}
                     </EmptyPlaceholder.Description>
+                    {!error && emptyState?.action ? (
+                      <EmptyPlaceholder.Action>{emptyState.action}</EmptyPlaceholder.Action>
+                    ) : null}
                   </EmptyPlaceholder>
                 </TableCell>
               </TableRow>

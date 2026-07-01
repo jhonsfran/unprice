@@ -4,10 +4,8 @@ import { useInfiniteQuery, useMutation } from "@tanstack/react-query"
 import { toast } from "@unprice/ui/sonner"
 import { useParams } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import type { DateRange } from "react-day-picker"
 import type { IngestionQueryFilter } from "~/components/analytics/ingestion-health-model"
 import { useFilterDataTable } from "~/hooks/use-filter-datatable"
-import { manipulateDate } from "~/lib/dates"
 import type { DataTableFilterParams } from "~/lib/searchParams"
 import { useTRPC } from "~/trpc/client"
 import {
@@ -87,6 +85,7 @@ export function useIngestionEventsData() {
     }
 
     const refresh = () => setRollingNow(Date.now())
+    refresh()
     const intervalId = globalThis.setInterval(refresh, AUTO_REFRESH_INTERVAL_MS)
     globalThis.addEventListener("focus", refresh)
 
@@ -95,19 +94,6 @@ export function useIngestionEventsData() {
       globalThis.removeEventListener("focus", refresh)
     }
   }, [hasExplicitDateRange])
-
-  // Only show a custom date range when explicitly set by the user.
-  // The query defaults to last hour via resolveWindow when no date is selected.
-  const dateRange = useMemo<DateRange | undefined>(
-    () =>
-      filters.from || filters.to
-        ? {
-            from: filters.from ? new Date(filters.from) : undefined,
-            to: filters.to ? new Date(filters.to) : undefined,
-          }
-        : undefined,
-    [filters.from, filters.to]
-  )
 
   const {
     data: queryData,
@@ -211,23 +197,6 @@ export function useIngestionEventsData() {
     }
   }, [])
 
-  const handleDateRangeChange = useCallback(
-    (range: DateRange | undefined) => {
-      if (!range) {
-        setRollingNow(Date.now())
-        void setFilters({ from: null, to: null })
-        return
-      }
-
-      const next = manipulateDate(range)
-      void setFilters({
-        from: next.from,
-        to: next.to,
-      })
-    },
-    [setFilters]
-  )
-
   const handleFilterChange = useCallback(
     (id: IngestionEventsFilterId, values: string[]) => {
       const nextFilters = updateFilterValues(filters.filters, id, values)
@@ -285,8 +254,6 @@ export function useIngestionEventsData() {
     isRefreshing,
     status: firstPage,
     windowLabel,
-    dateRange,
-    handleDateRangeChange,
     rows,
     filterOptions,
     handleRejectionFilterSelect,

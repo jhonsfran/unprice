@@ -148,6 +148,26 @@ describe("calculateNextNCycles sequences", () => {
     }
   })
 
+  it("does not start day-based windows before a sub-day effective start", () => {
+    const start = utc("2026-07-01", "14:38:19.929")
+    const reference = utc("2026-07-01", "14:45:00.000")
+    const cfg = monthlyCfg(1)
+
+    const windows = calculateNextNCycles({
+      referenceDate: reference,
+      effectiveStartDate: start,
+      effectiveEndDate: null,
+      trialEndsAt: null,
+      config: cfg,
+      count: 0,
+    })
+
+    expect(windows[0]).toEqual({
+      start,
+      end: utc("2026-08-01"),
+    })
+  })
+
   it("reference at exact boundary uses next window; count=0 stops at containing window", () => {
     const start = utc("2024-01-01")
     const cfg = monthlyCfg(15)

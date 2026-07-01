@@ -1,7 +1,20 @@
-import { type Database, and, eq } from "@unprice/db"
-import { budgetRuns } from "@unprice/db/schema"
-import type { BudgetRunStatus } from "@unprice/db/schema"
-import { newId } from "@unprice/db/utils"
+import {
+  type Database,
+  type SQL,
+  and,
+  between,
+  count,
+  eq,
+  getTableColumns,
+  gte,
+  ilike,
+  inArray,
+  lte,
+  or,
+} from "@unprice/db"
+import { type BudgetRunStatus, budgetRuns, customers } from "@unprice/db/schema"
+import { newId, withPagination } from "@unprice/db/utils"
+import type { BudgetRun, Customer, SearchParamsDataTable } from "@unprice/db/validators"
 import { BaseError, Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { Cache } from "../cache"
@@ -22,6 +35,7 @@ type BudgetRunServiceDeps = {
 }
 
 type BudgetRunRow = typeof budgetRuns.$inferSelect
+export type BudgetRunWithCustomer = BudgetRun & { customer: Customer }
 
 export class BudgetRunService {
   constructor(private readonly deps: BudgetRunServiceDeps) {}
@@ -124,6 +138,119 @@ export class BudgetRunService {
     }
 
     return Ok(val)
+  }
+
+  async listRunsByProject(input: {
+    projectId: string
+    query: SearchParamsDataTable
+  }): Promise<
+    Result<{ runs: BudgetRunWithCustomer[]; pageCount: number }, BudgetRunServiceError>
+  > {
+    const runColumns = getTableColumns(budgetRuns)
+    const customerColumns = getTableColumns(customers)
+    const runStatusValues = new Set<BudgetRunStatus>([
+      "running",
+      "completed",
+      "expired",
+      "canceled",
+      "budget_exceeded",
+      "failed",
+    ])
+    const filter = `%${input.query.search ?? ""}%`
+    const statusFilters =
+      input.query.filters.status?.filter(
+        (value): value is BudgetRunStatus =>
+          typeof value === "string" && runStatusValues.has(value as BudgetRunStatus)
+      ) ?? []
+
+    try {
+      const { data, total } = await this.deps.db.transaction(async (tx) => {
+        const expressions = [
+          eq(runColumns.projectId, input.projectId),
+          input.query.search
+            ? or(
+                ilike(runColumns.id, filter),
+                ilike(runColumns.customerId, filter),
+                ilike(runColumns.traceId, filter),
+                ilike(runColumns.workloadId, filter),
+                ilike(customerColumns.email, filter),
+                ilike(customerColumns.name, filter)
+              )
+            : undefined,
+          statusFilters.length > 0 ? inArray(runColumns.status, statusFilters) : undefined,
+        ]
+        const startedFrom = input.query.from !== null ? new Date(input.query.from) : null
+        const startedTo = input.query.to !== null ? new Date(input.query.to) : null
+        const whereQuery = and(
+          and(...expressions),
+          startedFrom && startedTo
+            ? between(runColumns.startedAt, startedFrom, startedTo)
+            : undefined,
+          startedFrom ? gte(runColumns.startedAt, startedFrom) : undefined,
+          startedTo ? lte(runColumns.startedAt, startedTo) : undefined
+        ) as SQL<BudgetRun>
+        const joinCustomers = and(
+          eq(budgetRuns.customerId, customers.id),
+          eq(customers.projectId, budgetRuns.projectId)
+        )
+        const query = tx
+          .select({
+            run: budgetRuns,
+            customer: customerColumns,
+          })
+          .from(budgetRuns)
+          .innerJoin(customers, joinCustomers)
+          .$dynamic()
+
+        const data = await withPagination(
+          query,
+          whereQuery,
+          [
+            {
+              column: runColumns.startedAt,
+              order: "desc",
+            },
+            {
+              column: runColumns.id,
+              order: "desc",
+            },
+          ],
+          input.query.page,
+          input.query.page_size
+        )
+
+        const total = await tx
+          .select({
+            count: count(),
+          })
+          .from(budgetRuns)
+          .innerJoin(customers, joinCustomers)
+          .where(whereQuery)
+          .execute()
+          .then((res) => res[0]?.count ?? 0)
+
+        return { data, total }
+      })
+
+      return Ok({
+        runs: data.map((row) => ({
+          ...row.run,
+          customer: row.customer,
+        })) as unknown as BudgetRunWithCustomer[],
+        pageCount: Math.ceil(total / input.query.page_size),
+      })
+    } catch (error) {
+      this.deps.logger.error(error instanceof Error ? error : new Error(String(error)), {
+        context: "error listing budget runs by project",
+        projectId: input.projectId,
+      })
+
+      return Err(
+        new BudgetRunServiceError({
+          message: "Failed to list budget runs",
+        })
+      )
+    }
   }
 
   async updateRunReservation(input: {

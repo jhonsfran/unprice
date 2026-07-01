@@ -1,8 +1,8 @@
-import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
+import { runStatusSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
 import { Typography } from "@unprice/ui/typography"
-import { Code, Plus } from "lucide-react"
+import { Code } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
@@ -13,16 +13,17 @@ import HeaderTab from "~/components/layout/header-tab"
 import { SuperLink } from "~/components/super-link"
 import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
-import { columns } from "../../_components/subscriptions/table-subscriptions/columns"
+import { columns as runsColumns } from "../../_components/runs/table-runs/columns"
 
-export default async function PlanSubscriptionsPage({
+export const dynamic = "force-dynamic"
+
+export default async function ProjectRunsPage({
   params,
   searchParams,
 }: {
   params: {
     workspaceSlug: string
     projectSlug: string
-    customerId: string
   }
   searchParams: SearchParams
 }) {
@@ -30,29 +31,21 @@ export default async function PlanSubscriptionsPage({
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers`
   const filters = dataTableParams(searchParams)
 
-  const { subscriptions } = await api.subscriptions.listByActiveProject(filters)
+  const { runs, pageCount } = await api.customers.listRunsByActiveProject(filters)
 
   return (
     <DashboardShell
       header={
         <HeaderTab
-          title="Subscriptions"
-          description="Connect customers to plan versions, billing periods, wallet policy, and invoice evidence."
+          title="Runs"
+          description="Budgeted run lifecycle, spend, and failure evidence across this project."
           action={
-            <div className="flex items-center gap-2">
-              <CodeApiSheet defaultMethod="getSubscription">
-                <Button variant={"ghost"}>
-                  <Code className="mr-2 h-4 w-4" />
-                  API
-                </Button>
-              </CodeApiSheet>
-              <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`}>
-                <Button variant={"primary"}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Subscription
-                </Button>
-              </SuperLink>
-            </div>
+            <CodeApiSheet defaultMethod="startBudgetedRun">
+              <Button variant={"ghost"}>
+                <Code className="mr-2 h-4 w-4" />
+                API
+              </Button>
+            </CodeApiSheet>
           }
         />
       }
@@ -62,10 +55,10 @@ export default async function PlanSubscriptionsPage({
           <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}`}>Customers</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild active>
+          <TabNavigationLink asChild>
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
-          <TabNavigationLink asChild>
+          <TabNavigationLink asChild active>
             <SuperLink href={`${baseUrl}/runs`}>Runs</SuperLink>
           </TabNavigationLink>
         </div>
@@ -73,40 +66,44 @@ export default async function PlanSubscriptionsPage({
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            Active subscription evidence across this project.
+            Budgeted runs across all customers in this project.
           </Typography>
         </div>
         <Suspense
           fallback={
             <DataTableSkeleton
-              columnCount={12}
-              rowCount={1}
+              columnCount={8}
               searchableColumnCount={1}
               filterableColumnCount={2}
               cellWidths={[
+                "16rem",
                 "10rem",
-                "40rem",
+                "20rem",
+                "14rem",
+                "10rem",
+                "10rem",
                 "12rem",
                 "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "12rem",
-                "8rem",
               ]}
             />
           }
         >
           <DataTable
-            columns={columns}
-            data={subscriptions}
+            pageCount={pageCount}
+            columns={runsColumns}
+            data={runs}
             emptyState={{
-              title: "No subscriptions",
+              title: "No budgeted runs",
               description:
-                "Subscriptions will appear after customers are assigned to published plan versions.",
+                "Runs will appear after your app starts budgeted workloads for customers.",
+              action: (
+                <CodeApiSheet defaultMethod="startBudgetedRun">
+                  <Button size="sm">
+                    <Code className="mr-2 size-4" />
+                    Start budgeted run
+                  </Button>
+                </CodeApiSheet>
+              ),
             }}
             hidePaginationWhenEmpty
             filterOptions={{
@@ -115,8 +112,8 @@ export default async function PlanSubscriptionsPage({
               filterDateRange: true,
               filterServerSide: true,
               filterSelectors: {
-                status: SUBSCRIPTION_STATUS.map((value) => ({
-                  value: value,
+                status: runStatusSchema.options.map((value) => ({
+                  value,
                   label: value,
                 })),
               },

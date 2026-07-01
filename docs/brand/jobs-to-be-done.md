@@ -1,6 +1,6 @@
 # Jobs To Be Done
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 This document translates the Unprice brand and product positioning into Jobs-to-Be-Done language.
 Use it when creating marketing campaigns, reviewing page copy, writing launch content, or checking
@@ -24,7 +24,7 @@ Evidence limits:
   available.
 - The sharpest current trigger is still cost spikes from expensive AI/API/workflow usage.
 - The broader job is commercial authorization plus evidence: decide before paid usage runs, then
-  explain the charge, credit, denial, or invoice line after.
+  explain the charge, credit, denial, or invoice line after from the same money path.
 - The measurable outcomes to emphasize are cost avoided, invoice-debugging time reduced, and pricing
   changes shipped without moving existing customers off their plan versions.
 
@@ -32,14 +32,14 @@ Evidence limits:
 
 When a developer-led usage-based SaaS product has paid actions that create cost or invoice
 complexity, the team wants to authorize usage, budgets, credits, and entitlements at runtime so it
-can decide before work runs and explain every charge from the same usage trail.
+can decide before work runs and explain every invoice line from the same money path.
 
 ## Job Statement
 
 When my usage-based SaaS product has paid actions that can create cost or customer confusion, I want
-to meter the event, check entitlement, check budget, reserve or capture credits, apply the correct
-plan version, and preserve invoice evidence in the request path, so I can show why a request was
-allowed, denied, charged, credited, or replayed.
+to apply the correct plan version, price the feature, meter the event when usage-based, check
+entitlement, check budget, reserve or capture credits, and preserve invoice evidence in the request
+path, so I can show why a request was allowed, denied, charged, credited, invoiced, or replayed.
 
 ## Primary Actor
 
@@ -82,19 +82,21 @@ Teams usually combine:
 
 What hurts: the money path is split across tools and code paths, so the team cannot reliably decide
 whether paid usage should run, keep existing customers on the right plan version, or explain a
-charge from one inspectable trail.
+charge from one inspectable trail. The product can move quickly, but the pricing logic becomes
+something engineers and support are afraid to touch.
 
 ## Desired Outcome
 
-Every paid action is commercially authorized before it runs, and every charge or denial can be
-explained after the fact.
+Every paid action is commercially authorized before it runs, and every charge, denial, credit, or
+invoice line can be explained after the fact.
 
 A successful implementation should let the team:
 
 - Authorize or deny paid usage before it creates cost.
 - Change packaging without rewriting the application money path.
 - Keep customers pinned to the plan version they bought while new pricing experiments ship.
-- Explain invoice lines from rated usage events, ledger captures, and wallet movements.
+- Explain invoice lines from plan versions, billing periods, pricing rules, rated usage events when
+  present, ledger captures, and wallet movements.
 - Distinguish wallet credits, entitlement grants, usage quantities, and invoices.
 - Recover from ingestion failures with evidence and replay paths.
 
@@ -104,12 +106,14 @@ A successful implementation should let the team:
 
 The current setup combines billing tools, usage tables, counters, cron reconciliation, and manual
 support debugging. It does not give enough runtime control or after-the-fact evidence when usage can
-create real cost before the billing cycle ends.
+create real cost before the billing cycle ends, or when a customer asks why a specific invoice line
+exists.
 
 ### Pull
 
-Unprice connects product requests, plan versions, meter events, entitlement decisions, budget
-checks, wallet movements, ingestion state, and invoice evidence in one inspectable runtime system.
+Unprice connects product requests, plan versions, pricing rules, meter events, entitlement
+decisions, budget checks, wallet movements, ledger captures, ingestion state, and invoice evidence in
+one inspectable runtime system.
 
 ### Habit
 
@@ -131,12 +135,13 @@ Before:
 - Cost spikes are discovered after usage already happened.
 - Support or engineering reconstructs invoice disputes by hand.
 - Packaging changes require edits across application code, billing code, and reconciliation jobs.
+- Engineers hesitate to change pricing because one hidden branch can create the wrong invoice.
 
 After:
 
 - Runtime checks decide whether paid work is commercially allowed before it runs.
 - Budgets and wallet credits constrain customer or workload spend.
-- Invoice explanations connect back to usage and ledger evidence.
+- Invoice explanations connect back to plan-version, pricing, usage, wallet, and ledger evidence.
 - Engineers can change pricing models while existing customers stay on their plan versions.
 
 ## Functional Needs
@@ -149,17 +154,18 @@ Unprice must help teams:
 - Reserve and capture wallet credits.
 - Keep subscriptions, entitlements, and plan versions separate but connected.
 - Keep failed, rejected, processed, and replayed ingestion states visible.
-- Explain invoices from pricing rules, usage quantity, rated facts, ledger captures, and event
-  evidence.
+- Explain invoices from pricing rules, usage quantity, rated facts when present, billing periods,
+  ledger captures, wallet movements, and event evidence.
 
 ## Emotional Needs
 
 The product should help founders and engineers feel:
 
 - In control of usage cost before it becomes invoice damage.
-- Clear about why a request was allowed, denied, charged, credited, or replayed.
+- Clear about why a request was allowed, denied, charged, credited, invoiced, or replayed.
 - Confident enough to offer usage pricing and customer budgets without scattering money logic
   through product code.
+- Safe enough to change packaging without turning the next invoice into an engineering investigation.
 
 ## Campaign Angles
 
@@ -174,10 +180,12 @@ Strong angles:
 - Put a budget and evidence trail around the expensive action in your product.
 - Your Redis counter is not a budget: request-path enforcement beats a homegrown pre-check.
 - Pricing is a runtime decision and an evidence trail for usage-based SaaS.
-- Explain every usage invoice line from event evidence.
+- Prove every invoice line after it bills.
+- Explain every invoice line from plan-version, pricing, usage, wallet, and ledger evidence.
 - Keep entitlements separate from subscriptions so pricing experiments do not rewrite existing
   customers.
-- Move usage, entitlements, credits, plan versions, and invoices into one inspectable money path.
+- Move usage, pricing rules, entitlements, credits, plan versions, ledger captures, and invoices into
+  one inspectable money path.
 
 Weak angles:
 
@@ -213,17 +221,17 @@ Use this checklist when reviewing homepage, landing page, launch, ad, docs, or s
 
 | Buyer question | Answer to emphasize |
 | --- | --- |
-| Why now? | Paid usage can create cost or invoice confusion before the billing cycle ends. Runtime authorization prevents unwanted usage, and invoice evidence explains what did happen. |
-| Why not just Stripe? | Stripe captures the payment; Unprice owns the PriceOps money path — plan versions, entitlements, usage, budgets, credits, and invoice evidence — inside the product request path. Stripe-first today, provider-extensible by design. |
+| Why now? | Paid usage can create cost or invoice confusion before the billing cycle ends. Runtime authorization prevents unwanted usage, and invoice evidence explains every line that did happen. |
+| Why not just Stripe? | Stripe captures the payment; Unprice owns the PriceOps money path — plan versions, pricing rules, entitlements, usage, budgets, credits, ledger captures, and invoice evidence — inside the product request path. Stripe-first today, provider-extensible by design. |
 | Why open source? | Revenue logic should be inspectable when it allows, denies, charges, credits, or replays customer activity. |
-| What is the first demo? | Pick the paid action, meter it, authorize it before it runs, budget it if it can burn margin, and show invoice evidence from the same stream. |
+| What is the first demo? | Pick the paid action, define the plan-version pricing rule, authorize it before it runs, budget it if it can burn margin, and show invoice evidence from the same money path. |
 | What should not be promised? | Do not promise live multi-provider payments (Stripe-first today; provider-extensible by design is fine), tax, accounting, enterprise revenue recognition, exact latency, or exact throughput without proof. |
 
 ## Validation Plan (P0 — validate before scaling spend)
 
 The positioning rests on one unproven bet: that buyers feel "authorize before; explain after" as
-acute pain, not just "rate usage accurately after." Validate this before committing GTM spend or
-treating the before/after money path as proven.
+acute pain, not just "rate usage accurately after." Use this story as the working center of selling
+propositions, but validate the lead phrase before committing GTM spend.
 
 Targets: 8-12 in-ICP engineering owners (CTOs, founding engineers, platform/product engineers) at
 developer-led usage-based SaaS teams (5-50 people, Seed to Series A) with paid actions that affect

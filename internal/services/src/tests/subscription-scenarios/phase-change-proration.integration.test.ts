@@ -449,7 +449,7 @@ describe("DB-backed subscription phase changes", () => {
       }))
     ).toEqual([
       expect.objectContaining({
-        cycle_start_at_m: jan16,
+        cycle_start_at_m: jan16NextMs,
         status: "pending",
       }),
     ])

@@ -1,6 +1,6 @@
 # Positioning And Messaging
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 This document is the canonical source for Unprice positioning, category, headline, message
 hierarchy, and competitor contrast. Other brand docs should defer to this file for these facts.
@@ -11,12 +11,13 @@ Unprice should not launch as a broad billing platform. That market is crowded an
 be forced to compete on provider coverage, tax/compliance, enterprise procurement, and brand trust.
 
 The first market should be developer-led usage-based SaaS teams that need request-path commercial
-authorization and explainable usage billing. AI/API and workflow products are the sharpest early
+authorization and explainable invoice outcomes. AI/API and workflow products are the sharpest early
 examples because their customer-triggered actions can create real marginal cost.
 
 The wedge leads with commercial authorization plus evidence: authorize paid usage before it runs,
 then prove why every event was allowed, denied, charged, credited, or invoiced. Spend safety is the
-first obvious pain; explainability is what makes the money path trustworthy after the fact.
+first obvious pain; invoice-line explainability is what makes the money path trustworthy after the
+fact.
 
 ## Positioning Statement
 
@@ -35,8 +36,8 @@ happens, entitlement layers that gate feature access, or workflow and AI infrast
 the work,
 
 Unprice ties the commercial decision and the after-the-fact explanation together: the same open
-money path that authorizes paid usage before cost is created also proves why the invoice came out
-that way.
+money path that authorizes paid usage before cost is created also proves why each invoice line came
+out that way.
 
 > Status: internal positioning hypothesis. Validate whether buyers feel the before/after promise
 > ("authorize before; explain after") as sharper than pure spend control before scaling GTM spend.
@@ -62,7 +63,7 @@ counters, and limits from application code and moving them into one inspectable 
 ## One-Liner
 
 Unprice lets developer-led SaaS teams authorize paid usage before it runs, then prove why every
-event was allowed, denied, charged, credited, or invoiced from the same runtime system.
+event was allowed, denied, charged, credited, or invoiced from the same money path.
 
 ## Homepage Headline
 
@@ -75,8 +76,8 @@ entitlements separate, and budgets in the request path so paid usage is authoriz
 and every invoice line can be explained after.
 
 Supporting capability line (secondary, not the hero): meter events, enforce entitlements, reserve
-customer credits, cap expensive runs, preserve invoice evidence, and ship pricing experiments
-without hardcoding revenue logic into your app.
+customer credits, cap expensive runs, price flat, tiered, package, and usage features, preserve
+invoice evidence, and ship pricing experiments without hardcoding revenue logic into your app.
 
 ## Terminology
 
@@ -141,11 +142,11 @@ highest-signal early slice, not the whole category.
 
 ## Core Narrative
 
-Pricing is not a page. For usage-based products, pricing is a runtime decision and an evidence
-trail.
+Pricing is not a page. For usage-based and hybrid products, pricing is a runtime decision and an
+evidence trail.
 
 Modern usage-based products need to authorize paid usage while requests are still flowing, then
-explain the invoice after the fact. Unprice gives builders an open-source PriceOps runtime so
+explain every invoice line after the fact. Unprice gives builders an open-source PriceOps runtime so
 pricing can change as fast as the product without hiding revenue logic inside application code or a
 black-box billing vendor.
 
@@ -155,10 +156,12 @@ black-box billing vendor.
 flowchart LR
   Request["Product request"] --> Meter["Meter event"]
   Meter --> Version["Resolve plan version"]
-  Version --> Entitlement["Check entitlement"]
+  Version --> Pricing["Apply pricing rule"]
+  Pricing --> Entitlement["Check entitlement"]
   Entitlement --> Budget["Check budget"]
   Budget --> Wallet["Reserve or capture credits"]
-  Wallet --> Invoice["Explain invoice"]
+  Wallet --> Ledger["Post ledger evidence"]
+  Ledger --> Invoice["Explain invoice line"]
   Budget --> Decision{"Allow or deny now"}
 ```
 
@@ -167,8 +170,8 @@ flowchart LR
 - Authorize paid usage before cost is created.
 - Explain every allow, deny, charge, credit, and invoice line from one evidence trail.
 - Cap customer or workload spend with budgeted runs.
-- Keep plans, plan versions, subscriptions, entitlements, usage meters, wallets, credits, and
-  invoices connected but separate.
+- Keep plans, plan versions, subscriptions, entitlements, pricing rules, usage meters, wallets,
+  credits, ledger captures, and invoices connected but separate.
 - Keep billing evidence inspectable and replayable.
 - Own monetization logic with open-source infrastructure.
 
@@ -177,10 +180,12 @@ flowchart LR
 - Public SDK methods for `access.check`, `usage.record`, `usage.consume`, `runs.start`,
   `runs.consume`, `runs.end`, `runs.get`, wallet balances, analytics, and ingestion replay.
 - Plan versions let pricing change without rewriting or silently moving existing customers.
-- Usage features require event-native meter configuration.
+- Flat, tiered, package, and usage features share one plan-version model; usage features require
+  event-native meter configuration.
 - Wallet credits are distinct from entitlement grants.
 - Budget runs are generic workload labels, not agent objects.
-- Invoice explanation connects charges back to rated usage events and ledger captures.
+- Invoice explanation connects lines back to plan versions, billing periods, pricing rules, rated
+  usage events when present, wallet movement, and ledger captures.
 
 ## Things Not To Claim Yet
 
@@ -203,10 +208,10 @@ flowchart LR
   reconciliation, and plan logic in product code.
 - Unprice: the open-source PriceOps runtime focused on tying the commercial decision and the
   explanation together. It authorizes paid usage before cost is created, while preserving the
-  evidence needed to explain the charge, denial, credit, and invoice later.
+  evidence needed to explain the charge, denial, credit, and invoice line later.
 
 Only-we test: the ownable wedge is not generic "runtime pricing control." It is the before/after
-money path: authorize paid usage in the request path, then explain the invoice from the same
+money path: authorize paid usage in the request path, then explain every invoice line from the same
 evidence trail.
 
 ### The Real Incumbent: The DIY Stack
@@ -223,11 +228,12 @@ Answer that objection directly. A homegrown pre-check breaks down because:
 - Credits, entitlement grants, and usage quantities get conflated in ad hoc columns, so a denial
   cannot be explained after the fact.
 - Every packaging change edits product code, billing scripts, and reconciliation jobs at once.
-- When a customer disputes a charge, there is no single evidence trail from request to invoice line.
+- When a customer disputes a charge, there is no single evidence trail from request to pricing rule to
+  invoice line.
 
 Unprice is the one runtime where the entitlement check, budget check, credit reservation, pricing
-version, and invoice evidence are the same money path — so the pre-check is correct under
-concurrency and explainable later. Lead competitive copy against the DIY stack first; position
+version, ledger capture, and invoice evidence are the same money path — so the pre-check is correct
+under concurrency and explainable later. Lead competitive copy against the DIY stack first; position
 against vendors second.
 
 ## Message Hierarchy
@@ -244,7 +250,8 @@ supporting depth.
 2. Evidence after the fact.
    Every allow, deny, charge, credit, replay, and invoice line should be explainable from the same
    money path.
-   Proof: invoice explanation from rated events and ledger captures; ingestion status and replay.
+   Proof: invoice explanation from plan versions, billing periods, pricing rules, rated events when
+   present, wallet movement, ledger captures, ingestion status, and replay.
 
 3. Versioned PriceOps model.
    Plans, plan versions, subscriptions, entitlements, meters, credits, budgets, and invoices stay

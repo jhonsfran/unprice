@@ -168,7 +168,7 @@ describe("applyRunSyncEvent", () => {
       traceId: "trace_rejected_001",
       parentRunId: "brun_parent_001",
     })
-    const { deps, enqueueOutcomes, runBudget } = createDeps({
+    const { deps, enqueueOutcomes, runBudget, updateRunSummary } = createDeps({
       run,
       runBudgetDecision: {
         allowed: false,
@@ -202,6 +202,12 @@ describe("applyRunSyncEvent", () => {
       },
     })
     expect(runBudget.applySyncEvent).toHaveBeenCalledOnce()
+    expect(updateRunSummary).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "budget_exceeded",
+        statusReason: "RUN_BUDGET_EXCEEDED",
+      })
+    )
     expect(enqueueOutcomes).toHaveBeenCalledWith({
       customerId: run.customerId,
       projectId: run.projectId,
@@ -298,6 +304,7 @@ function createDeps(
     runBudget: {
       applySyncEvent,
     },
+    updateRunSummary,
   }
 }
 

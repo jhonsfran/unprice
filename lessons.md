@@ -176,6 +176,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-07-01: Billing periods generated for subscription phases must never start before
+  `subscription_phases.start_at_m`; `statement_key`, pay-in-advance `invoiceAt`, and proration
+  all derive from that service start, so rounding down can merge phase-change invoices.
 - 2026-06-22: Customer wallet dashboards should distinguish ledger balances from usable display
   balances; expired-by-time wallet credits can remain in ledger until the sweep runs, so UI
   availability must derive from non-expired credits and show credit status explicitly.

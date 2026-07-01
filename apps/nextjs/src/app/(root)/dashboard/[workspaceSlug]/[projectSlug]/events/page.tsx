@@ -4,6 +4,7 @@ import { Suspense } from "react"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { HydrateClient } from "~/trpc/server"
+import { EventsTimeWindowFilterAction } from "./_components/events-time-window-filter"
 import { IngestionEventsPanel } from "./_components/ingestion-events-panel"
 
 export const dynamic = "force-dynamic"
@@ -18,6 +19,7 @@ export default async function ProjectEventsPage(_props: {
         <HeaderTab
           title="Events"
           description="Ingestion events and processing outcomes — refreshes every 15s"
+          action={<EventsTimeWindowFilterAction />}
         />
       }
     >

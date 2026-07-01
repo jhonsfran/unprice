@@ -35,9 +35,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@unprice/ui/popover"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { cn } from "@unprice/ui/utils"
 import { motion } from "framer-motion"
-import { CheckIcon, ChevronDown } from "lucide-react"
+import { CheckIcon, ChevronDown, Code } from "lucide-react"
 import { useParams, useSearchParams } from "next/navigation"
 import { revalidateAppPath } from "~/actions/revalidate"
+import { CodeApiSheet } from "~/components/code-api-sheet"
 import { CopyButton } from "~/components/copy-button"
 import { FilterScroll } from "~/components/filter-scroll"
 import { SubmitButton } from "~/components/submit-button"
@@ -197,6 +198,20 @@ function ApiKeyCreatedSecret({
           <CopyButton value={apiKey} className="size-4 opacity-70" />
         </div>
       </motion.div>
+      <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-card/70 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="font-medium">First request-path call</p>
+          <p className="text-muted-foreground text-xs">
+            Use this key from your server to check access, record usage, or start a budgeted run.
+          </p>
+        </div>
+        <CodeApiSheet defaultMethod="checkAccess">
+          <Button type="button" variant="outline" size="sm" className="shrink-0">
+            <Code className="mr-2 size-4" />
+            Open SDK example
+          </Button>
+        </CodeApiSheet>
+      </div>
     </>
   )
 }

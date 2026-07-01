@@ -1,10 +1,23 @@
 "use client"
 
-import { Button } from "@unprice/ui/button"
+import { Button, type ButtonProps } from "@unprice/ui/button"
+import { cn } from "@unprice/ui/utils"
 import { CheckIcon, CopyIcon } from "lucide-react"
 import React from "react"
 
-export default function CopyToClipboard({ code }: { code: string }) {
+export default function CopyToClipboard({
+  code,
+  className,
+  label,
+  variant = "default",
+  size = "icon",
+}: {
+  code: string
+  className?: string
+  label?: string
+  variant?: ButtonProps["variant"]
+  size?: ButtonProps["size"]
+}) {
   const [copied, setCopied] = React.useState(false)
   const copyToClipboard = async () => {
     try {
@@ -20,16 +33,18 @@ export default function CopyToClipboard({ code }: { code: string }) {
   }
   return (
     <Button
-      size="icon"
-      variant="default"
+      size={size}
+      variant={variant}
       onClick={copyToClipboard}
-      className="select-none backdrop-blur-xl"
+      className={cn("select-none backdrop-blur-xl", className)}
+      aria-label={copied ? "Copied code" : "Copy code"}
     >
       {!copied ? (
         <CopyIcon aria-hidden="true" className="size-4" />
       ) : (
         <CheckIcon aria-hidden="true" className="size-4" />
       )}
+      {label ? <span>{copied ? "Copied" : label}</span> : null}
     </Button>
   )
 }

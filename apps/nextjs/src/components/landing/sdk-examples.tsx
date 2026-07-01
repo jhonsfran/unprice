@@ -1,4 +1,5 @@
 "use client"
+
 import { BorderBeam } from "@unprice/ui/border-beam"
 import { Button } from "@unprice/ui/button"
 import { ScrollArea } from "@unprice/ui/scroll-area"
@@ -8,19 +9,18 @@ import { useState } from "react"
 import { CodeEditor } from "./code-editor"
 import CopyToClipboard from "./copy-to-clipboard"
 
-// Sample code examples for different frameworks and methods
 export const codeExamples = {
   sdk: {
-    verifyEntitlement: `import { Unprice } from "@unprice/api"
+    checkAccess: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-// verify access to a feature
+// Check access before the paid action runs.
 const { result, error } = await unprice.access.check({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
-  featureSlug: "feature-1",
+  featureSlug: "tokens",
 })
 
 if (error) {
@@ -29,36 +29,66 @@ if (error) {
 }
 
 if (!result.allowed) {
-  console.error("Customer does not have access to feature")
+  throw new Error("Denied before paid usage ran")
 }
 `,
-    ingestUsage: `import { Unprice } from "@unprice/api"
+    recordUsage: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-// ingest usage event for a feature
-const { result, error } = await unprice.usage.consume({
-  idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
-  eventSlug: "feature-1",
+// Record usage for asynchronous ingestion.
+const { result, error } = await unprice.usage.record({
+  idempotencyKey: crypto.randomUUID(),
+  eventSlug: "tokens_used",
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
-  featureSlug: "feature-1",
   properties: {
-    usage: 30,
+    tokens: 3842,
   },
 })
+
+if (error) {
+  console.error(error.message)
+  return
+}
 `,
-    signUp: `import { Unprice } from "@unprice/api"
+    consumeUsage: `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN,
+})
+
+// Consume usage when the request path needs a decision.
+const { result, error } = await unprice.usage.consume({
+  idempotencyKey: crypto.randomUUID(),
+  eventSlug: "tokens_used",
+  customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+  featureSlug: "tokens",
+  properties: {
+    tokens: 3842,
+  },
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+if (!result.allowed) {
+  throw new Error(result.message ?? "Usage denied")
+}
+`,
+    signUpCustomer: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
 const { result, error } = await unprice.customers.signUp({
-  name: "John Doe",
-  email: "seb@unprice.dev",
-  planVersionId: "plan_version_1",
+  name: "Acme Inc.",
+  email: "billing@acme.test",
+  planVersionId: "plan_version_1GTzSGrapiBW1QwCL3Fcn",
   successUrl: "http://your-app.com/dashboard",
   cancelUrl: "http://your-app.com/failed",
 })
@@ -70,19 +100,16 @@ if (error) {
 
 const customerId = result.customerId
 
-// redirect to stripe checkout
+// Redirect to checkout when the plan requires payment.
 redirect(result.url ?? "/")
 `,
-    getEntitlements: `import { Unprice } from "@unprice/api"
+    listEntitlements: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const {
-  result,
-  error,
-} = await unprice.access.entitlements.list({
+const { result, error } = await unprice.access.entitlements.list({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
 })
 
@@ -91,18 +118,20 @@ if (error) {
   return
 }
 `,
-    getWallet: `import { Unprice } from "@unprice/api"
+    getWalletBalance: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const {
-  result,
-  error,
-} = await unprice.wallet.balance({
+const { result, error } = await unprice.wallet.balance({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
 })
+
+if (error) {
+  console.error(error.message)
+  return
+}
 `,
     getSubscription: `import { Unprice } from "@unprice/api"
 
@@ -110,10 +139,7 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const {
-  result,
-  error,
-} = await unprice.subscriptions.get({
+const { result, error } = await unprice.subscriptions.get({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
 })
 
@@ -130,10 +156,7 @@ const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
 })
 
-const {
-  result,
-  error,
-} = await unprice.analytics.usage.get({
+const { result, error } = await unprice.analytics.usage.get({
   project_id: "project_1GTzSGrapiBW1QwCL3Fcn",
   customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",
   range: "30d",
@@ -168,7 +191,7 @@ const { result, error } = await unprice.paymentMethods.create({
   cancelUrl: "http://your-app.com/failed",
 })
 `,
-    listVersions: `import { Unprice } from "@unprice/api"
+    listPlanVersions: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
@@ -179,114 +202,520 @@ const { result, error } = await unprice.planVersions.list({
   currency: "USD",
 })
 `,
+    startBudgetedRun: `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN,
+})
+
+// Start a budgeted run before the workload creates cost,
+// then consume usage and end the run.
+const { result: run, error: startError } = await unprice.runs.start({
+  customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+  budgetAmount: 5000,
+  idempotencyKey: crypto.randomUUID(),
+  workloadType: "workflow",
+  workloadId: "daily-report",
+})
+
+if (startError) {
+  console.error(startError.message)
+  return
+}
+
+let finalStatus: "completed" | "failed" = "completed"
+
+try {
+  // Run your workload here, then report the usage it created.
+  const { result: usage, error: consumeError } = await unprice.runs.consume({
+    runId: run.runId,
+    featureSlug: "tokens",
+    eventSlug: "tokens_used",
+    idempotencyKey: crypto.randomUUID(),
+    properties: {
+      tokens: 3842,
+    },
+  })
+
+  if (consumeError) {
+    throw new Error(consumeError.message)
+  }
+
+  if (!usage.accepted) {
+    throw new Error(usage.reason)
+  }
+} catch (error) {
+  finalStatus = "failed"
+  throw error
+} finally {
+  // End the run so unused reservation funds are released.
+  const { error: endError } = await unprice.runs.end({
+    runId: run.runId,
+    status: finalStatus,
+  })
+
+  if (endError) {
+    console.error(endError.message)
+  }
+}
+`,
+    applyRunUsage: `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN,
+})
+
+// Apply usage to a running budgeted run.
+const { result, error } = await unprice.runs.consume({
+  runId: "run_1GTzSGrapiBW1QwCL3Fcn",
+  featureSlug: "tokens",
+  eventSlug: "tokens_used",
+  idempotencyKey: crypto.randomUUID(),
+  properties: {
+    tokens: 3842,
+  },
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+if (!result.accepted) {
+  throw new Error(result.reason)
+}
+`,
+    endBudgetedRun: `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN,
+})
+
+// End a budgeted run and release unused reservation funds.
+const { result, error } = await unprice.runs.end({
+  runId: "run_1GTzSGrapiBW1QwCL3Fcn",
+  status: "completed",
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+`,
+    explainCharge: `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN,
+})
+
+// Explain an invoice charge from rated usage and ledger evidence.
+const { result, error } = await unprice.analytics.charges.explain({
+  invoice_id: "inv_1GTzSGrapiBW1QwCL3Fcn",
+  entry_id: "entry_1GTzSGrapiBW1QwCL3Fcn",
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+`,
   },
   fetch: {
-    verifyEntitlement:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/access/check" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n  }),\n})',
-    ingestUsage:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/usage/consume" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",\n    eventSlug: "feature-1",\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    featureSlug: "feature-1",\n    properties: {\n      usage: 30,\n    },\n  }),\n})',
-    signUp:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/customers/sign-up" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    name: "John Doe",\n    email: "seb@unprice.dev",\n    planVersionId: "plan_version_1",\n    successUrl: "http://your-app.com/dashboard",\n    cancelUrl: "http://your-app.com/failed",\n  }),\n})',
-    getEntitlements:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/access/entitlements/list" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n  }),\n})',
-    getWallet:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/wallet/balance?customerId=cus_1GTzSGrapiBW1QwCL3Fcn" +
-      '", {\n  method: "GET",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n})',
-    getSubscription:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/subscriptions/get" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n  }),\n})',
-    getUsage:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/analytics/usage/get" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    project_id: "project_1GTzSGrapiBW1QwCL3Fcn",\n    customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    range: "30d",\n  }),\n})',
-    getPaymentMethods:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/payment-methods/list" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    provider: "stripe",\n  }),\n})',
-    createPaymentMethod:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/payment-methods/create" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    paymentProvider: "stripe",\n    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",\n    successUrl: "http://your-app.com/dashboard",\n    cancelUrl: "http://your-app.com/failed",\n  }),\n})',
-    listVersions:
-      'const baseUrl = "https://api.unprice.dev"\nconst token = process.env.UNPRICE_TOKEN\n\nawait fetch("' +
-      "${baseUrl}/v1/plan-versions/list" +
-      '", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${token}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({\n    billingInterval: "month",\n    currency: "USD",\n  }),\n})',
+    checkAccess: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/access/check", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+    featureSlug: "tokens",
+  }),
+})`,
+    recordUsage: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/usage/record", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    idempotencyKey: crypto.randomUUID(),
+    eventSlug: "tokens_used",
+    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+    properties: {
+      tokens: 3842,
+    },
+  }),
+})`,
+    consumeUsage: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/usage/consume", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    idempotencyKey: crypto.randomUUID(),
+    eventSlug: "tokens_used",
+    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+    featureSlug: "tokens",
+    properties: {
+      tokens: 3842,
+    },
+  }),
+})`,
+    signUpCustomer: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/customers/sign-up", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    name: "Acme Inc.",
+    email: "billing@acme.test",
+    planVersionId: "plan_version_1GTzSGrapiBW1QwCL3Fcn",
+    successUrl: "http://your-app.com/dashboard",
+    cancelUrl: "http://your-app.com/failed",
+  }),
+})`,
+    listEntitlements: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/access/entitlements/list", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+  }),
+})`,
+    getWalletBalance: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/wallet/balance?customerId=cus_1GTzSGrapiBW1QwCL3Fcn", {
+  method: "GET",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+})`,
+    getSubscription: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/subscriptions/get", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+  }),
+})`,
+    getUsage: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/analytics/usage/get", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    project_id: "project_1GTzSGrapiBW1QwCL3Fcn",
+    customer_id: "cus_1GTzSGrapiBW1QwCL3Fcn",
+    range: "30d",
+  }),
+})`,
+    getPaymentMethods: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/payment-methods/list", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+    provider: "stripe",
+  }),
+})`,
+    createPaymentMethod: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/payment-methods/create", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    paymentProvider: "stripe",
+    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+    successUrl: "http://your-app.com/dashboard",
+    cancelUrl: "http://your-app.com/failed",
+  }),
+})`,
+    listPlanVersions: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/plan-versions/list", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    billingInterval: "month",
+    currency: "USD",
+  }),
+})`,
+    startBudgetedRun: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+const startResponse = await fetch(baseUrl + "/v1/runs/start", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
+    budgetAmount: 5000,
+    idempotencyKey: crypto.randomUUID(),
+    workloadType: "workflow",
+    workloadId: "daily-report",
+  }),
+})
+
+if (!startResponse.ok) {
+  throw new Error(await startResponse.text())
+}
+
+const run = await startResponse.json()
+let finalStatus = "completed"
+
+try {
+  const consumeResponse = await fetch(baseUrl + "/v1/runs/consume/" + run.runId, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      featureSlug: "tokens",
+      eventSlug: "tokens_used",
+      idempotencyKey: crypto.randomUUID(),
+      properties: {
+        tokens: 3842,
+      },
+    }),
+  })
+
+  if (!consumeResponse.ok) {
+    throw new Error(await consumeResponse.text())
+  }
+
+  const usage = await consumeResponse.json()
+
+  if (!usage.accepted) {
+    throw new Error(usage.reason)
+  }
+} catch (error) {
+  finalStatus = "failed"
+  throw error
+} finally {
+  await fetch(baseUrl + "/v1/runs/end/" + run.runId, {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      status: finalStatus,
+    }),
+  })
+}`,
+    applyRunUsage: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/runs/consume/run_1GTzSGrapiBW1QwCL3Fcn", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    featureSlug: "tokens",
+    eventSlug: "tokens_used",
+    idempotencyKey: crypto.randomUUID(),
+    properties: {
+      tokens: 3842,
+    },
+  }),
+})`,
+    endBudgetedRun: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/runs/end/run_1GTzSGrapiBW1QwCL3Fcn", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    status: "completed",
+  }),
+})`,
+    explainCharge: `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+await fetch(baseUrl + "/v1/analytics/charges/explain", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    invoice_id: "inv_1GTzSGrapiBW1QwCL3Fcn",
+    entry_id: "entry_1GTzSGrapiBW1QwCL3Fcn",
+  }),
+})`,
   },
 }
 
 export type method = keyof typeof codeExamples.sdk
 
+const methodLabels: Record<method, string> = {
+  checkAccess: "Check access",
+  recordUsage: "Record usage",
+  consumeUsage: "Consume usage",
+  signUpCustomer: "Sign up customer",
+  listEntitlements: "List entitlements",
+  getWalletBalance: "Get wallet balance",
+  getSubscription: "Get subscription",
+  getUsage: "Get usage",
+  getPaymentMethods: "List payment methods",
+  createPaymentMethod: "Create payment method",
+  listPlanVersions: "List plan versions",
+  startBudgetedRun: "Start budgeted run",
+  applyRunUsage: "Apply run usage",
+  endBudgetedRun: "End budgeted run",
+  explainCharge: "Explain charge",
+}
+
 export function SDKDemo({
   className,
   defaultMethod,
   showBorderBeam = true,
-}: { className?: string; defaultMethod?: method; showBorderBeam?: boolean }) {
-  const [activeFramework, setActiveFramework] = useState("sdk")
-  const [activeMethod, setActiveMethod] = useState(defaultMethod ?? "verifyEntitlement")
+  presentation = "marketing",
+}: {
+  className?: string
+  defaultMethod?: method
+  showBorderBeam?: boolean
+  presentation?: "marketing" | "panel"
+}) {
+  const [activeFramework, setActiveFramework] = useState<keyof typeof codeExamples>("sdk")
+  const [activeMethod, setActiveMethod] = useState<method>(defaultMethod ?? "checkAccess")
+  const isPanel = presentation === "panel"
 
-  // Get the methods for the active framework
-  let methods = Object.keys(codeExamples[activeFramework as keyof typeof codeExamples])
+  let methods = Object.keys(codeExamples[activeFramework]) as method[]
 
-  // if defaultMethod is passed only show that method
   if (defaultMethod) {
     methods = [defaultMethod]
   }
 
-  // Get the code for the active framework and method
-  const code =
-    codeExamples[activeFramework as keyof typeof codeExamples][
-      activeMethod as keyof typeof codeExamples.sdk
-    ] ?? codeExamples.sdk.verifyEntitlement
+  const code = codeExamples[activeFramework][activeMethod] ?? codeExamples.sdk.checkAccess
 
   return (
     <div
       className={cn(
-        "relative mx-auto mt-12 flex w-full max-w-6xl flex-col items-center justify-center rounded-2xl border bg-background shadow-primary-line shadow-sm ring-1 ring-background-line [box-shadow:0_0_0_1px_rgba(0,0,0,.03),0_2px_4px_rgba(0,0,0,.05),0_12px_24px_rgba(0,0,0,.05)]",
+        isPanel
+          ? "relative flex w-full flex-col overflow-hidden rounded-lg border border-background-border bg-background shadow-none"
+          : "relative mx-auto mt-12 flex w-full max-w-6xl flex-col items-center justify-center rounded-2xl border bg-background shadow-primary-line shadow-sm ring-1 ring-background-line [box-shadow:0_0_0_1px_rgba(0,0,0,.03),0_2px_4px_rgba(0,0,0,.05),0_12px_24px_rgba(0,0,0,.05)]",
         className
       )}
     >
-      {/* Framework tabs */}
-      <Tabs value={activeFramework} onValueChange={setActiveFramework} className="w-full">
-        <div className="border-background-border border-b pt-4">
-          <TabsList variant="line">
-            <TabsTrigger value="sdk" className="px-5">
+      <Tabs
+        value={activeFramework}
+        onValueChange={(value) => setActiveFramework(value as keyof typeof codeExamples)}
+        className="w-full"
+      >
+        <div
+          className={cn(
+            "border-background-border border-b",
+            isPanel
+              ? "flex h-12 items-stretch justify-between gap-3 bg-background-bgSubtle px-3"
+              : "pt-4"
+          )}
+        >
+          <TabsList variant="line" className={cn(isPanel && "h-full border-b-0")}>
+            <TabsTrigger
+              value="sdk"
+              className={cn(isPanel ? "flex h-full items-center px-2.5 pt-0 pb-0 text-xs" : "px-5")}
+            >
               SDK TypeScript
             </TabsTrigger>
-            <TabsTrigger value="fetch" className="px-5">
+            <TabsTrigger
+              value="fetch"
+              className={cn(isPanel ? "flex h-full items-center px-2.5 pt-0 pb-0 text-xs" : "px-5")}
+            >
               Fetch API
             </TabsTrigger>
           </TabsList>
+          {isPanel && (
+            <CopyToClipboard
+              code={code}
+              label="Copy"
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0 gap-1.5 self-center border-background-border bg-background-base px-2 font-normal text-background-text text-xs shadow-none hover:bg-background-bgHover"
+            />
+          )}
         </div>
-        <TabsContent value={activeFramework}>
+        <TabsContent value={activeFramework} className="mt-0">
           <div className="flex flex-col md:flex-row">
-            {/* Method selection */}
             {methods.length > 1 && (
-              <div className="w-full border-b md:w-52 md:border-r md:border-b-0">
-                <div className="hide-scrollbar flex gap-2 overflow-y-auto px-2 py-0 md:flex-col md:py-4">
-                  {methods.map((method) => (
+              <div
+                className={cn(
+                  "w-full border-b md:border-r md:border-b-0",
+                  isPanel ? "bg-background-bgSubtle/60 md:w-48" : "md:w-52"
+                )}
+              >
+                <div
+                  className={cn(
+                    "hide-scrollbar flex gap-2 overflow-y-auto px-2 py-0 md:flex-col",
+                    isPanel ? "md:py-2" : "md:py-4"
+                  )}
+                >
+                  {methods.map((methodKey) => (
                     <Button
-                      key={method}
+                      key={methodKey}
                       variant="link"
-                      onClick={() => setActiveMethod(method as method)}
+                      onClick={() => setActiveMethod(methodKey)}
                       className={cn(
                         "flex flex-col items-start whitespace-nowrap text-left transition-colors",
-                        activeMethod === method
+                        isPanel && "h-8 rounded px-2 text-xs hover:bg-background-bgHover",
+                        activeMethod === methodKey
                           ? "text-background-textContrast"
                           : "text-background-text"
                       )}
                     >
-                      {/* Format method name for display */}
-                      {method.replace(/([A-Z])/g, " $1").replace(/^./, (str) => str.toUpperCase())}
+                      {methodLabels[methodKey]}
                     </Button>
                   ))}
                 </div>
@@ -295,26 +724,36 @@ export function SDKDemo({
 
             <div
               className={cn(
-                "relative flex h-full w-full overflow-hidden rounded-b-3xl rounded-br-3xl bg-background-base font-mono text-background-text text-sm md:rounded-none",
-                {
+                isPanel
+                  ? "relative flex h-full w-full overflow-hidden bg-background-base font-mono text-[13px] text-background-text leading-6"
+                  : "relative flex h-full w-full overflow-hidden rounded-b-3xl rounded-br-3xl bg-background-base font-mono text-background-text text-sm md:rounded-none",
+                !isPanel && {
                   "md:rounded-br-3xl": methods.length > 1,
                   "md:rounded-b-3xl": methods.length === 1,
                 }
               )}
             >
-              <div className="absolute top-3 right-3 z-10">
-                <CopyToClipboard code={code} />
-              </div>
+              {!isPanel && (
+                <div className="absolute top-3 right-3 z-10">
+                  <CopyToClipboard code={code} />
+                </div>
+              )}
               <ScrollArea
                 hideScrollBar={true}
                 className={cn(
                   "hide-scrollbar w-full",
-                  // hack for not having to set height on scroll area
-                  "[&>[data-radix-scroll-area-viewport]]:h-full md:[&>[data-radix-scroll-area-viewport]]:h-[35rem]",
+                  isPanel
+                    ? "[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-18rem)] [&>[data-radix-scroll-area-viewport]]:max-h-[30rem] [&>[data-radix-scroll-area-viewport]]:min-h-[24rem] sm:[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-16rem)]"
+                    : "[&>[data-radix-scroll-area-viewport]]:h-full md:[&>[data-radix-scroll-area-viewport]]:h-[35rem]",
                   "[&>[data-radix-scroll-area-viewport]]:w-full"
                 )}
               >
-                <CodeEditor codeBlock={code} language={"typescript"} />
+                <CodeEditor
+                  codeBlock={code}
+                  language={"typescript"}
+                  className={cn(isPanel && "px-3 py-4 text-[13px] leading-6")}
+                  lineNumberClassName={cn(isPanel && "w-8 pr-3 text-background-text/25")}
+                />
               </ScrollArea>
             </div>
           </div>

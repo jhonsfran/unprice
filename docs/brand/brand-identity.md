@@ -1,6 +1,6 @@
 # Unprice Brand Identity
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 ## Brand Core
 
@@ -143,7 +143,8 @@ trail after that action becomes a charge, credit, denial, replay, or invoice lin
 Proof points:
 
 - Access checks and synchronous usage consumption.
-- Invoice explanation from rated usage events and ledger captures.
+- Invoice explanation from plan versions, billing periods, pricing rules, rated usage events when
+  present, wallet movement, and ledger captures.
 - Ingestion status and replay.
 
 ### Spend Safety For Expensive Workloads
@@ -267,12 +268,13 @@ Avoid:
 
 The brand should feel like operational infrastructure, not a glossy SaaS template.
 
-Signature visual (the one ownable idea): the money path. Render request -> meter -> entitlement ->
-budget -> wallet -> invoice as a literal, inspectable flow, with the authorization decision and the
-invoice explanation as the hero moments. Reuse it as the recurring system across hero, docs, empty
-states, and explainers. The brand's distinctiveness is legibility of real state — product state,
-monospace facts, and the money-path diagram — not decoration or a color trick. This is what keeps
-Unprice from looking like a generic dev-tool template.
+Signature visual (the one ownable idea): the money path. Render request -> plan version -> pricing
+rule -> meter -> entitlement -> budget -> wallet -> ledger -> invoice as a literal, inspectable
+flow, with the authorization decision and the invoice explanation as the hero moments. Reuse it as
+the recurring system across hero, docs, empty states, and explainers. The brand's distinctiveness is
+legibility of real state — product state, monospace facts, and the money-path diagram — not
+decoration or a color trick. This is what keeps Unprice from looking like a generic dev-tool
+template.
 
 Use:
 

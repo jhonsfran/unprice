@@ -4,13 +4,17 @@ import type { ColumnDef } from "@tanstack/react-table"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Typography } from "@unprice/ui/typography"
+import { useParams } from "next/navigation"
 import { DataTableColumnHeader } from "~/components/data-table/data-table-column-header"
+import { SuperLink } from "~/components/super-link"
 import { formatDate } from "~/lib/dates"
 import { formatRunMoney } from "../format-run-money"
 
 type CustomerRun = RouterOutputs["customers"]["getRuns"]["runs"][number]
+type ProjectRun = RouterOutputs["customers"]["listRunsByActiveProject"]["runs"][number]
+type RunRow = CustomerRun | ProjectRun
 
-function statusVariant(status: CustomerRun["status"]) {
+function statusVariant(status: RunRow["status"]) {
   switch (status) {
     case "completed":
       return "success"
@@ -24,7 +28,7 @@ function statusVariant(status: CustomerRun["status"]) {
   }
 }
 
-function formatRunDate(date: CustomerRun["startedAt"] | CustomerRun["endedAt"]): string {
+function formatRunDate(date: RunRow["startedAt"] | RunRow["endedAt"]): string {
   if (!date) {
     return "-"
   }
@@ -32,20 +36,62 @@ function formatRunDate(date: CustomerRun["startedAt"] | CustomerRun["endedAt"]):
   return `${formatDate(new Date(date).getTime(), "UTC", "yyyy-MM-dd HH:mm:ss")} UTC`
 }
 
-export const columns: ColumnDef<CustomerRun>[] = [
+function RunCustomerCell({ row }: { row: { original: RunRow } }) {
+  const { workspaceSlug, projectSlug } = useParams<{
+    workspaceSlug: string
+    projectSlug: string
+  }>()
+  const customer = "customer" in row.original ? row.original.customer : null
+
+  return (
+    <SuperLink href={`/${workspaceSlug}/${projectSlug}/customers/${row.original.customerId}`}>
+      <div className="flex min-w-0 flex-col gap-1">
+        <Typography
+          variant="p"
+          affects="removePaddingMargin"
+          className="truncate font-mono text-sm"
+        >
+          {row.original.customerId}
+        </Typography>
+        {customer ? (
+          <Typography
+            variant="p"
+            affects="removePaddingMargin"
+            className="truncate text-muted-foreground text-xs"
+          >
+            {customer.email} - {customer.name}
+          </Typography>
+        ) : null}
+      </div>
+    </SuperLink>
+  )
+}
+
+export const columns: ColumnDef<RunRow>[] = [
   {
-    accessorKey: "id",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Run" className="pl-4" />,
-    cell: ({ row }) => (
-      <Typography
-        variant="p"
-        affects="removePaddingMargin"
-        className="whitespace-nowrap pl-3 font-mono text-sm"
-      >
-        {row.original.id}
-      </Typography>
+    accessorKey: "customerId",
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Customer" className="pl-4" />
     ),
-    size: 44,
+    cell: ({ row }) => (
+      <div className="pl-3">
+        <RunCustomerCell row={row} />
+      </div>
+    ),
+    size: 56,
+    filterFn: (row, _id, filterValue) => {
+      const searchValue = String(filterValue).toLowerCase()
+      const customer = "customer" in row.original ? row.original.customer : null
+
+      return Boolean(
+        row.original.customerId.toLowerCase().includes(searchValue) ||
+          row.original.id.toLowerCase().includes(searchValue) ||
+          row.original.traceId?.toLowerCase().includes(searchValue) ||
+          row.original.workloadId?.toLowerCase().includes(searchValue) ||
+          customer?.email.toLowerCase().includes(searchValue) ||
+          customer?.name.toLowerCase().includes(searchValue)
+      )
+    },
   },
   {
     accessorKey: "status",
@@ -57,6 +103,25 @@ export const columns: ColumnDef<CustomerRun>[] = [
     filterFn: (row, _id, value) => {
       return Array.isArray(value) && value.includes(row.original.status)
     },
+  },
+  {
+    accessorKey: "statusReason",
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Reason" />,
+    cell: ({ row }) => {
+      const reason = row.original.statusReason?.trim()
+
+      return (
+        <Typography
+          variant="p"
+          affects="removePaddingMargin"
+          className="max-w-[22rem] truncate text-sm text-muted-foreground"
+          title={reason || undefined}
+        >
+          {reason || "-"}
+        </Typography>
+      )
+    },
+    size: 52,
   },
   {
     accessorKey: "workloadId",

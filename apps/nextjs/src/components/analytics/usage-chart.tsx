@@ -36,19 +36,19 @@ export const UsageChartSkeleton = ({
           <BarChart4 className="h-8 w-8" />
         </EmptyPlaceholder.Icon>
         <EmptyPlaceholder.Title>
-          {error ? "Ups, something went wrong" : "No data available"}
+          {error ? "Ups, something went wrong" : "No usage evidence yet"}
         </EmptyPlaceholder.Title>
         <EmptyPlaceholder.Description>
           {error
             ? error
-            : "There is no usage available for the selected interval. Start usage to see data."}
+            : "Usage evidence appears after your app records usage events for metered features."}
         </EmptyPlaceholder.Description>
         {!error && (
           <EmptyPlaceholder.Action>
-            <CodeApiSheet defaultMethod="ingestUsage">
+            <CodeApiSheet defaultMethod="recordUsage">
               <Button size={"sm"} disabled={isLoading}>
                 <Code className="mr-2 h-4 w-4" />
-                Start usage
+                Record usage
               </Button>
             </CodeApiSheet>
           </EmptyPlaceholder.Action>

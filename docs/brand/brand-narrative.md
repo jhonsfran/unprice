@@ -1,6 +1,6 @@
 # Brand Narrative
 
-Date: 2026-06-30
+Date: 2026-07-01
 
 This document defines the core Unprice story for developer-led usage-based SaaS founders and
 founding engineers. The primary action it should drive is product trial and SDK integration.
@@ -9,40 +9,51 @@ founding engineers. The primary action it should drive is product trial and SDK 
 
 Unprice should make a technical founder think:
 
-> I know the paid action in my product, and I can authorize it before it runs and explain it after
-> it bills.
+> I know the paid action in my product, I can authorize it before it runs, and I can prove every
+> invoice line after it bills — starting with one action in one afternoon.
 
 The builder — the developer-led team — is the hero. Unprice is the tool that helps them version,
-meter, gate, budget, reserve, and explain usage without scattering revenue logic through product
-code.
+meter, authorize, budget, reserve, rate, invoice, and explain pricing without scattering revenue
+logic through product code.
 
 Terminology: "builder"/"team"/"you" is the Unprice buyer; "customer"/"account" is the buyer's
 economic actor that holds budgets, wallets, and invoices.
 
 ## Core Story
 
-A customer is about to trigger a paid action in your product.
+A customer is about to trigger the paid action in your product.
+
+Maybe it is an LLM call, a data job, a costly API request, a multi-step workflow, a seat package, or
+a usage tier. The work is about to happen now. The invoice that explains it may not exist for weeks.
+If the decision is wrong, the team does not find out in a dashboard. They find out when the margin is
+gone, support is asking for an explanation, and an engineer has to stop building product to defend a
+charge.
 
 Your app needs to know, right now:
 
 - Is this customer entitled to the feature?
+- Which plan version and pricing rule apply?
 - Is this request inside their budget?
 - Should credits be reserved or captured?
-- If this becomes an invoice line, can you explain it later?
+- If this becomes an invoice line, what evidence will prove why?
 
-That is the shift: for usage-based SaaS, pricing is no longer just a page, a plan table, or an
-invoice calculation. Pricing is a runtime decision and an evidence trail.
+That is the shift: for usage-based and hybrid SaaS, pricing is no longer just a page, a plan table,
+or an invoice calculation. Pricing is a runtime decision and an evidence trail.
 
 Unprice gives developer-led teams an open-source PriceOps runtime for that decision. It connects
-plan versions, meter events, entitlement checks, budgeted runs, wallet credits, ingestion state, and
-invoice evidence in one inspectable money path.
+plan versions, feature pricing, meter events, entitlement checks, budgeted runs, wallet credits,
+ledger captures, ingestion state, and invoice evidence in one inspectable money path.
 
 ## The Five-Second Moment
 
 The realization:
 
 > Paid usage should not run until the commercial decision is made, and it should not bill unless the
-> evidence can explain it.
+> money path can prove it.
+
+The sharper version for selling:
+
+> The invoice is too late. The work already ran.
 
 Everything else in the story should create context for that moment.
 
@@ -53,13 +64,20 @@ Put a budget and evidence trail around the expensive action.
 This is the most repeatable buyer mission. It is concrete, technical, and action-oriented. It also
 keeps Unprice out of vague billing-platform language.
 
+For broader selling copy, the fuller promise is:
+
+> Pick the paid action in your product that can burn margin or create invoice confusion. Unprice puts
+> commercial authorization and evidence around it: authorize it before it runs, budget it when it can
+> overspend, and prove every invoice line after it bills. Start with one action in one afternoon.
+
 ## Narrative Model
 
 ```mermaid
 flowchart LR
   Action["Paid product action"] --> Check["Commercial authorization"]
-  Check --> Allowed{"Allow or deny now"}
-  Check --> Evidence["Usage and spend evidence"]
+  Check --> Rule["Plan version and pricing rule"]
+  Rule --> Allowed{"Allow or deny now"}
+  Rule --> Evidence["Ledger, usage, wallet, and billing evidence"]
   Evidence --> Invoice["Explainable invoice line"]
 ```
 
@@ -70,47 +88,60 @@ Once, pricing lived mostly in plan pages, checkout flows, and invoices.
 Every day, developer-led SaaS teams shipped usage-based products with Stripe, custom usage tables,
 database counters, Redis limits, cron reconciliation, and hardcoded plan logic.
 
-One day, usage became expensive enough that a customer, job, workflow, tool, or agent could cross a
-budget before anyone reached the invoice.
+One day, the paid action became expensive enough that a customer, job, workflow, tool, or agent could
+cross a budget before anyone reached the invoice.
 
-Because of that, teams needed pricing to make decisions while requests were still flowing and keep
-proof for the invoice that came later.
+Because of that, teams needed pricing to make decisions while requests were still flowing, before the
+cost was created and before the customer asked why they were charged.
 
-Because of that, the money path had to connect plan versions, usage, entitlements, budgets, credits,
-denials, replays, and invoices.
+Because of that, the money path had to connect plan versions, feature pricing, usage, entitlements,
+budgets, credits, denials, ledger captures, replays, and invoices.
 
 Until finally, pricing became runtime infrastructure.
 
-Ever since then, teams building usage-based products do not only calculate invoices after usage
-happens. They decide whether expensive usage should happen in the first place.
+Ever since then, teams building usage-based and hybrid products do not only calculate invoices after
+work happens. They decide whether paid work should happen in the first place, and they keep the proof
+for every invoice line that follows.
 
 ## Long-Form Narrative
 
 A customer clicks the button that runs the expensive part of your product. It might call an LLM,
-process a data job, hit a costly API, start an automation, or run a workflow for several minutes.
+process a data job, hit a costly API, start an automation, unlock a package, or move through a usage
+tier.
 
 At that moment, billing is already too late.
 
 If the request should have been blocked, the cost is already created. If the customer later disputes
 the invoice, engineering has to reconstruct the path from product event to usage counter to billing
-line by hand. If the team wants to change packaging, plan logic is spread across the application,
-billing scripts, counters, and support workflows.
+line by hand. The customer waits. Support has no satisfying answer. A founder or senior engineer
+opens logs instead of shipping the next feature.
 
-This is the real pricing problem for usage-based SaaS: the product needs a money decision while the
-request is still in flight, and a money explanation after the invoice exists.
+That is the quiet tax of DIY pricing: not only lost margin, but lost confidence. The team starts to
+fear its own pricing system. A packaging change feels risky. A usage limit feels brittle. An invoice
+question feels like a forensic project. The product can keep moving fast, but the money path becomes
+the part everyone avoids touching.
+
+This is the real pricing problem for usage-based and hybrid SaaS: the product needs a money decision
+while the request is still in flight, and a money explanation after the invoice exists.
 
 Unprice is open-source PriceOps infrastructure for that request path. Your app can check access,
 consume usage, start and consume budgeted runs, reserve wallet credits, pin customers to plan
-versions, and keep evidence for the invoice that comes later. The dashboard makes the state visible.
-The API and SDK make the decision easy to place inside the product.
+versions, apply flat, tiered, package, and usage pricing, and keep evidence for the invoice that
+comes later. The dashboard makes the state visible. The API and SDK make the decision easy to place
+inside the product.
 
 The product still owns the customer experience. Your payment provider still captures payment: Stripe
 today, with a provider model designed to extend to Paddle, Lemon Squeezy, and others. Unprice
-connects the runtime money path between product usage and invoice evidence.
+connects the runtime money path between product usage, pricing rules, ledger movement, and invoice
+evidence.
 
 The result is simple: when the paid action is about to run, your app can ask Unprice whether it
 should happen now, under which entitlement, plan version, budget, and credits — and with what
-evidence if it becomes a charge.
+evidence if it becomes an invoice line.
+
+And it does not require a leap of faith. The first proof is small: one paid action, one afternoon,
+one shadow check beside the code you already trust, one Sandbox path that shows the invoice evidence
+before real money moves.
 
 ## Short Pitch
 
@@ -118,16 +149,20 @@ Unprice is open-source PriceOps infrastructure for usage-based SaaS.
 
 It helps developer-led teams put commercial authorization in the request path: check entitlement,
 budget, credits, and meter rules before paid usage runs, then explain every charge, credit, denial,
-and invoice line from the same usage trail.
+and invoice line from the same money path. Start with one paid action in one afternoon.
 
 ## Thirty-Second Version
 
-Usage-based pricing breaks when pricing only happens on a page or at invoice time. By then, the
-paid action already ran and the explanation is scattered across counters, logs, and billing records.
+Usage-based pricing breaks when pricing only happens on a page or at invoice time. By then, the paid
+action already ran, the cost is real, and the explanation is scattered across counters, logs, and
+billing records.
 
 Unprice puts commercial authorization in the request path. Your app can check access, consume
 usage, enforce budgets, reserve credits, and preserve invoice evidence before paid usage becomes
-margin damage or a support dispute.
+margin damage or a support dispute — and before the invoice becomes a forensic project.
+
+The first integration is deliberately small: create one plan, install the SDK, run one action in
+shadow, and prove it on Sandbox.
 
 ## Homepage Narrative
 
@@ -143,16 +178,17 @@ and every invoice line can be explained after.
 
 Supporting story:
 
-Pick the paid action in your product. Unprice helps you authorize it before it runs, budget it when
-it can burn margin, and keep the evidence needed to explain the invoice later.
+Pick the paid action in your product that can burn margin or create invoice confusion. Unprice helps
+you authorize it before it runs, budget it when it can overspend, and prove every invoice line after
+it bills. Start with one action in one afternoon, in shadow, before you enforce anything.
 
 Primary CTA:
 
-Authorize paid usage.
+Start with one paid action.
 
 Secondary CTA:
 
-Explore the SDK.
+Watch the workflow demo.
 
 ## Demo Script
 
@@ -160,26 +196,35 @@ Open with the buyer's product, not Unprice:
 
 > Show me the paid action in your product that creates cost or invoice confusion.
 
-Then demonstrate:
+Then demonstrate the one-afternoon workflow-app proof:
 
-1. Create or identify the usage feature and meter.
-2. Call `access.check` before the action runs.
-3. Call `usage.consume` or `runs.start` / `runs.consume` for usage that should affect spend.
-4. Show an over-budget or wallet-empty denial before the expensive work runs.
-5. Show the usage, wallet, run, plan version, ingestion, and invoice evidence in the dashboard.
+1. Identify one workflow action that creates cost or invoice confusion.
+2. Create or identify the plan version, feature, pricing rule, and meter when usage-based.
+3. Install the SDK and provision or map one customer.
+4. Call `access.check` beside the current product logic as a shadow decision.
+5. Run the workflow and show what Unprice would allow, deny, budget, or reserve.
+6. Simulate the same path on Sandbox.
+7. Show the usage, wallet, run, plan version, pricing rule, ledger, ingestion, and invoice evidence
+   in the dashboard.
 
 The demo should end with:
 
-> The same event trail that protects margin in the request path also explains the invoice later.
+> One paid action. One afternoon. The same money path that protects margin in the request path also
+> explains the invoice later.
 
 ## Repeatable Lines
 
 - Pricing is not a page. Pricing is a runtime decision and an evidence trail.
 - Authorize paid usage before it runs.
+- Prove every invoice line after it bills.
+- One paid action in one afternoon.
 - Put a budget and evidence trail around the expensive action.
 - Stop expensive usage before it becomes margin damage.
+- The invoice is too late to be the first commercial decision.
+- The invoice is too late. The work already ran.
 - The request path is the new pricing surface.
-- Usage, credits, budgets, and invoices should share one evidence trail.
+- Usage, pricing rules, credits, budgets, ledger captures, and invoices should share one evidence
+  trail.
 - Entitlements should not be trapped inside subscriptions.
 - Revenue logic should be inspectable when it allows, denies, charges, credits, or replays customer
   activity.
@@ -192,22 +237,25 @@ Use proof that exists in the product and docs:
   `runs.consume`, `runs.end`, `runs.get`, wallet balances, analytics, and ingestion replay.
 - Plan versions that keep existing customers on the pricing they bought while new pricing
   experiments ship.
-- Usage features with event-native meter configuration.
+- Flat, tiered, package, and usage feature pricing, with event-native meter configuration for usage
+  features.
 - Wallet credits that are distinct from entitlement grants.
 - Budgeted runs for agents, workflows, jobs, tools, and custom workloads.
-- Invoice explanation that connects charges back to rated usage events and ledger captures.
+- Invoice explanation that connects lines back to plan versions, billing periods, pricing rules,
+  rated usage events when present, wallet movement, and ledger captures.
 - Open-source infrastructure with explicit contracts for pricing-critical behavior.
 
 ## Guardrails
 
 Do:
 
-- Lead with the wedge: authorize paid usage before it runs and explain it after it bills.
+- Lead with the wedge: authorize paid usage before it runs and prove every invoice line after it
+  bills.
 - Start with the paid product action, then narrow to the expensive action when selling the first
   integration.
 - Make the founder or engineer (the builder) the hero.
-- Show the path from request to meter to entitlement to budget to wallet to plan version to invoice
-  evidence when the plan version affects the decision.
+- Show the path from request to plan version to pricing rule to meter to entitlement to budget to
+  wallet to ledger to invoice evidence when the plan version affects the decision.
 - Emphasize open-source inspectability and clear failure paths.
 - Use calm urgency: name the cost-before-invoice risk with mechanism, not fear adjectives.
 - Drive toward SDK integration.
@@ -231,4 +279,5 @@ Before publishing copy, ask:
 - Does the reader know what to integrate first?
 - Does the story make pricing feel urgent before invoice time?
 - Does it connect commercial authorization to later invoice evidence?
+- Does it make clear that invoice evidence covers usage and non-usage pricing lines?
 - Does every claim have product evidence?
