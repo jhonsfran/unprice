@@ -49,6 +49,10 @@ metering, entitlements, and request-path usage enforcement.
 
 Unprice is dual-licensed under **AGPL-3.0** and a **Commercial License**.
 
+The published client packages **@unprice/api** and **@unprice/react** are
+licensed separately under **MIT**. They are intended to be embedded in customer
+applications without applying the AGPL-3.0 core license to the host app.
+
 ### Why AGPL? Transparency & Fairness.
 We believe the infrastructure that handles your money should be **fully transparent and auditable.**
 - **No Hidden Logic**: See exactly how every cent is calculated.

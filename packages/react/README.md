@@ -66,3 +66,9 @@ buffer.startAutoFlush(async (batch) => {
   return { accepted: batch.length, rejected: 0 }
 })
 ```
+
+## License
+
+MIT. This package is licensed separately from the AGPL-3.0 Unprice core so it
+can be embedded in applications without applying the core repository license to
+the host app.

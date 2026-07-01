@@ -21,9 +21,9 @@ This is the verbal version of the brand system:
 
 ```mermaid
 flowchart LR
-  Action["expensive action"] --> Decision["runtime decision"]
+  Action["paid action"] --> Decision["commercial authorization"]
   Decision --> State["allow / deny / reject / fail"]
-  State --> Evidence["usage + wallet + ledger evidence"]
+  State --> Evidence["plan version + usage + wallet + ledger evidence"]
   Evidence --> Invoice["explain invoice"]
   State --> Next["next action"]
 ```
@@ -42,11 +42,11 @@ after fixing the wording.
 
 ## Language Principles
 
-1. Lead with the wedge: stop over-budget usage before it runs.
+1. Lead with the wedge: authorize paid usage before it runs, then explain what happened after.
 2. Prefer mechanism over adjective. Say what Unprice checks, reserves, rejects, captures, replays,
    or explains.
-3. Use exact product nouns. `wallet credit`, `entitlement`, `budgeted run`, `invoice evidence`, and
-   `meter event` are different things.
+3. Use exact product nouns. `plan version`, `wallet credit`, `entitlement`, `budgeted run`,
+   `invoice evidence`, and `meter event` are different things.
 4. Distinguish business decisions from system failures. A denial is not a crash.
 5. Make the buyer the builder. The buyer is `you`, `team`, or `builder`; the buyer's economic actor
    is the `customer`.
@@ -63,12 +63,13 @@ Use this voice everywhere:
 - Open: show the evidence path and failure mode.
 - Fast: emphasize request-path decisions and short integration paths.
 - Calm: no fear stacking, no hype.
-- Opinionated: pricing is a runtime decision, not a page.
+- Opinionated: pricing is a runtime decision and an evidence trail, not a page.
 
 Good:
 
-- "Reject over-budget work before it runs."
+- "Authorize paid usage before it runs."
 - "Explain an invoice line from rated usage events and ledger captures."
+- "Keep existing customers on the plan version they bought."
 - "Retry with the same idempotency key."
 - "A run labels workload spend; the customer remains the economic actor."
 
@@ -104,6 +105,8 @@ economic actor that holds subscriptions, budgets, wallets, and invoices.
 | `open-source PriceOps infrastructure` | `open source billing platform` | Use when describing category. |
 | `request path` | `request-path` as a noun | Hyphenate only as modifier: `request-path decision`. |
 | `money path` | `revenue flow` | The inspectable path from usage to invoice evidence. |
+| `commercial authorization` | `pricing control engine` | Mechanism: deciding whether paid usage is commercially allowed. |
+| `paid action` | `monetized action` | Broad product action that may be entitled, metered, budgeted, credited, or invoiced. |
 | `budgeted run` | `agent run` as the generic term | Agents are one possible workload label. |
 | `wallet credit` | `credit` when ambiguous | Credits are wallet funds, not entitlement grants. |
 | `entitlement grant` | `credit` | Grants define access/quantity; credits fund spend. |
@@ -119,12 +122,14 @@ Use these nouns consistently.
 
 | Noun | Meaning | Recommended copy |
 | --- | --- | --- |
-| `expensive action` | The buyer's product action that can create real cost | "Put a budget around the expensive action." |
-| `runtime decision` | The allow/deny decision made while a request is in flight | "Pricing is a runtime decision." |
+| `paid action` | Broad buyer product action that may require entitlement, metering, credits, or invoice evidence | "Authorize paid usage before it runs." |
+| `expensive action` | The buyer's paid action that can create real marginal cost | "Put a budget around the expensive action." |
+| `commercial authorization` | The allow/deny decision that checks entitlement, budget, credits, meter rules, and plan version while a request is in flight | "Commercial authorization belongs in the request path." |
+| `runtime decision` | Shorter generic phrase for commercial authorization when the context is already clear | "Pricing is a runtime decision." |
 | `request path` | The path where the buyer's app calls Unprice before work runs | "Check budget in the request path." |
-| `money path` | The connected path from request to meter, entitlement, budget, wallet, ledger, and invoice | "Explain invoices from the same money path." |
+| `money path` | The connected path from request to plan version, meter, entitlement, budget, wallet, ledger, and invoice | "Explain invoices from the same money path." |
 | `plan` | Commercial package authored by the team | "Create a plan to define features and defaults." |
-| `plan version` | Publishable version of a plan | "Publish a plan version before customer signup." |
+| `plan version` | Publishable version of a plan that customers can be pinned to | "Keep customers on the plan version they bought." |
 | `feature` | Sellable or gateable capability in a plan | "Attach meter configuration to usage features." |
 | `meter` | Configuration for turning events into usage facts | "Meter usage by event slug." |
 | `event` | Reported usage occurrence | "Replay failed ingestion events." |
@@ -147,6 +152,7 @@ These are the primary Unprice verbs.
 | --- | --- | --- |
 | `meter` | Convert product activity into usage | "Meter usage events." |
 | `check` | Ask for entitlement, budget, or access state | "Check access before the LLM call." |
+| `authorize` | Decide whether paid usage is commercially allowed | "Authorize paid usage before it runs." |
 | `enforce` | Apply limits or entitlements | "Enforce entitlements in the request path." |
 | `budget` | Put a spend cap around a customer or workload | "Budget the expensive action." |
 | `reserve` | Hold wallet funds before usage is final | "Reserve credits before the run starts." |
@@ -157,7 +163,7 @@ These are the primary Unprice verbs.
 | `deny` | Stop a runtime request from continuing | "Deny over-budget work before it runs." |
 | `reject` | Refuse an event or action as a business outcome | "Rejected because the customer exceeded budget." |
 | `fail` | System or pipeline failure | "Failed during rating." |
-| `explain` | Show evidence behind a charge or decision | "Explain this invoice line." |
+| `explain` | Show evidence behind a charge, credit, denial, or decision | "Explain this invoice line." |
 | `replay` | Queue failed ingestion again | "Replay selected failed events." |
 | `retry` | Client repeats the same request safely | "Retry with the same idempotency key." |
 | `version` | Create a new plan state | "Version plans without rewriting the app." |
@@ -209,30 +215,33 @@ This distinction is central to the brand because it shows control instead of pan
 
 Do not present the product as five equal features. The order matters.
 
-1. Spend safety: cap runaway usage before it runs.
-2. Runtime pricing control: pricing decisions happen in the request path.
-3. One inspectable money path: usage, entitlements, budgets, credits, ingestion, and invoices share
-   evidence.
-4. Open PriceOps infrastructure: the team owns inspectable revenue logic.
-5. Pricing flexibility: plan versions and feature configuration change without rewriting the app.
-6. Bring your own payments: Stripe-first today, provider-extensible by design.
+1. Commercial authorization: authorize paid usage before it runs.
+2. Evidence after the fact: explain every allow, deny, charge, credit, replay, and invoice line.
+3. Versioned PriceOps model: plans, plan versions, subscriptions, entitlements, meters, credits, and
+   invoices stay separate but connected.
+4. Budgeted workloads: cap expensive actions without owning the workload.
+5. Open PriceOps infrastructure: the team owns inspectable revenue logic.
+6. Pricing flexibility: plan versions and feature configuration change without rewriting the app.
+7. Bring your own payments: Stripe-first today, provider-extensible by design.
 
 When space is tight, lead with the first two and mention evidence if there is room:
 
-> Put a budget around the expensive action. Reject over-budget work before it runs, then explain the
-> invoice from the same money path.
+> Authorize paid usage before it runs, then explain every invoice line from the same money path.
 
 ## Surface Guidelines
 
 ### Landing Page
 
-Landing copy should start with the expensive action and the request-path decision.
+Landing copy should start with the paid action, request-path decision, or invoice explanation. Use
+the expensive action when the page needs a concrete first integration.
 
 Use:
 
-- "Stop runaway usage before it runs."
-- "Put a budget around the expensive action."
-- "Pricing is a runtime decision."
+- "Authorize paid usage before it runs."
+- "Prove every charge after it bills."
+- "Put a budget and evidence trail around the expensive action."
+- "Pricing is a runtime decision and an evidence trail."
+- "Keep entitlements separate from subscriptions."
 - "Your Redis counter is not a budget."
 - "Explain every invoice line from usage and ledger evidence."
 - "Stripe-first today, provider-extensible by design."
@@ -275,9 +284,10 @@ prose when explaining integration.
 
 Use:
 
-- "Call `access.check` before the expensive action runs."
+- "Call `access.check` before the paid action runs."
 - "Use `usage.consume` when the request path needs a synchronous decision."
 - "Use `usage.record` for async usage ingestion."
+- "Publish a plan version before customer signup."
 - "Retry with the same idempotency key."
 - "A bound API key cannot spend for a different customer."
 
@@ -293,6 +303,7 @@ API copy should describe the contract, not the marketing benefit.
 
 Use:
 
+- "Authorize paid usage."
 - "Start a budgeted run."
 - "Apply usage to a running budgeted run."
 - "End a budgeted run and release unused reservation funds."
@@ -318,6 +329,7 @@ Examples:
 
 - "Plan title: Display name for this plan."
 - "Plan slug: Stable identifier used by API calls."
+- "Plan version: Published pricing and entitlement rules used by assigned customers."
 - "Default customer: Used when requests with this API key omit `customerId`."
 - "Expiration date: After this date, the API key can no longer call this project."
 
@@ -335,6 +347,7 @@ Good:
   funds."
 - "No budgeted runs. Runs will appear after your app starts a budgeted workload for this customer."
 - "No invoices. Invoices will appear after this customer has billable subscriptions."
+- "No plan versions. Publish a plan version before assigning customers."
 
 Avoid:
 
@@ -365,7 +378,7 @@ Primary CTAs should name the concrete first step.
 
 | Context | Preferred CTA | Avoid |
 | --- | --- | --- |
-| Homepage primary | "Budget my expensive action" | "Start pricing" |
+| Homepage primary | "Authorize paid usage" | "Start pricing" |
 | Homepage secondary | "Explore the request-path SDK" | "Learn more" |
 | Docs secondary | "Read the integration guide" | "Read more" |
 | GitHub/community | "Star on GitHub" | "Join us" |
@@ -384,6 +397,7 @@ Examples:
 
 - "Create plan"
 - "Publish plan version"
+- "Authorize paid usage"
 - "Replay selected"
 - "Explain charge"
 - "Bind default customer"
@@ -395,12 +409,14 @@ Examples:
 ### One-Liners
 
 - Unprice is open-source PriceOps infrastructure for usage-based SaaS.
-- Stop runaway usage before it runs.
-- Put a budget around the expensive action.
-- Pricing is not a page. Pricing is a runtime decision.
+- Authorize paid usage before it runs.
+- Prove every charge after it bills.
+- Put a budget and evidence trail around the expensive action.
+- Pricing is not a page. Pricing is a runtime decision and an evidence trail.
 - The request path is the new pricing surface.
 - Your Redis counter is not a budget.
-- Usage, credits, budgets, and invoices should share one evidence trail.
+- Entitlements should not be trapped inside subscriptions.
+- Usage, credits, budgets, plan versions, and invoices should share one evidence trail.
 - Revenue logic should be inspectable when it allows, denies, charges, credits, or replays customer
   activity.
 
@@ -422,6 +438,7 @@ Examples:
 
 - Built for the request path
 - One inspectable money path
+- Authorize paid usage
 - Budget the expensive action
 - Explain the charge
 - Replay failed events
@@ -446,15 +463,15 @@ Use this table when reviewing existing copy.
 
 | Replace | With | Why |
 | --- | --- | --- |
-| "Start pricing" | "Budget my expensive action" or "Create plan" | Names the first valuable action. |
+| "Start pricing" | "Authorize paid usage", "Budget my expensive action", or "Create plan" | Names the first valuable action. |
 | "Learn more" | "Explore the SDK", "Read the docs", "See API reference" | Says what the user gets. |
-| "Manage your customers" | "Create customers and inspect subscriptions, wallets, invoices, and runs." | Shows customer as economic actor. |
-| "Revenue architecture" | "plans, features, meters, and limits" | Uses product nouns. |
-| "Growth levers" | "plans, features, meters, and budgets" | Avoids vague growth language. |
+| "Manage your customers" | "Create customers and inspect subscriptions, entitlements, wallets, invoices, and runs." | Shows customer as economic actor. |
+| "Revenue architecture" | "plans, plan versions, features, meters, and limits" | Uses product nouns. |
+| "Growth levers" | "plans, plan versions, features, meters, and budgets" | Avoids vague growth language. |
 | "Adaptive model" | "usage-based, tiered, package, or hybrid plan" | Specific pricing language. |
 | "Analytics" | "usage evidence", "ingestion status", or "invoice evidence" | Matches operational truth. |
 | "Performance" | "usage", "spend", "latency" only if measured, or "failures" | Avoids generic dashboards. |
-| "Global low latency" | "request-path checks" | Avoids unproven latency claims. |
+| "Global low latency" | "request-path authorization" | Avoids unproven latency claims. |
 | "Subscription billing" | "subscriptions and payment-provider settlement" | Keeps payment boundary clear. |
 | "Verify entitlement" | "Check access" | Matches `access.check`. |
 | "Track usage" | "Record usage" or "Consume usage" | Usage is billing-relevant. |
@@ -473,11 +490,11 @@ Before:
 
 After:
 
-> Budget my expensive action
+> Authorize paid usage
 
 Alternative:
 
-> Put Unprice in the request path
+> Budget my expensive action
 
 ### Plans Empty State
 
@@ -497,7 +514,7 @@ Before:
 
 After:
 
-> Define plans, features, meters, and limits without hardcoding the money path.
+> Define plans, plan versions, features, meters, and limits without hardcoding the money path.
 
 ### API Sheet
 
@@ -528,16 +545,18 @@ Before:
 
 After:
 
-> Request-path checks. Put entitlement and budget decisions where expensive work starts.
+> Request-path authorization. Put entitlement, budget, and credit decisions where paid work starts.
 
 ## Claim Boundaries
 
 Allowed:
 
 - "Open-source PriceOps infrastructure."
-- "Stop over-budget usage before it runs."
-- "Meter usage, enforce entitlements, reserve credits, and explain invoices."
+- "Authorize paid usage before it runs."
+- "Explain every allow, deny, charge, credit, and invoice line from one money path."
+- "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
 - "Budgeted runs for agents, workflows, jobs, tools, and custom workloads."
+- "Plan versions keep customers on the pricing they bought while new pricing experiments ship."
 - "Stripe-first today, provider-extensible by design."
 - "Designed for request-path usage enforcement."
 
@@ -556,11 +575,12 @@ Use this before publishing app copy, marketing copy, docs, examples, or emails.
 
 - Does the copy use `team`, `builder`, or `you` for the Unprice buyer?
 - Does `customer` refer only to the buyer's economic actor?
-- Does the first screen or first paragraph name the expensive action, request path, budget, or
-  invoice evidence?
-- Does the sentence use a concrete Unprice verb: meter, check, enforce, budget, reserve, capture,
-  consume, record, allow, deny, reject, explain, replay, version, publish?
-- Are wallet credits, entitlement grants, usage quantities, budgets, and invoices kept distinct?
+- Does the first screen or first paragraph name the paid action, request path, budget, plan version,
+  or invoice evidence?
+- Does the sentence use a concrete Unprice verb: meter, check, authorize, enforce, budget, reserve,
+  capture, consume, record, allow, deny, reject, explain, replay, version, publish?
+- Are wallet credits, entitlement grants, usage quantities, budgets, plan versions, and invoices
+  kept distinct?
 - Are business denials separated from system failures?
 - Is every CTA a verb plus a specific object?
 - Does every claim have product evidence or a canonical source?
@@ -584,8 +604,8 @@ boundary, or product nouns change.
 
 Open questions to validate with customer interviews:
 
-- Whether buyers prefer "runaway usage", "customer budget", or "runtime pricing control" as the
-  first phrase.
+- Whether buyers prefer "authorize paid usage", "prove every charge", or "budget the expensive
+  action" as the first phrase.
 - Whether "PriceOps" lands quickly enough or needs the DevOps/FinOps analogy on every cold surface.
-- Which proof point matters most: budget rejection, invoice explanation, or pricing changes without
-  rewrites.
+- Which proof point matters most: authorization before work, invoice explanation, or pricing changes
+  without moving existing customers.

@@ -12,7 +12,7 @@
       "require": "./dist/index.js"
     }
   },
-  "license": "AGPL-3.0",
+  "license": "MIT",
   "files": ["./dist/**"],
   "publishConfig": {
     "access": "public"

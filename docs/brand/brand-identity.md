@@ -5,14 +5,17 @@ Date: 2026-06-30
 ## Brand Core
 
 Unprice is open-source PriceOps infrastructure for usage-based SaaS. It helps developer-led teams
-meter usage, enforce entitlements, reserve credits, cap expensive workloads, and explain invoices
-without hardcoding revenue logic into product code.
+authorize paid usage before it runs, then explain why every event was allowed, denied, charged,
+credited, or invoiced from the same money path.
 
-The wedge is spend safety: stop over-budget usage before it runs.
+The wedge is commercial authorization with evidence: decide whether paid usage is commercially
+allowed before cost is created, and preserve the evidence needed to explain the charge or denial
+after the fact.
 
-PriceOps means operating pricing as live infrastructure — metering, entitlements, budgets, credits,
-and invoice evidence run as one inspectable system in the request path, the way DevOps operates
-deploys and FinOps operates cloud spend.
+PriceOps means operating pricing as versioned commercial infrastructure — plan versions,
+subscriptions, entitlements, meters, budgets, credits, usage evidence, and invoice evidence stay
+separate but connected. Entitlements do not live inside a subscription blob; customers can stay on
+the plan version they bought while new pricing experiments ship safely for future customers.
 
 ## What "Unprice" Means
 
@@ -36,28 +39,27 @@ work immediately:
 - Let the bracket mark carry the meaning the word cannot. The brackets read as code containment —
   pricing pulled into one inspectable place, with the gated value held inside — which is exactly
   what "un-price your codebase" means.
-- The first line of any cold surface should pre-empt the misread by stating the control and
-  spend-safety promise, not by explaining the name. Explain the name only where there is room
-  (about pages, docs, this doc).
+- The first line of any cold surface should pre-empt the misread by stating the authorization and
+  evidence promise, not by explaining the name. Explain the name only where there is room (about
+  pages, docs, this doc).
 
 ## Positioning Statement
 
 Canonical source: [`positioning-and-messaging.md`](positioning-and-messaging.md).
 
-For developer-led AI/API SaaS teams — CTOs, founding engineers, and platform engineers — who ship
-expensive per-request usage and cannot stop a customer or workload from blowing past budget before
-the invoice arrives, Unprice is the open-source PriceOps runtime that puts a real-time spend budget
-in the request path: rejecting over-budget work before it runs, then metering, gating, crediting,
-and explaining every invoice line from one inspectable money path.
+For developer-led usage-based SaaS teams — CTOs, founding engineers, and platform engineers — who
+ship paid product actions that can create cost before the invoice exists, Unprice is the open-source
+PriceOps runtime that authorizes usage in the request path: checking entitlement, budget, credits,
+and meter rules before work runs, then preserving the evidence that explains every allow, deny,
+charge, credit, and invoice line from one inspectable money path.
 
-Unlike billing and metering platforms (Stripe Billing, Metronome, Orb, Lago, OpenMeter) that rate
-and invoice usage after it happens, or entitlement layers (Stigg) that gate access but not spend,
-only Unprice decides — at runtime, in open source — whether expensive usage is allowed to happen at
-all, before the cost is created.
+Unlike billing platforms that primarily rate, invoice, and collect after usage, entitlement layers
+that gate access, or workflow and AI infrastructure that runs the work, Unprice ties the commercial
+decision and the after-the-fact explanation together in one open money path.
 
 ## Brand Promise
 
-Revenue logic you can inspect, enforce, and change safely.
+Paid usage you can authorize, explain, and change safely.
 
 ## Terminology
 
@@ -79,12 +81,12 @@ Secondary: Ruler. The product is about control, order, auditability, and operati
 money-adjacent workflows.
 
 Archetype division of labor (resolve the lead-message tension deliberately): the wedge leads with
-Ruler energy — "stop runaway usage before it runs," "put a budget around the expensive action," the
-bracket logo, the name's promise of control. Ruler opens because the buying trigger is a loss of
-control over spend. Sage then carries the close: once Unprice has stopped the over-budget work, its
-durable value is explaining and inspecting the money path. So lead with Ruler control in the wedge,
-and win and retain on Sage explainability. The two are not in conflict — control is exactly what
-Sage's evidence makes safe.
+Ruler energy — "authorize paid usage before it runs," "put a budget and evidence trail around the
+expensive action," the bracket logo, the name's promise of control. Ruler opens because the buying
+trigger is a loss of control over paid usage. Sage then carries the close: once Unprice has made the
+commercial decision, its durable value is explaining and inspecting the money path. So lead with
+Ruler authorization in the wedge, and win and retain on Sage explainability. The two are not in
+conflict — control is exactly what Sage's evidence makes safe.
 
 Avoid a Magician posture. Do not present billing as invisible magic. The product wins when it makes
 the money path visible.
@@ -129,13 +131,26 @@ Resolve the tension by creating urgency with mechanism, not adjectives.
 
 ## Messaging Pillars
 
-Pillar order is the message hierarchy. Lead with spend safety; the rest is supporting depth. Keep
-this aligned with the message hierarchy in `positioning-and-messaging.md`.
+Pillar order is the message hierarchy. Lead with commercial authorization plus evidence; spend
+safety is the first concrete wedge, not the whole story. Keep this aligned with the message
+hierarchy in `positioning-and-messaging.md`.
 
-### Spend Safety For Expensive Workloads (Wedge)
+### Commercial Authorization With Evidence (Wedge)
 
-AI/API products need to prevent a customer, job, workflow, tool, or custom run from turning into
-uncapped cost. Real-time budgets reject over-budget work in the request path, before it runs.
+Usage-based products need a commercial decision before a paid action creates cost, and an evidence
+trail after that action becomes a charge, credit, denial, replay, or invoice line.
+
+Proof points:
+
+- Access checks and synchronous usage consumption.
+- Invoice explanation from rated usage events and ledger captures.
+- Ingestion status and replay.
+
+### Spend Safety For Expensive Workloads
+
+AI/API products, workflow apps, and other usage-based products need to prevent a customer, job,
+workflow, tool, or custom run from turning into uncapped cost. Real-time budgets reject over-budget
+work in the request path, before it runs.
 
 Proof points:
 
@@ -143,16 +158,17 @@ Proof points:
 - Workload attribution.
 - Run-level budget rejection.
 
-### Runtime Control
+### Versioned PriceOps Model
 
-Pricing is not only a billing-cycle calculation. For usage-based products, pricing is a runtime
-decision.
+Pricing experiments should not rewrite subscriptions or silently move existing customers.
+Subscriptions, entitlements, plan versions, meters, budgets, credits, and invoices stay separate but
+connected.
 
 Proof points:
 
-- Access checks and synchronous usage consumption.
-- Budgeted runs with remaining spend and allow/deny decisions.
-- Wallet reservations before usage is captured.
+- Plan versions.
+- Entitlements derived from published plan versions.
+- Usage features with explicit meter configuration.
 
 ### Explainable Money Flow
 
@@ -171,7 +187,7 @@ Revenue logic should not be trapped in a black box.
 Proof points:
 
 - Open-source codebase (AGPL-3.0 core plus a commercial license).
-- Explicit schemas for features, meters, entitlements, wallets, and runs.
+- Explicit schemas for plans, plan versions, features, meters, entitlements, wallets, and runs.
 - Generated SDK surface from OpenAPI contracts.
 
 ### Pricing Flexibility
@@ -202,9 +218,11 @@ Use only code-backed claims unless a benchmark, customer result, or integration 
 Allowed now:
 
 - "Open-source PriceOps infrastructure."
-- "Stop over-budget usage before it runs."
-- "Meter usage, enforce entitlements, reserve credits, and explain invoices."
+- "Authorize paid usage before it runs."
+- "Explain every allow, deny, charge, credit, and invoice line from one money path."
+- "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
 - "Budgeted runs for agents, workflows, jobs, tools, and custom workloads."
+- "Plan versions keep customers on the pricing they bought while new pricing experiments ship."
 - "Stripe-first today, provider-extensible by design."
 - "Designed for request-path usage enforcement."
 
@@ -221,9 +239,11 @@ Avoid until proven:
 
 Use:
 
-- Stop runaway usage before it runs
+- Authorize paid usage before it runs
+- Prove every charge after it bills
 - Spend safety
-- Runtime pricing control
+- Commercial authorization
+- Versioned PriceOps
 - Open PriceOps infrastructure
 - Usage enforcement
 - Budgeted runs
@@ -248,11 +268,11 @@ Avoid:
 The brand should feel like operational infrastructure, not a glossy SaaS template.
 
 Signature visual (the one ownable idea): the money path. Render request -> meter -> entitlement ->
-budget -> wallet -> invoice as a literal, inspectable flow, with the budget/allow-deny decision as
-the hero moment. Reuse it as the recurring system across hero, docs, empty states, and explainers.
-The brand's distinctiveness is legibility of real state — product state, monospace facts, and the
-money-path diagram — not decoration or a color trick. This is what keeps Unprice from looking like a
-generic dev-tool template.
+budget -> wallet -> invoice as a literal, inspectable flow, with the authorization decision and the
+invoice explanation as the hero moments. Reuse it as the recurring system across hero, docs, empty
+states, and explainers. The brand's distinctiveness is legibility of real state — product state,
+monospace facts, and the money-path diagram — not decoration or a color trick. This is what keeps
+Unprice from looking like a generic dev-tool template.
 
 Use:
 
@@ -262,6 +282,7 @@ Use:
 - Dense but calm layouts with clear groupings.
 - Monospace accents for IDs, slugs, event names, run IDs, amounts, and ledger facts.
 - Diagrams that connect request, pricing, entitlement, budget, wallet, and invoice.
+- Version markers when a pricing decision depends on a specific plan version.
 
 Avoid:
 

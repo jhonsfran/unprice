@@ -5,8 +5,8 @@ Date: 2026-06-30
 ## Design Objective
 
 Unprice should feel like trustworthy operational infrastructure for money-adjacent workflows. The
-interface should help engineers and founders understand current state, make pricing decisions, and
-recover from failures quickly.
+interface should help engineers and founders understand current state, authorize paid usage, explain
+invoice outcomes, and recover from failures quickly.
 
 The product should not feel like a marketing dashboard that hides complexity. Pricing, entitlement,
 budget, wallet, and invoice details are the product.
@@ -14,8 +14,8 @@ budget, wallet, and invoice details are the product.
 ## Design Principles
 
 1. Show the money path.
-   Every important flow should make the path from request to meter to entitlement to budget to
-   wallet to invoice visible.
+   Every important flow should make the path from request to plan version to meter to entitlement to
+   budget to wallet to invoice visible.
 
 2. Prefer calm density.
    Use compact tables, clear rows, status chips, and concise metrics. Avoid oversized cards for
@@ -26,8 +26,8 @@ budget, wallet, and invoice details are the product.
    `consumed`, `draft`, `finalized`, and `paid`.
 
 4. Keep developer actions close.
-   API keys, SDK snippets, event slugs, feature slugs, idempotency keys, replay actions, and error
-   recovery should be easy to find near the state they affect.
+   API keys, SDK snippets, event slugs, feature slugs, plan version IDs, idempotency keys, replay
+   actions, and error recovery should be easy to find near the state they affect.
 
 5. Use visual emphasis only when it changes a decision.
    Color, motion, and hierarchy should explain state or next action, not decorate.
@@ -105,8 +105,9 @@ with vanity analytics.
 
 ### Plans And Features
 
-Show the relationship between feature, feature type, meter, limit, billing cadence, reset cadence,
-and overage behavior. Usage features should make meter configuration unavoidable and legible.
+Show the relationship between plan version, feature, feature type, meter, entitlement, limit,
+billing cadence, reset cadence, and overage behavior. Usage features should make meter configuration
+unavoidable and legible.
 
 ### Events And Ingestion
 
@@ -115,8 +116,8 @@ and a reason.
 
 ### Customers
 
-Treat the customer as the economic actor. Show subscriptions, entitlements, wallet balances,
-invoices, and runs as connected state, not separate product silos.
+Treat the customer as the economic actor. Show subscriptions, plan versions, entitlements, wallet
+balances, invoices, and runs as connected state, not separate product silos.
 
 ### Wallet And Credits
 
@@ -130,8 +131,8 @@ not imply Unprice owns the workload. It only labels and controls spend.
 
 ### Invoices
 
-Every charge should have an explain action when evidence exists. Explain views should show pricing
-rule, usage quantity, rated facts, ledger captures, and event evidence.
+Every charge should have an explain action when evidence exists. Explain views should show plan
+version, pricing rule, usage quantity, rated facts, ledger captures, and event evidence.
 
 ## Empty, Loading, And Error States
 
@@ -162,10 +163,11 @@ Respect reduced motion.
 
 The first viewport should show product truth, not abstract category art.
 
-Signature visual: the money path is Unprice's one ownable visual idea. Render request -> meter ->
-entitlement -> budget -> wallet -> invoice as a literal, inspectable flow, with the budget
-allow/deny decision as the hero moment. Reuse it across hero, docs, empty states, and explainers so
-the brand is recognizable by its legibility of state, not by decoration.
+Signature visual: the money path is Unprice's one ownable visual idea. Render request -> plan
+version -> meter -> entitlement -> budget -> wallet -> invoice as a literal, inspectable flow, with
+the authorization decision and invoice explanation as the hero moments. Reuse it across hero, docs,
+empty states, and explainers so the brand is recognizable by its legibility of state, not by
+decoration.
 
 Implemented as a reusable component:
 [`apps/nextjs/src/components/landing/money-path.tsx`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/components/landing/money-path.tsx)
@@ -178,7 +180,8 @@ Recommended hero concept:
 ```mermaid
 flowchart LR
   App["App request"] --> Unprice["Unprice runtime"]
-  Unprice --> Budget["budget check"]
+  Unprice --> Version["plan version"]
+  Version --> Budget["authorization check"]
   Budget --> Decision["allow / deny before it runs"]
   Unprice --> Evidence["usage + spend evidence"]
   Evidence --> Invoice["invoice line"]
@@ -186,10 +189,10 @@ flowchart LR
 
 Recommended hero copy:
 
-- Headline: Stop runaway usage before it runs.
-- Subheadline: Open-source PriceOps infrastructure for usage-based SaaS. Put a real-time budget
-  around your most expensive action, reject over-budget work in the request path, and explain every
-  invoice line from the same money path.
+- Headline: Authorize paid usage before it runs.
+- Subheadline: Open-source PriceOps infrastructure for usage-based SaaS. Keep plans versioned,
+  entitlements separate, and budgets in the request path so paid usage is authorized before it runs
+  and every invoice line can be explained after.
 
 Hero copy should make the brand/product explicit. Prefer product screenshots, generated product
 scenes, or request-path visuals over generic SaaS illustrations.
@@ -206,9 +209,9 @@ scenes, or request-path visuals over generic SaaS illustrations.
 ## Design Review Checklist
 
 - Does the screen show the current state and the next useful action?
-- Can a developer identify the relevant ID, slug, or API call?
+- Can a developer identify the relevant ID, slug, plan version, or API call?
 - Can an operator tell whether a denial is expected business logic or a system failure?
 - Is money displayed with the correct currency and precision?
-- Are wallet credits, entitlement grants, and usage quantities visually distinct?
+- Are wallet credits, entitlement grants, plan versions, and usage quantities visually distinct?
 - Are claims and labels code-backed?
 - Does the UI stay dense and scannable on mobile and desktop?

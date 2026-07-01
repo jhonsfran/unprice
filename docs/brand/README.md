@@ -13,15 +13,20 @@ plans.
 Do not re-derive these. Copy from here; if they change, change them here first.
 
 - Category: open-source PriceOps runtime for usage-based SaaS.
-- PriceOps: operating pricing as live infrastructure (metering, entitlements, budgets, credits,
-  invoice evidence) in the request path.
-- Wedge: spend safety — stop over-budget usage before it runs.
-- Headline: Stop runaway usage before it runs.
-- Rallying cry: Put a budget around the expensive action.
+- PriceOps: operating pricing as versioned commercial infrastructure — plan versions,
+  subscriptions, entitlements, meters, budgets, credits, usage evidence, and invoice evidence stay
+  separate but connected.
+- PriceOps manifesto: entitlements should not be hardcoded into subscriptions; customers can stay
+  pinned to the plan version they bought while the team ships new pricing experiments.
+- Wedge: commercial authorization with evidence — authorize paid usage before it runs, then prove
+  every allow, deny, charge, credit, and invoice line after.
+- Headline: Authorize paid usage before it runs.
+- Rallying cry: Put a budget and evidence trail around the expensive action.
 - Name meaning: "Unprice" = un-hardcoding pricing from your codebase, not removing price.
 - Payments: Stripe-first today, provider-extensible by design (Paddle, Lemon Squeezy, others).
 - Business model: open-core (AGPL-3.0 plus a commercial license).
-- Primary buyers: developer-led AI/API SaaS teams — CTOs, founding engineers, platform engineers.
+- Primary buyers: developer-led usage-based SaaS teams — CTOs, founding engineers, platform
+  engineers. AI/API and workflow products are the sharpest early slice.
 
 ## Terminology
 

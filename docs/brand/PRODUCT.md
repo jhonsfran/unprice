@@ -8,29 +8,37 @@ This is the app-level product source of truth. Detailed brand and design rules l
 ## Product Definition
 
 Unprice is open-source PriceOps infrastructure for usage-based SaaS. It helps developer-led teams
-meter usage, enforce entitlements, reserve credits, cap expensive workloads, and explain invoices
-without hardcoding revenue logic into product code.
+authorize paid usage before it runs, then explain why every event was allowed, denied, charged,
+credited, or invoiced from the same money path.
 
-The wedge is spend safety: stop over-budget usage before it runs. Everything else (metering,
-entitlements, credits, invoices) is the supporting money path.
+PriceOps is the operating model behind that promise: plan versions, subscriptions, entitlements,
+meters, budgets, credits, usage evidence, and invoice evidence stay separate but connected.
+Entitlements are not hardcoded into subscriptions; customers can remain on the plan version they
+bought while new pricing experiments ship safely for future customers.
+
+The wedge is commercial authorization with evidence: decide whether paid usage is commercially
+allowed before cost is created, and preserve the evidence needed to explain the charge or denial
+after the fact.
 
 Unprice is not an agent platform, tracing system, payment processor, tax engine, accounting system,
 or generic pricing-page builder.
 
 ## Primary Market
 
-The first market is developer-led AI/API SaaS teams with expensive per-request usage and hybrid
-subscription plus usage/credit pricing.
+The first market is developer-led usage-based SaaS teams with paid product actions, hybrid
+subscription plus usage/credit pricing, and a need to explain invoice outcomes. AI/API and workflow
+products are the sharpest early slice because their customer-triggered actions can create real
+marginal cost.
 
 Best-fit early users:
 
 - SaaS founders and founding engineers launching usage-based pricing.
 - CTOs and platform engineers who own request-path usage enforcement.
-- AI/API teams that need per-customer or per-run spend caps.
+- AI/API and workflow teams that need per-customer or per-run spend caps.
 
 Primary buyers are engineering owners: CTOs, founding engineers, and platform/product engineers who
-own billing, metering, or entitlements. The economic actor in the product is the team's customer,
-not the Unprice buyer.
+own billing, metering, entitlements, or request-path authorization. The economic actor in the
+product is the team's customer, not the Unprice buyer.
 
 Bad-fit early users:
 
@@ -42,17 +50,18 @@ Bad-fit early users:
 ## Product Purpose
 
 Pricing is not only a page or an invoice calculation. For usage-based products, pricing is a
-runtime decision.
+runtime decision and an evidence trail.
 
 The dashboard and API work together:
 
-- The dashboard makes plans, features, customers, subscriptions, usage, wallets, runs, invoices,
-  and ingestion state understandable.
+- The dashboard makes plans, plan versions, features, customers, subscriptions, entitlements, usage,
+  wallets, runs, invoices, and ingestion state understandable.
 - The API makes access checks, usage reporting, synchronous consumption, budgeted runs, wallet
   balances, and analytics easy to integrate into production request paths.
 
-Success means a founder or engineer can support new pricing models, enforce real-time spend and
-access gates, and change packaging without rewriting the application money path.
+Success means a founder or engineer can support new pricing models, authorize paid usage in the
+request path, explain invoices after the fact, and change packaging without rewriting the
+application money path.
 
 ## Positioning
 
@@ -60,17 +69,17 @@ Canonical source: [`positioning-and-messaging.md`](positioning-and-messaging.md)
 in sync with it.
 
 Category: open-source PriceOps runtime for usage-based SaaS. PriceOps means operating pricing as
-live infrastructure (metering, entitlements, budgets, credits, invoice evidence) in the request
-path.
+versioned commercial infrastructure: plan versions, subscriptions, entitlements, meters, budgets,
+credits, usage evidence, and invoice evidence stay separate but connected.
 
-One-liner: Unprice lets developer-led SaaS teams stop over-budget usage before it runs, then meter,
-gate, credit, and explain every invoice from the same runtime system.
+One-liner: Unprice lets developer-led SaaS teams authorize paid usage before it runs, then prove why
+every event was allowed, denied, charged, credited, or invoiced from the same runtime system.
 
-Homepage headline: Stop runaway usage before it runs.
+Homepage headline: Authorize paid usage before it runs.
 
-Homepage subheadline: Unprice is open-source PriceOps infrastructure for usage-based SaaS. Put a
-real-time budget around your most expensive action, reject over-budget work in the request path, and
-explain every invoice line from the same money path.
+Homepage subheadline: Unprice is open-source PriceOps infrastructure for usage-based SaaS. Keep
+plans versioned, entitlements separate, and budgets in the request path so paid actions are
+authorized before they run and every invoice line can be explained after.
 
 Name meaning: "Unprice" means un-hardcoding pricing — moving plan logic, counters, and limits out of
 application code into one inspectable runtime — not removing price.
@@ -80,7 +89,8 @@ application code into one inspectable runtime — not removing price.
 ```mermaid
 flowchart LR
   Request["Product request"] --> Meter["Meter event"]
-  Meter --> Entitlement["Check entitlement"]
+  Meter --> Version["Resolve plan version"]
+  Version --> Entitlement["Check entitlement"]
   Entitlement --> Budget["Check budget"]
   Budget --> Wallet["Reserve or capture credits"]
   Wallet --> Invoice["Explain invoice"]
@@ -89,27 +99,32 @@ flowchart LR
 
 ## Product Pillars
 
-1. Spend safety (wedge): customers, jobs, workflows, tools, agents, and custom workloads can be
-   budgeted so over-budget work is rejected before it runs, without Unprice owning the workload
-   itself.
-2. Runtime control: access and usage decisions happen before expensive work runs.
-3. Explainable money flow: every charge, denial, replay, and wallet movement should have evidence.
-4. Open PriceOps infrastructure: pricing logic should be inspectable and owned by the builder.
-5. Pricing flexibility: flat, package, tiered, usage-based, and hybrid models share one mental
-   model.
+1. Commercial authorization (wedge): paid usage is checked against entitlement, budget, credits, and
+   meter rules before expensive work runs.
+2. Evidence after the fact: every allow, deny, charge, credit, replay, and invoice line should have
+   an explainable trail.
+3. Versioned pricing model: plans and entitlements stay separated so existing customers can remain
+   on a plan version while new pricing experiments ship.
+4. Budgeted workloads: customers, jobs, workflows, tools, agents, and custom workloads can be
+   budgeted without Unprice owning the workload itself.
+5. Open PriceOps infrastructure: pricing logic should be inspectable and owned by the builder.
+6. Pricing flexibility: flat, package, tiered, usage-based, credit-based, and hybrid models share one
+   mental model.
 
-Note: the marketing message hierarchy in `positioning-and-messaging.md` lists a sixth item, "bring
-your own payments." That is a positioning boundary (see Payments And Business Model below), not a
-sixth product pillar. These five are product capabilities; payments is the boundary around them.
+Note: the marketing message hierarchy in `positioning-and-messaging.md` also includes "bring your
+own payments." That is a positioning boundary (see Payments And Business Model below), not a product
+pillar. These six are product capabilities; payments is the boundary around them.
 
 ## Claim Boundaries
 
 Use:
 
 - "Open-source PriceOps infrastructure."
-- "Stop over-budget usage before it runs."
-- "Meter usage, enforce entitlements, reserve credits, and explain invoices."
+- "Authorize paid usage before it runs."
+- "Explain every allow, deny, charge, credit, and invoice line from one money path."
+- "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
 - "Budgeted runs for agents, workflows, jobs, tools, and custom workloads."
+- "Plan versions keep customers on the pricing they bought while new pricing experiments ship."
 - "Stripe-first today, provider-extensible by design."
 - "Designed for request-path usage enforcement."
 
@@ -124,10 +139,11 @@ Avoid until proven:
 
 ## Payments And Business Model
 
-Unprice owns the runtime money path (metering, entitlements, budgets, credits, invoice evidence).
-The payment provider still captures payment. Stripe is the first supported provider; the provider
-model is designed to extend to Paddle, Lemon Squeezy, and others without rewriting the app. This is
-a deliberate boundary: bring your own payments, keep one pricing runtime.
+Unprice owns the runtime money path (plan versions, entitlements, metering, budgets, credits, usage
+evidence, invoice evidence). The payment provider still captures payment. Stripe is the first
+supported provider; the provider model is designed to extend to Paddle, Lemon Squeezy, and others
+without rewriting the app. This is a deliberate boundary: bring your own payments, keep one
+PriceOps runtime.
 
 Unprice is open-core: an AGPL-3.0 open-source core plus a Commercial License for teams that cannot
 open-source their modifications or want dedicated support.
@@ -142,7 +158,8 @@ direct state, and obvious next actions over decorative SaaS gloss.
 
 ## UX Principles
 
-1. Show the money path. Connect request, meter, entitlement, budget, wallet, and invoice state.
+1. Show the money path. Connect request, meter, entitlement, budget, wallet, plan version, and
+   invoice state.
 2. Keep the developer path short. API keys, SDK examples, event ingestion, entitlement checks,
    budgeted runs, and replay actions should be easy to find and hard to misread.
 3. Make state explicit. Use concrete lifecycle labels instead of vague analytics language.

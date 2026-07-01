@@ -10,32 +10,36 @@ hierarchy, and competitor contrast. Other brand docs should defer to this file f
 Unprice should not launch as a broad billing platform. That market is crowded and the product would
 be forced to compete on provider coverage, tax/compliance, enterprise procurement, and brand trust.
 
-The first market should be developer-led AI/API SaaS teams that need runtime spend control and
-explainable usage billing.
+The first market should be developer-led usage-based SaaS teams that need request-path commercial
+authorization and explainable usage billing. AI/API and workflow products are the sharpest early
+examples because their customer-triggered actions can create real marginal cost.
 
-The wedge leads with spend safety: stop over-budget usage before it runs. Everything else (metering,
-entitlements, credits, invoices) is the supporting money path, not the headline.
+The wedge leads with commercial authorization plus evidence: authorize paid usage before it runs,
+then prove why every event was allowed, denied, charged, credited, or invoiced. Spend safety is the
+first obvious pain; explainability is what makes the money path trustworthy after the fact.
 
 ## Positioning Statement
 
-For developer-led AI/API SaaS teams — CTOs, founding engineers, and platform engineers —
+For developer-led usage-based SaaS teams — CTOs, founding engineers, and platform engineers —
 
-Who ship expensive per-request usage and cannot stop a customer or workload from blowing past budget
-before the invoice arrives,
+Who ship paid product actions that can create cost before the invoice exists,
 
 Unprice is the open-source PriceOps runtime
 
-That puts a real-time spend budget in the request path — rejecting over-budget work before it runs,
-then metering, gating, crediting, and explaining every invoice line from one inspectable money path.
+That authorizes usage in the request path — checking entitlement, budget, credits, and meter rules
+before work runs — then preserves the evidence that explains every allow, deny, charge, credit, and
+invoice line from one inspectable money path.
 
-Unlike billing and metering platforms (Stripe Billing, Metronome, Orb, Lago, OpenMeter) that rate
-and invoice usage after it happens, or entitlement layers (Stigg) that gate access but not spend,
+Unlike billing and metering platforms that primarily rate, invoice, and collect usage after it
+happens, entitlement layers that gate feature access, or workflow and AI infrastructure that runs
+the work,
 
-Only Unprice decides — at runtime, in open source — whether expensive usage is allowed to happen at
-all, before the cost is created.
+Unprice ties the commercial decision and the after-the-fact explanation together: the same open
+money path that authorizes paid usage before cost is created also proves why the invoice came out
+that way.
 
-> Status: internal positioning hypothesis. Validate the "only Unprice" claim with real customer
-> interviews before treating it as proven (see `jobs-to-be-done.md` evidence limits).
+> Status: internal positioning hypothesis. Validate whether buyers feel the before/after promise
+> ("authorize before; explain after") as sharper than pure spend control before scaling GTM spend.
 
 ## Category
 
@@ -43,10 +47,11 @@ Open-source PriceOps runtime for usage-based SaaS.
 
 ### PriceOps Defined
 
-PriceOps is the practice of operating pricing as live infrastructure: metering, entitlements,
-budgets, credits, and invoice evidence run as one inspectable system in the request path — the way
-DevOps operates deploys and FinOps operates cloud spend. Unprice is the open-source runtime for
-PriceOps.
+PriceOps is the practice of operating pricing as versioned commercial infrastructure: plan
+versions, subscriptions, entitlements, meters, budgets, credits, usage evidence, and invoice
+evidence stay separate but connected. Entitlements do not live inside a subscription blob; customers
+can stay pinned to the plan version they bought while new pricing experiments ship safely for future
+customers. Unprice is the open-source runtime for PriceOps.
 
 ### What "Unprice" Means
 
@@ -56,22 +61,22 @@ counters, and limits from application code and moving them into one inspectable 
 
 ## One-Liner
 
-Unprice lets developer-led SaaS teams stop over-budget usage before it runs, then meter, gate,
-credit, and explain every invoice from the same runtime system.
+Unprice lets developer-led SaaS teams authorize paid usage before it runs, then prove why every
+event was allowed, denied, charged, credited, or invoiced from the same runtime system.
 
 ## Homepage Headline
 
-Stop runaway usage before it runs.
+Authorize paid usage before it runs.
 
 ## Homepage Subheadline
 
-Unprice is open-source PriceOps infrastructure for usage-based SaaS. Put a real-time budget around
-your most expensive action, reject over-budget work in the request path, and explain every invoice
-line from the same money path.
+Unprice is open-source PriceOps infrastructure for usage-based SaaS. Keep plans versioned,
+entitlements separate, and budgets in the request path so paid usage is authorized before it runs
+and every invoice line can be explained after.
 
 Supporting capability line (secondary, not the hero): meter events, enforce entitlements, reserve
-customer credits, cap expensive runs, and explain every invoice line without hardcoding revenue
-logic into your app.
+customer credits, cap expensive runs, preserve invoice evidence, and ship pricing experiments
+without hardcoding revenue logic into your app.
 
 ## Terminology
 
@@ -87,18 +92,20 @@ Never call the Unprice buyer "the customer." The buyer is the team or builder.
 
 ## Payments Boundary
 
-Unprice owns the runtime money path: metering, entitlements, budgets, credits, and invoice evidence.
-The payment provider still captures the payment. Stripe is the first supported provider today; the
-provider model is designed to extend to Paddle, Lemon Squeezy, and others without rewriting the app.
-This is a deliberate boundary, not a limitation: bring your own payments, keep one pricing runtime.
+Unprice owns the runtime money path: plan versions, entitlements, metering, budgets, credits, usage
+evidence, and invoice evidence. The payment provider still captures the payment. Stripe is the first
+supported provider today; the provider model is designed to extend to Paddle, Lemon Squeezy, and
+others without rewriting the app. This is a deliberate boundary, not a limitation: bring your own
+payments, keep one PriceOps runtime.
 
 Claim discipline: say "Stripe-first today, provider-extensible by design." Do not claim live
 Paddle/Lemon Squeezy/Square integrations until they ship.
 
 ## Primary Beachhead
 
-Developer-led AI/API SaaS teams with expensive per-request usage and hybrid subscription plus
-usage/credit pricing.
+Developer-led usage-based SaaS teams with paid product actions, hybrid subscription plus
+usage/credit pricing, and a need to explain invoice outcomes. AI/API and workflow products are the
+highest-signal early slice, not the whole category.
 
 ### Company Profile
 
@@ -125,7 +132,8 @@ usage/credit pricing.
 
 ### Trigger Events
 
-- AI or API costs spike after a customer overuses the product.
+- A customer-triggered action creates cost before billing catches it.
+- AI/API/workflow costs spike after a customer overuses the product.
 - A new usage-based pricing model is blocked by hardcoded plan logic.
 - The team needs credits, prepaid balances, or per-run spend caps.
 - Support cannot explain a disputed invoice line.
@@ -133,19 +141,21 @@ usage/credit pricing.
 
 ## Core Narrative
 
-Pricing is not a page. For usage-based products, pricing is a runtime decision.
+Pricing is not a page. For usage-based products, pricing is a runtime decision and an evidence
+trail.
 
-Modern SaaS and AI/API products need to price usage, gate access, control spend, and explain
-invoices while requests are still flowing. Unprice gives builders an open-source PriceOps runtime
-so pricing can change as fast as the product without hiding revenue logic inside application code
-or a black-box billing vendor.
+Modern usage-based products need to authorize paid usage while requests are still flowing, then
+explain the invoice after the fact. Unprice gives builders an open-source PriceOps runtime so
+pricing can change as fast as the product without hiding revenue logic inside application code or a
+black-box billing vendor.
 
 ## Strategic Diagram
 
 ```mermaid
 flowchart LR
   Request["Product request"] --> Meter["Meter event"]
-  Meter --> Entitlement["Check entitlement"]
+  Meter --> Version["Resolve plan version"]
+  Version --> Entitlement["Check entitlement"]
   Entitlement --> Budget["Check budget"]
   Budget --> Wallet["Reserve or capture credits"]
   Wallet --> Invoice["Explain invoice"]
@@ -154,9 +164,11 @@ flowchart LR
 
 ## Supporting Claims
 
-- Cap customer or workload spend with budgeted runs — reject over-budget work before it runs.
-- Enforce access and usage before expensive work runs.
-- Model plans, usage meters, wallets, credits, and invoices together.
+- Authorize paid usage before cost is created.
+- Explain every allow, deny, charge, credit, and invoice line from one evidence trail.
+- Cap customer or workload spend with budgeted runs.
+- Keep plans, plan versions, subscriptions, entitlements, usage meters, wallets, credits, and
+  invoices connected but separate.
 - Keep billing evidence inspectable and replayable.
 - Own monetization logic with open-source infrastructure.
 
@@ -164,6 +176,7 @@ flowchart LR
 
 - Public SDK methods for `access.check`, `usage.record`, `usage.consume`, `runs.start`,
   `runs.consume`, `runs.end`, `runs.get`, wallet balances, analytics, and ingestion replay.
+- Plan versions let pricing change without rewriting or silently moving existing customers.
 - Usage features require event-native meter configuration.
 - Wallet credits are distinct from entitlement grants.
 - Budget runs are generic workload labels, not agent objects.
@@ -180,20 +193,21 @@ flowchart LR
 
 ## Competitor Contrast
 
-- Stripe Billing and Metronome: broad commercial billing and metering. They rate and invoice usage
-  after it happens.
-- Orb: advanced usage billing for enterprise pricing models. Post-usage rating, not request-path
-  spend rejection.
-- Stigg: monetization control layer with strong entitlements. Gates access, but not real-time spend
-  budgets and wallet reservations on expensive workloads.
-- OpenMeter and Lago: open-source metering and billing. Open source, but post-hoc; not a runtime
-  budget that rejects work before it runs.
-- Unprice: the only open-source runtime that decides whether expensive usage is allowed to happen at
-  all — in the request path, before the cost is created — then explains the invoice from the same
-  money path.
+- Stripe Billing, Metronome, and Orb: strong billing, rating, invoicing, credits, and commercial
+  workflows. They are the payment and billing center of gravity.
+- Stigg and OpenMeter: strong monetization, entitlements, metering, and usage-control language.
+  They validate the market; do not claim they lack runtime concepts.
+- Workflow and AI infrastructure: runs jobs, agents, model calls, and automations. It owns
+  execution, not the full customer money path.
+- The DIY stack: Stripe for invoices, custom usage tables, Redis or database counters, cron
+  reconciliation, and plan logic in product code.
+- Unprice: the open-source PriceOps runtime focused on tying the commercial decision and the
+  explanation together. It authorizes paid usage before cost is created, while preserving the
+  evidence needed to explain the charge, denial, credit, and invoice later.
 
-Only-we test: the ownable wedge is real-time, pre-spend budget rejection inside the request path,
-in open source. Generic "runtime pricing control" alone is not ownable; lead with the budget cap.
+Only-we test: the ownable wedge is not generic "runtime pricing control." It is the before/after
+money path: authorize paid usage in the request path, then explain the invoice from the same
+evidence trail.
 
 ### The Real Incumbent: The DIY Stack
 
@@ -211,56 +225,65 @@ Answer that objection directly. A homegrown pre-check breaks down because:
 - Every packaging change edits product code, billing scripts, and reconciliation jobs at once.
 - When a customer disputes a charge, there is no single evidence trail from request to invoice line.
 
-Unprice is the one runtime where the budget check, the credit reservation, and the invoice evidence
-are the same money path — so the pre-check is correct under concurrency and explainable later. Lead
-competitive copy against the DIY stack first; position against vendors second.
+Unprice is the one runtime where the entitlement check, budget check, credit reservation, pricing
+version, and invoice evidence are the same money path — so the pre-check is correct under
+concurrency and explainable later. Lead competitive copy against the DIY stack first; position
+against vendors second.
 
 ## Message Hierarchy
 
 Lead with the wedge. Do not present these as five equal verbs; tier 1 is the headline, the rest are
 supporting depth.
 
-1. Spend safety — cap runaway usage before it runs. (Wedge.)
-   Real-time budgets reject over-budget customer and workload spend in the request path, before
-   expensive work executes.
-   Proof: budgeted runs (`runs.start` / `runs.consume` / `runs.end`), run-level budget rejection,
-   wallet reservations, `access.check`.
+1. Commercial authorization — authorize paid usage before it runs. (Wedge.)
+   Entitlement, budget, credit, and meter decisions happen in the request path before expensive work
+   executes.
+   Proof: `access.check`, `usage.consume`, budgeted runs (`runs.start` / `runs.consume` /
+   `runs.end`), wallet reservations.
 
-2. Runtime pricing control.
-   Pricing is a runtime decision, not a page or an end-of-cycle job. Decide while the request is in
-   flight.
-   Proof: `access.check`, `usage.consume`, synchronous consumption.
+2. Evidence after the fact.
+   Every allow, deny, charge, credit, replay, and invoice line should be explainable from the same
+   money path.
+   Proof: invoice explanation from rated events and ledger captures; ingestion status and replay.
 
-3. One inspectable money path.
-   Usage, entitlements, budgets, credits, ingestion, and invoices share one evidence trail.
-   Proof: invoice explanation from rated events and ledger captures; ingestion replay.
+3. Versioned PriceOps model.
+   Plans, plan versions, subscriptions, entitlements, meters, credits, budgets, and invoices stay
+   separate but connected; pricing experiments do not silently move existing customers.
+   Proof: plan versions, feature and meter configuration, customer subscriptions tied to published
+   plan versions.
 
-4. Open PriceOps infrastructure.
+4. Budgeted workloads.
+   Customer, workflow, job, tool, agent, and custom workloads can carry budget envelopes without
+   Unprice owning execution.
+   Proof: generic budgeted runs and workload labels.
+
+5. Open PriceOps infrastructure.
    Revenue logic is inspectable and owned by you, not trapped in a black box. AGPL-3.0 core plus a
    commercial license.
    Proof: open source, explicit schemas, generated SDK from OpenAPI.
 
-5. Pricing flexibility without rewrites.
-   Flat, tier, package, usage, and hybrid models share one mental model; change packaging without
-   rewriting the money path.
+6. Pricing flexibility without rewrites.
+   Flat, tier, package, usage, credit-based, and hybrid models share one mental model; change
+   packaging without rewriting the money path.
    Proof: plan versions, feature and meter configuration.
 
-6. Bring your own payments — Stripe-first, provider-extensible.
+7. Bring your own payments — Stripe-first, provider-extensible.
    Unprice owns the runtime money path; your provider still captures payment. Stripe today; the
    provider model is designed to extend to Paddle, Lemon Squeezy, and others.
    Proof: payment-provider abstraction.
 
 ## Demo Script Angle
 
-"Show me the expensive action in your product. We will put a customer budget around it, reject
-over-budget calls before they cost you money, and produce invoice evidence from the same usage
-stream."
+"Show me the paid action in your product that creates cost or invoice confusion. We will authorize
+it before it runs, put a budget around it when needed, and produce invoice evidence from the same
+usage stream."
 
 ## First Content Topics
 
-- How to stop runaway LLM usage per customer.
+- How to authorize paid usage before it runs.
+- Why usage billing needs an evidence trail after the fact.
 - Credits, entitlements, and invoices are three different systems.
-- Why usage billing needs request-path enforcement.
+- Why usage billing needs request-path authorization.
 - How to explain a usage invoice from event evidence.
 - How to launch usage pricing without rewriting product code.
 
@@ -274,6 +297,6 @@ pricing page as its best demo of explainable, usage-aware pricing.
 
 - Define the commercial/hosted offering and its pricing tiers, then make the public pricing page an
   exemplar of the product.
-- Validate the "only Unprice" positioning claim and the lead phrase ("runaway usage", "customer
-  budgets", or "runtime pricing control") with real customer interviews before treating either as
-  proven.
+- Validate the "authorize before; explain after" positioning claim and the lead phrase ("authorize
+  paid usage", "prove every charge", or "budget the expensive action") with real customer interviews
+  before treating either as proven.

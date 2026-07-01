@@ -181,4 +181,4 @@ Resolved 2026-06-30 (realigned to the tokens above):
 - [`apps/nextjs/src/app/(root)/og/route.tsx`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/app/(root)/og/route.tsx):
   the `SimpleLogo` pillars became the bracket mark, the wordmark is now ink (`#fafafa`) not amber,
   and the emoji "track usage / iterate prices / real-time insights" chips became the money-path
-  steps "meter usage / budget the request / explain the invoice."
+  steps "authorize usage / preserve evidence / explain the invoice."
