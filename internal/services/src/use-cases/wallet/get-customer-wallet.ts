@@ -21,6 +21,8 @@ export const customerWalletBalancesSchema = z.object({
   granted: z.number().int(),
   reserved: z.number().int(),
   consumed: z.number().int(),
+  walletConsumed: z.number().int().nonnegative(),
+  subscriptionCharges: z.number().int().nonnegative(),
 })
 
 export const walletCreditStatusSchema = z.enum(["active", "expired"])

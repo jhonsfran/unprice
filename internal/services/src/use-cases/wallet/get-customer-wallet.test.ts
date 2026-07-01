@@ -47,6 +47,8 @@ describe("getCustomerWallet", () => {
           granted: 500_000_000,
           reserved: 250_000_000,
           consumed: 2_000_000_000,
+          walletConsumed: 0,
+          subscriptionCharges: 2_000_000_000,
         },
       },
     })
@@ -307,16 +309,30 @@ function createWalletCredit(
   } as WalletCreditWithConsumption
 }
 
-function createWalletState(overrides: Partial<WalletStateOutput> = {}): WalletStateOutput {
+function createWalletState(
+  overrides: Partial<Omit<WalletStateOutput, "balances">> & {
+    balances?: Partial<WalletStateOutput["balances"]>
+  } = {}
+): WalletStateOutput {
+  const balances = {
+    purchased: overrides.balances?.purchased ?? 1_000_000_000,
+    granted: overrides.balances?.granted ?? 500_000_000,
+    reserved: overrides.balances?.reserved ?? 250_000_000,
+    consumed: overrides.balances?.consumed ?? 2_000_000_000,
+    walletConsumed: overrides.balances?.walletConsumed ?? 0,
+    subscriptionCharges:
+      overrides.balances?.subscriptionCharges ??
+      Math.max(
+        0,
+        (overrides.balances?.consumed ?? 2_000_000_000) -
+          (overrides.balances?.walletConsumed ?? 0)
+      ),
+  }
+
   return {
-    balances: {
-      purchased: 1_000_000_000,
-      granted: 500_000_000,
-      reserved: 250_000_000,
-      consumed: 2_000_000_000,
-    },
     credits: [createWalletCredit()],
     ...overrides,
+    balances,
   }
 }
 

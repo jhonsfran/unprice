@@ -66,6 +66,7 @@ export default async function CustomerUsagePage({
         <CustomerCurrentAccess
           access={currentAccess}
           wallet={walletResult.wallet}
+          plansHref={`/${workspaceSlug}/${projectSlug}/plans`}
           subscriptionsHref={`${baseUrl}/subscriptions`}
         />
         <Suspense fallback={<CustomerMetricsPanelSkeleton />}>

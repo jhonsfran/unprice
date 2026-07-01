@@ -231,6 +231,8 @@ export interface WalletBalances {
   granted: number
   reserved: number
   consumed: number
+  walletConsumed: number
+  subscriptionCharges: number
 }
 
 export type WalletCreditWithConsumption = WalletCredit & {
@@ -1380,11 +1382,12 @@ export class WalletService {
     const keys = customerAccountKeys(input.customerId)
 
     try {
-      const [purchased, granted, reserved, consumed, credits] = await Promise.all([
+      const [purchased, granted, reserved, consumed, walletConsumed, credits] = await Promise.all([
         this.readBalance(this.db, keys.purchased),
         this.readBalance(this.db, keys.granted),
         this.readBalance(this.db, keys.reserved),
         this.readBalance(this.db, keys.consumed),
+        this.readWalletConsumedAmount(input),
         this.db.query.walletCredits.findMany({
           where: and(
             eq(walletCredits.customerId, input.customerId),
@@ -1406,7 +1409,14 @@ export class WalletService {
       })
 
       return Ok({
-        balances: { purchased, granted, reserved, consumed },
+        balances: {
+          purchased,
+          granted,
+          reserved,
+          consumed,
+          walletConsumed,
+          subscriptionCharges: Math.max(0, consumed - walletConsumed),
+        },
         credits: creditsWithConsumption,
       })
     } catch (error) {
@@ -1468,6 +1478,31 @@ export class WalletService {
       ...credit,
       consumedAmount: consumedByCredit.get(credit.id) ?? 0,
     }))
+  }
+
+  private async readWalletConsumedAmount(input: GetWalletStateInput): Promise<number> {
+    const rows = await this.db
+      .select({
+        walletConsumed:
+          sql<number>`COALESCE(SUM(${entitlementReservationFundingLegs.capturedAmount}), 0)::bigint`,
+      })
+      .from(entitlementReservationFundingLegs)
+      .innerJoin(
+        entitlementReservations,
+        and(
+          eq(entitlementReservations.id, entitlementReservationFundingLegs.reservationId),
+          eq(entitlementReservations.projectId, entitlementReservationFundingLegs.projectId)
+        )
+      )
+      .where(
+        and(
+          eq(entitlementReservationFundingLegs.projectId, input.projectId),
+          eq(entitlementReservations.customerId, input.customerId)
+        )
+      )
+      .limit(1)
+
+    return Number(rows[0]?.walletConsumed ?? 0)
   }
 
   // -------------------------------------------------------------------------

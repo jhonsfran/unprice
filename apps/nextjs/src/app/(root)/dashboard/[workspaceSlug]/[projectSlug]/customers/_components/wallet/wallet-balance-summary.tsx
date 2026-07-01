@@ -40,15 +40,21 @@ export function WalletBalanceSummary({ wallet }: { wallet: CustomerWallet }) {
       variant: "secondary",
     },
     {
-      label: "Consumed",
-      description: "Already spent from the wallet",
-      amount: wallet.balances.consumed,
+      label: "Wallet consumed",
+      description: "Usage captured from wallet funds",
+      amount: wallet.balances.walletConsumed,
+      variant: "secondary",
+    },
+    {
+      label: "Subscription charges",
+      description: "Billed outside wallet funds",
+      amount: wallet.balances.subscriptionCharges,
       variant: "secondary",
     },
   ]
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       {balances.map((balance) => (
         <div key={balance.label} className="rounded-md border bg-background p-4">
           <div className="flex flex-col gap-3">

@@ -134,11 +134,24 @@ function createDb(state: FakeState): Database {
       },
     },
     execute: vi.fn(async () => ({ rows: [] })),
-    select: vi.fn(() => ({
+    select: vi.fn((fields?: Record<string, unknown>) => ({
       from: vi.fn(() => ({
         innerJoin: vi.fn(() => ({
           where: vi.fn(() => ({
-            limit: vi.fn(async () => []),
+            limit: vi.fn(async () => {
+              if (fields && "walletConsumed" in fields) {
+                return [
+                  {
+                    walletConsumed: state.fundingLegs.reduce(
+                      (sum, leg) => sum + leg.capturedAmount,
+                      0
+                    ),
+                  },
+                ]
+              }
+
+              return []
+            }),
           })),
         })),
       })),
@@ -1752,6 +1765,8 @@ describe("WalletService.getWalletState", () => {
       granted: 2 * DOLLAR,
       reserved: 1 * DOLLAR,
       consumed: 25 * DOLLAR,
+      walletConsumed: 3 * DOLLAR,
+      subscriptionCharges: 22 * DOLLAR,
     })
     expect(val?.credits.map((g) => g.id)).toEqual(["wcr_soon", "wcr_far"])
     expect(val?.credits.map((g) => ({ id: g.id, consumedAmount: g.consumedAmount }))).toEqual([
@@ -1774,6 +1789,8 @@ describe("WalletService.getWalletState", () => {
       granted: 0,
       reserved: 0,
       consumed: 0,
+      walletConsumed: 0,
+      subscriptionCharges: 0,
     })
     expect(val?.credits).toEqual([])
   })

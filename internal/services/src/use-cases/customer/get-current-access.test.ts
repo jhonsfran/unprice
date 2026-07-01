@@ -191,6 +191,11 @@ function activeSubscription() {
         creditLineAmount: null,
         startAt: entitlementEffectiveAt,
         endAt: null,
+        planVersion: {
+          id: "pv_1",
+          version: 1,
+          billingConfig: billingEveryFiveMinutes,
+        },
       },
     ],
   }

@@ -380,6 +380,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   `customer_not_found`, not `feature_missing`.
 - 2026-05-06: Validate local provisioning with signup E2E before usage E2E:
   `UNPRICE_TOKEN=unprice_dev_1234567890 pnpm --filter @unprice/tiny-tools e2e:signup:local`.
+- 2026-07-01: Tiny-tools signup against localhost authenticates only against the API database in
+  `apps/api/.dev.vars`; preview/prod API keys must be recreated or seeded into local
+  `unprice_apikeys`, and plan slugs should be treated as lower-case slugs.
 
 ## Payment Providers And Stripe
 
@@ -454,6 +457,8 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   consistent across tables, charts, and panels. The component lives in
   `apps/nextjs/src/components/empty-placeholder.tsx` and accepts `isLoading` to show a centered
   `LoadingAnimation`.
+- 2026-06-15: Whenever you are using link component, prefer the superlink component if the link is inside the dashboard.
+  The superlink component disables the auto fetch of next.js, allowing to reduce unnecesary load.
 
 ## Tests, Tooling, And Docs
 

@@ -4,7 +4,7 @@ interface UnpriceLogoProps {
   size?: "xs" | "sm" | "md" | "lg" | "xl"
   variant?: "full" | "icon" | "wordmark"
   theme?: "dark" | "light"
-  /** Render the action point in ink instead of the amber signal (for monochrome contexts). */
+  /** Render the held value in ink instead of the amber signal (for monochrome contexts). */
   monochrome?: boolean
   className?: string
 }
@@ -19,13 +19,11 @@ const sizes = {
   xl: { text: 56, gap: 13 },
 }
 
-// Brand signal — Radix amber. On dark surfaces the dot is amber-9 (#ffc53d, the
-// platform `primary`); on light surfaces it steps to amber-11 (#ab6400) so the
-// gated value keeps contrast — amber-9 on near-white is only ~1.4:1. Same hue,
-// surface-aware step. Brackets stay neutral ink; color lands only on the point
-// that changes a decision. See docs/brand/design-tokens.md.
-const SIGNAL_ON_DARK = "#ffc53d" // amber-9, on near-black
-const SIGNAL_ON_LIGHT = "#ab6400" // amber-11, on near-white
+// Brand signal — amber, surface-aware. On dark surfaces the value is amber-9
+// (#ffc53d); on light surfaces it steps to amber-11 (#ab6400) so the gated value
+// keeps contrast (amber-9 on near-white is only ~1.4:1). Same hue, different step.
+const SIGNAL_ON_DARK = "#ffc53d"
+const SIGNAL_ON_LIGHT = "#ab6400"
 
 export default function UnpriceLogo({
   size = "md",
@@ -35,51 +33,43 @@ export default function UnpriceLogo({
   className = "",
 }: UnpriceLogoProps) {
   const { text, gap } = sizes[size]
-  // The icon viewBox is cropped to the ink (below), so px maps almost 1:1 to the
-  // visible mark; 0.82 lands the brackets at ~cap height next to the wordmark.
-  const px = Math.round(text * 0.82)
+  // viewBox is cropped tight and evenly padded around the ink, so px maps ~1:1
+  // to the visible mark; 0.86 lands the mark at ~cap height beside the wordmark.
+  const px = Math.round(text * 0.86)
 
   const ink = theme === "dark" ? "#fafafa" : "#0a0a0a"
   const signal = theme === "dark" ? SIGNAL_ON_DARK : SIGNAL_ON_LIGHT
 
-  // The mark is a pair of brackets cradling a single point: pricing pulled out of
-  // product code into one inspectable place — "un-hardcode pricing" — with the gated
-  // value held inside. Color lands only on the element that changes a decision, which
-  // is the product's own law. Reads as brackets, not a letter, down to favicon size.
-  // The viewBox is cropped to the ink so the lockup gap is true; the favicon tiles
-  // keep their own padded 32×32 box (apps/nextjs/**/icon.svg).
+  // The mark is a bracket-U gating a single value. The two brackets are joined at
+  // the bottom into one continuous stroke — down the left arm, across the base, up
+  // the right arm — so it reads at once as code-native brackets AND a U (unprice)
+  // that cradles/gates the value held inside. "Un-hardcode pricing," pulled into
+  // one inspectable place. Color lands only on the element that changes a decision.
+  // Mitered corners and flush top serifs keep it engineered and ownable.
   const IconMark = () => {
-    const action = monochrome ? ink : signal
+    const value = monochrome ? ink : signal
     return (
       <svg
         width={px}
         height={px}
-        viewBox="4 4 24 24"
+        viewBox="6 6 20 20"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         role="img"
         aria-label="Unprice logo"
       >
-        {/* Left and right brackets: code-native containment. Square feet keep them
-            unmistakably brackets, not a letter. */}
+        {/* Bracket-U: short top serifs for a clear opening, arms joined across
+            the base into one continuous stroke, centered with even padding. */}
         <path
-          d="M13.5 6 L8 6 L8 26 L13.5 26"
+          d="M13.5 8.5 L9 8.5 L9 23.5 L23 23.5 L23 8.5 L18.5 8.5"
           stroke={ink}
-          strokeWidth="3.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          strokeWidth="3"
+          strokeLinecap="butt"
+          strokeLinejoin="miter"
           fill="none"
         />
-        <path
-          d="M18.5 6 L24 6 L24 26 L18.5 26"
-          stroke={ink}
-          strokeWidth="3.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-        {/* The value held within the brackets — amber signal (primary), ink when monochrome. */}
-        <circle cx="16" cy="16" r="3.3" fill={action} />
+        {/* The value gated within the U — cradled at optical center. */}
+        <circle cx="16" cy="15.1" r="3" fill={value} />
       </svg>
     )
   }

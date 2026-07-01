@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 import type React from "react"
-import { DashboardShell } from "~/components/layout/dashboard-shell"
 import { api } from "~/trpc/server"
+import { CustomerDetailShell } from "./_components/customer-detail-shell"
 import { CustomerEconomicHeader } from "./_components/customer-economic-header"
 import { CustomerTabs } from "./_components/customer-tabs"
 
@@ -26,9 +26,11 @@ export default async function CustomerDetailLayout({
   }
 
   return (
-    <DashboardShell header={<CustomerEconomicHeader customer={customer} />}>
-      <CustomerTabs baseUrl={baseUrl} />
+    <CustomerDetailShell
+      header={<CustomerEconomicHeader customer={customer} />}
+      tabs={<CustomerTabs baseUrl={baseUrl} />}
+    >
       {children}
-    </DashboardShell>
+    </CustomerDetailShell>
   )
 }

@@ -1,13 +1,18 @@
 import { nFormatter } from "@unprice/db/utils"
 import type { RouterOutputs } from "@unprice/trpc/routes"
+import { Button } from "@unprice/ui/button"
 import { Progress } from "@unprice/ui/progress"
-import { CalendarRange, KeyRound } from "lucide-react"
+import { ArrowUpRight, CalendarRange, KeyRound } from "lucide-react"
 import { SuperLink } from "~/components/super-link"
 import { formatWalletMoney } from "../../_components/wallet/format-wallet-money"
+import { EntitlementConfigSheet } from "./entitlement-config-sheet"
 
 type CustomerCurrentAccessData = RouterOutputs["customers"]["getCurrentAccess"]
 type CurrentAccessEntitlement = CustomerCurrentAccessData["entitlements"][number]
 type WalletData = RouterOutputs["customers"]["getWallet"]["wallet"]
+type BillingConfig = NonNullable<
+  NonNullable<CustomerCurrentAccessData["activePlan"]>["activePhase"]
+>["planVersion"]["billingConfig"]
 
 const SHORT_DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -24,94 +29,123 @@ export function CustomerCurrentAccess({
   access,
   wallet,
   subscriptionsHref,
+  plansHref,
 }: {
   access: CustomerCurrentAccessData
   wallet: WalletData
   subscriptionsHref: string
+  plansHref: string
 }) {
-  const visibleEntitlements = access.entitlements.slice(0, 5)
-  const hiddenEntitlementCount = Math.max(
-    0,
-    access.entitlements.length - visibleEntitlements.length
-  )
   const activePlan = access.activePlan
+  const activePhase = activePlan?.activePhase ?? null
   const walletAvailable = wallet.balances.purchased + wallet.balances.granted
   const walletHeld = wallet.balances.reserved
+  const planVersionHref =
+    activePlan && activePhase
+      ? `${plansHref}/${encodeURIComponent(activePlan.planSlug)}/${encodeURIComponent(
+          activePhase.planVersion.id
+        )}`
+      : null
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <h2 className="font-semibold text-lg leading-none">Current plan + access</h2>
-          <p className="text-muted-foreground text-sm">
-            Active subscription context and entitlement usage for the current entitlement period.
-          </p>
-        </div>
-        <SuperLink
-          href={subscriptionsHref}
-          className="text-muted-foreground text-sm transition-colors hover:text-foreground"
-        >
-          Manage subscription
-        </SuperLink>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <h2 className="font-semibold text-lg leading-none">Current plan + access</h2>
+        <p className="text-muted-foreground text-sm">
+          Active subscription context and entitlement usage for the current entitlement period.
+        </p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[0.9fr_1.6fr]">
-        <div className="flex flex-col gap-4 rounded-md border border-border/60 bg-card/70 p-4">
-          <div className="flex items-center gap-2 text-muted-foreground text-sm">
-            <CalendarRange className="size-4" />
-            Billing period
-          </div>
-          {activePlan ? (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-1">
-                <p className="truncate font-semibold text-lg">{activePlan.planSlug}</p>
-                <p className="text-muted-foreground text-sm">
-                  {formatPeriod(activePlan.currentCycleStartAt, activePlan.currentCycleEndAt)}
+
+      <div className="grid gap-4 lg:grid-cols-[0.95fr_1.55fr]">
+        <div className="flex max-h-[520px] min-h-[360px] flex-col overflow-hidden rounded-md border border-border/60">
+          <div className="flex items-center justify-between gap-3 border-border/60 border-b bg-card/70 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <CalendarRange className="size-4 text-muted-foreground" />
+              <div className="min-w-0">
+                <p className="font-medium text-sm">Billing period</p>
+                <p className="truncate text-muted-foreground text-xs">
+                  {activePlan ? "Current subscription window" : "No active subscription window"}
                 </p>
               </div>
-              <dl className="grid gap-3 text-sm">
-                <PlanFact label="Status" value={formatStatus(activePlan.status)} />
-                <PlanFact
-                  label="Renews"
-                  value={formatDate(activePlan.renewAt ?? activePlan.currentCycleEndAt)}
-                />
-                <PlanFact
-                  label="Active subscriptions"
-                  value={String(access.activeSubscriptionCount)}
-                />
-                <PlanFact label="Active entitlements" value={String(access.entitlementCount)} />
-                <PlanFact
-                  label="Wallet available"
-                  value={formatWalletMoney(walletAvailable, wallet.currency)}
-                />
-                <PlanFact
-                  label="Wallet held"
-                  value={formatWalletMoney(walletHeld, wallet.currency)}
-                />
-              </dl>
             </div>
-          ) : (
-            <div className="flex flex-col gap-1">
-              <p className="font-semibold text-lg">No active plan</p>
-              <p className="text-muted-foreground text-sm">
-                This customer has no active subscription billing period.
-              </p>
-              <dl className="mt-3 grid gap-3 text-sm">
-                <PlanFact
-                  label="Active subscriptions"
-                  value={String(access.activeSubscriptionCount)}
-                />
-                <PlanFact label="Active entitlements" value={String(access.entitlementCount)} />
-                <PlanFact
-                  label="Wallet available"
-                  value={formatWalletMoney(walletAvailable, wallet.currency)}
-                />
-                <PlanFact
-                  label="Wallet held"
-                  value={formatWalletMoney(walletHeld, wallet.currency)}
-                />
-              </dl>
-            </div>
-          )}
+            <Button asChild variant="ghost" size="sm" className="shrink-0">
+              <SuperLink href={subscriptionsHref}>Manage</SuperLink>
+            </Button>
+          </div>
+
+          <div className="px-4 py-4">
+            {activePlan ? (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <p className="truncate font-semibold text-lg">{activePlan.planSlug}</p>
+                      {activePhase && (
+                        <p className="shrink-0 text-muted-foreground text-xs">
+                          v{activePhase.planVersion.version}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-muted-foreground text-sm">
+                      {formatPeriod(activePlan.currentCycleStartAt, activePlan.currentCycleEndAt, {
+                        billingConfig: activePhase?.planVersion.billingConfig,
+                        timezone: activePlan.timezone,
+                      })}
+                    </p>
+                  </div>
+                  {planVersionHref && (
+                    <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
+                      <SuperLink href={planVersionHref} target="_blank" rel="noreferrer">
+                        Open plan version
+                        <ArrowUpRight className="size-3.5" />
+                      </SuperLink>
+                    </Button>
+                  )}
+                </div>
+
+                <dl className="grid gap-3 text-sm">
+                  <PlanFact label="Status" value={formatStatus(activePlan.status)} />
+                  <PlanFact
+                    label="Renews"
+                    value={formatDate(activePlan.renewAt ?? activePlan.currentCycleEndAt)}
+                  />
+                  <PlanFact
+                    label="Billing cadence"
+                    value={
+                      activePhase
+                        ? formatBillingCadence(activePhase.planVersion.billingConfig)
+                        : "None"
+                    }
+                  />
+                  <PlanFact
+                    label="Wallet available"
+                    value={formatWalletMoney(walletAvailable, wallet.currency)}
+                  />
+                  <PlanFact
+                    label="Wallet held"
+                    value={formatWalletMoney(walletHeld, wallet.currency)}
+                  />
+                </dl>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                <p className="font-semibold text-lg">No active plan</p>
+                <p className="text-muted-foreground text-sm">
+                  This customer has no active subscription billing period.
+                </p>
+                <dl className="mt-3 grid gap-3 text-sm">
+                  <PlanFact
+                    label="Wallet available"
+                    value={formatWalletMoney(walletAvailable, wallet.currency)}
+                  />
+                  <PlanFact
+                    label="Wallet held"
+                    value={formatWalletMoney(walletHeld, wallet.currency)}
+                  />
+                </dl>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-md border border-border/60">
@@ -134,20 +168,18 @@ export function CustomerCurrentAccess({
             </p>
           </div>
 
-          {visibleEntitlements.length > 0 ? (
-            <div className="divide-y divide-border/60">
-              {visibleEntitlements.map((entitlement) => (
-                <EntitlementUsageRow
-                  key={entitlement.id}
-                  entitlement={entitlement}
-                  usageUnavailable={access.usageUnavailable}
-                />
-              ))}
-              {hiddenEntitlementCount > 0 && (
-                <div className="px-4 py-3 text-muted-foreground text-sm">
-                  +{hiddenEntitlementCount} more active entitlements
-                </div>
-              )}
+          {access.entitlements.length > 0 ? (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="divide-y divide-border/60">
+                {access.entitlements.map((entitlement) => (
+                  <EntitlementUsageRow
+                    key={entitlement.id}
+                    entitlement={entitlement}
+                    usageUnavailable={access.usageUnavailable}
+                    planVersionId={activePhase?.planVersion.id ?? null}
+                  />
+                ))}
+              </div>
             </div>
           ) : (
             <div className="flex min-h-[168px] flex-col items-center justify-center gap-1 px-4 py-8 text-center">
@@ -166,21 +198,23 @@ export function CustomerCurrentAccess({
 function EntitlementUsageRow({
   entitlement,
   usageUnavailable,
+  planVersionId,
 }: {
   entitlement: CurrentAccessEntitlement
   usageUnavailable: boolean
+  planVersionId: string | null
 }) {
   const hasMeasuredUsage = entitlement.currentUsage !== null && !usageUnavailable
   const hasFiniteLimit = entitlement.limit !== null && entitlement.limit > 0
 
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)] md:items-center">
-      <div className="min-w-0">
-        <div className="flex items-baseline gap-2">
-          <p className="truncate font-medium text-sm">{entitlement.featureTitle}</p>
-          <p className="shrink-0 text-muted-foreground text-xs">{entitlement.featureSlug}</p>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <p className="min-w-0 truncate font-medium text-sm">{entitlement.featureTitle}</p>
+          <EntitlementConfigSheet entitlement={entitlement} planVersionId={planVersionId} />
         </div>
-        <p className="mt-1 truncate text-muted-foreground text-xs">
+        <p className="truncate text-muted-foreground text-xs">
           {formatFeatureContext(entitlement)}
         </p>
       </div>
@@ -212,11 +246,25 @@ function EntitlementUsageRow({
   )
 }
 
-function PlanFact({ label, value }: { label: string; value: string }) {
+function PlanFact({
+  label,
+  value,
+  valueClassName,
+}: {
+  label: string
+  value: string
+  valueClassName?: string
+}) {
   return (
     <div className="flex items-center justify-between gap-3">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 truncate text-right font-medium">{value}</dd>
+      <dd
+        className={["min-w-0 truncate text-right font-medium", valueClassName]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {value}
+      </dd>
     </div>
   )
 }
@@ -258,12 +306,86 @@ function formatFeatureType(type: CurrentAccessEntitlement["featureType"]): strin
   }
 }
 
-function formatPeriod(start: number, end: number): string {
-  return `${SHORT_DATE_FORMAT.format(new Date(start))} - ${LONG_DATE_FORMAT.format(new Date(end))}`
+function formatPeriod(
+  start: number,
+  end: number,
+  options?: {
+    billingConfig?: BillingConfig
+    timezone?: string
+  }
+): string {
+  const includeTime = options?.billingConfig?.billingInterval === "minute"
+  const timeZone = options?.timezone
+  const startDate = new Date(start)
+  const endDate = new Date(end)
+
+  if (!includeTime) {
+    return `${formatShortDate(startDate, timeZone)} - ${formatLongDate(endDate, timeZone)}`
+  }
+
+  return `${formatShortDateTime(startDate, timeZone)} - ${formatLongDateTime(endDate, timeZone)}`
 }
 
 function formatDate(timestamp: number): string {
   return LONG_DATE_FORMAT.format(new Date(timestamp))
+}
+
+function formatShortDate(date: Date, timeZone?: string): string {
+  if (!timeZone) {
+    return SHORT_DATE_FORMAT.format(date)
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    timeZone,
+  }).format(date)
+}
+
+function formatLongDate(date: Date, timeZone?: string): string {
+  if (!timeZone) {
+    return LONG_DATE_FORMAT.format(date)
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  }).format(date)
+}
+
+function formatShortDateTime(date: Date, timeZone?: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+  }).format(date)
+}
+
+function formatLongDateTime(date: Date, timeZone?: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone,
+  }).format(date)
+}
+
+function formatBillingCadence(config: BillingConfig): string {
+  if (config.billingInterval === "onetime") {
+    return "One-time"
+  }
+
+  if (config.billingIntervalCount === 1) {
+    return `Every ${config.billingInterval}`
+  }
+
+  return `Every ${config.billingIntervalCount} ${config.billingInterval}s`
 }
 
 function formatStatus(status: string): string {

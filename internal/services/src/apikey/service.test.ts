@@ -31,6 +31,7 @@ describe("ApiKeysService customer binding", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    hashCache.clear()
   })
 
   it("bindCustomer updates defaultCustomerId and invalidates api key hash cache", async () => {
@@ -271,5 +272,40 @@ describe("ApiKeysService customer binding", () => {
 
     expect(result.err).toBeDefined()
     expect(result.err?.message).toBe("cache miss")
+  })
+
+  it("createApiKey invalidates any cached miss for the generated hash", async () => {
+    const insertedApiKey: { current?: Record<string, unknown> } = {}
+    const db = {} as Database
+    db.insert = vi.fn().mockReturnValue({
+      values: vi.fn((value: Record<string, unknown>) => {
+        insertedApiKey.current = value
+        return {
+          returning: vi.fn().mockResolvedValue([value]),
+        }
+      }),
+    })
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.createApiKey({
+      projectId: "proj_123",
+      isRoot: false,
+      name: "local test key",
+    })
+
+    expect(result.err).toBeUndefined()
+    if (!insertedApiKey.current) {
+      throw new Error("expected api key insert values")
+    }
+    expect(waitUntil).toHaveBeenCalledTimes(1)
+    expect(cache.apiKeyByHash.remove).toHaveBeenCalledWith(insertedApiKey.current.hash)
   })
 })

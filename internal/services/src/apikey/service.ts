@@ -172,6 +172,8 @@ export class ApiKeysService {
       )
     }
 
+    this.waitUntil(this.cache.apiKeyByHash.remove(apiKeyHash))
+
     return Ok({
       ...(val as ApiKey),
       key: apiKey,
@@ -386,6 +388,7 @@ export class ApiKeysService {
   }): Promise<Result<ApiKeyExtended, UnPriceApiKeyError | FetchError | SchemaError>> {
     try {
       const { key } = req
+      let retriedWithoutCache = false
 
       const result = await this.getApiKey(
         {
@@ -399,6 +402,7 @@ export class ApiKeysService {
           context: `verify error, retrying without cache, ${err.message}`,
         })
 
+        retriedWithoutCache = true
         await this.cache.apiKeyByHash.remove(await this.hash(req.key))
         return await this.getApiKey(
           {
@@ -412,7 +416,9 @@ export class ApiKeysService {
 
       if (result.err) {
         this.logger.error(result.err, {
-          context: "Error verifying apikey after retrying without cache",
+          context: retriedWithoutCache
+            ? "Error verifying apikey after retrying without cache"
+            : "Error verifying apikey",
         })
 
         return result

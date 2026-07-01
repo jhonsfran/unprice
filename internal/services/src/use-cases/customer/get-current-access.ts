@@ -1,6 +1,6 @@
 import type { FeatureUsagePeriodRow } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import type { BillingConfig, ResetConfig } from "@unprice/db/validators"
+import { type BillingConfig, type ResetConfig, billingConfigSchema } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
@@ -29,6 +29,11 @@ export const customerCurrentAccessPlanSchema = z.object({
       creditLineAmount: z.number().int().nullable(),
       startAt: z.number().int(),
       endAt: z.number().int().nullable(),
+      planVersion: z.object({
+        id: z.string(),
+        version: z.number().int(),
+        billingConfig: billingConfigSchema,
+      }),
     })
     .nullable(),
 })
@@ -143,6 +148,15 @@ export async function getCustomerCurrentAccess(
                 startAt: true,
                 endAt: true,
               },
+              with: {
+                planVersion: {
+                  columns: {
+                    id: true,
+                    version: true,
+                    billingConfig: true,
+                  },
+                },
+              },
               where: (phase, { and, gte, isNull, lte, or }) =>
                 and(lte(phase.startAt, now), or(isNull(phase.endAt), gte(phase.endAt, now))),
               orderBy: (phase, { desc }) => [desc(phase.startAt)],
@@ -244,6 +258,11 @@ export async function getCustomerCurrentAccess(
                     creditLineAmount: activePlan.phases[0].creditLineAmount ?? null,
                     startAt: activePlan.phases[0].startAt,
                     endAt: activePlan.phases[0].endAt ?? null,
+                    planVersion: {
+                      id: activePlan.phases[0].planVersion.id,
+                      version: activePlan.phases[0].planVersion.version,
+                      billingConfig: activePlan.phases[0].planVersion.billingConfig,
+                    },
                   }
                 : null,
             }
