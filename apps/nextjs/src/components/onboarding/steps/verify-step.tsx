@@ -154,7 +154,7 @@ export function VerifyStep({ className }: React.ComponentProps<"div"> & StepComp
         <div className="flex size-10 animate-content items-center justify-center rounded-md bg-primary/10 delay-0!">
           <Shield className="size-6 text-primary" />
         </div>
-        <h1 className="animate-content font-bold text-2xl delay-0!">Verify Feature Access</h1>
+        <h1 className="animate-content font-bold text-2xl delay-0!">Check access</h1>
         <div className="animate-content text-center text-muted-foreground text-sm delay-0!">
           Check if your customer has access to a specific feature.
         </div>
@@ -170,7 +170,7 @@ export function VerifyStep({ className }: React.ComponentProps<"div"> & StepComp
             <CardHeader>
               <CardTitle>API Request</CardTitle>
               <CardDescription>
-                Run this command to verify if the customer can access a feature.
+                Run this command to check whether the customer can access a feature.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -209,7 +209,7 @@ export function VerifyStep({ className }: React.ComponentProps<"div"> & StepComp
                     Verifying...
                   </>
                 ) : (
-                  "Verify Access"
+                  "Check access"
                 )}
               </Button>
             </CardContent>

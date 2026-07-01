@@ -36,8 +36,11 @@ export function CodeApiSheet({
       <SheetTrigger asChild>{children}</SheetTrigger>
       <SheetContent className="hide-scrollbar flex max-h-screen w-full flex-col justify-start overflow-y-auto overflow-x-hidden lg:w-[800px]">
         <SheetHeader>
-          <SheetTitle className="text-2xl">Code API</SheetTitle>
-          <SheetDescription>Use the code API to get the price of a product</SheetDescription>
+          <SheetTitle className="text-2xl">Request-path SDK</SheetTitle>
+          <SheetDescription>
+            Use the SDK to check access, record usage, start budgeted runs, and inspect customer
+            money state.
+          </SheetDescription>
         </SheetHeader>
         <SDKDemo
           className="mt-2 bg-background-base"

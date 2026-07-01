@@ -10,8 +10,8 @@ export default function BillingPageLoading() {
     <DashboardShell
       header={
         <HeaderTab
-          title="Billing Settings"
-          description="Manage your payments for this workspace."
+          title="Workspace usage evidence"
+          description="Usage, billing, and invoice activity reported for this workspace."
         />
       }
     >

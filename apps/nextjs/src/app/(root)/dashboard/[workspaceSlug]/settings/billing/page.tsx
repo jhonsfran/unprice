@@ -18,8 +18,8 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
       <DashboardShell
         header={
           <HeaderTab
-            title="Scale & Usage"
-            description="Observe the growth and value metrics of this workspace."
+            title="Workspace usage evidence"
+            description="Usage, billing, and invoice activity reported for this workspace."
           />
         }
       >
@@ -27,8 +27,7 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Main Workspace</AlertTitle>
           <AlertDescription>
-            This is the main workspace, where your foundation is established. No further billing
-            management is required here.
+            This is the main workspace. No billing customer context is required here.
           </AlertDescription>
         </Alert>
       </DashboardShell>
@@ -39,8 +38,8 @@ export default async function BillingPage({ params }: { params: { workspaceSlug:
     <DashboardShell
       header={
         <HeaderTab
-          title="Scale & Usage"
-          description="Observe and manage your workspace value flows."
+          title="Workspace usage evidence"
+          description="Usage, billing, and invoice activity reported for this workspace."
         />
       }
     >
@@ -56,7 +55,7 @@ async function UsageCard({
   if (!customerId) {
     return (
       <Alert variant="info">
-        <AlertTitle>No Customer Context</AlertTitle>
+        <AlertTitle>No billing customer context</AlertTitle>
         <AlertDescription>This workspace has no billing customer configured yet.</AlertDescription>
       </Alert>
     )
@@ -72,7 +71,7 @@ async function UsageCard({
       return (
         <Alert variant="info">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Error fetching usage data</AlertTitle>
+          <AlertTitle>Usage evidence could not be loaded</AlertTitle>
           <AlertDescription>{usageData.error}</AlertDescription>
         </Alert>
       )
@@ -81,8 +80,8 @@ async function UsageCard({
     if (!usageData.usage || usageData.usage.length === 0) {
       return (
         <Alert variant="info">
-          <AlertTitle>No Usage Data</AlertTitle>
-          <AlertDescription>No usage was reported in the last 30 days.</AlertDescription>
+          <AlertTitle>No usage evidence</AlertTitle>
+          <AlertDescription>No usage was recorded in the last 30 days.</AlertDescription>
         </Alert>
       )
     }
@@ -99,7 +98,7 @@ async function UsageCard({
     return (
       <Alert variant="info">
         <AlertCircle className="h-4 w-4" />
-        <AlertTitle>Error fetching usage data</AlertTitle>
+        <AlertTitle>Usage evidence could not be loaded</AlertTitle>
         <AlertDescription>{message}</AlertDescription>
       </Alert>
     )

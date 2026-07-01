@@ -148,12 +148,12 @@ const TEMPLATE_PLANS: TemplatePlan[] = [
     ],
   },
   {
-    key: "growth",
-    label: "GROWTH",
-    summary: "Seat packs plus tiered usage for growth teams.",
+    key: "scale",
+    label: "SCALE",
+    summary: "Seat packs plus tiered usage for usage-heavy teams.",
     plan: {
-      title: "GROWTH",
-      slug: "growth",
+      title: "SCALE",
+      slug: "scale",
       description: "Balanced pricing with tiered usage.",
     },
     billingConfig: {

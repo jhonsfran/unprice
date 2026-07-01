@@ -39,7 +39,7 @@ export default async function ProjectUsersPage(props: {
       header={
         <HeaderTab
           title="Customers"
-          description="Manage your customers"
+          description="Create customers and inspect subscriptions, wallets, invoices, and runs."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="signUp">
@@ -72,7 +72,7 @@ export default async function ProjectUsersPage(props: {
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            All customers for this project
+            Customer money state for this project.
           </Typography>
         </div>
 
@@ -92,8 +92,9 @@ export default async function ProjectUsersPage(props: {
             columns={columns}
             data={customers}
             emptyState={{
-              title: "No customers",
-              description: "Create a customer or send one through the API to start tracking usage.",
+              title: "No customers yet",
+              description:
+                "Customers will appear after signup or API creation. Record usage to build evidence.",
             }}
             hidePaginationWhenEmpty
             filterOptions={{

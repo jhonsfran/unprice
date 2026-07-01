@@ -37,7 +37,7 @@ export default async function PlanSubscriptionsPage({
       header={
         <HeaderTab
           title="Subscriptions"
-          description="Manages the subscriptions of your customers."
+          description="Connect customers to plan versions, billing periods, wallet policy, and invoice evidence."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="getSubscription">
@@ -70,7 +70,7 @@ export default async function PlanSubscriptionsPage({
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            All active subscriptions
+            Active subscription evidence across this project.
           </Typography>
         </div>
         <Suspense
@@ -102,7 +102,8 @@ export default async function PlanSubscriptionsPage({
             data={subscriptions}
             emptyState={{
               title: "No subscriptions",
-              description: "Subscriptions will appear here after customers are assigned to plans.",
+              description:
+                "Subscriptions will appear after customers are assigned to published plan versions.",
             }}
             hidePaginationWhenEmpty
             filterOptions={{

@@ -122,7 +122,7 @@ export default function DomainConfiguration({
               <div className="my-3 text-left">
                 <p className="my-5 text-sm">
                   To configure your subdomain (<InlineSnippet>{domainProvider.name}</InlineSnippet>
-                  ), set the following A record on your DNS provider to continue:
+                  ), set the following CNAME record on your DNS provider to continue:
                 </p>
                 <div className="flex items-center justify-start space-x-10 rounded-md bg-muted p-2">
                   <div>

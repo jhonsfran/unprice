@@ -51,8 +51,10 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
       </DropdownMenu>
       <DialogContent className="max-h-[95vh] md:max-w-screen-md">
         <DialogHeader>
-          <DialogTitle>Customer Form</DialogTitle>
-          <DialogDescription>Modify the customer details below.</DialogDescription>
+          <DialogTitle>Customer details</DialogTitle>
+          <DialogDescription>
+            Update the economic actor that holds subscriptions, wallet credits, runs, and invoices.
+          </DialogDescription>
         </DialogHeader>
         <CustomerForm defaultValues={customer} setDialogOpen={setDialogOpen} />
       </DialogContent>

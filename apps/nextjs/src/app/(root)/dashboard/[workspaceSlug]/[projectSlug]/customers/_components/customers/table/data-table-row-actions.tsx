@@ -53,15 +53,17 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           </DialogTrigger>
           <DialogTrigger asChild>
             <DropdownMenuItem>
-              <SuperLink href={baseUrl}>Manage</SuperLink>
+              <SuperLink href={baseUrl}>Open customer</SuperLink>
             </DropdownMenuItem>
           </DialogTrigger>
         </DropdownMenuContent>
       </DropdownMenu>
       <DialogContent className="max-h-[95vh] md:max-w-screen-md">
         <DialogHeader>
-          <DialogTitle>Customer Form</DialogTitle>
-          <DialogDescription>Modify the customer details below.</DialogDescription>
+          <DialogTitle>Customer details</DialogTitle>
+          <DialogDescription>
+            Update the economic actor that holds subscriptions, wallet credits, runs, and invoices.
+          </DialogDescription>
         </DialogHeader>
         <CustomerForm defaultValues={customer} setDialogOpen={setDialogOpen} />
       </DialogContent>

@@ -38,7 +38,7 @@ export const PROJECT_NAV: DashboardRoute[] = [
     featureSlug: FEATURE_SLUGS.PAGES.SLUG,
   },
   {
-    name: "Api Keys",
+    name: "API Keys",
     href: "/apikeys",
     icon: Key,
     featureSlug: FEATURE_SLUGS.API_KEYS.SLUG,
@@ -59,7 +59,7 @@ export const PROJECT_NAV: DashboardRoute[] = [
         href: "/settings/danger",
       },
       {
-        name: "Infrastructure",
+        name: "Payment providers",
         href: "/settings/payment",
       },
     ],

@@ -18,13 +18,13 @@ function getSettingsHeaderCopy(segment: string | null) {
       }
     case "payment":
       return {
-        title: "Infrastructure",
-        description: "Configure payment provider infrastructure for this project.",
+        title: "Payment providers",
+        description: "Configure the provider used for subscription settlement.",
       }
     default:
       return {
         title: "General Settings",
-        description: "Manage your project settings.",
+        description: "Configure project identity, currency, and timezone.",
       }
   }
 }

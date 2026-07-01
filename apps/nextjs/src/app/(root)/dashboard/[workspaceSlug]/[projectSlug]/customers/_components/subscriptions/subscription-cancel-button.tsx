@@ -48,14 +48,14 @@ export const SubscriptionCancelButton = ({
 
   return (
     <ConfirmAction
-      message="Once you cancel this subscription, you will lose access immediately. If you want to downgrade/upgrade please create a new phase instead. Are you sure you want to cancel this subscription?"
+      message="This cancels the subscription immediately. Future phases will not renew or create new invoices. Create a new phase instead if you want to change the plan. Are you sure you want to cancel this subscription?"
       confirmAction={() => {
         onConfirmAction?.()
         onCancelSubscription()
       }}
     >
       <Button variant={variant} disabled={cancelSubscription.isPending}>
-        Cancel Subscription
+        Cancel subscription
         {cancelSubscription.isPending && <LoadingAnimation className={"ml-2"} />}
       </Button>
     </ConfirmAction>

@@ -47,7 +47,7 @@ const statusTones: Record<string, StatusTone> = {
   pending: "warning",
   published: "success",
   unpaid: "danger",
-  void: "success",
+  void: "default",
 }
 
 export function getStatusTone(status: string | null | undefined): StatusTone {

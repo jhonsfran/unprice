@@ -21,7 +21,12 @@ export default async function WorkspaceSettingsPage({
 
   return (
     <DashboardShell
-      header={<HeaderTab title="General Settings" description="Manage your workspace settings" />}
+      header={
+        <HeaderTab
+          title="General Settings"
+          description="Configure workspace identity and lifecycle controls."
+        />
+      }
     >
       <WorkspaceName workspace={workspace} />
 

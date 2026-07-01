@@ -13,11 +13,11 @@ export function WelcomeStep({ className }: React.ComponentProps<"div">) {
           <Balancer>Welcome to Unprice</Balancer>
         </Typography>
         <Typography variant="p" affects="removePaddingMargin" className="animate-content">
-          Manage, iterate, and find the best price for your product.
+          Put plans, meters, budgets, wallets, and invoice evidence in one request-path system.
         </Typography>
 
         <Button className="mt-8 animate-button" onClick={() => next()}>
-          Start pricing
+          Put Unprice in the request path
         </Button>
       </div>
     </div>

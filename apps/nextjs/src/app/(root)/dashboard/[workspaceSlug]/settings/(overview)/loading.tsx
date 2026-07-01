@@ -14,7 +14,12 @@ import HeaderTab from "~/components/layout/header-tab"
 export default function WorkSpaceSettingsDangerLoading() {
   return (
     <DashboardShell
-      header={<HeaderTab title="General Settings" description="Manage your workspace settings" />}
+      header={
+        <HeaderTab
+          title="General Settings"
+          description="Configure workspace identity and lifecycle controls."
+        />
+      }
     >
       <Card className="animate-pulse bg-muted">
         <CardHeader>

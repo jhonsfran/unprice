@@ -16,7 +16,7 @@ export default function Loading() {
       header={
         <HeaderTab
           title="Customers"
-          description="Manage your customers, add new customers, update plans and more."
+          description="Create customers and inspect subscriptions, wallets, invoices, and runs."
           action={
             <CustomerDialog>
               <Button>
@@ -41,7 +41,7 @@ export default function Loading() {
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            All customers for this project
+            Customer money state for this project.
           </Typography>
         </div>
         <DataTableSkeleton

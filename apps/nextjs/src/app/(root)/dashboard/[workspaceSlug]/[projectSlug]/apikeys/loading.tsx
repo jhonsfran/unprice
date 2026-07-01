@@ -9,7 +9,7 @@ export default function Loading() {
       header={
         <HeaderTab
           title="API Keys"
-          description="Manage project API keys and default customer access."
+          description="Create project API keys and bind a default customer for request-path calls."
           action={<NewApiKeyDialog />}
         />
       }

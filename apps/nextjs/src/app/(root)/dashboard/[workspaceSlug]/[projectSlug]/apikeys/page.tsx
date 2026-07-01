@@ -32,7 +32,7 @@ export default async function ApiKeysPage(props: {
       header={
         <HeaderTab
           title="API Keys"
-          description="Manage project API keys and default customer access."
+          description="Create project API keys and bind a default customer for request-path calls."
           action={<NewApiKeyDialog />}
         />
       }
@@ -54,7 +54,7 @@ export default async function ApiKeysPage(props: {
           emptyState={{
             title: "No API keys",
             description:
-              "Create an API key when you are ready to call this project from an application.",
+              "Create an API key before your application checks access, records usage, or starts budgeted runs.",
           }}
           hidePaginationWhenEmpty
           filterOptions={{

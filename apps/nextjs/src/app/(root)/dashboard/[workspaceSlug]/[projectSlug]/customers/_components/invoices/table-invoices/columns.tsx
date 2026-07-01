@@ -82,8 +82,15 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
     enableResizing: true,
     header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
     cell: ({ row }) => {
+      const statusVariant =
+        row.original.status === "paid"
+          ? "success"
+          : row.original.status === "void"
+            ? "secondary"
+            : "destructive"
+
       return (
-        <Badge variant={["void", "paid"].includes(row.original.status) ? "success" : "destructive"}>
+        <Badge variant={statusVariant}>
           {row.original.status}
         </Badge>
       )

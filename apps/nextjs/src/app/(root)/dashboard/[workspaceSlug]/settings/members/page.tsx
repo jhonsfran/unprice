@@ -19,7 +19,7 @@ export default async function WorkspaceMembersPage() {
       header={
         <HeaderTab
           title="Members Settings"
-          description="Manage your users for this workspace"
+          description="Invite and review team members who can operate this workspace."
           action={<InviteMemberDialog />}
         />
       }

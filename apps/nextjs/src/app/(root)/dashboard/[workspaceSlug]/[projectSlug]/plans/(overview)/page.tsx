@@ -31,7 +31,7 @@ export default async function PlansPage(props: {
       header={
         <HeaderTab
           title="Plans"
-          description="Design and iterate on your revenue architecture."
+          description="Define plans, features, meters, and limits without hardcoding the money path."
           action={
             <PlanDialog>
               <Button>
@@ -61,8 +61,10 @@ export default async function PlansPage(props: {
             </ul>
             <div className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-1/2 w-full text-center">
               <Balancer>
-                <Typography variant="h2">Your growth levers are waiting.</Typography>
-                <Typography variant="large">Launch your first adaptive model to begin.</Typography>
+                <Typography variant="h2">No plans yet.</Typography>
+                <Typography variant="large">
+                  Create a plan to define features, meters, limits, and billing behavior.
+                </Typography>
               </Balancer>
             </div>
           </div>

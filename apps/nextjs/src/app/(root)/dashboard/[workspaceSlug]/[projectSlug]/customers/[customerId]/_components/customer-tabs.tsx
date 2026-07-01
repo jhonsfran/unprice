@@ -6,7 +6,7 @@ import { SuperLink } from "~/components/super-link"
 
 const tabs = [
   { label: "Overview", href: "" },
-  { label: "Wallets & Credits", href: "/wallet" },
+  { label: "Wallet & Credits", href: "/wallet" },
   { label: "Runs", href: "/runs" },
   { label: "Subscriptions", href: "/subscriptions" },
   { label: "Invoices", href: "/invoices" },

@@ -32,8 +32,8 @@ const OVERVIEW_STATS_SKELETON_ICON = <Skeleton className="size-4 shrink-0" />
 export const OverviewStatsSkeleton = ({ isLoading }: { isLoading?: boolean }) => {
   return (
     <EvidenceSection
-      title="Growth evidence"
-      description="Supporting business context."
+      title="Business evidence"
+      description="Customer, subscription, and invoice context from the money path."
       className="min-h-[132px]"
       contentClassName="mt-3"
     >
@@ -83,8 +83,8 @@ const OverviewStats = () => {
 
   return (
     <EvidenceSection
-      title="Growth evidence"
-      description="Supporting business context."
+      title="Business evidence"
+      description="Customer, subscription, and invoice context from the money path."
       isRefreshing={isFetching}
       className="min-h-[150px]"
       contentClassName="mt-3"

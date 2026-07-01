@@ -152,7 +152,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
           </div>
           <h1 className="font-bold text-2xl">No Metered Features</h1>
           <p className="text-center text-muted-foreground text-sm">
-            The plan you created doesn't have any metered features, so you can't report usage. You
+            The plan you created doesn't have any metered features, so you can't record usage. You
             can proceed to the next step.
           </p>
           <Button onClick={() => next()} className="mt-4">
@@ -175,9 +175,9 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
         <div className="flex size-10 animate-content items-center justify-center rounded-md bg-primary/10 delay-0!">
           <Activity className="size-6 text-primary" />
         </div>
-        <h1 className="animate-content font-bold text-2xl delay-0!">Report Usage</h1>
+        <h1 className="animate-content font-bold text-2xl delay-0!">Record usage</h1>
         <div className="animate-content text-center text-muted-foreground text-sm delay-0!">
-          Simulate usage for your customer to test metered billing.
+          Simulate usage for your customer to create meter and invoice evidence.
         </div>
       </div>
 
@@ -190,7 +190,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
           <Card className="h-full">
             <CardHeader>
               <CardTitle>API Request</CardTitle>
-              <CardDescription>Run this command to report usage via API.</CardDescription>
+              <CardDescription>Run this command to record usage through the API.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -235,10 +235,10 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Reporting...
+                    Recording...
                   </>
                 ) : (
-                  "Report Usage"
+                  "Record usage"
                 )}
               </Button>
             </CardContent>
@@ -261,7 +261,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
                     {isSuccess ? (
                       <>
                         <CheckCircle className="h-5 w-5 text-green-500" />
-                        <CardTitle className="text-green-600">Usage Reported</CardTitle>
+                        <CardTitle className="text-green-600">Usage recorded</CardTitle>
                       </>
                     ) : (
                       <>

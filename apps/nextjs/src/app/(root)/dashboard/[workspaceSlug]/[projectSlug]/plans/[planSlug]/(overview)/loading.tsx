@@ -51,7 +51,7 @@ export default function Loading() {
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            All customers for this project
+            Plan version subscription evidence.
           </Typography>
         </div>
         <DataTableSkeleton

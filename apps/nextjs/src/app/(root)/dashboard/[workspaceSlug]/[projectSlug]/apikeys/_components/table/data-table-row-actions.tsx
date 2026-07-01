@@ -131,7 +131,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
           }),
         {
           loading: "Rolling key...",
-          success: "Key rolled, your new key is been copied to your clipboard",
+          success: "Key rolled. The new key was copied to your clipboard.",
         }
       )
     })

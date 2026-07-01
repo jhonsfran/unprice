@@ -27,7 +27,7 @@ export default async function InvoicePage({
   return (
     <>
       <HeaderTab
-        title={"INVOICE"}
+        title="Invoice evidence"
         description={`Invoice date: ${invoice.statementDateString}`}
         label={invoice.status}
         id={invoice.id}

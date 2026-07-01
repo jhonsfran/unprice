@@ -18,6 +18,7 @@ export function InvoiceActions({ invoice }: { invoice: SubscriptionInvoice }) {
   const subscriptionId = invoice.subscriptionId
   const invoiceId = invoice.id
   const canFinalize = invoice.status === "draft" && invoice.dueAt <= Date.now()
+  const isVoid = invoice.status === "void"
   const finalizeReadyAt = formatDate(
     invoice.dueAt,
     invoice.subscription.timezone,
@@ -80,8 +81,8 @@ export function InvoiceActions({ invoice }: { invoice: SubscriptionInvoice }) {
           onFinalizeInvoice()
         } else if (["waiting", "unpaid", "failed"].includes(invoice.status)) {
           onCollectPayment()
-        } else if (["void"].includes(invoice.status)) {
-          toast.success("Invoice is already voided, no link available")
+        } else if (isVoid) {
+          toast.info("Invoice is voided and has no hosted invoice link")
         } else if (["paid"].includes(invoice.status)) {
           if (invoice.paymentProvider === "sandbox") {
             toast.success("Sandbox invoices are available in Unprice only")
@@ -98,15 +99,17 @@ export function InvoiceActions({ invoice }: { invoice: SubscriptionInvoice }) {
           toast.error("Invoice is in an unknown status")
         }
       }}
-      disabled={machine.isPending}
+      disabled={machine.isPending || isVoid}
     >
       <CreditCard className="mr-2 h-4 w-4" />
       {["draft"].includes(invoice.status)
-        ? "Finalize Invoice"
+        ? "Finalize invoice"
         : ["waiting", "unpaid", "failed"].includes(invoice.status)
-          ? "Collect Payment"
-          : ["paid", "void"].includes(invoice.status)
-            ? "View Invoice"
+          ? "Collect payment"
+          : ["paid"].includes(invoice.status)
+            ? "View invoice"
+            : isVoid
+              ? "Invoice voided"
             : "Unknown Status"}
     </Button>
   )
