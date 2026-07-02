@@ -14,17 +14,19 @@ function getSettingsHeaderCopy(segment: string | null) {
     case "danger":
       return {
         title: "Danger Zone",
-        description: "Transfer ownership or delete this project.",
+        description:
+          "Transfer ownership or delete the project. These actions affect every customer, key, plan, and invoice in this project.",
       }
     case "payment":
       return {
         title: "Payment providers",
-        description: "Configure the provider used for subscription settlement.",
+        description: "Configure providers that plan versions can use for subscription settlement.",
       }
     default:
       return {
-        title: "General Settings",
-        description: "Configure project identity, currency, and timezone.",
+        title: "Project identity",
+        description:
+          "Configure the project name used across dashboard navigation, API keys, events, customers, and invoices.",
       }
   }
 }

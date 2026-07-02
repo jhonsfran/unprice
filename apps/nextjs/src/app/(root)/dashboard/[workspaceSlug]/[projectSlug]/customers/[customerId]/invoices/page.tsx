@@ -1,10 +1,12 @@
 import { INVOICE_STATUS } from "@unprice/db/utils"
-import { Typography } from "@unprice/ui/typography"
+import { BadgeCheck, CircleAlert, ReceiptText } from "lucide-react"
 import { notFound } from "next/navigation"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
+import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
 import { columns as invoicesColumns } from "../../_components/invoices/table-invoices/columns"
@@ -30,13 +32,39 @@ export default async function CustomerPage(props: {
     notFound()
   }
 
+  const paidInvoices = invoices.filter((invoice) => invoice.status === "paid").length
+  const openInvoices = invoices.filter(
+    (invoice) => invoice.status !== "paid" && invoice.status !== "void"
+  ).length
+
   return (
-    <div className="mt-4">
-      <div className="flex flex-col px-1 py-4">
-        <Typography variant="p" affects="removePaddingMargin">
-          All invoices of this customer
-        </Typography>
-      </div>
+    <div className="mt-4 flex flex-col gap-4">
+      <SectionIntro
+        title="Invoice evidence"
+        description="Explain invoice state from subscription, plan version, usage, wallet, and settlement evidence."
+      />
+      <EvidenceMetricStrip className="sm:grid-cols-3">
+        <EvidenceMetricTile
+          label="Visible invoices"
+          value={String(invoices.length)}
+          helper={`${pageCount} result ${pageCount === 1 ? "page" : "pages"}`}
+          icon={<ReceiptText className="h-4 w-4" />}
+        />
+        <EvidenceMetricTile
+          label="Paid"
+          value={String(paidInvoices)}
+          helper="Settled invoice rows"
+          icon={<BadgeCheck className="h-4 w-4" />}
+          tone={paidInvoices > 0 ? "success" : "default"}
+        />
+        <EvidenceMetricTile
+          label="Open or failed"
+          value={String(openInvoices)}
+          helper="Needs settlement or inspection"
+          icon={<CircleAlert className="h-4 w-4" />}
+          tone={openInvoices > 0 ? "warning" : "default"}
+        />
+      </EvidenceMetricStrip>
       <Suspense
         fallback={
           <DataTableSkeleton
@@ -66,7 +94,7 @@ export default async function CustomerPage(props: {
           emptyState={{
             title: "No invoices",
             description:
-              "Invoices will appear here after this customer has billable subscriptions.",
+              "Invoices appear after this customer has billable subscriptions and rated usage or recurring charges.",
           }}
           hidePaginationWhenEmpty
           filterOptions={{

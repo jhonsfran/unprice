@@ -193,7 +193,7 @@ export const columns: ColumnDef<PlanVersion>[] = [
   },
   {
     accessorKey: "createdAtM",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Created At" />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Created" />,
     cell: ({ row }) => (
       <div className="flex items-center space-x-1 whitespace-nowrap">
         <Typography variant="p" affects="removePaddingMargin">

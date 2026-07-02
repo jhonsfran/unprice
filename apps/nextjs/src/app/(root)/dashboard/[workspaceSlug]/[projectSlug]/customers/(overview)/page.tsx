@@ -1,17 +1,18 @@
 import { FEATURE_SLUGS } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
-import { Code, Plus } from "lucide-react"
+import { Code, ReceiptText, Route, UserRound, WalletCards } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { columns } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/_components/customers/table/columns"
+import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import UpgradePlanError from "~/components/layout/error"
 import HeaderTab from "~/components/layout/header-tab"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { entitlementFlag } from "~/lib/flags"
 import { dataTableParams } from "~/lib/searchParams"
@@ -33,26 +34,24 @@ export default async function ProjectUsersPage(props: {
   }
 
   const { customers, pageCount } = await api.customers.listByActiveProject(filters)
+  const activeCustomers = customers.filter((customer) => customer.active).length
 
   return (
     <DashboardShell
       header={
         <HeaderTab
           title="Customers"
-          description="Create customers and inspect subscriptions, wallets, invoices, and runs."
+          description="Customers are the economic actors that hold subscriptions, wallet credits, invoices, and budgeted runs."
           action={
             <div className="flex items-center gap-2">
               <CodeApiSheet defaultMethod="signUpCustomer">
                 <Button variant={"ghost"}>
                   <Code className="mr-2 h-4 w-4" />
-                  API
+                  Create via API
                 </Button>
               </CodeApiSheet>
               <CustomerDialog>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Customer
-                </Button>
+                <Button>Customer</Button>
               </CustomerDialog>
             </div>
           }
@@ -68,16 +67,41 @@ export default async function ProjectUsersPage(props: {
             <SuperLink href={`${baseUrl}/subscriptions`}>Subscriptions</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
-            <SuperLink href={`${baseUrl}/runs`}>Runs</SuperLink>
+            <SuperLink href={`${baseUrl}/runs`}>Budgeted Runs</SuperLink>
           </TabNavigationLink>
         </div>
       </TabNavigation>
-      <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            Customer money state for this project.
-          </Typography>
-        </div>
+      <div className="mt-4 flex flex-col gap-4">
+        <SectionIntro
+          title="Customer money state"
+          description="Inspect which customers can be billed, which ones are active, and where to follow subscriptions, wallets, invoices, and runs."
+        />
+        <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
+          <EvidenceMetricTile
+            label="Visible customers"
+            value={String(customers.length)}
+            helper={`${activeCustomers} active on this page`}
+            icon={<UserRound className="h-4 w-4" />}
+          />
+          <EvidenceMetricTile
+            label="Table pages"
+            value={String(pageCount)}
+            helper="Server-side customer result pages"
+            icon={<Route className="h-4 w-4" />}
+          />
+          <EvidenceMetricTile
+            label="Wallet state"
+            value="Per customer"
+            helper="Purchased, granted, reserved, and consumed credits"
+            icon={<WalletCards className="h-4 w-4" />}
+          />
+          <EvidenceMetricTile
+            label="Invoice evidence"
+            value="Available"
+            helper="Open a customer to explain invoices and charges"
+            icon={<ReceiptText className="h-4 w-4" />}
+          />
+        </EvidenceMetricStrip>
 
         <Suspense
           fallback={
@@ -97,7 +121,7 @@ export default async function ProjectUsersPage(props: {
             emptyState={{
               title: "No customers yet",
               description:
-                "Customers will appear after signup or API creation. Create a customer before recording usage, subscriptions, wallets, invoices, and runs.",
+                "Customers appear after signup or API creation. Create a customer before recording usage, assigning subscriptions, issuing wallet credits, or starting budgeted runs.",
               action: (
                 <CodeApiSheet defaultMethod="signUpCustomer">
                   <Button size="sm" variant="outline">

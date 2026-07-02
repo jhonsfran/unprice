@@ -51,7 +51,7 @@ export const columns: ColumnDef<ApiKey>[] = [
   },
   {
     accessorKey: "defaultCustomerId",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Default Customer" />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Default customer" />,
     cell: ({ row }) => {
       if (!row.original.defaultCustomerId) {
         return <span className="text-muted-foreground">Not configured</span>
@@ -64,7 +64,7 @@ export const columns: ColumnDef<ApiKey>[] = [
   },
   {
     accessorKey: "createdAtM",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Created At" />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Created" />,
     cell: ({ row }) => (
       <div className="flex items-center space-x-1 whitespace-nowrap">
         <Typography variant="p" affects="removePaddingMargin">
@@ -77,7 +77,7 @@ export const columns: ColumnDef<ApiKey>[] = [
   },
   {
     accessorKey: "expiresAt",
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Expires At" />,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Expires" />,
     cell: ({ row }) => {
       const expiresAt = row.original.expiresAt
 

@@ -30,26 +30,32 @@ export function PlanCard(props: {
 }) {
   const { plan } = props
   const { versions, ...rest } = plan
+  const publishedVersions = versions.filter((version) => version.status === "published").length
+  const draftVersions = versions.filter((version) => version.status === "draft").length
+  const latestVersion = versions.reduce<number | null>(
+    (latest, version) => (latest === null || version.version > latest ? version.version : latest),
+    null
+  )
 
   return (
     <Card className="relative overflow-hidden hover:border-background-borderHover">
-      <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
         <SuperLink
           href={`/${props.workspaceSlug}/${props.projectSlug}/plans/${plan.slug}`}
           className="min-w-0 flex-1 after:absolute after:inset-0"
         >
           <CardTitle className="line-clamp-1">
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center gap-3">
               <span>{plan.title}</span>
               {plan.defaultPlan && (
                 <div className="inline-flex items-center font-mono font-semibold text-info text-xs">
-                  <span className="flex h-2 w-2 rounded-full bg-info" />
+                  <span className="flex size-2 rounded-full bg-info" />
                   <span className="ml-1">{"default"}</span>
                 </div>
               )}
               {plan.enterprisePlan && (
                 <div className="inline-flex items-center font-mono font-semibold text-info text-xs">
-                  <span className="flex h-2 w-2 rounded-full bg-info" />
+                  <span className="flex size-2 rounded-full bg-info" />
                   <span className="ml-1">{"enterprise"}</span>
                 </div>
               )}
@@ -88,10 +94,15 @@ export function PlanCard(props: {
           </DialogContent>
         </Dialog>
       </CardHeader>
-      <CardFooter className="flex flex-row justify-between space-x-4 text-muted-foreground text-sm">
+      <CardFooter className="flex flex-wrap items-center justify-between gap-3 text-muted-foreground text-sm">
         <div className="flex items-center text-muted-foreground text-xs">
           <GalleryHorizontalEnd className="mr-2 h-3 w-3" aria-hidden="true" />
-          {versions.length === 0 ? "no" : versions.length} versions published
+          {versions.length === 0 ? "No" : versions.length} plan versions
+        </div>
+        <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+          <span>{publishedVersions} published</span>
+          <span>{draftVersions} draft</span>
+          <span>{latestVersion === null ? "No latest" : `Latest v${latestVersion}`}</span>
         </div>
       </CardFooter>
     </Card>

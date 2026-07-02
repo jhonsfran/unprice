@@ -1,13 +1,14 @@
 import { runStatusSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
-import { Typography } from "@unprice/ui/typography"
-import { Code } from "lucide-react"
+import { Activity, CircleAlert, Code, Gauge, Route } from "lucide-react"
 import { notFound } from "next/navigation"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
+import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { dataTableParams } from "~/lib/searchParams"
 import { api } from "~/trpc/server"
 import { columns as runsColumns } from "../../_components/runs/table-runs/columns"
@@ -35,29 +36,52 @@ export default async function CustomerRunsPage(props: {
     notFound()
   }
 
+  const runningRuns = runs.filter((run) => run.status === "running").length
+  const budgetExceededRuns = runs.filter((run) => run.status === "budget_exceeded").length
+  const failedRuns = runs.filter((run) => run.status === "failed").length
+
   return (
-    <div className="mt-4">
-      <div className="flex flex-col px-1 py-4">
-        <Typography variant="p" affects="removePaddingMargin">
-          Budgeted runs for this customer
-        </Typography>
-      </div>
+    <div className="mt-4 flex flex-col gap-4">
+      <SectionIntro
+        title="Budgeted runs for this customer"
+        description="Runs label workload spend, reserve budget, and stop over-budget work before the customer creates more cost."
+      />
+      <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
+        <EvidenceMetricTile
+          label="Visible runs"
+          value={String(runs.length)}
+          helper={`${pageCount} result ${pageCount === 1 ? "page" : "pages"}`}
+          icon={<Route className="h-4 w-4" />}
+        />
+        <EvidenceMetricTile
+          label="Running"
+          value={String(runningRuns)}
+          helper="Still consuming budget"
+          icon={<Activity className="h-4 w-4" />}
+          tone={runningRuns > 0 ? "warning" : "default"}
+        />
+        <EvidenceMetricTile
+          label="Budget exceeded"
+          value={String(budgetExceededRuns)}
+          helper="Stopped by spend limit"
+          icon={<Gauge className="h-4 w-4" />}
+          tone={budgetExceededRuns > 0 ? "destructive" : "default"}
+        />
+        <EvidenceMetricTile
+          label="Failed"
+          value={String(failedRuns)}
+          helper="System failures to inspect"
+          icon={<CircleAlert className="h-4 w-4" />}
+          tone={failedRuns > 0 ? "destructive" : "default"}
+        />
+      </EvidenceMetricStrip>
       <Suspense
         fallback={
           <DataTableSkeleton
             columnCount={8}
             searchableColumnCount={1}
             filterableColumnCount={2}
-            cellWidths={[
-              "16rem",
-              "10rem",
-              "20rem",
-              "14rem",
-              "10rem",
-              "10rem",
-              "12rem",
-              "12rem",
-            ]}
+            cellWidths={["16rem", "10rem", "20rem", "14rem", "10rem", "10rem", "12rem", "12rem"]}
           />
         }
       >
@@ -67,8 +91,7 @@ export default async function CustomerRunsPage(props: {
           data={runs}
           emptyState={{
             title: "No budgeted runs",
-            description:
-              "Runs will appear after your app starts a budgeted workload for this customer.",
+            description: "Runs appear after your app starts a budgeted workload for this customer.",
             action: (
               <CodeApiSheet defaultMethod="startBudgetedRun">
                 <Button size="sm">

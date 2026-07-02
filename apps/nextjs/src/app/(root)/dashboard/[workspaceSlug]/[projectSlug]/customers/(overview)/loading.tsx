@@ -16,7 +16,7 @@ export default function Loading() {
       header={
         <HeaderTab
           title="Customers"
-          description="Create customers and inspect subscriptions, wallets, invoices, and runs."
+          description="Customers are the economic actors that hold subscriptions, wallet credits, invoices, and budgeted runs."
           action={
             <CustomerDialog>
               <Button>
@@ -37,14 +37,14 @@ export default function Loading() {
             <SuperLink href={"#"}>Subscriptions</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
-            <SuperLink href={"#"}>Runs</SuperLink>
+            <SuperLink href={"#"}>Budgeted Runs</SuperLink>
           </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            Customer money state for this project.
+            Customer money state
           </Typography>
         </div>
         <DataTableSkeleton

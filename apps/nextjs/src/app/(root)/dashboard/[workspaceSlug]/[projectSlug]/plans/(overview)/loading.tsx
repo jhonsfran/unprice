@@ -11,12 +11,12 @@ export default function Loading() {
       header={
         <HeaderTab
           title="Plans"
-          description="Create and manage your plans"
+          description="Define plans, features, meters, and limits without hardcoding the money path."
           action={
             <PlanDialog>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
-                Add Plan
+                Create plan
               </Button>
             </PlanDialog>
           }

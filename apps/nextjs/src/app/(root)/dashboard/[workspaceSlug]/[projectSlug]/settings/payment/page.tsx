@@ -27,7 +27,8 @@ export default async function ProjectPaymentSettingsPage() {
           <div className="flex flex-col space-y-1.5">
             <CardTitle>Payment providers</CardTitle>
             <CardDescription>
-              Enable the providers that plan versions can use for new subscriptions.
+              Enable Sandbox for testing or connect Stripe for subscription settlement from
+              published plan versions.
             </CardDescription>
           </div>
         </div>

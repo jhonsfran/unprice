@@ -13,7 +13,7 @@ export default function Loading() {
     <DashboardShell
       header={
         <HeaderTab
-          title="Runs"
+          title="Budgeted Runs"
           description="Budgeted run lifecycle, spend, and failure evidence across this project."
           action={
             <CodeApiSheet defaultMethod="startBudgetedRun">
@@ -35,30 +35,21 @@ export default function Loading() {
             <SuperLink href={"#"}>Subscriptions</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild active>
-            <SuperLink href={"#"}>Runs</SuperLink>
+            <SuperLink href={"#"}>Budgeted Runs</SuperLink>
           </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            Budgeted runs across all customers in this project.
+            Budgeted workloads across customers
           </Typography>
         </div>
         <DataTableSkeleton
           columnCount={8}
           searchableColumnCount={1}
           filterableColumnCount={2}
-          cellWidths={[
-            "16rem",
-            "10rem",
-            "20rem",
-            "14rem",
-            "10rem",
-            "10rem",
-            "12rem",
-            "12rem",
-          ]}
+          cellWidths={["16rem", "10rem", "20rem", "14rem", "10rem", "10rem", "12rem", "12rem"]}
         />
       </div>
     </DashboardShell>

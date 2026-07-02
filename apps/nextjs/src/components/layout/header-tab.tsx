@@ -25,7 +25,7 @@ export default function HeaderTab({
   return (
     <div
       className={cn(
-        "flex w-full flex-col items-center justify-between gap-6 px-0 md:flex-row",
+        "flex w-full flex-col items-start justify-between gap-4 px-0 md:flex-row md:items-center md:gap-6",
         className
       )}
     >
@@ -33,7 +33,7 @@ export default function HeaderTab({
         <div className="flex items-center gap-2">
           <Typography variant="h3">{title}</Typography>
           {label && (
-            <Badge variant={toneClass.badgeVariant} className="hidden gap-1.5 md:flex">
+            <Badge variant={toneClass.badgeVariant} className="flex gap-1.5">
               <span className={cn("size-2 rounded-full", toneClass.dot)} />
               <span>{label}</span>
             </Badge>
@@ -41,12 +41,15 @@ export default function HeaderTab({
           {id && <CopyButton value={id} />}
         </div>
         {description && (
-          <Typography variant="normal" className="hidden text-background-solidHover md:flex">
+          <Typography
+            variant="normal"
+            className="max-w-3xl text-background-solidHover text-sm leading-6 md:text-base"
+          >
             {description}
           </Typography>
         )}
       </div>
-      <div className="ml-auto">{action}</div>
+      <div className="flex w-full justify-start md:ml-auto md:w-auto md:justify-end">{action}</div>
     </div>
   )
 }

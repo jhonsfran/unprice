@@ -66,12 +66,13 @@ export function RenameProjectForm(props: {
         onSubmit={form.handleSubmit(async (data: RenameProject) => {
           await renameProject.mutateAsync(data)
         })}
-        className="space-y-2"
       >
         <Card>
           <CardHeader>
             <CardTitle>Project name</CardTitle>
-            <CardDescription>Change the display name of your project</CardDescription>
+            <CardDescription>
+              Change the display name shown in dashboard navigation and project-level evidence.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <FormField
@@ -91,7 +92,7 @@ export function RenameProjectForm(props: {
 
           <CardFooter className="flex justify-between gap-2 border-t px-6 py-4">
             <Button type="submit">
-              Save
+              Save project name
               {form.formState.isSubmitting && <LoadingAnimation className="ml-2" />}
             </Button>
           </CardFooter>

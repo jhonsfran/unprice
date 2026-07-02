@@ -37,14 +37,14 @@ export default function Loading() {
             <SuperLink href={"#"}>Subscriptions</SuperLink>
           </TabNavigationLink>
           <TabNavigationLink asChild>
-            <SuperLink href={"#"}>Runs</SuperLink>
+            <SuperLink href={"#"}>Budgeted Runs</SuperLink>
           </TabNavigationLink>
         </div>
       </TabNavigation>
       <div className="mt-4">
         <div className="flex flex-col px-1 py-4">
           <Typography variant="p" affects="removePaddingMargin">
-            Active subscription evidence across this project.
+            Subscription evidence across this project
           </Typography>
         </div>
         <DataTableSkeleton

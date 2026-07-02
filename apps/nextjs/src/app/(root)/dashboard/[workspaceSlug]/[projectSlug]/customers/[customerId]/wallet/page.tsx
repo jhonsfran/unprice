@@ -1,9 +1,12 @@
 import { walletCreditSourceSchema } from "@unprice/db/validators"
-import { Typography } from "@unprice/ui/typography"
+import { Button } from "@unprice/ui/button"
+import { Code } from "lucide-react"
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
+import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { api } from "~/trpc/server"
 import { columns as walletCreditColumns } from "../../_components/wallet/table-wallet-credits/columns"
 import { WalletBalanceSummary } from "../../_components/wallet/wallet-balance-summary"
@@ -40,11 +43,10 @@ export default async function CustomerWalletPage({
       <WalletBalanceSummary wallet={wallet} />
 
       <div>
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            Wallet credits for this customer
-          </Typography>
-        </div>
+        <SectionIntro
+          title="Wallet credits by source"
+          description="Purchased and granted credits show issued, consumed, available, expiry, and status for this customer."
+        />
         <Suspense
           fallback={
             <DataTableSkeleton
@@ -60,7 +62,16 @@ export default async function CustomerWalletPage({
             data={walletCredits}
             emptyState={{
               title: "No wallet credits",
-              description: "This customer has no issued, active, or expired wallet credits yet.",
+              description:
+                "Wallet credits appear after this customer receives purchased or granted funds.",
+              action: (
+                <CodeApiSheet defaultMethod="getWalletBalance">
+                  <Button size="sm" variant="outline">
+                    <Code className="mr-2 size-4" />
+                    Check wallet balance
+                  </Button>
+                </CodeApiSheet>
+              ),
             }}
             hidePaginationWhenEmpty
             filterOptions={{

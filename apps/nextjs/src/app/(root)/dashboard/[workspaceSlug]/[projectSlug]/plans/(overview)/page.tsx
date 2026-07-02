@@ -4,7 +4,9 @@ import { FEATURE_SLUGS } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
 import { Plus } from "@unprice/ui/icons"
 import { Typography } from "@unprice/ui/typography"
+import { BadgeCheck, FilePenLine, Layers3, Route } from "lucide-react"
 import { Fragment } from "react"
+import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import UpgradePlanError from "~/components/layout/error"
 import HeaderTab from "~/components/layout/header-tab"
@@ -25,6 +27,10 @@ export default async function PlansPage(props: {
   }
 
   const { plans } = await api.plans.listByActiveProject({})
+  const versions = plans.flatMap((plan) => plan.versions)
+  const publishedVersions = versions.filter((version) => version.status === "published").length
+  const draftVersions = versions.filter((version) => version.status === "draft").length
+  const activePlans = plans.filter((plan) => plan.active).length
 
   return (
     <DashboardShell
@@ -36,7 +42,7 @@ export default async function PlansPage(props: {
             <PlanDialog>
               <Button>
                 <Plus className="mr-2 h-4 w-4" />
-                Create Plan
+                Create plan
               </Button>
             </PlanDialog>
           }
@@ -44,6 +50,34 @@ export default async function PlansPage(props: {
       }
     >
       <Fragment>
+        <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
+          <EvidenceMetricTile
+            label="Plans"
+            value={String(plans.length)}
+            helper={`${activePlans} active`}
+            icon={<Layers3 className="h-4 w-4" />}
+          />
+          <EvidenceMetricTile
+            label="Published versions"
+            value={String(publishedVersions)}
+            helper="Usable by assigned customers"
+            icon={<BadgeCheck className="h-4 w-4" />}
+            tone={publishedVersions > 0 ? "success" : "default"}
+          />
+          <EvidenceMetricTile
+            label="Draft versions"
+            value={String(draftVersions)}
+            helper="Editable before publish"
+            icon={<FilePenLine className="h-4 w-4" />}
+          />
+          <EvidenceMetricTile
+            label="Money path"
+            value="Versioned"
+            helper="Features, meters, limits, and billing stay connected"
+            icon={<Route className="h-4 w-4" />}
+          />
+        </EvidenceMetricStrip>
+
         <ul className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {plans.map((plan) => (
             <li key={plan.id}>

@@ -293,7 +293,7 @@ function DefaultCustomerField({
       name="defaultCustomerId"
       render={({ field }) => (
         <FormItem className="flex flex-col">
-          <FormLabel>Default Customer</FormLabel>
+          <FormLabel>Default customer</FormLabel>
           <FormDescription>
             Optional. If set, this customer is used when requests omit `customerId`.
           </FormDescription>
