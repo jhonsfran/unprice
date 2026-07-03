@@ -5,7 +5,7 @@ import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { fromLedgerAmount, toLedgerMinor } from "@unprice/money"
+import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { getPaymentProviderCapabilities } from "../../payment-provider/service"
@@ -43,15 +43,15 @@ type SignUpContext = {
 function normalizePhaseCreditLine(
   input: {
     creditLinePolicy?: CustomerSignUp["creditLinePolicy"]
-    creditLineAmount?: CustomerSignUp["creditLineAmount"]
+    creditLineAmountMinor?: CustomerSignUp["creditLineAmountMinor"]
   },
   currency: string
 ) {
   const creditLinePolicy = input.creditLinePolicy ?? "uncapped"
   const creditLineAmount =
-    input.creditLineAmount === null || input.creditLineAmount === undefined
+    input.creditLineAmountMinor === null || input.creditLineAmountMinor === undefined
       ? null
-      : toLedgerMinor(fromLedgerAmount(String(input.creditLineAmount), currency))
+      : toLedgerMinor(fromCurrencyMinor(input.creditLineAmountMinor, currency))
 
   return {
     creditLinePolicy,

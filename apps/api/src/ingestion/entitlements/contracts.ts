@@ -12,7 +12,10 @@ import {
 } from "@unprice/db/validators"
 import { LEDGER_SCALE } from "@unprice/money"
 import type { Fact, GrantConsumptionState, MeterConfig } from "@unprice/services/entitlements"
-import type { IngestionRejectionReason } from "@unprice/services/ingestion"
+import type {
+  IngestionIdempotencyStatus,
+  IngestionRejectionReason,
+} from "@unprice/services/ingestion"
 import type { ReservationCloseReason } from "@unprice/services/wallet"
 import { z } from "zod"
 import { APPLY_BATCH_SIZE_LIMIT } from "./constants"
@@ -81,6 +84,7 @@ export type DeniedReason =
 export type ApplyResult = {
   allowed: boolean
   deniedReason?: DeniedReason
+  idempotencyStatus?: IngestionIdempotencyStatus
   meterFacts?: AnalyticsEntitlementMeterFact[]
   message?: string
 }

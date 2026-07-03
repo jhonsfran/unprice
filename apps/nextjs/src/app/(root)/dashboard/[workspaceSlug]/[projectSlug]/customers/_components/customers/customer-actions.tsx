@@ -34,7 +34,7 @@ export function CustomerActions({
     projectSlug: string
   }>()
 
-  const addSubscriptionHref = `/${workspaceSlug}/${projectSlug}/customers/subscriptions/new`
+  const addSubscriptionHref = `/${workspaceSlug}/${projectSlug}/customers/subscriptions/new?customerId=${customer.id}`
 
   return (
     <Dialog>

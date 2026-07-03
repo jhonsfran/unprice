@@ -3,11 +3,19 @@ import type {
   IngestionEntitlement,
   PreparedCustomerGrantContext,
 } from "./entitlement-context"
-import { resolveCustomerGrantContextWindow } from "./entitlement-context"
+import {
+  hasBillingPeriodCoveringEvent,
+  resolveCustomerGrantContextWindow,
+} from "./entitlement-context"
 import type { IngestionEntitlementRouter } from "./entitlement-routing"
 import type { EntitlementWindowApplier } from "./entitlement-window-applier"
 import type { FanoutMessageOutcome as MessageOutcome } from "./fanout-outcomes"
-import type { IngestionOutcome, IngestionRejectionReason, IngestionSyncResult } from "./interface"
+import type {
+  IngestionIdempotencyStatus,
+  IngestionOutcome,
+  IngestionRejectionReason,
+  IngestionSyncResult,
+} from "./interface"
 import type { IngestionQueueMessage } from "./message"
 import { type IngestionMessageOutcomes, toSyncResult } from "./message-outcomes"
 import type { IngestionReportingOutcomeDispatcher } from "./reporting-dispatcher"
@@ -18,8 +26,17 @@ type SyncEntitlementResolution =
   | { kind: "rejected"; rejectionReason: IngestionRejectionReason }
 
 type PreparedSyncApplyResult =
-  | { state: "processed"; meterFacts: MessageOutcome["meterFacts"] }
-  | { state: "rejected"; messageText?: string; rejectionReason: IngestionRejectionReason }
+  | {
+      idempotencyStatus: IngestionIdempotencyStatus
+      state: "processed"
+      meterFacts: MessageOutcome["meterFacts"]
+    }
+  | {
+      idempotencyStatus: IngestionIdempotencyStatus
+      state: "rejected"
+      messageText?: string
+      rejectionReason: IngestionRejectionReason
+    }
 
 export class IngestionSyncProcessor {
   private readonly entitlementContext: CustomerGrantContextReader
@@ -79,10 +96,26 @@ export class IngestionSyncProcessor {
       })
     }
 
-    const applyResult = await this.applyPreparedSyncMessage({
+    const applyContext = await this.refreshSyncContextForMissingBillingPeriod({
+      customerId,
       featureSlug,
       message,
       preparedContext,
+      projectId,
+    })
+    if (applyContext.rejectionReason) {
+      return this.rejectSyncMessage({
+        customerId,
+        message,
+        projectId,
+        rejectionReason: applyContext.rejectionReason,
+      })
+    }
+
+    const applyResult = await this.applyPreparedSyncMessage({
+      featureSlug,
+      message,
+      preparedContext: applyContext,
     })
     if (
       applyResult.state === "processed" ||
@@ -96,7 +129,7 @@ export class IngestionSyncProcessor {
     }
 
     const catchUp = await this.subscriptionCatchUp.catchUpForPreparedGroup({
-      candidateEntitlements: preparedContext.candidateEntitlements,
+      candidateEntitlements: applyContext.candidateEntitlements,
       customerId,
       messages: [message],
       projectId,
@@ -148,6 +181,47 @@ export class IngestionSyncProcessor {
     })
   }
 
+  private async refreshSyncContextForMissingBillingPeriod(params: {
+    customerId: string
+    featureSlug: string
+    message: IngestionQueueMessage
+    preparedContext: PreparedCustomerGrantContext
+    projectId: string
+  }): Promise<PreparedCustomerGrantContext> {
+    const { customerId, featureSlug, message, preparedContext, projectId } = params
+    if (this.subscriptionCatchUp === undefined) {
+      return preparedContext
+    }
+
+    const entitlementResolution = this.resolveSyncEntitlement({
+      candidateEntitlements: preparedContext.candidateEntitlements,
+      featureSlug,
+      message,
+    })
+    if (
+      entitlementResolution.kind === "rejected" ||
+      hasBillingPeriodCoveringEvent(entitlementResolution.entitlement, message.timestamp)
+    ) {
+      return preparedContext
+    }
+
+    const catchUp = await this.subscriptionCatchUp.catchUpForPreparedGroup({
+      candidateEntitlements: preparedContext.candidateEntitlements,
+      customerId,
+      messages: [message],
+      projectId,
+    })
+    if (!catchUp.changed) {
+      return preparedContext
+    }
+
+    return this.prepareSyncContext({
+      customerId,
+      message,
+      projectId,
+    })
+  }
+
   private async applyPreparedSyncMessage(params: {
     featureSlug: string
     message: IngestionQueueMessage
@@ -162,7 +236,23 @@ export class IngestionSyncProcessor {
       message,
     })
     if (entitlementResolution.kind === "rejected") {
-      return { state: "rejected", rejectionReason: entitlementResolution.rejectionReason }
+      return {
+        idempotencyStatus: "new",
+        state: "rejected",
+        rejectionReason: entitlementResolution.rejectionReason,
+      }
+    }
+
+    if (
+      requiresBillingPeriodContext(entitlementResolution.entitlement) &&
+      !hasBillingPeriodCoveringEvent(entitlementResolution.entitlement, message.timestamp)
+    ) {
+      return {
+        idempotencyStatus: "new",
+        state: "rejected",
+        rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+        messageText: "No active billing period covers this event timestamp",
+      }
     }
 
     const applyResult = await this.entitlementWindowApplier.apply({
@@ -175,13 +265,18 @@ export class IngestionSyncProcessor {
 
     if (!applyResult.allowed) {
       return {
+        idempotencyStatus: applyResult.idempotencyStatus ?? "new",
         state: "rejected",
         rejectionReason: applyResult.deniedReason ?? "LIMIT_EXCEEDED",
         messageText: applyResult.message,
       }
     }
 
-    return { state: "processed", meterFacts: applyResult.meterFacts }
+    return {
+      idempotencyStatus: applyResult.idempotencyStatus ?? "new",
+      state: "processed",
+      meterFacts: applyResult.meterFacts,
+    }
   }
 
   private reportPreparedSyncApplyResult(params: {
@@ -192,6 +287,7 @@ export class IngestionSyncProcessor {
 
     if (result.state === "processed") {
       return this.reportProcessedSyncMessage({
+        idempotencyStatus: result.idempotencyStatus,
         message,
         meterFacts: result.meterFacts,
       })
@@ -199,6 +295,7 @@ export class IngestionSyncProcessor {
 
     return this.rejectSyncMessage({
       customerId: message.customerId,
+      idempotencyStatus: result.idempotencyStatus,
       message,
       messageText: result.messageText,
       projectId: message.projectId,
@@ -253,10 +350,11 @@ export class IngestionSyncProcessor {
   }
 
   private async reportProcessedSyncMessage(params: {
+    idempotencyStatus: IngestionIdempotencyStatus
     message: IngestionQueueMessage
     meterFacts: MessageOutcome["meterFacts"]
   }): Promise<IngestionSyncResult> {
-    const { message, meterFacts } = params
+    const { idempotencyStatus, message, meterFacts } = params
     const outcome: IngestionOutcome = { state: "processed" }
     await this.reportingDispatcher.enqueueOutcomes({
       customerId: message.customerId,
@@ -266,18 +364,27 @@ export class IngestionSyncProcessor {
 
     return toSyncResult({
       allowed: true,
+      idempotencyStatus,
       outcome,
     })
   }
 
   private async rejectSyncMessage(params: {
     customerId: string
+    idempotencyStatus?: IngestionIdempotencyStatus
     message: IngestionQueueMessage
     messageText?: string
     projectId: string
     rejectionReason: IngestionRejectionReason
   }): Promise<IngestionSyncResult> {
-    const { customerId, message, messageText, projectId, rejectionReason } = params
+    const {
+      customerId,
+      idempotencyStatus = "new",
+      message,
+      messageText,
+      projectId,
+      rejectionReason,
+    } = params
     const outcome: IngestionOutcome = { state: "rejected", rejectionReason }
     this.messageOutcomes.logRejectedMessage({
       customerId,
@@ -293,8 +400,13 @@ export class IngestionSyncProcessor {
 
     return toSyncResult({
       allowed: false,
+      idempotencyStatus,
       message: messageText,
       outcome,
     })
   }
+}
+
+function requiresBillingPeriodContext(entitlement: IngestionEntitlement): boolean {
+  return entitlement.creditLinePolicy !== "uncapped"
 }

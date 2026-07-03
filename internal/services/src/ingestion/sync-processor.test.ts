@@ -30,6 +30,7 @@ describe("IngestionSyncProcessor", () => {
 
     expect(result).toEqual({
       allowed: false,
+      idempotencyStatus: "new",
       message: "Event timestamp is older than the maximum accepted age",
       rejectionReason: "EVENT_TOO_OLD",
       state: "rejected",
@@ -74,6 +75,7 @@ describe("IngestionSyncProcessor", () => {
 
     expect(result).toEqual({
       allowed: true,
+      idempotencyStatus: "new",
       state: "processed",
     })
     expect(prepareCustomerGrantContext).toHaveBeenCalledWith({
@@ -91,6 +93,45 @@ describe("IngestionSyncProcessor", () => {
         projectId: message.projectId,
       })
     )
+    expect(enqueueOutcomes).toHaveBeenCalledWith({
+      customerId: message.customerId,
+      projectId: message.projectId,
+      outcomes: [
+        {
+          message,
+          outcome: { state: "processed" },
+          meterFacts: undefined,
+        },
+      ],
+    })
+  })
+
+  it("marks sync results as already reported when the entitlement window replays idempotency", async () => {
+    const entitlement = createEntitlement()
+    const apply = vi.fn().mockResolvedValue({
+      allowed: true,
+      idempotencyStatus: "already_reported",
+    })
+    const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
+    const processor = createProcessor({
+      apply,
+      enqueueOutcomes,
+      preparedContext: {
+        candidateEntitlements: [entitlement],
+      },
+    })
+    const message = createMessage()
+
+    const result = await processor.ingestFeatureSync({
+      featureSlug: entitlement.featureSlug,
+      message,
+    })
+
+    expect(result).toEqual({
+      allowed: true,
+      idempotencyStatus: "already_reported",
+      state: "processed",
+    })
     expect(enqueueOutcomes).toHaveBeenCalledWith({
       customerId: message.customerId,
       projectId: message.projectId,
@@ -128,6 +169,7 @@ describe("IngestionSyncProcessor", () => {
 
     expect(result).toEqual({
       allowed: false,
+      idempotencyStatus: "new",
       message: "wallet empty",
       rejectionReason: "WALLET_EMPTY",
       state: "rejected",
@@ -147,12 +189,73 @@ describe("IngestionSyncProcessor", () => {
     })
   })
 
+  it("runs subscription catch-up before sync apply when billing period context is missing", async () => {
+    const beforeCatchUp = createEntitlement({
+      billingPeriods: [],
+      customerEntitlementId: "ce_before",
+      subscriptionId: "sub_123",
+      subscriptionItemId: "item_123",
+    })
+    const afterCatchUp = createEntitlement({
+      customerEntitlementId: "ce_after",
+      subscriptionId: "sub_123",
+      subscriptionItemId: "item_123",
+      billingPeriods: [createBillingPeriod()],
+    })
+    const apply = vi.fn().mockResolvedValue({
+      allowed: true,
+      meterFacts: [],
+    })
+    const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
+    const prepareCustomerGrantContext = vi
+      .fn()
+      .mockResolvedValueOnce({ candidateEntitlements: [beforeCatchUp] })
+      .mockResolvedValueOnce({ candidateEntitlements: [afterCatchUp] })
+    const catchUpForPreparedGroup = vi.fn().mockResolvedValue({
+      changed: true,
+      caughtUpSubscriptionIds: ["sub_123"],
+    })
+    const processor = createProcessor({
+      apply,
+      enqueueOutcomes,
+      prepareCustomerGrantContext,
+      subscriptionCatchUp: { catchUpForPreparedGroup },
+    })
+    const message = createMessage()
+
+    const result = await processor.ingestFeatureSync({
+      featureSlug: beforeCatchUp.featureSlug,
+      message,
+    })
+
+    expect(result).toEqual({
+      allowed: true,
+      idempotencyStatus: "new",
+      state: "processed",
+    })
+    expect(catchUpForPreparedGroup).toHaveBeenCalledWith({
+      candidateEntitlements: [beforeCatchUp],
+      customerId: message.customerId,
+      messages: [message],
+      projectId: message.projectId,
+    })
+    expect(prepareCustomerGrantContext).toHaveBeenCalledTimes(2)
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entitlement: afterCatchUp,
+      })
+    )
+  })
+
   it("runs subscription catch-up and retries WALLET_EMPTY sync denials", async () => {
     const beforeCatchUp = createEntitlement({
+      billingPeriods: [createBillingPeriod()],
       customerEntitlementId: "ce_before",
       subscriptionId: "sub_123",
     })
     const afterCatchUp = createEntitlement({
+      billingPeriods: [createBillingPeriod()],
       customerEntitlementId: "ce_after",
       subscriptionId: "sub_123",
     })
@@ -191,6 +294,7 @@ describe("IngestionSyncProcessor", () => {
 
     expect(result).toEqual({
       allowed: true,
+      idempotencyStatus: "new",
       state: "processed",
     })
     expect(catchUpForPreparedGroup).toHaveBeenCalledWith({
@@ -215,6 +319,52 @@ describe("IngestionSyncProcessor", () => {
           message,
           outcome: { state: "processed" },
           meterFacts: [],
+        },
+      ],
+    })
+  })
+
+  it("rejects sync usage without calling the entitlement window when billing context is still missing", async () => {
+    const entitlement = createEntitlement({ billingPeriods: [] })
+    const apply = vi.fn()
+    const enqueueOutcomes = vi.fn().mockResolvedValue(undefined)
+    const catchUpForPreparedGroup = vi.fn().mockResolvedValue({
+      changed: false,
+      caughtUpSubscriptionIds: [],
+    })
+    const processor = createProcessor({
+      apply,
+      enqueueOutcomes,
+      preparedContext: {
+        candidateEntitlements: [entitlement],
+      },
+      subscriptionCatchUp: { catchUpForPreparedGroup },
+    })
+    const message = createMessage()
+
+    const result = await processor.ingestFeatureSync({
+      featureSlug: entitlement.featureSlug,
+      message,
+    })
+
+    expect(result).toEqual({
+      allowed: false,
+      idempotencyStatus: "new",
+      message: "No active billing period covers this event timestamp",
+      rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+      state: "rejected",
+    })
+    expect(apply).not.toHaveBeenCalled()
+    expect(enqueueOutcomes).toHaveBeenCalledWith({
+      customerId: message.customerId,
+      projectId: message.projectId,
+      outcomes: [
+        {
+          message,
+          outcome: {
+            state: "rejected",
+            rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+          },
         },
       ],
     })
@@ -308,9 +458,19 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
   }
 }
 
+function createBillingPeriod() {
+  return {
+    billingPeriodId: "bp_123",
+    cycleEndAt: TEST_NOW + 86_400_000,
+    cycleStartAt: TEST_NOW - 86_400_000,
+    featurePlanVersionItemId: "item_123",
+    statementKey: "stmt_123",
+  }
+}
+
 function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
-    billingPeriods: [],
+    billingPeriods: [createBillingPeriod()],
     creditLinePolicy: "capped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",

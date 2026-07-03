@@ -61,6 +61,7 @@ describe("getCustomerWallet", () => {
     expect(wallet.getWalletState).toHaveBeenCalledWith({
       projectId: "proj_123",
       customerId: "cus_123",
+      includeInactiveCredits: true,
     })
     expect(logger.set).toHaveBeenCalledWith({
       business: {
@@ -132,6 +133,75 @@ describe("getCustomerWallet", () => {
       consumedAmount: 0,
       status: "expired",
       usableAmount: 0,
+    })
+  })
+
+  it("includes consumed credits without counting them as display granted balance", async () => {
+    const customer = createCustomer()
+    const activeCredit = createWalletCredit({
+      id: "wcr_active",
+      issuedAmount: 300_000_000,
+      remainingAmount: 300_000_000,
+      createdAt: new Date("2026-06-22T10:00:00.000Z"),
+    })
+    const consumedCredit = createWalletCredit({
+      id: "wcr_consumed",
+      issuedAmount: 200_000_000,
+      remainingAmount: 0,
+      consumedAmount: 200_000_000,
+      createdAt: new Date("2026-06-22T11:00:00.000Z"),
+    })
+    const walletState = createWalletState({
+      balances: {
+        granted: 500_000_000,
+        reserved: 0,
+        consumed: 200_000_000,
+        walletConsumed: 200_000_000,
+      },
+      credits: [activeCredit, consumedCredit],
+    })
+    const customers = {
+      getCustomerByIdInProject: vi.fn().mockResolvedValue(Ok(customer)),
+    }
+    const wallet = {
+      getWalletState: vi.fn().mockResolvedValue(Ok(walletState)),
+    }
+
+    const result = await getCustomerWallet(
+      {
+        services: {
+          customers: customers as unknown as CustomerService,
+          wallet: wallet as unknown as WalletService,
+        },
+        logger: createLogger(),
+        now: () => new Date("2026-06-22T12:00:00.000Z"),
+      },
+      {
+        projectId: "proj_123",
+        customerId: "cus_123",
+      }
+    )
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.wallet.balances).toMatchObject({
+      granted: 300_000_000,
+      walletConsumed: 200_000_000,
+    })
+    expect(result.val?.wallet.credits.map((credit) => credit.id)).toEqual([
+      "wcr_consumed",
+      "wcr_active",
+    ])
+
+    const creditsById = new Map(result.val?.wallet.credits.map((credit) => [credit.id, credit]))
+    expect(creditsById.get("wcr_consumed")).toMatchObject({
+      consumedAmount: 200_000_000,
+      status: "consumed",
+      usableAmount: 0,
+    })
+    expect(creditsById.get("wcr_active")).toMatchObject({
+      consumedAmount: 0,
+      status: "active",
+      usableAmount: 300_000_000,
     })
   })
 

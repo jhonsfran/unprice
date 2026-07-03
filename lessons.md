@@ -170,9 +170,12 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
-- 2026-07-03: Customer current-access usage is a feature entitlement-period view, not the
-  last-30-days evidence view; it is loaded with the server page while analytics widgets refetch
-  client-side, so recently reported usage can appear in evidence before current-access rows update.
+- 2026-07-03: Dashboard breadcrumbs are rendered by the `@breadcrumbs` parallel route, so they
+  only see URL/search params. For entity-context crumbs, pass context in the URL/search params or
+  resolve it inside `apps/nextjs/src/app/(root)/dashboard/@breadcrumbs/[...all]/page.tsx`.
+- 2026-07-03: Customer current-access usage is a per-feature entitlement-period view, not the
+  last-30-days evidence view; compute/query each active usage entitlement by its current grant
+  `period_key` and keep the UI on realtime polling so reset-specific windows update in place.
 - 2026-07-03: Dialog forms rendered from inside another React form can still bubble submit events
   through the React tree even when Radix portals the dialog content; stop propagation on the dialog
   form submit when the inner action must not save the parent form.
@@ -258,6 +261,12 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-12: Ingestion catch-up must materialize per-item billing periods for active/trialing
   subscriptions even when the subscription cycle is not due for renewal; usage feature cadences can
   be shorter than the subscription cycle and still need invoice context before DO fanout.
+- 2026-07-03: Sync usage consume must catch up and reload billing-period context before
+  EntitlementWindowDO fanout; if invoice context is still missing for a capped entitlement, return a
+  `LATE_EVENT_CLOSED_PERIOD` rejection instead of letting wallet bootstrap throw a generic 500.
+- 2026-07-03: tRPC subscription machine adapters must map expected lifecycle refusals like early
+  renew, invalid invoice action, and `SUBSCRIPTION_BUSY` to non-500 errors; `INTERNAL_SERVER_ERROR`
+  is masked to "Internal server error" in the dashboard.
 - 2026-06-07: When signup or provider-completion use cases materialize billing periods, wire
   `billing` through API route service bags and `apps/api/src/hono/env.ts`; missing adapter wiring
   can return signup `success=false` with a hidden `generateBillingPeriods` error.
@@ -287,7 +296,7 @@ patterns. Keep it cheap to load and useful.
   history.
 - 2026-05-06: Wallet bigint amounts are ledger-scale minor units; pgledger views are decimals.
 - 2026-05-06: `creditLineAmount` is period usage allowance, not plan fee or creditworthiness.
-- 2026-05-17: Public signup `creditLineAmount` is currency minor units; convert to
+- 2026-05-17: Public signup `creditLineAmountMinor` is currency minor units; convert to
   ledger-scale before saving subscription phases or customer sessions.
 - 2026-05-06: Arrears plans can derive allowance from finite priced usage limits; unlimited paid
   usage needs explicit allowance or balance.

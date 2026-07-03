@@ -1,10 +1,16 @@
+"use client"
+
+import { useSuspenseQuery } from "@tanstack/react-query"
 import { nFormatter } from "@unprice/db/utils"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Progress } from "@unprice/ui/progress"
 import { ArrowUpRight, CalendarRange, KeyRound } from "lucide-react"
+import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
+import { useTRPC } from "~/trpc/client"
+import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 import { formatWalletMoney } from "../../_components/wallet/format-wallet-money"
 import { EntitlementConfigSheet } from "./entitlement-config-sheet"
 
@@ -27,7 +33,7 @@ const LONG_DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
 })
 
 export function CustomerCurrentAccess({
-  access,
+  access: initialAccess,
   wallet,
   subscriptionsHref,
   plansHref,
@@ -37,6 +43,18 @@ export function CustomerCurrentAccess({
   subscriptionsHref: string
   plansHref: string
 }) {
+  const trpc = useTRPC()
+  const { data: access, isFetching } = useSuspenseQuery(
+    trpc.customers.getCurrentAccess.queryOptions(
+      {
+        customerId: initialAccess.customerId,
+      },
+      {
+        ...ANALYTICS_CONFIG_REALTIME,
+        initialData: initialAccess,
+      }
+    )
+  )
   const activePlan = access.activePlan
   const activePhase = activePlan?.activePhase ?? null
   const walletAvailable = wallet.balances.purchased + wallet.balances.granted
@@ -54,6 +72,7 @@ export function CustomerCurrentAccess({
         title="Current plan + access"
         description="Active subscription context and entitlement usage for the current entitlement period."
         className="px-0 py-0"
+        actions={<FreshnessIndicator generatedAt={access.generatedAt} isFetching={isFetching} />}
       />
 
       <div className="grid gap-4 lg:grid-cols-[0.95fr_1.55fr]">
@@ -177,6 +196,7 @@ export function CustomerCurrentAccess({
                     entitlement={entitlement}
                     usageUnavailable={access.usageUnavailable}
                     planVersionId={activePhase?.planVersion.id ?? null}
+                    timezone={activePlan?.timezone}
                   />
                 ))}
               </div>
@@ -199,13 +219,19 @@ function EntitlementUsageRow({
   entitlement,
   usageUnavailable,
   planVersionId,
+  timezone,
 }: {
   entitlement: CurrentAccessEntitlement
   usageUnavailable: boolean
   planVersionId: string | null
+  timezone?: string
 }) {
   const hasMeasuredUsage = entitlement.currentUsage !== null && !usageUnavailable
   const hasFiniteLimit = entitlement.limit !== null && entitlement.limit > 0
+  const usagePeriodLabel =
+    hasMeasuredUsage && entitlement.usagePeriods.length > 0
+      ? formatUsagePeriods(entitlement.usagePeriods, timezone)
+      : null
 
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)] md:items-center">
@@ -240,6 +266,9 @@ function EntitlementUsageRow({
             max={100}
             aria-label={`${entitlement.featureTitle} usage`}
           />
+        )}
+        {usagePeriodLabel && (
+          <p className="truncate text-muted-foreground text-xs">{usagePeriodLabel}</p>
         )}
       </div>
     </div>
@@ -311,10 +340,11 @@ function formatPeriod(
   end: number,
   options?: {
     billingConfig?: BillingConfig
+    includeTime?: boolean
     timezone?: string
   }
 ): string {
-  const includeTime = options?.billingConfig?.billingInterval === "minute"
+  const includeTime = options?.includeTime ?? options?.billingConfig?.billingInterval === "minute"
   const timeZone = options?.timezone
   const startDate = new Date(start)
   const endDate = new Date(end)
@@ -324,6 +354,33 @@ function formatPeriod(
   }
 
   return `${formatShortDateTime(startDate, timeZone)} - ${formatLongDateTime(endDate, timeZone)}`
+}
+
+function formatUsagePeriods(
+  periods: CurrentAccessEntitlement["usagePeriods"],
+  timezone?: string
+): string | null {
+  if (periods.length === 0) {
+    return null
+  }
+
+  if (periods.length > 1) {
+    return `${periods.length} active periods`
+  }
+
+  const period = periods[0]
+  if (!period) {
+    return null
+  }
+
+  if (period.end >= Number.MAX_SAFE_INTEGER) {
+    return `Period since ${formatLongDate(new Date(period.start), timezone)}`
+  }
+
+  return `Period ${formatPeriod(period.start, period.end, {
+    includeTime: period.end - period.start < 2 * 24 * 60 * 60 * 1000,
+    timezone,
+  })}`
 }
 
 function formatDate(timestamp: number): string {

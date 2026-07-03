@@ -19,6 +19,9 @@ import { DataTableRowActions } from "./data-table-row-actions"
 
 type Subscription = RouterOutputs["subscriptions"]["listByActiveProject"]["subscriptions"][number]
 
+const DATE_ONLY_FORMAT = "yyyy-MM-dd"
+const DATE_TIME_FORMAT = "yyyy-MM-dd HH:mm"
+
 function SubscriptionCustomerCell({ row }: { row: { original: Subscription } }) {
   const { workspaceSlug, projectSlug } = useParams()
   return (
@@ -27,6 +30,68 @@ function SubscriptionCustomerCell({ row }: { row: { original: Subscription } }) 
         {row.original.customer.email} - {row.original.customer.name}
       </div>
     </SuperLink>
+  )
+}
+
+function shouldShowDateTime(subscription: Subscription) {
+  return subscription.billingConfig?.billingInterval === "minute"
+}
+
+function formatSubscriptionDate(timestamp: number, subscription: Subscription) {
+  return formatDate(
+    timestamp,
+    subscription.timezone,
+    shouldShowDateTime(subscription) ? DATE_TIME_FORMAT : DATE_ONLY_FORMAT
+  )
+}
+
+function SubscriptionDateCell({
+  subscription,
+  timestamp,
+  emptyLabel = "Forever",
+  tooltipSide = "bottom",
+}: {
+  subscription: Subscription
+  timestamp: number | null | undefined
+  emptyLabel?: string
+  tooltipSide?: "bottom" | "right"
+}) {
+  if (timestamp === null || timestamp === undefined) {
+    return (
+      <Typography variant="p" affects="removePaddingMargin">
+        {emptyLabel}
+      </Typography>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1 whitespace-nowrap">
+      <Typography variant="p" affects="removePaddingMargin">
+        {formatSubscriptionDate(timestamp, subscription)}
+      </Typography>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <AlertCircle className="size-4 font-light text-muted-foreground" />
+        </TooltipTrigger>
+        <TooltipContent align="start" side={tooltipSide} sideOffset={10} alignOffset={-5}>
+          <div className="flex flex-col gap-1">
+            <Typography variant="p" affects="removePaddingMargin" className="font-semibold">
+              Timezone: {subscription.timezone}
+            </Typography>
+            <Separator className="my-1" />
+            <Typography variant="p" affects="removePaddingMargin" className="text-xs">
+              <span className="font-semibold">Local time: </span>
+              {format(toZonedTime(timestamp, subscription.timezone), "PPpp")}
+            </Typography>
+
+            <Typography variant="p" affects="removePaddingMargin" className="text-xs">
+              <span className="font-semibold">Customer time: </span>
+              {format(new Date(timestamp), "PPpp")}
+            </Typography>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </div>
   )
 }
 
@@ -119,36 +184,11 @@ export const columns: ColumnDef<Subscription>[] = [
     accessorKey: "currentCycleStartAt",
     header: ({ column }) => <DataTableColumnHeader column={column} title="Start current cycle" />,
     cell: ({ row }) => (
-      <div className="flex items-center space-x-1 whitespace-nowrap">
-        <Typography variant="p" affects="removePaddingMargin">
-          {formatDate(row.original.currentCycleStartAt, row.original.timezone)}
-        </Typography>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <AlertCircle className="size-4 font-light text-muted-foreground" />
-          </TooltipTrigger>
-          <TooltipContent align="start" side="right" sideOffset={10} alignOffset={-5}>
-            <div className="flex flex-col gap-1">
-              <Typography variant="p" affects="removePaddingMargin" className="font-semibold">
-                Timezone: {row.original.timezone}
-              </Typography>
-              <Separator className="my-1" />
-              <Typography variant="p" affects="removePaddingMargin" className="text-xs">
-                <span className="font-semibold">Local time: </span>
-                {format(
-                  toZonedTime(row.original.currentCycleStartAt, row.original.timezone),
-                  "PPpp"
-                )}
-              </Typography>
-
-              <Typography variant="p" affects="removePaddingMargin" className="text-xs">
-                <span className="font-semibold">Customer time: </span>
-                {format(new Date(row.original.currentCycleStartAt), "PPpp")}
-              </Typography>
-            </div>
-          </TooltipContent>
-        </Tooltip>
-      </div>
+      <SubscriptionDateCell
+        subscription={row.original}
+        timestamp={row.original.currentCycleStartAt}
+        tooltipSide="right"
+      />
     ),
     enableSorting: true,
     enableHiding: true,
@@ -157,47 +197,27 @@ export const columns: ColumnDef<Subscription>[] = [
   {
     accessorKey: "currentCycleEndAt",
     header: ({ column }) => <DataTableColumnHeader column={column} title="End current cycle" />,
-    cell: ({ row }) => {
-      const endDate = row.original.currentCycleEndAt
-
-      if (endDate === null || endDate === undefined) {
-        return (
-          <Typography variant="p" affects="removePaddingMargin">
-            Forever
-          </Typography>
-        )
-      }
-
-      return (
-        <div className="flex items-center space-x-1 whitespace-nowrap">
-          <Typography variant="p" affects="removePaddingMargin">
-            {formatDate(endDate, row.original.timezone)}
-          </Typography>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <AlertCircle className="size-4 font-light text-muted-foreground" />
-            </TooltipTrigger>
-            <TooltipContent align="start" side="bottom" sideOffset={10} alignOffset={-5}>
-              <div className="flex flex-col gap-1">
-                <Typography variant="p" affects="removePaddingMargin" className="font-semibold">
-                  Timezone: {row.original.timezone}
-                </Typography>
-                <Separator className="my-1" />
-                <Typography variant="p" affects="removePaddingMargin" className="text-xs">
-                  <span className="font-semibold">Local time: </span>
-                  {format(toZonedTime(endDate, row.original.timezone), "PPpp")}
-                </Typography>
-
-                <Typography variant="p" affects="removePaddingMargin" className="text-xs">
-                  <span className="font-semibold">Customer time: </span>
-                  {format(new Date(endDate), "PPpp")}
-                </Typography>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        </div>
-      )
-    },
+    cell: ({ row }) => (
+      <SubscriptionDateCell
+        subscription={row.original}
+        timestamp={row.original.currentCycleEndAt}
+      />
+    ),
+    enableSorting: true,
+    enableHiding: true,
+    size: 40,
+  },
+  {
+    id: "renewalDate",
+    accessorFn: (row) => row.renewAt ?? row.currentCycleEndAt,
+    header: ({ column }) => <DataTableColumnHeader column={column} title="Renewal date" />,
+    cell: ({ row }) => (
+      <SubscriptionDateCell
+        subscription={row.original}
+        timestamp={row.original.renewAt ?? row.original.currentCycleEndAt}
+        emptyLabel="Not scheduled"
+      />
+    ),
     enableSorting: true,
     enableHiding: true,
     size: 40,

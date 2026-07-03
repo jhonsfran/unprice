@@ -1,7 +1,7 @@
 import type { Database } from "@unprice/db"
 import { Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { fromLedgerAmount, toLedgerMinor } from "@unprice/money"
+import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
 import { describe, expect, it, vi } from "vitest"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { signUp } from "./sign-up"
@@ -101,7 +101,7 @@ describe("customer signUp payment provider guard", () => {
   })
 
   it("allows sandbox signup and stores capped credit line at ledger scale", async () => {
-    const expectedCreditLineAmount = toLedgerMinor(fromLedgerAmount("100", "USD"))
+    const expectedCreditLineAmount = toLedgerMinor(fromCurrencyMinor(10_000, "USD"))
     let insertCount = 0
     const tx = {
       insert: vi.fn(() => {
@@ -187,7 +187,7 @@ describe("customer signUp payment provider guard", () => {
           cancelUrl: "https://example.com/cancel",
           defaultCurrency: "USD",
           creditLinePolicy: "capped",
-          creditLineAmount: 100,
+          creditLineAmountMinor: 10_000,
         } as never,
       }
     )

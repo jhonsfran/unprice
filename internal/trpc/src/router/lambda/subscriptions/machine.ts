@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { toSubscriptionMachineTrpcError } from "./machine-errors"
 
 export const machine = protectedProjectProcedure
   .input(
@@ -32,10 +33,7 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
+          throw toSubscriptionMachineTrpcError(err)
         }
 
         return {
@@ -59,10 +57,7 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
+          throw toSubscriptionMachineTrpcError(err)
         }
         return {
           providerInvoiceId: val.providerInvoiceId,
@@ -79,10 +74,7 @@ export const machine = protectedProjectProcedure
           now: Date.now(),
         })
         if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
+          throw toSubscriptionMachineTrpcError(err)
         }
         return {
           status: val.status,
@@ -97,10 +89,7 @@ export const machine = protectedProjectProcedure
         })
 
         if (err) {
-          throw new TRPCError({
-            code: "INTERNAL_SERVER_ERROR",
-            message: err.message,
-          })
+          throw toSubscriptionMachineTrpcError(err)
         }
 
         return {

@@ -246,6 +246,7 @@ describe("Unprice client", () => {
       requests.push(request.clone())
       return createJsonResponse({
         allowed: true,
+        idempotencyStatus: "already_reported",
         state: "processed",
       })
     })
@@ -262,6 +263,7 @@ describe("Unprice client", () => {
 
     expect(error).toBeUndefined()
     expect(result?.allowed).toBe(true)
+    expect(result?.idempotencyStatus).toBe("already_reported")
     expect(requests[0]?.method).toBe("POST")
     expect(requests[0]?.url).toBe("https://example.com/v1/usage/consume")
     await expect(requests[0]?.json()).resolves.toEqual({

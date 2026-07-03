@@ -9,7 +9,10 @@ import type {
   IngestionEntitlement,
   PreparedCustomerGrantContext,
 } from "./entitlement-context"
-import { resolveCustomerGrantContextWindow } from "./entitlement-context"
+import {
+  hasBillingPeriodCoveringEvent,
+  resolveCustomerGrantContextWindow,
+} from "./entitlement-context"
 import { IngestionEntitlementRouter } from "./entitlement-routing"
 import type { IngestionQueueMessage } from "./message"
 
@@ -79,7 +82,7 @@ export class IngestionRunEntitlementResolver implements RunEntitlementResolver {
     if (
       !resolution.ok ||
       this.subscriptionCatchUp === undefined ||
-      hasBillingPeriodCovering(resolution.entitlement, eventTimestamp)
+      hasBillingPeriodCoveringEvent(resolution.entitlement, eventTimestamp)
     ) {
       return resolution
     }
@@ -189,10 +192,4 @@ function buildRunEntitlementMessage(params: {
       sourceName: null,
     },
   }
-}
-
-function hasBillingPeriodCovering(entitlement: IngestionEntitlement, eventTimestamp: number) {
-  return entitlement.billingPeriods.some(
-    (period) => period.cycleStartAt <= eventTimestamp && eventTimestamp < period.cycleEndAt
-  )
 }

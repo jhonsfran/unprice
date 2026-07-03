@@ -15,7 +15,15 @@ type WalletCredit = RouterOutputs["customers"]["getWallet"]["wallet"]["credits"]
 }
 
 function statusVariant(status: WalletCredit["status"]) {
-  return status === "active" ? "success" : "destructive"
+  if (status === "active") {
+    return "success"
+  }
+
+  if (status === "consumed") {
+    return "secondary"
+  }
+
+  return "destructive"
 }
 
 function formatWalletDate(date: WalletCredit["expiresAt"] | WalletCredit["createdAt"]) {

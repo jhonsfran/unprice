@@ -35,14 +35,12 @@ export default async function CustomerPage({
       <Suspense
         fallback={
           <DataTableSkeleton
-            columnCount={11}
+            columnCount={9}
             searchableColumnCount={1}
             filterableColumnCount={2}
             cellWidths={[
-              "10rem",
+              "4rem",
               "40rem",
-              "12rem",
-              "12rem",
               "12rem",
               "12rem",
               "12rem",

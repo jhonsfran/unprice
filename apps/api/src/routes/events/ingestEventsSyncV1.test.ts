@@ -79,12 +79,18 @@ describe("ingestEventsSyncV1 route", () => {
     vi.setSystemTime(new Date(requestBody.timestamp))
 
     const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+    ingestFeatureSync.mockResolvedValueOnce({
+      allowed: true,
+      idempotencyStatus: "already_reported",
+      state: "processed",
+    })
 
     const response = await app.fetch(buildRequest(), env, executionCtx)
 
     expect(response.status).toBe(200)
     await expect(response.json()).resolves.toEqual({
       allowed: true,
+      idempotencyStatus: "already_reported",
       state: "processed",
     })
     expect(ingestFeatureSync).toHaveBeenCalledWith({
@@ -324,6 +330,7 @@ function createTestApp() {
   const app = new OpenAPIHono<HonoEnv>()
   const ingestFeatureSync = vi.fn().mockResolvedValue({
     allowed: true,
+    idempotencyStatus: "new",
     state: "processed",
   })
   const logger = createRouteLogger()

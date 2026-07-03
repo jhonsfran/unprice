@@ -278,6 +278,7 @@ describe("IngestionService entitlement routing", () => {
 
     expect(result).toEqual({
       allowed: false,
+      idempotencyStatus: "new",
       message: "Wallet empty for meter api_calls (reservation res_123)",
       rejectionReason: "WALLET_EMPTY",
       state: "rejected",
@@ -395,6 +396,7 @@ describe("IngestionService entitlement routing", () => {
 
     expect(retry).toEqual({
       allowed: true,
+      idempotencyStatus: "new",
       state: "processed",
     })
     expect(apply).toHaveBeenCalledTimes(2)
@@ -433,6 +435,7 @@ describe("IngestionService entitlement routing", () => {
 
     expect(result).toEqual({
       allowed: true,
+      idempotencyStatus: "new",
       state: "processed",
     })
     expect(send).toHaveBeenCalledTimes(1)
@@ -1784,10 +1787,20 @@ function createReportingMeterFact(
   }
 }
 
+function createBillingPeriod() {
+  return {
+    billingPeriodId: "bp_123",
+    cycleEndAt: SERVICE_NOW + 86_400_000,
+    cycleStartAt: SERVICE_NOW - 86_400_000,
+    featurePlanVersionItemId: "item_123",
+    statementKey: "stmt_123",
+  }
+}
+
 function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): IngestionEntitlement {
   return {
-    billingPeriods: [],
-    creditLinePolicy: "capped",
+    billingPeriods: [createBillingPeriod()],
+    creditLinePolicy: "uncapped",
     customerEntitlementId: "ce_123",
     customerId: "cus_123",
     effectiveAt: Date.UTC(2026, 2, 1),

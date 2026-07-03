@@ -78,16 +78,13 @@ export default async function PlanSubscriptionsPage({
         <Suspense
           fallback={
             <DataTableSkeleton
-              columnCount={12}
+              columnCount={9}
               rowCount={1}
               searchableColumnCount={1}
               filterableColumnCount={2}
               cellWidths={[
-                "10rem",
+                "4rem",
                 "40rem",
-                "12rem",
-                "12rem",
-                "12rem",
                 "12rem",
                 "12rem",
                 "12rem",

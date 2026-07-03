@@ -2,7 +2,11 @@ import type { AnalyticsEntitlementMeterFact } from "@unprice/analytics"
 import type { MeterConfig } from "@unprice/db/validators"
 import type { IngestionEntitlement, IngestionGrant } from "./entitlement-context"
 import { getMessageOutcomeKey } from "./fanout-outcomes"
-import type { EntitlementWindowState, IngestionRejectionReason } from "./interface"
+import type {
+  EntitlementWindowState,
+  IngestionIdempotencyStatus,
+  IngestionRejectionReason,
+} from "./interface"
 import type { IngestionQueueMessage } from "./message"
 
 type EntitlementWindowApplySource = IngestionQueueMessage["source"] & {
@@ -15,6 +19,7 @@ export type EntitlementWindowApplyResult = {
     IngestionRejectionReason,
     "LIMIT_EXCEEDED" | "WALLET_EMPTY" | "LATE_EVENT_CLOSED_PERIOD" | "RUN_BUDGET_EXCEEDED"
   >
+  idempotencyStatus?: IngestionIdempotencyStatus
   meterFacts?: AnalyticsEntitlementMeterFact[]
   message?: string
 }

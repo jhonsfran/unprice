@@ -97,7 +97,7 @@ const { result, error } = await unprice.customers.signUp({
   name: "Acme Inc.",
   email: "billing@acme.test",
   creditLinePolicy: "capped",
-  creditLineAmount: 100,
+  creditLineAmountMinor: 10000,
   successUrl: "http://your-app.com/dashboard",
   cancelUrl: "http://your-app.com/failed",
 })
@@ -406,7 +406,7 @@ await fetch(baseUrl + "/v1/customers/sign-up", {
     name: "Acme Inc.",
     email: "billing@acme.test",
     creditLinePolicy: "capped",
-    creditLineAmount: 100,
+    creditLineAmountMinor: 10000,
     successUrl: "http://your-app.com/dashboard",
     cancelUrl: "http://your-app.com/failed",
   }),
@@ -1108,7 +1108,7 @@ function buildCurlExample(currentMethod: method, params?: SDKExampleParams) {
   "name": "Acme Inc.",
   "email": "billing@acme.test",
   "creditLinePolicy": "capped",
-  "creditLineAmount": 100,
+  "creditLineAmountMinor": 10000,
   "successUrl": "http://your-app.com/dashboard",
   "cancelUrl": "http://your-app.com/failed"
 }`,

@@ -3650,6 +3650,12 @@
                       "description": "Synchronous ingestion lifecycle state for the targeted feature",
                       "example": "processed"
                     },
+                    "idempotencyStatus": {
+                      "type": "string",
+                      "enum": ["new", "already_reported"],
+                      "description": "Whether this request applied a new idempotency key or replayed a previously reported event",
+                      "example": "already_reported"
+                    },
                     "rejectionReason": {
                       "type": "string",
                       "enum": [
@@ -3673,7 +3679,7 @@
                       "example": "Limit exceeded for meter meter_123"
                     }
                   },
-                  "required": ["allowed", "state"]
+                  "required": ["allowed", "state", "idempotencyStatus"]
                 }
               }
             }

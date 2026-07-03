@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import {
+  billingConfigSchema,
   customerSelectSchema,
   subscriptionInvoiceSelectSchema,
   subscriptionPhaseSelectSchema,
@@ -13,6 +14,7 @@ const getSubscriptionsOutputSchema = z.object({
     .extend({
       subscriptions: subscriptionSelectSchema
         .extend({
+          billingConfig: billingConfigSchema.nullable(),
           customer: customerSelectSchema,
           phases: subscriptionPhaseSelectSchema.array(),
         })

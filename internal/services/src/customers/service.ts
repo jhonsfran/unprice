@@ -649,6 +649,13 @@ export class CustomerService {
               phases: {
                 where: (table, { and, gte, lte, isNull, or }) =>
                   and(lte(table.startAt, now), or(isNull(table.endAt), gte(table.endAt, now))),
+                with: {
+                  planVersion: {
+                    columns: {
+                      billingConfig: true,
+                    },
+                  },
+                },
                 orderBy: (table, { desc }) => [desc(table.startAt)],
                 limit: 1,
               },
@@ -678,7 +685,17 @@ export class CustomerService {
       return Err(err)
     }
 
-    return Ok(val ?? null)
+    if (!val) {
+      return Ok(null)
+    }
+
+    return Ok({
+      ...val,
+      subscriptions: val.subscriptions.map((subscription) => ({
+        ...subscription,
+        billingConfig: subscription.phases[0]?.planVersion?.billingConfig ?? null,
+      })),
+    })
   }
 
   public async getCustomerRuns({

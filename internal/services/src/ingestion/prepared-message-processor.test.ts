@@ -82,7 +82,7 @@ describe("IngestionPreparedMessageProcessor", () => {
     ]
 
     const outcomes = await processor.process({
-      candidateEntitlements: [createEntitlement()],
+      candidateEntitlements: [createEntitlement({ billingPeriods: [createBillingPeriod()] })],
       customerId: "cus_123",
       projectId: "proj_123",
       messages,
@@ -93,6 +93,57 @@ describe("IngestionPreparedMessageProcessor", () => {
     )
     expect(applyBatch).toHaveBeenCalledTimes(2)
     expect(applyBatch.mock.calls.map(([input]) => input.messages.length)).toEqual([2, 1])
+  })
+
+  it("rejects capped entitlement usage without a covering billing period before applying windows", async () => {
+    const applyBatch = vi.fn()
+    const processor = createProcessor({ applyBatch })
+    const message = createMessage()
+
+    const outcomes = await processor.process({
+      candidateEntitlements: [createEntitlement()],
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [message],
+    })
+
+    expect(outcomes).toEqual([
+      {
+        message,
+        outcome: {
+          state: "rejected",
+          rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+        },
+      },
+    ])
+    expect(applyBatch).not.toHaveBeenCalled()
+  })
+
+  it("applies uncapped entitlement usage without billing period context", async () => {
+    const applyBatch = vi.fn().mockImplementation(
+      (input: {
+        messageOutcomeKeys: ReadonlyMap<IngestionQueueMessage, string>
+        messages: IngestionQueueMessage[]
+      }) =>
+        Promise.resolve(
+          input.messages.map((message) => ({
+            allowed: true,
+            correlationKey: getMessageOutcomeKey(message, input.messageOutcomeKeys),
+          }))
+        )
+    )
+    const processor = createProcessor({ applyBatch })
+    const message = createMessage()
+
+    const outcomes = await processor.process({
+      candidateEntitlements: [createEntitlement({ creditLinePolicy: "uncapped" })],
+      customerId: "cus_123",
+      projectId: "proj_123",
+      messages: [message],
+    })
+
+    expect(outcomes).toEqual([{ message, outcome: { state: "processed" } }])
+    expect(applyBatch).toHaveBeenCalledTimes(1)
   })
 
   it("records concrete apply denials as rejected outcomes", async () => {
@@ -114,7 +165,7 @@ describe("IngestionPreparedMessageProcessor", () => {
     const message = createMessage()
 
     const outcomes = await processor.process({
-      candidateEntitlements: [createEntitlement()],
+      candidateEntitlements: [createEntitlement({ billingPeriods: [createBillingPeriod()] })],
       customerId: "cus_123",
       projectId: "proj_123",
       messages: [message],
@@ -223,6 +274,19 @@ function createEntitlement(overrides: Partial<IngestionEntitlement> = {}): Inges
     projectId: "proj_123",
     resetConfig: null,
     subscriptionItemId: null,
+    ...overrides,
+  }
+}
+
+function createBillingPeriod(
+  overrides: Partial<IngestionEntitlement["billingPeriods"][number]> = {}
+): IngestionEntitlement["billingPeriods"][number] {
+  return {
+    billingPeriodId: "bp_123",
+    cycleEndAt: TEST_NOW + 60_000,
+    cycleStartAt: TEST_NOW - 60_000,
+    featurePlanVersionItemId: "fpvi_123",
+    statementKey: "stmt_123",
     ...overrides,
   }
 }

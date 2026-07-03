@@ -52,6 +52,7 @@ describe("batch apply helpers", () => {
     ).toEqual({
       allowed: false,
       deniedReason: "LIMIT_EXCEEDED",
+      idempotencyStatus: "already_reported",
       message: "Limit exceeded",
     })
   })
@@ -103,6 +104,7 @@ describe("batch apply helpers", () => {
       allowed: true,
       correlationKey: "corr_456",
       idempotencyKey: "idem_456",
+      idempotencyStatus: "already_reported",
     })
   })
 

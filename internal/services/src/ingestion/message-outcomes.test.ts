@@ -141,7 +141,17 @@ describe("message disposition helpers", () => {
 
     expect(toSyncResult({ allowed: false, message: "limit reached", outcome })).toEqual({
       allowed: false,
+      idempotencyStatus: "new",
       message: "limit reached",
+      rejectionReason: "LIMIT_EXCEEDED",
+      state: "rejected",
+    })
+
+    expect(
+      toSyncResult({ allowed: false, idempotencyStatus: "already_reported", outcome })
+    ).toEqual({
+      allowed: false,
+      idempotencyStatus: "already_reported",
       rejectionReason: "LIMIT_EXCEEDED",
       state: "rejected",
     })

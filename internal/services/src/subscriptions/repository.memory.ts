@@ -1,5 +1,6 @@
 import type { Database } from "@unprice/db"
 import type {
+  BillingConfig,
   Customer,
   Subscription,
   SubscriptionItem,
@@ -200,6 +201,7 @@ export class InMemorySubscriptionRepository implements SubscriptionRepository {
   async listSubscriptionsByProject(
     input: ListSubscriptionsByProjectInput
   ): Promise<ListSubscriptionsResult> {
+    const now = input.now ?? Date.now()
     let filtered = this.subscriptions.filter((s) => s.projectId === input.projectId)
 
     if (input.from != null) {
@@ -217,7 +219,22 @@ export class InMemorySubscriptionRepository implements SubscriptionRepository {
 
     const withCustomer = paged.map((sub) => {
       const customer = this.customers.find((c) => c.id === sub.customerId)
-      return { ...sub, customer: customer ?? ({} as Customer) }
+      const activePhase = this.phases.find(
+        (phase) =>
+          phase.subscriptionId === sub.id &&
+          phase.projectId === sub.projectId &&
+          phase.startAt <= now &&
+          (phase.endAt == null || phase.endAt >= now)
+      )
+      const planVersion = activePhase
+        ? (this.planVersionsByPhaseId.get(activePhase.id) as { billingConfig?: BillingConfig })
+        : null
+
+      return {
+        ...sub,
+        billingConfig: planVersion?.billingConfig ?? null,
+        customer: customer ?? ({} as Customer),
+      }
     })
 
     return {

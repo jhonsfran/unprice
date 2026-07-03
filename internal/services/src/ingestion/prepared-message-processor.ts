@@ -1,11 +1,16 @@
 import type { Logger } from "@unprice/logs"
-import type { IngestionCandidateEntitlements, IngestionEntitlement } from "./entitlement-context"
+import {
+  hasBillingPeriodCoveringEvent,
+  type IngestionCandidateEntitlements,
+  type IngestionEntitlement,
+} from "./entitlement-context"
 import type { IngestionEntitlementRouter } from "./entitlement-routing"
 import type { EntitlementWindowApplier } from "./entitlement-window-applier"
 import {
   AsyncFanoutOutcomeAccumulator,
   type FanoutMessageOutcome as MessageOutcome,
   buildMessageOutcomeKeys,
+  getMessageOutcomeKey,
 } from "./fanout-outcomes"
 import type { IngestionRejectionReason } from "./interface"
 import type { IngestionQueueMessage } from "./message"
@@ -129,7 +134,14 @@ export class IngestionPreparedMessageProcessor {
   }): Promise<void> {
     const { customerId, fanoutOutcomes, messageOutcomeKeys, projectId } = params
     for (const group of fanoutOutcomes.getApplyGroups()) {
-      for (const chunk of chunkArray(group.messages, this.entitlementApplyBatchSize)) {
+      const messages = this.filterMessagesWithBillingPeriodContext({
+        entitlement: group.entitlement,
+        fanoutOutcomes,
+        messageOutcomeKeys,
+        messages: group.messages,
+      })
+
+      for (const chunk of chunkArray(messages, this.entitlementApplyBatchSize)) {
         const batchResults = await this.entitlementWindowApplier.applyBatch({
           customerId,
           enforceLimit: false,
@@ -144,6 +156,33 @@ export class IngestionPreparedMessageProcessor {
         }
       }
     }
+  }
+
+  private filterMessagesWithBillingPeriodContext(params: {
+    entitlement: IngestionEntitlement
+    fanoutOutcomes: AsyncFanoutOutcomeAccumulator<IngestionEntitlement>
+    messageOutcomeKeys: ReadonlyMap<IngestionQueueMessage, string>
+    messages: IngestionQueueMessage[]
+  }): IngestionQueueMessage[] {
+    if (!requiresBillingPeriodContext(params.entitlement)) {
+      return params.messages
+    }
+
+    const messages: IngestionQueueMessage[] = []
+    for (const message of params.messages) {
+      if (hasBillingPeriodCoveringEvent(params.entitlement, message.timestamp)) {
+        messages.push(message)
+        continue
+      }
+
+      params.fanoutOutcomes.recordApplyResult({
+        allowed: false,
+        correlationKey: getMessageOutcomeKey(message, params.messageOutcomeKeys),
+        deniedReason: "LATE_EVENT_CLOSED_PERIOD",
+      })
+    }
+
+    return messages
   }
 
   private logRejectedOutcomes(params: {
@@ -173,4 +212,8 @@ function chunkArray<T>(values: T[], size: number): T[][] {
     chunks.push(values.slice(index, index + size))
   }
   return chunks
+}
+
+function requiresBillingPeriodContext(entitlement: IngestionEntitlement): boolean {
+  return entitlement.creditLinePolicy !== "uncapped"
 }

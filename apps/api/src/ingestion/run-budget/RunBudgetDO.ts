@@ -162,6 +162,19 @@ export class RunBudgetDO extends DurableObject {
     // Compute remaining budget
     const remainingAmount = Math.max(0, run.budgetAmount - run.consumedAmount)
 
+    const missingBillingPeriodDecision = this.rejectMissingBillingPeriodContext(input, run)
+    if (missingBillingPeriodDecision) {
+      await this.persistIdempotency(
+        this.db,
+        input.idempotencyKey,
+        input.runId,
+        missingBillingPeriodDecision,
+        0,
+        []
+      )
+      return missingBillingPeriodDecision
+    }
+
     // Delegate pricing to EntitlementWindowDO with external reservation mode
     const entitlementResult = await this.callEntitlementWindow(input, remainingAmount)
 
@@ -874,6 +887,29 @@ export class RunBudgetDO extends DurableObject {
     }
 
     return period
+  }
+
+  private rejectMissingBillingPeriodContext(
+    input: ApplyRunSyncEventInput,
+    run: RunStateRow
+  ): RunBudgetDecision | null {
+    const billingPeriod = input.entitlement.billingPeriods.find(
+      (period) =>
+        period.cycleStartAt <= input.event.timestamp && input.event.timestamp < period.cycleEndAt
+    )
+
+    if (billingPeriod) {
+      return null
+    }
+
+    return {
+      allowed: false,
+      state: "rejected",
+      rejectionReason: "LATE_EVENT_CLOSED_PERIOD",
+      message: "No active billing period covers this event timestamp",
+      budget: this.toSummary(run),
+      meterFacts: [],
+    }
   }
 
   private projectRunSpend(run: RunStateRow, pricedAmount: number, now: number): RunStateRow {

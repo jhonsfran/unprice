@@ -13,7 +13,7 @@ import { WalletBalanceSummary } from "../../_components/wallet/wallet-balance-su
 
 export const dynamic = "force-dynamic"
 
-const walletCreditStatuses = ["active", "expired"] as const
+const walletCreditStatuses = ["active", "consumed", "expired"] as const
 
 export default async function CustomerWalletPage({
   params,
@@ -45,7 +45,7 @@ export default async function CustomerWalletPage({
       <div>
         <SectionIntro
           title="Wallet credits by source"
-          description="Purchased and granted credits show issued, consumed, available, expiry, and status for this customer."
+          description="Active, expired, and fully consumed credits show issued, consumed, available, expiry, and status for this customer."
         />
         <Suspense
           fallback={

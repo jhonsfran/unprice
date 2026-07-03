@@ -397,6 +397,7 @@ function createWalletReservationRefillTrigger(
 export function idempotencyEntryToApplyResult(entry: BatchIdempotencyEntry): ApplyResult {
   const result: ApplyResult = {
     allowed: entry.allowed,
+    idempotencyStatus: "already_reported",
   }
   const meterFacts = nonEmptyMeterFacts(entry.meterFacts)
   if (entry.deniedReason !== null) {

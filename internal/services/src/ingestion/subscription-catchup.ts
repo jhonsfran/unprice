@@ -1,7 +1,11 @@
 import type { Subscription } from "@unprice/db/validators"
 import type { Logger } from "@unprice/logs"
 import type { SubscriptionService } from "../subscriptions/service"
-import type { IngestionCandidateEntitlements, IngestionEntitlement } from "./entitlement-context"
+import {
+  type IngestionCandidateEntitlements,
+  type IngestionEntitlement,
+  hasBillingPeriodCoveringEvent,
+} from "./entitlement-context"
 import type { IngestionQueueMessage } from "./message"
 
 export type IngestionSubscriptionCatchUpService = Pick<
@@ -171,7 +175,7 @@ function collectSubscriptionIdsNeedingCatchUp(params: {
       continue
     }
 
-    if (hasBillingPeriodCovering(entitlement, params.eventAt)) {
+    if (hasBillingPeriodCoveringEvent(entitlement, params.eventAt)) {
       continue
     }
 
@@ -191,12 +195,6 @@ function isRelevantUsageEntitlement(
     entitlement.featureType === "usage" &&
     entitlement.meterConfig !== null &&
     eventSlugs.has(entitlement.meterConfig.eventSlug)
-  )
-}
-
-function hasBillingPeriodCovering(entitlement: IngestionEntitlement, eventAt: number): boolean {
-  return entitlement.billingPeriods.some(
-    (period) => period.cycleStartAt <= eventAt && eventAt < period.cycleEndAt
   )
 }
 

@@ -1,4 +1,4 @@
-import { type Database, and, asc, eq, gt, inArray, isNull, or, sql } from "@unprice/db"
+import { type Database, and, asc, desc, eq, gt, inArray, isNull, or, sql } from "@unprice/db"
 import {
   entitlementReservationFundingLegs,
   entitlementReservations,
@@ -218,6 +218,12 @@ export interface ExpireGrantInput {
 export interface GetWalletStateInput {
   projectId: string
   customerId: string
+  /**
+   * Include expired and fully consumed credits in the returned credit list.
+   * Public balance reads keep the default active-only view; admin/customer
+   * dashboards use this to reconcile historical wallet consumption.
+   */
+  includeInactiveCredits?: boolean
 }
 
 export interface GetWalletCreditBalanceInput {
@@ -1370,16 +1376,37 @@ export class WalletService {
 
   /**
    * Read-only snapshot of the customer's wallet: the four sub-account
-   * balances and the list of active credits (not expired, not voided,
-   * `remaining_amount > 0`). Missing ledger accounts report zero — a
-   * customer who has never transacted is not an error, just an empty
-   * wallet. No advisory lock: balances are eventually consistent with
-   * in-flight writes, which is what a read endpoint wants.
+   * balances plus the credit rows used to explain them. By default the
+   * credit list is active-only (not expired, not voided, `remaining_amount > 0`);
+   * admin/dashboard reads can include inactive rows for historical reconciliation.
+   *
+   * Missing ledger accounts report zero — a customer who has never transacted is
+   * not an error, just an empty wallet. No advisory lock: balances are eventually
+   * consistent with in-flight writes, which is what a read endpoint wants.
    */
   public async getWalletState(
     input: GetWalletStateInput
   ): Promise<Result<WalletStateOutput, UnPriceWalletError>> {
     const keys = customerAccountKeys(input.customerId)
+    const creditWhere = input.includeInactiveCredits
+      ? and(
+          eq(walletCredits.customerId, input.customerId),
+          eq(walletCredits.projectId, input.projectId),
+          isNull(walletCredits.voidedAt)
+        )
+      : and(
+          eq(walletCredits.customerId, input.customerId),
+          eq(walletCredits.projectId, input.projectId),
+          isNull(walletCredits.expiredAt),
+          isNull(walletCredits.voidedAt),
+          gt(walletCredits.remainingAmount, 0)
+        )
+    const creditOrderBy = input.includeInactiveCredits
+      ? [desc(walletCredits.createdAt)]
+      : [
+          sql`COALESCE(${walletCredits.expiresAt}, 'infinity'::timestamptz) ASC`,
+          asc(walletCredits.createdAt),
+        ]
 
     try {
       const [purchased, granted, reserved, consumed, walletConsumed, credits] = await Promise.all([
@@ -1389,17 +1416,8 @@ export class WalletService {
         this.readBalance(this.db, keys.consumed),
         this.readWalletConsumedAmount(input),
         this.db.query.walletCredits.findMany({
-          where: and(
-            eq(walletCredits.customerId, input.customerId),
-            eq(walletCredits.projectId, input.projectId),
-            isNull(walletCredits.expiredAt),
-            isNull(walletCredits.voidedAt),
-            gt(walletCredits.remainingAmount, 0)
-          ),
-          orderBy: [
-            sql`COALESCE(${walletCredits.expiresAt}, 'infinity'::timestamptz) ASC`,
-            asc(walletCredits.createdAt),
-          ],
+          where: creditWhere,
+          orderBy: creditOrderBy,
         }),
       ])
 

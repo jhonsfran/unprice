@@ -25,7 +25,7 @@ export const customerWalletBalancesSchema = z.object({
   subscriptionCharges: z.number().int().nonnegative(),
 })
 
-export const walletCreditStatusSchema = z.enum(["active", "expired"])
+export const walletCreditStatusSchema = z.enum(["active", "consumed", "expired"])
 
 export const customerWalletCreditSchema = walletCreditSelectSchema.extend({
   consumedAmount: z.number().int().nonnegative(),
@@ -82,6 +82,7 @@ export async function getCustomerWallet(
   const walletResult = await deps.services.wallet.getWalletState({
     projectId: input.projectId,
     customerId: input.customerId,
+    includeInactiveCredits: true,
   })
 
   if (walletResult.err) {
@@ -113,13 +114,28 @@ function toCustomerWalletCredit(
   credit: WalletCreditWithConsumption,
   now: Date
 ): CustomerWalletCredit {
-  const status = isExpired(credit, now) ? "expired" : "active"
+  const status = getWalletCreditStatus(credit, now)
 
   return {
     ...credit,
     status,
-    usableAmount: status === "active" ? credit.remainingAmount : 0,
+    usableAmount: status === "active" ? Math.max(0, credit.remainingAmount) : 0,
   }
+}
+
+function getWalletCreditStatus(
+  credit: WalletCreditWithConsumption,
+  now: Date
+): CustomerWalletCredit["status"] {
+  if (credit.remainingAmount <= 0 && credit.consumedAmount > 0) {
+    return "consumed"
+  }
+
+  if (isExpired(credit, now)) {
+    return "expired"
+  }
+
+  return "active"
 }
 
 function isExpired(credit: WalletCredit, now: Date): boolean {

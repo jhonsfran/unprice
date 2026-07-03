@@ -20,10 +20,26 @@ const resetEveryFiveMinutes = {
   planType: "recurring",
 } satisfies ResetConfig
 
+const resetEveryFifteenMinutes = {
+  name: "every-15-minutes",
+  resetInterval: "minute",
+  resetIntervalCount: 15,
+  resetAnchor: "dayOfCreation",
+  planType: "recurring",
+} satisfies ResetConfig
+
 const billingEveryFiveMinutes = {
   name: "every-5-minutes",
   billingInterval: "minute",
   billingIntervalCount: 5,
+  billingAnchor: "dayOfCreation",
+  planType: "recurring",
+} satisfies BillingConfig
+
+const billingEveryFifteenMinutes = {
+  name: "every-15-minutes",
+  billingInterval: "minute",
+  billingIntervalCount: 15,
   billingAnchor: "dayOfCreation",
   planType: "recurring",
 } satisfies BillingConfig
@@ -50,7 +66,7 @@ describe("getCustomerCurrentAccess", () => {
         grantId: "grant_events",
         resetConfig: resetEveryFiveMinutes,
       },
-      now - 1
+      now
     )?.periodKey
 
     expect(expectedPeriodKey).toBeDefined()
@@ -99,6 +115,162 @@ describe("getCustomerCurrentAccess", () => {
       result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "customers")
         ?.currentUsage
     ).toBe(7)
+    expect(
+      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "customers")
+        ?.usagePeriods
+    ).toEqual([
+      expect.objectContaining({
+        periodKey: expectedPeriodKey,
+      }),
+    ])
+  })
+
+  it("loads each usage entitlement by its own current reset period", async () => {
+    const currentNow = Date.parse("2026-06-30T21:09:45.000Z")
+    const events = usageEntitlement({
+      featureSlug: "events",
+      featureTitle: "Events",
+      grantId: "grant_events",
+      resetConfig: resetEveryFiveMinutes,
+      billingConfig: billingEveryFiveMinutes,
+    })
+    const customers = usageEntitlement({
+      id: "ce_customers",
+      featureSlug: "customers",
+      featureTitle: "Customers",
+      grantId: "grant_customers",
+      resetConfig: resetEveryFifteenMinutes,
+      billingConfig: billingEveryFifteenMinutes,
+    })
+    const eventsPeriod = computeGrantPeriodBucket(
+      {
+        cadenceEffectiveAt: entitlementEffectiveAt,
+        cadenceExpiresAt: null,
+        effectiveAt: entitlementEffectiveAt,
+        expiresAt: null,
+        grantId: "grant_events",
+        resetConfig: resetEveryFiveMinutes,
+      },
+      currentNow
+    )
+    const customersPeriod = computeGrantPeriodBucket(
+      {
+        cadenceEffectiveAt: entitlementEffectiveAt,
+        cadenceExpiresAt: null,
+        effectiveAt: entitlementEffectiveAt,
+        expiresAt: null,
+        grantId: "grant_customers",
+        resetConfig: resetEveryFifteenMinutes,
+      },
+      currentNow
+    )
+
+    expect(eventsPeriod).toBeDefined()
+    expect(customersPeriod).toBeDefined()
+    expect(eventsPeriod?.periodKey).not.toBe(customersPeriod?.periodKey)
+
+    const { deps, analytics } = makeDeps({
+      entitlements: [events, customers],
+      nowAt: currentNow,
+      periodRowsByPeriodKey: new Map([
+        [eventsPeriod!.periodKey, [periodRow({ feature_slug: "events", usage: 4 })]],
+        [customersPeriod!.periodKey, [periodRow({ feature_slug: "customers", usage: 9 })]],
+      ]),
+    })
+
+    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
+
+    expect(result.err).toBeUndefined()
+    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledTimes(2)
+    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
+      project_id: projectId,
+      customer_id: customerId,
+      period_key: eventsPeriod!.periodKey,
+      feature_slugs: ["events"],
+    })
+    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
+      project_id: projectId,
+      customer_id: customerId,
+      period_key: customersPeriod!.periodKey,
+      feature_slugs: ["customers"],
+    })
+
+    expect(
+      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "events")
+    ).toEqual(
+      expect.objectContaining({
+        currentUsage: 4,
+        usagePeriods: [
+          {
+            periodKey: eventsPeriod!.periodKey,
+            start: eventsPeriod!.start,
+            end: eventsPeriod!.end,
+          },
+        ],
+      })
+    )
+    expect(
+      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "customers")
+    ).toEqual(
+      expect.objectContaining({
+        currentUsage: 9,
+        usagePeriods: [
+          {
+            periodKey: customersPeriod!.periodKey,
+            start: customersPeriod!.start,
+            end: customersPeriod!.end,
+          },
+        ],
+      })
+    )
+  })
+
+  it("uses the active entitlement period even when the subscription cycle has not advanced", async () => {
+    const events = usageEntitlement({
+      featureSlug: "events",
+      featureTitle: "Events",
+      grantId: "grant_events",
+    })
+    const expectedPeriod = computeGrantPeriodBucket(
+      {
+        cadenceEffectiveAt: entitlementEffectiveAt,
+        cadenceExpiresAt: null,
+        effectiveAt: entitlementEffectiveAt,
+        expiresAt: null,
+        grantId: "grant_events",
+        resetConfig: resetEveryFiveMinutes,
+      },
+      now
+    )
+
+    expect(expectedPeriod).toBeDefined()
+
+    const { deps, analytics } = makeDeps({
+      entitlements: [events],
+      subscription: {
+        ...activeSubscription(),
+        currentCycleStartAt: Date.parse("2026-06-30T20:45:57.000Z"),
+        currentCycleEndAt: Date.parse("2026-06-30T21:00:57.000Z"),
+        renewAt: Date.parse("2026-06-30T21:00:57.000Z"),
+      },
+      periodRowsByPeriodKey: new Map([
+        [expectedPeriod!.periodKey, [periodRow({ feature_slug: "events", usage: 12 })]],
+      ]),
+    })
+
+    const result = await getCustomerCurrentAccess(deps, { projectId, customerId })
+
+    expect(result.err).toBeUndefined()
+    expect(analytics.getFeaturesUsagePeriod).toHaveBeenCalledWith({
+      project_id: projectId,
+      customer_id: customerId,
+      period_key: expectedPeriod!.periodKey,
+      feature_slugs: ["events"],
+    })
+    expect(
+      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "events")
+        ?.currentUsage
+    ).toBe(12)
   })
 
   it("does not call usage analytics when no measured usage entitlement is active", async () => {
@@ -141,9 +313,13 @@ describe("getCustomerCurrentAccess", () => {
 
 function makeDeps({
   entitlements,
+  nowAt = now,
+  subscription = activeSubscription(),
   periodRowsByPeriodKey = new Map<string, FeatureUsagePeriodRow[]>(),
 }: {
   entitlements: unknown[]
+  nowAt?: number
+  subscription?: unknown
   periodRowsByPeriodKey?: Map<string, FeatureUsagePeriodRow[]>
 }) {
   const db = {
@@ -152,7 +328,7 @@ function makeDeps({
         findFirst: vi.fn(async () => ({ id: customerId })),
       },
       subscriptions: {
-        findMany: vi.fn(async () => [activeSubscription()]),
+        findMany: vi.fn(async () => [subscription]),
       },
       customerEntitlements: {
         findMany: vi.fn(async () => entitlements),
@@ -178,7 +354,7 @@ function makeDeps({
       db,
       analytics,
       logger,
-      now: () => now,
+      now: () => nowAt,
     } satisfies GetCustomerCurrentAccessDeps,
   }
 }
@@ -217,6 +393,8 @@ function usageEntitlement({
   grantAllowances = [10_000],
   grantId,
   limit = 10_000,
+  resetConfig = resetEveryFiveMinutes,
+  billingConfig = billingEveryFiveMinutes,
 }: {
   id?: string
   featureSlug: string
@@ -224,6 +402,8 @@ function usageEntitlement({
   grantAllowances?: Array<number | null>
   grantId: string
   limit?: number | null
+  resetConfig?: ResetConfig | null
+  billingConfig?: BillingConfig
 }) {
   return {
     id,
@@ -248,8 +428,8 @@ function usageEntitlement({
         aggregationMethod: "sum",
         aggregationField: "quantity",
       },
-      resetConfig: resetEveryFiveMinutes,
-      billingConfig: billingEveryFiveMinutes,
+      resetConfig,
+      billingConfig,
       feature: {
         id: `feat_${featureSlug}`,
         slug: featureSlug,

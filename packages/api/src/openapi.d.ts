@@ -1383,10 +1383,10 @@ export interface operations {
            */
           creditLinePolicy?: "capped" | "uncapped"
           /**
-           * @description Optional capped usage credit amount in the currency's smallest unit (for example, cents for USD/EUR). Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.
+           * @description Optional capped usage credit amount in the currency's minor unit. For USD/EUR, 10000 means 100.00. Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.
            * @example 10000
            */
-          creditLineAmount?: number | null
+          creditLineAmountMinor?: number | null
           /**
            * @description The external id you want to associate with the customer. Could be the id of the user in your database
            * @example 1234567890
@@ -2525,6 +2525,12 @@ export interface operations {
              * @enum {string}
              */
             state: "processed" | "rejected"
+            /**
+             * @description Whether this request applied a new idempotency key or replayed a previously reported event
+             * @example already_reported
+             * @enum {string}
+             */
+            idempotencyStatus: "new" | "already_reported"
             /**
              * @description Business rejection reason when the event could not be ingested
              * @example LIMIT_EXCEEDED

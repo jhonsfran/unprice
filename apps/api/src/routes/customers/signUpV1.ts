@@ -76,7 +76,7 @@ export const registerSignUpV1 = (app: App) =>
       planSlug,
       billingInterval,
       creditLinePolicy,
-      creditLineAmount,
+      creditLineAmountMinor,
       metadata,
       sessionId,
     } = c.req.valid("json")
@@ -112,7 +112,7 @@ export const registerSignUpV1 = (app: App) =>
           cancelUrl,
           config,
           creditLinePolicy,
-          creditLineAmount,
+          creditLineAmountMinor,
           externalId,
           billingInterval,
           sessionId,

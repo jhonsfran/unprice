@@ -4,7 +4,10 @@ import {
   EventTimestampTooOldError,
   validateEventTimestamp,
 } from "@unprice/services/entitlements"
-import { INGESTION_REJECTION_REASONS } from "@unprice/services/ingestion"
+import {
+  INGESTION_IDEMPOTENCY_STATUSES,
+  INGESTION_REJECTION_REASONS,
+} from "@unprice/services/ingestion"
 import { endTime, startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
@@ -41,6 +44,11 @@ const syncIngestionResultSchema = z.object({
   state: z.enum(["processed", "rejected"]).openapi({
     description: "Synchronous ingestion lifecycle state for the targeted feature",
     example: "processed",
+  }),
+  idempotencyStatus: z.enum(INGESTION_IDEMPOTENCY_STATUSES).openapi({
+    description:
+      "Whether this request applied a new idempotency key or replayed a previously reported event",
+    example: "already_reported",
   }),
   rejectionReason: z.enum(INGESTION_REJECTION_REASONS).optional().openapi({
     description: "Business rejection reason when the event could not be ingested",

@@ -1,5 +1,6 @@
 import type { Database } from "@unprice/db"
 import type {
+  BillingConfig,
   Customer,
   PlanVersion,
   Subscription,
@@ -121,6 +122,7 @@ export interface ListSubscriptionsByProjectInput {
   pageSize: number
   from?: number | null
   to?: number | null
+  now?: number
 }
 
 export interface ListSubscriptionsByPlanVersionInput {
@@ -178,8 +180,13 @@ export type SubscriptionWithPhases = Subscription & {
   >
 }
 
+export type SubscriptionListRow = Subscription & {
+  billingConfig: BillingConfig | null
+  customer: Customer
+}
+
 export interface ListSubscriptionsResult {
-  subscriptions: Array<Subscription & { customer: Customer }>
+  subscriptions: SubscriptionListRow[]
   pageCount: number
 }
 

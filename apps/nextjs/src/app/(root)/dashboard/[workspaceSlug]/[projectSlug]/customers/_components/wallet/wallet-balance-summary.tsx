@@ -41,7 +41,7 @@ export function WalletBalanceSummary({ wallet }: { wallet: CustomerWallet }) {
     },
     {
       label: "Wallet consumed",
-      description: "Usage captured from wallet funds",
+      description: "Lifetime usage captured from wallet credits",
       amount: wallet.balances.walletConsumed,
       variant: "secondary",
     },

@@ -14,6 +14,12 @@ import { computeGrantPeriodBucket, toGrantResetConfigFromBillingConfig } from ".
 
 const entitlementFeatureTypeSchema = z.enum(["flat", "tier", "package", "usage"])
 
+const customerCurrentAccessUsagePeriodSchema = z.object({
+  periodKey: z.string(),
+  start: z.number().int(),
+  end: z.number().int(),
+})
+
 export const getCustomerCurrentAccessInputSchema = z.object({
   projectId: z.string(),
   customerId: z.string(),
@@ -59,6 +65,7 @@ export const customerCurrentAccessEntitlementSchema = z.object({
   unitOfMeasure: z.string(),
   limit: z.number().int().nullable(),
   currentUsage: z.number().nullable(),
+  usagePeriods: customerCurrentAccessUsagePeriodSchema.array(),
   usagePercent: z.number().nullable(),
   grantCount: z.number().int().nonnegative(),
   grantAllowance: z.number().int().nonnegative().nullable(),
@@ -127,6 +134,8 @@ type UsagePeriodScope = {
   featureSlug: string
   periodKey: string
 }
+
+type UsagePeriodBucket = z.infer<typeof customerCurrentAccessUsagePeriodSchema>
 
 export async function getCustomerCurrentAccess(
   deps: GetCustomerCurrentAccessDeps,
@@ -225,12 +234,12 @@ export async function getCustomerCurrentAccess(
           }
         : null
       const usagePeriodPlan =
-        usageWindow && usageWindow.end > usageWindow.start
+        entitlements.length > 0
           ? buildUsagePeriodPlan({
               entitlements,
-              timestamp: Math.max(usageWindow.start, usageWindow.end - 1),
+              timestamp: now,
             })
-          : { scopes: [], periodKeysByEntitlementId: new Map<string, string[]>() }
+          : { scopes: [], usagePeriodsByEntitlementId: new Map<string, UsagePeriodBucket[]>() }
       const usageResult =
         usagePeriodPlan.scopes.length > 0
           ? await loadUsageByFeaturePeriodKey({
@@ -294,7 +303,9 @@ export async function getCustomerCurrentAccess(
               featurePlanVersion.featureType === "usage" ||
               (featurePlanVersion.meterConfig !== null &&
                 featurePlanVersion.meterConfig !== undefined)
-            const periodKeys = usagePeriodPlan.periodKeysByEntitlementId.get(entitlement.id) ?? []
+            const usagePeriods =
+              usagePeriodPlan.usagePeriodsByEntitlementId.get(entitlement.id) ?? []
+            const periodKeys = usagePeriods.map((period) => period.periodKey)
             const currentUsage =
               isUsageEntitlement && !usageResult.error
                 ? sumUsageForFeaturePeriodKeys({
@@ -313,6 +324,7 @@ export async function getCustomerCurrentAccess(
               unitOfMeasure: featurePlanVersion.unitOfMeasure,
               limit,
               currentUsage,
+              usagePeriods,
               usagePercent:
                 currentUsage !== null && limit !== null && limit > 0
                   ? Math.min(100, (currentUsage / limit) * 100)
@@ -472,9 +484,9 @@ function buildUsagePeriodPlan({
 }: {
   entitlements: ActiveEntitlementRow[]
   timestamp: number
-}): { scopes: UsagePeriodScope[]; periodKeysByEntitlementId: Map<string, string[]> } {
+}): { scopes: UsagePeriodScope[]; usagePeriodsByEntitlementId: Map<string, UsagePeriodBucket[]> } {
   const scopesByKey = new Map<string, UsagePeriodScope>()
-  const periodKeysByEntitlementId = new Map<string, string[]>()
+  const usagePeriodsByEntitlementId = new Map<string, UsagePeriodBucket[]>()
 
   for (const entitlement of entitlements) {
     const featurePlanVersion = entitlement.featurePlanVersion
@@ -489,7 +501,7 @@ function buildUsagePeriodPlan({
     const resetConfig =
       featurePlanVersion.resetConfig ??
       toGrantResetConfigFromBillingConfig(featurePlanVersion.billingConfig)
-    const periodKeys = new Set<string>()
+    const usagePeriodsByKey = new Map<string, UsagePeriodBucket>()
 
     for (const grant of entitlement.grants) {
       const bucket = computeGrantPeriodBucket(
@@ -508,7 +520,11 @@ function buildUsagePeriodPlan({
         continue
       }
 
-      periodKeys.add(bucket.periodKey)
+      usagePeriodsByKey.set(bucket.periodKey, {
+        periodKey: bucket.periodKey,
+        start: bucket.start,
+        end: bucket.end,
+      })
       const key = usagePeriodKey(featurePlanVersion.feature.slug, bucket.periodKey)
       scopesByKey.set(key, {
         featureSlug: featurePlanVersion.feature.slug,
@@ -516,14 +532,17 @@ function buildUsagePeriodPlan({
       })
     }
 
-    if (periodKeys.size > 0) {
-      periodKeysByEntitlementId.set(entitlement.id, [...periodKeys])
+    if (usagePeriodsByKey.size > 0) {
+      usagePeriodsByEntitlementId.set(
+        entitlement.id,
+        [...usagePeriodsByKey.values()].sort((a, b) => a.start - b.start)
+      )
     }
   }
 
   return {
     scopes: [...scopesByKey.values()],
-    periodKeysByEntitlementId,
+    usagePeriodsByEntitlementId,
   }
 }
 

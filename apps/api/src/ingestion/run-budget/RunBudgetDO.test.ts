@@ -674,6 +674,66 @@ describe("RunBudgetDO", () => {
     expect(result.meterFacts).toEqual([])
   })
 
+  it("applySyncEvent rejects missing billing period context before pricing", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+
+    await durable.startRun({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 100_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    const eventInput = {
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: "idem_event_missing_period",
+      event: {
+        id: "evt_missing_period",
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 3 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+      entitlement: {
+        ...TEST_ENTITLEMENT_FIELDS.entitlement,
+        billingPeriods: [],
+      },
+    }
+
+    const result = await durable.applySyncEvent(eventInput)
+    const duplicate = await durable.applySyncEvent(eventInput)
+
+    expect(result).toEqual(duplicate)
+    expect(result.allowed).toBe(false)
+    expect(result.rejectionReason).toBe("LATE_EVENT_CLOSED_PERIOD")
+    expect(result.message).toBe("No active billing period covers this event timestamp")
+    expect(result.budget.consumedAmount).toBe(0)
+    expect(testState.entitlementWindowApply).not.toHaveBeenCalled()
+  })
+
   it("applySyncEvent updates consumed amount and schedules alarm", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
