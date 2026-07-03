@@ -170,12 +170,19 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-07-03: Customer detail header actions are rendered by
+  `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/[customerId]/layout.tsx`
+  for every tab; for tab-specific header buttons, keep the header data load in the layout and put
+  `useSelectedLayoutSegments` branching in a small client action child.
 - 2026-07-03: Dashboard breadcrumbs are rendered by the `@breadcrumbs` parallel route, so they
   only see URL/search params. For entity-context crumbs, pass context in the URL/search params or
   resolve it inside `apps/nextjs/src/app/(root)/dashboard/@breadcrumbs/[...all]/page.tsx`.
 - 2026-07-03: Customer current-access usage is a per-feature entitlement-period view, not the
   last-30-days evidence view; compute/query each active usage entitlement by its current grant
   `period_key` and keep the UI on realtime polling so reset-specific windows update in place.
+- 2026-07-03: Workspace billing overview is self-reflective customer reporting; resolve
+  `workspace.unPriceCustomerId` to the customer owning project before calling customer
+  current-access, wallet, or usage-dashboard queries.
 - 2026-07-03: Dialog forms rendered from inside another React form can still bubble submit events
   through the React tree even when Radix portals the dialog content; stop propagation on the dialog
   form submit when the inner action must not save the parent form.

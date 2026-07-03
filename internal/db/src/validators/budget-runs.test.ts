@@ -4,7 +4,7 @@ import { runSummarySchema, startRunInputSchema } from "./budget-runs"
 describe("budget run validators", () => {
   it("accepts workload, trace, and parent attribution on start without currency", () => {
     const input = startRunInputSchema.parse({
-      budgetAmount: 100,
+      budgetAmountMinor: 100,
       idempotencyKey: "idem_run_attr",
       workloadType: "workflow",
       workloadId: "checkout-flow",
@@ -13,7 +13,7 @@ describe("budget run validators", () => {
     })
 
     expect(input).toEqual({
-      budgetAmount: 100,
+      budgetAmountMinor: 100,
       idempotencyKey: "idem_run_attr",
       workloadType: "workflow",
       workloadId: "checkout-flow",
@@ -22,14 +22,23 @@ describe("budget run validators", () => {
     })
   })
 
+  it("requires the public start budget amount to name minor units", () => {
+    const result = startRunInputSchema.safeParse({
+      budgetAmount: 100,
+      idempotencyKey: "idem_old_budget_amount",
+    })
+
+    expect(result.success).toBe(false)
+  })
+
   it("does not expose agentId in the run summary contract", () => {
     const summary = runSummarySchema.parse({
       runId: "brun_123",
       status: "running",
       customerId: "cus_123",
-      budgetAmount: 100,
-      consumedAmount: 0,
-      remainingAmount: 100,
+      budgetAmountMinor: 100,
+      consumedAmountMinor: 0,
+      remainingAmountMinor: 100,
       currency: "USD",
       workloadType: "agent",
       workloadId: "research-assistant",

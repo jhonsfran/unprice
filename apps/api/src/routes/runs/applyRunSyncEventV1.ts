@@ -168,16 +168,15 @@ export const registerApplyRunSyncEventV1 = (app: App) =>
     }
 
     const { currency } = result.val.run
+    const { budgetAmount, consumedAmount, remainingAmount, ...run } = result.val.run
     return c.json(
       {
         ...result.val,
         run: {
-          ...result.val.run,
-          budgetAmount: toCurrencyMinor(fromLedgerMinor(result.val.run.budgetAmount, currency)),
-          consumedAmount: toCurrencyMinor(fromLedgerMinor(result.val.run.consumedAmount, currency)),
-          remainingAmount: toCurrencyMinor(
-            fromLedgerMinor(result.val.run.remainingAmount, currency)
-          ),
+          ...run,
+          budgetAmountMinor: toCurrencyMinor(fromLedgerMinor(budgetAmount, currency)),
+          consumedAmountMinor: toCurrencyMinor(fromLedgerMinor(consumedAmount, currency)),
+          remainingAmountMinor: toCurrencyMinor(fromLedgerMinor(remainingAmount, currency)),
         },
       },
       HttpStatusCodes.OK

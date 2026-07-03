@@ -45,7 +45,7 @@ export default async function ProjectUsersPage(props: {
               <CodeApiSheet defaultMethod="signUpCustomer">
                 <Button variant={"ghost"}>
                   <Code className="mr-2 h-4 w-4" />
-                  Create via API
+                  API
                 </Button>
               </CodeApiSheet>
               <CustomerDialog>
@@ -97,7 +97,7 @@ export default async function ProjectUsersPage(props: {
                 <CodeApiSheet defaultMethod="signUpCustomer">
                   <Button size="sm" variant="outline">
                     <Code className="mr-2 size-4" />
-                    Create via API
+                    API
                   </Button>
                 </CodeApiSheet>
               ),

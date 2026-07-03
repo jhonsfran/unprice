@@ -107,7 +107,7 @@ export default async function PlanSubscriptionsPage({
                 <CodeApiSheet defaultMethod="signUpCustomer">
                   <Button size="sm" variant="outline">
                     <Code className="mr-2 size-4" />
-                    Create via API
+                    API
                   </Button>
                 </CodeApiSheet>
               ),

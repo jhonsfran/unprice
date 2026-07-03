@@ -67,6 +67,9 @@ export function UsageDashboardView({
   usageExampleParams,
   showCustomerSummary = mode === "customer",
   showHeaderControls = true,
+  title,
+  subjectLabel,
+  showEmptyStateActions = true,
 }: {
   data: UsageDashboardData
   intervalLabel: string
@@ -78,6 +81,9 @@ export function UsageDashboardView({
   usageExampleParams?: SDKExampleParams
   showCustomerSummary?: boolean
   showHeaderControls?: boolean
+  title?: string
+  subjectLabel?: string
+  showEmptyStateActions?: boolean
 }) {
   // Hooks must be called unconditionally (before any early return)
   const chart = useMemo(
@@ -99,6 +105,9 @@ export function UsageDashboardView({
         generatedAt={data.freshness.generatedAt}
         isFetching={isFetching}
         showHeaderControls={showHeaderControls}
+        title={title}
+        subjectLabel={subjectLabel}
+        showActions={showEmptyStateActions}
       />
     )
   }
@@ -133,6 +142,8 @@ export function UsageDashboardView({
         isFetching={isFetching}
         mode={mode}
         showControls={showHeaderControls}
+        title={title}
+        subjectLabel={subjectLabel}
       />
       <div
         className={cn(
@@ -198,17 +209,21 @@ function UsageEvidenceHeader({
   generatedAt,
   isFetching,
   showControls,
+  title: titleOverride,
+  subjectLabel,
 }: {
   intervalLabel: string
   mode: "project" | "customer"
   generatedAt: number
   isFetching: boolean
   showControls: boolean
+  title?: string
+  subjectLabel?: string
 }) {
-  const title = mode === "customer" ? "Customer usage evidence" : "Usage and spend evidence"
-  const description = `Latest feature usage and ledger display amounts for this ${
-    mode === "customer" ? "customer" : "project"
-  } in the ${intervalLabel}.`
+  const subject = subjectLabel ?? (mode === "customer" ? "customer" : "project")
+  const title =
+    titleOverride ?? (mode === "customer" ? "Customer usage evidence" : "Usage and spend evidence")
+  const description = `Latest feature usage and ledger display amounts for this ${subject} in the ${intervalLabel}.`
 
   return (
     <SectionIntro
@@ -389,6 +404,9 @@ function UsageDashboardEmptyState({
   generatedAt,
   isFetching,
   showHeaderControls,
+  title,
+  subjectLabel,
+  showActions,
 }: {
   intervalLabel: string
   mode: "project" | "customer"
@@ -396,6 +414,9 @@ function UsageDashboardEmptyState({
   generatedAt: number
   isFetching: boolean
   showHeaderControls: boolean
+  title?: string
+  subjectLabel?: string
+  showActions: boolean
 }) {
   return (
     <section className="flex flex-col gap-4">
@@ -405,6 +426,8 @@ function UsageDashboardEmptyState({
         isFetching={isFetching}
         mode={mode}
         showControls={showHeaderControls}
+        title={title}
+        subjectLabel={subjectLabel}
       />
       <Card className="border-muted/60">
         <CardContent className="py-6">
@@ -416,9 +439,11 @@ function UsageDashboardEmptyState({
             <EmptyPlaceholder.Description>
               Usage evidence appears after your app records usage events for metered features.
             </EmptyPlaceholder.Description>
-            <EmptyPlaceholder.Action>
-              <UsageExampleActions exampleParams={usageExampleParams} />
-            </EmptyPlaceholder.Action>
+            {showActions && (
+              <EmptyPlaceholder.Action>
+                <UsageExampleActions exampleParams={usageExampleParams} />
+              </EmptyPlaceholder.Action>
+            )}
           </EmptyPlaceholder>
         </CardContent>
       </Card>

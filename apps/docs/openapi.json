@@ -461,7 +461,7 @@
       "post": {
         "operationId": "runs.start",
         "summary": "start a budgeted run",
-        "description": "Start a new budgeted run with a budget reservation against a customer. The currency is inherited from the customer's active subscription plan. budgetAmount is in currency minor units (e.g. 500 = $5.00 USD).",
+        "description": "Start a new budgeted run with a budget reservation against a customer. The currency is inherited from the customer's active subscription plan. budgetAmountMinor is in currency minor units, usually cents (e.g. 5000 = $50.00 USD).",
         "tags": ["runs"],
         "x-unprice": {
           "audience": "public",
@@ -490,8 +490,9 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "budgetAmount": {
+                  "budgetAmountMinor": {
                     "type": "integer",
+                    "description": "Budget in currency minor units, usually cents. For USD, 5000 means $50.00.",
                     "minimum": 0,
                     "exclusiveMinimum": true
                   },
@@ -532,7 +533,7 @@
                     "exclusiveMinimum": true
                   }
                 },
-                "required": ["budgetAmount", "idempotencyKey"]
+                "required": ["budgetAmountMinor", "idempotencyKey"]
               }
             }
           }
@@ -562,13 +563,13 @@
                     "customerId": {
                       "type": "string"
                     },
-                    "budgetAmount": {
+                    "budgetAmountMinor": {
                       "type": "integer"
                     },
-                    "consumedAmount": {
+                    "consumedAmountMinor": {
                       "type": "integer"
                     },
-                    "remainingAmount": {
+                    "remainingAmountMinor": {
                       "type": "integer"
                     },
                     "currency": {
@@ -596,9 +597,9 @@
                     "runId",
                     "status",
                     "customerId",
-                    "budgetAmount",
-                    "consumedAmount",
-                    "remainingAmount",
+                    "budgetAmountMinor",
+                    "consumedAmountMinor",
+                    "remainingAmountMinor",
                     "currency",
                     "workloadType",
                     "workloadId",
@@ -809,13 +810,13 @@
                         "customerId": {
                           "type": "string"
                         },
-                        "budgetAmount": {
+                        "budgetAmountMinor": {
                           "type": "integer"
                         },
-                        "consumedAmount": {
+                        "consumedAmountMinor": {
                           "type": "integer"
                         },
-                        "remainingAmount": {
+                        "remainingAmountMinor": {
                           "type": "integer"
                         },
                         "currency": {
@@ -843,9 +844,9 @@
                         "runId",
                         "status",
                         "customerId",
-                        "budgetAmount",
-                        "consumedAmount",
-                        "remainingAmount",
+                        "budgetAmountMinor",
+                        "consumedAmountMinor",
+                        "remainingAmountMinor",
                         "currency",
                         "workloadType",
                         "workloadId",
@@ -1014,13 +1015,13 @@
                     "customerId": {
                       "type": "string"
                     },
-                    "budgetAmount": {
+                    "budgetAmountMinor": {
                       "type": "integer"
                     },
-                    "consumedAmount": {
+                    "consumedAmountMinor": {
                       "type": "integer"
                     },
-                    "remainingAmount": {
+                    "remainingAmountMinor": {
                       "type": "integer"
                     },
                     "currency": {
@@ -1048,9 +1049,9 @@
                     "runId",
                     "status",
                     "customerId",
-                    "budgetAmount",
-                    "consumedAmount",
-                    "remainingAmount",
+                    "budgetAmountMinor",
+                    "consumedAmountMinor",
+                    "remainingAmountMinor",
                     "currency",
                     "workloadType",
                     "workloadId",
@@ -1207,13 +1208,13 @@
                     "customerId": {
                       "type": "string"
                     },
-                    "budgetAmount": {
+                    "budgetAmountMinor": {
                       "type": "integer"
                     },
-                    "consumedAmount": {
+                    "consumedAmountMinor": {
                       "type": "integer"
                     },
-                    "remainingAmount": {
+                    "remainingAmountMinor": {
                       "type": "integer"
                     },
                     "currency": {
@@ -1241,9 +1242,9 @@
                     "runId",
                     "status",
                     "customerId",
-                    "budgetAmount",
-                    "consumedAmount",
-                    "remainingAmount",
+                    "budgetAmountMinor",
+                    "consumedAmountMinor",
+                    "remainingAmountMinor",
                     "currency",
                     "workloadType",
                     "workloadId",

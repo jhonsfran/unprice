@@ -229,7 +229,7 @@ const unprice = new Unprice({
 // then consume usage and end the run.
 const { result: run, error: startError } = await unprice.runs.start({
   customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
-  budgetAmount: 5000,
+  budgetAmountMinor: 5000,
   idempotencyKey: crypto.randomUUID(),
   workloadType: "workflow",
   workloadId: "daily-report",
@@ -517,7 +517,7 @@ const startResponse = await fetch(baseUrl + "/v1/runs/start", {
   },
   body: JSON.stringify({
     customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
-    budgetAmount: 5000,
+    budgetAmountMinor: 5000,
     idempotencyKey: crypto.randomUUID(),
     workloadType: "workflow",
     workloadId: "daily-report",
@@ -1169,7 +1169,7 @@ function buildCurlExample(currentMethod: method, params?: SDKExampleParams) {
         "/v1/runs/start",
         `{
   "customerId": ${stringLiteral(getCustomerId(params))},
-  "budgetAmount": 5000,
+  "budgetAmountMinor": 5000,
   "idempotencyKey": "run-example-1",
   "workloadType": "workflow",
   "workloadId": "daily-report"

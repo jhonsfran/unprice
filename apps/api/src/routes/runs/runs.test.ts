@@ -234,7 +234,7 @@ describe("budgeted runs API", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          budgetAmount: 1000,
+          budgetAmountMinor: 1000,
           idempotencyKey: "idem_start_1",
         }),
       }),
@@ -249,11 +249,12 @@ describe("budgeted runs API", () => {
       runId: expect.stringMatching(/^brun_/),
       status: "running",
       customerId: "cus_default",
-      budgetAmount: 1000,
-      consumedAmount: 0,
-      remainingAmount: 1000,
+      budgetAmountMinor: 1000,
+      consumedAmountMinor: 0,
+      remainingAmountMinor: 1000,
       currency: "USD",
     })
+    expect(body).not.toHaveProperty("budgetAmount")
   })
 
   it("starts a run with workload, trace, and parent attribution", async () => {
@@ -290,7 +291,7 @@ describe("budgeted runs API", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          budgetAmount: 500,
+          budgetAmountMinor: 500,
           idempotencyKey: "run_attr_1",
           workloadType: "agent",
           workloadId: "research-assistant-v2",
@@ -349,7 +350,7 @@ describe("budgeted runs API", () => {
         },
         body: JSON.stringify({
           customerId: "cus_other",
-          budgetAmount: 1000,
+          budgetAmountMinor: 1000,
           idempotencyKey: "idem_mismatch_1",
         }),
       }),
@@ -383,7 +384,7 @@ describe("budgeted runs API", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          budgetAmount: 1000,
+          budgetAmountMinor: 1000,
           idempotencyKey: "idem_unbound_1",
         }),
       }),
@@ -613,9 +614,9 @@ describe("budgeted runs API", () => {
       })
     )
     await expect(response.json()).resolves.toMatchObject({
-      budgetAmount: 1000,
-      consumedAmount: 250,
-      remainingAmount: 750,
+      budgetAmountMinor: 1000,
+      consumedAmountMinor: 250,
+      remainingAmountMinor: 750,
     })
   })
 
@@ -661,8 +662,8 @@ describe("budgeted runs API", () => {
     expect(body).toMatchObject({
       runId: "brun_abc123",
       status: "completed",
-      consumedAmount: 300,
-      remainingAmount: 700,
+      consumedAmountMinor: 300,
+      remainingAmountMinor: 700,
     })
   })
 })

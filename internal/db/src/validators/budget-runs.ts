@@ -24,8 +24,9 @@ const nullableWorkloadTypeSchema = workloadTypeSchema.nullable().openapi({
 
 export const startRunInputSchema = z.object({
   customerId: z.string().min(1).optional(),
-  /** Budget in currency minor units (cents). e.g. 500 = $5.00 USD. */
-  budgetAmount: z.number().int().positive(),
+  budgetAmountMinor: z.number().int().positive().openapi({
+    description: "Budget in currency minor units, usually cents. For USD, 5000 means $50.00.",
+  }),
   idempotencyKey: z.string().min(1),
   workloadType: nullableWorkloadTypeSchema.optional(),
   workloadId: z.string().min(1).nullable().optional(),
@@ -68,13 +69,13 @@ export const runLedgerSummarySchema = z.object({
 
 export const runSummarySchema = z.object({
   ...runSummaryCommonShape,
-  budgetAmount: z.number().int().openapi({
+  budgetAmountMinor: z.number().int().openapi({
     description: "Budget in currency minor units (cents).",
   }),
-  consumedAmount: z.number().int().openapi({
+  consumedAmountMinor: z.number().int().openapi({
     description: "Consumed in currency minor units (cents).",
   }),
-  remainingAmount: z.number().int().openapi({
+  remainingAmountMinor: z.number().int().openapi({
     description: "Remaining in currency minor units (cents).",
   }),
 })

@@ -109,7 +109,7 @@ describe("Unprice client", () => {
 
     expectTypeOf(client.runs.start).parameter(0).toEqualTypeOf<OperationInput<"runs.start">>()
     expectTypeOf<{
-      budgetAmount: number
+      budgetAmountMinor: number
       idempotencyKey: string
       workloadType: null
     }>().toMatchTypeOf<OperationInput<"runs.start">>()
@@ -122,9 +122,9 @@ describe("Unprice client", () => {
       runId: string
       status: "running"
       customerId: string
-      budgetAmount: number
-      consumedAmount: number
-      remainingAmount: number
+      budgetAmountMinor: number
+      consumedAmountMinor: number
+      remainingAmountMinor: number
       currency: string
       workloadType: null
       workloadId: null
@@ -284,9 +284,9 @@ describe("Unprice client", () => {
       return createJsonResponse({
         runId: "run_123",
         status: "running",
-        budgetAmount: 500,
-        consumedAmount: 0,
-        remainingAmount: 500,
+        budgetAmountMinor: 500,
+        consumedAmountMinor: 0,
+        remainingAmountMinor: 500,
         currency: "USD",
         customerId: "cus_123",
         projectId: "proj_123",
@@ -298,7 +298,7 @@ describe("Unprice client", () => {
     })
 
     const { result, error } = await client.runs.start({
-      budgetAmount: 500,
+      budgetAmountMinor: 500,
       idempotencyKey: "idem_run_1",
       workloadType: "agent",
       workloadId: "research-assistant",
@@ -311,7 +311,7 @@ describe("Unprice client", () => {
     expect(requests[0]?.method).toBe("POST")
     expect(requests[0]?.url).toBe("https://example.com/v1/runs/start")
     await expect(requests[0]?.json()).resolves.toEqual({
-      budgetAmount: 500,
+      budgetAmountMinor: 500,
       idempotencyKey: "idem_run_1",
       workloadType: "agent",
       workloadId: "research-assistant",
@@ -330,9 +330,9 @@ describe("Unprice client", () => {
         run: {
           runId: "run_123",
           status: "running",
-          budgetAmount: 500,
-          consumedAmount: 10,
-          remainingAmount: 490,
+          budgetAmountMinor: 500,
+          consumedAmountMinor: 10,
+          remainingAmountMinor: 490,
           currency: "USD",
           customerId: "cus_123",
           projectId: "proj_123",

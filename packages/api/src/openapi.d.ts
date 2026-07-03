@@ -35,7 +35,7 @@ export interface paths {
     put?: never
     /**
      * start a budgeted run
-     * @description Start a new budgeted run with a budget reservation against a customer. The currency is inherited from the customer's active subscription plan. budgetAmount is in currency minor units (e.g. 500 = $5.00 USD).
+     * @description Start a new budgeted run with a budget reservation against a customer. The currency is inherited from the customer's active subscription plan. budgetAmountMinor is in currency minor units, usually cents (e.g. 5000 = $50.00 USD).
      */
     post: operations["runs.start"]
     delete?: never
@@ -798,7 +798,8 @@ export interface operations {
       content: {
         "application/json": {
           customerId?: string
-          budgetAmount: number
+          /** @description Budget in currency minor units, usually cents. For USD, 5000 means $50.00. */
+          budgetAmountMinor: number
           idempotencyKey: string
           /** @enum {string|null} */
           workloadType?: "agent" | "workflow" | "job" | "tool" | "custom" | null
@@ -824,9 +825,9 @@ export interface operations {
             /** @enum {string} */
             status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
             customerId: string
-            budgetAmount: number
-            consumedAmount: number
-            remainingAmount: number
+            budgetAmountMinor: number
+            consumedAmountMinor: number
+            remainingAmountMinor: number
             currency: string
             /** @enum {string|null} */
             workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
@@ -962,9 +963,9 @@ export interface operations {
                 | "budget_exceeded"
                 | "failed"
               customerId: string
-              budgetAmount: number
-              consumedAmount: number
-              remainingAmount: number
+              budgetAmountMinor: number
+              consumedAmountMinor: number
+              remainingAmountMinor: number
               currency: string
               /** @enum {string|null} */
               workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
@@ -1082,9 +1083,9 @@ export interface operations {
             /** @enum {string} */
             status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
             customerId: string
-            budgetAmount: number
-            consumedAmount: number
-            remainingAmount: number
+            budgetAmountMinor: number
+            consumedAmountMinor: number
+            remainingAmountMinor: number
             currency: string
             /** @enum {string|null} */
             workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null
@@ -1192,9 +1193,9 @@ export interface operations {
             /** @enum {string} */
             status: "running" | "completed" | "expired" | "canceled" | "budget_exceeded" | "failed"
             customerId: string
-            budgetAmount: number
-            consumedAmount: number
-            remainingAmount: number
+            budgetAmountMinor: number
+            consumedAmountMinor: number
+            remainingAmountMinor: number
             currency: string
             /** @enum {string|null} */
             workloadType: "agent" | "workflow" | "job" | "tool" | "custom" | null

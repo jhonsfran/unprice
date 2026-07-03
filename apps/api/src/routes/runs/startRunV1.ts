@@ -22,7 +22,7 @@ export const route = createRoute(
       description:
         "Start a new budgeted run with a budget reservation against a customer. " +
         "The currency is inherited from the customer's active subscription plan. " +
-        "budgetAmount is in currency minor units (e.g. 500 = $5.00 USD).",
+        "budgetAmountMinor is in currency minor units, usually cents (e.g. 5000 = $50.00 USD).",
       method: "post",
       tags,
       request: {
@@ -86,7 +86,7 @@ export const registerStartRunV1 = (app: App) =>
       {
         projectId: key.projectId,
         customerId: customer.customerId,
-        budgetAmountCurrencyMinor: body.budgetAmount,
+        budgetAmountCurrencyMinor: body.budgetAmountMinor,
         idempotencyKey: body.idempotencyKey,
         workloadType: body.workloadType,
         workloadId: body.workloadId,
@@ -122,12 +122,13 @@ export const registerStartRunV1 = (app: App) =>
 
     // Convert response amounts from ledger scale back to currency minor units
     const { currency } = result.val
+    const { budgetAmount, consumedAmount, remainingAmount, ...summary } = result.val
     return c.json(
       {
-        ...result.val,
-        budgetAmount: toCurrencyMinor(fromLedgerMinor(result.val.budgetAmount, currency)),
-        consumedAmount: toCurrencyMinor(fromLedgerMinor(result.val.consumedAmount, currency)),
-        remainingAmount: toCurrencyMinor(fromLedgerMinor(result.val.remainingAmount, currency)),
+        ...summary,
+        budgetAmountMinor: toCurrencyMinor(fromLedgerMinor(budgetAmount, currency)),
+        consumedAmountMinor: toCurrencyMinor(fromLedgerMinor(consumedAmount, currency)),
+        remainingAmountMinor: toCurrencyMinor(fromLedgerMinor(remainingAmount, currency)),
       },
       HttpStatusCodes.OK
     )

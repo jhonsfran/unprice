@@ -63,9 +63,9 @@ export async function refreshRunningRuns<T extends BudgetRun>(input: {
       return {
         ...run,
         status: live.status,
-        budgetAmount: toLedgerMinor(fromCurrencyMinor(live.budgetAmount, live.currency)),
-        consumedAmount: toLedgerMinor(fromCurrencyMinor(live.consumedAmount, live.currency)),
-        remainingAmount: toLedgerMinor(fromCurrencyMinor(live.remainingAmount, live.currency)),
+        budgetAmount: toLedgerMinor(fromCurrencyMinor(live.budgetAmountMinor, live.currency)),
+        consumedAmount: toLedgerMinor(fromCurrencyMinor(live.consumedAmountMinor, live.currency)),
+        remainingAmount: toLedgerMinor(fromCurrencyMinor(live.remainingAmountMinor, live.currency)),
       } as T
     })
   )

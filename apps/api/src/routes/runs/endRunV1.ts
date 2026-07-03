@@ -84,12 +84,13 @@ export const registerEndRunV1 = (app: App) =>
     }
 
     const { currency } = result.val
+    const { budgetAmount, consumedAmount, remainingAmount, ...summary } = result.val
     return c.json(
       {
-        ...result.val,
-        budgetAmount: toCurrencyMinor(fromLedgerMinor(result.val.budgetAmount, currency)),
-        consumedAmount: toCurrencyMinor(fromLedgerMinor(result.val.consumedAmount, currency)),
-        remainingAmount: toCurrencyMinor(fromLedgerMinor(result.val.remainingAmount, currency)),
+        ...summary,
+        budgetAmountMinor: toCurrencyMinor(fromLedgerMinor(budgetAmount, currency)),
+        consumedAmountMinor: toCurrencyMinor(fromLedgerMinor(consumedAmount, currency)),
+        remainingAmountMinor: toCurrencyMinor(fromLedgerMinor(remainingAmount, currency)),
       },
       HttpStatusCodes.OK
     )
