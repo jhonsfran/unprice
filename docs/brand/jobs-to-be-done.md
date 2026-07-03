@@ -1,6 +1,9 @@
 # Jobs To Be Done
 
-Date: 2026-07-01
+Date: 2026-07-03
+
+Status: pre-validation refresh (July 2026 market audit). Run the Validation Plan below, then lock
+the brand docs.
 
 This document translates the Unprice brand and product positioning into Jobs-to-Be-Done language.
 Use it when creating marketing campaigns, reviewing page copy, writing launch content, or checking
@@ -23,23 +26,45 @@ Evidence limits:
 - Do not write or imply customer quotes until real interviews, support threads, or sales calls are
   available.
 - The sharpest current trigger is still cost spikes from expensive AI/API/workflow usage.
-- The broader job is commercial authorization plus evidence: decide before paid usage runs, then
-  explain the charge, credit, denial, or invoice line after from the same money path.
+- The broader job is customer spend authorization plus evidence: decide before paid usage runs,
+  then explain the charge, credit, denial, or invoice line after from the same money path.
 - The measurable outcomes to emphasize are cost avoided, invoice-debugging time reduced, and pricing
   changes shipped without moving existing customers off their plan versions.
+
+### Public Buyer Language (Market Research, July 2026)
+
+Sourced verbatims from public threads. These are market evidence for the pain, not Unprice customer
+proof — they inform recruiting and interview language, and must never be presented as Unprice
+customer quotes.
+
+- On Stripe Billing, for AI products: "no way to check a customer's balance before they use the
+  product, no way to enforce spend caps" — teams are forced to "hardcode pricing logic inside their
+  product." (HackerNoon teardown of Stripe usage-based billing.)
+- "Usage based billing is tough." / "I want to freely mix subscription based and pre-paid credits.
+  My users go over their quota one month… they prefer a one-off top-up." (Hacker News, Lago
+  thread, item 39958909.)
+- "Billing systems are a nightmare for engineers." (Lago's canonical post, 846+ points on Hacker
+  News, item 31424450.)
+- On entitlement sprawl: "tying entitlements closely to plans and pricing doesn't hold up" —
+  pricing migrations "create numerous opportunities for entitlements to be incorrect." (Garrett
+  Dimon, data-modeling-saas-entitlements-and-pricing.)
+
+Use the first verbatim as the interview recruiting hook: "Can you check a balance or enforce a
+spend cap before the request runs today?"
 
 ## Core Job
 
 When a developer-led usage-based SaaS product has paid actions that create cost or invoice
-complexity, the team wants to authorize usage, budgets, credits, and entitlements at runtime so it
-can decide before work runs and explain every invoice line from the same money path.
+complexity, the team wants to authorize the customer's plan, budget, credits, and entitlements at
+runtime so it can decide before work runs and explain every invoice line from the same money path.
 
 ## Job Statement
 
-When my usage-based SaaS product has paid actions that can create cost or customer confusion, I want
-to apply the correct plan version, price the feature, meter the event when usage-based, check
-entitlement, check budget, reserve or capture credits, and preserve invoice evidence in the request
-path, so I can show why a request was allowed, denied, charged, credited, invoiced, or replayed.
+When my usage-based SaaS product has paid actions that can burn a customer's credits, budget, or
+usage allowance, I want to apply the correct plan version, price the feature, meter the event when
+usage-based, check entitlement, check customer budget, reserve or capture credits, and preserve
+invoice evidence in the request path, so I can show why a request was allowed, denied, charged,
+credited, invoiced, or replayed.
 
 ## Primary Actor
 
@@ -49,7 +74,7 @@ Best-fit early actors:
 - Developer-led SaaS teams with 5-50 employees, Seed to Series A.
 - B2B SaaS, API, infrastructure, automation, data, or AI products where usage affects gross margin.
 - Engineering teams that own billing, metering, entitlements, plan versions, or request-path
-  commercial authorization.
+  customer spend authorization.
 
 The customer account is the economic actor. Runs, jobs, workflows, tools, and agents are workload
 labels that help control and explain spend.
@@ -58,7 +83,8 @@ labels that help control and explain spend.
 
 Primary trigger:
 
-- A paid customer action creates cost or an invoice outcome before the team can explain it.
+- A paid customer action can burn through credits, budget, or usage allowance before the team can
+  explain it.
 
 Secondary triggers:
 
@@ -81,18 +107,18 @@ Teams usually combine:
 - Hardcoded plan logic inside product code.
 
 What hurts: the money path is split across tools and code paths, so the team cannot reliably decide
-whether paid usage should run, keep existing customers on the right plan version, or explain a
-charge from one inspectable trail. The product can move quickly, but the pricing logic becomes
+whether a customer is allowed to spend, keep existing customers on the right plan version, or explain
+a charge from one inspectable trail. The product can move quickly, but the pricing logic becomes
 something engineers and support are afraid to touch.
 
 ## Desired Outcome
 
-Every paid action is commercially authorized before it runs, and every charge, denial, credit, or
-invoice line can be explained after the fact.
+Every paid action is authorized against the customer's plan, budget, and credits before it runs, and
+every charge, denial, credit, or invoice line can be explained after the fact.
 
 A successful implementation should let the team:
 
-- Authorize or deny paid usage before it creates cost.
+- Authorize or deny customer spend before paid work creates cost.
 - Change packaging without rewriting the application money path.
 - Keep customers pinned to the plan version they bought while new pricing experiments ship.
 - Explain invoice lines from plan versions, billing periods, pricing rules, rated usage events when
@@ -112,8 +138,8 @@ exists.
 ### Pull
 
 Unprice connects product requests, plan versions, pricing rules, meter events, entitlement
-decisions, budget checks, wallet movements, ledger captures, ingestion state, and invoice evidence in
-one inspectable runtime system.
+decisions, customer budget checks, wallet movements, ledger captures, ingestion state, and invoice
+evidence in one inspectable runtime system.
 
 ### Habit
 
@@ -123,7 +149,7 @@ forces the team to trace the full money path.
 
 ### Anxiety
 
-A prospect may worry about putting money decisions in the request path, relying on a young
+A prospect may worry about putting customer money decisions in the request path, relying on a young
 open-source billing-adjacent system, moving logic out of familiar Stripe-centered workflows, or
 depending on latency and throughput claims that have not been proven for their workload.
 
@@ -139,7 +165,7 @@ Before:
 
 After:
 
-- Runtime checks decide whether paid work is commercially allowed before it runs.
+- Runtime checks decide whether customer spend is commercially allowed before paid work runs.
 - Budgets and wallet credits constrain customer or workload spend.
 - Invoice explanations connect back to plan-version, pricing, usage, wallet, and ledger evidence.
 - Engineers can change pricing models while existing customers stay on their plan versions.
@@ -161,7 +187,7 @@ Unprice must help teams:
 
 The product should help founders and engineers feel:
 
-- In control of usage cost before it becomes invoice damage.
+- In control of customer spend before it becomes invoice damage.
 - Clear about why a request was allowed, denied, charged, credited, invoiced, or replayed.
 - Confident enough to offer usage pricing and customer budgets without scattering money logic
   through product code.
@@ -175,10 +201,12 @@ example.
 
 Strong angles:
 
-- Authorize paid usage before it runs.
+- Authorize customer spend before paid work runs.
 - Prove every charge after it bills.
+- Sell credits and usage-based plans without eating over-budget customer work.
 - Put a budget and evidence trail around the expensive action in your product.
 - Your Redis counter is not a budget: request-path enforcement beats a homegrown pre-check.
+- AI gateways cap provider spend; Unprice governs customer spend and invoice evidence.
 - Pricing is a runtime decision and an evidence trail for usage-based SaaS.
 - Prove every invoice line after it bills.
 - Explain every invoice line from plan-version, pricing, usage, wallet, and ledger evidence.
@@ -186,6 +214,12 @@ Strong angles:
   customers.
 - Move usage, pricing rules, entitlements, credits, plan versions, ledger captures, and invoices into
   one inspectable money path.
+- Your customers' agents can burn a month of credits in an afternoon. Budget the run before it
+  starts. (AI-credits slice; stays inside the not-an-agent-platform boundary.)
+- The billing layer you rent can be acquired. The money path you own cannot. (Consolidation angle;
+  dated market facts — verify at publish time.)
+- Read the code that guards your money — or have your agent read it. (Open-source AI-legibility
+  angle.)
 
 Weak angles:
 
@@ -202,12 +236,12 @@ Use this checklist when reviewing homepage, landing page, launch, ad, docs, or s
 
 - Does the copy name the actor: developer-led usage-based SaaS teams, CTOs, founding engineers,
   platform engineers, or product engineers?
-- Does the first screen make commercial authorization or invoice explanation visible?
+- Does the first screen make customer spend authorization or invoice explanation visible?
 - Does the message lead with a paid-action trigger, cost-spike trigger, invoice-dispute trigger, or
   pricing-experiment trigger from this document?
 - Does the copy connect request, meter, entitlement, budget, wallet, plan version, and invoice
   evidence?
-- Does it show that Unprice authorizes paid usage before cost is created?
+- Does it show that Unprice authorizes customer spend before paid work creates cost?
 - Does it explain why open source matters: inspectable revenue logic and clear failure paths?
 - Does it avoid broad billing-platform, tax, and accounting claims, and avoid claiming live
   multi-provider payments (Stripe-first today, provider-extensible by design is fine)?
@@ -221,8 +255,9 @@ Use this checklist when reviewing homepage, landing page, launch, ad, docs, or s
 
 | Buyer question | Answer to emphasize |
 | --- | --- |
-| Why now? | Paid usage can create cost or invoice confusion before the billing cycle ends. Runtime authorization prevents unwanted usage, and invoice evidence explains every line that did happen. |
-| Why not just Stripe? | Stripe captures the payment; Unprice owns the PriceOps money path — plan versions, pricing rules, entitlements, usage, budgets, credits, ledger captures, and invoice evidence — inside the product request path. Stripe-first today, provider-extensible by design. |
+| Why now? | A customer can burn through credits, budget, or usage allowance before the billing cycle ends. Runtime authorization prevents over-budget work, and invoice evidence explains every line that did happen. |
+| Why not just Stripe? | Stripe captures the payment; Unprice owns the customer money path — plan versions, pricing rules, entitlements, usage, budgets, credits, ledger captures, and invoice evidence — inside the product request path. Stripe-first today, provider-extensible by design. |
+| Why not an AI gateway? | Gateways cap provider spend, route models, and manage virtual keys. Unprice governs what the buyer's customer is allowed to spend and connects that decision to plan versions, credits, and invoice evidence. |
 | Why open source? | Revenue logic should be inspectable when it allows, denies, charges, credits, or replays customer activity. |
 | What is the first demo? | Pick the paid action, define the plan-version pricing rule, authorize it before it runs, budget it if it can burn margin, and show invoice evidence from the same money path. |
 | What should not be promised? | Do not promise live multi-provider payments (Stripe-first today; provider-extensible by design is fine), tax, accounting, enterprise revenue recognition, exact latency, or exact throughput without proof. |
@@ -236,7 +271,9 @@ propositions, but validate the lead phrase before committing GTM spend.
 Targets: 8-12 in-ICP engineering owners (CTOs, founding engineers, platform/product engineers) at
 developer-led usage-based SaaS teams (5-50 people, Seed to Series A) with paid actions that affect
 gross margin, invoice trust, or packaging flexibility. Recruit from inbound, design partners, and
-warm dev-community intros — not a broad survey.
+warm dev-community intros — not a broad survey. Open recruiting and interviews with the buyer's own
+words from the Public Buyer Language section ("can you check a balance or enforce a spend cap
+before the request runs today?"), not Unprice vocabulary.
 
 Falsify the wedge. Ask for the last time usage created cost they wished they had blocked, and the
 last time support or engineering had to explain a confusing invoice line. Listen for whether they
@@ -246,7 +283,7 @@ counters is good enough, the wedge is weaker than assumed.
 
 Phrase test. Show the same hero three ways and measure comprehension and "this is for me" response:
 
-1. "Authorize paid usage before it runs." (commercial-authorization frame)
+1. "Authorize customer spend before paid work runs." (customer-spend frame)
 2. "Prove every charge after it bills." (evidence-after-the-fact frame)
 3. "Put a budget and evidence trail around your most expensive action." (expensive-action frame)
 
@@ -266,5 +303,5 @@ These are resolved by running the Validation Plan above:
 - Collect one real customer or founder quote that captures the paid-action trigger.
 - Quantify the strongest outcome once evidence exists: cost avoided, invoice-debugging time saved,
   or time to launch a pricing experiment without migrating existing customers.
-- Validate whether the primary beachhead responds better to "authorize paid usage", "prove every
-  charge", or "budget the expensive action" as the first phrase in campaign copy.
+- Validate whether the primary beachhead responds better to "authorize customer spend", "prove every
+  charge", or "budget the paid action" as the first phrase in campaign copy.

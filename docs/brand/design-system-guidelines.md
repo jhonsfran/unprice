@@ -5,8 +5,8 @@ Date: 2026-06-30
 ## Design Objective
 
 Unprice should feel like trustworthy operational infrastructure for money-adjacent workflows. The
-interface should help engineers and founders understand current state, authorize paid usage, explain
-invoice outcomes, and recover from failures quickly.
+interface should help engineers and founders understand current state, authorize customer spend,
+explain invoice outcomes, and recover from failures quickly.
 
 The product should not feel like a marketing dashboard that hides complexity. Pricing, entitlement,
 budget, wallet, and invoice details are the product.
@@ -189,10 +189,10 @@ flowchart LR
 
 Recommended hero copy:
 
-- Headline: Authorize paid usage before it runs.
-- Subheadline: Open-source PriceOps infrastructure for usage-based SaaS. Keep plans versioned,
-  entitlements separate, and budgets in the request path so paid usage is authorized before it runs
-  and every invoice line can be explained after.
+- Headline: Authorize customer spend before paid work runs.
+- Subheadline: Open-source money path for usage-based SaaS. Keep plans versioned, entitlements
+  separate, customer budgets in the request path, and invoice evidence tied to the same decision
+  that allowed or denied the work.
 
 Hero copy should make the brand/product explicit. Prefer product screenshots, generated product
 scenes, or request-path visuals over generic SaaS illustrations.

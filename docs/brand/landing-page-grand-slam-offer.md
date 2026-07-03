@@ -1,6 +1,6 @@
 # Landing Page Grand Slam Offer
 
-Date: 2026-07-01
+Date: 2026-07-02
 
 ## What This Is
 
@@ -18,7 +18,8 @@ use the strategy doc for the full reasoning.
 tax/accounting/revenue-recognition, not an "AI agent platform." Payments: Stripe-first today (Stripe
 Connect to the buyer's own account, or bring-your-own-key) plus the built-in **Sandbox** test
 provider; do not claim Square (unimplemented) or live Paddle/Lemon Squeezy. Lead competitive copy
-against the DIY stack (counter + cron) first. Voice is **calm urgency** — mechanism, not fear.
+against the DIY stack (counter + cron) first, then distinguish Unprice from AI gateways and closed
+usage runtimes. Voice is **calm urgency** — mechanism, not fear.
 
 ---
 
@@ -40,7 +41,7 @@ Primary CTA everywhere: **Start with one paid action**. Consultative/design-part
 | --- | --- | --- |
 | Above the fold | `hero.tsx` | Name the pain + the wedge promise in one breath; one low-friction CTA. |
 | Problem | `mainfesto-copy.tsx` | "By invoice time, the paid work already ran." Agitate the before/after gap. |
-| Solution / category | `pillarsAMI.tsx` | "The Solution: PriceOps" + 4 pillars. |
+| Solution / operating model | `pillarsAMI.tsx` | Explain PriceOps after the customer money path is clear. |
 | Mechanism (signature visual) | `money-path.tsx` | Show the money path + the allow/deny decision + invoice explanation. |
 | Proof / demo | *(new — add it)* | Workflow-app video: one paid action in one afternoon. Increase perceived likelihood. |
 | Adoption path | *(new — add it)* | Shadow → Sandbox → your own Stripe. Collapse adoption risk. |
@@ -57,13 +58,13 @@ Primary CTA everywhere: **Start with one paid action**. Consultative/design-part
 
 **Headline (keep — it is canonical):**
 
-> Authorize paid usage before it runs.
+> Authorize customer spend before paid work runs.
 
 **Subheadline:**
 
-> Open-source PriceOps infrastructure for usage-based SaaS. Keep plans versioned, entitlements
-> separate, and budgets in the request path so paid usage is authorized before it runs and every
-> invoice line can be explained after.
+> Open-source money path for usage-based SaaS. Keep plans versioned, entitlements separate,
+> customer budgets in the request path, and invoice evidence tied to the same decision that allowed
+> or denied the work.
 
 **Outcome line:**
 
@@ -79,11 +80,12 @@ Primary CTA everywhere: **Start with one paid action**. Consultative/design-part
 
 **Proof strip (under the fold):**
 
-- Request-path commercial authorization — before any cost
+- Customer spend authorization — before paid work creates cost
 - Plan versions and separated entitlements
 - Reserve up front (`runs`) or enforce live (`usage.consume`)
 - Wallet credits and reservations
 - Invoice evidence from the same money path
+- Customer spend control, not provider-cost routing
 - Workflow-app demo: one action in one afternoon
 - Shadow-adopt beside your current stack
 - Sandbox-first, then your own Stripe — AGPL core
@@ -106,7 +108,7 @@ Primary CTA everywhere: **Start with one paid action**. Consultative/design-part
 
 **Signs of static, after-the-fact pricing (keep):**
 
-- No way to authorize paid usage before it runs.
+- No way to authorize customer spend before paid work runs.
 - Inability to change packaging without rewriting product code.
 - Treating pricing as a backend config, not a runtime decision and evidence trail.
 - Invoice disputes that take manual reconstruction to explain.
@@ -115,20 +117,20 @@ Primary CTA everywhere: **Start with one paid action**. Consultative/design-part
 
 ## Mechanism (maps to `money-path.tsx`)
 
-**Section line:** Commercial authorization runs in the request path.
+**Section line:** Customer spend authorization runs in the request path.
 
-Before the paid action runs, your app asks Unprice five questions on one money path
+Before the paid action runs, your app asks Unprice five questions on one customer money path
 (**Request → Plan version → Pricing rule → Meter → Entitlement → Budget → Wallet → Ledger →
 Invoice**):
 
 1. Which **plan version** applies to this customer?
 2. Which **pricing rule** applies to this feature?
 3. Is this customer **entitled** to the feature?
-4. Is this request **inside budget**, and should **credits** be reserved or captured?
+4. Is this request inside the **customer's budget**, and should **credits** be reserved or captured?
 5. Can this decision **explain the invoice line** later?
 
-Over-budget work is denied in the request path (`429`), before any cost is created. Accepted usage
-settles credits and explains the invoice from the same money path.
+Over-budget customer work is denied in the request path (`429`), before any cost is created.
+Accepted usage settles credits and explains the invoice from the same money path.
 
 **Pick the right call (don't conflate them):**
 
@@ -148,13 +150,13 @@ authorize-before-cost wedge.
 
 **Headline:** Start with one paid action in one afternoon.
 
-Bring the one action in your product that can burn margin or create invoice confusion. Create the
-plan, install the SDK, put Unprice beside your current logic in shadow, and prove the path on
-Sandbox before you enforce anything.
+Bring the one action in your product that can burn a customer's credits, budget, or usage allowance.
+Create the plan, install the SDK, put Unprice beside your current logic in shadow, and prove the path
+on Sandbox before you enforce anything.
 
 **What you get:**
 
-- Commercial authorization for one paid action — entitlement, budget, credits, and meter rules
+- Customer spend authorization for one paid action — entitlement, budget, credits, and meter rules
   checked before work runs.
 - One `signUp` call that provisions the customer, subscription, and entitlements from your plan
   version (no entitlement tables to hand-roll).
@@ -164,7 +166,7 @@ Sandbox before you enforce anything.
 - Wallet credits and reservations kept distinct from entitlement grants.
 - Invoice evidence that traces every charge to plan version, pricing rule, billing period, rated
   events when present, wallet movement, and ledger captures.
-- An open-source PriceOps core you can read before you trust it.
+- An open-source money-path core you can read before you trust it.
 
 **CTA:** Start with one paid action
 
@@ -231,8 +233,9 @@ Lead with the buyer's real fear — not price, but *"will I put money logic some
   sandbox, enforce only when the evidence convinces you.
 - **Your money, your account:** go live on your own Stripe (Connect or your own key). Unprice never
   sits in your funds flow; there is no central platform account between you and your revenue.
-- **Inspectable core:** the code that guards your money is open (AGPL-3.0). Read it, run it, own your
-  data. No black box.
+- **Inspectable core:** the code that guards your money is open (AGPL-3.0). Read it — or have your
+  agent read it — run it, own your data. No black box, and no acquisition risk: a forkable money
+  path cannot be bought out from under you.
 - **One-afternoon fit check:** model one paid action first. If it is not clearer than your counter
   or cron in one working session, you will know before you migrate the rest.
 
@@ -258,7 +261,9 @@ money path while it's small.
 
 | Objection | Answer |
 | --- | --- |
-| "Why not just Stripe?" | Stripe captures payment and issues invoices. Unprice owns the PriceOps money path before and around that invoice: plan versions, pricing rules, entitlements, usage, budgets, credits, ledger captures, and evidence. Keep Stripe; put commercial authorization in front of paid usage. |
+| "Why not just Stripe?" | Stripe captures payment and issues invoices. Unprice owns the customer money path before and around that invoice: plan versions, pricing rules, entitlements, usage, budgets, credits, ledger captures, and evidence. Keep Stripe; put customer spend authorization in front of paid usage. |
+| "Why not an AI gateway?" | Gateways cap provider spend, route models, and manage virtual keys. Unprice governs what your customer is allowed to spend and connects that decision to plan versions, credits, and invoice evidence. |
+| "Why not Stigg?" | Stigg is a strong closed usage runtime. Use Unprice when you want the request-to-invoice money path in open source: inspect it, self-host it, adapt it, and keep the budget check, credit reservation, and invoice evidence together. |
 | "Why not a Redis counter?" | A counter can drift from spend, credits, and invoice evidence, and races let over-budget work through. Unprice keeps the budget check, credit reservation, and invoice explanation on one path. |
 | "Will switching disrupt my current logic?" | No — adopt it in shadow. `access.check` is read-only and `usage.record` is non-blocking, so you run Unprice's decisions beside your stack and only cut over to enforcement when you trust it. |
 | "Do I have to move my payments / will you touch my money?" | No. Start on Sandbox (no processor), then connect your **own** Stripe via Connect or your own key. Charges and payouts run on your account; Unprice never sits in your funds flow. |
@@ -273,12 +278,12 @@ money path while it's small.
 
 ## Final CTA (maps to `cta.tsx`)
 
-**Headline:** Authorize paid usage before it runs.
+**Headline:** Authorize customer spend before paid work runs.
 
-> Unprice is open-source PriceOps infrastructure for usage-based SaaS. Pick one paid action, check
-> entitlement, budget, credits, and meter rules before it runs, then explain every invoice from the
-> same money path. Start in shadow in one afternoon, prove it on Sandbox, then settle to your own
-> Stripe. The core is open source — build on it, or help us shape it.
+> Unprice is the open-source customer money path for usage-based SaaS. Pick one paid action, check
+> entitlement, customer budget, credits, and meter rules before it runs, then explain every invoice
+> from the same money path. Start in shadow in one afternoon, prove it on Sandbox, then settle to
+> your own Stripe. The core is open source — build on it, or help us shape it.
 
 **CTA:** Start with one paid action   ·   Microcopy: Not sure where to start? **Map my paid action.**
 
@@ -301,7 +306,7 @@ Concrete edits to align the live page with this offer (copy only — no structur
    visual and the capabilities grid — it is the strongest risk-reducer and is currently missing.
 6. `mainfesto-copy.tsx` — add the "Your Redis counter is not a budget" line to sharpen the DIY-stack
    contrast.
-7. Keep "PriceOps" as the category explanation (`pillarsAMI.tsx`), not the primary promise.
+7. Keep "PriceOps" as the operating-model explanation (`pillarsAMI.tsx`), not the primary promise.
 
 ---
 
@@ -320,3 +325,8 @@ Concrete edits to align the live page with this offer (copy only — no structur
 - The "authorize before; explain after" wedge is the canonical competitive line but a
   still-unvalidated hypothesis (`positioning-and-messaging.md`). Lead with mechanism; don't oversell
   superlatives.
+- Keep "one afternoon" mechanically honest: back it with a timed, CI-tested quickstart (plan
+  version + `signUp` + `access.check` on Sandbox) before using it as a hard claim in paid
+  campaigns. The proof-video and adoption-path sections depend on assets that have not shipped yet.
+- Consolidation copy ("a forkable money path cannot be bought out from under you") rests on dated
+  market facts (see Market Context in `positioning-and-messaging.md`); verify at publish time.

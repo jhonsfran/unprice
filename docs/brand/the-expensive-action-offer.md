@@ -1,6 +1,6 @@
 # The Expensive-Action Offer (Grand Slam Offer)
 
-Date: 2026-06-30
+Date: 2026-07-02
 
 ## What This Is
 
@@ -13,18 +13,17 @@ pitch.
 no tax/accounting/revenue-recognition coverage, not an "AI agent platform." Payments: Stripe-first
 today (via Stripe Connect to the buyer's own account, or bring-your-own-key) plus the built-in
 **Sandbox** test provider; do not claim Square (an unimplemented placeholder) or live
-Paddle/Lemon Squeezy. The "authorize before; explain after" wedge is a positioning hypothesis —
-validate it with buyer interviews before treating it as proven.
+Paddle/Lemon Squeezy. Lead with the customer money path, not cold category language.
 
 ---
 
 ## The One-Sentence Offer
 
-> Bring the one paid action in your product that can burn margin or create invoice confusion. In one
-> afternoon, define the plan version, install the SDK, provision or map one customer, and run Unprice
-> in shadow beside your current logic. You see whether that action should be allowed, which budget or
-> credits apply, and what evidence will explain the invoice line later — before you enforce anything,
-> before you move payments, and before a real dollar moves.
+> Bring the one paid action in your product that can burn a customer's credits, budget, or usage
+> allowance. In one afternoon, define the plan version, install the SDK, provision or map one
+> customer, and run Unprice in shadow beside your current logic. You see whether that action should
+> be allowed, which customer budget or credits apply, and what evidence will explain the invoice line
+> later — before you enforce anything, before you move payments, and before a real dollar moves.
 
 ---
 
@@ -36,7 +35,7 @@ validate it with buyer interviews before treating it as proven.
 | --- | --- |
 | **M**ake it about them | "Your paid action," "your margin," "your invoice evidence," "your request path." The hero is the builder's money path, not our platform. |
 | **A**nnounce the avatar | Developer-led usage-based SaaS teams with paid actions that affect margin, invoice trust, or pricing flexibility (CTOs, founding engineers, platform engineers). |
-| **G**ive them a goal | Authorize one paid action before it runs and prove the charge after it bills. |
+| **G**ive them a goal | Authorize customer spend before one paid action runs and prove the charge after it bills. |
 | **I**ndicate a time interval | One afternoon to get the first action into shadow, not a quarter-long billing migration. |
 | **C**omplete with a container word | "Sprint" (the container). Alternatives below. |
 
@@ -65,7 +64,7 @@ Every line of the offer is engineered to push the two numerators up and the two 
 
 | Lever | Direction | The move in this offer |
 | --- | --- | --- |
-| **Dream Outcome** | Maximize | Reframe from "better invoices" to **commercial control with proof**: *"The paid action is allowed before cost is created, and the invoice line can defend itself after."* The win is emotional as much as technical: no surprise margin leak, no support panic, no founding engineer spending Friday reconstructing why a customer was charged. |
+| **Dream Outcome** | Maximize | **Customer spend control with proof**: *"The paid action is allowed before cost is created, and the invoice line can defend itself after."* The win is emotional as much as technical: no surprise margin leak, no support panic, no founding engineer spending Friday reconstructing why a customer was charged. |
 | **Perceived Likelihood** | Maximize | Shrink the promise to one plan version, one paid action, one shadow authorization path, one evidence trail. Back it with a workflow-app demo video that shows the exact path: create the plan, install the SDK, run `access.check` in shadow, simulate on Sandbox, then inspect the invoice evidence. The core is **open source** — they can read the money-path code before trusting it. Start small, prove it, expand. |
 | **Time Delay** | Minimize | **One paid action in one afternoon.** No full billing migration, no payment-provider move, and no production enforcement to start. Define one plan version, provision or map one customer with `signUp`, install the SDK, and place a read-only shadow check beside the existing logic. |
 | **Effort & Sacrifice** | Minimize | Adopt in **shadow** first: `access.check` mutates nothing and `usage.record` is non-blocking, so production behavior stays unchanged while you compare decisions. You don't hand-build subscription or entitlement tables — `signUp` provisions them from the plan version. When you go live, connect **your own** Stripe account (Stripe Connect or your own key); Unprice never sits in your funds flow. Generated SDK, explicit schemas, no black box. |
@@ -129,8 +128,8 @@ The one-line mental model:
 - **`consume` = "decide now."** Sync, blocks the moment funds/limit are exhausted.
 - **`runs` = "ring-fence it first."** Reserve the budget before the work starts, so the run is guaranteed not to overspend.
 
-Lead the offer with `access.check` / `usage.consume` / `runs` — that is the authorize-before-cost
-wedge. `record` is for metering and invoice evidence, not spend safety.
+Lead the offer with `access.check` / `usage.consume` / `runs` — that is the customer-spend
+authorization wedge. `record` is for metering and invoice evidence, not spend safety.
 
 ## Adopt In Shadow: Don't Touch Your Current Logic
 
@@ -176,7 +175,7 @@ commercial pricing is still being defined; do not fabricate a number).
 
 | # | What you get | What you do without it | What that costs you (fill in your number) |
 | --- | --- | --- | --- |
-| 1 | **Commercial authorization for one paid action** — check entitlement, budget, credits, and meter rules in the request path before work runs. | Let the action run first and reconcile later. | The work already ran, the cost is real, and now the team has to defend it. |
+| 1 | **Customer spend authorization for one paid action** — check entitlement, budget, credits, and meter rules in the request path before work runs. | Let the action run first and reconcile later. | The work already ran, the cost is real, and now the team has to defend it. |
 | 2 | **Explainable invoice evidence** — every charge traces back to the plan version, pricing rule, billing period, rated usage events when present, wallet movement, and ledger captures. | Reconstruct a disputed line by hand from logs. | Senior engineering time turns into invoice forensics; customer trust drops while everyone waits. |
 | 3 | **Auto-provisioned entitlements + runtime metering** — `signUp` derives entitlements from the plan version; check access and consume usage while the request is in flight. | Hand-build a subscriptions + entitlements table and scatter `if (plan === ...)` checks through product code. | Every packaging change feels like touching a live wire: app code, billing scripts, and support rules all move together. |
 | 4 | **Wallets & credits with reservations** — purchased, granted, reserved, and consumed balances kept distinct from entitlement grants. | Conflate credits, grants, and quantities in ad-hoc columns. | Denials you cannot explain; refunds you cannot defend. |
@@ -226,9 +225,10 @@ reverses **implementation risk**, not purchase risk. Two layers:
 
 ### 1. The Inspectable-Core Guarantee (anti-black-box)
 
-> The code that guards your money is open. Read the exact money-path logic before you trust it, run
-> it on your own infrastructure under AGPL-3.0, and keep your own data. No hidden pricing logic, no
-> vendor lock-in, no black box between your product and your margin.
+> The code that guards your money is open. Read the exact money-path logic before you trust it — or
+> have your agent read it — run it on your own infrastructure under AGPL-3.0, and keep your own
+> data. No hidden pricing logic, no vendor lock-in, no black box between your product and your
+> margin — and no acquisition risk: a forkable money path cannot be bought out from under you.
 
 Hormozi type: **unconditional transparency** — stronger than money-back for infrastructure, because
 the buyer can verify the claim themselves instead of trusting it.
@@ -270,7 +270,7 @@ No countdown timers. Urgency comes from the buyer's own traffic and from genuine
 
 > Unprice is for teams that can name the paid action. If your product is pure seat-based SaaS,
 > Stripe Billing is probably enough. If a single request can create margin risk or invoice confusion,
-> that request needs commercial authorization and evidence around it.
+> that request needs customer spend authorization and evidence around it.
 
 **Cost-of-delay urgency (the deadline is set by your traffic):**
 
@@ -290,7 +290,9 @@ No countdown timers. Urgency comes from the buyer's own traffic and from genuine
 
 | Objection | Answer |
 | --- | --- |
-| "Why not just Stripe?" | Stripe captures the payment and issues the invoice. Unprice owns the PriceOps money path before and around that invoice: plan version, entitlement, usage, budget, credit, and evidence. Keep Stripe; put commercial authorization in front of paid usage. |
+| "Why not just Stripe?" | Stripe captures the payment and issues the invoice. Unprice owns the customer money path before and around that invoice: plan version, entitlement, usage, budget, credit, and evidence. Keep Stripe; put customer spend authorization in front of paid usage. |
+| "Why not an AI gateway?" | Gateways cap provider spend, route models, and manage virtual keys. Unprice governs what your customer is allowed to spend and connects that decision to plan versions, credits, and invoice evidence. |
+| "Why not Stigg?" | Stigg is a strong closed usage runtime. Use Unprice when you want the request-to-invoice money path in open source: inspect it, self-host it, adapt it, and keep the budget check, credit reservation, and invoice evidence together. |
 | "Why not a Redis counter?" | **Your Redis counter is not a budget.** A counter can say "usage is high." It cannot reliably explain which budget was checked, which credits were reserved, why a request was denied, and how accepted usage became an invoice line — correctly, under concurrency. Unprice keeps all of that on one money path. |
 | "Will this replace my billing stack?" | No. Stripe-first today, provider-extensible by design. Unprice sits between product usage and invoice evidence; it does not replace your payment processor, tax, or accounting. |
 | "Do I have to move my payments to you? Will you touch my money?" | No. Start on the built-in Sandbox provider (no real processor) to test behavior, then connect **your own** Stripe account via Stripe Connect or your own API key. Charges and payouts run on your account; Unprice never sits in your funds flow. |
@@ -325,9 +327,9 @@ No countdown timers. Urgency comes from the buyer's own traffic and from genuine
 > from real spend, it leaks over-budget work under concurrency, and it can't explain a denial after
 > the fact.
 >
-> Unprice is open-source PriceOps infrastructure. You name one paid action, and Unprice puts
-> commercial authorization in that request path: check plan version, entitlement, budget, credits,
-> and meter rules before it runs, then keep the invoice evidence from the same money trail. Define
+> Unprice is the open-source customer money path for usage-based SaaS. You name one paid action, and Unprice
+> puts customer spend authorization in that request path: check plan version, entitlement, budget,
+> credits, and meter rules before it runs, then keep the invoice evidence from the same money trail. Define
 > one plan version and a single `signUp` call provisions the customer, subscription, and entitlements
 > — no entitlement tables to hand-roll.
 >
@@ -360,7 +362,7 @@ Avoid vague CTAs like "Start pricing" or "Get started."
 **One-liners (repeatable):**
 
 - Pricing is not a page. Pricing is a runtime decision and an evidence trail.
-- Authorize paid usage before it runs.
+- Authorize customer spend before paid work runs.
 - Prove every charge after it bills.
 - Put a budget and evidence trail around the expensive action.
 - Your Redis counter is not a budget.
@@ -372,9 +374,9 @@ Avoid vague CTAs like "Start pricing" or "Get started."
 
 > Saw you're shipping usage-based [AI/API/workflows]. Quick one: what's the paid action a customer
 > can trigger that either burns margin or creates invoice questions, and what authorizes it before it
-> runs? If the answer is "a counter and a cron job," that's the leak we close. Unprice is open-source
-> PriceOps infra — one paid action in one afternoon, run in shadow first, prove it on Sandbox, then
-> connect your own Stripe when you trust it. Worth 10 minutes?
+> runs? If the answer is "a counter and a cron job," that's the leak we close. Unprice is the
+> open-source customer money path — one paid action in one afternoon, run in shadow first, prove it
+> on Sandbox, then connect your own Stripe when you trust it. Worth 10 minutes?
 
 **Tweet/post:**
 
@@ -417,3 +419,7 @@ Avoid vague CTAs like "Start pricing" or "Get started."
   provider — it is running Unprice's decision endpoints in parallel without enforcing.
 - Voice is **calm urgency**: create urgency with the mechanism, not fear adjectives. Avoid "growth
   platform," "magic billing," "effortless," "revenue OS," "no-code pricing."
+- Keep "one afternoon" mechanically honest: back it with a timed, CI-tested quickstart (plan
+  version + `signUp` + `access.check` on Sandbox) before using it as a hard claim in paid
+  campaigns. The workflow-demo video and the quickstart are the two proof assets this offer
+  depends on; neither has shipped yet.

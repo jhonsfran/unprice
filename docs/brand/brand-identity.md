@@ -1,16 +1,19 @@
 # Unprice Brand Identity
 
-Date: 2026-07-01
+Date: 2026-07-03
+
+Status: pre-validation refresh (July 2026 market audit). Lock after the customer interviews in
+`jobs-to-be-done.md`.
 
 ## Brand Core
 
-Unprice is open-source PriceOps infrastructure for usage-based SaaS. It helps developer-led teams
-authorize paid usage before it runs, then explain why every event was allowed, denied, charged,
-credited, or invoiced from the same money path.
+Unprice is the open-source customer money path for usage-based SaaS. It helps developer-led teams
+sell credits and usage-based plans without eating over-budget customer work: authorize in the
+request path, explain on the invoice, and own the money logic in open source.
 
-The wedge is commercial authorization with evidence: decide whether paid usage is commercially
-allowed before cost is created, and preserve the evidence needed to explain the charge or denial
-after the fact.
+The wedge is customer spend authorization with invoice evidence: decide whether a customer's paid
+work is commercially allowed before cost is created, and preserve the evidence needed to explain the
+charge, credit, denial, or invoice line after the fact.
 
 PriceOps means operating pricing as versioned commercial infrastructure — plan versions,
 subscriptions, entitlements, meters, budgets, credits, usage evidence, and invoice evidence stay
@@ -33,9 +36,9 @@ product does. Treat this as a standing brand risk, not a solved problem. The nam
 category ("PriceOps") are two new concepts at once, so every first touch must do the disambiguation
 work immediately:
 
-- Never show the wordmark cold. Pair it with the category line ("open-source PriceOps infrastructure
-  for usage-based SaaS") or the headline on first impression: homepage hero, OG cards, README,
-  social avatars in context, conference slides.
+- Never show the wordmark cold. Pair it with the public frame ("open-source customer money path for
+  usage-based SaaS") or the headline on first impression: homepage hero, OG cards, README, social
+  avatars in context, conference slides.
 - Let the bracket mark carry the meaning the word cannot. The brackets read as code containment —
   pricing pulled into one inspectable place, with the gated value held inside — which is exactly
   what "un-price your codebase" means.
@@ -48,18 +51,20 @@ work immediately:
 Canonical source: [`positioning-and-messaging.md`](positioning-and-messaging.md).
 
 For developer-led usage-based SaaS teams — CTOs, founding engineers, and platform engineers — who
-ship paid product actions that can create cost before the invoice exists, Unprice is the open-source
-PriceOps runtime that authorizes usage in the request path: checking entitlement, budget, credits,
-and meter rules before work runs, then preserving the evidence that explains every allow, deny,
-charge, credit, and invoice line from one inspectable money path.
+sell credits, usage, or hybrid plans, Unprice is the open-source customer money path that authorizes
+customer spend in the request path: checking entitlement, customer budget, wallet credits, and meter
+rules before work runs, then preserving the evidence that explains every allow, deny, charge,
+credit, and invoice line.
 
-Unlike billing platforms that primarily rate, invoice, and collect after usage, entitlement layers
-that gate access, or workflow and AI infrastructure that runs the work, Unprice ties the commercial
-decision and the after-the-fact explanation together in one open money path.
+Unlike billing platforms that rate and invoice after usage and are consolidating into payment
+processors, AI gateways that cap provider cost, closed usage runtimes that cannot be inspected or
+forked, and open-source billing engines that do not authorize in the request path, Unprice keeps
+the customer spend decision, the double-entry ledger, and the invoice explanation in one open money
+path you can read, self-host, and fork.
 
 ## Brand Promise
 
-Paid usage you can authorize, explain, and change safely.
+Customer spend you can authorize, explain, and change safely.
 
 ## Terminology
 
@@ -81,11 +86,11 @@ Secondary: Ruler. The product is about control, order, auditability, and operati
 money-adjacent workflows.
 
 Archetype division of labor (resolve the lead-message tension deliberately): the wedge leads with
-Ruler energy — "authorize paid usage before it runs," "put a budget and evidence trail around the
-expensive action," the bracket logo, the name's promise of control. Ruler opens because the buying
-trigger is a loss of control over paid usage. Sage then carries the close: once Unprice has made the
-commercial decision, its durable value is explaining and inspecting the money path. So lead with
-Ruler authorization in the wedge, and win and retain on Sage explainability. The two are not in
+Ruler energy — "authorize customer spend before paid work runs," "put a budget and evidence trail
+around the expensive action," the bracket logo, the name's promise of control. Ruler opens because
+the buying trigger is a loss of control over customer spend. Sage then carries the close: once
+Unprice has made the customer money decision, its durable value is explaining and inspecting the
+money path. So lead with Ruler authorization in the wedge, and win and retain on Sage explainability. The two are not in
 conflict — control is exactly what Sage's evidence makes safe.
 
 Avoid a Magician posture. Do not present billing as invisible magic. The product wins when it makes
@@ -95,7 +100,7 @@ the money path visible.
 
 - Precise: use exact nouns, states, and examples.
 - Open: prefer inspectability, source evidence, and clear failure modes.
-- Fast: emphasize runtime decisions and short developer paths.
+- Fast: emphasize request-path decisions and short developer paths.
 - Calm: serious infrastructure, not hype. Calm urgency, not alarm: name the risk plainly and let
   the mechanism carry the weight.
 - Opinionated: clear mental model around events, meters, entitlements, wallets, and invoices.
@@ -125,20 +130,23 @@ Resolve the tension by creating urgency with mechanism, not adjectives.
 
 - Do: state the failure plainly. "Over-budget work runs before the invoice exists" is calm and
   urgent because it is literally true.
-- Do: use concrete business terms once and precisely: runaway usage, over-budget, margin.
+- Do: use concrete business terms once and precisely: customer budget, over-budget work, credits,
+  margin.
 - Avoid: stacked fear adjectives and hype ("catastrophic margin bleed", "explosive", "magical",
   "effortless"). Let the cost-before-invoice reality do the work.
 
 ## Messaging Pillars
 
-Pillar order is the message hierarchy. Lead with commercial authorization plus evidence; spend
-safety is the first concrete wedge, not the whole story. Keep this aligned with the message
-hierarchy in `positioning-and-messaging.md`.
+Pillar order is the message hierarchy. Lead with customer spend authorization plus invoice evidence;
+spend safety is the first concrete trigger, not the whole story. Keep this aligned with the message
+hierarchy in `positioning-and-messaging.md`. 2026-07 refresh: spend safety (budgeted workloads)
+holds second position and open, independent infrastructure moves ahead of the versioned model,
+matching the canonical hierarchy.
 
-### Commercial Authorization With Evidence (Wedge)
+### Customer Spend Authorization With Evidence (Wedge)
 
-Usage-based products need a commercial decision before a paid action creates cost, and an evidence
-trail after that action becomes a charge, credit, denial, replay, or invoice line.
+Usage-based products need a customer budget and credit decision before paid work creates cost, and
+an evidence trail after that action becomes a charge, credit, denial, replay, or invoice line.
 
 Proof points:
 
@@ -150,14 +158,40 @@ Proof points:
 ### Spend Safety For Expensive Workloads
 
 AI/API products, workflow apps, and other usage-based products need to prevent a customer, job,
-workflow, tool, or custom run from turning into uncapped cost. Real-time budgets reject over-budget
-work in the request path, before it runs.
+workflow, tool, or custom run from burning past the customer's plan, credits, or budget. Real-time
+budgets reject over-budget work in the request path, before it runs.
+
+Boundary, stated positively: not an agent platform — the budget, wallet, and authorization layer
+for products whose customers burn credits, including when an agent triggers the spend.
 
 Proof points:
 
-- Budgeted runs.
+- Budgeted runs with up-front wallet reservation.
 - Workload attribution.
 - Run-level budget rejection.
+
+### Explainable Money Flow
+
+Customers, engineers, and operators need evidence for why something was charged or blocked.
+
+Proof points:
+
+- Invoice charge explanation.
+- Ingestion status and replay.
+- Ledger-backed wallet balances and credit attribution.
+
+### Open, Independent Money-Path Infrastructure
+
+Revenue logic should not be trapped in a black box — or subject to a vendor's acquisition or
+sunset (see the market context in `positioning-and-messaging.md`).
+
+Proof points:
+
+- Open-source codebase (AGPL-3.0 core plus a commercial license) you can read, self-host, and
+  fork — or have your agent read — before you trust it.
+- Double-entry wallet ledger.
+- Explicit schemas for plans, plan versions, features, meters, entitlements, wallets, and runs.
+- Generated SDK surface from OpenAPI contracts.
 
 ### Versioned PriceOps Model
 
@@ -171,26 +205,6 @@ Proof points:
 - Entitlements derived from published plan versions.
 - Usage features with explicit meter configuration.
 
-### Explainable Money Flow
-
-Customers, engineers, and operators need evidence for why something was charged or blocked.
-
-Proof points:
-
-- Invoice charge explanation.
-- Ingestion status and replay.
-- Ledger-backed wallet balances and credit attribution.
-
-### Open PriceOps Infrastructure
-
-Revenue logic should not be trapped in a black box.
-
-Proof points:
-
-- Open-source codebase (AGPL-3.0 core plus a commercial license).
-- Explicit schemas for plans, plan versions, features, meters, entitlements, wallets, and runs.
-- Generated SDK surface from OpenAPI contracts.
-
 ### Pricing Flexibility
 
 Teams should change pricing models without rewriting the product request path.
@@ -203,7 +217,7 @@ Proof points:
 
 ### Bring Your Own Payments
 
-Unprice owns the runtime money path; the payment provider still captures payment. Stripe-first
+Unprice owns the customer money path; the payment provider still captures payment. Stripe-first
 today, provider-extensible by design.
 
 Proof points:
@@ -218,14 +232,19 @@ Use only code-backed claims unless a benchmark, customer result, or integration 
 
 Allowed now:
 
-- "Open-source PriceOps infrastructure."
-- "Authorize paid usage before it runs."
+- "Open-source customer money path for usage-based SaaS."
+- "Authorize customer spend before paid work runs."
 - "Explain every allow, deny, charge, credit, and invoice line from one money path."
 - "Meter usage, enforce entitlements, reserve credits, budget workloads, and explain invoices."
 - "Budgeted runs for agents, workflows, jobs, tools, and custom workloads."
 - "Plan versions keep customers on the pricing they bought while new pricing experiments ship."
 - "Stripe-first today, provider-extensible by design."
 - "Designed for request-path usage enforcement."
+- "AI gateways cap provider spend; Unprice governs customer spend and invoice evidence."
+- "Wallet credits ride a double-entry ledger."
+- "The money path is yours to read, self-host, and fork — it cannot be acquired out from under
+  you."
+- "Read the code that guards your money — or have your agent read it."
 
 Avoid until proven:
 
@@ -240,12 +259,13 @@ Avoid until proven:
 
 Use:
 
-- Authorize paid usage before it runs
+- Authorize customer spend before paid work runs
 - Prove every charge after it bills
 - Spend safety
-- Commercial authorization
+- Customer spend authorization
 - Versioned PriceOps
-- Open PriceOps infrastructure
+- Open money-path infrastructure
+- Customer money path
 - Usage enforcement
 - Budgeted runs
 - Spend-safe metering
@@ -253,6 +273,9 @@ Use:
 - Wallet credits
 - Invoice evidence
 - Entitlement decision
+- Credit reservation (pre-authorization for paid work)
+- Budget envelope
+- Independent money path
 
 Avoid:
 
@@ -270,7 +293,7 @@ The brand should feel like operational infrastructure, not a glossy SaaS templat
 
 Signature visual (the one ownable idea): the money path. Render request -> plan version -> pricing
 rule -> meter -> entitlement -> budget -> wallet -> ledger -> invoice as a literal, inspectable
-flow, with the authorization decision and the invoice explanation as the hero moments. Reuse it as
+flow, with customer spend authorization and invoice explanation as the hero moments. Reuse it as
 the recurring system across hero, docs, empty states, and explainers. The brand's distinctiveness is
 legibility of real state — product state, monospace facts, and the money-path diagram — not
 decoration or a color trick. This is what keeps Unprice from looking like a generic dev-tool
@@ -301,7 +324,7 @@ Every important screen or page should answer at least one of these questions:
 - What happened?
 - Who did it affect?
 - Was it allowed, denied, accepted, replayed, captured, or invoiced?
-- What limit, budget, or wallet balance was involved?
+- What customer budget, limit, or wallet balance was involved?
 - What should the operator or developer do next?
 
 If a screen cannot answer one of those questions, it is probably decoration or premature surface

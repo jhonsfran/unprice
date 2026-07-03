@@ -1,6 +1,9 @@
 # Brand And Design Documentation
 
-Date: 2026-06-30
+Date: 2026-07-03
+
+Status: pre-validation refresh (July 2026 market audit). Run the Validation Plan in
+`jobs-to-be-done.md`, fold in the interview evidence, then lock these documents.
 
 These documents define how Unprice should present itself in product UI, marketing pages, docs,
 sales demos, and developer examples.
@@ -8,25 +11,32 @@ sales demos, and developer examples.
 They are internal source-of-truth documents. They do not replace API docs, ADRs, or implementation
 plans.
 
-## Canonical Positioning (Quick Reference)
+## Canonical Brand (Quick Reference)
 
 Do not re-derive these. Copy from here; if they change, change them here first.
 
-- Category: open-source PriceOps runtime for usage-based SaaS.
-- PriceOps: operating pricing as versioned commercial infrastructure — plan versions,
+- Public frame: open-source customer money path for usage-based SaaS.
+- PriceOps: internal operating model for pricing as versioned commercial infrastructure — plan versions,
   subscriptions, entitlements, meters, budgets, credits, usage evidence, and invoice evidence stay
   separate but connected.
 - PriceOps manifesto: entitlements should not be hardcoded into subscriptions; customers can stay
   pinned to the plan version they bought while the team ships new pricing experiments.
-- Wedge: commercial authorization with evidence — authorize paid usage before it runs, then prove
-  every allow, deny, charge, credit, and invoice line after.
-- Headline: Authorize paid usage before it runs.
-- Rallying cry: Put a budget and evidence trail around the expensive action.
+- Wedge: customer spend authorization with invoice evidence — authorize customer spend before paid
+  work runs, then prove every allow, deny, charge, credit, and invoice line after.
+- Headline: Authorize customer spend before paid work runs.
+- Rallying cry: Sell credits and usage-based plans without eating over-budget customer work.
 - Name meaning: "Unprice" = un-hardcoding pricing from your codebase, not removing price.
-- Payments: Stripe-first today, provider-extensible by design (Paddle, Lemon Squeezy, others).
+- Payments: Stripe-first today, provider-extensible by design. Unprice never sits in the buyer's
+  funds flow.
 - Business model: open-core (AGPL-3.0 plus a commercial license).
 - Primary buyers: developer-led usage-based SaaS teams — CTOs, founding engineers, platform
   engineers. AI/API and workflow products are the sharpest early slice.
+- Contrast: gateways cap provider spend; Unprice governs what the buyer's customer is allowed to
+  spend and connects that decision to invoice evidence.
+- Why now (dated 2026-07; verify before external use): the independent billing layer consolidated
+  into payment processors (Stripe/Metronome, Adyen/Orb, Kong/OpenMeter). Authorization alone is a
+  contested claim (Stigg); the open, forkable authorization runtime is not. Full context in
+  `positioning-and-messaging.md` Market Context.
 
 ## Terminology
 
