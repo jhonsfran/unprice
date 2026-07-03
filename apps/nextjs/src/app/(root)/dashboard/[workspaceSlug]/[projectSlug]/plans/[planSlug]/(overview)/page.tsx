@@ -2,16 +2,14 @@ import { CURRENCIES, STATUS_PLAN } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { Separator } from "@unprice/ui/separator"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { BadgeCheck, Code, FilePenLine, Plus, Route, UsersRound } from "lucide-react"
+import { Code, Plus } from "lucide-react"
 import { notFound } from "next/navigation"
 import { Suspense } from "react"
-import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
-import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { api } from "~/trpc/server"
 import { PlanActions } from "../../_components/plan-actions"
@@ -39,12 +37,19 @@ export default async function PlanPage({
     notFound()
   }
 
-  const publishedVersions = plan.versions.filter((version) => version.status === "published").length
-  const draftVersions = plan.versions.filter((version) => version.status === "draft").length
-  const assignedSubscriptions = plan.versions.reduce(
-    (total, version) => total + version.subscriptions,
-    0
-  )
+  const planVersionIds = plan.versions.map((version) => version.id)
+  const latestVersion = plan.versions.find((version) => version.latest) ?? plan.versions[0]
+  const listPlanVersionsExampleParams =
+    planVersionIds.length > 0 && latestVersion
+      ? {
+          listPlanVersions: {
+            planVersionIds,
+            billingInterval: latestVersion.billingConfig.billingInterval,
+            currency: latestVersion.currency,
+            version: latestVersion.version,
+          },
+        }
+      : undefined
 
   return (
     <DashboardShell
@@ -60,7 +65,10 @@ export default async function PlanPage({
           label={plan.active ? "active" : "inactive"}
           action={
             <div className="flex items-center gap-2 rounded-md">
-              <CodeApiSheet defaultMethod="listPlanVersions">
+              <CodeApiSheet
+                defaultMethod="listPlanVersions"
+                exampleParams={listPlanVersionsExampleParams}
+              >
                 <Button variant={"ghost"}>
                   <Code className="mr-2 h-4 w-4" />
                   API
@@ -116,37 +124,6 @@ export default async function PlanPage({
         </div>
       </TabNavigation>
       <div className="mt-4 flex flex-col gap-4">
-        <SectionIntro
-          title="Plan versions customers can be pinned to"
-          description="Published versions are immutable pricing and entitlement rules. Draft versions stay editable until they are published."
-        />
-        <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
-          <EvidenceMetricTile
-            label="Versions"
-            value={String(plan.versions.length)}
-            helper="Draft and published"
-            icon={<Route className="h-4 w-4" />}
-          />
-          <EvidenceMetricTile
-            label="Published"
-            value={String(publishedVersions)}
-            helper="Usable by assigned customers"
-            icon={<BadgeCheck className="h-4 w-4" />}
-            tone={publishedVersions > 0 ? "success" : "default"}
-          />
-          <EvidenceMetricTile
-            label="Draft"
-            value={String(draftVersions)}
-            helper="Editable before publish"
-            icon={<FilePenLine className="h-4 w-4" />}
-          />
-          <EvidenceMetricTile
-            label="Assigned subscriptions"
-            value={String(assignedSubscriptions)}
-            helper="Customers currently pinned to these versions"
-            icon={<UsersRound className="h-4 w-4" />}
-          />
-        </EvidenceMetricStrip>
         <Suspense
           fallback={
             <DataTableSkeleton

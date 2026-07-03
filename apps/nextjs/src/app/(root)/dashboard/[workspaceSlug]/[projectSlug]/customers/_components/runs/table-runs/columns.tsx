@@ -114,7 +114,7 @@ export const columns: ColumnDef<RunRow>[] = [
         <Typography
           variant="p"
           affects="removePaddingMargin"
-          className="max-w-[22rem] truncate text-sm text-muted-foreground"
+          className="max-w-[22rem] truncate text-muted-foreground text-sm"
           title={reason || undefined}
         >
           {reason || "-"}

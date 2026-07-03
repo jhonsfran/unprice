@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server"
 import {
   insertPaymentProviderConfigSchema,
-  selectPaymentProviderConfigSchema,
+  publicPaymentProviderConfigSchema,
 } from "@unprice/db/validators"
 import { savePaymentProviderConfig as savePaymentProviderConfigUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
@@ -14,7 +14,7 @@ const saveConfigInputSchema = insertPaymentProviderConfigSchema.extend({
 
 export const saveConfig = protectedProjectProcedure
   .input(saveConfigInputSchema)
-  .output(z.object({ paymentProviderConfig: selectPaymentProviderConfigSchema }))
+  .output(z.object({ paymentProviderConfig: publicPaymentProviderConfigSchema }))
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 

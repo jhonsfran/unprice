@@ -143,9 +143,7 @@ export class BudgetRunService {
   async listRunsByProject(input: {
     projectId: string
     query: SearchParamsDataTable
-  }): Promise<
-    Result<{ runs: BudgetRunWithCustomer[]; pageCount: number }, BudgetRunServiceError>
-  > {
+  }): Promise<Result<{ runs: BudgetRunWithCustomer[]; pageCount: number }, BudgetRunServiceError>> {
     const runColumns = getTableColumns(budgetRuns)
     const customerColumns = getTableColumns(customers)
     const runStatusValues = new Set<BudgetRunStatus>([

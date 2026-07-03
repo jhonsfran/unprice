@@ -15,6 +15,7 @@ import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { ProgressBar } from "./progress"
 import { type UsageChartPoint, buildUsageChartConfig } from "./usage-chart-config"
@@ -200,28 +201,29 @@ function UsageEvidenceHeader({
   isFetching: boolean
   showControls: boolean
 }) {
+  const title = mode === "customer" ? "Customer usage evidence" : "Usage and spend evidence"
+  const description = `Latest feature usage and ledger display amounts for this ${
+    mode === "customer" ? "customer" : "project"
+  } in the ${intervalLabel}.`
+
   return (
-    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-      <div className="min-w-0 space-y-1.5">
-        <h2 className="font-semibold text-lg leading-none">
-          {mode === "customer" ? "Customer usage evidence" : "Usage and spend evidence"}
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          Latest feature usage and ledger display amounts for this{" "}
-          {mode === "customer" ? "customer" : "project"} in the {intervalLabel}.
-        </p>
-      </div>
-      {showControls && (
-        <div className="flex shrink-0 flex-col items-start gap-4 md:items-end">
-          {mode === "customer" && <IntervalFilter />}
-          <FreshnessIndicator
-            generatedAt={generatedAt}
-            isFetching={isFetching}
-            className="md:justify-end"
-          />
-        </div>
-      )}
-    </div>
+    <SectionIntro
+      title={title}
+      description={description}
+      className="px-0 py-0"
+      actions={
+        showControls ? (
+          <div className="flex flex-col items-start gap-4 md:items-end">
+            {mode === "customer" && <IntervalFilter />}
+            <FreshnessIndicator
+              generatedAt={generatedAt}
+              isFetching={isFetching}
+              className="md:justify-end"
+            />
+          </div>
+        ) : null
+      }
+    />
   )
 }
 

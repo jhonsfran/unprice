@@ -5,7 +5,11 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
-import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
+import {
+  keyAuth,
+  resolveCustomerIdForApiKeyOrThrow,
+  validateIsAllowedToAccessProject,
+} from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -70,11 +74,15 @@ export type GetEntitlementsResponse = z.infer<
 
 export const registerGetEntitlementsV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, projectId } = c.req.valid("json")
+    const { customerId: inputCustomerId, projectId } = c.req.valid("json")
     const { entitlement } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: inputCustomerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
 
     // start a new timer
     startTime(c, "getEntitlements")

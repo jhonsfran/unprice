@@ -32,6 +32,26 @@ function readOptionalStringBinding(workerEnv: Record<string, unknown>, key: stri
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
+export function resolveRealtimeTicketSecret(env: {
+  APP_ENV: "development" | "preview" | "production"
+  AUTH_SECRET: string
+  REALTIME_TICKET_SECRET?: string | undefined
+}): string {
+  if (env.APP_ENV === "development") {
+    return env.REALTIME_TICKET_SECRET ?? env.AUTH_SECRET
+  }
+
+  if (!env.REALTIME_TICKET_SECRET) {
+    throw new Error("REALTIME_TICKET_SECRET binding is required outside development")
+  }
+
+  if (env.REALTIME_TICKET_SECRET === env.AUTH_SECRET) {
+    throw new Error("REALTIME_TICKET_SECRET must be distinct from AUTH_SECRET")
+  }
+
+  return env.REALTIME_TICKET_SECRET
+}
+
 // This function should be called at the start of each request.
 export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
   const parsedEnv = createEnv({
@@ -40,7 +60,8 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
       APP_ENV: z.enum(["development", "preview", "production"]).default("development"),
     },
     server: {
-      AUTH_SECRET: z.string(),
+      AUTH_SECRET: z.string().min(32),
+      REALTIME_TICKET_SECRET: z.string().min(32).optional(),
       VERSION: z.string().default("unknown"),
       projectdo: z.custom<DurableObjectNamespace<DurableObjectProject>>(
         (ns) => typeof ns === "object"
@@ -82,6 +103,7 @@ export function createRuntimeEnv(workerEnv: Record<string, unknown>) {
 
   return {
     ...parsedEnv,
+    REALTIME_TICKET_SECRET: resolveRealtimeTicketSecret(parsedEnv),
     // The services env is created from process.env and is also extended into
     // this Worker env. Prefer Worker bindings here so `.dev.vars` and
     // Cloudflare secrets are not overwritten by an undefined process env.

@@ -3,6 +3,7 @@ import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Progress } from "@unprice/ui/progress"
 import { ArrowUpRight, CalendarRange, KeyRound } from "lucide-react"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { formatWalletMoney } from "../../_components/wallet/format-wallet-money"
 import { EntitlementConfigSheet } from "./entitlement-config-sheet"
@@ -49,12 +50,11 @@ export function CustomerCurrentAccess({
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <h2 className="font-semibold text-lg leading-none">Current plan + access</h2>
-        <p className="text-muted-foreground text-sm">
-          Active subscription context and entitlement usage for the current entitlement period.
-        </p>
-      </div>
+      <SectionIntro
+        title="Current plan + access"
+        description="Active subscription context and entitlement usage for the current entitlement period."
+        className="px-0 py-0"
+      />
 
       <div className="grid gap-4 lg:grid-cols-[0.95fr_1.55fr]">
         <div className="flex max-h-[520px] min-h-[360px] flex-col overflow-hidden rounded-md border border-border/60">

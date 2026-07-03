@@ -89,11 +89,7 @@ export const columns: ColumnDef<InvoiceCustomer>[] = [
             ? "secondary"
             : "destructive"
 
-      return (
-        <Badge variant={statusVariant}>
-          {row.original.status}
-        </Badge>
-      )
+      return <Badge variant={statusVariant}>{row.original.status}</Badge>
     },
     size: 20,
     filterFn: (row, _id, value) => {

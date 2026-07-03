@@ -21,6 +21,8 @@ import { waitUntil } from "@vercel/functions"
 import { ZodError } from "zod"
 import { fromZodError } from "zod-validation-error"
 import { env } from "./env"
+import { getPublicTrpcErrorMessage, isInternalTrpcError } from "./error-format"
+import { type TrpcRateLimitConfig, checkTrpcRateLimit } from "./rate-limit"
 import { transformer } from "./transformer"
 import { db } from "./utils/db"
 import { getHttpStatus } from "./utils/get-status"
@@ -315,6 +317,8 @@ export const createTRPCContext = async (opts: {
 export const t = initTRPC.context<typeof createTRPCContext>().create({
   transformer,
   errorFormatter({ shape, error, ctx }) {
+    const internalError = isInternalTrpcError(error.code)
+
     if (env.NODE_ENV === "production") {
       delete error.stack
       delete shape.data.stack
@@ -325,15 +329,17 @@ export const t = initTRPC.context<typeof createTRPCContext>().create({
       data: {
         ...shape.data,
         code: error.code,
-        cause: error.cause,
+        cause: internalError ? undefined : error.cause,
         requestId: ctx?.requestId,
         zodError:
-          error.code === "BAD_REQUEST" && error.cause instanceof ZodError
+          !internalError && error.code === "BAD_REQUEST" && error.cause instanceof ZodError
             ? error.cause.flatten()
             : null,
       },
       message:
-        error.cause instanceof ZodError ? fromZodError(error.cause).toString() : error.message,
+        !internalError && error.cause instanceof ZodError
+          ? fromZodError(error.cause).toString()
+          : getPublicTrpcErrorMessage({ code: error.code, message: error.message }),
     }
 
     return errorResponse
@@ -410,6 +416,35 @@ export const publicProcedure = t.procedure.use(async ({ ctx, next, path }) => {
   }
 })
 
+function createTrpcRateLimitMiddleware(config: TrpcRateLimitConfig) {
+  return t.middleware(async ({ ctx, next, path }) => {
+    const rateLimit = await checkTrpcRateLimit(ctx, { ...config, path })
+
+    if (rateLimit?.limited) {
+      ctx.logger.set({
+        request: {
+          rate_limited: true,
+        },
+        rate_limit: {
+          count: rateLimit.count,
+          key: rateLimit.key,
+          limit: config.limit,
+          reset_at: rateLimit.resetAt.toISOString(),
+          scope: config.scope,
+          window_seconds: config.windowSeconds,
+        },
+      })
+
+      throw new TRPCError({
+        code: "TOO_MANY_REQUESTS",
+        message: "Rate limit exceeded",
+      })
+    }
+
+    return next()
+  })
+}
+
 /**
  * Reusable procedure that enforces users are logged in before running the
  * procedure
@@ -435,6 +470,10 @@ export const protectedProcedure = publicProcedure.use(({ ctx, next }) => {
   })
 })
 
+export function protectedRateLimitedProcedure(config: TrpcRateLimitConfig) {
+  return protectedProcedure.use(createTrpcRateLimitMiddleware(config))
+}
+
 export const protectedWorkspaceProcedure = protectedProcedure.use(
   async ({ ctx, next, getRawInput }) => {
     const input = (await getRawInput()) as { workspaceSlug?: string }
@@ -454,6 +493,10 @@ export const protectedWorkspaceProcedure = protectedProcedure.use(
     })
   }
 )
+
+export function protectedWorkspaceRateLimitedProcedure(config: TrpcRateLimitConfig) {
+  return protectedWorkspaceProcedure.use(createTrpcRateLimitMiddleware(config))
+}
 
 export const protectedProjectProcedure = protectedProcedure.use(
   async ({ ctx, next, getRawInput }) => {
@@ -480,5 +523,9 @@ export const protectedProjectProcedure = protectedProcedure.use(
     })
   }
 )
+
+export function protectedProjectRateLimitedProcedure(config: TrpcRateLimitConfig) {
+  return protectedProjectProcedure.use(createTrpcRateLimitMiddleware(config))
+}
 
 export type Context = Awaited<ReturnType<typeof createTRPCContext>>

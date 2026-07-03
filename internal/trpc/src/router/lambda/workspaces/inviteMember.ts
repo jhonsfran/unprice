@@ -3,9 +3,14 @@ import { inviteMembersSchema, invitesSelectBase } from "@unprice/db/validators"
 import { InviteEmail, sendEmail } from "@unprice/email"
 import { inviteMember as inviteMemberUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
-import { protectedWorkspaceProcedure } from "#trpc"
+import { protectedWorkspaceRateLimitedProcedure } from "#trpc"
 
-export const inviteMember = protectedWorkspaceProcedure
+export const inviteMember = protectedWorkspaceRateLimitedProcedure({
+  limit: 50,
+  name: "workspaces.inviteMember",
+  scope: "workspace",
+  windowSeconds: 60 * 60,
+})
   .input(inviteMembersSchema)
   .output(
     z.object({
@@ -16,6 +21,7 @@ export const inviteMember = protectedWorkspaceProcedure
     const { email, role, name } = opts.input
     const userId = opts.ctx.userId
     const workspace = opts.ctx.workspace
+    const actorRole = opts.ctx.member.role
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
 
@@ -34,6 +40,7 @@ export const inviteMember = protectedWorkspaceProcedure
         waitUntil: opts.ctx.waitUntil,
       },
       {
+        actorRole,
         email,
         role,
         name,
@@ -72,6 +79,13 @@ export const inviteMember = protectedWorkspaceProcedure
       throw new TRPCError({
         code: "BAD_REQUEST",
         message: "User not found",
+      })
+    }
+
+    if (val.state === "owner_role_forbidden") {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Only workspace owners can assign the owner role",
       })
     }
 

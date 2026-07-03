@@ -2,6 +2,7 @@ import baseX from "base-x"
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 const b58 = baseX(ALPHABET)
+const API_KEY_SECRET_BYTES = 16
 
 // this simulates uuid v7 and generated ids sortable by timestamp and url safe base58 encoded
 export const prefixes = {
@@ -135,6 +136,13 @@ export function randomId(): string {
   crypto.getRandomValues(buf.subarray(8))
 
   return b58.encode(buf).padStart(22, ALPHABET[0])
+}
+
+export function newApiKeySecret(): `${(typeof prefixes)["apikey_key"]}_${string}` {
+  const buf = new Uint8Array(API_KEY_SECRET_BYTES)
+  crypto.getRandomValues(buf)
+
+  return `${prefixes.apikey_key}_${b58.encode(buf).padStart(22, ALPHABET[0])}` as const
 }
 
 /**

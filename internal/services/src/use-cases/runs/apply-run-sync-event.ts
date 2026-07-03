@@ -159,9 +159,7 @@ export async function applyRunSyncEvent(
     projectId: run.projectId,
     runId: run.id,
     status: decision.budget.status,
-    statusReason: decision.allowed
-      ? null
-      : (decision.rejectionReason ?? "RUN_BUDGET_EXCEEDED"),
+    statusReason: decision.allowed ? null : (decision.rejectionReason ?? "RUN_BUDGET_EXCEEDED"),
     consumedAmount: decision.budget.consumedAmount,
     remainingAmount: decision.budget.remainingAmount,
   })

@@ -152,7 +152,7 @@ export const POST = withEvlog(async (req: NextRequest) => {
       })
 
       const response = new Response(JSON.stringify(result))
-      setCorsHeaders(response)
+      setCorsHeaders(response, req.headers.get("origin"))
       return response
     }
 
@@ -175,13 +175,13 @@ export const POST = withEvlog(async (req: NextRequest) => {
       })
 
       const response = new Response(JSON.stringify(result))
-      setCorsHeaders(response)
+      setCorsHeaders(response, req.headers.get("origin"))
       return response
     }
 
     default: {
       const response = new Response(JSON.stringify({ error: "Invalid action" }), { status: 400 })
-      setCorsHeaders(response)
+      setCorsHeaders(response, req.headers.get("origin"))
       return response
     }
   }

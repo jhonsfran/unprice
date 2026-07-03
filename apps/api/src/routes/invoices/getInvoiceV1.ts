@@ -9,7 +9,7 @@ import {
 import { toLedgerMinor } from "@unprice/money"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -128,6 +128,11 @@ export const registerGetInvoiceV1 = (app: App) =>
     if (!row) {
       throw new UnpriceApiError({ code: "NOT_FOUND", message: "Invoice not found" })
     }
+
+    resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: row.customerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
 
     const { val: lines, err } = await ledger.getInvoiceLines({
       projectId: row.projectId,

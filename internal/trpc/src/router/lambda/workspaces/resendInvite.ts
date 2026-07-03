@@ -3,9 +3,14 @@ import { invitesSelectBase } from "@unprice/db/validators"
 import { InviteEmail, sendEmail } from "@unprice/email"
 import { resendInvite as resendInviteUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
-import { protectedWorkspaceProcedure } from "#trpc"
+import { protectedWorkspaceRateLimitedProcedure } from "#trpc"
 
-export const resendInvite = protectedWorkspaceProcedure
+export const resendInvite = protectedWorkspaceRateLimitedProcedure({
+  limit: 25,
+  name: "workspaces.resendInvite",
+  scope: "workspace",
+  windowSeconds: 60 * 60,
+})
   .input(invitesSelectBase.pick({ email: true }))
   .output(
     z.object({

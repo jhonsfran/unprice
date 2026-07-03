@@ -32,6 +32,7 @@ vi.mock("~/auth/key", async (importOriginal) => {
 })
 
 import { registerIngestEventsSyncV1 } from "./ingestEventsSyncV1"
+import { RAW_EVENT_MAX_BODY_BYTES, RAW_EVENT_MAX_PROPERTIES_BYTES } from "./ingestEventsV1"
 
 const requestBody = {
   id: "evt_123",
@@ -202,6 +203,58 @@ describe("ingestEventsSyncV1 route", () => {
         message: "customerId is required when the API key has no default customer binding",
       })
     )
+  })
+
+  it("returns 413 and skips sync ingestion when properties exceed the size limit", async () => {
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        properties: {
+          body: "x".repeat(RAW_EVENT_MAX_PROPERTIES_BYTES),
+        },
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+        message: `Event properties must be ${RAW_EVENT_MAX_PROPERTIES_BYTES} bytes or less`,
+      })
+    )
+    expect(ingestFeatureSync).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips sync ingestion when the raw body exceeds the limit without Content-Length", async () => {
+    const { app, env, executionCtx, ingestFeatureSync } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/usage/consume", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sk_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...requestBody,
+          padding: "x".repeat(RAW_EVENT_MAX_BODY_BYTES),
+        }),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+      })
+    )
+    expect(ingestFeatureSync).not.toHaveBeenCalled()
   })
 
   it("returns 400 and logs when the raw event timestamp is older than the max accepted age", async () => {

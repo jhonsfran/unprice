@@ -11,9 +11,14 @@ const authMocks = vi.hoisted(() => ({
   keyAuth: vi.fn(),
 }))
 
-vi.mock("~/auth/key", () => ({
-  keyAuth: authMocks.keyAuth,
-}))
+vi.mock("~/auth/key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("~/auth/key")>()
+
+  return {
+    ...actual,
+    keyAuth: authMocks.keyAuth,
+  }
+})
 
 import { registerGetIngestionStatusV1 } from "./getIngestionStatusV1"
 

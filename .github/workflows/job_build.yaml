@@ -26,6 +26,9 @@ jobs:
           ts: "true"
           python: "false"
 
+      - name: Audit dependencies
+        run: pnpm audit:high
+
       - name: Build API client
         run: pnpm build --filter='./packages/api'
         env:

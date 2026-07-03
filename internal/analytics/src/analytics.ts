@@ -101,6 +101,7 @@ export class Analytics {
       pipe: "v1_get_session_event",
       parameters: z.object({
         session_id: z.string(),
+        project_id: z.string(),
         action: z.literal("plan_click"),
         interval_days: z.number().optional(),
       }),

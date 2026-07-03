@@ -726,6 +726,135 @@ describe("RunBudgetDO", () => {
     expect(state.alarmAt).toBe(BASE_NOW + 10_000)
   })
 
+  it("serializes concurrent applySyncEvent calls before pricing against remaining budget", async () => {
+    const RunBudgetDO = await loadRunBudgetDO()
+    const state = createDurableObjectState()
+    const env = createEnv()
+    const durable = new RunBudgetDO(state, env)
+    const eventAmount = 7000
+
+    let firstPricingStarted = () => undefined
+    let releaseFirstPricing = () => undefined
+    let pricingCallCount = 0
+    const firstPricingStartedPromise = new Promise<void>((resolve) => {
+      firstPricingStarted = resolve
+    })
+    const releaseFirstPricingPromise = new Promise<void>((resolve) => {
+      releaseFirstPricing = resolve
+    })
+
+    testState.entitlementWindowApply.mockImplementation(async (input: unknown) => {
+      pricingCallCount += 1
+      const remainingAmount =
+        (input as { externalReservation?: { remainingAmount?: number } }).externalReservation
+          ?.remainingAmount ?? 0
+
+      if (pricingCallCount === 1) {
+        firstPricingStarted()
+        await releaseFirstPricingPromise
+      }
+
+      if (remainingAmount < eventAmount) {
+        return {
+          allowed: false,
+          deniedReason: "RUN_BUDGET_EXCEEDED",
+          message: "Run budget exceeded",
+          meterFacts: [],
+        }
+      }
+
+      return {
+        allowed: true,
+        meterFacts: [
+          {
+            amount: eventAmount,
+            customer_entitlement_id: "ce_1",
+            statement_key: "stmt_1",
+            period_key: "period_1",
+            feature_id: "feat_1",
+            period_start_at: BASE_NOW - 60_000,
+            period_end_at: BASE_NOW + 60_000,
+            currency: "USD",
+          },
+        ],
+      }
+    })
+
+    await durable.startRun({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      currency: "USD",
+      budgetAmount: 10_000,
+      idempotencyKey: "idem_start_1",
+      metadata: {},
+      now: BASE_NOW,
+    })
+
+    const eventInput = (suffix: string) => ({
+      workloadType: "agent",
+      workloadId: "agent_1",
+      runId: "run_1",
+      customerId: "cus_1",
+      projectId: "proj_1",
+      featureSlug: "tokens",
+      idempotencyKey: `idem_event_${suffix}`,
+      event: {
+        id: `evt_${suffix}`,
+        slug: "tokens_used",
+        timestamp: BASE_NOW,
+        properties: { amount: 7 },
+      },
+      source: {
+        workspaceId: "ws_1",
+        environment: "test",
+        apiKeyId: "key_1",
+        sourceType: "api_key" as const,
+        sourceId: "key_1",
+        sourceName: null,
+      },
+      now: BASE_NOW,
+      ...TEST_ENTITLEMENT_FIELDS,
+    })
+
+    const first = durable.applySyncEvent(eventInput("1"))
+    await firstPricingStartedPromise
+
+    const second = durable.applySyncEvent(eventInput("2"))
+    await Promise.resolve()
+
+    expect(testState.entitlementWindowApply).toHaveBeenCalledTimes(1)
+    releaseFirstPricing()
+
+    const [firstResult, secondResult] = await Promise.all([first, second])
+
+    expect(firstResult.allowed).toBe(true)
+    expect(secondResult.allowed).toBe(false)
+    expect(secondResult.rejectionReason).toBe("RUN_BUDGET_EXCEEDED")
+
+    const firstPricingInput = testState.entitlementWindowApply.mock.calls[0]?.[0] as {
+      externalReservation: { remainingAmount: number }
+    }
+    const secondPricingInput = testState.entitlementWindowApply.mock.calls[1]?.[0] as {
+      externalReservation: { remainingAmount: number }
+    }
+    expect(firstPricingInput.externalReservation.remainingAmount).toBe(10_000)
+    expect(secondPricingInput.externalReservation.remainingAmount).toBe(3000)
+
+    await expect(
+      durable.getRunStatus({
+        runId: "run_1",
+        customerId: "cus_1",
+        projectId: "proj_1",
+      })
+    ).resolves.toMatchObject({
+      consumedAmount: 7000,
+      remainingAmount: 3000,
+    })
+  })
+
   it("rolls back spend when accepted decision idempotency fails", async () => {
     const RunBudgetDO = await loadRunBudgetDO()
     const state = createDurableObjectState()
@@ -2098,11 +2227,27 @@ async function loadRunBudgetDO() {
 }
 
 function createDurableObjectState(): FakeDurableObjectState {
+  let gate = Promise.resolve()
+
   const state: FakeDurableObjectState = {
     alarmAt: null,
     deletedAlarm: false,
     id: { toString: () => "do_run_budget_123" },
-    blockConcurrencyWhile: async <T>(cb: () => Promise<T> | T) => await cb(),
+    blockConcurrencyWhile: async <T>(cb: () => Promise<T> | T) => {
+      const previous = gate
+      let releaseGate: () => void = () => undefined
+      gate = new Promise<void>((resolve) => {
+        releaseGate = resolve
+      })
+
+      await previous
+
+      try {
+        return await cb()
+      } finally {
+        releaseGate()
+      }
+    },
     storage: {
       deleteAlarm: async () => {
         state.deletedAlarm = true

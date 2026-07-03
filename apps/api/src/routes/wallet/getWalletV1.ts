@@ -8,7 +8,11 @@ import {
 import { formatMoney, fromLedgerMinor, toDecimal } from "@unprice/money"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
+import {
+  keyAuth,
+  resolveCustomerIdForApiKeyOrThrow,
+  validateIsAllowedToAccessProject,
+} from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -219,10 +223,14 @@ function formatWalletState(
 
 export const registerGetWalletV1 = (app: App) => {
   app.openapi(walletBalanceRoute, async (c) => {
-    const { customerId, projectId } = c.req.valid("query")
+    const { customerId: inputCustomerId, projectId } = c.req.valid("query")
     const { customer, wallet: walletService } = c.get("services")
 
     const key = await keyAuth(c)
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: inputCustomerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
 
     const finalProjectId = validateIsAllowedToAccessProject({
       isMain: key.project.isMain ?? false,
@@ -230,7 +238,10 @@ export const registerGetWalletV1 = (app: App) => {
       requestedProjectId: projectId ?? key.project.id ?? "",
     })
 
-    const { val: customerRecord, err: customerErr } = await customer.getCustomer(customerId)
+    const { val: customerRecord, err: customerErr } = await customer.getCustomerByIdInProject({
+      id: customerId,
+      projectId: finalProjectId,
+    })
 
     if (customerErr) {
       throw toUnpriceApiError(customerErr)
@@ -253,10 +264,14 @@ export const registerGetWalletV1 = (app: App) => {
   })
 
   app.openapi(route, async (c) => {
-    const { customerId, projectId } = c.req.valid("query")
+    const { customerId: inputCustomerId, projectId } = c.req.valid("query")
     const { customer, wallet: walletService } = c.get("services")
 
     const key = await keyAuth(c)
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: inputCustomerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
 
     const finalProjectId = validateIsAllowedToAccessProject({
       isMain: key.project.isMain ?? false,
@@ -264,7 +279,10 @@ export const registerGetWalletV1 = (app: App) => {
       requestedProjectId: projectId ?? key.project.id ?? "",
     })
 
-    const { val: customerRecord, err: customerErr } = await customer.getCustomer(customerId)
+    const { val: customerRecord, err: customerErr } = await customer.getCustomerByIdInProject({
+      id: customerId,
+      projectId: finalProjectId,
+    })
 
     if (customerErr) {
       throw toUnpriceApiError(customerErr)
@@ -287,11 +305,15 @@ export const registerGetWalletV1 = (app: App) => {
   })
 
   app.openapi(walletCreditBalanceRoute, async (c) => {
-    const { customerId, projectId } = c.req.valid("query")
+    const { customerId: inputCustomerId, projectId } = c.req.valid("query")
     const { walletId } = c.req.valid("param")
     const { customer, wallet: walletService } = c.get("services")
 
     const key = await keyAuth(c)
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: inputCustomerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
 
     const finalProjectId = validateIsAllowedToAccessProject({
       isMain: key.project.isMain ?? false,
@@ -299,7 +321,10 @@ export const registerGetWalletV1 = (app: App) => {
       requestedProjectId: projectId ?? key.project.id ?? "",
     })
 
-    const { val: customerRecord, err: customerErr } = await customer.getCustomer(customerId)
+    const { val: customerRecord, err: customerErr } = await customer.getCustomerByIdInProject({
+      id: customerId,
+      projectId: finalProjectId,
+    })
 
     if (customerErr) {
       throw toUnpriceApiError(customerErr)

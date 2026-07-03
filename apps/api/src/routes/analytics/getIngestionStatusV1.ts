@@ -6,7 +6,7 @@ import {
 } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -87,6 +87,13 @@ export const registerGetIngestionStatusV1 = (app: App) =>
       limit,
     } = c.req.valid("json")
     const key = await keyAuth(c)
+    const resolvedCustomerId =
+      customerId || key.defaultCustomerId
+        ? resolveCustomerIdForApiKeyOrThrow({
+            explicitCustomerId: customerId,
+            defaultCustomerId: key.defaultCustomerId,
+          })
+        : undefined
 
     const result = await getIngestionStatus(
       {
@@ -94,7 +101,7 @@ export const registerGetIngestionStatusV1 = (app: App) =>
       },
       {
         projectId: key.projectId,
-        customerId,
+        customerId: resolvedCustomerId,
         window: {
           from: fromTs,
           to: toTs,

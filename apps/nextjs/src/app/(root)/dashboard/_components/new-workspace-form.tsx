@@ -34,7 +34,7 @@ export default function NewWorkspaceForm({
     schema: workspaceSignupSchema,
     defaultValues: {
       ...defaultValues,
-      successUrl: `${APP_DOMAIN}new?customer_id={CUSTOMER_ID}`,
+      successUrl: `${APP_DOMAIN}new`,
       cancelUrl: `${APP_DOMAIN}`,
     },
   })
@@ -60,7 +60,7 @@ export default function NewWorkspaceForm({
   const onSubmitForm = async (data: WorkspaceSignup) => {
     await signUpWorkspace.mutateAsync({
       ...data,
-      successUrl: toBrowserAbsoluteUrl("/new?customer_id={CUSTOMER_ID}"),
+      successUrl: toBrowserAbsoluteUrl("/new"),
       cancelUrl: toBrowserAbsoluteUrl("/"),
     })
   }

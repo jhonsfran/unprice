@@ -20,6 +20,7 @@ const ErrorCode = z.enum([
   "RATE_LIMITED",
   "UNAUTHORIZED",
   "PRECONDITION_FAILED",
+  "PAYLOAD_TOO_LARGE",
   "INSUFFICIENT_PERMISSIONS",
   "METHOD_NOT_ALLOWED",
   "EXPIRED",
@@ -69,6 +70,12 @@ export const ErrorSchema = z.object({
 
 export type ErrorResponse = z.infer<typeof ErrorSchema>
 
+const INTERNAL_SERVER_ERROR_MESSAGE = "Internal server error"
+
+function clientErrorMessage(status: StatusCode, message: string): string {
+  return status >= 500 ? INTERNAL_SERVER_ERROR_MESSAGE : message
+}
+
 function codeToStatus(code: z.infer<typeof ErrorCode>): StatusCode {
   switch (code) {
     case "BAD_REQUEST":
@@ -90,6 +97,8 @@ function codeToStatus(code: z.infer<typeof ErrorCode>): StatusCode {
     case "DELETE_PROTECTED":
     case "PRECONDITION_FAILED":
       return 412
+    case "PAYLOAD_TOO_LARGE":
+      return 413
     case "RATE_LIMITED":
       return 429
     case "INTERNAL_SERVER_ERROR":
@@ -111,6 +120,8 @@ function statusToCode(status: StatusCode): z.infer<typeof ErrorCode> {
 
     case 405:
       return "METHOD_NOT_ALLOWED"
+    case 413:
+      return "PAYLOAD_TOO_LARGE"
     case 500:
       return "INTERNAL_SERVER_ERROR"
     default:
@@ -229,7 +240,7 @@ export function handleError(err: Error, c: Context<HonoEnv>): Response {
         error: {
           code: err.code,
           docs: `https://docs.unprice.dev/api-reference/errors/code/${err.code}`,
-          message: err.message,
+          message: clientErrorMessage(err.status, err.message),
           requestId: c.get("requestId"),
         },
       },
@@ -255,7 +266,7 @@ export function handleError(err: Error, c: Context<HonoEnv>): Response {
         error: {
           code,
           docs: `https://docs.unprice.dev/api-reference/errors/code/${code}`,
-          message: err.message,
+          message: clientErrorMessage(err.status, err.message),
           requestId: c.get("requestId"),
         },
       },
@@ -268,7 +279,7 @@ export function handleError(err: Error, c: Context<HonoEnv>): Response {
       {
         error: {
           code: "INTERNAL_SERVER_ERROR",
-          message: err.message,
+          message: INTERNAL_SERVER_ERROR_MESSAGE,
           docs: "https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR",
           requestId: c.get("requestId"),
         },
@@ -306,7 +317,7 @@ export function handleError(err: Error, c: Context<HonoEnv>): Response {
       error: {
         code: "INTERNAL_SERVER_ERROR",
         docs: "https://docs.unprice.dev/api-reference/errors/code/INTERNAL_SERVER_ERROR",
-        message: err.message ?? "something unexpected happened",
+        message: INTERNAL_SERVER_ERROR_MESSAGE,
         requestId: c.get("requestId"),
       },
     },

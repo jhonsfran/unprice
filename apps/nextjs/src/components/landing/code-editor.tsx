@@ -32,7 +32,7 @@ export function CodeEditor({
       {({ className: prismClassName, style, tokens, getLineProps, getTokenProps }) => {
         return (
           <pre
-            className={cn("h-full overflow-x-auto text-sm leading-6", prismClassName, className)}
+            className={cn("h-full overflow-x-hidden text-sm leading-6", prismClassName, className)}
             style={{ ...style, background: "transparent" }}
           >
             {tokens.map((line, i) => {
@@ -51,7 +51,7 @@ export function CodeEditor({
                   >
                     {i + 1}
                   </span>
-                  <span className={cn("table-cell whitespace-pre", codeClassName)}>
+                  <span className={cn("table-cell whitespace-pre-wrap break-words", codeClassName)}>
                     {line.map((token, j) => {
                       const { key: tokenKey, ...tokenProps } = getTokenProps({
                         token,

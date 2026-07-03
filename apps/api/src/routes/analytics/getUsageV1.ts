@@ -12,7 +12,7 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { serializeError } from "~/errors/log"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
@@ -112,13 +112,20 @@ function formatUsageResponse(
 
 export const registerGetAnalyticsUsageV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customer_id: customerId, range, project_id: projectId } = c.req.valid("json")
+    const { customer_id: inputCustomerId, range, project_id: projectId } = c.req.valid("json")
     const analytics = c.get("analytics")
     const cache = c.get("cache")
     const logger = c.get("logger")
 
     // validate the request
     const key = await keyAuth(c)
+    const customerId =
+      inputCustomerId || key.defaultCustomerId
+        ? resolveCustomerIdForApiKeyOrThrow({
+            explicitCustomerId: inputCustomerId,
+            defaultCustomerId: key.defaultCustomerId,
+          })
+        : undefined
 
     // start a new timer
     startTime(c, "getUsage")

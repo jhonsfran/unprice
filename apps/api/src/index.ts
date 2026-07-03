@@ -1,3 +1,4 @@
+import { CORS_ALLOW_HEADERS, CORS_ALLOW_METHODS, getAllowedCorsOrigin } from "@unprice/config"
 import { log } from "evlog"
 import { partyserverMiddleware } from "hono-party"
 import { cors } from "hono/cors"
@@ -65,7 +66,14 @@ app.use(
   knownRoute(() => app.routes)
 )
 app.use(serveEmojiFavicon("◎"))
-app.use("*", cors())
+app.use(
+  "*",
+  cors({
+    allowHeaders: [...CORS_ALLOW_HEADERS],
+    allowMethods: [...CORS_ALLOW_METHODS],
+    origin: (origin) => getAllowedCorsOrigin(origin) ?? undefined,
+  })
+)
 app.use("*", apiEvlog)
 app.use("*", init())
 app.use("*", obs())
@@ -107,9 +115,10 @@ app.use(
         }
 
         try {
+          const runtimeEnv = createRuntimeEnv(env as unknown as Record<string, unknown>)
           const payload = await verifyRealtimeTicket({
             token: ticket,
-            secret: env.AUTH_SECRET,
+            secret: runtimeEnv.REALTIME_TICKET_SECRET,
           })
 
           if (!payload.customerId.startsWith("cus_")) {

@@ -4,6 +4,9 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+permissions:
+  contents: read
+
 env:
   SKIP_ENV_VALIDATION: 1
 
@@ -42,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
@@ -60,7 +63,7 @@ jobs:
 
       - name: Get branch name
         id: branch-name
-        uses: tj-actions/branch-names@v8
+        uses: tj-actions/branch-names@dde14ac574a8b9b1cedc59a1cf312788af43d8d8 # v8
 
       - name: Create Neon Branch
         id: create-branch
@@ -108,7 +111,7 @@ jobs:
           database: ${{ env.NEON_DATABASE_NAME }}
           api_key: ${{ env.NEON_API_KEY }}
 
-      - uses: cloudposse/github-action-secret-outputs@main
+      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
         id: db-url
         with:
           ## PASSWORD is a gpg passphrase stored in Github Secrets.
@@ -116,7 +119,7 @@ jobs:
           op: encode
           in: ${{ steps.create-branch.outputs.db_url_with_pooler }}
 
-      - uses: cloudposse/github-action-secret-outputs@main
+      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
         id: db-branch
         with:
           ## PASSWORD is a gpg passphrase stored in Github Secrets.
@@ -166,7 +169,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: cloudposse/github-action-secret-outputs@main
+      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
         id: db-url
         with:
           ## PASSWORD is a gpg passphrase stored in Github Secrets.
@@ -174,7 +177,7 @@ jobs:
           op: decode
           in: ${{ needs.deploy-preview-neon.outputs.db_url }}
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
@@ -191,7 +194,7 @@ jobs:
           ts: "true"
           python: "false"
 
-      - uses: cardinalby/export-env-action@v2
+      - uses: cardinalby/export-env-action@4f48c4676cf6ed6f46e30899ee987ce695da7c80 # v2
         with:
           envFile: '.env'
           export: true
@@ -204,7 +207,7 @@ jobs:
         continue-on-error: true
         run: npx turbo-ignore -d apps/auth-proxy
 
-      - uses: amondnet/vercel-action@v42.3.0 #deploy
+      - uses: amondnet/vercel-action@de09aeac2ace6599ec9b11ef87558759a496bac4 # v42.3.0 deploy
         name: Deploy Unprice auth to Vercel
         id: deploy-auth
         # if turbo-ignore fails,that means there are no changes in the auth-proxy folder
@@ -234,7 +237,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: cloudposse/github-action-secret-outputs@main
+      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
         id: db-url
         with:
           ## PASSWORD is a gpg passphrase stored in Github Secrets.
@@ -242,7 +245,7 @@ jobs:
           op: decode
           in: ${{ needs.deploy-preview-neon.outputs.db_url }}
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
@@ -259,7 +262,7 @@ jobs:
           ts: "true"
           python: "false"
 
-      - uses: cardinalby/export-env-action@v2
+      - uses: cardinalby/export-env-action@4f48c4676cf6ed6f46e30899ee987ce695da7c80 # v2
         with:
           envFile: '.env'
           export: true
@@ -273,7 +276,7 @@ jobs:
         run: npx turbo-ignore -d apps/auth-proxy
 
       # deploy preview unprice to vercel
-      - uses: amondnet/vercel-action@v42.3.0 #deploy
+      - uses: amondnet/vercel-action@de09aeac2ace6599ec9b11ef87558759a496bac4 # v42.3.0 deploy
         name: Deploy Preview Unprice to Vercel
         id: deploy-unprice
         with:

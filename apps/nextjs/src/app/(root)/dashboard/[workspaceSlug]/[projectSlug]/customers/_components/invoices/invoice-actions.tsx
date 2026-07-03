@@ -110,7 +110,7 @@ export function InvoiceActions({ invoice }: { invoice: SubscriptionInvoice }) {
             ? "View invoice"
             : isVoid
               ? "Invoice voided"
-            : "Unknown Status"}
+              : "Unknown Status"}
     </Button>
   )
 }

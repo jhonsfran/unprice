@@ -9,7 +9,11 @@ import {
 } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
+import {
+  keyAuth,
+  resolveCustomerIdForApiKeyOrThrow,
+  validateIsAllowedToAccessProject,
+} from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -162,6 +166,11 @@ export const registerExplainChargeV1 = (app: App) =>
     if (result.err) {
       throw explainChargeErrorToApiError(result.err)
     }
+
+    resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: result.val.invoice.customerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
 
     const response: ExplainChargeApiResponse = {
       invoice: {

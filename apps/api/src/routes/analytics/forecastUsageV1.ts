@@ -2,7 +2,7 @@ import { createRoute } from "@hono/zod-openapi"
 import { forecastUsage, forecastUsageOutputSchema } from "@unprice/services/use-cases"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -64,13 +64,17 @@ export const registerForecastUsageV1 = (app: App) =>
       horizon_days: horizonDays,
     } = c.req.valid("json")
     const key = await keyAuth(c)
+    const resolvedCustomerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: customerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
     const result = await forecastUsage(
       {
         analytics: c.get("analytics"),
       },
       {
         projectId: key.projectId,
-        customerId,
+        customerId: resolvedCustomerId,
         featureSlug,
         periodKey,
         horizonDays,

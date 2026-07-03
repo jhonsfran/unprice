@@ -1,5 +1,6 @@
 import { createTRPCRouter } from "#trpc"
 import { create } from "./create"
+import { createPaymentMethodByActiveProject } from "./createPaymentMethodByActiveProject"
 import { exist } from "./exist"
 import { getByEmail } from "./getByEmail"
 import { getById } from "./getById"
@@ -14,12 +15,14 @@ import { getSubscription } from "./getSubscription"
 import { getSubscriptions } from "./getSubscriptions"
 import { getWallet } from "./getWallet"
 import { listByActiveProject } from "./listByActiveProject"
+import { listPaymentMethodsByActiveProject } from "./listPaymentMethodsByActiveProject"
 import { listRunsByActiveProject } from "./listRunsByActiveProject"
 import { remove } from "./remove"
 import { update } from "./update"
 
 export const customersRouter = createTRPCRouter({
   create: create,
+  createPaymentMethodByActiveProject: createPaymentMethodByActiveProject,
   remove: remove,
   update: update,
   exist: exist,
@@ -32,6 +35,7 @@ export const customersRouter = createTRPCRouter({
   getSubscription: getSubscription,
   getSubscriptions: getSubscriptions,
   listByActiveProject: listByActiveProject,
+  listPaymentMethodsByActiveProject: listPaymentMethodsByActiveProject,
   listRunsByActiveProject: listRunsByActiveProject,
   getInvoices: getInvoices,
   getRuns: getRuns,

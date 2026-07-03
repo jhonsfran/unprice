@@ -4,7 +4,7 @@ import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { customerPaymentMethodSchema, paymentProviderSchema } from "@unprice/db/validators"
 import { z } from "zod"
-import { keyAuth } from "~/auth/key"
+import { keyAuth, resolveCustomerIdForApiKey } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -76,10 +76,24 @@ export const registerListPaymentMethodsV1 = (app: App) =>
     const { customer } = c.get("services")
 
     // validate the request
-    await keyAuth(c)
+    const key = await keyAuth(c)
 
-    // TODO: check this an identify key can query all customers
-    const { err: customerDataErr, val: customerData } = await customer.getCustomer(customerId)
+    const resolvedCustomer = resolveCustomerIdForApiKey({
+      explicitCustomerId: customerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
+
+    if (!resolvedCustomer.success) {
+      throw new UnpriceApiError({
+        code: resolvedCustomer.code === "customer_forbidden" ? "FORBIDDEN" : "BAD_REQUEST",
+        message: resolvedCustomer.message,
+      })
+    }
+
+    const { err: customerDataErr, val: customerData } = await customer.getCustomerByIdInProject({
+      id: resolvedCustomer.customerId,
+      projectId: key.project.id,
+    })
 
     if (customerDataErr) {
       throw toUnpriceApiError(customerDataErr)

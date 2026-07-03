@@ -1,18 +1,34 @@
-export function setCorsHeaders(res: Response) {
-  res.headers.set("Access-Control-Allow-Origin", "*")
-  res.headers.set("Access-Control-Request-Method", "*")
-  res.headers.set("Access-Control-Allow-Methods", "OPTIONS, GET, POST")
+import { CORS_ALLOW_HEADERS, CORS_ALLOW_METHODS, getAllowedCorsOrigin } from "@unprice/config"
 
-  res.headers.set(
-    "Access-Control-Allow-Headers",
-    "Authorization, X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Unprice-Telemetry-Platform, Unprice-Telemetry-Runtime, Unprice-Telemetry-SDK, X-Trpc-Source, Unprice-Request-Id, Unprice-Request-Source"
-  )
+function appendVaryOrigin(res: Response) {
+  const vary = res.headers.get("Vary")
+  if (!vary) {
+    res.headers.set("Vary", "Origin")
+    return
+  }
+
+  const values = vary.split(",").map((value) => value.trim().toLowerCase())
+  if (!values.includes("origin")) {
+    res.headers.set("Vary", `${vary}, Origin`)
+  }
 }
 
-export function CorsOptions() {
+export function setCorsHeaders(res: Response, origin: string | null) {
+  const allowedOrigin = getAllowedCorsOrigin(origin)
+
+  if (allowedOrigin) {
+    res.headers.set("Access-Control-Allow-Origin", allowedOrigin)
+  }
+
+  appendVaryOrigin(res)
+  res.headers.set("Access-Control-Allow-Methods", CORS_ALLOW_METHODS.join(", "))
+  res.headers.set("Access-Control-Allow-Headers", CORS_ALLOW_HEADERS.join(", "))
+}
+
+export function CorsOptions(req: Request) {
   const response = new Response(null, {
     status: 204,
   })
-  setCorsHeaders(response)
+  setCorsHeaders(response, req.headers.get("origin"))
   return response
 }

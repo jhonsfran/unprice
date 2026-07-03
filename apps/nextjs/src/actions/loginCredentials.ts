@@ -2,6 +2,7 @@
 
 import { signIn } from "@unprice/auth/server"
 import { APP_DOMAIN } from "@unprice/config"
+import { checkCredentialsActionRateLimit } from "./authRateLimit"
 
 // react-doctor-disable-next-line react-doctor/server-auth-actions
 export async function loginWithCredentials({
@@ -9,6 +10,18 @@ export async function loginWithCredentials({
   password,
   redirectTo,
 }: { email: string; password: string; redirectTo?: string }) {
+  const rateLimit = await checkCredentialsActionRateLimit({
+    action: "credentials-login",
+    email,
+  })
+
+  if (rateLimit.limited) {
+    return {
+      success: false,
+      message: rateLimit.message,
+    }
+  }
+
   try {
     const res = await signIn("credentials", {
       email,

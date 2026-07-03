@@ -15,14 +15,16 @@ import {
 } from "@unprice/ui/sheet"
 import { Code, FileCode2 } from "lucide-react"
 import Link from "next/link"
-import { SDKDemo, type method } from "~/components/landing/sdk-examples"
+import { SDKDemo, type SDKExampleParams, type method } from "~/components/landing/sdk-examples"
 
 export function CodeApiSheet({
   children,
   defaultMethod,
+  exampleParams,
 }: {
   children?: React.ReactNode
   defaultMethod?: method
+  exampleParams?: SDKExampleParams
 }) {
   const [isOpen, setIsOpen] = useState(false)
 
@@ -52,6 +54,7 @@ export function CodeApiSheet({
         <SDKDemo
           className="bg-background-base"
           defaultMethod={defaultMethod}
+          exampleParams={exampleParams}
           presentation="panel"
           showBorderBeam={false}
         />

@@ -16,12 +16,15 @@ import type { ServiceContext } from "~/hono/env"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 import {
+  assertRawEventPayloadWithinLimits,
   buildIngestionQueueMessage,
+  enforceRawEventBodyLimit,
   logEventTooOldRejection,
   rawEventSchema,
 } from "./ingestEventsV1"
 
 const tags = ["usage"]
+export const USAGE_CONSUME_PATH = "/v1/usage/consume"
 
 const syncEventSchema = rawEventSchema.extend({
   featureSlug: z.string().openapi({
@@ -52,7 +55,7 @@ const syncIngestionResultSchema = z.object({
 export const route = createRoute(
   defineEndpointContract(
     {
-      path: "/v1/usage/consume",
+      path: USAGE_CONSUME_PATH,
       operationId: "usage.consume",
       summary: "ingest raw event synchronously for a feature",
       description:
@@ -88,9 +91,13 @@ export const route = createRoute(
   )
 )
 
-export const registerIngestEventsSyncV1 = (app: App) =>
-  app.openapi(route, async (c) => {
+export const registerIngestEventsSyncV1 = (app: App) => {
+  app.use(USAGE_CONSUME_PATH, enforceRawEventBodyLimit)
+
+  return app.openapi(route, async (c) => {
     const body = c.req.valid("json")
+    assertRawEventPayloadWithinLimits(body)
+
     const { ingestion } = c.get("services")
     const requestId = c.get("requestId")
     const receivedAt = c.get("requestStartedAt")
@@ -171,6 +178,7 @@ export const registerIngestEventsSyncV1 = (app: App) =>
 
     return c.json(result, HttpStatusCodes.OK)
   })
+}
 
 export type IngestEventsSyncRequest = z.infer<typeof syncEventSchema>
 export type IngestEventsSyncResponse = z.infer<typeof syncIngestionResultSchema>

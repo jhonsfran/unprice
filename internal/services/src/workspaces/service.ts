@@ -12,6 +12,7 @@ import type {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { z } from "zod"
+import { canAssignWorkspaceRole } from "./roles"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
 type WorkspaceMember = z.infer<typeof listMembersSchema>
@@ -101,7 +102,7 @@ export class WorkspaceService {
     plan: Workspace["plan"]
   }): Promise<
     Result<
-      | { state: "user_not_found" | "member_creation_failed" }
+      | { state: "user_not_found" | "member_creation_failed" | "workspace_claim_conflict" }
       | { state: "ok"; workspace: Workspace },
       FetchError
     >
@@ -119,64 +120,78 @@ export class WorkspaceService {
     const { val, err } = await wrapResult(
       this.db.transaction(async (tx) => {
         const slug = createSlug()
+        const workspaceId = id ?? newId("workspace")
 
         const existingWorkspace = await tx.query.workspaces.findFirst({
+          where: (workspace, { eq }) => eq(workspace.id, workspaceId),
+        })
+
+        if (existingWorkspace?.id) {
+          if (existingWorkspace.unPriceCustomerId !== unPriceCustomerId) {
+            return { state: "workspace_claim_conflict" } as const
+          }
+
+          const member = await tx.query.members.findFirst({
+            where: (memberRecord, { eq, and }) =>
+              and(
+                eq(memberRecord.workspaceId, existingWorkspace.id),
+                eq(memberRecord.userId, user.id)
+              ),
+          })
+
+          if (!member) {
+            return { state: "workspace_claim_conflict" } as const
+          }
+
+          return { state: "ok", workspace: existingWorkspace as Workspace } as const
+        }
+
+        const existingWorkspaceForCustomer = await tx.query.workspaces.findFirst({
+          columns: {
+            id: true,
+          },
           where: (workspace, { eq }) => eq(workspace.unPriceCustomerId, unPriceCustomerId),
         })
 
-        let workspaceId = ""
-        let workspace: Workspace | null = null
-
-        if (!existingWorkspace?.id) {
-          const createdWorkspace = await tx
-            .insert(schema.workspaces)
-            .values({
-              id: id ?? newId("workspace"),
-              slug,
-              name,
-              imageUrl: user.image,
-              isPersonal: isPersonal ?? false,
-              isInternal: isInternal ?? false,
-              createdBy: user.id,
-              unPriceCustomerId,
-              plan,
-            })
-            .returning()
-            .then((rows) => rows[0] ?? null)
-
-          if (!createdWorkspace?.id) {
-            return { state: "member_creation_failed" } as const
-          }
-
-          workspaceId = createdWorkspace.id
-          workspace = createdWorkspace as Workspace
-        } else {
-          workspaceId = existingWorkspace.id
-          workspace = existingWorkspace as Workspace
+        if (existingWorkspaceForCustomer) {
+          return { state: "workspace_claim_conflict" } as const
         }
 
-        const member = await tx.query.members.findFirst({
-          where: (memberRecord, { eq, and }) =>
-            and(eq(memberRecord.workspaceId, workspaceId), eq(memberRecord.userId, user.id)),
-        })
+        const createdWorkspace = await tx
+          .insert(schema.workspaces)
+          .values({
+            id: workspaceId,
+            slug,
+            name,
+            imageUrl: user.image,
+            isPersonal: isPersonal ?? false,
+            isInternal: isInternal ?? false,
+            createdBy: user.id,
+            unPriceCustomerId,
+            plan,
+          })
+          .returning()
+          .then((rows) => rows[0] ?? null)
 
-        if (!member) {
-          const membership = await tx
-            .insert(schema.members)
-            .values({
-              userId: user.id,
-              workspaceId,
-              role: "OWNER",
-            })
-            .returning()
-            .then((rows) => rows[0] ?? null)
-
-          if (!membership?.userId) {
-            return { state: "member_creation_failed" } as const
-          }
+        if (!createdWorkspace?.id) {
+          return { state: "member_creation_failed" } as const
         }
 
-        return { state: "ok", workspace: workspace! } as const
+        const membership = await tx
+          .insert(schema.members)
+          .values({
+            userId: user.id,
+            workspaceId,
+            role: "OWNER",
+          })
+          .returning()
+          .then((rows) => rows[0] ?? null)
+
+        if (!membership?.userId) {
+          return { state: "member_creation_failed" } as const
+        }
+
+        return { state: "ok", workspace: createdWorkspace as Workspace } as const
       }),
       (error) =>
         new FetchError({
@@ -292,13 +307,22 @@ export class WorkspaceService {
     workspaceId,
     email,
     role,
+    actorRole,
   }: {
     workspaceId: string
     email: string
     role: Member["role"]
+    actorRole: Member["role"]
   }): Promise<
-    Result<{ state: "not_found" } | { state: "ok"; invite: WorkspaceInvite }, FetchError>
+    Result<
+      { state: "not_found" | "owner_role_forbidden" } | { state: "ok"; invite: WorkspaceInvite },
+      FetchError
+    >
   > {
+    if (!canAssignWorkspaceRole({ actorRole, targetRole: role })) {
+      return Ok({ state: "owner_role_forbidden" })
+    }
+
     const { val, err } = await wrapResult(
       this.db
         .update(schema.invites)
@@ -338,18 +362,70 @@ export class WorkspaceService {
     workspaceId,
     userId,
     role,
+    actorRole,
   }: {
     workspaceId: string
     userId: string
     role: Member["role"]
-  }): Promise<Result<{ state: "not_found" } | { state: "ok"; member: Member }, FetchError>> {
+    actorRole: Member["role"]
+  }): Promise<
+    Result<
+      | { state: "not_found" | "last_owner" | "owner_role_forbidden" }
+      | { state: "ok"; member: Member },
+      FetchError
+    >
+  > {
+    if (!canAssignWorkspaceRole({ actorRole, targetRole: role })) {
+      return Ok({ state: "owner_role_forbidden" })
+    }
+
     const { val, err } = await wrapResult(
-      this.db
-        .update(schema.members)
-        .set({ role })
-        .where(and(eq(schema.members.workspaceId, workspaceId), eq(schema.members.userId, userId)))
-        .returning()
-        .then((rows) => rows[0] ?? null),
+      this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${`workspace-members:${workspaceId}`}))`
+        )
+
+        const currentMember = await tx.query.members.findFirst({
+          where: (member, { and, eq }) =>
+            and(eq(member.workspaceId, workspaceId), eq(member.userId, userId)),
+        })
+
+        if (!currentMember) {
+          return { state: "not_found" } as const
+        }
+
+        if (currentMember.role === "OWNER" && role !== "OWNER") {
+          const owners = await tx.query.members.findMany({
+            columns: {
+              userId: true,
+            },
+            where: (member, { and, eq }) =>
+              and(eq(member.workspaceId, workspaceId), eq(member.role, "OWNER")),
+          })
+
+          if (owners.length <= 1) {
+            return { state: "last_owner" } as const
+          }
+        }
+
+        const member = await tx
+          .update(schema.members)
+          .set({ role })
+          .where(
+            and(eq(schema.members.workspaceId, workspaceId), eq(schema.members.userId, userId))
+          )
+          .returning()
+          .then((rows) => rows[0] ?? null)
+
+        if (!member) {
+          return { state: "not_found" } as const
+        }
+
+        return {
+          state: "ok",
+          member: member as Member,
+        } as const
+      }),
       (error) =>
         new FetchError({
           message: `error updating member role: ${error.message}`,
@@ -372,10 +448,7 @@ export class WorkspaceService {
       })
     }
 
-    return Ok({
-      state: "ok",
-      member: val as Member,
-    })
+    return Ok(val)
   }
 
   public async deleteInvite({
@@ -485,24 +558,46 @@ export class WorkspaceService {
     }
 
     const workspaceData = await this.db.query.workspaces.findFirst({
-      with: {
-        members: true,
-      },
       where: (workspace, operators) => operators.and(operators.eq(workspace.id, workspaceId)),
     })
 
-    if (workspaceData && workspaceData.members.length <= 1) {
-      return Ok({
-        state: "only_owner_conflict",
-      })
-    }
-
     const { val, err } = await wrapResult(
-      this.db
-        .delete(schema.members)
-        .where(and(eq(schema.members.workspaceId, workspaceId), eq(schema.members.userId, user.id)))
-        .returning()
-        .then((members) => members[0] ?? null),
+      this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${`workspace-members:${workspaceId}`}))`
+        )
+
+        const member = await tx.query.members.findFirst({
+          where: (memberRecord, { and, eq }) =>
+            and(eq(memberRecord.workspaceId, workspaceId), eq(memberRecord.userId, user.id)),
+        })
+
+        if (!member) {
+          return null
+        }
+
+        if (workspaceData && member.role === "OWNER") {
+          const owners = await tx.query.members.findMany({
+            columns: {
+              userId: true,
+            },
+            where: (memberRecord, { and, eq }) =>
+              and(eq(memberRecord.workspaceId, workspaceId), eq(memberRecord.role, "OWNER")),
+          })
+
+          if (owners.length <= 1) {
+            return { state: "only_owner_conflict" } as const
+          }
+        }
+
+        return tx
+          .delete(schema.members)
+          .where(
+            and(eq(schema.members.workspaceId, workspaceId), eq(schema.members.userId, user.id))
+          )
+          .returning()
+          .then((members) => members[0] ?? null)
+      }),
       (error) =>
         new FetchError({
           message: `error removing workspace member: ${error.message}`,
@@ -526,6 +621,10 @@ export class WorkspaceService {
           retry: false,
         })
       )
+    }
+
+    if ("state" in val && val.state === "only_owner_conflict") {
+      return Ok(val)
     }
 
     return Ok({

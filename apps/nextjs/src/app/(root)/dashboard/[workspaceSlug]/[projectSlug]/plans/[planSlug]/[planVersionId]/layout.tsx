@@ -38,6 +38,15 @@ export default async function PlanVersionLayout(props: {
   const headerLabel = !active ? "inactive" : status
   const description = planVersion.description ?? planVersion.plan.description ?? undefined
   const baseHref = `/${props.params.workspaceSlug}/${props.params.projectSlug}/plans/${props.params.planSlug}`
+  const listPlanVersionsExampleParams = {
+    listPlanVersions: {
+      planVersionIds: [planVersion.id],
+      billingInterval: planVersion.billingConfig.billingInterval,
+      currency: planVersion.currency,
+      version: planVersion.version,
+      featureSlugs: planVersion.planFeatures.map((planFeature) => planFeature.feature.slug),
+    },
+  }
 
   return (
     <DashboardShell
@@ -50,7 +59,10 @@ export default async function PlanVersionLayout(props: {
             label={headerLabel}
             action={
               <div className="flex items-center gap-2">
-                <CodeApiSheet defaultMethod="listPlanVersions">
+                <CodeApiSheet
+                  defaultMethod="listPlanVersions"
+                  exampleParams={listPlanVersionsExampleParams}
+                >
                   <Button variant={"ghost"}>
                     <Code className="mr-2 h-4 w-4" />
                     API

@@ -1,6 +1,8 @@
 # Fixed project name so all worktrees/folders share the same containers.
 # Start compose from any repo path: the same db, redis, etc. are used and
 # exposed on localhost, so e.g. frontend-only in another folder can reach them.
+# Development only. Do not use these default service credentials in shared,
+# preview, or production environments.
 name: unprice
 
 services:
@@ -17,7 +19,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   # pgbouncer:
   #   image: edoburu/pgbouncer
@@ -43,7 +45,7 @@ services:
       LOG_TRAFFIC: "true"
       # USE_HOST_HEADER: "false"
     ports:
-      - "5433:80"
+      - "127.0.0.1:5433:80"
     depends_on:
       # - pgbouncer
       - db
@@ -58,11 +60,11 @@ services:
   redis:
     image: redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   serverless-redis-http:
     ports:
-      - "8079:80"
+      - "127.0.0.1:8079:80"
     image: hiett/serverless-redis-http:latest
     environment:
       SRH_MODE: env
@@ -73,7 +75,7 @@ services:
     image: docker.redpanda.com/redpandadata/connect:latest
     command: ["run", "/connect.yaml"]
     ports:
-      - "4195:4195"
+      - "127.0.0.1:4195:4195"
     volumes:
       - ./tooling/local-pipeline/connect.yaml:/connect.yaml:ro
       - ./tmp/lakehouse:/data
@@ -85,8 +87,8 @@ services:
     volumes:
       - ./mailpit:/data
     ports:
-      - "8025:8025" # Web UI
-      - "1025:1025" # SMTP server
+      - "127.0.0.1:8025:8025" # Web UI
+      - "127.0.0.1:1025:1025" # SMTP server
     environment:
       MP_MAX_MESSAGES: 5000
       MP_DATABASE: /data/mailpit.db

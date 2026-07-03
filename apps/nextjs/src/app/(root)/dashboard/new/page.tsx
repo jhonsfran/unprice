@@ -1,9 +1,7 @@
 import { COOKIES_APP } from "@unprice/config"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@unprice/ui/card"
-import { UserIcon } from "lucide-react"
 import { cookies } from "next/headers"
 import { Suspense } from "react"
-import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import LayoutLoader from "~/components/layout/layout-loader"
 import { api } from "~/trpc/server"
@@ -12,17 +10,17 @@ import Redirect from "./_components/redirect"
 
 export default async function NewPage(props: {
   searchParams: {
-    customer_id?: string
+    workspace_id?: string
   }
 }) {
-  const { customer_id } = props.searchParams
+  const { workspace_id } = props.searchParams
   const cookieStore = cookies()
   const sessionId = cookieStore.get(COOKIES_APP.SESSION)?.value
 
   if (!sessionId) {
     return (
       <Suspense fallback={<LayoutLoader />}>
-        <Content customerId={customer_id} />
+        <Content workspaceId={workspace_id} />
       </Suspense>
     )
   }
@@ -37,7 +35,7 @@ export default async function NewPage(props: {
   return (
     <Suspense fallback={<LayoutLoader />}>
       <Content
-        customerId={customer_id}
+        workspaceId={workspace_id}
         planVersionId={session?.payload.plan_version_id}
         sessionId={sessionId}
       />
@@ -46,15 +44,15 @@ export default async function NewPage(props: {
 }
 
 async function Content({
-  customerId,
+  workspaceId,
   planVersionId,
   sessionId,
 }: {
-  customerId?: string
+  workspaceId?: string
   planVersionId?: string
   sessionId?: string
 }) {
-  if (!customerId || customerId === "") {
+  if (!workspaceId || workspaceId === "") {
     return (
       <DashboardShell>
         <div className="flex flex-col items-center justify-center">
@@ -82,32 +80,9 @@ async function Content({
     )
   }
 
-  const { customer } = await api.customers.getById({
-    id: customerId,
-  })
-
-  if (!customer) {
-    return (
-      <DashboardShell>
-        <div className="flex flex-col items-center justify-center">
-          <EmptyPlaceholder>
-            <EmptyPlaceholder.Icon>
-              <UserIcon className="size-8" />
-            </EmptyPlaceholder.Icon>
-            <EmptyPlaceholder.Title>Customer not found</EmptyPlaceholder.Title>
-            <EmptyPlaceholder.Description>
-              The customer with the id {customerId} was not found.
-            </EmptyPlaceholder.Description>
-          </EmptyPlaceholder>
-        </div>
-      </DashboardShell>
-    )
-  }
-
   // create the workspace
   const newWorkspace = await api.workspaces.create({
-    name: customer.name,
-    unPriceCustomerId: customer.id,
+    workspaceId,
   })
 
   return <Redirect url={newWorkspace.workspace.slug} />

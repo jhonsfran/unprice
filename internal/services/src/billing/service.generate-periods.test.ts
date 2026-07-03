@@ -408,9 +408,7 @@ describe("BillingService._generateBillingPeriods", () => {
     expect(result.err).toBeUndefined()
 
     const periods = createdPeriods()
-    const originalPeriod = periods.find(
-      (period) => period.subscriptionPhaseId === "phase_original"
-    )
+    const originalPeriod = periods.find((period) => period.subscriptionPhaseId === "phase_original")
     const enterprisePeriod = periods.find(
       (period) => period.subscriptionPhaseId === "phase_enterprise"
     )

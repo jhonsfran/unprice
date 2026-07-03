@@ -1,11 +1,10 @@
 import { FEATURE_SLUGS } from "@unprice/config"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Code, ReceiptText, Route, UserRound, WalletCards } from "lucide-react"
+import { Code } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
 import { columns } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/_components/customers/table/columns"
-import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
@@ -34,7 +33,6 @@ export default async function ProjectUsersPage(props: {
   }
 
   const { customers, pageCount } = await api.customers.listByActiveProject(filters)
-  const activeCustomers = customers.filter((customer) => customer.active).length
 
   return (
     <DashboardShell
@@ -76,33 +74,6 @@ export default async function ProjectUsersPage(props: {
           title="Customer money state"
           description="Inspect which customers can be billed, which ones are active, and where to follow subscriptions, wallets, invoices, and runs."
         />
-        <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
-          <EvidenceMetricTile
-            label="Visible customers"
-            value={String(customers.length)}
-            helper={`${activeCustomers} active on this page`}
-            icon={<UserRound className="h-4 w-4" />}
-          />
-          <EvidenceMetricTile
-            label="Table pages"
-            value={String(pageCount)}
-            helper="Server-side customer result pages"
-            icon={<Route className="h-4 w-4" />}
-          />
-          <EvidenceMetricTile
-            label="Wallet state"
-            value="Per customer"
-            helper="Purchased, granted, reserved, and consumed credits"
-            icon={<WalletCards className="h-4 w-4" />}
-          />
-          <EvidenceMetricTile
-            label="Invoice evidence"
-            value="Available"
-            helper="Open a customer to explain invoices and charges"
-            icon={<ReceiptText className="h-4 w-4" />}
-          />
-        </EvidenceMetricStrip>
-
         <Suspense
           fallback={
             <DataTableSkeleton

@@ -324,8 +324,7 @@ function createWalletState(
       overrides.balances?.subscriptionCharges ??
       Math.max(
         0,
-        (overrides.balances?.consumed ?? 2_000_000_000) -
-          (overrides.balances?.walletConsumed ?? 0)
+        (overrides.balances?.consumed ?? 2_000_000_000) - (overrides.balances?.walletConsumed ?? 0)
       ),
   }
 

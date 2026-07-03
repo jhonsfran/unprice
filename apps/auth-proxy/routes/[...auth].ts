@@ -6,10 +6,12 @@ import { eventHandler, toWebRequest } from "h3"
 
 import { env } from "../env"
 
+const trustHost = env.NODE_ENV === "development" || env.APP_ENV !== "development"
+
 export default eventHandler((event) =>
   Auth(toWebRequest(event), {
     secret: env.AUTH_SECRET,
-    trustHost: Boolean(env.APP_ENV) || env.NODE_ENV === "development",
+    trustHost,
     redirectProxyUrl: env.AUTH_REDIRECT_PROXY_URL,
     basePath: "/auth",
     providers: [

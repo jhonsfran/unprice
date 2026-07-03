@@ -6,16 +6,17 @@ import { createWorkspacesByUserQuery } from "@unprice/db/queries"
 import * as schema from "@unprice/db/schema"
 import type { NextAuthConfig } from "next-auth"
 import { cookies } from "next/headers"
+import { toCredentialsAuthUser, verifyCredentialsPassword } from "./credentials"
 import { db } from "./db"
 import { env } from "./env"
 import { authLogger } from "./logger"
-import { verifyPassword } from "./password"
-import { createUser } from "./utils"
+import { shouldTrustAuthHost, shouldUseSecureAuthCookies } from "./runtime"
+import { createUserFromProvider } from "./utils"
 
-const useSecureCookies = env.APP_ENV === "production"
+const useSecureCookies = shouldUseSecureAuthCookies(env.APP_ENV)
 
 export const authConfig: NextAuthConfig = {
-  trustHost: Boolean(env.APP_ENV) || env.NODE_ENV === "development",
+  trustHost: shouldTrustAuthHost({ appEnv: env.APP_ENV, nodeEnv: env.NODE_ENV }),
   logger: authLogger,
   redirectProxyUrl: env.AUTH_REDIRECT_PROXY_URL,
   session: {
@@ -63,7 +64,7 @@ export const authConfig: NextAuthConfig = {
 
     // override the default create user
     async createUser(data) {
-      const { val, err } = await createUser({
+      const { val, err } = await createUserFromProvider({
         email: data.email,
         name: data.name ?? "",
         emailVerified: data.emailVerified,
@@ -82,12 +83,10 @@ export const authConfig: NextAuthConfig = {
     GitHub({
       clientId: process.env.AUTH_GITHUB_CLIENT_ID,
       clientSecret: process.env.AUTH_GITHUB_CLIENT_SECRET,
-      allowDangerousEmailAccountLinking: true,
     }),
     Google({
       clientId: process.env.AUTH_GOOGLE_CLIENT_ID,
       clientSecret: process.env.AUTH_GOOGLE_CLIENT_SECRET,
-      allowDangerousEmailAccountLinking: true,
     }),
     Credentials({
       credentials: {
@@ -108,13 +107,16 @@ export const authConfig: NextAuthConfig = {
           throw new Error("Invalid credentials")
         }
 
-        const validPassword = await verifyPassword(credentials.password as string, user.password)
+        const validPassword = await verifyCredentialsPassword({
+          password: credentials.password as string,
+          passwordHash: user?.password,
+        })
 
-        if (!validPassword) {
+        if (!user || !validPassword) {
           throw new Error("Invalid credentials")
         }
 
-        return user
+        return toCredentialsAuthUser(user)
       },
     }),
   ],
@@ -125,7 +127,7 @@ export const authConfig: NextAuthConfig = {
           path: "/",
           maxAge: 31536000, // 1 year
           sameSite: "lax",
-          secure: process.env.NODE_ENV === "production",
+          secure: useSecureCookies,
         })
       }
       return true

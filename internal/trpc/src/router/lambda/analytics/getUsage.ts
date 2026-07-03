@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server"
 import { type Usage, analyticsIntervalSchema } from "@unprice/analytics"
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
@@ -17,8 +18,16 @@ export const getUsage = protectedWorkspaceProcedure
     })
   )
   .query(async (opts) => {
-    const customerId = opts.input.customerId || opts.ctx.workspace.unPriceCustomerId
+    const inputCustomerId = opts.input.customerId
+    const customerId = opts.ctx.workspace.unPriceCustomerId
     const range = opts.input.range
+
+    if (inputCustomerId && inputCustomerId !== customerId) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Customer does not belong to the active workspace",
+      })
+    }
 
     if (!customerId) {
       return {

@@ -1,6 +1,6 @@
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
-import { Typography } from "@unprice/ui/typography"
+import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { formatWalletMoney } from "./format-wallet-money"
 
 type CustomerWallet = RouterOutputs["customers"]["getWallet"]["wallet"]
@@ -54,29 +54,16 @@ export function WalletBalanceSummary({ wallet }: { wallet: CustomerWallet }) {
   ]
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <EvidenceMetricStrip className="sm:grid-cols-3">
       {balances.map((balance) => (
-        <div key={balance.label} className="rounded-md border bg-background p-4">
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <Typography variant="p" affects="removePaddingMargin" className="font-medium">
-                {balance.label}
-              </Typography>
-              <Badge variant={balance.variant}>{wallet.currency}</Badge>
-            </div>
-            <Typography variant="h4" affects="removePaddingMargin">
-              {formatWalletMoney(balance.amount, wallet.currency)}
-            </Typography>
-            <Typography
-              variant="p"
-              affects="removePaddingMargin"
-              className="text-muted-foreground text-xs"
-            >
-              {balance.description}
-            </Typography>
-          </div>
-        </div>
+        <EvidenceMetricTile
+          key={balance.label}
+          label={balance.label}
+          value={formatWalletMoney(balance.amount, wallet.currency)}
+          helper={balance.description}
+          icon={<Badge variant={balance.variant}>{wallet.currency}</Badge>}
+        />
       ))}
-    </div>
+    </EvidenceMetricStrip>
   )
 }

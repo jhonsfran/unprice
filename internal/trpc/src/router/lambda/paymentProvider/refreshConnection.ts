@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server"
-import { paymentProviderSchema, selectPaymentProviderConfigSchema } from "@unprice/db/validators"
+import { paymentProviderSchema, publicPaymentProviderConfigSchema } from "@unprice/db/validators"
 import { refreshProviderConnection } from "@unprice/services/use-cases"
 import { z } from "zod"
 
@@ -14,7 +14,7 @@ const connectionLinkInputSchema = z.object({
 export const refreshConnection = protectedProjectProcedure
   .input(connectionLinkInputSchema)
   .output(
-    z.object({ url: z.string().url(), paymentProviderConfig: selectPaymentProviderConfigSchema })
+    z.object({ url: z.string().url(), paymentProviderConfig: publicPaymentProviderConfigSchema })
   )
   .mutation(async (opts) => {
     opts.ctx.verifyRole(["OWNER", "ADMIN"])

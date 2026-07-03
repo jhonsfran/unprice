@@ -10,6 +10,7 @@ export const changeRoleMember = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { userId, role } = opts.input
     const workspace = opts.ctx.workspace
+    const actorRole = opts.ctx.member.role
     const { workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
@@ -18,6 +19,7 @@ export const changeRoleMember = protectedWorkspaceProcedure
       workspaceId: workspace.id,
       userId,
       role,
+      actorRole,
     })
 
     if (err) {
@@ -27,11 +29,24 @@ export const changeRoleMember = protectedWorkspaceProcedure
       })
     }
 
-    if (val.state === "not_found") {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Member not found",
-      })
+    switch (val.state) {
+      case "not_found":
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Member not found",
+        })
+      case "last_owner":
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Workspace must have at least one owner",
+        })
+      case "owner_role_forbidden":
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only workspace owners can assign the owner role",
+        })
+      case "ok":
+        break
     }
 
     opts.ctx.waitUntil(

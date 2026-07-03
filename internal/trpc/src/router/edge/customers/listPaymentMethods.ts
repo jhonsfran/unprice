@@ -19,7 +19,22 @@ export const listPaymentMethods = protectedWorkspaceProcedure
     })
   )
   .query(async (opts) => {
-    const { customerId, provider, skipCache } = opts.input
+    const { customerId: inputCustomerId, provider, skipCache } = opts.input
+    const customerId = opts.ctx.workspace.unPriceCustomerId
+
+    if (!customerId) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Workspace billing customer not found",
+      })
+    }
+
+    if (inputCustomerId !== customerId) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Customer does not belong to the active workspace",
+      })
+    }
 
     const result = await unprice.paymentMethods.list({
       customerId,

@@ -4,6 +4,7 @@ import { transferToWorkspace as transferToWorkspaceUseCase } from "@unprice/serv
 import { z } from "zod"
 import { protectedWorkspaceProcedure } from "#trpc"
 import { projectWorkspaceGuard } from "#utils"
+import { workspaceGuard } from "#utils/workspace-guard"
 
 export const transferToWorkspace = protectedWorkspaceProcedure
   .input(transferToWorkspaceSchema)
@@ -24,6 +25,12 @@ export const transferToWorkspace = protectedWorkspaceProcedure
       projectSlug,
       ctx: opts.ctx,
     })
+
+    const targetWorkspace = await workspaceGuard({
+      workspaceId: targetWorkspaceId,
+      ctx: opts.ctx,
+    })
+    targetWorkspace.verifyRole(["OWNER", "ADMIN"])
 
     const { err, val } = await transferToWorkspaceUseCase(
       {

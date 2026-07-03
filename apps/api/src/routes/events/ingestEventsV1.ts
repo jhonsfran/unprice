@@ -10,6 +10,7 @@ import {
   ingestionQueueMessageSchema,
   markRawProcessingFailureTestRequestId,
 } from "@unprice/services/ingestion"
+import type { MiddlewareHandler } from "hono"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { ulid } from "ulid"
 import { z } from "zod"
@@ -18,14 +19,20 @@ import type { Env } from "~/env"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
+import type { HonoEnv } from "~/hono/env"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 const tags = ["usage"]
 const SAFE_QUEUE_SEND_RETRIES = 3
 const SAFE_QUEUE_SEND_BASE_DELAY_MS = 100
+export const RAW_EVENT_MAX_BODY_BYTES = 128 * 1024
+export const RAW_EVENT_MAX_PROPERTIES_BYTES = 64 * 1024
+export const RAW_EVENT_MAX_PROPERTY_KEYS = 128
+export const RAW_EVENT_MAX_PROPERTY_DEPTH = 5
 export const INGESTION_TEST_FAILURE_HEADER = "x-unprice-ingestion-test-failure"
 export const INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE = "raw_queue_processing_failed"
+export const USAGE_RECORD_PATH = "/v1/usage/record"
 
 export const rawEventSchema = z.object({
   id: z
@@ -67,6 +74,124 @@ export const rawEventSchema = z.object({
   }),
 })
 
+export const enforceRawEventBodyLimit: MiddlewareHandler<HonoEnv> = async (c, next) => {
+  const contentLength = c.req.header("content-length")
+
+  if (contentLength) {
+    const size = Number.parseInt(contentLength, 10)
+
+    if (Number.isFinite(size) && size > RAW_EVENT_MAX_BODY_BYTES) {
+      throw new UnpriceApiError({
+        code: "PAYLOAD_TOO_LARGE",
+        message: `Request body must be ${RAW_EVENT_MAX_BODY_BYTES} bytes or less`,
+      })
+    }
+  }
+
+  await assertRawRequestBodyWithinLimit(c.req.raw)
+  await next()
+}
+
+async function assertRawRequestBodyWithinLimit(request: Request): Promise<void> {
+  const body = request.clone().body
+
+  if (!body) {
+    return
+  }
+
+  const reader = body.getReader()
+  let size = 0
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+
+      if (done) {
+        return
+      }
+
+      size += value.byteLength
+      if (size > RAW_EVENT_MAX_BODY_BYTES) {
+        throw new UnpriceApiError({
+          code: "PAYLOAD_TOO_LARGE",
+          message: `Request body must be ${RAW_EVENT_MAX_BODY_BYTES} bytes or less`,
+        })
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+export function assertRawEventPayloadWithinLimits(body: IngestEventsRequest): void {
+  const propertiesBytes = getJsonByteLength(body.properties)
+  const stats = collectRawEventPropertyStats(body.properties)
+
+  if (propertiesBytes > RAW_EVENT_MAX_PROPERTIES_BYTES) {
+    throw new UnpriceApiError({
+      code: "PAYLOAD_TOO_LARGE",
+      message: `Event properties must be ${RAW_EVENT_MAX_PROPERTIES_BYTES} bytes or less`,
+    })
+  }
+
+  if (stats.keyCount > RAW_EVENT_MAX_PROPERTY_KEYS) {
+    throw new UnpriceApiError({
+      code: "PAYLOAD_TOO_LARGE",
+      message: `Event properties must contain ${RAW_EVENT_MAX_PROPERTY_KEYS} keys or fewer`,
+    })
+  }
+
+  if (stats.maxDepth > RAW_EVENT_MAX_PROPERTY_DEPTH) {
+    throw new UnpriceApiError({
+      code: "PAYLOAD_TOO_LARGE",
+      message: `Event properties must be nested ${RAW_EVENT_MAX_PROPERTY_DEPTH} levels or fewer`,
+    })
+  }
+}
+
+function getJsonByteLength(value: unknown): number {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).length
+  } catch {
+    return Number.POSITIVE_INFINITY
+  }
+}
+
+function collectRawEventPropertyStats(value: unknown): { keyCount: number; maxDepth: number } {
+  const seen = new WeakSet<object>()
+
+  return collectValueStats(value, 0, seen)
+}
+
+function collectValueStats(
+  value: unknown,
+  depth: number,
+  seen: WeakSet<object>
+): { keyCount: number; maxDepth: number } {
+  if (value === null || typeof value !== "object") {
+    return { keyCount: 0, maxDepth: depth }
+  }
+
+  if (seen.has(value)) {
+    return { keyCount: 0, maxDepth: depth }
+  }
+
+  seen.add(value)
+
+  const childValues = Array.isArray(value) ? value : Object.values(value)
+  const ownKeyCount = Array.isArray(value) ? 0 : Object.keys(value).length
+  let keyCount = ownKeyCount
+  let maxDepth = depth
+
+  for (const childValue of childValues) {
+    const childStats = collectValueStats(childValue, depth + 1, seen)
+    keyCount += childStats.keyCount
+    maxDepth = Math.max(maxDepth, childStats.maxDepth)
+  }
+
+  return { keyCount, maxDepth }
+}
+
 const acceptedSchema = z.object({
   accepted: z.literal(true).openapi({
     description: "The raw event was accepted for asynchronous processing",
@@ -77,7 +202,7 @@ const acceptedSchema = z.object({
 export const route = createRoute(
   defineEndpointContract(
     {
-      path: "/v1/usage/record",
+      path: USAGE_RECORD_PATH,
       operationId: "usage.record",
       summary: "ingest raw event",
       description:
@@ -113,9 +238,13 @@ export const route = createRoute(
   )
 )
 
-export const registerIngestEventsV1 = (app: App) =>
-  app.openapi(route, async (c) => {
+export const registerIngestEventsV1 = (app: App) => {
+  app.use(USAGE_RECORD_PATH, enforceRawEventBodyLimit)
+
+  return app.openapi(route, async (c) => {
     const body = c.req.valid("json")
+    assertRawEventPayloadWithinLimits(body)
+
     const requestId = c.get("requestId")
     // we use this as the time of the request to avoid clock skews
     const receivedAt = c.get("requestStartedAt")
@@ -220,6 +349,7 @@ export const registerIngestEventsV1 = (app: App) =>
 
     return c.json({ accepted: true as const }, HttpStatusCodes.ACCEPTED)
   })
+}
 
 /**
  * simple hash algo to shared queues

@@ -3,12 +3,15 @@ on:
   pull_request:
     types: [closed]
 
+permissions:
+  contents: read
+
 jobs:
   delete-neon-preview:
     runs-on: ubuntu-latest
     if: "!contains(github.head_ref, 'renovate/') || !contains(github.head_ref, 'main')"
     steps:
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}
           client-secret: ${{ secrets.MACHINE_IDENTITY_CLIENT_SECRET }}
@@ -18,7 +21,7 @@ jobs:
 
       - name: Get branch name
         id: branch-name
-        uses: tj-actions/branch-names@v8
+        uses: tj-actions/branch-names@dde14ac574a8b9b1cedc59a1cf312788af43d8d8 # v8
 
       - name: Delete Neon Branch
         uses: neondatabase/delete-branch-action@v3

@@ -16,6 +16,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-06-30: The repo pins `pnpm@10.28.0`; if the Codex runtime resolves `pnpm` to 11.x,
   use the pinned/Corepack pnpm instead. pnpm 11 ignores the root `pnpm` config, can report
   lockfile config mismatch, and may purge `node_modules` before tests run.
+- 2026-07-03: In Codex, prefer targeted `corepack pnpm --filter <pkg> typecheck` over the
+  root `pnpm typecheck` turbo path; the root path can invoke the runtime pnpm during package
+  tasks and try to reinstall dependencies.
 - Before adding a helper, utility, or repeated row shape, search the repo for an established
   pattern first; reuse or extract the canonical path instead of duplicating logic.
 - Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.

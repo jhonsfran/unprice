@@ -15,6 +15,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 env:
   SKIP_ENV_VALIDATION: 1
 
@@ -46,7 +49,7 @@ jobs:
             fi
           fi
 
-      - uses: cloudposse/github-action-secret-outputs@main
+      - uses: cloudposse/github-action-secret-outputs@67ae2f7ee1890986ba0012bacd079a5a36ecb449 # main
         if: inputs.env == 'preview'
         id: db-url
         with:
@@ -55,7 +58,7 @@ jobs:
           op: decode
           in: ${{ secrets.DATABASE_URL_ENCRYPTED }}
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         name: Pull secrets from Infisical
         with:
           client-id: ${{ secrets.MACHINE_IDENTITY_CLIENT_ID }}

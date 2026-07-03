@@ -29,6 +29,10 @@ import type { ExecutionContext } from "hono"
 import {
   INGESTION_TEST_FAILURE_HEADER,
   INGESTION_TEST_FAILURE_RAW_PROCESSING_VALUE,
+  RAW_EVENT_MAX_BODY_BYTES,
+  RAW_EVENT_MAX_PROPERTIES_BYTES,
+  RAW_EVENT_MAX_PROPERTY_DEPTH,
+  RAW_EVENT_MAX_PROPERTY_KEYS,
   generateEventId,
   registerIngestEventsV1,
   resolveIngestionMessageRequestId,
@@ -256,6 +260,125 @@ describe("ingestEventsV1 route", () => {
     )
 
     expect(response.status).toBe(400)
+  })
+
+  it("returns 413 and skips auth when Content-Length exceeds the raw event body limit", async () => {
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest(requestBody, {
+        "content-length": String(RAW_EVENT_MAX_BODY_BYTES + 1),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips auth when the raw body exceeds the limit without Content-Length", async () => {
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      new Request("https://example.com/v1/usage/record", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer sk_test",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          ...requestBody,
+          padding: "x".repeat(RAW_EVENT_MAX_BODY_BYTES),
+        }),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips auth when properties exceed the serialized size limit", async () => {
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        properties: {
+          body: "x".repeat(RAW_EVENT_MAX_PROPERTIES_BYTES),
+        },
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+        message: `Event properties must be ${RAW_EVENT_MAX_PROPERTIES_BYTES} bytes or less`,
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips auth when properties contain too many keys", async () => {
+    const { app, env, executionCtx } = createTestApp()
+    const properties = Object.fromEntries(
+      Array.from({ length: RAW_EVENT_MAX_PROPERTY_KEYS + 1 }, (_, index) => [`key_${index}`, index])
+    )
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        properties,
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+        message: `Event properties must contain ${RAW_EVENT_MAX_PROPERTY_KEYS} keys or fewer`,
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
+  })
+
+  it("returns 413 and skips auth when properties are nested too deeply", async () => {
+    const { app, env, executionCtx } = createTestApp()
+
+    const response = await app.fetch(
+      buildRequest({
+        ...requestBody,
+        properties: createNestedProperties(RAW_EVENT_MAX_PROPERTY_DEPTH + 1),
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(413)
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        code: "PAYLOAD_TOO_LARGE",
+        message: `Event properties must be nested ${RAW_EVENT_MAX_PROPERTY_DEPTH} levels or fewer`,
+      })
+    )
+    expect(authMocks.keyAuth).not.toHaveBeenCalled()
   })
 
   it("returns 400 when the raw event timestamp is too far in the future", async () => {
@@ -544,4 +667,14 @@ function createRouteLogger(): Pick<Logger, "error" | "warn" | "set"> {
     warn: vi.fn(),
     set: vi.fn(),
   }
+}
+
+function createNestedProperties(depth: number): Record<string, unknown> {
+  let value: Record<string, unknown> = { value: 1 }
+
+  for (let index = 0; index < depth; index++) {
+    value = { nested: value }
+  }
+
+  return value
 }

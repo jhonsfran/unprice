@@ -3,10 +3,10 @@ import { Plus } from "lucide-react"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { CustomerDialog } from "../../_components/customers/customer-dialog"
 
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
 
 import { SuperLink } from "~/components/super-link"
 
@@ -42,11 +42,10 @@ export default function Loading() {
         </div>
       </TabNavigation>
       <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            Subscription evidence across this project
-          </Typography>
-        </div>
+        <SectionIntro
+          title="Subscription evidence across this project"
+          description="Subscriptions connect customers to plan versions, billing periods, wallet policy, and invoice evidence."
+        />
         <DataTableSkeleton
           columnCount={12}
           searchableColumnCount={1}

@@ -28,6 +28,10 @@ export const openApiErrorResponses = {
     errorSchemaFactory(z.enum(["PRECONDITION_FAILED"])).openapi("ErrPreconditionFailed"),
     "The requested operation cannot be completed because certain conditions were not met. This typically occurs when a required resource state or version check fails."
   ),
+  [HttpStatusCodes.PAYLOAD_TOO_LARGE]: jsonContent(
+    errorSchemaFactory(z.enum(["PAYLOAD_TOO_LARGE"])).openapi("ErrPayloadTooLarge"),
+    "The request payload is larger than the server is willing to process."
+  ),
   [HttpStatusCodes.TOO_MANY_REQUESTS]: jsonContent(
     errorSchemaFactory(z.enum(["TOO_MANY_REQUESTS"])).openapi("ErrTooManyRequests"),
     `The user has sent too many requests in a given amount of time ("rate limiting")`

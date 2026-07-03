@@ -101,6 +101,7 @@ async function resolvePlanVersion(
 
     const data = await deps.analytics.getPlanClickBySessionId({
       session_id: sessionId,
+      project_id: projectId,
       action: "plan_click",
     })
 

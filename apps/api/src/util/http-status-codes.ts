@@ -8,5 +8,6 @@ export const FORBIDDEN = 403 as const
 export const NOT_FOUND = 404 as const
 export const CONFLICT = 409 as const
 export const PRECONDITION_FAILED = 412 as const
+export const PAYLOAD_TOO_LARGE = 413 as const
 export const TOO_MANY_REQUESTS = 429 as const
 export const INTERNAL_SERVER_ERROR = 500 as const

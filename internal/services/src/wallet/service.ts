@@ -1483,8 +1483,7 @@ export class WalletService {
   private async readWalletConsumedAmount(input: GetWalletStateInput): Promise<number> {
     const rows = await this.db
       .select({
-        walletConsumed:
-          sql<number>`COALESCE(SUM(${entitlementReservationFundingLegs.capturedAmount}), 0)::bigint`,
+        walletConsumed: sql<number>`COALESCE(SUM(${entitlementReservationFundingLegs.capturedAmount}), 0)::bigint`,
       })
       .from(entitlementReservationFundingLegs)
       .innerJoin(

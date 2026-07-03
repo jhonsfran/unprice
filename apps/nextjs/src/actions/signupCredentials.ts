@@ -1,7 +1,8 @@
 "use server"
 
-import { createUser } from "@unprice/auth/utils"
+import { createCredentialsUser } from "@unprice/auth/utils"
 import { AUTH_ROUTES } from "@unprice/config"
+import { checkCredentialsActionRateLimit } from "./authRateLimit"
 
 // react-doctor-disable-next-line react-doctor/server-auth-actions
 export async function signUpWithCredentials({
@@ -15,8 +16,20 @@ export async function signUpWithCredentials({
   confirmPassword: string
   name: string
 }) {
+  const rateLimit = await checkCredentialsActionRateLimit({
+    action: "credentials-signup",
+    email,
+  })
+
+  if (rateLimit.limited) {
+    return {
+      success: false,
+      message: rateLimit.message,
+    }
+  }
+
   try {
-    const { err } = await createUser({
+    const { err } = await createCredentialsUser({
       email,
       password,
       confirmPassword,

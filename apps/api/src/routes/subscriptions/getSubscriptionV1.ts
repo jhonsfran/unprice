@@ -4,7 +4,11 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import { z } from "zod"
-import { keyAuth, validateIsAllowedToAccessProject } from "~/auth/key"
+import {
+  keyAuth,
+  resolveCustomerIdForApiKeyOrThrow,
+  validateIsAllowedToAccessProject,
+} from "~/auth/key"
 import { toUnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -69,12 +73,16 @@ export type GetSubscriptionResponse = z.infer<
 
 export const registerGetSubscriptionV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { customerId, projectId } = c.req.valid("json")
+    const { customerId: inputCustomerId, projectId } = c.req.valid("json")
     const requestStartedAt = c.get("requestStartedAt")
     const { customer } = c.get("services")
 
     // validate the request
     const key = await keyAuth(c)
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: inputCustomerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
 
     const finalProjectId = validateIsAllowedToAccessProject({
       isMain: key.project.isMain ?? false,

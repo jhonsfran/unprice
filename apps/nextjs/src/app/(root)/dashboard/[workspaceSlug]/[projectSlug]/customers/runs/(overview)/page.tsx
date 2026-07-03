@@ -1,10 +1,9 @@
 import { runStatusSchema } from "@unprice/db/validators"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Activity, CircleAlert, Code, Gauge, Route } from "lucide-react"
+import { Code } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
-import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
@@ -33,9 +32,6 @@ export default async function ProjectRunsPage({
   const filters = dataTableParams(searchParams)
 
   const { runs, pageCount } = await api.customers.listRunsByActiveProject(filters)
-  const runningRuns = runs.filter((run) => run.status === "running").length
-  const budgetExceededRuns = runs.filter((run) => run.status === "budget_exceeded").length
-  const failedRuns = runs.filter((run) => run.status === "failed").length
 
   return (
     <DashboardShell
@@ -72,35 +68,6 @@ export default async function ProjectRunsPage({
           title="Budgeted workloads across customers"
           description="Runs label workload spend, reserve budget, and stop over-budget work without making Unprice the workload owner."
         />
-        <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
-          <EvidenceMetricTile
-            label="Visible runs"
-            value={String(runs.length)}
-            helper={`${pageCount} result ${pageCount === 1 ? "page" : "pages"}`}
-            icon={<Route className="h-4 w-4" />}
-          />
-          <EvidenceMetricTile
-            label="Running"
-            value={String(runningRuns)}
-            helper="Still consuming budget"
-            icon={<Activity className="h-4 w-4" />}
-            tone={runningRuns > 0 ? "warning" : "default"}
-          />
-          <EvidenceMetricTile
-            label="Budget exceeded"
-            value={String(budgetExceededRuns)}
-            helper="Stopped by spend limit"
-            icon={<Gauge className="h-4 w-4" />}
-            tone={budgetExceededRuns > 0 ? "destructive" : "default"}
-          />
-          <EvidenceMetricTile
-            label="Failed"
-            value={String(failedRuns)}
-            helper="System failures to inspect"
-            icon={<CircleAlert className="h-4 w-4" />}
-            tone={failedRuns > 0 ? "destructive" : "default"}
-          />
-        </EvidenceMetricStrip>
         <Suspense
           fallback={
             <DataTableSkeleton

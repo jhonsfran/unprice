@@ -302,10 +302,94 @@ describe("ApiKeysService customer binding", () => {
     })
 
     expect(result.err).toBeUndefined()
+    expect(result.val?.key).toMatch(/^unprice_live_[1-9A-HJ-NP-Za-km-z]{22}$/)
     if (!insertedApiKey.current) {
       throw new Error("expected api key insert values")
     }
     expect(waitUntil).toHaveBeenCalledTimes(1)
     expect(cache.apiKeyByHash.remove).toHaveBeenCalledWith(insertedApiKey.current.hash)
+  })
+
+  it("rollApiKey scopes the lookup by hash and project before returning a new key", async () => {
+    type FindFirstConfig = {
+      where?: (
+        table: Record<string, unknown>,
+        ops: {
+          eq: (column: unknown, value: unknown) => Record<string, unknown>
+          and: (...conditions: Array<Record<string, unknown>>) => Record<string, unknown>
+        }
+      ) => unknown
+    }
+
+    const eq = vi.fn((column: unknown, value: unknown) => ({ column, value }))
+    const and = vi.fn((...conditions: Array<Record<string, unknown>>) => ({
+      conditions,
+    }))
+    const returning = vi.fn().mockResolvedValue([
+      {
+        id: "api_123",
+        projectId: "proj_123",
+        hash: "new_hash",
+      },
+    ])
+    const updateWhere = vi.fn().mockReturnValue({ returning })
+    const db = {
+      query: {
+        apikeys: {
+          findFirst: vi.fn(async (config: FindFirstConfig) => {
+            config.where?.(
+              {
+                hash: "hash_column",
+                projectId: "project_id_column",
+              },
+              { eq, and }
+            )
+
+            return {
+              id: "api_123",
+              projectId: "proj_123",
+              expiresAt: null,
+              revokedAt: null,
+              hash: "old_hash",
+              defaultCustomerId: null,
+              project: {
+                id: "proj_123",
+                enabled: true,
+                workspace: {
+                  enabled: true,
+                },
+              },
+            }
+          }),
+        },
+      },
+      update: vi.fn().mockReturnValue({
+        set: vi.fn().mockReturnValue({
+          where: updateWhere,
+        }),
+      }),
+    } as unknown as Database
+
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.rollApiKey({
+      keyHash: "old_hash",
+      projectId: "proj_123",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.newKey).toMatch(/^unprice_live_[1-9A-HJ-NP-Za-km-z]{22}$/)
+    expect(eq).toHaveBeenCalledWith("hash_column", "old_hash")
+    expect(eq).toHaveBeenCalledWith("project_id_column", "proj_123")
+    expect(and).toHaveBeenCalledTimes(1)
+    expect(updateWhere).toHaveBeenCalledTimes(2)
   })
 })

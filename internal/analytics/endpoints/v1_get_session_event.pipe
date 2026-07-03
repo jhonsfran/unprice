@@ -17,6 +17,7 @@ SQL >
     FROM unprice_events
     WHERE
         action = {{ String(action, description="Action to filter by", required=True) }}
+        AND project_id = {{ String(project_id, description="Project ID to filter by", required=True) }}
         AND timestamp <= now()
         {% if defined(interval_days) %}
             AND timestamp >= timestampAdd(now(), interval -{{ Int32(interval_days, description="Interval days", required=False) }} day)

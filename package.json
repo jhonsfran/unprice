@@ -7,23 +7,6 @@
   "workspaces": ["apps/*", "packages/*"],
   "engineStrict": true,
   "packageManager": "pnpm@10.28.0",
-  "pnpm": {
-    "overrides": {
-      "date-fns": "^3.3.1"
-    },
-    "packageExtensions": {
-      "@hookform/resolvers": {
-        "peerDependencies": {
-          "zod": ">=3.0.0"
-        }
-      },
-      "react-virtual": {
-        "peerDependencies": {
-          "react": ">=16.6.3"
-        }
-      }
-    }
-  },
   "scripts": {
     "build": "turbo run build",
     "clean": "git clean -xdf node_modules dist .next && rm -rf node_modules",
@@ -35,6 +18,7 @@
     "wh": "pnpm dlx webhookthing@latest",
     "knip": "knip --use-tsconfig-files --include files,dependencies",
     "test": "cross-env SKIP_ENV_VALIDATION=1 NODE_ENV=test turbo run test",
+    "audit:high": "node tooling/scripts/audit-high.mjs",
     "fmt:fix": "pnpm biome format . --write && pnpm biome check .  --write --unsafe ",
     "fmt": "pnpm biome format . && pnpm biome check .",
     "validate": "pnpm typecheck && pnpm manypkg check && pnpm fmt:fix",

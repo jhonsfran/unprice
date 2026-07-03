@@ -112,6 +112,10 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     })
 
     expect(result.err).toBeUndefined()
+    expect(repo.findSubscriptionWithPhases).toHaveBeenCalledWith({
+      subscriptionId,
+      projectId,
+    })
     expect(customerService.validatePaymentMethod).toHaveBeenCalledWith({
       customerId: "cus_123",
       projectId,

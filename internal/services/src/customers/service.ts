@@ -277,12 +277,12 @@ export class CustomerService {
   }
 
   /**
-   * Gets the customer data from the database
+   * Gets customer data across projects. Prefer getCustomerByIdInProject for tenant-scoped calls.
    * @param customerId - Customer id
    * @param opts - Options
    * @returns Customer data
    */
-  public async getCustomer(
+  public async getCustomerByIdAcrossProjects(
     customerId: string,
     opts?: {
       skipCache: boolean
@@ -520,13 +520,16 @@ export class CustomerService {
     const { projectId, customerId, externalId } = opts
 
     if (customerId) {
-      const { err, val } = await this.getCustomer(customerId)
+      const { err, val } = await this.getCustomerByIdInProject({
+        id: customerId,
+        projectId,
+      })
 
       if (err) {
         return Err(err)
       }
 
-      if (!val || val.projectId !== projectId) {
+      if (!val) {
         return Err(
           new UnPriceCustomerError({
             code: "CUSTOMER_NOT_FOUND",

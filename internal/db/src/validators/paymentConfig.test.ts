@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
   insertPaymentProviderConfigSchema,
   paymentProviderConnectionDataSchema,
+  publicPaymentProviderConfigSchema,
 } from "./paymentConfig"
 
 describe("payment provider config validators", () => {
@@ -47,5 +48,43 @@ describe("payment provider config validators", () => {
       "identity information could not be found"
     )
     expect(parsed?.requirements?.past_due).toEqual(["individual.first_name"])
+  })
+
+  it("strips encrypted payment provider secrets from public config output", () => {
+    const parsed = publicPaymentProviderConfigSchema.parse({
+      id: "ppc_123",
+      projectId: "proj_123",
+      createdAtM: 1,
+      updatedAtM: 2,
+      active: true,
+      paymentProvider: "stripe",
+      connectionType: "bring_your_own_key",
+      mode: "test",
+      status: "active",
+      key: "encrypted_key",
+      keyIv: "key_iv",
+      webhookSecret: "encrypted_webhook_secret",
+      webhookSecretIv: "webhook_iv",
+      externalAccountId: null,
+      connectionData: null,
+    })
+
+    expect(parsed).toEqual({
+      id: "ppc_123",
+      projectId: "proj_123",
+      createdAtM: 1,
+      updatedAtM: 2,
+      active: true,
+      paymentProvider: "stripe",
+      connectionType: "bring_your_own_key",
+      mode: "test",
+      status: "active",
+      externalAccountId: null,
+      connectionData: null,
+    })
+    expect("key" in parsed).toBe(false)
+    expect("keyIv" in parsed).toBe(false)
+    expect("webhookSecret" in parsed).toBe(false)
+    expect("webhookSecretIv" in parsed).toBe(false)
   })
 })

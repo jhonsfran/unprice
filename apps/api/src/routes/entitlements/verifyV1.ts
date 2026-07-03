@@ -10,7 +10,7 @@ import { endTime } from "hono/timing"
 import { startTime } from "hono/timing"
 import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId } from "~/auth/key"
+import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { UnpriceApiError } from "~/errors"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
@@ -150,12 +150,16 @@ export type VerifyResponse = z.infer<
 export const registerVerifyV1 = (app: App) =>
   app.openapi(route, async (c) => {
     const body = c.req.valid("json")
-    const { customerId, featureSlug } = body
+    const { customerId: inputCustomerId, featureSlug } = body
     const { ingestion } = c.get("services")
     const requestStartedAt = c.get("requestStartedAt")
     const timestamp = body.timestamp ?? requestStartedAt
 
     const key = await keyAuth(c)
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: inputCustomerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     try {

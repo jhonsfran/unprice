@@ -39,6 +39,23 @@ function applySetCookie(req: NextAuthRequest, res: NextResponse) {
   })
 }
 
+export function getSafeNextPath(next: string | null) {
+  if (!next || !next.startsWith("/") || next.startsWith("//")) {
+    return null
+  }
+
+  try {
+    const normalized = decodeURIComponent(next).replace(/\\/g, "/")
+    if (normalized.startsWith("//")) {
+      return null
+    }
+  } catch {
+    return null
+  }
+
+  return next
+}
+
 export default function AppMiddleware(req: NextAuthRequest) {
   const url = new URL(req.nextUrl.origin)
   const { path, key: currentWorkspaceSlug, fullPath } = parse(req)
@@ -49,7 +66,7 @@ export default function AppMiddleware(req: NextAuthRequest) {
   const isNonWorkspaceRoute = APP_NON_WORKSPACE_ROUTES.has(path)
 
   // use next param to redirect to the workspace
-  const next = req.nextUrl.searchParams.get("next")
+  const next = getSafeNextPath(req.nextUrl.searchParams.get("next"))
 
   // API routes we don't need to check if the user is logged in
   if (isApiRoute || isAppAuthRoute) {

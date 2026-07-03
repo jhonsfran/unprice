@@ -1,10 +1,9 @@
 import { SUBSCRIPTION_STATUS } from "@unprice/db/utils"
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { BadgeCheck, Code, FileClock, Layers3, Plus, ReceiptText } from "lucide-react"
+import { Code, Plus } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import { Suspense } from "react"
-import { EvidenceMetricStrip, EvidenceMetricTile } from "~/components/analytics/evidence-panel"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTable } from "~/components/data-table/data-table"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
@@ -31,12 +30,7 @@ export default async function PlanSubscriptionsPage({
   const baseUrl = `/${workspaceSlug}/${projectSlug}/customers`
   const filters = dataTableParams(searchParams)
 
-  const { subscriptions, pageCount } = await api.subscriptions.listByActiveProject(filters)
-  const activeSubscriptions = subscriptions.filter((subscription) => subscription.active).length
-  const pendingSubscriptions = subscriptions.filter(
-    (subscription) =>
-      subscription.status === "pending_payment" || subscription.status === "pending_activation"
-  ).length
+  const { subscriptions } = await api.subscriptions.listByActiveProject(filters)
 
   return (
     <DashboardShell
@@ -81,34 +75,6 @@ export default async function PlanSubscriptionsPage({
           title="Subscription evidence across this project"
           description="Subscriptions connect customers to plan versions, billing periods, wallet policy, and invoice evidence."
         />
-        <EvidenceMetricStrip className="sm:grid-cols-2 lg:grid-cols-4">
-          <EvidenceMetricTile
-            label="Visible subscriptions"
-            value={String(subscriptions.length)}
-            helper={`${pageCount} result ${pageCount === 1 ? "page" : "pages"}`}
-            icon={<Layers3 className="h-4 w-4" />}
-          />
-          <EvidenceMetricTile
-            label="Active"
-            value={String(activeSubscriptions)}
-            helper="Currently governing customer access"
-            icon={<BadgeCheck className="h-4 w-4" />}
-            tone={activeSubscriptions > 0 ? "success" : "default"}
-          />
-          <EvidenceMetricTile
-            label="Pending"
-            value={String(pendingSubscriptions)}
-            helper="Waiting on payment or setup"
-            icon={<FileClock className="h-4 w-4" />}
-            tone={pendingSubscriptions > 0 ? "warning" : "default"}
-          />
-          <EvidenceMetricTile
-            label="Invoice path"
-            value="Connected"
-            helper="Subscription phases create invoice evidence"
-            icon={<ReceiptText className="h-4 w-4" />}
-          />
-        </EvidenceMetricStrip>
         <Suspense
           fallback={
             <DataTableSkeleton

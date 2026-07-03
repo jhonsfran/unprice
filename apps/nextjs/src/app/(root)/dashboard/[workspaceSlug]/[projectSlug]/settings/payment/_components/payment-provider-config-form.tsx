@@ -1,7 +1,7 @@
 "use client"
 
 import { useMutation } from "@tanstack/react-query"
-import type { PaymentProvider, PaymentProviderConfig } from "@unprice/db/validators"
+import type { PaymentProvider, PublicPaymentProviderConfig } from "@unprice/db/validators"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Switch } from "@unprice/ui/switch"
@@ -80,7 +80,9 @@ function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))]
 }
 
-function getStripeConnectionIssue(provider?: PaymentProviderConfig): StripeConnectionIssue | null {
+function getStripeConnectionIssue(
+  provider?: PublicPaymentProviderConfig
+): StripeConnectionIssue | null {
   const connectionData = provider?.connectionData
   const requirements = connectionData?.requirements
   const requirementErrors = requirements?.errors ?? []
@@ -118,7 +120,7 @@ function deriveStripeStatus({
   provider,
   enabled,
 }: {
-  provider?: PaymentProviderConfig
+  provider?: PublicPaymentProviderConfig
   enabled: boolean
 }): ProviderUiStatus | undefined {
   if (!enabled) {
@@ -146,7 +148,7 @@ export function PaymentProviderConfigForm({
   onSkip,
   isOnboarding,
 }: {
-  provider?: PaymentProviderConfig
+  provider?: PublicPaymentProviderConfig
   paymentProvider: PaymentProvider
   setDialogOpen?: (open: boolean) => void
   onSuccess?: (key: string) => void

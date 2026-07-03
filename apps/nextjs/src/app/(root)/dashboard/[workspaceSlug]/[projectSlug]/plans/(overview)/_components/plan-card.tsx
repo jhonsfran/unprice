@@ -95,14 +95,12 @@ export function PlanCard(props: {
         </Dialog>
       </CardHeader>
       <CardFooter className="flex flex-wrap items-center justify-between gap-3 text-muted-foreground text-sm">
-        <div className="flex items-center text-muted-foreground text-xs">
+        <div className="flex items-center font-mono text-muted-foreground text-xs">
           <GalleryHorizontalEnd className="mr-2 h-3 w-3" aria-hidden="true" />
-          {versions.length === 0 ? "No" : versions.length} plan versions
-        </div>
-        <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-          <span>{publishedVersions} published</span>
-          <span>{draftVersions} draft</span>
           <span>{latestVersion === null ? "No latest" : `Latest v${latestVersion}`}</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 px-4 font-mono text-xs">
+          <span>{publishedVersions} published</span> - <span>{draftVersions} draft</span>
         </div>
       </CardFooter>
     </Card>

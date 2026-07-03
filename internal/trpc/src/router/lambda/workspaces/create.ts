@@ -1,24 +1,32 @@
 import { TRPCError } from "@trpc/server"
-import { workspaceInsertBase, workspaceSelectBase } from "@unprice/db/validators"
+import { workspaceSelectBase } from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
 
+const createWorkspaceInputSchema = z.object({
+  workspaceId: z.string().min(1),
+})
+
 export const create = protectedProcedure
-  .input(
-    workspaceInsertBase.required({
-      name: true,
-      unPriceCustomerId: true,
-    })
-  )
+  .input(createWorkspaceInputSchema)
   .output(
     z.object({
       workspace: workspaceSelectBase,
     })
   )
   .mutation(async (opts) => {
+    const { workspaceId } = opts.input
     const userId = opts.ctx.userId
-    const { workspaces } = opts.ctx.services
+    const userEmail = opts.ctx.session.user.email
+    const { customers, projects, workspaces } = opts.ctx.services
+
+    if (!userEmail) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "User email not found in session",
+      })
+    }
 
     const { err: countErr, val: membershipCount } = await workspaces.countMembershipsByUser({
       userId,
@@ -33,8 +41,46 @@ export const create = protectedProcedure
 
     const isPersonal = membershipCount === 0
 
+    const { err: projectErr, val: mainProject } = await projects.getMainProjectBySlug({
+      slug: "unprice-admin",
+    })
+
+    if (projectErr || !mainProject?.id) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: projectErr?.message ?? "Main project not found",
+      })
+    }
+
+    const { err: customerErr, val: customer } = await customers.getCustomerByExternalId(
+      mainProject.id,
+      workspaceId,
+      { skipCache: true }
+    )
+
+    if (customerErr) {
+      throw new TRPCError({
+        code: "INTERNAL_SERVER_ERROR",
+        message: customerErr.message,
+      })
+    }
+
+    if (!customer) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: "Workspace signup session not found",
+      })
+    }
+
+    if (customer.email.toLowerCase() !== userEmail.toLowerCase()) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Workspace signup session does not belong to the active user",
+      })
+    }
+
     const { result: subscription, error: subscriptionErr } = await unprice.subscriptions.get({
-      customerId: opts.input.unPriceCustomerId,
+      customerId: customer.id,
     })
 
     if (subscriptionErr) {
@@ -53,7 +99,9 @@ export const create = protectedProcedure
 
     const { err, val } = await workspaces.createWorkspaceRecord({
       input: {
-        ...opts.input,
+        id: workspaceId,
+        name: customer.name,
+        unPriceCustomerId: customer.id,
         isPersonal,
       },
       userId,
@@ -78,6 +126,13 @@ export const create = protectedProcedure
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: "Error creating member",
+      })
+    }
+
+    if (val.state === "workspace_claim_conflict") {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: "Workspace signup session has already been claimed",
       })
     }
 

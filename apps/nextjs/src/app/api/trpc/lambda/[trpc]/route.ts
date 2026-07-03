@@ -60,7 +60,7 @@ const handler = withEvlog(
       },
     })
 
-    setCorsHeaders(response)
+    setCorsHeaders(response, req.headers.get("origin"))
     return response
   })
 )

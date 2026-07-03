@@ -599,6 +599,19 @@ await fetch(baseUrl + "/v1/analytics/charges/explain", {
 }
 
 export type method = keyof typeof codeExamples.sdk
+type Framework = keyof typeof codeExamples
+
+export type ListPlanVersionsExampleParams = {
+  planVersionIds?: string[]
+  billingInterval?: string
+  currency?: string
+  version?: number
+  featureSlugs?: string[]
+}
+
+export type SDKExampleParams = {
+  listPlanVersions?: ListPlanVersionsExampleParams
+}
 
 const methodLabels: Record<method, string> = {
   checkAccess: "Check access",
@@ -618,18 +631,120 @@ const methodLabels: Record<method, string> = {
   explainCharge: "Explain charge",
 }
 
+function stringLiteral(value: string) {
+  return JSON.stringify(value)
+}
+
+function stringArrayLiteral(values: string[]) {
+  return `[${values.map(stringLiteral).join(", ")}]`
+}
+
+function buildPlanVersionsRequestLines(params: ListPlanVersionsExampleParams, indent = "  ") {
+  const requestLines: string[] = []
+
+  if (params.planVersionIds && params.planVersionIds.length > 0) {
+    requestLines.push(`${indent}planVersionIds: ${stringArrayLiteral(params.planVersionIds)},`)
+  }
+
+  if (params.billingInterval) {
+    requestLines.push(`${indent}billingInterval: ${stringLiteral(params.billingInterval)},`)
+  }
+
+  if (params.currency) {
+    requestLines.push(`${indent}currency: ${stringLiteral(params.currency)},`)
+  }
+
+  return requestLines.length > 0
+    ? requestLines.join("\n")
+    : `${indent}billingInterval: "month",
+${indent}currency: "USD",`
+}
+
+function buildPlanVersionsContextComment(params: ListPlanVersionsExampleParams) {
+  const context: string[] = []
+
+  if (params.version !== undefined) {
+    context.push(`v${params.version}`)
+  }
+
+  if (params.featureSlugs && params.featureSlugs.length > 0) {
+    context.push(`features: ${params.featureSlugs.map(stringLiteral).join(", ")}`)
+  }
+
+  return context.length > 0 ? `\n// Dashboard context: ${context.join("; ")}\n` : "\n"
+}
+
+function buildListPlanVersionsSdkExample(params: ListPlanVersionsExampleParams) {
+  return `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN,
+})
+
+const { result, error } = await unprice.planVersions.list({
+${buildPlanVersionsRequestLines(params)}
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+${buildPlanVersionsContextComment(params)}const [planVersion] = result.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+`
+}
+
+function buildListPlanVersionsFetchExample(params: ListPlanVersionsExampleParams) {
+  return `const baseUrl = "https://api.unprice.dev"
+const token = process.env.UNPRICE_TOKEN
+
+const response = await fetch(baseUrl + "/v1/plan-versions/list", {
+  method: "POST",
+  headers: {
+    Authorization: "Bearer " + token,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+${buildPlanVersionsRequestLines(params, "    ")}
+  }),
+})
+
+if (!response.ok) {
+  throw new Error(await response.text())
+}
+
+const data = await response.json()
+${buildPlanVersionsContextComment(params)}const [planVersion] = data.planVersions
+const featureSlugs =
+  planVersion?.planFeatures.map((planFeature) => planFeature.feature.slug) ?? []
+`
+}
+
+function getCodeExample(framework: Framework, currentMethod: method, params?: SDKExampleParams) {
+  if (currentMethod === "listPlanVersions" && params?.listPlanVersions) {
+    return framework === "sdk"
+      ? buildListPlanVersionsSdkExample(params.listPlanVersions)
+      : buildListPlanVersionsFetchExample(params.listPlanVersions)
+  }
+
+  return codeExamples[framework][currentMethod] ?? codeExamples.sdk.checkAccess
+}
+
 export function SDKDemo({
   className,
   defaultMethod,
+  exampleParams,
   showBorderBeam = true,
   presentation = "marketing",
 }: {
   className?: string
   defaultMethod?: method
+  exampleParams?: SDKExampleParams
   showBorderBeam?: boolean
   presentation?: "marketing" | "panel"
 }) {
-  const [activeFramework, setActiveFramework] = useState<keyof typeof codeExamples>("sdk")
+  const [activeFramework, setActiveFramework] = useState<Framework>("sdk")
   const [activeMethod, setActiveMethod] = useState<method>(defaultMethod ?? "checkAccess")
   const isPanel = presentation === "panel"
 
@@ -639,7 +754,7 @@ export function SDKDemo({
     methods = [defaultMethod]
   }
 
-  const code = codeExamples[activeFramework][activeMethod] ?? codeExamples.sdk.checkAccess
+  const code = getCodeExample(activeFramework, activeMethod, exampleParams)
 
   return (
     <div
@@ -652,7 +767,7 @@ export function SDKDemo({
     >
       <Tabs
         value={activeFramework}
-        onValueChange={(value) => setActiveFramework(value as keyof typeof codeExamples)}
+        onValueChange={(value) => setActiveFramework(value as Framework)}
         className="w-full"
       >
         <div

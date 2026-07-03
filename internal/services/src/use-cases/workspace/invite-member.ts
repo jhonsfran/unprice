@@ -6,6 +6,7 @@ import { Err, FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { z } from "zod"
 import type { Cache } from "../../cache/service"
+import { canAssignWorkspaceRole } from "../../workspaces/roles"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
 
@@ -18,6 +19,7 @@ type InviteMemberDeps = {
 }
 
 type InviteMemberInput = {
+  actorRole: Member["role"]
   email: string
   role: Member["role"]
   name?: string | null
@@ -36,6 +38,7 @@ export async function inviteMember(
 ): Promise<
   Result<
     | { state: "personal_workspace_conflict" | "already_member" | "inviter_not_found" }
+    | { state: "owner_role_forbidden" }
     | { state: "member_added" }
     | {
         state: "invite_created"
@@ -46,7 +49,7 @@ export async function inviteMember(
     FetchError
   >
 > {
-  const { email, role, name, userId, workspace } = input
+  const { actorRole, email, role, name, userId, workspace } = input
 
   deps.logger.set({
     business: {
@@ -59,6 +62,12 @@ export async function inviteMember(
   if (workspace.isPersonal) {
     return Ok({
       state: "personal_workspace_conflict",
+    })
+  }
+
+  if (!canAssignWorkspaceRole({ actorRole, targetRole: role })) {
+    return Ok({
+      state: "owner_role_forbidden",
     })
   }
 

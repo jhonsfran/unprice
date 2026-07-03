@@ -1,5 +1,5 @@
 import type { Analytics } from "@unprice/analytics"
-import { hashStringSHA256, newId } from "@unprice/db/utils"
+import { hashStringSHA256, newApiKeySecret, newId } from "@unprice/db/utils"
 import type { ApiKey, ApiKeyExtended, SearchParamsDataTable } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, type SchemaError, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -130,7 +130,7 @@ export class ApiKeysService {
     expiresAt?: number | null
     defaultCustomerId?: string | null
   }): Promise<Result<ApiKey & { key: string }, FetchError>> {
-    const apiKey = newId("apikey_key")
+    const apiKey = newApiKeySecret()
     const apiKeyId = newId("apikey")
     const apiKeyHash = await hashStringSHA256(apiKey)
 
@@ -252,7 +252,7 @@ export class ApiKeysService {
     return hash
   }
 
-  private async getData(keyHash: string): Promise<ApiKeyExtended | null> {
+  private async getData(keyHash: string, projectId?: string): Promise<ApiKeyExtended | null> {
     const data = await this.db.query.apikeys
       .findFirst({
         with: {
@@ -289,7 +289,10 @@ export class ApiKeysService {
           hash: true,
           defaultCustomerId: true,
         },
-        where: (apikey, { eq }) => eq(apikey.hash, keyHash),
+        where: (apikey, { and, eq }) =>
+          projectId
+            ? and(eq(apikey.hash, keyHash), eq(apikey.projectId, projectId))
+            : eq(apikey.hash, keyHash),
       })
       .catch((e) => {
         this.logger.set({ error: toErrorContext(e) })
@@ -480,8 +483,9 @@ export class ApiKeysService {
 
   public async rollApiKey(req: {
     keyHash: string
+    projectId: string
   }): Promise<Result<ApiKey & { newKey: string }, SchemaError | FetchError | UnPriceApiKeyError>> {
-    const apiKey = await this.getData(req.keyHash)
+    const apiKey = await this.getData(req.keyHash, req.projectId)
 
     if (!apiKey) {
       return Err(
@@ -501,14 +505,14 @@ export class ApiKeysService {
       )
     }
 
-    const newKey = newId("apikey_key")
+    const newKey = newApiKeySecret()
     // generate hash of the key
     const apiKeyHash = await hashStringSHA256(newKey)
 
     const newApiKey = await this.db
       .update(apikeys)
       .set({ updatedAtM: Date.now(), hash: apiKeyHash })
-      .where(eq(apikeys.id, apiKey.id))
+      .where(and(eq(apikeys.id, apiKey.id), eq(apikeys.projectId, req.projectId)))
       .returning()
       .then((res) => res[0])
 

@@ -7,9 +7,14 @@ import type { Domain } from "@unprice/vercel"
 import { Vercel } from "@unprice/vercel"
 import { z } from "zod"
 import { env } from "#env"
-import { protectedWorkspaceProcedure } from "#trpc"
+import { protectedWorkspaceRateLimitedProcedure } from "#trpc"
 
-export const verify = protectedWorkspaceProcedure
+export const verify = protectedWorkspaceRateLimitedProcedure({
+  limit: 60,
+  name: "domains.verify",
+  scope: "workspace",
+  windowSeconds: 10 * 60,
+})
   .input(z.object({ domain: z.string() }))
   .output(
     z.object({

@@ -61,7 +61,7 @@ const handler = withEvlog(
       // https://trpc.io/docs/server/caching
     })
 
-    setCorsHeaders(response)
+    setCorsHeaders(response, req.headers.get("origin"))
     return response
   })
 )

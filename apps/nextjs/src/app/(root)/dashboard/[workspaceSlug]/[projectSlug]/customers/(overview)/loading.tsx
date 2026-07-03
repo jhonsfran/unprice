@@ -3,10 +3,10 @@ import { Plus } from "lucide-react"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { CustomerDialog } from "../_components/customers/customer-dialog"
 
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
 
 import { SuperLink } from "~/components/super-link"
 
@@ -42,11 +42,10 @@ export default function Loading() {
         </div>
       </TabNavigation>
       <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            Customer money state
-          </Typography>
-        </div>
+        <SectionIntro
+          title="Customer money state"
+          description="Inspect which customers can be billed, which ones are active, and where to follow subscriptions, wallets, invoices, and runs."
+        />
         <DataTableSkeleton
           columnCount={8}
           showDateFilterOptions={true}

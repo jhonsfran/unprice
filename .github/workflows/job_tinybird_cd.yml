@@ -7,6 +7,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   cd:
     runs-on: ubuntu-latest
@@ -20,7 +23,7 @@ jobs:
         if: steps.should-deploy.outputs.skip != '1'
         run: curl https://tinybird.co | sh
 
-      - uses: Infisical/secrets-action@v1.0.7
+      - uses: Infisical/secrets-action@03d3fa38607956c493f53c6633f94006a13c47ae # v1.0.7
         name: Pull secrets from Infisical
         if: steps.should-deploy.outputs.skip != '1'
         with:

@@ -125,6 +125,10 @@ export class RunBudgetDO extends DurableObject {
     await this.ready
     const input = applyRunSyncEventInputSchema.parse(rawInput)
 
+    return this.ctx.blockConcurrencyWhile(() => this.applySyncEventLocked(input))
+  }
+
+  private async applySyncEventLocked(input: ApplyRunSyncEventInput): Promise<RunBudgetDecision> {
     // Check idempotency
     const cached = await this.db.query.runIdempotency.findFirst({
       where: eq(schema.runIdempotency.idempotencyKey, input.idempotencyKey),

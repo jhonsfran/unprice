@@ -72,13 +72,14 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
     () => ({
       customerId: customerId ?? "",
       provider: paymentProvider,
+      projectSlug,
       ...(awaitingPaymentSetup ? { skipCache: true } : {}),
     }),
-    [customerId, paymentProvider, awaitingPaymentSetup]
+    [customerId, paymentProvider, projectSlug, awaitingPaymentSetup]
   )
 
   const { data, isLoading } = useQuery(
-    trpc.customers.listPaymentMethods.queryOptions(paymentMethodsInput, {
+    trpc.customers.listPaymentMethodsByActiveProject.queryOptions(paymentMethodsInput, {
       enabled: !!customerId,
       placeholderData: (previousData) => previousData,
       refetchInterval: awaitingPaymentSetup && !confirmationTimedOut ? 2000 : false,
@@ -111,9 +112,10 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
     if (!customerId || !defaultPaymentMethod) return
 
     queryClient.setQueryData(
-      trpc.customers.listPaymentMethods.queryKey({
+      trpc.customers.listPaymentMethodsByActiveProject.queryKey({
         customerId,
         provider: paymentProvider,
+        projectSlug,
       }),
       data
     )
@@ -133,7 +135,15 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
         }
       )
     }
-  }, [customerId, data, form, paymentProvider, queryClient, trpc.customers.listPaymentMethods])
+  }, [
+    customerId,
+    data,
+    form,
+    paymentProvider,
+    projectSlug,
+    queryClient,
+    trpc.customers.listPaymentMethodsByActiveProject,
+  ])
 
   // if payment method is not required, hide the field
   if (!paymentProviderRequired) {
@@ -248,6 +258,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
               successUrl={successUrl}
               cancelUrl={cancelUrl}
               paymentProvider={paymentProvider}
+              scope="project"
               hasPaymentMethods={hasPaymentMethods}
               isRefreshing={shouldShowConfirmingState}
               onProviderSessionStarted={() => {

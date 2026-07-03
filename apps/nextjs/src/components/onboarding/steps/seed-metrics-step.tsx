@@ -73,9 +73,9 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
   )
   const { data: existingSubscriptionData, isLoading: isExistingSubscriptionLoading } = useQuery(
     trpc.subscriptions.getById.queryOptions(
-      { id: existingSubscriptionId ?? "" },
+      { id: existingSubscriptionId ?? "", projectSlug: project?.slug },
       {
-        enabled: !!existingSubscriptionId,
+        enabled: !!existingSubscriptionId && !!project?.slug,
         retry: false,
       }
     )

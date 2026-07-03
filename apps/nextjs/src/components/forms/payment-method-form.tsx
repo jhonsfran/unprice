@@ -2,6 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query"
 import type { PaymentProvider } from "@unprice/db/validators"
+import { useParams } from "next/navigation"
 import { SubmitButton } from "~/components/submit-button"
 import { toBrowserAbsoluteUrl } from "~/lib/browser-url"
 import { useTRPC } from "~/trpc/client"
@@ -11,6 +12,7 @@ export function PaymentMethodButton({
   successUrl,
   cancelUrl,
   paymentProvider,
+  scope = "workspace",
   hasPaymentMethods,
   isRefreshing,
   onProviderSessionStarted,
@@ -19,15 +21,20 @@ export function PaymentMethodButton({
   successUrl: string
   cancelUrl: string
   paymentProvider: PaymentProvider
+  scope?: "project" | "workspace"
   hasPaymentMethods?: boolean
   isRefreshing?: boolean
   onProviderSessionStarted?: () => void
 }) {
   const trpc = useTRPC()
+  const projectSlug = useParams().projectSlug as string | undefined
   const isSandbox = paymentProvider === "sandbox"
 
   const createSession = useMutation(
-    trpc.customers.createPaymentMethod.mutationOptions({
+    (scope === "project"
+      ? trpc.customers.createPaymentMethodByActiveProject
+      : trpc.customers.createPaymentMethod
+    ).mutationOptions({
       onSuccess: (data) => {
         if (!data?.url) return
 
@@ -58,6 +65,7 @@ export function PaymentMethodButton({
           customerId,
           successUrl: toBrowserAbsoluteUrl(successUrl),
           cancelUrl: toBrowserAbsoluteUrl(cancelUrl),
+          ...(scope === "project" && projectSlug ? { projectSlug } : {}),
         })
       }}
       isSubmitting={!isSandbox && createSession.isPending}

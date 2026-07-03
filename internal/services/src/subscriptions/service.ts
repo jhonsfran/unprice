@@ -834,6 +834,7 @@ export class SubscriptionService {
     // get subscription with phases from start date
     const subscriptionWithPhases = await repo.findSubscriptionWithPhases({
       subscriptionId,
+      projectId,
     })
 
     if (!subscriptionWithPhases) {
@@ -1715,16 +1716,19 @@ export class SubscriptionService {
 
   public async getSubscriptionById({
     subscriptionId,
+    projectId,
   }: {
     subscriptionId: string
+    projectId: string
   }): Promise<Result<unknown | null, UnPriceSubscriptionError>> {
     try {
-      const subscriptionData = await this.repo.findSubscriptionFull({ subscriptionId })
+      const subscriptionData = await this.repo.findSubscriptionFull({ subscriptionId, projectId })
       return Ok(subscriptionData ?? null)
     } catch (err) {
       this.logger.error(err, {
         context: "error getting subscription by id",
         subscriptionId,
+        projectId,
       })
       return Err(
         new UnPriceSubscriptionError({

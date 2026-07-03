@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server"
 import { subscriptionPhaseExtendedSchema, subscriptionSelectSchema } from "@unprice/db/validators"
 import { z } from "zod"
 
-import { protectedProcedure } from "#trpc"
+import { protectedProjectProcedure } from "#trpc"
 
 const getByIdOutputSchema = z.object({
   subscription: subscriptionSelectSchema.extend({
@@ -10,15 +10,21 @@ const getByIdOutputSchema = z.object({
   }),
 })
 
-export const getById = protectedProcedure
-  .input(subscriptionSelectSchema.pick({ id: true }))
+export const getById = protectedProjectProcedure
+  .input(
+    subscriptionSelectSchema.pick({ id: true }).extend({
+      projectSlug: z.string().optional(),
+    })
+  )
   .output(getByIdOutputSchema)
   .query(async (opts) => {
     const { id } = opts.input
+    const { project } = opts.ctx
     const { subscriptions } = opts.ctx.services
 
     const { err, val: subscriptionData } = await subscriptions.getSubscriptionById({
       subscriptionId: id,
+      projectId: project.id,
     })
 
     if (err) {

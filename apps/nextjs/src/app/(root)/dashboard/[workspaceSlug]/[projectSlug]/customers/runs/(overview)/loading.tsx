@@ -1,11 +1,11 @@
 import { Button } from "@unprice/ui/button"
 import { TabNavigation, TabNavigationLink } from "@unprice/ui/tabs-navigation"
-import { Typography } from "@unprice/ui/typography"
 import { Code } from "lucide-react"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { DataTableSkeleton } from "~/components/data-table/data-table-skeleton"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
+import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 
 export default function Loading() {
@@ -40,11 +40,10 @@ export default function Loading() {
         </div>
       </TabNavigation>
       <div className="mt-4">
-        <div className="flex flex-col px-1 py-4">
-          <Typography variant="p" affects="removePaddingMargin">
-            Budgeted workloads across customers
-          </Typography>
-        </div>
+        <SectionIntro
+          title="Budgeted workloads across customers"
+          description="Runs label workload spend, reserve budget, and stop over-budget work without making Unprice the workload owner."
+        />
         <DataTableSkeleton
           columnCount={8}
           searchableColumnCount={1}

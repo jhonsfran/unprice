@@ -10,6 +10,7 @@ export const changeRoleInvite = protectedWorkspaceProcedure
   .mutation(async (opts) => {
     const { email, role } = opts.input
     const workspace = opts.ctx.workspace
+    const actorRole = opts.ctx.member.role
     const { workspaces } = opts.ctx.services
 
     opts.ctx.verifyRole(["OWNER", "ADMIN"])
@@ -18,6 +19,7 @@ export const changeRoleInvite = protectedWorkspaceProcedure
       workspaceId: workspace.id,
       email,
       role,
+      actorRole,
     })
 
     if (err) {
@@ -27,14 +29,20 @@ export const changeRoleInvite = protectedWorkspaceProcedure
       })
     }
 
-    if (val.state === "not_found") {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Invite not found",
-      })
-    }
-
-    return {
-      invite: val.invite,
+    switch (val.state) {
+      case "not_found":
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Invite not found",
+        })
+      case "owner_role_forbidden":
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only workspace owners can assign the owner role",
+        })
+      case "ok":
+        return {
+          invite: val.invite,
+        }
     }
   })

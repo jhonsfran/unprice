@@ -1,7 +1,7 @@
 import { createRoute } from "@hono/zod-openapi"
 import { jsonContent } from "stoker/openapi/helpers"
 import { z } from "zod"
-import { keyAuth, resolveContextProjectId } from "~/auth/key"
+import { keyAuth, resolveContextProjectId, resolveCustomerIdForApiKeyOrThrow } from "~/auth/key"
 import { openApiErrorResponses } from "~/errors/openapi-responses"
 import type { App } from "~/hono/app"
 import { CloudflareEntitlementWindowClient } from "~/ingestion/entitlements/client"
@@ -56,8 +56,12 @@ export const route = createRoute(
 
 export const registerGetEntitlementWindowStatusV1 = (app: App) =>
   app.openapi(route, async (c) => {
-    const { entitlementId, customerId } = c.req.valid("query")
+    const { entitlementId, customerId: inputCustomerId } = c.req.valid("query")
     const key = await keyAuth(c)
+    const customerId = resolveCustomerIdForApiKeyOrThrow({
+      explicitCustomerId: inputCustomerId,
+      defaultCustomerId: key.defaultCustomerId,
+    })
     const projectId = await resolveContextProjectId(c, key.projectId, customerId)
 
     const windowClient = new CloudflareEntitlementWindowClient({

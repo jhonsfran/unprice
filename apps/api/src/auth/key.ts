@@ -243,7 +243,7 @@ export async function resolveContextProjectId(
 
     // Fallback: resolve Main Project via customer record when env is not set.
     const { customer } = c.get("services")
-    const { val } = await customer.getCustomer(customerId)
+    const { val } = await customer.getCustomerByIdAcrossProjects(customerId)
 
     if (val) {
       endTime(c, "resolveContextProjectId")
@@ -303,6 +303,22 @@ export function resolveCustomerIdForApiKey(input: {
   }
 
   return { success: true, customerId: explicitCustomerId }
+}
+
+export function resolveCustomerIdForApiKeyOrThrow(input: {
+  explicitCustomerId?: string | null
+  defaultCustomerId?: string | null
+}): string {
+  const result = resolveCustomerIdForApiKey(input)
+
+  if (!result.success) {
+    throw new UnpriceApiError({
+      code: result.code === "customer_forbidden" ? "FORBIDDEN" : "BAD_REQUEST",
+      message: result.message,
+    })
+  }
+
+  return result.customerId
 }
 
 export function validateIsAllowedToAccessProject({

@@ -3,9 +3,14 @@ import { currencySchema, paymentProviderSchema } from "@unprice/db/validators"
 import { initiateTopup as initiateTopupUseCase } from "@unprice/services/use-cases"
 import { z } from "zod"
 
-import { protectedProjectProcedure } from "#trpc"
+import { protectedProjectRateLimitedProcedure } from "#trpc"
 
-export const initiateTopup = protectedProjectProcedure
+export const initiateTopup = protectedProjectRateLimitedProcedure({
+  limit: 30,
+  name: "wallets.initiateTopup",
+  scope: "project",
+  windowSeconds: 10 * 60,
+})
   .input(
     z.object({
       customerId: z.string(),
