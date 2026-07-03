@@ -1,5 +1,6 @@
 "use client"
 
+import { API_DOMAIN } from "@unprice/config"
 import { BorderBeam } from "@unprice/ui/border-beam"
 import { Button } from "@unprice/ui/button"
 import { ScrollArea } from "@unprice/ui/scroll-area"
@@ -9,12 +10,15 @@ import { useState } from "react"
 import { CodeEditor } from "./code-editor"
 import CopyToClipboard from "./copy-to-clipboard"
 
+const API_BASE_URL = API_DOMAIN.replace(/\/$/, "")
+
 export const codeExamples = {
   sdk: {
     checkAccess: `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 // Check access before the paid action runs.
@@ -36,6 +40,7 @@ if (!result.allowed) {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 // Record usage for asynchronous ingestion.
@@ -57,6 +62,7 @@ if (error) {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 // Consume usage when the request path needs a decision.
@@ -83,12 +89,15 @@ if (!result.allowed) {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
+// Omitting planVersionId uses the latest published version of the default plan.
 const { result, error } = await unprice.customers.signUp({
   name: "Acme Inc.",
   email: "billing@acme.test",
-  planVersionId: "plan_version_1GTzSGrapiBW1QwCL3Fcn",
+  creditLinePolicy: "capped",
+  creditLineAmount: 100,
   successUrl: "http://your-app.com/dashboard",
   cancelUrl: "http://your-app.com/failed",
 })
@@ -107,6 +116,7 @@ redirect(result.url ?? "/")
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 const { result, error } = await unprice.access.entitlements.list({
@@ -122,6 +132,7 @@ if (error) {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 const { result, error } = await unprice.wallet.balance({
@@ -137,6 +148,7 @@ if (error) {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 const { result, error } = await unprice.subscriptions.get({
@@ -154,6 +166,7 @@ console.log(result)
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 const { result, error } = await unprice.analytics.usage.get({
@@ -171,6 +184,7 @@ if (error) {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 const { result, error } = await unprice.paymentMethods.list({
@@ -182,6 +196,7 @@ const { result, error } = await unprice.paymentMethods.list({
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 const { result, error } = await unprice.paymentMethods.create({
@@ -195,6 +210,7 @@ const { result, error } = await unprice.paymentMethods.create({
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 const { result, error } = await unprice.planVersions.list({
@@ -206,6 +222,7 @@ const { result, error } = await unprice.planVersions.list({
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 // Start a budgeted run before the workload creates cost,
@@ -263,6 +280,7 @@ try {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 // Apply usage to a running budgeted run.
@@ -289,6 +307,7 @@ if (!result.accepted) {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 // End a budgeted run and release unused reservation funds.
@@ -306,6 +325,7 @@ if (error) {
 
 const unprice = new Unprice({
   token: process.env.UNPRICE_TOKEN,
+  baseUrl: "${API_BASE_URL}",
 })
 
 // Explain an invoice charge from rated usage and ledger evidence.
@@ -321,7 +341,7 @@ if (error) {
 `,
   },
   fetch: {
-    checkAccess: `const baseUrl = "https://api.unprice.dev"
+    checkAccess: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/access/check", {
@@ -335,7 +355,7 @@ await fetch(baseUrl + "/v1/access/check", {
     featureSlug: "tokens",
   }),
 })`,
-    recordUsage: `const baseUrl = "https://api.unprice.dev"
+    recordUsage: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/usage/record", {
@@ -353,7 +373,7 @@ await fetch(baseUrl + "/v1/usage/record", {
     },
   }),
 })`,
-    consumeUsage: `const baseUrl = "https://api.unprice.dev"
+    consumeUsage: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/usage/consume", {
@@ -372,7 +392,7 @@ await fetch(baseUrl + "/v1/usage/consume", {
     },
   }),
 })`,
-    signUpCustomer: `const baseUrl = "https://api.unprice.dev"
+    signUpCustomer: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/customers/sign-up", {
@@ -381,15 +401,17 @@ await fetch(baseUrl + "/v1/customers/sign-up", {
     Authorization: "Bearer " + token,
     "Content-Type": "application/json",
   },
+  // Omitting planVersionId uses the latest published version of the default plan.
   body: JSON.stringify({
     name: "Acme Inc.",
     email: "billing@acme.test",
-    planVersionId: "plan_version_1GTzSGrapiBW1QwCL3Fcn",
+    creditLinePolicy: "capped",
+    creditLineAmount: 100,
     successUrl: "http://your-app.com/dashboard",
     cancelUrl: "http://your-app.com/failed",
   }),
 })`,
-    listEntitlements: `const baseUrl = "https://api.unprice.dev"
+    listEntitlements: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/access/entitlements/list", {
@@ -402,7 +424,7 @@ await fetch(baseUrl + "/v1/access/entitlements/list", {
     customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   }),
 })`,
-    getWalletBalance: `const baseUrl = "https://api.unprice.dev"
+    getWalletBalance: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/wallet/balance?customerId=cus_1GTzSGrapiBW1QwCL3Fcn", {
@@ -412,7 +434,7 @@ await fetch(baseUrl + "/v1/wallet/balance?customerId=cus_1GTzSGrapiBW1QwCL3Fcn",
     "Content-Type": "application/json",
   },
 })`,
-    getSubscription: `const baseUrl = "https://api.unprice.dev"
+    getSubscription: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/subscriptions/get", {
@@ -425,7 +447,7 @@ await fetch(baseUrl + "/v1/subscriptions/get", {
     customerId: "cus_1GTzSGrapiBW1QwCL3Fcn",
   }),
 })`,
-    getUsage: `const baseUrl = "https://api.unprice.dev"
+    getUsage: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/analytics/usage/get", {
@@ -440,7 +462,7 @@ await fetch(baseUrl + "/v1/analytics/usage/get", {
     range: "30d",
   }),
 })`,
-    getPaymentMethods: `const baseUrl = "https://api.unprice.dev"
+    getPaymentMethods: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/payment-methods/list", {
@@ -454,7 +476,7 @@ await fetch(baseUrl + "/v1/payment-methods/list", {
     provider: "stripe",
   }),
 })`,
-    createPaymentMethod: `const baseUrl = "https://api.unprice.dev"
+    createPaymentMethod: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/payment-methods/create", {
@@ -470,7 +492,7 @@ await fetch(baseUrl + "/v1/payment-methods/create", {
     cancelUrl: "http://your-app.com/failed",
   }),
 })`,
-    listPlanVersions: `const baseUrl = "https://api.unprice.dev"
+    listPlanVersions: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/plan-versions/list", {
@@ -484,7 +506,7 @@ await fetch(baseUrl + "/v1/plan-versions/list", {
     currency: "USD",
   }),
 })`,
-    startBudgetedRun: `const baseUrl = "https://api.unprice.dev"
+    startBudgetedRun: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 const startResponse = await fetch(baseUrl + "/v1/runs/start", {
@@ -550,7 +572,7 @@ try {
     }),
   })
 }`,
-    applyRunUsage: `const baseUrl = "https://api.unprice.dev"
+    applyRunUsage: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/runs/consume/run_1GTzSGrapiBW1QwCL3Fcn", {
@@ -568,7 +590,7 @@ await fetch(baseUrl + "/v1/runs/consume/run_1GTzSGrapiBW1QwCL3Fcn", {
     },
   }),
 })`,
-    endBudgetedRun: `const baseUrl = "https://api.unprice.dev"
+    endBudgetedRun: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/runs/end/run_1GTzSGrapiBW1QwCL3Fcn", {
@@ -581,7 +603,7 @@ await fetch(baseUrl + "/v1/runs/end/run_1GTzSGrapiBW1QwCL3Fcn", {
     status: "completed",
   }),
 })`,
-    explainCharge: `const baseUrl = "https://api.unprice.dev"
+    explainCharge: `const baseUrl = "${API_BASE_URL}"
 const token = process.env.UNPRICE_TOKEN
 
 await fetch(baseUrl + "/v1/analytics/charges/explain", {
@@ -599,7 +621,7 @@ await fetch(baseUrl + "/v1/analytics/charges/explain", {
 }
 
 export type method = keyof typeof codeExamples.sdk
-type Framework = keyof typeof codeExamples
+type Framework = keyof typeof codeExamples | "curl"
 
 export type ListPlanVersionsExampleParams = {
   planVersionIds?: string[]
@@ -610,8 +632,22 @@ export type ListPlanVersionsExampleParams = {
 }
 
 export type SDKExampleParams = {
+  apiToken?: string
+  customerId?: string
   listPlanVersions?: ListPlanVersionsExampleParams
+  usage?: {
+    eventSlug?: string
+    featureSlug?: string
+    aggregationMethod?: "count" | "sum" | "max" | "latest"
+    aggregationField?: string | null
+  }
 }
+
+const DEFAULT_CUSTOMER_ID = "cus_1GTzSGrapiBW1QwCL3Fcn"
+const DEFAULT_USAGE_EVENT_SLUG = "tokens_used"
+const DEFAULT_USAGE_FEATURE_SLUG = "tokens"
+const DEFAULT_USAGE_AGGREGATION_FIELD = "tokens"
+const DEFAULT_FRAMEWORKS = ["sdk", "fetch"] satisfies Framework[]
 
 const methodLabels: Record<method, string> = {
   checkAccess: "Check access",
@@ -631,12 +667,97 @@ const methodLabels: Record<method, string> = {
   explainCharge: "Explain charge",
 }
 
+const frameworkLabels: Record<Framework, string> = {
+  sdk: "SDK TypeScript",
+  fetch: "Fetch API",
+  curl: "cURL",
+}
+
 function stringLiteral(value: string) {
   return JSON.stringify(value)
 }
 
 function stringArrayLiteral(values: string[]) {
   return `[${values.map(stringLiteral).join(", ")}]`
+}
+
+function maskSecret(value: string) {
+  const parts = value.split("_")
+
+  if (parts.length >= 3) {
+    return `${parts[0]}_${parts[1]}_${parts.slice(2).join("_").replace(/./g, "*")}`
+  }
+
+  if (value.length <= 8) {
+    return value.replace(/./g, "*")
+  }
+
+  return `${value.slice(0, 4)}${value.slice(4, -4).replace(/./g, "*")}${value.slice(-4)}`
+}
+
+function getDisplayCode(code: string, params?: SDKExampleParams) {
+  return params?.apiToken ? code.replaceAll(params.apiToken, maskSecret(params.apiToken)) : code
+}
+
+function getCustomerId(params?: SDKExampleParams) {
+  return params?.customerId ?? DEFAULT_CUSTOMER_ID
+}
+
+function getUsageExample(params?: SDKExampleParams) {
+  return {
+    eventSlug: params?.usage?.eventSlug ?? DEFAULT_USAGE_EVENT_SLUG,
+    featureSlug: params?.usage?.featureSlug ?? DEFAULT_USAGE_FEATURE_SLUG,
+    aggregationMethod: params?.usage?.aggregationMethod ?? "sum",
+    aggregationField: params?.usage?.aggregationField ?? DEFAULT_USAGE_AGGREGATION_FIELD,
+  }
+}
+
+function buildUsagePropertiesObject(params?: SDKExampleParams, indent = "  ") {
+  const usage = getUsageExample(params)
+
+  if (usage.aggregationMethod === "count" || !usage.aggregationField) {
+    return "{}"
+  }
+
+  return `{
+${indent}${JSON.stringify(usage.aggregationField)}: 1,
+}`
+}
+
+function buildUsagePropertiesJson(params?: SDKExampleParams, indent = "  ") {
+  const usage = getUsageExample(params)
+
+  if (usage.aggregationMethod === "count" || !usage.aggregationField) {
+    return "{}"
+  }
+
+  return `{
+${indent}${JSON.stringify(usage.aggregationField)}: 1
+}`
+}
+
+function getSdkToken(params?: SDKExampleParams) {
+  return params?.apiToken ? stringLiteral(params.apiToken) : "process.env.UNPRICE_TOKEN"
+}
+
+function buildSdkClientOptions(params?: SDKExampleParams) {
+  return `  token: ${getSdkToken(params)},
+  baseUrl: ${stringLiteral(API_BASE_URL)},`
+}
+
+function getFetchAuthorization(params?: SDKExampleParams) {
+  return params?.apiToken ? stringLiteral(`Bearer ${params.apiToken}`) : '"Bearer " + token'
+}
+
+function buildFetchPreamble(params?: SDKExampleParams) {
+  return params?.apiToken
+    ? `const baseUrl = ${stringLiteral(API_BASE_URL)}`
+    : `const baseUrl = ${stringLiteral(API_BASE_URL)}
+const token = process.env.UNPRICE_TOKEN`
+}
+
+function getCurlToken(params?: SDKExampleParams) {
+  return params?.apiToken ?? "$UNPRICE_TOKEN"
 }
 
 function buildPlanVersionsRequestLines(params: ListPlanVersionsExampleParams, indent = "  ") {
@@ -674,11 +795,173 @@ function buildPlanVersionsContextComment(params: ListPlanVersionsExampleParams) 
   return context.length > 0 ? `\n// Dashboard context: ${context.join("; ")}\n` : "\n"
 }
 
-function buildListPlanVersionsSdkExample(params: ListPlanVersionsExampleParams) {
+function buildPlanVersionsJsonBody(params: ListPlanVersionsExampleParams) {
+  const fields: Array<[string, string]> = []
+
+  if (params.planVersionIds && params.planVersionIds.length > 0) {
+    fields.push(["planVersionIds", stringArrayLiteral(params.planVersionIds)])
+  }
+
+  if (params.billingInterval) {
+    fields.push(["billingInterval", stringLiteral(params.billingInterval)])
+  }
+
+  if (params.currency) {
+    fields.push(["currency", stringLiteral(params.currency)])
+  }
+
+  const defaultBodyFields: Array<[string, string]> = [
+    ["billingInterval", stringLiteral("month")],
+    ["currency", stringLiteral("USD")],
+  ]
+  const bodyFields = fields.length > 0 ? fields : defaultBodyFields
+
+  return `{
+${bodyFields
+  .map(
+    ([key, value], index) =>
+      `  ${stringLiteral(key)}: ${value}${index === bodyFields.length - 1 ? "" : ","}`
+  )
+  .join("\n")}
+}`
+}
+
+function buildCheckAccessSdkExample(params?: SDKExampleParams) {
   return `import { Unprice } from "@unprice/api"
 
 const unprice = new Unprice({
-  token: process.env.UNPRICE_TOKEN,
+${buildSdkClientOptions(params)}
+})
+
+// Check access before the paid action runs.
+const { result, error } = await unprice.access.check({
+  customerId: ${stringLiteral(getCustomerId(params))},
+  featureSlug: "tokens",
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+if (!result.allowed) {
+  throw new Error("Denied before paid usage ran")
+}
+`
+}
+
+function buildCheckAccessFetchExample(params?: SDKExampleParams) {
+  return `${buildFetchPreamble(params)}
+await fetch(baseUrl + "/v1/access/check", {
+  method: "POST",
+  headers: {
+    Authorization: ${getFetchAuthorization(params)},
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    customerId: ${stringLiteral(getCustomerId(params))},
+    featureSlug: "tokens",
+  }),
+})`
+}
+
+function buildRecordUsageSdkExample(params?: SDKExampleParams) {
+  const usage = getUsageExample(params)
+
+  return `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+${buildSdkClientOptions(params)}
+})
+
+// Report usage asynchronously.
+const { result, error } = await unprice.usage.record({
+  idempotencyKey: crypto.randomUUID(),
+  eventSlug: ${stringLiteral(usage.eventSlug)},
+  customerId: ${stringLiteral(getCustomerId(params))},
+  properties: ${buildUsagePropertiesObject(params, "    ")},
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+`
+}
+
+function buildRecordUsageFetchExample(params?: SDKExampleParams) {
+  const usage = getUsageExample(params)
+
+  return `${buildFetchPreamble(params)}
+await fetch(baseUrl + "/v1/usage/record", {
+  method: "POST",
+  headers: {
+    Authorization: ${getFetchAuthorization(params)},
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    idempotencyKey: crypto.randomUUID(),
+    eventSlug: ${stringLiteral(usage.eventSlug)},
+    customerId: ${stringLiteral(getCustomerId(params))},
+    properties: ${buildUsagePropertiesObject(params, "      ")},
+  }),
+})`
+}
+
+function buildConsumeUsageSdkExample(params?: SDKExampleParams) {
+  const usage = getUsageExample(params)
+
+  return `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+${buildSdkClientOptions(params)}
+})
+
+// Report usage synchronously when the request path needs a decision.
+const { result, error } = await unprice.usage.consume({
+  idempotencyKey: crypto.randomUUID(),
+  eventSlug: ${stringLiteral(usage.eventSlug)},
+  customerId: ${stringLiteral(getCustomerId(params))},
+  featureSlug: ${stringLiteral(usage.featureSlug)},
+  properties: ${buildUsagePropertiesObject(params, "    ")},
+})
+
+if (error) {
+  console.error(error.message)
+  return
+}
+
+if (!result.allowed) {
+  throw new Error(result.message ?? "Usage denied")
+}
+`
+}
+
+function buildConsumeUsageFetchExample(params?: SDKExampleParams) {
+  const usage = getUsageExample(params)
+
+  return `${buildFetchPreamble(params)}
+await fetch(baseUrl + "/v1/usage/consume", {
+  method: "POST",
+  headers: {
+    Authorization: ${getFetchAuthorization(params)},
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    idempotencyKey: crypto.randomUUID(),
+    eventSlug: ${stringLiteral(usage.eventSlug)},
+    customerId: ${stringLiteral(getCustomerId(params))},
+    featureSlug: ${stringLiteral(usage.featureSlug)},
+    properties: ${buildUsagePropertiesObject(params, "      ")},
+  }),
+})`
+}
+
+function buildListPlanVersionsSdkExample(params: ListPlanVersionsExampleParams, apiToken?: string) {
+  return `import { Unprice } from "@unprice/api"
+
+const unprice = new Unprice({
+${buildSdkClientOptions({ apiToken })}
 })
 
 const { result, error } = await unprice.planVersions.list({
@@ -695,14 +978,15 @@ const featureSlugs =
 `
 }
 
-function buildListPlanVersionsFetchExample(params: ListPlanVersionsExampleParams) {
-  return `const baseUrl = "https://api.unprice.dev"
-const token = process.env.UNPRICE_TOKEN
-
+function buildListPlanVersionsFetchExample(
+  params: ListPlanVersionsExampleParams,
+  apiToken?: string
+) {
+  return `${buildFetchPreamble({ apiToken })}
 const response = await fetch(baseUrl + "/v1/plan-versions/list", {
   method: "POST",
   headers: {
-    Authorization: "Bearer " + token,
+    Authorization: ${getFetchAuthorization({ apiToken })},
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
@@ -721,40 +1005,297 @@ const featureSlugs =
 `
 }
 
-function getCodeExample(framework: Framework, currentMethod: method, params?: SDKExampleParams) {
-  if (currentMethod === "listPlanVersions" && params?.listPlanVersions) {
-    return framework === "sdk"
-      ? buildListPlanVersionsSdkExample(params.listPlanVersions)
-      : buildListPlanVersionsFetchExample(params.listPlanVersions)
+function buildCurlPostCommand(path: string, body: string, params?: SDKExampleParams) {
+  return `curl -sS "${API_BASE_URL}${path}" \\
+  -H "Authorization: Bearer ${getCurlToken(params)}" \\
+  -H "Content-Type: application/json" \\
+  -d '${body}'
+`
+}
+
+function buildCurlGetCommand(path: string, params?: SDKExampleParams) {
+  return `curl -sS "${API_BASE_URL}${path}" \\
+  -H "Authorization: Bearer ${getCurlToken(params)}"
+`
+}
+
+function buildCheckAccessCurlExample(params?: SDKExampleParams) {
+  return buildCurlPostCommand(
+    "/v1/access/check",
+    `{
+  "customerId": ${stringLiteral(getCustomerId(params))},
+  "featureSlug": "tokens"
+}`,
+    params
+  )
+}
+
+function buildListPlanVersionsCurlExample(
+  listParams: ListPlanVersionsExampleParams,
+  params?: SDKExampleParams
+) {
+  return buildCurlPostCommand(
+    "/v1/plan-versions/list",
+    buildPlanVersionsJsonBody(listParams),
+    params
+  )
+}
+
+function buildCurlExample(currentMethod: method, params?: SDKExampleParams) {
+  switch (currentMethod) {
+    case "checkAccess":
+      return buildCheckAccessCurlExample(params)
+    case "recordUsage":
+      if (params?.customerId || params?.usage || params?.apiToken) {
+        const usage = getUsageExample(params)
+
+        return buildCurlPostCommand(
+          "/v1/usage/record",
+          `{
+  "idempotencyKey": "usage-example-1",
+  "eventSlug": ${stringLiteral(usage.eventSlug)},
+  "customerId": ${stringLiteral(getCustomerId(params))},
+  "properties": ${buildUsagePropertiesJson(params, "    ")}
+}`,
+          params
+        )
+      }
+      return buildCurlPostCommand(
+        "/v1/usage/record",
+        `{
+  "idempotencyKey": "usage-example-1",
+  "eventSlug": "tokens_used",
+  "customerId": ${stringLiteral(getCustomerId(params))},
+  "properties": {
+    "tokens": 3842
+  }
+}`,
+        params
+      )
+    case "consumeUsage":
+      if (params?.customerId || params?.usage || params?.apiToken) {
+        const usage = getUsageExample(params)
+
+        return buildCurlPostCommand(
+          "/v1/usage/consume",
+          `{
+  "idempotencyKey": "usage-example-1",
+  "eventSlug": ${stringLiteral(usage.eventSlug)},
+  "customerId": ${stringLiteral(getCustomerId(params))},
+  "featureSlug": ${stringLiteral(usage.featureSlug)},
+  "properties": ${buildUsagePropertiesJson(params, "    ")}
+}`,
+          params
+        )
+      }
+      return buildCurlPostCommand(
+        "/v1/usage/consume",
+        `{
+  "idempotencyKey": "usage-example-1",
+  "eventSlug": "tokens_used",
+  "customerId": ${stringLiteral(getCustomerId(params))},
+  "featureSlug": "tokens",
+  "properties": {
+    "tokens": 3842
+  }
+}`,
+        params
+      )
+    case "signUpCustomer":
+      return buildCurlPostCommand(
+        "/v1/customers/sign-up",
+        `{
+  "name": "Acme Inc.",
+  "email": "billing@acme.test",
+  "creditLinePolicy": "capped",
+  "creditLineAmount": 100,
+  "successUrl": "http://your-app.com/dashboard",
+  "cancelUrl": "http://your-app.com/failed"
+}`,
+        params
+      )
+    case "listEntitlements":
+      return buildCurlPostCommand(
+        "/v1/access/entitlements/list",
+        `{
+  "customerId": ${stringLiteral(getCustomerId(params))}
+}`,
+        params
+      )
+    case "getWalletBalance":
+      return buildCurlGetCommand(`/v1/wallet/balance?customerId=${getCustomerId(params)}`, params)
+    case "getSubscription":
+      return buildCurlPostCommand(
+        "/v1/subscriptions/get",
+        `{
+  "customerId": ${stringLiteral(getCustomerId(params))}
+}`,
+        params
+      )
+    case "getUsage":
+      return buildCurlPostCommand(
+        "/v1/analytics/usage/get",
+        `{
+  "project_id": "project_1GTzSGrapiBW1QwCL3Fcn",
+  "customer_id": ${stringLiteral(getCustomerId(params))},
+  "range": "30d"
+}`,
+        params
+      )
+    case "getPaymentMethods":
+      return buildCurlPostCommand(
+        "/v1/payment-methods/list",
+        `{
+  "customerId": ${stringLiteral(getCustomerId(params))},
+  "provider": "stripe"
+}`,
+        params
+      )
+    case "createPaymentMethod":
+      return buildCurlPostCommand(
+        "/v1/payment-methods/create",
+        `{
+  "paymentProvider": "stripe",
+  "customerId": ${stringLiteral(getCustomerId(params))},
+  "successUrl": "http://your-app.com/dashboard",
+  "cancelUrl": "http://your-app.com/failed"
+}`,
+        params
+      )
+    case "listPlanVersions":
+      return buildListPlanVersionsCurlExample(params?.listPlanVersions ?? {}, params)
+    case "startBudgetedRun":
+      return buildCurlPostCommand(
+        "/v1/runs/start",
+        `{
+  "customerId": ${stringLiteral(getCustomerId(params))},
+  "budgetAmount": 5000,
+  "idempotencyKey": "run-example-1",
+  "workloadType": "workflow",
+  "workloadId": "daily-report"
+}`,
+        params
+      )
+    case "applyRunUsage":
+      return buildCurlPostCommand(
+        "/v1/runs/consume/run_1GTzSGrapiBW1QwCL3Fcn",
+        `{
+  "featureSlug": "tokens",
+  "eventSlug": "tokens_used",
+  "idempotencyKey": "run-usage-example-1",
+  "properties": {
+    "tokens": 3842
+  }
+}`,
+        params
+      )
+    case "endBudgetedRun":
+      return buildCurlPostCommand(
+        "/v1/runs/end/run_1GTzSGrapiBW1QwCL3Fcn",
+        `{
+  "status": "completed"
+}`,
+        params
+      )
+    case "explainCharge":
+      return buildCurlPostCommand(
+        "/v1/analytics/charges/explain",
+        `{
+  "invoice_id": "inv_1GTzSGrapiBW1QwCL3Fcn",
+  "entry_id": "entry_1GTzSGrapiBW1QwCL3Fcn"
+}`,
+        params
+      )
+  }
+}
+
+function applyExampleParams(code: string, params?: SDKExampleParams) {
+  let nextCode = code
+
+  if (params?.customerId) {
+    nextCode = nextCode.replaceAll(DEFAULT_CUSTOMER_ID, params.customerId)
   }
 
-  return codeExamples[framework][currentMethod] ?? codeExamples.sdk.checkAccess
+  if (params?.apiToken) {
+    nextCode = nextCode
+      .replaceAll('"Bearer " + token', stringLiteral(`Bearer ${params.apiToken}`))
+      .replaceAll("const token = process.env.UNPRICE_TOKEN\n\n", "")
+      .replaceAll("process.env.UNPRICE_TOKEN", stringLiteral(params.apiToken))
+  }
+
+  return nextCode
+}
+
+function getCodeExample(framework: Framework, currentMethod: method, params?: SDKExampleParams) {
+  if (framework === "curl") {
+    return buildCurlExample(currentMethod, params)
+  }
+
+  if (currentMethod === "checkAccess" && (params?.apiToken || params?.customerId)) {
+    return framework === "sdk"
+      ? buildCheckAccessSdkExample(params)
+      : buildCheckAccessFetchExample(params)
+  }
+
+  if (
+    currentMethod === "recordUsage" &&
+    (params?.apiToken || params?.customerId || params?.usage)
+  ) {
+    return framework === "sdk"
+      ? buildRecordUsageSdkExample(params)
+      : buildRecordUsageFetchExample(params)
+  }
+
+  if (
+    currentMethod === "consumeUsage" &&
+    (params?.apiToken || params?.customerId || params?.usage)
+  ) {
+    return framework === "sdk"
+      ? buildConsumeUsageSdkExample(params)
+      : buildConsumeUsageFetchExample(params)
+  }
+
+  if (currentMethod === "listPlanVersions" && params?.listPlanVersions) {
+    return framework === "sdk"
+      ? buildListPlanVersionsSdkExample(params.listPlanVersions, params.apiToken)
+      : buildListPlanVersionsFetchExample(params.listPlanVersions, params.apiToken)
+  }
+
+  return applyExampleParams(
+    codeExamples[framework][currentMethod] ?? codeExamples.sdk.checkAccess,
+    params
+  )
 }
 
 export function SDKDemo({
   className,
   defaultMethod,
   exampleParams,
+  frameworks = DEFAULT_FRAMEWORKS,
   showBorderBeam = true,
   presentation = "marketing",
 }: {
   className?: string
   defaultMethod?: method
   exampleParams?: SDKExampleParams
+  frameworks?: Framework[]
   showBorderBeam?: boolean
   presentation?: "marketing" | "panel"
 }) {
-  const [activeFramework, setActiveFramework] = useState<Framework>("sdk")
+  const [activeFramework, setActiveFramework] = useState<Framework>(frameworks[0] ?? "sdk")
   const [activeMethod, setActiveMethod] = useState<method>(defaultMethod ?? "checkAccess")
   const isPanel = presentation === "panel"
 
-  let methods = Object.keys(codeExamples[activeFramework]) as method[]
+  let methods = Object.keys(codeExamples.sdk) as method[]
 
   if (defaultMethod) {
     methods = [defaultMethod]
   }
 
   const code = getCodeExample(activeFramework, activeMethod, exampleParams)
+  const displayCode = getDisplayCode(code, exampleParams)
+  const language = activeFramework === "curl" ? "bash" : "typescript"
+  const curlTokenClassName = activeFramework === "curl" ? "!text-success" : undefined
 
   return (
     <div
@@ -779,18 +1320,17 @@ export function SDKDemo({
           )}
         >
           <TabsList variant="line" className={cn(isPanel && "h-full border-b-0")}>
-            <TabsTrigger
-              value="sdk"
-              className={cn(isPanel ? "flex h-full items-center px-2.5 pt-0 pb-0 text-xs" : "px-5")}
-            >
-              SDK TypeScript
-            </TabsTrigger>
-            <TabsTrigger
-              value="fetch"
-              className={cn(isPanel ? "flex h-full items-center px-2.5 pt-0 pb-0 text-xs" : "px-5")}
-            >
-              Fetch API
-            </TabsTrigger>
+            {frameworks.map((framework) => (
+              <TabsTrigger
+                key={framework}
+                value={framework}
+                className={cn(
+                  isPanel ? "flex h-full items-center px-2.5 pt-0 pb-0 text-xs" : "px-5"
+                )}
+              >
+                {frameworkLabels[framework]}
+              </TabsTrigger>
+            ))}
           </TabsList>
           {isPanel && (
             <CopyToClipboard
@@ -864,10 +1404,12 @@ export function SDKDemo({
                 )}
               >
                 <CodeEditor
-                  codeBlock={code}
-                  language={"typescript"}
+                  codeBlock={displayCode}
+                  language={language}
                   className={cn(isPanel && "px-3 py-4 text-[13px] leading-6")}
+                  codeClassName={cn(activeFramework === "curl" && "text-success")}
                   lineNumberClassName={cn(isPanel && "w-8 pr-3 text-background-text/25")}
+                  tokenClassName={curlTokenClassName}
                 />
               </ScrollArea>
             </div>

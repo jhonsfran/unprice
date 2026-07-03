@@ -15,6 +15,7 @@ import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { IntervalFilter } from "~/components/analytics/interval-filter"
 import { CodeApiSheet } from "~/components/code-api-sheet"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
+import type { SDKExampleParams } from "~/components/landing/sdk-examples"
 import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { ProgressBar } from "./progress"
@@ -63,6 +64,7 @@ export function UsageDashboardView({
   isFetching,
   invoiceCount,
   customerHref,
+  usageExampleParams,
   showCustomerSummary = mode === "customer",
   showHeaderControls = true,
 }: {
@@ -73,6 +75,7 @@ export function UsageDashboardView({
   isFetching: boolean
   invoiceCount?: number
   customerHref?: (customerId: string) => string
+  usageExampleParams?: SDKExampleParams
   showCustomerSummary?: boolean
   showHeaderControls?: boolean
 }) {
@@ -92,6 +95,7 @@ export function UsageDashboardView({
       <UsageDashboardEmptyState
         intervalLabel={intervalLabel}
         mode={mode}
+        usageExampleParams={usageExampleParams}
         generatedAt={data.freshness.generatedAt}
         isFetching={isFetching}
         showHeaderControls={showHeaderControls}
@@ -381,12 +385,14 @@ function UsageDashboardErrorState({ error }: { error: string }) {
 function UsageDashboardEmptyState({
   intervalLabel,
   mode,
+  usageExampleParams,
   generatedAt,
   isFetching,
   showHeaderControls,
 }: {
   intervalLabel: string
   mode: "project" | "customer"
+  usageExampleParams?: SDKExampleParams
   generatedAt: number
   isFetching: boolean
   showHeaderControls: boolean
@@ -411,17 +417,31 @@ function UsageDashboardEmptyState({
               Usage evidence appears after your app records usage events for metered features.
             </EmptyPlaceholder.Description>
             <EmptyPlaceholder.Action>
-              <CodeApiSheet defaultMethod="recordUsage">
-                <Button size="sm">
-                  <Code className="mr-2 size-4" />
-                  Record usage
-                </Button>
-              </CodeApiSheet>
+              <UsageExampleActions exampleParams={usageExampleParams} />
             </EmptyPlaceholder.Action>
           </EmptyPlaceholder>
         </CardContent>
       </Card>
     </section>
+  )
+}
+
+function UsageExampleActions({ exampleParams }: { exampleParams?: SDKExampleParams }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
+      <CodeApiSheet defaultMethod="consumeUsage" exampleParams={exampleParams}>
+        <Button size="sm" variant="primary">
+          <Code className="mr-2 size-4" />
+          Report usage synchronously
+        </Button>
+      </CodeApiSheet>
+      <CodeApiSheet defaultMethod="recordUsage" exampleParams={exampleParams}>
+        <Button size="sm" variant="default">
+          <Code className="mr-2 size-4" />
+          Report asynchronously
+        </Button>
+      </CodeApiSheet>
+    </div>
   )
 }
 

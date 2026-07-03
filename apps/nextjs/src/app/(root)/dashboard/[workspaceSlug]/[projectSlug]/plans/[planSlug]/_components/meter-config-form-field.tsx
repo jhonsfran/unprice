@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { type FormEvent, useEffect, useMemo, useState } from "react"
 import type { UseFormReturn } from "react-hook-form"
 import { useFieldArray } from "react-hook-form"
 import { z } from "zod"
@@ -188,6 +188,11 @@ function EventFormDialog({
     onOpenChange(false)
   }
 
+  const handleFormSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.stopPropagation()
+    void form.handleSubmit(onSubmit)(event)
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[620px]">
@@ -202,7 +207,7 @@ function EventFormDialog({
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+          <form onSubmit={handleFormSubmit} className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 control={form.control}

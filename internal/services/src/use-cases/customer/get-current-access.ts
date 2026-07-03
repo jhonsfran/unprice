@@ -1,6 +1,12 @@
 import type { FeatureUsagePeriodRow } from "@unprice/analytics"
 import type { Database } from "@unprice/db"
-import { type BillingConfig, type ResetConfig, billingConfigSchema } from "@unprice/db/validators"
+import {
+  type BillingConfig,
+  type ResetConfig,
+  aggregationMethodSchema,
+  billingConfigSchema,
+  meterConfigSchema,
+} from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
@@ -43,6 +49,13 @@ export const customerCurrentAccessEntitlementSchema = z.object({
   featureSlug: z.string(),
   featureTitle: z.string(),
   featureType: entitlementFeatureTypeSchema,
+  meterConfig: z
+    .object({
+      eventSlug: z.string(),
+      aggregationMethod: aggregationMethodSchema,
+      aggregationField: z.string().nullable(),
+    })
+    .nullable(),
   unitOfMeasure: z.string(),
   limit: z.number().int().nullable(),
   currentUsage: z.number().nullable(),
@@ -296,6 +309,7 @@ export async function getCustomerCurrentAccess(
               featureSlug: feature.slug,
               featureTitle: feature.title,
               featureType: featurePlanVersion.featureType,
+              meterConfig: toPublicMeterConfig(featurePlanVersion.meterConfig),
               unitOfMeasure: featurePlanVersion.unitOfMeasure,
               limit,
               currentUsage,
@@ -428,6 +442,20 @@ async function loadUsageByFeaturePeriodKey({
   }
 
   return { usageByFeaturePeriodKey, error: null }
+}
+
+function toPublicMeterConfig(meterConfig: unknown) {
+  const parsed = meterConfigSchema.safeParse(meterConfig)
+
+  if (!parsed.success) {
+    return null
+  }
+
+  return {
+    eventSlug: parsed.data.eventSlug,
+    aggregationMethod: parsed.data.aggregationMethod,
+    aggregationField: parsed.data.aggregationField ?? null,
+  }
 }
 
 function sumGrantAllowance(grants: Array<{ allowanceUnits: number | null }>): number | null {

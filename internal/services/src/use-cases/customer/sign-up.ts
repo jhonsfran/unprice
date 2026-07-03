@@ -5,7 +5,7 @@ import { newId } from "@unprice/db/utils"
 import type { CustomerSignUp, Plan, PlanVersion, Project } from "@unprice/db/validators"
 import { Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { fromCurrencyMinor, toLedgerMinor } from "@unprice/money"
+import { fromLedgerAmount, toLedgerMinor } from "@unprice/money"
 import type { ServiceContext } from "../../context"
 import { UnPriceCustomerError } from "../../customers/errors"
 import { getPaymentProviderCapabilities } from "../../payment-provider/service"
@@ -51,7 +51,7 @@ function normalizePhaseCreditLine(
   const creditLineAmount =
     input.creditLineAmount === null || input.creditLineAmount === undefined
       ? null
-      : toLedgerMinor(fromCurrencyMinor(input.creditLineAmount, currency))
+      : toLedgerMinor(fromLedgerAmount(String(input.creditLineAmount), currency))
 
   return {
     creditLinePolicy,

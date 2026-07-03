@@ -59,7 +59,7 @@ export default async function CustomerRunsPage(props: {
             title: "No budgeted runs",
             description: "Runs appear after your app starts a budgeted workload for this customer.",
             action: (
-              <CodeApiSheet defaultMethod="startBudgetedRun">
+              <CodeApiSheet defaultMethod="startBudgetedRun" exampleParams={{ customerId }}>
                 <Button size="sm">
                   <Code className="mr-2 size-4" />
                   Start budgeted run

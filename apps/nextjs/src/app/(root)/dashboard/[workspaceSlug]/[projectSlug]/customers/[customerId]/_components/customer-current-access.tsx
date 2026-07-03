@@ -60,7 +60,7 @@ export function CustomerCurrentAccess({
         <div className="flex max-h-[520px] min-h-[360px] flex-col overflow-hidden rounded-md border border-border/60">
           <div className="flex items-center justify-between gap-3 border-border/60 border-b bg-card/70 px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
-              <CalendarRange className="size-4 text-muted-foreground" />
+              <CalendarRange className="mr-2 size-6 text-muted-foreground" />
               <div className="min-w-0">
                 <p className="font-medium text-sm">Billing period</p>
                 <p className="truncate text-muted-foreground text-xs">
@@ -151,7 +151,7 @@ export function CustomerCurrentAccess({
         <div className="overflow-hidden rounded-md border border-border/60">
           <div className="flex items-center justify-between gap-3 border-border/60 border-b bg-card/70 px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
-              <KeyRound className="size-4 text-muted-foreground" />
+              <KeyRound className="mr-2 size-6 text-muted-foreground" />
               <div className="min-w-0">
                 <p className="font-medium text-sm">Active entitlements</p>
                 <p className="truncate text-muted-foreground text-xs">

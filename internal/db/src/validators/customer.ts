@@ -66,10 +66,9 @@ export const customerSignUpSchema = z
         "The billing interval of the customer to be used for the subscription. If plan version is provided, the billing interval will be the same as the plan version. If plan slug is provided, the billing interval will be the default billing interval of the plan.",
       example: "month",
     }),
-    // either plan slug or plan version id is required
     planSlug: z.string().optional().openapi({
       description:
-        "If the plan id is not provided, you can pass a plan slug and the system will intelligently pick the lastest plan for that slug and sign up the customer for it",
+        "If provided, the system will intelligently pick the latest plan version for that slug and sign up the customer for it. If omitted with planVersionId, the default plan is used.",
       example: "PRO",
     }),
     sessionId: z.string().optional().openapi({
@@ -98,10 +97,10 @@ export const customerSignUpSchema = z
         "Usage credit policy for the initial subscription phase. Uncapped allows postpaid usage without wallet reservation; capped uses a finite credit amount or derives one from finite usage limits.",
       example: "uncapped",
     }),
-    creditLineAmount: z.coerce.number().int().min(0).safe().nullable().optional().openapi({
+    creditLineAmount: z.coerce.number().min(0).safe().nullable().optional().openapi({
       description:
-        "Optional capped usage credit amount in the currency's smallest unit (for example, cents for USD/EUR). Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.",
-      example: 10_000,
+        "Optional capped usage credit amount in normal currency units (for example, 100 means $100 or €100). Leave null or omit to derive from finite usage limits when creditLinePolicy is capped.",
+      example: 100,
     }),
     externalId: z.string().optional().openapi({
       description:
@@ -129,12 +128,6 @@ export const customerSignUpSchema = z
     }),
   })
   .superRefine((data, ctx) => {
-    if (!data.planSlug && !data.planVersionId)
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Either planSlug or planVersionId is required",
-        path: ["planSlug", "planVersionId"],
-      })
     if (data.planSlug && data.planVersionId)
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -213,7 +206,7 @@ export const customerSessionPlanVersionSchema = z.object({
   projectId: z.string().min(1, "Project id is required"),
   config: subscriptionItemsConfigSchema.optional(),
   creditLinePolicy: creditLinePolicySchema.default("uncapped"),
-  creditLineAmount: z.number().int().min(0).nullable().optional(),
+  creditLineAmount: z.number().min(0).nullable().optional(),
   paymentMethodRequired: z.boolean(),
 })
 

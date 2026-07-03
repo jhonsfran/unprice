@@ -4,6 +4,7 @@ import { create } from "./create"
 import { listByActiveProject } from "./listByActiveProject"
 import { revoke } from "./revoke"
 import { roll } from "./roll"
+import { rollDefaultSdkExample } from "./rollDefaultSdkExample"
 import { unbindCustomer } from "./unbindCustomer"
 
 export const apiKeyRouter = createTRPCRouter({
@@ -11,6 +12,7 @@ export const apiKeyRouter = createTRPCRouter({
   create: create,
   revoke: revoke,
   roll: roll,
+  rollDefaultSdkExample: rollDefaultSdkExample,
   bindCustomer: bindCustomer,
   unbindCustomer: unbindCustomer,
 })

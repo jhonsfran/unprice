@@ -122,7 +122,14 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
         onSubmit={form.handleSubmit(async (data: CreateApiKey) => await create.mutateAsync(data))}
         className="space-y-6"
       >
-        {key && <ApiKeyCreatedSecret apiKey={key} show={show} onShowChange={setShow} />}
+        {key && (
+          <ApiKeyCreatedSecret
+            apiKey={key}
+            customerId={defaultCustomerId ?? undefined}
+            show={show}
+            onShowChange={setShow}
+          />
+        )}
         {!key && (
           <CreateApiKeyFields
             form={form}
@@ -153,10 +160,12 @@ export default function CreateApiKeyForm(props: CreateApiKeyFormProps) {
 
 function ApiKeyCreatedSecret({
   apiKey,
+  customerId,
   show,
   onShowChange,
 }: {
   apiKey: string
+  customerId?: string
   show: boolean
   onShowChange: (show: boolean) => void
 }) {
@@ -205,7 +214,13 @@ function ApiKeyCreatedSecret({
             Use this key from your server to check access, record usage, or start a budgeted run.
           </p>
         </div>
-        <CodeApiSheet defaultMethod="checkAccess">
+        <CodeApiSheet
+          defaultMethod="checkAccess"
+          exampleParams={{
+            apiToken: apiKey,
+            customerId,
+          }}
+        >
           <Button type="button" variant="outline" size="sm" className="shrink-0">
             <Code className="mr-2 size-4" />
             Open SDK example

@@ -65,7 +65,7 @@ export default async function CustomerWalletPage({
               description:
                 "Wallet credits appear after this customer receives purchased or granted funds.",
               action: (
-                <CodeApiSheet defaultMethod="getWalletBalance">
+                <CodeApiSheet defaultMethod="getWalletBalance" exampleParams={{ customerId }}>
                   <Button size="sm" variant="outline">
                     <Code className="mr-2 size-4" />
                     Check wallet balance

@@ -11,12 +11,14 @@ export function CodeEditor({
   className,
   lineNumberClassName,
   codeClassName,
+  tokenClassName,
 }: {
   codeBlock: string
   language: string
   className?: string
   lineNumberClassName?: string
   codeClassName?: string
+  tokenClassName?: string
 }) {
   const { theme } = useTheme()
   const isMounted = useMounted()
@@ -57,7 +59,13 @@ export function CodeEditor({
                         token,
                         key: j,
                       })
-                      return <span key={j.toString()} {...tokenProps} />
+                      return (
+                        <span
+                          key={j.toString()}
+                          {...tokenProps}
+                          className={cn(tokenProps.className, tokenClassName)}
+                        />
+                      )
                     })}
                   </span>
                 </div>

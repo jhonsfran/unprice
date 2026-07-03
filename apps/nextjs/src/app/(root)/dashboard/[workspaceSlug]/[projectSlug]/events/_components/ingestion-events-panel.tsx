@@ -112,16 +112,16 @@ export function IngestionEventsPanel() {
             {!queryError && (
               <EmptyPlaceholder.Action>
                 <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
-                  <CodeApiSheet defaultMethod="recordUsage">
-                    <Button size="sm">
+                  <CodeApiSheet defaultMethod="consumeUsage">
+                    <Button size="sm" variant="primary">
                       <Code className="mr-2 size-4" />
-                      Record usage
+                      Report usage synchronously
                     </Button>
                   </CodeApiSheet>
-                  <CodeApiSheet defaultMethod="consumeUsage">
-                    <Button size="sm" variant="outline">
+                  <CodeApiSheet defaultMethod="recordUsage">
+                    <Button size="sm" variant="default">
                       <Code className="mr-2 size-4" />
-                      Consume usage
+                      Report asynchronously
                     </Button>
                   </CodeApiSheet>
                 </div>

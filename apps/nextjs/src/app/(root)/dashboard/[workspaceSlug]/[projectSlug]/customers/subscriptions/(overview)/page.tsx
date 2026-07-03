@@ -106,6 +106,14 @@ export default async function PlanSubscriptionsPage({
               title: "No subscriptions",
               description:
                 "Subscriptions appear after customers are assigned to published plan versions.",
+              action: (
+                <CodeApiSheet defaultMethod="signUpCustomer">
+                  <Button size="sm" variant="outline">
+                    <Code className="mr-2 size-4" />
+                    Create via API
+                  </Button>
+                </CodeApiSheet>
+              ),
             }}
             hidePaginationWhenEmpty
             filterOptions={{

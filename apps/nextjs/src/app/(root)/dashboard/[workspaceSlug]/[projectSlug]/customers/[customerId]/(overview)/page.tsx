@@ -53,8 +53,8 @@ export default async function CustomerUsagePage({
   ])
 
   return (
-    <div className="flex flex-col gap-6">
-      <HydrateClient>
+    <HydrateClient>
+      <div className="flex flex-col gap-6 space-y-6">
         <Suspense fallback={<CustomerEvidenceSummarySkeleton />}>
           <CustomerEvidenceSummary
             customerId={customerId}
@@ -70,9 +70,9 @@ export default async function CustomerUsagePage({
           subscriptionsHref={`${baseUrl}/subscriptions`}
         />
         <Suspense fallback={<CustomerMetricsPanelSkeleton />}>
-          <CustomerMetricsPanel customerId={customerId} />
+          <CustomerMetricsPanel customerId={customerId} currentAccess={currentAccess} />
         </Suspense>
-      </HydrateClient>
-    </div>
+      </div>
+    </HydrateClient>
   )
 }

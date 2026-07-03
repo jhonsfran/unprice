@@ -45,12 +45,20 @@ export const UsageChartSkeleton = ({
         </EmptyPlaceholder.Description>
         {!error && (
           <EmptyPlaceholder.Action>
-            <CodeApiSheet defaultMethod="recordUsage">
-              <Button size={"sm"} disabled={isLoading}>
-                <Code className="mr-2 h-4 w-4" />
-                Record usage
-              </Button>
-            </CodeApiSheet>
+            <div className="flex flex-col items-center justify-center gap-2 sm:flex-row">
+              <CodeApiSheet defaultMethod="consumeUsage">
+                <Button size="sm" variant="primary" disabled={isLoading}>
+                  <Code className="mr-2 h-4 w-4" />
+                  Report usage synchronously
+                </Button>
+              </CodeApiSheet>
+              <CodeApiSheet defaultMethod="recordUsage">
+                <Button size="sm" variant="default" disabled={isLoading}>
+                  <Code className="mr-2 h-4 w-4" />
+                  Report asynchronously
+                </Button>
+              </CodeApiSheet>
+            </div>
           </EmptyPlaceholder.Action>
         )}
       </EmptyPlaceholder>

@@ -12,6 +12,7 @@ import {
   UsageDashboardSkeleton,
   UsageDashboardView,
 } from "~/components/analytics/usage-dashboard-view"
+import type { SDKExampleParams } from "~/components/landing/sdk-examples"
 import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
 import { useIntervalFilter } from "~/hooks/use-filter"
@@ -21,6 +22,7 @@ import { ANALYTICS_CONFIG_REALTIME } from "~/trpc/shared"
 
 type CustomerMetricsPanelProps = {
   customerId: string
+  currentAccess: RouterOutputs["customers"]["getCurrentAccess"]
 }
 type EconomicSummary = RouterOutputs["customers"]["getEconomicSummary"]
 type UsageDashboardData = RouterOutputs["analytics"]["getUsageDashboard"]
@@ -71,13 +73,13 @@ export function CustomerEvidenceSummary({
   )
 
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-6">
       <SectionIntro
         title="Customer evidence"
         description={`Usage and ledger follow ${intervalFilter.label}; runs and invoices are current totals.`}
         className="px-0 py-0"
         actions={
-          <div className="flex flex-col items-start gap-3 md:items-end">
+          <div className="flex flex-col items-start gap-8 md:items-end">
             <IntervalFilter />
             <FreshnessIndicator
               generatedAt={data.freshness.generatedAt}
@@ -124,7 +126,7 @@ export function CustomerEvidenceSummary({
   )
 }
 
-export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) {
+export function CustomerMetricsPanel({ customerId, currentAccess }: CustomerMetricsPanelProps) {
   const [intervalFilter] = useIntervalFilter()
   const trpc = useTRPC()
   const queryInput = {
@@ -162,6 +164,7 @@ export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) 
       dateFormat={intervalFilter.dateFormat}
       mode="customer"
       isFetching={isFetching}
+      usageExampleParams={buildCustomerUsageExampleParams(customerId, currentAccess)}
       showCustomerSummary={false}
       showHeaderControls={false}
     />
@@ -169,6 +172,27 @@ export function CustomerMetricsPanel({ customerId }: CustomerMetricsPanelProps) 
 }
 
 const CUSTOMER_EVIDENCE_SKELETONS = ["usage", "ledger", "runs", "invoices"]
+
+function buildCustomerUsageExampleParams(
+  customerId: string,
+  currentAccess: RouterOutputs["customers"]["getCurrentAccess"]
+): SDKExampleParams {
+  const usageEntitlement = currentAccess.entitlements.find((entitlement) => entitlement.meterConfig)
+
+  if (!usageEntitlement?.meterConfig) {
+    return { customerId }
+  }
+
+  return {
+    customerId,
+    usage: {
+      featureSlug: usageEntitlement.featureSlug,
+      eventSlug: usageEntitlement.meterConfig.eventSlug,
+      aggregationMethod: usageEntitlement.meterConfig.aggregationMethod,
+      aggregationField: usageEntitlement.meterConfig.aggregationField,
+    },
+  }
+}
 
 function formatSpendingSummary(summary: UsageDashboardData["summary"]["spending"]): string {
   if (summary.length === 0) {

@@ -170,6 +170,12 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-07-03: Customer current-access usage is a feature entitlement-period view, not the
+  last-30-days evidence view; it is loaded with the server page while analytics widgets refetch
+  client-side, so recently reported usage can appear in evidence before current-access rows update.
+- 2026-07-03: Dialog forms rendered from inside another React form can still bubble submit events
+  through the React tree even when Radix portals the dialog content; stop propagation on the dialog
+  form submit when the inner action must not save the parent form.
 - 2026-06-30: Customer current-access entitlement usage should query Tinybird with computed grant
   `period_key` values; exact subscription `start/end` windows can drop hourly rollup buckets and
   hide fresh usage for short entitlement periods.

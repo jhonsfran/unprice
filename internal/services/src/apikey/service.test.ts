@@ -1,10 +1,10 @@
 import type { Database } from "@unprice/db"
 import { Err, FetchError, Ok } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Cache } from "../cache"
 import type { Metrics } from "../metrics"
-import { ApiKeysService } from "./service"
+import { ApiKeysService, SDK_EXAMPLE_API_KEY_NAME } from "./service"
 
 describe("ApiKeysService customer binding", () => {
   const cache = {
@@ -32,6 +32,10 @@ describe("ApiKeysService customer binding", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     hashCache.clear()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("bindCustomer updates defaultCustomerId and invalidates api key hash cache", async () => {
@@ -308,6 +312,127 @@ describe("ApiKeysService customer binding", () => {
     }
     expect(waitUntil).toHaveBeenCalledTimes(1)
     expect(cache.apiKeyByHash.remove).toHaveBeenCalledWith(insertedApiKey.current.hash)
+  })
+
+  it("rollDefaultSdkExampleApiKey creates the reusable key when it is missing", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-07-03T12:34:56.000Z"))
+    const expectedExpiresAt = new Date("2026-07-03T23:59:59.999Z").getTime()
+    const insertedApiKey: { current?: Record<string, unknown> } = {}
+    const db = {
+      query: {
+        apikeys: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
+      },
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn((value: Record<string, unknown>) => {
+          insertedApiKey.current = value
+          return {
+            returning: vi.fn().mockResolvedValue([value]),
+          }
+        }),
+      }),
+    } as unknown as Database
+
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.rollDefaultSdkExampleApiKey({
+      projectId: "proj_123",
+      isRoot: false,
+      timezone: "UTC",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.state).toBe("created")
+    expect(result.val?.key).toMatch(/^unprice_live_[1-9A-HJ-NP-Za-km-z]{22}$/)
+    expect(insertedApiKey.current?.name).toBe(SDK_EXAMPLE_API_KEY_NAME)
+    expect(insertedApiKey.current?.expiresAt).toBe(expectedExpiresAt)
+  })
+
+  it("rollDefaultSdkExampleApiKey rolls the reusable key when it already exists", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-07-03T12:34:56.000Z"))
+    const expectedExpiresAt = new Date("2026-07-03T23:59:59.999Z").getTime()
+    const insert = vi.fn()
+    const updateSet = vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([
+          {
+            id: "api_123",
+            projectId: "proj_123",
+            hash: "new_hash",
+          },
+        ]),
+      }),
+    })
+    const findFirst = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: "api_123",
+        projectId: "proj_123",
+        expiresAt: null,
+        revokedAt: null,
+        hash: "old_hash",
+      })
+      .mockResolvedValueOnce({
+        id: "api_123",
+        projectId: "proj_123",
+        expiresAt: null,
+        revokedAt: null,
+        hash: "old_hash",
+        defaultCustomerId: null,
+        project: {
+          id: "proj_123",
+          enabled: true,
+          workspace: {
+            enabled: true,
+          },
+        },
+      })
+    const db = {
+      query: {
+        apikeys: {
+          findFirst,
+        },
+      },
+      insert,
+      update: vi.fn().mockReturnValue({
+        set: updateSet,
+      }),
+    } as unknown as Database
+
+    const service = new ApiKeysService({
+      cache,
+      metrics,
+      analytics,
+      logger,
+      db,
+      waitUntil,
+      hashCache,
+    })
+
+    const result = await service.rollDefaultSdkExampleApiKey({
+      projectId: "proj_123",
+      isRoot: false,
+      timezone: "UTC",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.state).toBe("rolled")
+    expect(result.val?.key).toMatch(/^unprice_live_[1-9A-HJ-NP-Za-km-z]{22}$/)
+    expect(updateSet).toHaveBeenCalledWith(
+      expect.objectContaining({ expiresAt: expectedExpiresAt })
+    )
+    expect(insert).not.toHaveBeenCalled()
   })
 
   it("rollApiKey scopes the lookup by hash and project before returning a new key", async () => {

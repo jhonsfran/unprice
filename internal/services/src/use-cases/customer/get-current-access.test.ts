@@ -88,6 +88,14 @@ describe("getCustomerCurrentAccess", () => {
         ?.currentUsage
     ).toBe(42)
     expect(
+      result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "events")
+        ?.meterConfig
+    ).toEqual({
+      eventSlug: "events_used",
+      aggregationMethod: "sum",
+      aggregationField: "quantity",
+    })
+    expect(
       result.val?.entitlements.find((entitlement) => entitlement.featureSlug === "customers")
         ?.currentUsage
     ).toBe(7)
@@ -103,6 +111,7 @@ describe("getCustomerCurrentAccess", () => {
     expect(result.err).toBeUndefined()
     expect(analytics.getFeaturesUsagePeriod).not.toHaveBeenCalled()
     expect(result.val?.entitlements[0]?.currentUsage).toBeNull()
+    expect(result.val?.entitlements[0]?.meterConfig).toBeNull()
   })
 
   it("treats any unlimited grant as unlimited allowance", async () => {
@@ -233,7 +242,12 @@ function usageEntitlement({
       featureType: "usage",
       unitOfMeasure: featureSlug.slice(0, -1) || "unit",
       limit,
-      meterConfig: { aggregationMethod: "count" },
+      meterConfig: {
+        eventId: `evt_${featureSlug}`,
+        eventSlug: `${featureSlug}_used`,
+        aggregationMethod: "sum",
+        aggregationField: "quantity",
+      },
       resetConfig: resetEveryFiveMinutes,
       billingConfig: billingEveryFiveMinutes,
       feature: {
