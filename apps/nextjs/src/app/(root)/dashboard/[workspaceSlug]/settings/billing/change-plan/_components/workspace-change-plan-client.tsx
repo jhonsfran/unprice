@@ -26,6 +26,8 @@ const TIMING_LABELS: Record<WhenToChange, string> = {
   end_of_cycle: "End of current cycle",
 }
 
+const MISSING_PAYMENT_METHOD_MESSAGE = "Add a payment method before changing to this plan."
+
 const PAYMENT_PROVIDER_LABELS: Record<PaymentProvider, string> = {
   sandbox: "Sandbox",
   square: "Square",
@@ -48,18 +50,20 @@ export function WorkspaceChangePlanClient({
   const router = useRouter()
   const trpc = useTRPC()
   const billingUrl = `/${workspaceSlug}/settings/billing`
+  const hasCurrentCycleEnd = upgradeOptions.currentCycleEndAt !== null
   const initialSelectablePlanId = useMemo(
     () =>
       upgradeOptions.options.find(
         (option) =>
           option.planVersion.id === initialTargetPlanVersionId &&
-          option.isAvailable &&
+          (option.isAvailable || isMissingPaymentMethodOption(option)) &&
           !option.isCurrent
       )?.planVersion.id ?? null,
     [initialTargetPlanVersionId, upgradeOptions.options]
   )
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(initialSelectablePlanId)
   const [whenToChange, setWhenToChange] = useState<WhenToChange>("immediately")
+  const effectiveWhenToChange = hasCurrentCycleEnd ? whenToChange : "immediately"
   const [paymentSetup, setPaymentSetup] = useState<{
     paymentProvider: PaymentProvider
     message: string
@@ -69,6 +73,20 @@ export function WorkspaceChangePlanClient({
     () => upgradeOptions.options.find((option) => option.planVersion.id === selectedPlanId) ?? null,
     [selectedPlanId, upgradeOptions.options]
   )
+  const selectedNeedsPaymentMethod = selectedOption
+    ? isMissingPaymentMethodOption(selectedOption)
+    : false
+  const showReviewSection =
+    !!selectedOption &&
+    !selectedOption.isCurrent &&
+    (selectedOption.isAvailable || selectedNeedsPaymentMethod)
+  const paymentMethodPrompt =
+    selectedOption && selectedNeedsPaymentMethod
+      ? {
+          paymentProvider: selectedOption.paymentProvider,
+          message: MISSING_PAYMENT_METHOD_MESSAGE,
+        }
+      : paymentSetup
 
   const changePlan = useMutation(
     trpc.workspaces.changePlan.mutationOptions({
@@ -104,12 +122,14 @@ export function WorkspaceChangePlanClient({
   }
 
   const handleSubmit = () => {
-    if (!selectedOption || selectedOption.isCurrent || !selectedOption.isAvailable) return
+    if (changePlan.isPending) return
+    if (!selectedOption || selectedOption.isCurrent) return
+    if (selectedNeedsPaymentMethod || !selectedOption.isAvailable) return
 
     changePlan.mutate({
       workspaceSlug,
       targetPlanVersionId: selectedOption.planVersion.id,
-      whenToChange,
+      whenToChange: effectiveWhenToChange,
     })
   }
 
@@ -149,7 +169,7 @@ export function WorkspaceChangePlanClient({
         </Alert>
       )}
 
-      {selectedOption && !selectedOption.isCurrent && selectedOption.isAvailable && (
+      {showReviewSection && selectedOption && (
         <section className="rounded-md border border-border/60 bg-card/70">
           <div className="flex flex-col gap-4 border-border/60 border-b px-4 py-4">
             <div className="flex flex-col gap-1">
@@ -165,7 +185,7 @@ export function WorkspaceChangePlanClient({
                 label="Payment provider"
                 value={formatPaymentProvider(selectedOption.paymentProvider)}
               />
-              <ReviewFact label="Timing" value={TIMING_LABELS[whenToChange]} />
+              <ReviewFact label="Timing" value={TIMING_LABELS[effectiveWhenToChange]} />
             </dl>
           </div>
 
@@ -173,32 +193,44 @@ export function WorkspaceChangePlanClient({
             <div className="flex flex-col gap-2">
               <p className="font-medium text-sm">Change timing</p>
               <Tabs
-                value={whenToChange}
-                onValueChange={(value) => setWhenToChange(value as WhenToChange)}
+                value={effectiveWhenToChange}
+                onValueChange={(value) => {
+                  if (value === "end_of_cycle" && !hasCurrentCycleEnd) return
+
+                  setWhenToChange(value as WhenToChange)
+                }}
               >
                 <TabsList variant="solid" className="grid w-full grid-cols-2 sm:w-auto">
                   <TabsTrigger value="immediately">Immediately</TabsTrigger>
-                  <TabsTrigger value="end_of_cycle">End of current cycle</TabsTrigger>
+                  <TabsTrigger value="end_of_cycle" disabled={!hasCurrentCycleEnd}>
+                    End of current cycle
+                  </TabsTrigger>
                 </TabsList>
               </Tabs>
               <p className="text-muted-foreground text-xs">
-                {whenToChange === "immediately"
+                {effectiveWhenToChange === "immediately"
                   ? "The plan changes now and the current phase closes immediately."
                   : getEndOfCycleDescription(upgradeOptions.currentCycleEndAt)}
               </p>
+              {!hasCurrentCycleEnd && (
+                <p className="text-muted-foreground text-xs">
+                  End-of-cycle scheduling is unavailable because this workspace has no current cycle
+                  end.
+                </p>
+              )}
             </div>
 
-            {paymentSetup && (
+            {paymentMethodPrompt && (
               <Alert variant="info">
                 <AlertTitle>Payment method required</AlertTitle>
                 <AlertDescription>
                   <div className="flex flex-col gap-3">
-                    <p>{paymentSetup.message}</p>
+                    <p>{paymentMethodPrompt.message}</p>
                     <PaymentMethodButton
                       customerId={upgradeOptions.customerId}
                       successUrl={currentUrl}
                       cancelUrl={currentUrl}
-                      paymentProvider={paymentSetup.paymentProvider}
+                      paymentProvider={paymentMethodPrompt.paymentProvider}
                       workspaceSlug={workspaceSlug}
                       hasPaymentMethods={false}
                     />
@@ -208,20 +240,22 @@ export function WorkspaceChangePlanClient({
             )}
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              <SubmitButton
-                label={
-                  changePlan.isPending
-                    ? "Applying change"
-                    : whenToChange === "immediately"
-                      ? "Change plan now"
-                      : "Schedule change"
-                }
-                onClick={handleSubmit}
-                isSubmitting={changePlan.isPending}
-                isLoading={changePlan.isPending}
-                isDisabled={changePlan.isPending}
-                className="w-full sm:w-auto"
-              />
+              {!selectedNeedsPaymentMethod && (
+                <SubmitButton
+                  label={
+                    changePlan.isPending
+                      ? "Applying change"
+                      : effectiveWhenToChange === "immediately"
+                        ? "Change plan now"
+                        : "Schedule change"
+                  }
+                  onClick={handleSubmit}
+                  isSubmitting={changePlan.isPending}
+                  isLoading={changePlan.isPending}
+                  isDisabled={changePlan.isPending || !!paymentSetup}
+                  className="w-full sm:w-auto"
+                />
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -251,6 +285,14 @@ function getPlanAction(
     return { kind: "current", label: "Current plan" }
   }
 
+  if (isMissingPaymentMethodOption(option)) {
+    return {
+      kind: "select",
+      label: selected ? "Payment required" : "Set up payment",
+      onSelect,
+    }
+  }
+
   if (!option.isAvailable) {
     return {
       kind: "disabled",
@@ -264,6 +306,20 @@ function getPlanAction(
     label: selected ? "Selected" : "Select plan",
     onSelect,
   }
+}
+
+function isMissingPaymentMethodOption(option: UpgradeOption): boolean {
+  return (
+    !option.isCurrent &&
+    !option.isAvailable &&
+    option.paymentMethodRequired &&
+    !option.hasPaymentMethod &&
+    (option.unavailableReason === null || isPaymentMethodReason(option.unavailableReason))
+  )
+}
+
+function isPaymentMethodReason(reason: string): boolean {
+  return reason.toLowerCase().includes("payment method")
 }
 
 function getUnavailableReason(option: UpgradeOption): string {
