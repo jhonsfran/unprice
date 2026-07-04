@@ -2,6 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query"
 import type { PaymentProvider } from "@unprice/db/validators"
+import type { ButtonProps } from "@unprice/ui/button"
 import { useParams } from "next/navigation"
 import { SubmitButton } from "~/components/submit-button"
 import { toBrowserAbsoluteUrl } from "~/lib/browser-url"
@@ -15,6 +16,7 @@ type BasePaymentMethodButtonProps = {
   paymentProvider: PaymentProvider
   hasPaymentMethods?: boolean
   isRefreshing?: boolean
+  variant?: ButtonProps["variant"]
   onProviderSessionStarted?: () => void
 }
 
@@ -38,6 +40,7 @@ export function PaymentMethodButton(props: PaymentMethodButtonProps) {
     paymentProvider,
     hasPaymentMethods,
     isRefreshing,
+    variant,
     onProviderSessionStarted,
   } = props
   const trpc = useTRPC()
@@ -74,7 +77,7 @@ export function PaymentMethodButton(props: PaymentMethodButtonProps) {
 
   return (
     <SubmitButton
-      variant="default"
+      variant={variant ?? "default"}
       size="sm"
       className="w-56"
       onClick={() => {

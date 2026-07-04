@@ -109,6 +109,7 @@ async function WorkspaceBillingCard({
                 cancelUrl={`/${workspaceSlug}/settings/billing`}
                 paymentProvider={overview.paymentProvider}
                 workspaceSlug={workspaceSlug}
+                variant="secondary"
                 hasPaymentMethods
               />
             </div>
