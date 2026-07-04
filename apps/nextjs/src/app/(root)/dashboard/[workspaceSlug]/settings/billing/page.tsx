@@ -1,11 +1,13 @@
 import { getSession } from "@unprice/auth/server-rsc"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
+import { Button } from "@unprice/ui/button"
 import { AlertCircle } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
 import type { ReactNode } from "react"
 import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
+import { SuperLink } from "~/components/super-link"
 import { intervalParams } from "~/lib/searchParams"
 import { HydrateClient, api } from "~/trpc/server"
 import { WorkspaceBillingOverview } from "./_components/workspace-billing-overview"
@@ -95,14 +97,21 @@ async function WorkspaceBillingCard({
       <BillingShell
         action={
           overview.paymentProvider ? (
-            <PaymentMethodButton
-              customerId={overview.customerId}
-              successUrl={`/${workspaceSlug}/settings/billing`}
-              cancelUrl={`/${workspaceSlug}/settings/billing`}
-              paymentProvider={overview.paymentProvider}
-              workspaceSlug={workspaceSlug}
-              hasPaymentMethods
-            />
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Button asChild>
+                <SuperLink href={`/${workspaceSlug}/settings/billing/change-plan`}>
+                  Change plan
+                </SuperLink>
+              </Button>
+              <PaymentMethodButton
+                customerId={overview.customerId}
+                successUrl={`/${workspaceSlug}/settings/billing`}
+                cancelUrl={`/${workspaceSlug}/settings/billing`}
+                paymentProvider={overview.paymentProvider}
+                workspaceSlug={workspaceSlug}
+                hasPaymentMethods
+              />
+            </div>
           ) : null
         }
       >
