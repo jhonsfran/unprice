@@ -96,7 +96,11 @@ type ProviderState = {
   unavailableReason: string | null
 }
 
-const requiredPaymentMethodNotFoundMessage = "Required payment method not found"
+const missingDefaultPaymentMethodMessages = new Set([
+  "Required payment method not found",
+  "Customer payment provider id not set",
+  "No payment methods found",
+])
 
 export type GetWorkspaceUpgradeOptionsDeps = {
   services: Pick<ServiceContext, "customers" | "plans">
@@ -113,6 +117,10 @@ function paymentMethodRequiredReason(paymentProvider: PaymentProvider): string {
     case "stripe":
       return "Add a default payment method before changing to this plan."
   }
+}
+
+export function isMissingDefaultPaymentMethodError(error: unknown): boolean {
+  return error instanceof Error && missingDefaultPaymentMethodMessages.has(error.message)
 }
 
 export async function getWorkspaceUpgradeOptions(
@@ -269,10 +277,7 @@ export async function getWorkspaceUpgradeOptions(
     })
 
     if (paymentMethodValidationResult.err) {
-      if (
-        paymentMethodValidationResult.err instanceof FetchError &&
-        paymentMethodValidationResult.err.message === requiredPaymentMethodNotFoundMessage
-      ) {
+      if (isMissingDefaultPaymentMethodError(paymentMethodValidationResult.err)) {
         providerStates.set(paymentProvider, {
           hasPaymentMethod: false,
           unavailableReason: null,
