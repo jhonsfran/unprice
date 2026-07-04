@@ -86,7 +86,7 @@ export default async function Page(props: {
           }
         />
         <UpdateClientCookie workspaceSlug={workspaceSlug} projectSlug={projectSlug} />
-        <Logo className="size-6 text-lg" />
+        <Logo />
       </Header>
     )
   }

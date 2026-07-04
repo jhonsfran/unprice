@@ -374,6 +374,7 @@ function activeSubscription() {
         planVersionId: "pv_1",
         creditLinePolicy: "uncapped",
         creditLineAmount: null,
+        paymentProvider: "sandbox",
         startAt: entitlementEffectiveAt,
         endAt: null,
         planVersion: {

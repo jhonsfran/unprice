@@ -5,6 +5,7 @@ import type { PaymentProvider } from "@unprice/db/validators"
 import { useParams } from "next/navigation"
 import { SubmitButton } from "~/components/submit-button"
 import { toBrowserAbsoluteUrl } from "~/lib/browser-url"
+import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
 export function PaymentMethodButton({
@@ -56,6 +57,10 @@ export function PaymentMethodButton({
       className="w-56"
       onClick={() => {
         if (isSandbox) {
+          toast.info("Sandbox payment provider", {
+            description:
+              "This customer uses the sandbox provider, so there is no external billing portal.",
+          })
           onProviderSessionStarted?.()
           return
         }
@@ -72,10 +77,12 @@ export function PaymentMethodButton({
       isDisabled={!customerId || (!isSandbox && createSession.isPending) || isRefreshing}
       isLoading={!isSandbox && createSession.isPending}
       label={
-        hasPaymentMethods
-          ? "Billing Portal"
-          : isSandbox
-            ? "Use Sandbox Method"
+        isSandbox
+          ? hasPaymentMethods
+            ? "Sandbox Provider"
+            : "Use Sandbox Method"
+          : hasPaymentMethods
+            ? "Billing Portal"
             : "Add Payment Method"
       }
     />

@@ -119,6 +119,12 @@ export function CurrentAccessOverview({
                     }
                   />
                   <PlanFact
+                    label="Payment provider"
+                    value={
+                      activePhase ? formatPaymentProvider(activePhase.paymentProvider) : "None"
+                    }
+                  />
+                  <PlanFact
                     label="Wallet available"
                     value={formatWalletMoney(walletAvailable, wallet.currency)}
                   />
@@ -428,6 +434,13 @@ function formatBillingCadence(config: BillingConfig): string {
   }
 
   return `Every ${config.billingIntervalCount} ${config.billingInterval}s`
+}
+
+function formatPaymentProvider(provider: string): string {
+  return provider
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
 }
 
 function formatStatus(status: string): string {

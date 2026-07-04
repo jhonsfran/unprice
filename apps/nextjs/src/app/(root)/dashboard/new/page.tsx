@@ -55,8 +55,8 @@ async function Content({
   if (!workspaceId || workspaceId === "") {
     return (
       <DashboardShell>
-        <div className="flex flex-col items-center justify-center">
-          <Card className="max-w-xl" variant="ghost">
+        <div className="flex w-full flex-col items-center justify-center">
+          <Card className="w-full max-w-xl" variant="ghost">
             <CardHeader>
               <CardTitle>Create Workspace</CardTitle>
               <CardDescription>Create a new workspace to get started.</CardDescription>

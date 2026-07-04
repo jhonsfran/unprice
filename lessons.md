@@ -170,6 +170,11 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-07-04: Dashboard header full logos should use the `Logo` size prop, not Tailwind
+  `size-*` width/height classes; fixed-size wrappers can make the SVG mark flex-shrink away while
+  the wordmark remains visible.
+- 2026-07-04: Centered ghost cards in dashboard forms need `w-full` alongside `max-w-*`; otherwise
+  conditional form sections can make the flex item shrink-wrap different content widths.
 - 2026-07-03: Customer detail header actions are rendered by
   `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/[customerId]/layout.tsx`
   for every tab; for tab-specific header buttons, keep the header data load in the layout and put
@@ -195,6 +200,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-07-04: Workspace billing portal actions must use the active subscription phase
+  `paymentProvider`; when it is `sandbox`, keep the flow local and show user feedback instead of
+  calling an external provider portal.
 - 2026-07-01: Billing periods generated for subscription phases must never start before
   `subscription_phases.start_at_m`; `statement_key`, pay-in-advance `invoiceAt`, and proration
   all derive from that service start, so rounding down can merge phase-change invoices.

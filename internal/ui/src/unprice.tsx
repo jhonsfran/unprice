@@ -53,6 +53,7 @@ export default function UnpriceLogo({
         width={px}
         height={px}
         viewBox="6 6 20 20"
+        className="shrink-0"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         role="img"

@@ -77,7 +77,7 @@ export default function NewWorkspaceForm({
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmitForm)} className="space-y-6">
+      <form onSubmit={form.handleSubmit(onSubmitForm)} className="flex w-full flex-col gap-6">
         <FormField
           control={form.control}
           name="name"
@@ -108,7 +108,7 @@ export default function NewWorkspaceForm({
           isLoading={isLoading}
         />
 
-        <div className="mt-8 flex justify-end space-x-4">
+        <div className="flex justify-end gap-4 pt-2">
           <SubmitButton
             onClick={() => form.handleSubmit(onSubmitForm)()}
             isSubmitting={form.formState.isSubmitting}

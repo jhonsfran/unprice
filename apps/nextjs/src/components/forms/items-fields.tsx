@@ -238,9 +238,9 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="overflow-hidden"
+            className="w-full overflow-hidden"
           >
-            <div className="mb-4 flex flex-col gap-2 pt-2">
+            <div className="mb-4 flex w-full flex-col gap-2 pt-2">
               <FormLabel
                 className={cn({
                   "text-destructive": errors.config,
@@ -256,7 +256,7 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
               {errors.config && <FormMessage>{getErrorMessage(errors, "config")}</FormMessage>}
             </div>
 
-            <div className="flex items-center justify-center px-1 py-2">
+            <div className="flex w-full items-center justify-center px-1 py-2">
               {fields.length > 0 ? (
                 <Table>
                   <TableHeader className="border-t border-b bg-transparent">

@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server"
 import { analyticsIntervalSchema } from "@unprice/analytics"
+import { paymentProviderSchema } from "@unprice/db/validators"
 import {
   emptyUsageDashboardOutput,
   getCustomerCurrentAccess,
@@ -20,6 +21,7 @@ const getBillingOverviewInputSchema = z.object({
 const getBillingOverviewOutputSchema = z.object({
   customerId: z.string(),
   billingProjectId: z.string(),
+  paymentProvider: paymentProviderSchema.nullable(),
   access: getCustomerCurrentAccessOutputSchema,
   customer: getCustomerWalletOutputSchema.shape.customer,
   wallet: getCustomerWalletOutputSchema.shape.wallet,
@@ -139,6 +141,7 @@ export const getBillingOverview = protectedWorkspaceProcedure
     return {
       customerId,
       billingProjectId,
+      paymentProvider: accessResult.val.activePlan?.activePhase?.paymentProvider ?? null,
       access: accessResult.val,
       customer: walletResult.val.customer,
       wallet: walletResult.val.wallet,

@@ -6,6 +6,7 @@ import {
   aggregationMethodSchema,
   billingConfigSchema,
   meterConfigSchema,
+  paymentProviderSchema,
 } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
@@ -39,6 +40,7 @@ export const customerCurrentAccessPlanSchema = z.object({
       planVersionId: z.string(),
       creditLinePolicy: z.string(),
       creditLineAmount: z.number().int().nullable(),
+      paymentProvider: paymentProviderSchema,
       startAt: z.number().int(),
       endAt: z.number().int().nullable(),
       planVersion: z.object({
@@ -167,6 +169,7 @@ export async function getCustomerCurrentAccess(
                 planVersionId: true,
                 creditLinePolicy: true,
                 creditLineAmount: true,
+                paymentProvider: true,
                 startAt: true,
                 endAt: true,
               },
@@ -278,6 +281,7 @@ export async function getCustomerCurrentAccess(
                     planVersionId: activePlan.phases[0].planVersionId,
                     creditLinePolicy: activePlan.phases[0].creditLinePolicy,
                     creditLineAmount: activePlan.phases[0].creditLineAmount ?? null,
+                    paymentProvider: activePlan.phases[0].paymentProvider,
                     startAt: activePlan.phases[0].startAt,
                     endAt: activePlan.phases[0].endAt ?? null,
                     planVersion: {
