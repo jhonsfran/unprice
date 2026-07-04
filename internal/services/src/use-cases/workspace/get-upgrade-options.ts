@@ -96,6 +96,8 @@ type ProviderState = {
   unavailableReason: string | null
 }
 
+const requiredPaymentMethodNotFoundMessage = "Required payment method not found"
+
 export type GetWorkspaceUpgradeOptionsDeps = {
   services: Pick<ServiceContext, "customers" | "plans">
   db: Database
@@ -259,21 +261,30 @@ export async function getWorkspaceUpgradeOptions(
       continue
     }
 
-    const paymentMethodsResult = await deps.services.customers.getPaymentMethods({
+    const paymentMethodValidationResult = await deps.services.customers.validatePaymentMethod({
       customerId,
       projectId: billingProjectId,
-      provider: paymentProvider,
-      opts: {
-        skipCache: true,
-      },
+      paymentProvider,
+      requiredPaymentMethod: true,
     })
 
-    if (paymentMethodsResult.err) {
-      return Err(paymentMethodsResult.err)
+    if (paymentMethodValidationResult.err) {
+      if (
+        paymentMethodValidationResult.err instanceof FetchError &&
+        paymentMethodValidationResult.err.message === requiredPaymentMethodNotFoundMessage
+      ) {
+        providerStates.set(paymentProvider, {
+          hasPaymentMethod: false,
+          unavailableReason: null,
+        })
+        continue
+      }
+
+      return Err(paymentMethodValidationResult.err)
     }
 
     providerStates.set(paymentProvider, {
-      hasPaymentMethod: paymentMethodsResult.val.length > 0,
+      hasPaymentMethod: paymentMethodValidationResult.val.paymentMethodId !== null,
       unavailableReason: null,
     })
   }
