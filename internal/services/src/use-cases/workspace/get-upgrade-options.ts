@@ -246,7 +246,10 @@ export async function getWorkspaceUpgradeOptions(
   const planVersions =
     planVersionsResult.val?.filter(
       (planVersion) =>
-        planVersion.active && planVersion.status === "published" && planVersion.currency === customerCurrency
+        planVersion.active &&
+        planVersion.status === "published" &&
+        (!planVersion.archived || planVersion.id === currentPlanVersionId) &&
+        planVersion.currency === customerCurrency
     ) ?? []
 
   const providerStates = new Map<PaymentProvider, ProviderState>()

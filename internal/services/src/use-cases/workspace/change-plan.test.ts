@@ -371,15 +371,24 @@ describe("changeWorkspacePlan", () => {
       return Ok({ id: "phase_current" })
     })
 
-    createPhase.mockImplementation(async ({ input }) => {
+    createPhase.mockImplementation(async ({ input, now: effectiveNow }) => {
       const overlapsOpenEndedPhase =
         activePhase.endAt === null || input.startAt <= activePhase.endAt
       const isConsecutive = activePhase.endAt !== null && activePhase.endAt + 1 === input.startAt
+      const wouldActivateTargetPhase = input.startAt <= effectiveNow
 
       if (overlapsOpenEndedPhase || !isConsecutive) {
         return {
           err: new UnPriceSubscriptionError({
             message: "Phases overlap, there is already a phase in the same date range",
+          }),
+        }
+      }
+
+      if (wouldActivateTargetPhase) {
+        return {
+          err: new UnPriceSubscriptionError({
+            message: "Scheduled future phase activated immediately",
           }),
         }
       }
@@ -416,12 +425,12 @@ describe("changeWorkspacePlan", () => {
       }),
       projectId: "proj_billing",
       db: tx,
-      now: currentCycleEndAt,
+      now,
     })
     expect(generateBillingPeriods).toHaveBeenCalledWith({
       projectId: "proj_billing",
       subscriptionId: "sub_123",
-      now: currentCycleEndAt,
+      now,
       db: tx,
     })
     expect(activePhase.endAt).toBe(currentCycleEndAt - 1)

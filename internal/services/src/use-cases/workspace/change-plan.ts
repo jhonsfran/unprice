@@ -421,7 +421,8 @@ export async function changeWorkspacePlan(
       const services = deps.services
       const targetStartAt = input.whenToChange === "immediately" ? now + 1 : currentCycleEndAt
       const currentPhaseEndAt = input.whenToChange === "immediately" ? now : currentCycleEndAt - 1
-      const billingPeriodsNow = targetStartAt
+      const targetPhaseEvaluationNow = input.whenToChange === "immediately" ? targetStartAt : now
+      const billingPeriodsNow = input.whenToChange === "immediately" ? targetStartAt : now
       const currentPhaseCreditLinePolicy: SubscriptionPhase["creditLinePolicy"] =
         activePhase.creditLinePolicy === "capped" ? "capped" : "uncapped"
       const currentPhaseBillingAnchor = getAnchor(
@@ -472,7 +473,7 @@ export async function changeWorkspacePlan(
         },
         projectId: billingProjectId,
         db: tx,
-        now: targetStartAt,
+        now: targetPhaseEvaluationNow,
       })
 
       if (createResult.err) {
