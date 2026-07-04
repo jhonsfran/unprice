@@ -74,6 +74,38 @@ describe("workspace changePlan mutation", () => {
     expect(error.message).toContain("Stripe is disabled")
   })
 
+  it("maps wrong-project target failures to precondition failed", () => {
+    const error = changePlanErrorToTrpcError(
+      new WorkspaceChangePlanError({
+        code: "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT",
+        message: "Target plan version belongs to a different billing project",
+      })
+    )
+
+    expect(error.code).toBe("PRECONDITION_FAILED")
+  })
+
+  it("maps expected service failures to precondition failed", () => {
+    const error = changePlanErrorToTrpcError(
+      Object.assign(new Error("Subscription must be active to create a new phase"), {
+        name: "UnPriceSubscriptionError",
+      })
+    )
+
+    expect(error.code).toBe("PRECONDITION_FAILED")
+    expect(error.message).toContain("Subscription must be active")
+  })
+
+  it("maps schema-like failures to bad request", () => {
+    const error = changePlanErrorToTrpcError(
+      Object.assign(new Error("targetPlanVersionId is required"), {
+        name: "SchemaError",
+      })
+    )
+
+    expect(error.code).toBe("BAD_REQUEST")
+  })
+
   it("returns the use-case payload when role checks pass", async () => {
     changeWorkspacePlanMock.mockResolvedValue({
       val: {

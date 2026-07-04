@@ -51,6 +51,7 @@ const workspaceChangePlanErrorCodeSchema = z.enum([
   "WORKSPACE_BILLING_CURRENCY_NOT_FOUND",
   "WORKSPACE_BILLING_ACCESS_NOT_FOUND",
   "WORKSPACE_TARGET_PLAN_VERSION_NOT_FOUND",
+  "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT",
   "WORKSPACE_TARGET_PLAN_VERSION_SAME_AS_CURRENT",
   "WORKSPACE_TARGET_PLAN_VERSION_INACTIVE",
   "WORKSPACE_TARGET_PLAN_VERSION_UNPUBLISHED",
@@ -257,6 +258,29 @@ export async function changeWorkspacePlan(
   const targetPlanVersion = targetPlanVersionResult.val
 
   if (!targetPlanVersion) {
+    const versionAcrossProjects = await deps.db.query.versions.findFirst({
+      columns: {
+        id: true,
+        projectId: true,
+      },
+      where: (version, { eq }) => eq(version.id, input.targetPlanVersionId),
+    })
+
+    if (versionAcrossProjects && versionAcrossProjects.projectId !== billingProjectId) {
+      return Err(
+        new WorkspaceChangePlanError({
+          code: "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT",
+          message: "Target plan version belongs to a different billing project",
+          context: {
+            workspaceId: rawInput.workspace.id,
+            customerId,
+            billingProjectId,
+            targetPlanVersionId: input.targetPlanVersionId,
+          },
+        })
+      )
+    }
+
     return Err(
       new WorkspaceChangePlanError({
         code: "WORKSPACE_TARGET_PLAN_VERSION_NOT_FOUND",

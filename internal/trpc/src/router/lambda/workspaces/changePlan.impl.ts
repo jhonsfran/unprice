@@ -51,6 +51,22 @@ function isSchemaLikeError(error: unknown): error is Error {
   return error instanceof Error && error.name === "SchemaError"
 }
 
+function isFetchLikeError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "FetchError"
+}
+
+function isCustomerLikeError(error: unknown): error is Error & { code?: unknown } {
+  return error instanceof Error && error.name === "UnPriceCustomerError"
+}
+
+function isSubscriptionLikeError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "UnPriceSubscriptionError"
+}
+
+function isBillingLikeError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "UnPriceBillingError"
+}
+
 export function changePlanErrorToTrpcError(error: unknown): TRPCError {
   if (error instanceof WorkspaceChangePlanError) {
     switch (error.code) {
@@ -60,6 +76,7 @@ export function changePlanErrorToTrpcError(error: unknown): TRPCError {
       case "WORKSPACE_BILLING_CUSTOMER_NOT_FOUND":
       case "WORKSPACE_BILLING_CURRENCY_NOT_FOUND":
       case "WORKSPACE_BILLING_ACCESS_NOT_FOUND":
+      case "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT":
       case "WORKSPACE_TARGET_PLAN_VERSION_SAME_AS_CURRENT":
       case "WORKSPACE_TARGET_PLAN_VERSION_INACTIVE":
       case "WORKSPACE_TARGET_PLAN_VERSION_UNPUBLISHED":
@@ -72,6 +89,15 @@ export function changePlanErrorToTrpcError(error: unknown): TRPCError {
 
   if (isSchemaLikeError(error)) {
     return new TRPCError({ code: "BAD_REQUEST", message: error.message })
+  }
+
+  if (
+    isFetchLikeError(error) ||
+    isCustomerLikeError(error) ||
+    isSubscriptionLikeError(error) ||
+    isBillingLikeError(error)
+  ) {
+    return new TRPCError({ code: "PRECONDITION_FAILED", message: error.message })
   }
 
   return new TRPCError({

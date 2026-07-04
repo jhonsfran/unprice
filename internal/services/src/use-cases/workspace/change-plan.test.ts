@@ -52,6 +52,8 @@ function createDeps(overrides?: {
     mode: string
   }> | null
   validatePaymentMethodResult?: unknown
+  scopedTargetPlanVersionResult?: unknown
+  versionAcrossProjects?: { id: string; projectId: string } | null
 }) {
   const now = overrides?.now ?? Date.parse("2026-07-04T10:00:00.000Z")
   const currentCycleEndAt = overrides?.currentCycleEndAt ?? now + 86_400_000
@@ -120,6 +122,9 @@ function createDeps(overrides?: {
               }
         ),
       },
+      versions: {
+        findFirst: vi.fn().mockResolvedValue(overrides?.versionAcrossProjects ?? null),
+      },
     },
     transaction: vi.fn(async (callback: (db: Database) => Promise<unknown>) => callback(tx)),
   } as unknown as Database
@@ -135,16 +140,17 @@ function createDeps(overrides?: {
     })
   )
   const getPlanVersionByIdRecord = vi.fn().mockResolvedValue(
-    Ok({
-      id: overrides?.targetPlanVersion?.id ?? "pv_target",
-      projectId: "proj_billing",
-      active: overrides?.targetPlanVersion?.active ?? true,
-      status: overrides?.targetPlanVersion?.status ?? "published",
-      archived: overrides?.targetPlanVersion?.archived ?? false,
-      currency: overrides?.targetPlanVersion?.currency ?? "USD",
-      paymentProvider: overrides?.targetPlanVersion?.paymentProvider ?? "sandbox",
-      paymentMethodRequired: overrides?.targetPlanVersion?.paymentMethodRequired ?? false,
-    })
+    overrides?.scopedTargetPlanVersionResult ??
+      Ok({
+        id: overrides?.targetPlanVersion?.id ?? "pv_target",
+        projectId: "proj_billing",
+        active: overrides?.targetPlanVersion?.active ?? true,
+        status: overrides?.targetPlanVersion?.status ?? "published",
+        archived: overrides?.targetPlanVersion?.archived ?? false,
+        currency: overrides?.targetPlanVersion?.currency ?? "USD",
+        paymentProvider: overrides?.targetPlanVersion?.paymentProvider ?? "sandbox",
+        paymentMethodRequired: overrides?.targetPlanVersion?.paymentMethodRequired ?? false,
+      })
   )
   const validatePaymentMethod = vi
     .fn()
@@ -191,6 +197,7 @@ function createDeps(overrides?: {
     updatePhase,
     createPhase,
     generateBillingPeriods,
+    getPlanVersionByIdRecord,
   }
 }
 
@@ -251,6 +258,48 @@ describe("changeWorkspacePlan", () => {
     expect(validatePaymentMethod).toHaveBeenCalled()
     expect(updatePhase).not.toHaveBeenCalled()
     expect(createPhase).not.toHaveBeenCalled()
+  })
+
+  it("returns a provider-unavailable error when the target provider is disabled", async () => {
+    const { deps } = createDeps({
+      targetPlanVersion: {
+        paymentProvider: "stripe",
+      },
+      paymentProviderConfig: {
+        paymentProvider: "stripe",
+        active: false,
+      },
+    })
+
+    const result = await changeWorkspacePlan(deps as never, createInput())
+
+    expect(result.err).toBeInstanceOf(WorkspaceChangePlanError)
+    expect((result.err as WorkspaceChangePlanError).code).toBe(
+      "WORKSPACE_TARGET_PLAN_PROVIDER_UNAVAILABLE"
+    )
+    expect(result.err?.message).toContain("Stripe is disabled")
+  })
+
+  it("returns a wrong-project error when the target version exists outside the billing project", async () => {
+    const { deps, getPlanVersionByIdRecord } = createDeps({
+      scopedTargetPlanVersionResult: Ok(null),
+      versionAcrossProjects: {
+        id: "pv_target",
+        projectId: "proj_other",
+      },
+    })
+
+    const result = await changeWorkspacePlan(deps as never, createInput())
+
+    expect(getPlanVersionByIdRecord).toHaveBeenCalledWith({
+      planVersionId: "pv_target",
+      projectId: "proj_billing",
+    })
+    expect(result.err).toBeInstanceOf(WorkspaceChangePlanError)
+    expect((result.err as WorkspaceChangePlanError).code).toBe(
+      "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT"
+    )
+    expect(result.err?.message).toContain("different billing project")
   })
 
   it("closes the current phase and creates the new one at now + 1 for immediate changes", async () => {
