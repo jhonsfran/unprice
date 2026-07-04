@@ -6,14 +6,21 @@ const { changeWorkspacePlanMock } = vi.hoisted(() => ({
   changeWorkspacePlanMock: vi.fn(),
 }))
 
-vi.mock("@unprice/services/use-cases", async () => {
-  const actual = await vi.importActual<typeof import("@unprice/services/use-cases")>(
-    "@unprice/services/use-cases"
-  )
+vi.mock("@unprice/services/use-cases", () => {
+  class WorkspaceChangePlanError extends Error {
+    public readonly code: string
+    public readonly retry = false
+
+    constructor(opts: { code: string; message: string }) {
+      super(opts.message)
+      this.name = "WorkspaceChangePlanError"
+      this.code = opts.code
+    }
+  }
 
   return {
-    ...actual,
     changeWorkspacePlan: changeWorkspacePlanMock,
+    WorkspaceChangePlanError,
   }
 })
 
