@@ -3,6 +3,7 @@ import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Typography } from "@unprice/ui/typography"
+import { PlanVersionPublish } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/_components/plan-version-actions"
 import { PlanVersionPricingCard } from "~/components/billing/plan-version-pricing-card"
 
 export function PricingCard({
@@ -28,6 +29,15 @@ export function PricingCard({
           ? { kind: "publish", onPublish }
           : { kind: "select", label: "Get Started", onSelect: () => undefined }
       }
+      renderAction={(action) => {
+        if (action.kind === "publish") {
+          return (
+            <PlanVersionPublish planVersionId={planVersion.id} onConfirmAction={action.onPublish} />
+          )
+        }
+
+        return undefined
+      }}
     />
   )
 }

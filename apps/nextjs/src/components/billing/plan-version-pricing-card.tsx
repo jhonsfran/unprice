@@ -6,7 +6,6 @@ import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
-import { PlanVersionPublish } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/_components/plan-version-actions"
 import { PlanVersionFeatureListItem } from "~/components/billing/plan-version-feature-list"
 
 export type PlanVersionPricingCardAction =
@@ -20,11 +19,13 @@ export function PlanVersionPricingCard({
   action,
   highlight = false,
   className,
+  renderAction,
 }: {
   planVersion: RouterOutputs["planVersions"]["getById"]["planVersion"]
   action: PlanVersionPricingCardAction
   highlight?: boolean
   className?: string
+  renderAction?: (action: PlanVersionPricingCardAction) => React.ReactNode
 }) {
   if (!planVersion) return null
 
@@ -73,7 +74,7 @@ export function PlanVersionPricingCard({
           </div>
         )}
 
-        <PricingCardAction action={action} planVersionId={planVersion.id} />
+        {renderAction ? renderAction(action) : <PricingCardAction action={action} />}
       </CardContent>
 
       <CardFooter className="flex w-full flex-col border-t px-6 py-6">
@@ -97,16 +98,14 @@ export function PlanVersionPricingCard({
   )
 }
 
-function PricingCardAction({
-  action,
-  planVersionId,
-}: {
-  action: PlanVersionPricingCardAction
-  planVersionId: string
-}) {
+function PricingCardAction({ action }: { action: PlanVersionPricingCardAction }) {
   switch (action.kind) {
     case "publish":
-      return <PlanVersionPublish planVersionId={planVersionId} onConfirmAction={action.onPublish} />
+      return (
+        <Button className="w-full" disabled>
+          Publish
+        </Button>
+      )
     case "select":
       return (
         <Button className="w-full" onClick={action.onSelect}>
