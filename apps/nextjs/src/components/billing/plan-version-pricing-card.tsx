@@ -44,6 +44,7 @@ export function PlanVersionPricingCard({
     units: trialUnits,
   })
   const billingLabel = planVersion.billingConfig.name
+  const actionElement = renderAction?.(action) ?? <PricingCardAction action={action} />
 
   return (
     <Card
@@ -74,7 +75,7 @@ export function PlanVersionPricingCard({
           </div>
         )}
 
-        {renderAction ? renderAction(action) : <PricingCardAction action={action} />}
+        {actionElement}
       </CardContent>
 
       <CardFooter className="flex w-full flex-col border-t px-6 py-6">
