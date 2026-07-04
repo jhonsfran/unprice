@@ -372,6 +372,7 @@ function activeSubscription() {
       {
         id: "phase_1",
         planVersionId: "pv_1",
+        paymentMethodId: "pm_phase_1",
         creditLinePolicy: "uncapped",
         creditLineAmount: null,
         paymentProvider: "sandbox",

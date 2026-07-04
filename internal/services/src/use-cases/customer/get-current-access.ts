@@ -38,6 +38,7 @@ export const customerCurrentAccessPlanSchema = z.object({
     .object({
       id: z.string(),
       planVersionId: z.string(),
+      paymentMethodId: z.string().nullable(),
       creditLinePolicy: z.string(),
       creditLineAmount: z.number().int().nullable(),
       paymentProvider: paymentProviderSchema,
@@ -167,6 +168,7 @@ export async function getCustomerCurrentAccess(
               columns: {
                 id: true,
                 planVersionId: true,
+                paymentMethodId: true,
                 creditLinePolicy: true,
                 creditLineAmount: true,
                 paymentProvider: true,
@@ -279,6 +281,7 @@ export async function getCustomerCurrentAccess(
                 ? {
                     id: activePlan.phases[0].id,
                     planVersionId: activePlan.phases[0].planVersionId,
+                    paymentMethodId: activePlan.phases[0].paymentMethodId ?? null,
                     creditLinePolicy: activePlan.phases[0].creditLinePolicy,
                     creditLineAmount: activePlan.phases[0].creditLineAmount ?? null,
                     paymentProvider: activePlan.phases[0].paymentProvider,

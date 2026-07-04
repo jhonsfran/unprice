@@ -37,6 +37,7 @@ function createDeps(overrides?: {
   currentPlanVersionId?: string
   currentCycleEndAt?: number
   activePhaseEndAt?: number | null
+  activePhasePaymentMethodId?: string | null
   targetPlanVersion?: Partial<{
     id: string
     active: boolean
@@ -77,6 +78,7 @@ function createDeps(overrides?: {
         activePhase: {
           id: "phase_current",
           planVersionId: overrides?.currentPlanVersionId ?? "pv_current",
+          paymentMethodId: overrides?.activePhasePaymentMethodId ?? "pm_phase_current",
           creditLinePolicy: "uncapped",
           creditLineAmount: null,
           paymentProvider: "sandbox",
@@ -321,6 +323,7 @@ describe("changeWorkspacePlan", () => {
       input: expect.objectContaining({
         id: "phase_current",
         subscriptionId: "sub_123",
+        paymentMethodId: "pm_phase_current",
         startAt: now - 1000,
         endAt: now,
       }),
@@ -351,6 +354,7 @@ describe("changeWorkspacePlan", () => {
   it("ends an open-ended current phase at cycle end minus one before scheduling the next phase", async () => {
     const now = Date.parse("2026-07-04T10:00:00.000Z")
     const currentCycleEndAt = now + 86_400_000
+    const activePhasePaymentMethodId = "pm_phase_current"
     const activePhase = {
       startAt: now - 1000,
       endAt: null as number | null,
@@ -359,6 +363,7 @@ describe("changeWorkspacePlan", () => {
       now,
       currentCycleEndAt,
       activePhaseEndAt: activePhase.endAt,
+      activePhasePaymentMethodId,
     })
 
     updatePhase.mockImplementation(async ({ input }) => {
@@ -394,6 +399,7 @@ describe("changeWorkspacePlan", () => {
       input: expect.objectContaining({
         id: "phase_current",
         subscriptionId: "sub_123",
+        paymentMethodId: activePhasePaymentMethodId,
         startAt: now - 1000,
         endAt: currentCycleEndAt - 1,
       }),

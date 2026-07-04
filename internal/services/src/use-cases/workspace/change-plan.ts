@@ -439,7 +439,7 @@ export async function changeWorkspacePlan(
         creditLineAmount: activePhase.creditLineAmount,
         billingAnchor: currentPhaseBillingAnchor,
         trialUnits: 0,
-        paymentMethodId: null,
+        paymentMethodId: activePhase.paymentMethodId,
         trialEndsAt: null,
         startAt: activePhase.startAt,
         endAt: currentPhaseEndAt,
