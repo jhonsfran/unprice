@@ -149,7 +149,7 @@ describe("calculateCycleWindow", () => {
       // no proration/billableSeconds on cycle window
     })
 
-    it("aligns dayOfCreation cycles to the start of the creation day", () => {
+    it("uses resolved dayOfCreation anchor without moving start before creation time", () => {
       const effectiveStart = utcDate("2026-05-07", "12:05:00")
       const now = utcDate("2026-05-07", "12:05:00")
 
@@ -163,12 +163,12 @@ describe("calculateCycleWindow", () => {
           interval: "month",
           intervalCount: 1,
           planType: "recurring",
-          anchor: "dayOfCreation",
+          anchor: 7,
         },
       })
 
       expect(result).not.toBeNull()
-      expect(result!.start).toBe(utcDate("2026-05-07", "00:00:00"))
+      expect(result!.start).toBe(effectiveStart)
       expect(result!.end).toBe(utcDate("2026-06-07", "00:00:00"))
     })
 

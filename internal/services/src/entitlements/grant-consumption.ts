@@ -5,6 +5,7 @@ import {
   type ResetConfig,
   calculateCycleWindow,
   calculatePricePerFeature,
+  normalizeBillingStartForInterval,
 } from "@unprice/db/validators"
 import { diffLedgerMinor } from "@unprice/money"
 
@@ -150,6 +151,13 @@ export function computeGrantPeriodBucket(
   >,
   timestamp: number
 ): { bucketKey: string; end: number; periodKey: string; start: number } | null {
+  const effectiveStartDate = grant.resetConfig
+    ? normalizeBillingStartForInterval(
+        grant.cadenceEffectiveAt ?? grant.effectiveAt,
+        grant.resetConfig.resetInterval
+      )
+    : (grant.cadenceEffectiveAt ?? grant.effectiveAt)
+
   const config = grant.resetConfig
     ? {
         name: grant.resetConfig.name,
@@ -168,7 +176,7 @@ export function computeGrantPeriodBucket(
 
   const cycle = calculateCycleWindow({
     now: timestamp,
-    effectiveStartDate: grant.cadenceEffectiveAt ?? grant.effectiveAt,
+    effectiveStartDate,
     effectiveEndDate: grant.cadenceExpiresAt ?? grant.expiresAt,
     trialEndsAt: null,
     config,

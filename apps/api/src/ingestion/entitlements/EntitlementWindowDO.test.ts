@@ -737,7 +737,7 @@ describe("EntitlementWindowDO", () => {
     })
     const replay = await durableObject.apply({ ...periodAInput, now: periodBStart })
 
-    expect(replay).toEqual(original)
+    expect(replay).toEqual({ ...original, idempotencyStatus: "already_reported" })
     expect(testState.engineApply).toHaveBeenCalledTimes(2)
     await expect(
       durableObject.getEnforcementState({
@@ -868,7 +868,7 @@ describe("EntitlementWindowDO", () => {
       deniedReason: "LIMIT_EXCEEDED",
       message: expect.stringContaining(DEFAULT_METER_KEY),
     })
-    expect(second).toEqual(first)
+    expect(second).toEqual({ ...first, idempotencyStatus: "already_reported" })
     expect(testState.engineApply).toHaveBeenCalledTimes(1)
     expect(readIdempotencyEntries(db).size).toBe(1)
     expect(readOutboxPayloads(db)).toHaveLength(0)
@@ -3862,7 +3862,7 @@ describe("EntitlementWindowDO", () => {
     // The first attempt rolls back, does one sync refill attempt, retries,
     // persists the denial, then schedules a final flush. Replay returns the
     // stored denial without touching the wallet again.
-    expect(second).toEqual(first)
+    expect(second).toEqual({ ...first, idempotencyStatus: "already_reported" })
     expect(testState.engineApply).toHaveBeenCalledTimes(2)
     expect(testState.flushReservation).toHaveBeenCalledTimes(2)
     expect(testState.flushReservation).toHaveBeenNthCalledWith(

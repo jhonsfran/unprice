@@ -85,7 +85,7 @@ export default function UserProfile({
             <ExternalLink className="mb-1 ml-1 size-2.5 shrink-0" aria-hidden="true" />
           </DropdownMenuItem>
           <DropdownMenuItem>
-            Join Slack community
+            Join Discord community
             <ExternalLink className="mb-1 ml-1 size-2.5 shrink-0" aria-hidden="true" />
           </DropdownMenuItem>
         </DropdownMenuGroup>

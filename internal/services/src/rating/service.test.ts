@@ -158,20 +158,22 @@ describe("RatingService", () => {
     expect(result.err).toBeUndefined()
   })
 
-  it("charges a full flat monthly fee when the subscription starts mid-day", async () => {
+  it("prorates a flat monthly fee when the subscription starts mid-day", async () => {
     const service = new RatingService({
       analytics: {} as never,
       grantsManager: {} as never,
       logger: { warn: vi.fn() } as never,
     })
+    const periodStart = Date.UTC(2026, 4, 7, 0, 0, 0)
+    const periodEnd = Date.UTC(2026, 5, 7, 0, 0, 0)
     const effectiveAt = Date.UTC(2026, 4, 7, 12, 5, 0)
 
     const result = await service.rateBillingPeriod({
       projectId: "proj_123",
       customerId: "cus_123",
       featureSlug: "access",
-      startAt: Date.UTC(2026, 4, 7, 0, 0, 0),
-      endAt: Date.UTC(2026, 5, 7, 0, 0, 0),
+      startAt: periodStart,
+      endAt: periodEnd,
       usageData: [{ featureSlug: "access", usage: 1 }],
       grants: [
         {
@@ -255,8 +257,12 @@ describe("RatingService", () => {
 
     expect(result.err).toBeUndefined()
     expect(result.val).toHaveLength(1)
-    expect(result.val![0]!.prorate).toBe(1)
-    expect(toDecimal(result.val![0]!.price.totalPrice.dinero)).toBe("99.00")
+    const expectedProrate = (periodEnd - effectiveAt) / (periodEnd - periodStart)
+    expect(result.val![0]!.prorate).toBeCloseTo(expectedProrate, 5)
+    expect(Number(toDecimal(result.val![0]!.price.totalPrice.dinero))).toBeCloseTo(
+      99 * expectedProrate,
+      5
+    )
   })
 
   it("filters usage billing by the grant period key", async () => {

@@ -41,8 +41,8 @@ export function ProjectSettingsHeader({ project }: { project: Project }) {
       description={copy.description}
       action={
         <ProjectDialog defaultValues={project}>
-          <Button variant="outline">
-            <Pencil className="mr-2 size-4" aria-hidden="true" />
+          <Button variant="link">
+            <Pencil className="mr-2 size-3.5" aria-hidden="true" />
             Edit Project
           </Button>
         </ProjectDialog>

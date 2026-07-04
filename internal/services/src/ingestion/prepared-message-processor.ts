@@ -1,8 +1,8 @@
 import type { Logger } from "@unprice/logs"
 import {
-  hasBillingPeriodCoveringEvent,
   type IngestionCandidateEntitlements,
   type IngestionEntitlement,
+  hasBillingPeriodCoveringEvent,
 } from "./entitlement-context"
 import type { IngestionEntitlementRouter } from "./entitlement-routing"
 import type { EntitlementWindowApplier } from "./entitlement-window-applier"

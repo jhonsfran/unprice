@@ -104,6 +104,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-05-08: Test DO eviction/recovery with a new DO instance over the same fake storage.
 - 2026-05-11: For usage concurrency, test `EntitlementWindowDO` replay and reporting enqueue
   retry paths, not only the service adapter.
+- 2026-07-04: API Durable Object tests are integration-style under root Turbo concurrency; keep
+  `apps/api/vitest.config.ts` on a 15s `testTimeout` instead of relying on Vitest's 5s default.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do
@@ -202,6 +204,9 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-07-04: `dayOfCreation` is a plan/reset config shorthand; subscription phases store the
+  numeric anchor resolved with `getAnchor`, and subscription period windows must preserve
+  `subscription_phases.start_at_m`.
 - 2026-07-04: Project payment-provider mutations should pass the route `workspaceSlug` and
   `projectSlug`; Stripe provider `active` must stay false unless the managed connection status is
   `active`.
