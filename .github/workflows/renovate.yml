@@ -10,4 +10,8 @@ env:
 jobs:
   build-lint:
     uses: ./.github/workflows/job_build.yaml
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
     if: "contains(github.head_ref, 'renovate/')"

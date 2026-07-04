@@ -23,6 +23,11 @@ patterns. Keep it cheap to load and useful.
   pattern first; reuse or extract the canonical path instead of duplicating logic.
 - Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.
 
+## CI And GitHub Actions
+
+- 2026-07-04: `job_build.yaml` requests `pull-requests: write` and `statuses: write`; callers
+  that set workflow-level `permissions` must grant those scopes on the reusable-workflow job.
+
 ## Cloudflare, API, And Ingestion
 
 - 2026-06-06: EntitlementWindowDO SQLite columns need the schema, contract snapshot, SQL migration,

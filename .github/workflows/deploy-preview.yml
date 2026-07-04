@@ -18,6 +18,10 @@ jobs:
   build-lint:
     if: ${{ !contains(github.head_ref, 'renovate/') }}
     uses: ./.github/workflows/job_build.yaml
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
     with:
       run_integration_tests: true
 
