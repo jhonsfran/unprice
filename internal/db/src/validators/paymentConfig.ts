@@ -77,6 +77,7 @@ export const insertPaymentProviderConfigSchema = createInsertSchema(paymentProvi
   })
   .extend({
     projectSlug: z.string().optional(),
+    workspaceSlug: z.string().optional(),
   })
   .partial({
     projectId: true,

@@ -3,6 +3,7 @@ import {
   createPaymentMethodResponseSchema,
   createPaymentMethodSchema,
 } from "@unprice/db/validators"
+import { z } from "zod"
 import { protectedWorkspaceRateLimitedProcedure } from "#trpc"
 import { unprice } from "#utils/unprice"
 
@@ -12,7 +13,11 @@ export const createPaymentMethod = protectedWorkspaceRateLimitedProcedure({
   scope: "workspace",
   windowSeconds: 10 * 60,
 })
-  .input(createPaymentMethodSchema)
+  .input(
+    createPaymentMethodSchema.extend({
+      workspaceSlug: z.string().optional(),
+    })
+  )
   .output(createPaymentMethodResponseSchema)
   .mutation(async (opts) => {
     const { successUrl, cancelUrl, customerId: inputCustomerId, paymentProvider } = opts.input
@@ -40,6 +45,13 @@ export const createPaymentMethod = protectedWorkspaceRateLimitedProcedure({
     })
 
     if (response.error) {
+      if (response.error.code === "PRECONDITION_FAILED") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: response.error.message,
+        })
+      }
+
       throw new TRPCError({
         code: "INTERNAL_SERVER_ERROR",
         message: response.error.message,

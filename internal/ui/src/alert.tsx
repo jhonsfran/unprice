@@ -13,6 +13,7 @@ const alertVariants = cva(
         destructive: "danger [&>svg]:text-destructive",
         info: "info [&>svg]:text-info",
         success: "success [&>svg]:text-success",
+        warning: "warning [&>svg]:text-warning",
       },
     },
     defaultVariants: {

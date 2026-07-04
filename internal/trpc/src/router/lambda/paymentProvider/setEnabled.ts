@@ -7,6 +7,8 @@ import { protectedProjectProcedure } from "#trpc"
 
 const setEnabledInputSchema = z.object({
   paymentProvider: paymentProviderSchema,
+  workspaceSlug: z.string().optional(),
+  projectSlug: z.string().optional(),
   enabled: z.boolean(),
 })
 

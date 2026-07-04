@@ -170,4 +170,32 @@ describe("provider connection enablement", () => {
     )
     expect(mocks.set).not.toHaveBeenCalledWith(expect.objectContaining({ externalAccountId: null }))
   })
+
+  it("rejects enabling Stripe until the connection is active", async () => {
+    const stripeConfig = {
+      id: "ppc_stripe",
+      projectId: "proj_123",
+      paymentProvider: "stripe",
+      active: false,
+      connectionType: "managed_connection",
+      mode: "test",
+      status: "restricted",
+      externalAccountId: "acct_123",
+    }
+    const mocks = createDb({ existing: stripeConfig })
+
+    const result = await setProviderEnabled(
+      { db: mocks.db, logger: createLogger() },
+      {
+        projectId: "proj_123",
+        paymentProvider: "stripe",
+        enabled: true,
+      }
+    )
+
+    expect(result.err?.message).toBe(
+      "Complete Stripe onboarding and refresh the connection before enabling this payment provider"
+    )
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
 })

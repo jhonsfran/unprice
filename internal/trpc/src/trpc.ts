@@ -500,11 +500,13 @@ export function protectedWorkspaceRateLimitedProcedure(config: TrpcRateLimitConf
 
 export const protectedProjectProcedure = protectedProcedure.use(
   async ({ ctx, next, getRawInput }) => {
-    const input = (await getRawInput()) as { projectSlug?: string }
+    const input = (await getRawInput()) as { projectSlug?: string; workspaceSlug?: string }
     const activeProjectSlug = input?.projectSlug ?? ctx.activeProjectSlug ?? undefined
+    const activeWorkspaceSlug = input?.workspaceSlug ?? ctx.activeWorkspaceSlug ?? undefined
 
     const data = await projectWorkspaceGuard({
       projectSlug: activeProjectSlug,
+      workspaceSlug: activeWorkspaceSlug,
       ctx,
     })
 

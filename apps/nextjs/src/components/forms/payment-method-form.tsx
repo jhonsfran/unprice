@@ -8,47 +8,69 @@ import { toBrowserAbsoluteUrl } from "~/lib/browser-url"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
 
-export function PaymentMethodButton({
-  customerId,
-  successUrl,
-  cancelUrl,
-  paymentProvider,
-  scope = "workspace",
-  hasPaymentMethods,
-  isRefreshing,
-  onProviderSessionStarted,
-}: {
+type BasePaymentMethodButtonProps = {
   customerId: string
   successUrl: string
   cancelUrl: string
   paymentProvider: PaymentProvider
-  scope?: "project" | "workspace"
   hasPaymentMethods?: boolean
   isRefreshing?: boolean
   onProviderSessionStarted?: () => void
-}) {
+}
+
+type WorkspacePaymentMethodButtonProps = BasePaymentMethodButtonProps & {
+  scope?: "workspace"
+  workspaceSlug: string
+}
+
+type ProjectPaymentMethodButtonProps = BasePaymentMethodButtonProps & {
+  scope: "project"
+  workspaceSlug?: never
+}
+
+type PaymentMethodButtonProps = WorkspacePaymentMethodButtonProps | ProjectPaymentMethodButtonProps
+
+export function PaymentMethodButton(props: PaymentMethodButtonProps) {
+  const {
+    customerId,
+    successUrl,
+    cancelUrl,
+    paymentProvider,
+    hasPaymentMethods,
+    isRefreshing,
+    onProviderSessionStarted,
+  } = props
   const trpc = useTRPC()
-  const projectSlug = useParams().projectSlug as string | undefined
+  const params = useParams()
+  const projectSlug = params.projectSlug as string | undefined
+  const isWorkspaceScope = props.scope !== "project"
   const isSandbox = paymentProvider === "sandbox"
 
-  const createSession = useMutation(
-    (scope === "project"
-      ? trpc.customers.createPaymentMethodByActiveProject
-      : trpc.customers.createPaymentMethod
-    ).mutationOptions({
-      onSuccess: (data) => {
-        if (!data?.url) return
+  const handleProviderSessionStarted = (data?: { url: string }) => {
+    if (!data?.url) return
 
-        onProviderSessionStarted?.()
+    onProviderSessionStarted?.()
 
-        // Keep the subscription draft open while the provider flow runs separately.
-        const providerWindow = window.open(data.url, "_blank")
-        if (!providerWindow) {
-          window.location.assign(data.url)
-        }
-      },
+    // Keep the subscription draft open while the provider flow runs separately.
+    const providerWindow = window.open(data.url, "_blank")
+    if (!providerWindow) {
+      window.location.assign(data.url)
+    }
+  }
+
+  const createWorkspaceSession = useMutation(
+    trpc.customers.createPaymentMethod.mutationOptions({
+      onSuccess: handleProviderSessionStarted,
     })
   )
+  const createProjectSession = useMutation(
+    trpc.customers.createPaymentMethodByActiveProject.mutationOptions({
+      onSuccess: handleProviderSessionStarted,
+    })
+  )
+  const createSessionPending = isWorkspaceScope
+    ? createWorkspaceSession.isPending
+    : createProjectSession.isPending
 
   return (
     <SubmitButton
@@ -65,17 +87,29 @@ export function PaymentMethodButton({
           return
         }
 
-        createSession.mutate({
+        const basePayload = {
           paymentProvider: paymentProvider,
           customerId,
           successUrl: toBrowserAbsoluteUrl(successUrl),
           cancelUrl: toBrowserAbsoluteUrl(cancelUrl),
-          ...(scope === "project" && projectSlug ? { projectSlug } : {}),
+        }
+
+        if (isWorkspaceScope) {
+          createWorkspaceSession.mutate({
+            ...basePayload,
+            workspaceSlug: props.workspaceSlug,
+          })
+          return
+        }
+
+        createProjectSession.mutate({
+          ...basePayload,
+          ...(projectSlug ? { projectSlug } : {}),
         })
       }}
-      isSubmitting={!isSandbox && createSession.isPending}
-      isDisabled={!customerId || (!isSandbox && createSession.isPending) || isRefreshing}
-      isLoading={!isSandbox && createSession.isPending}
+      isSubmitting={!isSandbox && createSessionPending}
+      isDisabled={!customerId || (!isSandbox && createSessionPending) || isRefreshing}
+      isLoading={!isSandbox && createSessionPending}
       label={
         isSandbox
           ? hasPaymentMethods

@@ -3,9 +3,11 @@ import { jsonContent, jsonContentRequired } from "stoker/openapi/helpers"
 import * as HttpStatusCodes from "~/util/http-status-codes"
 
 import {
+  type PaymentProvider,
   createPaymentMethodResponseSchema,
   createPaymentMethodSchema,
 } from "@unprice/db/validators"
+import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { z } from "zod"
 import { keyAuth, resolveCustomerIdForApiKey } from "~/auth/key"
 import { UnpriceApiError, toUnpriceApiError } from "~/errors"
@@ -14,6 +16,26 @@ import type { App } from "~/hono/app"
 import { defineEndpointContract } from "~/openapi/endpoint-contract"
 
 const tags = ["paymentMethods"]
+
+function providerUnavailableMessage(provider: PaymentProvider): string {
+  const label = provider
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+
+  return `Billing portal is unavailable because ${label} is disabled or not configured for this billing project.`
+}
+
+function toCreatePaymentMethodProviderError(error: unknown, provider: PaymentProvider) {
+  if (error instanceof UnPriceCustomerError && error.code === "PAYMENT_PROVIDER_CONFIG_NOT_FOUND") {
+    return new UnpriceApiError({
+      code: "PRECONDITION_FAILED",
+      message: providerUnavailableMessage(provider),
+    })
+  }
+
+  return toUnpriceApiError(error)
+}
 
 export const route = createRoute(
   defineEndpointContract(
@@ -106,7 +128,7 @@ export const registerCreatePaymentMethodV1 = (app: App) =>
       })
 
     if (paymentProviderErr) {
-      throw toUnpriceApiError(paymentProviderErr)
+      throw toCreatePaymentMethodProviderError(paymentProviderErr, paymentProvider)
     }
 
     const { err, val } = await paymentProviderService.createSession({

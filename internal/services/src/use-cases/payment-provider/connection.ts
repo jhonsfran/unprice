@@ -10,6 +10,7 @@ import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { Stripe } from "@unprice/stripe"
 import { env } from "../../../env"
+import { isStripeProviderReady } from "../../payment-provider/readiness"
 import { upsertManagedSandboxProviderConfig } from "../../payment-provider/sandbox-config"
 
 type ProviderConnectionDeps = {
@@ -149,11 +150,13 @@ async function updateStripeConnectionStatus(
     return Err(err)
   }
 
+  const status = mapStripeAccountStatus(account)
   const { val: updated, err: updateErr } = await wrapResult(
     deps.db
       .update(paymentProviderConfig)
       .set({
-        status: mapStripeAccountStatus(account),
+        active: status === "active" ? config.active : false,
+        status,
         connectionData: stripeAccountConnectionData(account),
         updatedAtM: Date.now(),
       })
@@ -235,7 +238,7 @@ export async function startProviderConnection(
         id: existing?.id ?? newId("payment_provider_config"),
         projectId: input.projectId,
         paymentProvider: "stripe",
-        active: true,
+        active: false,
         connectionType: "managed_connection",
         mode: "test",
         status: "pending",
@@ -249,7 +252,7 @@ export async function startProviderConnection(
       .onConflictDoUpdate({
         target: [paymentProviderConfig.paymentProvider, paymentProviderConfig.projectId],
         set: {
-          active: true,
+          active: false,
           connectionType: "managed_connection",
           mode: "test",
           status: "pending",
@@ -440,6 +443,16 @@ export async function setProviderEnabled(
     return Err(
       new FetchError({
         message: "Connect Stripe before enabling this payment provider",
+        retry: false,
+      })
+    )
+  }
+
+  if (!isStripeProviderReady(existing)) {
+    return Err(
+      new FetchError({
+        message:
+          "Complete Stripe onboarding and refresh the connection before enabling this payment provider",
         retry: false,
       })
     )

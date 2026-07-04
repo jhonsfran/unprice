@@ -232,7 +232,7 @@ function UsageEvidenceHeader({
       className="px-0 py-0"
       actions={
         showControls ? (
-          <div className="flex flex-col items-start gap-4 md:items-end">
+          <div className="flex flex-col items-start gap-6 md:items-end">
             {mode === "customer" && <IntervalFilter />}
             <FreshnessIndicator
               generatedAt={generatedAt}

@@ -15,14 +15,16 @@ interface ProjectGuardType {
 export const projectWorkspaceGuard = async ({
   projectSlug,
   projectId,
+  workspaceSlug,
   ctx,
 }: {
   projectId?: string
   projectSlug?: string
+  workspaceSlug?: string
   ctx: Context
 }): Promise<ProjectGuardType> => {
   const userId = ctx.session?.user.id
-  const activeWorkspace = ctx.activeWorkspaceSlug
+  const expectedWorkspaceSlug = workspaceSlug ?? ctx.activeWorkspaceSlug
 
   if (!userId) {
     throw new TRPCError({
@@ -74,7 +76,7 @@ export const projectWorkspaceGuard = async ({
     })
   }
 
-  if (activeWorkspace !== workspace.slug) {
+  if (expectedWorkspaceSlug !== workspace.slug) {
     throw new TRPCError({
       code: "UNAUTHORIZED",
       message: "Active workspace does not match the workspace of the project",

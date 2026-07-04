@@ -170,6 +170,8 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-07-04: Workspace signup should omit `planVersionId` when no pricing/session plan is
+  selected; sending an empty string blocks the customer signup default-plan resolver.
 - 2026-07-04: Dashboard header full logos should use the `Logo` size prop, not Tailwind
   `size-*` width/height classes; fixed-size wrappers can make the SVG mark flex-shrink away while
   the wordmark remains visible.
@@ -200,9 +202,13 @@ patterns. Keep it cheap to load and useful.
 
 ## Billing, Wallets, And Invoices
 
+- 2026-07-04: Project payment-provider mutations should pass the route `workspaceSlug` and
+  `projectSlug`; Stripe provider `active` must stay false unless the managed connection status is
+  `active`.
 - 2026-07-04: Workspace billing portal actions must use the active subscription phase
-  `paymentProvider`; when it is `sandbox`, keep the flow local and show user feedback instead of
-  calling an external provider portal.
+  `paymentProvider`; map provider config failures to provider-agnostic billing portal messages.
+  Also pass the URL `workspaceSlug` into workspace-scoped mutations so `protectedWorkspaceProcedure`
+  does not fall back to a stale active workspace.
 - 2026-07-01: Billing periods generated for subscription phases must never start before
   `subscription_phases.start_at_m`; `statement_key`, pay-in-advance `invoiceAt`, and proration
   all derive from that service start, so rounding down can merge phase-change invoices.

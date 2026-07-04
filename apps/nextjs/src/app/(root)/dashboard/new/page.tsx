@@ -37,7 +37,7 @@ export default async function NewPage(props: {
       <Content
         workspaceId={workspace_id}
         planVersionId={session?.payload.plan_version_id}
-        sessionId={sessionId}
+        sessionId={session ? sessionId : undefined}
       />
     </Suspense>
   )
@@ -55,19 +55,19 @@ async function Content({
   if (!workspaceId || workspaceId === "") {
     return (
       <DashboardShell>
-        <div className="flex w-full flex-col items-center justify-center">
+        <div className="flex min-h-[calc(100svh-10rem)] w-full flex-col items-center justify-start pt-[clamp(3rem,10svh,8rem)] pb-8">
           <Card className="w-full max-w-xl" variant="ghost">
-            <CardHeader>
+            <CardHeader className="items-center text-center">
               <CardTitle>Create Workspace</CardTitle>
-              <CardDescription>Create a new workspace to get started.</CardDescription>
+              <CardDescription className="max-w-sm">
+                Create a new workspace to get started.
+              </CardDescription>
             </CardHeader>
             <CardContent className="py-4">
               <NewWorkspaceForm
                 defaultValues={{
                   name: "",
-                  // preselect the plan version if it exists
-                  planVersionId: planVersionId ?? "",
-                  config: [],
+                  planVersionId,
                   successUrl: "",
                   cancelUrl: "",
                   sessionId: sessionId,

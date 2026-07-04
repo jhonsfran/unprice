@@ -100,6 +100,7 @@ async function WorkspaceBillingCard({
               successUrl={`/${workspaceSlug}/settings/billing`}
               cancelUrl={`/${workspaceSlug}/settings/billing`}
               paymentProvider={overview.paymentProvider}
+              workspaceSlug={workspaceSlug}
               hasPaymentMethods
             />
           ) : null

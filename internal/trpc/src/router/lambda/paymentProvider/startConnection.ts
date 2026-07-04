@@ -7,6 +7,8 @@ import { protectedProjectProcedure } from "#trpc"
 
 const connectionLinkInputSchema = z.object({
   paymentProvider: paymentProviderSchema,
+  workspaceSlug: z.string().optional(),
+  projectSlug: z.string().optional(),
   returnUrl: z.string().url(),
   refreshUrl: z.string().url(),
 })

@@ -10,9 +10,12 @@ function ProjectTierIndicator(props: { tier: string; isInternal?: boolean }) {
         "ml-2 whitespace-nowrap rounded-md px-2 py-1 font-mono text-xs no-underline group-hover:no-underline",
         {
           danger: props.isInternal,
-          "bg-blue-100 dark:bg-blue-800": props.tier === "PRO" && !props.isInternal,
-          "bg-red-100 dark:bg-red-800": props.tier === "ENTERPRISE" && !props.isInternal,
-          "bg-teal-100 dark:bg-teal-600": props.tier === "FREE" && !props.isInternal,
+          "bg-blue-100 dark:bg-blue-800":
+            props.tier.toLocaleUpperCase() === "PRO" && !props.isInternal,
+          "bg-red-100 dark:bg-red-800":
+            props.tier.toLocaleUpperCase() === "ENTERPRISE" && !props.isInternal,
+          "bg-teal-100 dark:bg-teal-600":
+            props.tier.toLocaleUpperCase() === "FREE" && !props.isInternal,
         }
       )}
     >

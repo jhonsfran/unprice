@@ -2,6 +2,7 @@ import type { Database } from "@unprice/db"
 import type { PaymentProvider, PaymentProviderConfig } from "@unprice/db/validators"
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
+import { isStripeProviderReady } from "../../payment-provider/readiness"
 
 type PaymentProviderAvailabilityDeps = {
   db: Database
@@ -36,10 +37,6 @@ function providerLabel(paymentProvider: PaymentProvider): string {
     case "square":
       return "Square"
   }
-}
-
-function stripeIsReady(config: PaymentProviderConfig): boolean {
-  return Boolean(config.externalAccountId) && config.status === "active"
 }
 
 export async function checkPaymentProviderAvailability(
@@ -87,7 +84,7 @@ export async function checkPaymentProviderAvailability(
     })
   }
 
-  if (input.paymentProvider === "stripe" && !stripeIsReady(paymentProviderConfig)) {
+  if (input.paymentProvider === "stripe" && !isStripeProviderReady(paymentProviderConfig)) {
     return Ok({
       available: false,
       reason: "not_ready",

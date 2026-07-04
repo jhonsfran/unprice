@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi"
+import { UnPriceCustomerError } from "@unprice/services/customers"
 import type { ExecutionContext } from "hono"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { UnpriceApiError } from "~/errors"
@@ -173,12 +174,51 @@ describe("payment method routes", () => {
       cancelUrl: "https://example.com/cancel",
     })
   })
+
+  it("maps missing payment provider config to a precondition failure", async () => {
+    const { app, env, executionCtx, customer, paymentProviderService } = createTestApp({
+      customerResult: { err: undefined, val: customerRecord },
+      paymentProviderResult: {
+        err: new UnPriceCustomerError({
+          code: "PAYMENT_PROVIDER_CONFIG_NOT_FOUND",
+          message: "Payment provider config not found or not active",
+        }),
+        val: undefined,
+      },
+    })
+
+    const response = await app.fetch(
+      buildJsonRequest("https://example.com/v1/payment-methods/create", {
+        customerId: "cus_123",
+        paymentProvider: "stripe",
+        successUrl: "https://example.com/success",
+        cancelUrl: "https://example.com/cancel",
+      }),
+      env,
+      executionCtx
+    )
+
+    expect(response.status).toBe(412)
+    await expect(response.json()).resolves.toEqual({
+      code: "PRECONDITION_FAILED",
+      message:
+        "Billing portal is unavailable because Stripe is disabled or not configured for this billing project.",
+    })
+    expect(customer.getPaymentProvider).toHaveBeenCalledWith({
+      customerId: "cus_123",
+      projectId: "proj_123",
+      provider: "stripe",
+    })
+    expect(paymentProviderService.createSession).not.toHaveBeenCalled()
+  })
 })
 
 function createTestApp({
   customerResult,
+  paymentProviderResult,
 }: {
   customerResult: { err?: Error; val?: unknown }
+  paymentProviderResult?: { err?: Error; val?: unknown }
 }) {
   const app = new OpenAPIHono<HonoEnv>()
   const paymentProviderService = {
@@ -196,10 +236,12 @@ function createTestApp({
       err: undefined,
       val: [],
     }),
-    getPaymentProvider: vi.fn().mockResolvedValue({
-      err: undefined,
-      val: paymentProviderService,
-    }),
+    getPaymentProvider: vi.fn().mockResolvedValue(
+      paymentProviderResult ?? {
+        err: undefined,
+        val: paymentProviderService,
+      }
+    ),
   }
 
   app.onError((error, c) => {

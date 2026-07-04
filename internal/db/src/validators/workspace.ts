@@ -30,7 +30,7 @@ export const workspaceSignupSchema = workspaceInsertBase
     name: true,
   })
   .extend({
-    planVersionId: z.string().min(1, "Plan version is required"),
+    planVersionId: z.string().min(1, "Plan version is required").optional(),
     config: subscriptionItemsConfigSchema.optional(),
     successUrl: z.string().url(),
     cancelUrl: z.string().url(),
