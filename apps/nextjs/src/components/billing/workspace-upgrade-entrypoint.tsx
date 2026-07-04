@@ -4,8 +4,8 @@ import { Button } from "@unprice/ui/button"
 import { useRouter } from "next/navigation"
 import type { ReactNode } from "react"
 import {
-  encodeWorkspaceUpgradeIntent,
   type WorkspaceUpgradeIntent,
+  encodeWorkspaceUpgradeIntent,
 } from "~/components/billing/workspace-upgrade-intent"
 
 export function WorkspaceUpgradeEntrypoint(props: {

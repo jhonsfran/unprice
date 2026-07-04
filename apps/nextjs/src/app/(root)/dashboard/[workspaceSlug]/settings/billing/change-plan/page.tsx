@@ -20,6 +20,7 @@ export default async function ChangePlanPage({
   const upgradeOptions = await api.workspaces.getUpgradeOptions({ workspaceSlug })
   const parsedSearchParams = toUrlSearchParams(searchParams)
   const intent = parseWorkspaceUpgradeIntent(parsedSearchParams)
+  const showFeatureBlockContext = parsedSearchParams.get("source") === "feature_block"
   const currentUrl = getCurrentChangePlanUrl(workspaceSlug, parsedSearchParams)
 
   return (
@@ -40,9 +41,7 @@ export default async function ChangePlanPage({
         <WorkspaceChangePlanClient
           workspaceSlug={workspaceSlug}
           upgradeOptions={upgradeOptions}
-          showFeatureBlockContext={
-            intent?.source === "feature_block" && intent.workspaceSlug === workspaceSlug
-          }
+          showFeatureBlockContext={showFeatureBlockContext}
           initialTargetPlanVersionId={intent?.targetPlanVersionId}
           currentUrl={currentUrl}
         />
