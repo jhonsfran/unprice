@@ -1,4 +1,5 @@
 import { createTRPCRouter } from "#trpc"
+import { changePlan } from "./changePlan"
 import { changeRoleInvite } from "./changeRoleInvite"
 import { changeRoleMember } from "./changeRoleMember"
 import { create } from "./create"
@@ -6,8 +7,8 @@ import { deleteWorkspace } from "./delete"
 import { deleteInvite } from "./deleteInvite"
 import { deleteMember } from "./deleteMember"
 import { getBillingOverview } from "./getBillingOverview"
-import { getUpgradeOptions } from "./getUpgradeOptions"
 import { getBySlug } from "./getBySlug"
+import { getUpgradeOptions } from "./getUpgradeOptions"
 import { inviteMember } from "./inviteMember"
 import { listInvitesByActiveWorkspace } from "./listInvitesByActiveWorkspace"
 import { listMembersByActiveWorkspace } from "./listMembersByActiveWorkspace"
@@ -18,6 +19,7 @@ import { signUp } from "./signUp"
 
 export const workspaceRouter = createTRPCRouter({
   create: create,
+  changePlan: changePlan,
   signUp: signUp,
   deleteMember: deleteMember,
   getBillingOverview: getBillingOverview,
