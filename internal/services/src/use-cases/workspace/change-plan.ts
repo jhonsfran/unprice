@@ -2,6 +2,7 @@ import type { Database } from "@unprice/db"
 import {
   type PaymentProvider,
   type SubscriptionPhase,
+  getAnchor,
   paymentProviderSchema,
   subscriptionItemsConfigSchema,
 } from "@unprice/db/validators"
@@ -419,38 +420,43 @@ export async function changeWorkspacePlan(
     .transaction(async (tx) => {
       const services = deps.services
       const targetStartAt = input.whenToChange === "immediately" ? now + 1 : currentCycleEndAt
+      const currentPhaseEndAt = input.whenToChange === "immediately" ? now : currentCycleEndAt - 1
       const billingPeriodsNow = targetStartAt
+      const currentPhaseCreditLinePolicy: SubscriptionPhase["creditLinePolicy"] =
+        activePhase.creditLinePolicy === "capped" ? "capped" : "uncapped"
+      const currentPhaseBillingAnchor = getAnchor(
+        activePhase.startAt,
+        activePhase.planVersion.billingConfig.billingInterval,
+        activePhase.planVersion.billingConfig.billingAnchor
+      )
+      const closeCurrentPhaseInput: SubscriptionPhase = {
+        id: activePhase.id,
+        projectId: billingProjectId,
+        subscriptionId,
+        planVersionId: activePhase.planVersionId,
+        paymentProvider: activePhase.paymentProvider,
+        creditLinePolicy: currentPhaseCreditLinePolicy,
+        creditLineAmount: activePhase.creditLineAmount,
+        billingAnchor: currentPhaseBillingAnchor,
+        trialUnits: 0,
+        paymentMethodId: null,
+        trialEndsAt: null,
+        startAt: activePhase.startAt,
+        endAt: currentPhaseEndAt,
+        items: [],
+      }
 
-      if (input.whenToChange === "immediately") {
-        const closeCurrentPhaseInput = {
-          id: activePhase.id,
-          projectId: billingProjectId,
-          subscriptionId,
-          planVersionId: activePhase.planVersionId,
-          paymentProvider: activePhase.paymentProvider,
-          creditLinePolicy: activePhase.creditLinePolicy,
-          creditLineAmount: activePhase.creditLineAmount,
-          billingAnchor: activePhase.planVersion.billingConfig.billingAnchor,
-          trialUnits: 0,
-          paymentMethodId: null,
-          trialEndsAt: null,
-          startAt: activePhase.startAt,
-          endAt: now,
-          items: [],
-        } as SubscriptionPhase
+      const closeResult = await services.subscriptions.updatePhase({
+        input: closeCurrentPhaseInput,
+        subscriptionId,
+        projectId: billingProjectId,
+        db: tx,
+        now,
+      })
 
-        const closeResult = await services.subscriptions.updatePhase({
-          input: closeCurrentPhaseInput,
-          subscriptionId,
-          projectId: billingProjectId,
-          db: tx,
-          now,
-        })
-
-        if (closeResult.err) {
-          transactionError = closeResult.err
-          throw closeResult.err
-        }
+      if (closeResult.err) {
+        transactionError = closeResult.err
+        throw closeResult.err
       }
 
       const createResult = await services.subscriptions.createPhase({

@@ -2,6 +2,7 @@ import type { Database } from "@unprice/db"
 import { FetchError, Ok, SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
+import { UnPriceSubscriptionError } from "../../subscriptions/errors"
 
 const { getCustomerCurrentAccessMock } = vi.hoisted(() => ({
   getCustomerCurrentAccessMock: vi.fn(),
@@ -35,6 +36,7 @@ function createDeps(overrides?: {
   now?: number
   currentPlanVersionId?: string
   currentCycleEndAt?: number
+  activePhaseEndAt?: number | null
   targetPlanVersion?: Partial<{
     id: string
     active: boolean
@@ -79,7 +81,7 @@ function createDeps(overrides?: {
           creditLineAmount: null,
           paymentProvider: "sandbox",
           startAt: now - 1000,
-          endAt: currentCycleEndAt,
+          endAt: overrides?.activePhaseEndAt ?? null,
           planVersion: {
             id: overrides?.currentPlanVersionId ?? "pv_current",
             version: 1,
@@ -346,12 +348,38 @@ describe("changeWorkspacePlan", () => {
     })
   })
 
-  it("creates the new phase at the current cycle end for end-of-cycle changes", async () => {
+  it("ends an open-ended current phase at cycle end minus one before scheduling the next phase", async () => {
     const now = Date.parse("2026-07-04T10:00:00.000Z")
     const currentCycleEndAt = now + 86_400_000
+    const activePhase = {
+      startAt: now - 1000,
+      endAt: null as number | null,
+    }
     const { deps, tx, updatePhase, createPhase, generateBillingPeriods } = createDeps({
       now,
       currentCycleEndAt,
+      activePhaseEndAt: activePhase.endAt,
+    })
+
+    updatePhase.mockImplementation(async ({ input }) => {
+      activePhase.endAt = input.endAt
+      return Ok({ id: "phase_current" })
+    })
+
+    createPhase.mockImplementation(async ({ input }) => {
+      const overlapsOpenEndedPhase =
+        activePhase.endAt === null || input.startAt <= activePhase.endAt
+      const isConsecutive = activePhase.endAt !== null && activePhase.endAt + 1 === input.startAt
+
+      if (overlapsOpenEndedPhase || !isConsecutive) {
+        return {
+          err: new UnPriceSubscriptionError({
+            message: "Phases overlap, there is already a phase in the same date range",
+          }),
+        }
+      }
+
+      return Ok({ id: "phase_new" })
     })
 
     const result = await changeWorkspacePlan(deps as never, createInput("end_of_cycle"))
@@ -362,7 +390,18 @@ describe("changeWorkspacePlan", () => {
       phaseId: "phase_new",
       effectiveAt: currentCycleEndAt,
     })
-    expect(updatePhase).not.toHaveBeenCalled()
+    expect(updatePhase).toHaveBeenCalledWith({
+      input: expect.objectContaining({
+        id: "phase_current",
+        subscriptionId: "sub_123",
+        startAt: now - 1000,
+        endAt: currentCycleEndAt - 1,
+      }),
+      subscriptionId: "sub_123",
+      projectId: "proj_billing",
+      db: tx,
+      now,
+    })
     expect(createPhase).toHaveBeenCalledWith({
       input: expect.objectContaining({
         subscriptionId: "sub_123",
@@ -379,6 +418,7 @@ describe("changeWorkspacePlan", () => {
       now: currentCycleEndAt,
       db: tx,
     })
+    expect(activePhase.endAt).toBe(currentCycleEndAt - 1)
   })
 
   it("returns the phase error and skips period generation when phase creation fails", async () => {
