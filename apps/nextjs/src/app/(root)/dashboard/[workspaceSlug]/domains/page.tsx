@@ -17,11 +17,20 @@ import DomainConfiguration from "./_components/domain-configuration"
 import { DomainDialog } from "./_components/domain-dialog"
 import { VerifyDomainButton } from "./_components/domain-verify-button"
 
-export default async function PageDomains() {
+export default async function PageDomains(props: {
+  params: { workspaceSlug: string }
+}) {
+  const { workspaceSlug } = props.params
   const isDomainsEnabled = await entitlementFlag(FEATURE_SLUGS.DOMAINS.SLUG)
 
   if (!isDomainsEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.DOMAINS.SLUG}
+        returnTo={`/${workspaceSlug}/domains`}
+      />
+    )
   }
 
   const { domains } = await api.domains.getAllByActiveWorkspace()

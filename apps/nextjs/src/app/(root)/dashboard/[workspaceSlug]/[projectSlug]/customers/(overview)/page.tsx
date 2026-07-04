@@ -29,7 +29,13 @@ export default async function ProjectUsersPage(props: {
   const isCustomersEnabled = await entitlementFlag(FEATURE_SLUGS.CUSTOMERS.SLUG)
 
   if (!isCustomersEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.CUSTOMERS.SLUG}
+        returnTo={baseUrl}
+      />
+    )
   }
 
   const { customers, pageCount } = await api.customers.listByActiveProject(filters)

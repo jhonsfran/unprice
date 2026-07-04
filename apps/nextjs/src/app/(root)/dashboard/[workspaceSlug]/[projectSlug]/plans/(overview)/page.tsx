@@ -21,7 +21,13 @@ export default async function PlansPage(props: {
   const isPlansEnabled = await entitlementFlag(FEATURE_SLUGS.PLANS.SLUG)
 
   if (!isPlansEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.PLANS.SLUG}
+        returnTo={`/${workspaceSlug}/${projectSlug}/plans`}
+      />
+    )
   }
 
   const { plans } = await api.plans.listByActiveProject({})

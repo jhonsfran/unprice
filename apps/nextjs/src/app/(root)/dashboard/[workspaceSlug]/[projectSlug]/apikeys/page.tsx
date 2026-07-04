@@ -21,7 +21,13 @@ export default async function ApiKeysPage(props: {
   const isApiKeysEnabled = await entitlementFlag(FEATURE_SLUGS.API_KEYS.SLUG)
 
   if (!isApiKeysEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={props.params.workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.API_KEYS.SLUG}
+        returnTo={`/${props.params.workspaceSlug}/${props.params.projectSlug}/apikeys`}
+      />
+    )
   }
 
   const filters = dataTableParams(props.searchParams)

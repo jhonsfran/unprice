@@ -20,13 +20,19 @@ export default async function DashboardPlans(props: {
   params: { workspaceSlug: string; projectSlug: string }
   searchParams: SearchParams
 }) {
+  const { projectSlug, workspaceSlug } = props.params
   const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
 
   if (!isPagesEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.PAGES.SLUG}
+        returnTo={`/${workspaceSlug}/${projectSlug}/dashboard/plans`}
+      />
+    )
   }
 
-  const { projectSlug, workspaceSlug } = props.params
   const baseUrl = `/${workspaceSlug}/${projectSlug}`
   const filter = intervalParams(props.searchParams)
   const interval = prepareInterval(filter.intervalFilter)

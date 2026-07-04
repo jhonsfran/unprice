@@ -1,13 +1,20 @@
 "use client"
 
 import { Button } from "@unprice/ui/button"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { WorkspaceUpgradeEntrypoint } from "~/components/billing/workspace-upgrade-entrypoint"
 import { BlurImage } from "~/components/blur-image"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 
-export default function UpgradePlanError() {
+export default function UpgradePlanError(props: {
+  workspaceSlug: string
+  blockedFeatureSlug?: string
+  returnTo?: string
+}) {
   const router = useRouter()
+  const pathname = usePathname()
+  const returnTo = props.returnTo ?? pathname
 
   return (
     <DashboardShell>
@@ -30,8 +37,16 @@ export default function UpgradePlanError() {
           </EmptyPlaceholder.Description>
           <EmptyPlaceholder.Action>
             <div className="mt-6 flex flex-row items-center justify-center gap-10">
-              {/* TODO: add update subscription button */}
-              <Button variant="primary">Update plan</Button>
+              <WorkspaceUpgradeEntrypoint
+                intent={{
+                  source: "feature_block",
+                  workspaceSlug: props.workspaceSlug,
+                  returnTo,
+                  blockedFeatureSlug: props.blockedFeatureSlug,
+                }}
+              >
+                Update plan
+              </WorkspaceUpgradeEntrypoint>
               <Button variant="default" onClick={() => router.back()}>
                 Back
               </Button>

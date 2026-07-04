@@ -24,7 +24,13 @@ export default async function WorkspaceOverviewPage(props: {
   const onboardingCompleted = session?.user?.onboardingCompleted ?? false
 
   if (!isProjectsEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={props.params.workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.PROJECTS.SLUG}
+        returnTo={`/${props.params.workspaceSlug}`}
+      />
+    )
   }
 
   const { projects } = await api.projects.listByWorkspace({

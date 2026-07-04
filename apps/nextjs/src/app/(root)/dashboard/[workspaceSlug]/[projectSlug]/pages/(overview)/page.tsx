@@ -22,7 +22,13 @@ export default async function PageOverviewPage(props: {
   const isPagesEnabled = await entitlementFlag(FEATURE_SLUGS.PAGES.SLUG)
 
   if (!isPagesEnabled) {
-    return <UpgradePlanError />
+    return (
+      <UpgradePlanError
+        workspaceSlug={workspaceSlug}
+        blockedFeatureSlug={FEATURE_SLUGS.PAGES.SLUG}
+        returnTo={`/${workspaceSlug}/${projectSlug}/pages`}
+      />
+    )
   }
 
   const { pages } = await api.pages.listByActiveProject({})
