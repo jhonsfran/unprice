@@ -10,6 +10,7 @@ export default function BillingPageLoading() {
         <HeaderTab
           title="Billing & Usage"
           description="Plan, payment, and usage evidence for this workspace."
+          action={<Skeleton className="h-9 w-56" />}
         />
       }
     >

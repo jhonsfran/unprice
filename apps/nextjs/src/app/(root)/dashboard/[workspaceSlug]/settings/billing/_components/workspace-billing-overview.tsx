@@ -5,7 +5,6 @@ import type { Interval } from "@unprice/analytics"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { UsageDashboardView } from "~/components/analytics/usage-dashboard-view"
 import { CurrentAccessOverview } from "~/components/billing/current-access-overview"
-import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { useIntervalFilter } from "~/hooks/use-filter"
 import { useQueryInvalidation } from "~/hooks/use-query-invalidation"
 import { useTRPC } from "~/trpc/client"
@@ -66,15 +65,6 @@ export function WorkspaceBillingOverview({
         isFetching={isFetching}
         noActivePlanDescription="This workspace has no active subscription billing period."
         noActiveEntitlementsDescription="Access grants will appear here once the workspace has an active subscription phase."
-        billingPeriodAction={
-          <PaymentMethodButton
-            customerId={overview.customerId}
-            successUrl={`/${workspaceSlug}/settings/billing`}
-            cancelUrl={`/${workspaceSlug}/settings/billing`}
-            paymentProvider="stripe"
-            hasPaymentMethods
-          />
-        }
       />
       <UsageDashboardView
         data={overview.usage}

@@ -1,6 +1,6 @@
 import { cn } from "@unprice/ui/utils"
 
-interface UnpriceLogoProps {
+export interface UnpriceLogoProps {
   size?: "xs" | "sm" | "md" | "lg" | "xl"
   variant?: "full" | "icon" | "wordmark"
   theme?: "dark" | "light"

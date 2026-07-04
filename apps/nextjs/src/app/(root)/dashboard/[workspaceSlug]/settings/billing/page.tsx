@@ -2,6 +2,7 @@ import { getSession } from "@unprice/auth/server-rsc"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
 import { AlertCircle } from "lucide-react"
 import type { SearchParams } from "nuqs/server"
+import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 import HeaderTab from "~/components/layout/header-tab"
 import { intervalParams } from "~/lib/searchParams"
@@ -23,6 +24,16 @@ export default async function BillingPage({
   const isMainWorkspace = atw?.isMain
   const customerId = atw?.unPriceCustomerId ?? ""
   const filter = await intervalParams(searchParams)
+  const billingPortalAction =
+    !isMainWorkspace && customerId ? (
+      <PaymentMethodButton
+        customerId={customerId}
+        successUrl={`/${workspaceSlug}/settings/billing`}
+        cancelUrl={`/${workspaceSlug}/settings/billing`}
+        paymentProvider="stripe"
+        hasPaymentMethods
+      />
+    ) : null
 
   return (
     <DashboardShell
@@ -30,6 +41,7 @@ export default async function BillingPage({
         <HeaderTab
           title="Billing & Usage"
           description="Plan, payment, and usage evidence for this workspace."
+          action={billingPortalAction}
         />
       }
     >

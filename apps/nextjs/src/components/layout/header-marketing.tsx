@@ -1,5 +1,4 @@
 import { APP_DOMAIN } from "@unprice/config"
-import { Badge } from "@unprice/ui/badge"
 import { buttonVariants } from "@unprice/ui/button"
 import { ChevronRight } from "@unprice/ui/icons"
 import { cn } from "@unprice/ui/utils"
@@ -16,10 +15,7 @@ export default function HeaderMarketing() {
     >
       <div className="flex h-14 w-full items-center space-x-8 sm:justify-between sm:space-x-0">
         <div className="flex items-center justify-start">
-          <Logo size="md" />{" "}
-          <Badge variant="outline" className="mt-1 ml-2">
-            beta
-          </Badge>
+          <Logo size="md" />
         </div>
 
         <div className="flex flex-1 items-center justify-end space-x-2">
