@@ -18,7 +18,7 @@ import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import Cookies from "js-cookie"
 
-export interface PricingPlan {
+export interface MarketingPricingPlan {
   name: string
   id: string
   flatPrice: string
@@ -43,13 +43,19 @@ export interface PricingPlan {
   version: string
 }
 
-export interface PricingCardProps extends React.HTMLAttributes<HTMLDivElement> {
-  plan: PricingPlan
+export interface MarketingPricingCardProps extends React.HTMLAttributes<HTMLDivElement> {
+  plan: MarketingPricingPlan
   isPopular: boolean
   isOnly: boolean
 }
 
-export function PricingCard({ plan, isPopular, className, isOnly, ...props }: PricingCardProps) {
+export function MarketingPricingCard({
+  plan,
+  isPopular,
+  className,
+  isOnly,
+  ...props
+}: MarketingPricingCardProps) {
   const currentPrice = plan.flatPrice
 
   return (

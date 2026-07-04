@@ -4,12 +4,12 @@ import { cn } from "@unprice/ui/utils"
 import { motion } from "framer-motion"
 import type React from "react"
 import Balancer from "react-wrap-balancer"
-import { PricingCard, type PricingPlan } from "./pricing-card"
+import { MarketingPricingCard, type MarketingPricingPlan } from "./marketing-pricing-card"
 
-export interface PricingTableProps extends React.HTMLAttributes<HTMLDivElement> {
+export interface MarketingPricingTableProps extends React.HTMLAttributes<HTMLDivElement> {
   title?: string
   subtitle?: string
-  plans: PricingPlan[]
+  plans: MarketingPricingPlan[]
   popularPlan: string
 }
 
@@ -66,13 +66,13 @@ const heroImageVariants = {
   },
 }
 
-export function PricingTable({
+export function MarketingPricingTable({
   title = "Simple, Transparent Pricing",
   subtitle = "Choose the plan that's right for you",
   plans,
   className,
   popularPlan,
-}: PricingTableProps) {
+}: MarketingPricingTableProps) {
   // Ensure the popular plan is always in the middle
   // const reorderedPlans = React.useMemo(() => {
   //   const plansCopy = [...plans]
@@ -118,7 +118,7 @@ export function PricingTable({
           })}
         >
           {plans.map((plan) => (
-            <PricingCard
+            <MarketingPricingCard
               key={plan.name}
               plan={plan}
               isPopular={plan.name === popularPlan}

@@ -15,9 +15,9 @@ import { ErrorMessage } from "../_components/error-message"
 import { Faqs } from "../_components/faqs"
 import FooterSites from "../_components/footer"
 import { ForceRefreshOnPreview } from "../_components/force-revalidate"
-import type { PricingPlan } from "../_components/pricing-card"
+import type { MarketingPricingPlan } from "../_components/marketing-pricing-card"
 import { FeatureComparison } from "../_components/pricing-comparision"
-import { PricingTable } from "../_components/pricing-table"
+import { MarketingPricingTable } from "../_components/marketing-pricing-table"
 
 // check shadcn landing page for inspiration
 export const revalidate = 3600 // 1 hour
@@ -117,7 +117,7 @@ export default async function DomainPage({
     plansUnprice = selectedPlans.map((p) => map.get(p.id) ?? null)
   }
 
-  // Transform Unprice plans to match our PricingPlan interface
+  // Transform Unprice plans to match our MarketingPricingPlan interface
   const plans =
     (plansUnprice
       .map((version) => {
@@ -164,7 +164,7 @@ export default async function DomainPage({
           version: version.version.toString(),
         }
       })
-      .filter(Boolean) as PricingPlan[]) || []
+      .filter(Boolean) as MarketingPricingPlan[]) || []
 
   const { text } = generateColorsFromBackground(page.colorPalette?.primary)
   const isUnprice = page.customDomain?.endsWith("unprice.dev")
@@ -222,7 +222,12 @@ export default async function DomainPage({
         <HeaderMarketing />
       )}
       <main className="container mx-auto mt-20 px-4 py-16">
-        <PricingTable plans={plans} popularPlan="PRO" title={page.title} subtitle={page.copy} />
+        <MarketingPricingTable
+          plans={plans}
+          popularPlan="PRO"
+          title={page.title}
+          subtitle={page.copy}
+        />
         <FeatureComparison plans={plans} />
         <Faqs faqs={page.faqs ?? []} />
       </main>

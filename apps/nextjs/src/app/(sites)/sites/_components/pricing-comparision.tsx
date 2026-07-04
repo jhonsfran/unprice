@@ -3,10 +3,10 @@
 import { cn } from "@unprice/ui/utils"
 import { motion } from "framer-motion"
 import { Check, X } from "lucide-react"
-import type { PricingPlan } from "./pricing-card"
+import type { MarketingPricingPlan } from "./marketing-pricing-card"
 
 interface FeatureComparisonProps {
-  plans: PricingPlan[]
+  plans: MarketingPricingPlan[]
 }
 
 const containerVariants = {
