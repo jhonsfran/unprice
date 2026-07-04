@@ -395,4 +395,51 @@ describe("changeWorkspacePlan", () => {
     expect(createPhase).toHaveBeenCalled()
     expect(generateBillingPeriods).not.toHaveBeenCalled()
   })
+
+  it("rolls back staged immediate-change writes when billing period generation fails", async () => {
+    const billingError = new FetchError({
+      message: "billing period generation failed",
+      retry: false,
+    })
+    const committedWrites: string[] = []
+    let rolledBack = false
+    const tx = {
+      stagedWrites: [] as string[],
+    } as unknown as Database & { stagedWrites: string[] }
+
+    const { deps, updatePhase, createPhase, generateBillingPeriods } = createDeps()
+
+    deps.db.transaction = vi.fn(async (callback: (db: Database) => Promise<unknown>) => {
+      try {
+        const result = await callback(tx)
+        committedWrites.push(...tx.stagedWrites)
+        return result
+      } catch (error) {
+        rolledBack = true
+        return Promise.reject(error)
+      }
+    }) as never
+
+    updatePhase.mockImplementation(async ({ db }) => {
+      ;(db as Database & { stagedWrites: string[] }).stagedWrites.push("close-current-phase")
+      return Ok({ id: "phase_current" })
+    })
+
+    createPhase.mockImplementation(async ({ db }) => {
+      ;(db as Database & { stagedWrites: string[] }).stagedWrites.push("create-target-phase")
+      return Ok({ id: "phase_new" })
+    })
+
+    generateBillingPeriods.mockResolvedValue({ err: billingError })
+
+    const result = await changeWorkspacePlan(deps as never, createInput("immediately"))
+
+    expect(result.err).toBe(billingError)
+    expect(updatePhase).toHaveBeenCalled()
+    expect(createPhase).toHaveBeenCalled()
+    expect(generateBillingPeriods).toHaveBeenCalled()
+    expect(rolledBack).toBe(true)
+    expect(committedWrites).toEqual([])
+    expect(tx.stagedWrites).toEqual(["close-current-phase", "create-target-phase"])
+  })
 })
