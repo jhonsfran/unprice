@@ -1,12 +1,9 @@
-import { calculateFlatPricePlan, getTrialUnitLabel } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Typography } from "@unprice/ui/typography"
-import { cn } from "@unprice/ui/utils"
-import { PlanVersionPublish } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/_components/plan-version-actions"
-import { PricingItem } from "~/components/forms/pricing-item"
+import { PlanVersionPricingCard } from "~/components/billing/plan-version-pricing-card"
 
 export function PricingCard({
   planVersion,
@@ -22,76 +19,16 @@ export function PricingCard({
 }) {
   if (!planVersion) return null
 
-  const { err, val } = calculateFlatPricePlan({
-    planVersion,
-    prorate: 1,
-  })
-
-  if (err) {
-    return <>Error calculating price</>
-  }
-
-  const isPublished = planVersion.status === "published"
-  const trialUnits = planVersion.trialUnits ?? 0
-  const trialUnitLabel = getTrialUnitLabel({
-    billingInterval: planVersion.billingConfig.billingInterval,
-    units: trialUnits,
-  })
-  const billingLabel = planVersion.billingConfig.name
-
   return (
-    <Card className={cn("flex w-[300px] flex-col", className)}>
-      <CardHeader className="space-y-2 pb-4">
-        <Typography variant="h2" className="leading-tight">
-          {planVersion.plan.title}
-        </Typography>
-        {planVersion.description && (
-          <CardDescription className="line-clamp-2">{planVersion.description}</CardDescription>
-        )}
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-3 pb-6">
-        {!planVersion.plan.enterprisePlan && (
-          <div className="space-y-1">
-            <div className="flex items-baseline gap-1.5">
-              <span className="font-extrabold text-4xl tracking-tight">{val.displayAmount}</span>
-              <span className="text-muted-foreground text-sm">/ {billingLabel}</span>
-            </div>
-            {trialUnits > 0 && (
-              <p className="text-muted-foreground text-xs">
-                {trialUnits} {trialUnitLabel} free trial
-              </p>
-            )}
-          </div>
-        )}
-
-        {showPublish && !isPublished ? (
-          <PlanVersionPublish planVersionId={planVersion.id} onConfirmAction={onPublish} />
-        ) : (
-          <Button className="w-full">Get Started</Button>
-        )}
-      </CardContent>
-
-      <CardFooter className="flex w-full flex-col border-t px-6 py-6">
-        <div className="w-full space-y-4">
-          <p className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-            What's included
-          </p>
-          <ul className="flex w-full flex-col space-y-3">
-            {[...planVersion.planFeatures]
-              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-              .filter((f) => !f.metadata?.hidden)
-              .map((feature) => {
-                return (
-                  <li key={feature.id} className="flex w-full flex-col justify-start">
-                    <PricingItem feature={feature} withCalculator withQuantity />
-                  </li>
-                )
-              })}
-          </ul>
-        </div>
-      </CardFooter>
-    </Card>
+    <PlanVersionPricingCard
+      planVersion={planVersion}
+      className={className}
+      action={
+        showPublish && planVersion.status !== "published"
+          ? { kind: "publish", onPublish }
+          : { kind: "select", label: "Get Started", onSelect: () => undefined }
+      }
+    />
   )
 }
 

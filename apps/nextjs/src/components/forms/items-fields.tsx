@@ -55,9 +55,9 @@ import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import { type Dinero, add, dinero, toDecimal } from "dinero.js"
 import { FeatureConfigForm } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/[planSlug]/_components/feature-config-form"
+import { PlanVersionFeatureListItem } from "~/components/billing/plan-version-feature-list"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { PriceFeature } from "~/components/forms/price-feature"
-import { PricingItem } from "~/components/forms/pricing-item"
 import { PropagationStopper } from "~/components/prevent-propagation"
 import { capitalize } from "~/lib/capitalize"
 
@@ -345,10 +345,10 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                                   </Dialog>
                                 </PropagationStopper>
                               )}
-                              <PricingItem
+                              <PlanVersionFeatureListItem
                                 feature={feature}
                                 withCalculator
-                                noCheckIcon
+                                hideCheckIcon
                                 withQuantity={false}
                               />
                             </div>
