@@ -1,9 +1,16 @@
 import { z } from "zod"
 
+const appRelativePathSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.startsWith("/") && !value.startsWith("//"), {
+    message: "Expected an app-relative path",
+  })
+
 export const workspaceUpgradeIntentSchema = z.object({
   source: z.enum(["billing", "feature_block", "usage_limit"]),
   workspaceSlug: z.string().min(1),
-  returnTo: z.string().min(1),
+  returnTo: appRelativePathSchema,
   blockedFeatureSlug: z.string().min(1).optional(),
   targetPlanVersionId: z.string().min(1).optional(),
 })

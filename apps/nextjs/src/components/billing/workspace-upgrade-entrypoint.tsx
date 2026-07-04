@@ -20,7 +20,7 @@ export function WorkspaceUpgradeEntrypoint(props: {
   }
 
   return (
-    <Button variant="primary" onClick={handleClick}>
+    <Button type="button" variant="primary" onClick={handleClick}>
       {props.children ?? "Change plan"}
     </Button>
   )
