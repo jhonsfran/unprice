@@ -163,6 +163,8 @@ const analyticsRunContextShape = {
   workload_id: z.string().nullable().optional(),
 }
 
+const analyticsIngestionModeSchema = z.enum(["async", "sync", "run"])
+
 export const entitlementMeterFactSchemaV1 = z.object({
   event_id: z.string(),
   idempotency_key: z.string(),
@@ -209,6 +211,7 @@ export const ingestionEventSchemaV1 = z.object({
   source_id: z.string(),
   source_name: z.string().nullable().optional(),
   ...analyticsRunContextShape,
+  ingestion_mode: analyticsIngestionModeSchema.nullable().optional(),
   event_slug: z.string(),
   idempotency_key: z.string(),
   state: z.enum(["processed", "rejected", "failed"]),
@@ -455,6 +458,7 @@ export const ingestionRecentEventRowSchema = ingestionEventSchemaV1
     parent_run_id: true,
     workload_type: true,
     workload_id: true,
+    ingestion_mode: true,
     state: true,
     rejection_reason: true,
     failure_stage: true,

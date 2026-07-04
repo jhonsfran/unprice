@@ -48,23 +48,26 @@
         "consumers": [
           {
             "queue": "unprice-api-ingestion-shard-0-prod",
-            "max_batch_size": 100,
+            "max_batch_size": 50,
             "max_batch_timeout": 20,
             "max_retries": 3,
+            "retry_delay": 60,
             "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
           },
           {
             "queue": "unprice-api-ingestion-shard-1-prod",
-            "max_batch_size": 100,
+            "max_batch_size": 50,
             "max_batch_timeout": 20,
             "max_retries": 3,
+            "retry_delay": 60,
             "dead_letter_queue": "unprice-api-ingestion-dlq-prod"
           },
           {
             "queue": "unprice-api-ingestion-reporting-prod",
             "max_batch_size": 100,
-            "max_batch_timeout": 30,
+            "max_batch_timeout": 5,
             "max_retries": 3,
+            "retry_delay": 60,
             "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-prod"
           }
         ]
@@ -179,23 +182,26 @@
         "consumers": [
           {
             "queue": "unprice-api-ingestion-shard-0-preview",
-            "max_batch_size": 100,
+            "max_batch_size": 50,
             "max_batch_timeout": 20,
             "max_retries": 3,
+            "retry_delay": 60,
             "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
           },
           {
             "queue": "unprice-api-ingestion-shard-1-preview",
-            "max_batch_size": 100,
+            "max_batch_size": 50,
             "max_batch_timeout": 20,
             "max_retries": 3,
+            "retry_delay": 60,
             "dead_letter_queue": "unprice-api-ingestion-dlq-preview"
           },
           {
             "queue": "unprice-api-ingestion-reporting-preview",
             "max_batch_size": 100,
-            "max_batch_timeout": 30,
+            "max_batch_timeout": 5,
             "max_retries": 3,
+            "retry_delay": 60,
             "dead_letter_queue": "unprice-api-ingestion-reporting-dlq-preview"
           }
         ]

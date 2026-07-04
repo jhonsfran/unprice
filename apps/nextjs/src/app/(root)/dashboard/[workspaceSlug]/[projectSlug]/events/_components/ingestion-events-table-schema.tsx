@@ -44,6 +44,27 @@ const sourceTypeOptions = [
   },
 ]
 
+const ingestionModeOptions = [
+  {
+    label: "Budgeted run",
+    value: "run",
+  },
+  {
+    label: "Sync",
+    value: "sync",
+  },
+  {
+    label: "Async",
+    value: "async",
+  },
+  {
+    label: "Unknown",
+    value: "unknown",
+  },
+] as const
+
+type IngestionEventMode = (typeof ingestionModeOptions)[number]["value"]
+
 export type IngestionEventsFilterId =
   | "state"
   | "eventSlug"
@@ -67,6 +88,19 @@ function statusBadgeVariant(
   }
 
   return state === "failed" ? "destructive" : "warning"
+}
+
+export function getIngestionEventMode(row: IngestionEventRow): IngestionEventMode {
+  if (row.runId) {
+    return "run"
+  }
+
+  return row.ingestionMode ?? "unknown"
+}
+
+export function formatIngestionEventModeLabel(row: IngestionEventRow): string {
+  const mode = getIngestionEventMode(row)
+  return ingestionModeOptions.find((option) => option.value === mode)?.label ?? mode
 }
 
 function isReplayableFailedRow(
@@ -175,6 +209,17 @@ export function buildIngestionEventsColumns(params: {
         return value.includes(String(filterValue).toLowerCase())
       },
       size: 220,
+    },
+    {
+      id: "ingestionMode",
+      accessorFn: (row) => getIngestionEventMode(row),
+      header: "Ingestion mode",
+      cell: ({ row }) => (
+        <Badge variant={getIngestionEventMode(row.original) === "run" ? "secondary" : "outline"}>
+          {formatIngestionEventModeLabel(row.original)}
+        </Badge>
+      ),
+      size: 160,
     },
     {
       accessorKey: "customerId",

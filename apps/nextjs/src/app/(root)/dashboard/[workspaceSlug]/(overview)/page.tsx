@@ -22,6 +22,7 @@ export default async function WorkspaceOverviewPage(props: {
 
   const session = await getSession()
   const onboardingCompleted = session?.user?.onboardingCompleted ?? false
+  const isDevelopment = process.env.NODE_ENV === "development"
 
   if (!isProjectsEnabled) {
     return (
@@ -44,7 +45,7 @@ export default async function WorkspaceOverviewPage(props: {
           title="Projects"
           description="Projects group the plans, customers, events, wallets, and invoices in one money path."
           action={
-            !onboardingCompleted ? (
+            !onboardingCompleted || isDevelopment ? (
               <SuperLink href={`/${props.params.workspaceSlug}/onboarding`}>
                 <Button>
                   <Plus className="mr-2 h-4 w-4" />

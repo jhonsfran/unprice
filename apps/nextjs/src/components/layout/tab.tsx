@@ -80,7 +80,7 @@ export function ShortLink({
     <SuperLink
       href={href}
       className={cn(
-        "flex items-center gap-x-2.5 rounded-md px-2 py-1.5 font-medium text-sm transition hover:text-background-textContrast",
+        "flex items-center gap-x-2.5 rounded-md px-2 py-1.5 font-medium text-xs transition hover:text-background-textContrast",
         focusRing
       )}
     >

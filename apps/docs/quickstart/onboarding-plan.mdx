@@ -1,83 +1,229 @@
 ---
-title: "Quickstart"
-description: "Go from zero to monetized in under 5 minutes."
+title: "One paid action"
+description: "Put one paid action on the Unprice money path."
 ---
 
-Integration with Unprice is designed to be seamless. Follow these steps to start managing your pricing.
+Start with the action in your product that can burn a customer's credits, budget, or usage
+allowance. Prove that one path before you migrate billing or enforce every feature.
 
-## 1. Configure your Model
-Pricing in Unprice is decoupled from your code. You define your model in the dashboard first.
+The first integration has one job:
 
-1. **Create a Plan**: Give it a name like "Pro" and a slug like `pro`.
-2. **Create a Plan Version**: Plans are versioned so you can safely iterate.
-3. **Add Features**: Define what you are selling (e.g., "API Requests") and choose a pricing type (Flat, Tiered, or Usage-based).
-4. **Publish**: Once published, your version is ready to accept subscriptions.
+> Decide whether one paid action should run, then keep the evidence that explains what happened.
 
-## 2. Install & Initialize
-Install our type-safe SDK and initialize it with your Project API Key.
+## 1. Pick the paid action
+
+Choose a narrow action with a clear customer and feature:
+
+- `ai.generate` for an LLM call
+- `api.request` for a billable API request
+- `workflow.run` for a multi-step job
+- `export.create` for a costly export
+
+Write down the feature slug and event slug you want your app to use:
+
+| Product concept | Example |
+| --- | --- |
+| Feature slug | `ai-messages`, `ai-generations`, or `ai-tools` |
+| Event slug | `completions` |
+| Customer ID | `cus_1234567890` |
+
+Use the event slug for the broad thing your app observed. Use feature slugs for the specific
+product features that read from that event.
+
+## 2. Publish a plan version
+
+In the dashboard:
+
+1. Create a plan, for example `Pro`.
+2. Add the feature that gates or meters the paid action.
+3. Configure the meter if the feature is usage-based.
+4. Publish the plan version.
+
+The plan version is the commercial rule your customer is pinned to. Future pricing experiments can
+ship as new plan versions without silently moving existing customers.
+
+## 3. Install the SDK
 
 <CodeGroup>
 ```bash npm
 npm install @unprice/api
 ```
+
 ```bash pnpm
 pnpm add @unprice/api
 ```
 </CodeGroup>
 
-```typescript
+```ts
 import { Unprice } from "@unprice/api";
 
 const unprice = new Unprice({
-  token: process.env.UNPRICE_TOKEN // Found in your Project Settings
+  token: process.env.UNPRICE_TOKEN
 });
 ```
 
-## 3. Verify Access (Entitlements)
-Before performing an action, check if the customer has access and if they have enough balance for the specific operation.
+Keep the API key on your server. Do not expose it in browser code.
 
-```typescript
-const { result } = await unprice.access.check({
-  customerId: "cust_123",
-  featureSlug: "ai-generations"
+## 4. Create or map one customer
+
+Use `customers.signUp` when Unprice should provision the customer, subscription, entitlements,
+billing periods, and wallet from the plan version.
+
+```ts
+const { result, error } = await unprice.customers.signUp({
+  name: "Acme Inc.",
+  email: "buyer@example.com",
+  planSlug: "pro",
+  externalId: "acct_123",
+  successUrl: "https://yourapp.com/billing/success",
+  cancelUrl: "https://yourapp.com/billing/cancel"
 });
 
-if (result?.allowed) {
-  // 1. Perform your operation...
+if (error) {
+  throw new Error(error.message);
+}
 
-  // 2. Then report the usage to update their balance
-  await unprice.usage.consume({
-    idempotencyKey: "unique-id-for-this-request",
-    eventSlug: "ai_generation",
-    customerId: "cust_123",
-    featureSlug: "ai-generations",
+const customerId = result.customerId;
+```
+
+If you already have customers in your app, store the returned Unprice `customerId` beside your own
+account ID.
+
+## 5. Run the decision in shadow
+
+Call `access.check` beside your current logic before the paid action runs. It is read-only, so it is
+safe to log and compare before you let Unprice enforce anything.
+
+```ts
+const { result, error } = await unprice.access.check({
+  customerId,
+  featureSlug: "ai-messages"
+});
+
+if (error) {
+  throw new Error(error.message);
+}
+
+console.log({
+  unpriceWouldAllow: result.allowed,
+  usage: result.usage,
+  limit: result.limit,
+  spending: result.spending
+});
+```
+
+Use this first when you need confidence that the plan version, entitlement, usage, and wallet state
+match the product behavior you already trust.
+
+## 6. Enforce when the decision is ready
+
+When the usage amount is known at the decision point, use `usage.consume` before the paid work runs.
+It synchronously applies the usage event and returns the allow or deny decision.
+
+```ts
+const { result, error } = await unprice.usage.consume({
+  customerId,
+  featureSlug: "ai-messages",
+  eventSlug: "completions",
+  idempotencyKey: request.id,
+  properties: {
+    aiMessages: 1,
+    inputTokens: 1840,
+    outputTokens: 620,
+    model: "gpt-4.1-mini"
+  }
+});
+
+if (error) {
+  throw new Error(error.message);
+}
+
+if (!result.allowed) {
+  return new Response("Usage limit reached", { status: 429 });
+}
+
+return runAiGeneration();
+```
+
+Use the same `idempotencyKey` when retrying the same request.
+
+## 7. Use a budgeted run for multi-step work
+
+If the action can spend across multiple steps, reserve a budget before the work starts, report the
+usage created inside the workload, then close the run so unused reserved funds are released:
+
+```ts
+// Reserve spend before the workload creates cost.
+const { result: run, error: startError } = await unprice.runs.start({
+  customerId,
+  budgetAmountMinor: 5000,
+  idempotencyKey: `run:${request.id}`,
+  workloadType: "workflow",
+  workloadId: "wf_summary_123"
+});
+
+if (startError) {
+  throw new Error(startError.message);
+}
+
+// Only start the paid work after the reservation is running.
+if (run.status !== "running") {
+  return new Response(`Run rejected: ${run.status}`, { status: 429 });
+}
+
+let finalStatus: "completed" | "failed" = "completed";
+
+try {
+  // Report each billable step against the running budget.
+  const { result: usage, error: consumeError } = await unprice.runs.consume({
+    runId: run.runId,
+    featureSlug: "ai-tools",
+    eventSlug: "completions",
+    idempotencyKey: `run:${request.id}:step:summary`,
     properties: {
-      usage: 5
+      aiTools: 3,
+      inputTokens: 1840,
+      outputTokens: 620,
+      step: "summary"
     }
   });
+
+  if (consumeError) {
+    throw new Error(consumeError.message);
+  }
+
+  if (!usage.accepted) {
+    finalStatus = "failed";
+    return new Response(`Run rejected: ${usage.reason}`, { status: 429 });
+  }
+
+  await runSummaryWorkflow();
+} catch (error) {
+  finalStatus = "failed";
+  throw error;
+} finally {
+  // Always close the run so unused reservation funds are released.
+  const { error: endError } = await unprice.runs.end({
+    runId: run.runId,
+    status: finalStatus
+  });
+
+  if (endError) {
+    console.error(endError.message);
+  }
 }
 ```
 
-## 4. Subscribe a Customer
-Subscribe a customer to your latest plan version in a single call. Unprice handles the checkout redirect and provider linking.
+This keeps the budget envelope separate from the workload executor: your app owns the workflow;
+Unprice owns the customer spend authorization and evidence.
 
-```typescript
-const { result } = await unprice.customers.signUp({
-  email: "user@example.com",
-  planSlug: "pro", // Subscribes them to the latest version of 'pro'
-  successUrl: "https://yourapp.com/dashboard",
-  cancelUrl: "https://yourapp.com/pricing"
-});
+## Next steps
 
-// Redirect the user to the checkout URL provided in result.url
-```
-
-## Next Steps
 <CardGroup cols={2}>
-  <Card title="Feature Types" icon="list-check" href="/concepts/pricing/feature-types">
-    Deep dive into Flat, Tiered, Usage, and Package models.
+  <Card title="Choose the runtime call" icon="code" href="/quickstart/choose-operation">
+    Compare `access.check`, `usage.record`, `usage.consume`, and budgeted runs.
   </Card>
-  <Card title="Usage Metering" icon="gauge" href="/concepts/pricing/usage-metering">
-    Learn how aggregation and reset cycles work.
+  <Card title="TypeScript SDK" icon="terminal" href="/libraries/ts/sdk/overview">
+    Learn the SDK result shape, retries, base URL, and telemetry options.
   </Card>
 </CardGroup>

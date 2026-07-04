@@ -81,6 +81,11 @@
       "required": false
     },
     {
+      "name": "ingestion_mode",
+      "type": "string",
+      "required": false
+    },
+    {
       "name": "request_id",
       "type": "string",
       "required": true

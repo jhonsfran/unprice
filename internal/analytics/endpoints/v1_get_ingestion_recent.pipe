@@ -18,6 +18,7 @@ SQL >
       tupleElement(argMax(tuple(parent_run_id), tuple(handled_at, created_at)), 1) AS parent_run_id,
       tupleElement(argMax(tuple(workload_type), tuple(handled_at, created_at)), 1) AS workload_type,
       tupleElement(argMax(tuple(workload_id), tuple(handled_at, created_at)), 1) AS workload_id,
+      tupleElement(argMax(tuple(ingestion_mode), tuple(handled_at, created_at)), 1) AS ingestion_mode,
       argMax(state, tuple(handled_at, created_at)) AS state,
       tupleElement(argMax(tuple(rejection_reason), tuple(handled_at, created_at)), 1) AS rejection_reason,
       tupleElement(argMax(tuple(failure_stage), tuple(handled_at, created_at)), 1) AS failure_stage,
@@ -47,6 +48,7 @@ SQL >
       parent_run_id,
       workload_type,
       workload_id,
+      ingestion_mode,
       state,
       rejection_reason,
       failure_stage,
@@ -74,6 +76,12 @@ SQL >
           OR positionCaseInsensitive(event_slug, {{ String(search) }}) > 0
           OR positionCaseInsensitive(source_type, {{ String(search) }}) > 0
           OR positionCaseInsensitive(source_id, {{ String(search) }}) > 0
+          OR positionCaseInsensitive(coalesce(ingestion_mode, ''), {{ String(search) }}) > 0
+          OR positionCaseInsensitive(coalesce(run_id, ''), {{ String(search) }}) > 0
+          OR positionCaseInsensitive(coalesce(trace_id, ''), {{ String(search) }}) > 0
+          OR positionCaseInsensitive(coalesce(parent_run_id, ''), {{ String(search) }}) > 0
+          OR positionCaseInsensitive(coalesce(workload_type, ''), {{ String(search) }}) > 0
+          OR positionCaseInsensitive(coalesce(workload_id, ''), {{ String(search) }}) > 0
           OR positionCaseInsensitive(coalesce(rejection_reason, ''), {{ String(search) }}) > 0
         )
       {% end %}
@@ -93,6 +101,7 @@ SQL >
       parent_run_id,
       workload_type,
       workload_id,
+      ingestion_mode,
       state,
       rejection_reason,
       failure_stage,

@@ -325,6 +325,7 @@ export const registerIngestEventsV1 = (app: App) => {
         failureTestHeader: c.req.header(INGESTION_TEST_FAILURE_HEADER),
         requestId,
       }),
+      ingestionMode: "async",
       source: {
         environment: c.env.APP_ENV,
         apiKeyId: key.id,
@@ -419,6 +420,7 @@ export function generateEventId(now = Date.now()): string {
 export function buildIngestionQueueMessage(params: {
   body: IngestEventsRequest
   customerId: string
+  ingestionMode?: IngestionQueueMessage["ingestionMode"]
   projectId: string
   receivedAt: number
   requestId: string
@@ -426,8 +428,17 @@ export function buildIngestionQueueMessage(params: {
   timestamp: number
   workspaceId: string
 }): IngestionQueueMessage {
-  const { body, customerId, projectId, receivedAt, requestId, source, timestamp, workspaceId } =
-    params
+  const {
+    body,
+    customerId,
+    ingestionMode = "async",
+    projectId,
+    receivedAt,
+    requestId,
+    source,
+    timestamp,
+    workspaceId,
+  } = params
   const eventId = body.id ?? generateEventId(receivedAt)
 
   return ingestionQueueMessageSchema.parse({
@@ -443,6 +454,7 @@ export function buildIngestionQueueMessage(params: {
     timestamp,
     properties: body.properties,
     source,
+    ingestionMode,
   })
 }
 

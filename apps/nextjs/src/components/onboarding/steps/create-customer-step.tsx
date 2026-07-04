@@ -89,7 +89,7 @@ export function CreateCustomerStep({
         toast.error(data.message || "Request failed")
       } else {
         setCustomerResult(data)
-        updateContext({
+        await updateContext({
           flowData: {
             customer: data,
           },
@@ -222,7 +222,12 @@ export function CreateCustomerStep({
                     </pre>
                   </div>
 
-                  <Button className="w-full" onClick={() => next()}>
+                  <Button
+                    className="w-full"
+                    onClick={async () => {
+                      await next()
+                    }}
+                  >
                     Continue
                   </Button>
                 </CardContent>

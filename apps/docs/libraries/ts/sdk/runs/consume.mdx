@@ -1,0 +1,108 @@
+---
+title: "Consume run usage"
+description: "Apply usage to a running budgeted run."
+---
+
+Use `runs.consume` while a budgeted workload is running. It applies a synchronous metered event to
+the run and rejects spend when the run is no longer allowed to consume budget.
+
+<RequestExample>
+
+```ts
+// Report each billable step against the running budget.
+const { result, error } = await unprice.runs.consume({
+  runId: "brun_123",
+  featureSlug: "ai-tools",
+  eventSlug: "completions",
+  idempotencyKey: "run:req_123:step_1",
+  // One event can carry the properties used by several feature meters.
+  properties: {
+    aiTools: 3,
+    inputTokens: 1840,
+    outputTokens: 620,
+    step: "summarize"
+  }
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+if (!result.accepted) {
+  console.log(result.reason);
+  return;
+}
+
+console.log(result.run.remainingAmountMinor);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "accepted": true,
+  "reason": "accepted",
+  "run": {
+    "runId": "brun_123",
+    "status": "running",
+    "customerId": "cus_1234567890",
+    "budgetAmountMinor": 5000,
+    "consumedAmountMinor": 1200,
+    "remainingAmountMinor": 3800,
+    "currency": "USD",
+    "workloadType": "workflow",
+    "workloadId": "wf_summary_123",
+    "traceId": "trace_123",
+    "parentRunId": null
+  }
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="runId" type="string" required>
+    The budgeted run ID.
+</ParamField>
+
+<ParamField body="featureSlug" type="string" required>
+    The specific feature or entitlement to consume against the running budget.
+</ParamField>
+
+<ParamField body="idempotencyKey" type="string" required>
+    Logical key used to deduplicate this run consumption event.
+</ParamField>
+
+<ParamField body="eventSlug" type="string">
+    Broad event kind configured in Unprice.
+</ParamField>
+
+<ParamField body="id" type="string">
+    Optional event ID from your system.
+</ParamField>
+
+<ParamField body="timestamp" type="number">
+    Optional epoch-millisecond event timestamp.
+</ParamField>
+
+<ParamField body="properties" type="object">
+    Event properties used by meters. The targeted feature's meter reads the relevant field from this
+    object.
+</ParamField>
+
+## Response
+
+<ResponseField name="accepted" type="boolean" required>
+    Whether the run consumption event was accepted.
+</ResponseField>
+
+<ResponseField name="reason" type="string" required>
+    Decision reason. Expected values include `accepted`, `duplicate`, `insufficient_budget`,
+    `expired`, `not_running`, and `entitlement_denied`.
+</ResponseField>
+
+<ResponseField name="run" type="object" required>
+    Current budget run summary after the decision.
+</ResponseField>

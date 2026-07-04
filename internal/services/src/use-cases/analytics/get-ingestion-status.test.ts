@@ -361,6 +361,37 @@ describe("getIngestionStatus", () => {
     })
   })
 
+  it("returns ingestion mode and run context on recent events", async () => {
+    const { deps } = makeDeps({
+      recentRows: [
+        recentEvent({
+          event_id: "evt_run",
+          run_id: "brun_1",
+          trace_id: "trace_1",
+          parent_run_id: "brun_parent_1",
+          workload_type: "workflow",
+          workload_id: "billing-audit",
+          ingestion_mode: "sync",
+        }),
+      ],
+    })
+
+    const result = await getIngestionStatus(deps, baseInput())
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.recentEvents).toEqual([
+      expect.objectContaining({
+        eventId: "evt_run",
+        ingestionMode: "run",
+        runId: "brun_1",
+        traceId: "trace_1",
+        parentRunId: "brun_parent_1",
+        workloadType: "workflow",
+        workloadId: "billing-audit",
+      }),
+    ])
+  })
+
   it("returns a composite cursor and passes it to Tinybird for the next page", async () => {
     const { deps, analytics } = makeDeps({
       recentRows: [
@@ -485,6 +516,12 @@ function recentEvent(overrides: Partial<IngestionRecentEventRow> = {}): Ingestio
     event_slug: "usage.recorded",
     source_type: "api_key",
     source_id: "src_1",
+    run_id: null,
+    trace_id: null,
+    parent_run_id: null,
+    workload_type: null,
+    workload_id: null,
+    ingestion_mode: "async",
     state: "processed",
     rejection_reason: null,
     failure_stage: null,

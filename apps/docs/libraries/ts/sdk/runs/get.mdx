@@ -1,0 +1,56 @@
+---
+title: "Get budgeted run"
+description: "Get the current status and budget for a run."
+---
+
+Use `runs.get` to inspect the current state of a budgeted run.
+
+<RequestExample>
+
+```ts
+const { result, error } = await unprice.runs.get({
+  runId: "brun_123"
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result.remainingAmountMinor);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "runId": "brun_123",
+  "status": "running",
+  "customerId": "cus_1234567890",
+  "budgetAmountMinor": 5000,
+  "consumedAmountMinor": 1200,
+  "remainingAmountMinor": 3800,
+  "currency": "USD",
+  "workloadType": "workflow",
+  "workloadId": "wf_summary_123",
+  "traceId": "trace_123",
+  "parentRunId": null
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="runId" type="string" required>
+    The budgeted run ID.
+</ParamField>
+
+<ParamField body="project_id" type="string">
+    Optional project override for main-project keys.
+</ParamField>
+
+## Response
+
+Returns the current budget, consumed amount, remaining amount, status, and workload labels for the
+run.

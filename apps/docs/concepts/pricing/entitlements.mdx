@@ -1,69 +1,83 @@
 ---
 title: Entitlements
-description: "How pricing translates into customer access."
+description: "How plan versions become customer access decisions."
 ---
 
-**Entitlements** are the bridge between your pricing models and your application's logic. They represent what a customer is allowed to do based on their active subscription.
+Entitlements are the customer's feature access and limits. Your app checks them before paid work
+runs, and Unprice keeps the decision tied to plan-version, usage, wallet, and invoice evidence.
 
-## The Entitlement Flow
+## The entitlement flow
 
-1. **Subscription**: A customer subscribes to a specific **Plan Version**.
-2. **Entitlements Generated**: Unprice automatically extracts the features and limits from that Plan Version and assigns them to the customer as entitlements.
-3. **Verification**: Your application uses the Unprice SDK to check if a customer has the required entitlement before performing an action.
+1. A customer signs up for a published plan version.
+2. Unprice derives the customer's entitlements from that plan version.
+3. Your app calls `access.check` or `usage.consume` before paid work runs.
+4. Accepted usage keeps evidence for usage, spend, wallet, and invoice explanation.
 
-## Features vs. Entitlements
+## Features vs. entitlements
 
-It's helpful to think of the distinction this way:
-- **Features** are what you *sell*.
-- **Entitlements** are what the customer *has*.
+| Concept | Meaning | Example |
+| --- | --- | --- |
+| Feature | What your team sells or gates | `ai-messages`, `ai-generations`, `ai-tools` |
+| Entitlement | What the customer can use from a plan version | 10,000 AI messages this month |
+| Meter | How usage events become a period total | sum `aiMessages` from `completions` events |
 
-For example, if you have a feature called "Monthly Exports" with a limit of 100, a subscribed customer has an **Entitlement** to perform "Monthly Exports" with a remaining balance of 100.
+Features are authored by your team. Entitlements are the customer-specific rights and limits created
+from a published plan version.
 
-## Types of Checks
+## Check access
 
-Using the Unprice SDK, you can perform different types of entitlement checks:
+Use `access.check` when you want a read-only decision.
 
-### 1. Access Check
-Check if a customer has access to a feature before doing work.
-
-**Why check access first?**
-Checking before performing an action lets you fail gracefully when the customer is not entitled to the feature.
-
-```typescript
+```ts
 const { result, error } = await unprice.access.check({
-  customerId: "cust_123",
-  featureSlug: "ai-generations"
+  customerId: "cus_1234567890",
+  featureSlug: "ai-messages"
 });
 
-if (result?.allowed) {
-  // 1. Perform the expensive operation
-  // 2. Then ingest usage (see below)
+if (error) {
+  throw new Error(error.message);
+}
+
+if (!result.allowed) {
+  return new Response("Feature unavailable", { status: 403 });
 }
 ```
 
-### 2. Ingest & Verify (Atomic)
-Ingest usage and verify access in a single call. This is the most common way to enforce metered features.
+This is the safest first integration because it mutates nothing. Run it in shadow beside your
+current logic before enforcing.
 
-```typescript
+## Consume usage
+
+Use `usage.consume` when the request path needs a synchronous decision and the usage amount is
+known.
+
+```ts
 const { result, error } = await unprice.usage.consume({
-  idempotencyKey: "unique-uuid-here",
-  eventSlug: "api_request",
-  customerId: "cust_123",
-  featureSlug: "api-requests",
+  customerId: "cus_1234567890",
+  featureSlug: "ai-messages",
+  eventSlug: "completions",
+  idempotencyKey: "req_123",
   properties: {
-    usage: 30
+    aiMessages: 1,
+    inputTokens: 1840,
+    outputTokens: 620
   }
 });
 
-if (result?.allowed) {
-  // Process the request
-} else {
-  // Return "Limit reached" error
+if (error) {
+  throw new Error(error.message);
+}
+
+if (!result.allowed) {
+  return new Response("Usage limit reached", { status: 429 });
 }
 ```
 
-## Benefits of the Entitlement System
+`usage.consume` is an enforcing operation. Use [Choose the runtime call](/quickstart/choose-operation)
+to decide when to use `access.check`, `usage.record`, `usage.consume`, or budgeted runs.
 
-- **Decoupling**: Your code doesn't need to know about "Gold" or "Silver" plans. It only needs to know if the customer can perform a specific action.
-- **Real-time Updates**: If a customer upgrades their plan, their entitlements are updated instantly across all your services.
-- **Grace Periods**: Unprice allows you to configure "overage" strategies, letting customers exceed their limits while you notify them to upgrade.
+## Why this matters
+
+Your app should not branch on plan names such as `Pro` or `Enterprise`. It should check stable
+feature slugs and let Unprice resolve the customer's plan version, entitlement, usage, budget, and
+wallet state.

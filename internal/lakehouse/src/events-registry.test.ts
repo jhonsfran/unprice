@@ -13,8 +13,8 @@ describe("lakehouse events registry", () => {
 
     expect(schema.source).toBe("events")
     expect(schema.firstVersion).toBe(1)
-    expect(schema.currentVersion).toBe(4)
-    expect(getLakehouseSourceCurrentVersion("events")).toBe(4)
+    expect(schema.currentVersion).toBe(5)
+    expect(getLakehouseSourceCurrentVersion("events")).toBe(5)
     expect(schema.fields.some((field) => field.name === "schema_version" && field.required)).toBe(
       true
     )
@@ -39,6 +39,11 @@ describe("lakehouse events registry", () => {
           name: "payload_json",
           required: false,
           addedInVersion: 4,
+        }),
+        expect.objectContaining({
+          name: "ingestion_mode",
+          required: false,
+          addedInVersion: 5,
         }),
       ])
     )
@@ -76,7 +81,7 @@ describe("lakehouse events registry", () => {
     expect(
       parseLakehouseEvent("events", {
         event_date: "2026-03-19",
-        schema_version: 4,
+        schema_version: 5,
         id: "evt_failed",
         project_id: "proj_123",
         customer_id: "cus_123",
@@ -91,6 +96,7 @@ describe("lakehouse events registry", () => {
         parent_run_id: "brun_parent_123",
         workload_type: "agent",
         workload_id: "research-assistant",
+        ingestion_mode: "run",
         request_id: "req_123",
         idempotency_key: "idem_failed",
         slug: "tokens_used",
@@ -111,9 +117,10 @@ describe("lakehouse events registry", () => {
       })
     ).toEqual(
       expect.objectContaining({
-        schema_version: 4,
+        schema_version: 5,
         run_id: "brun_123",
         workload_id: "research-assistant",
+        ingestion_mode: "run",
         state: "failed",
         failure_stage: "rating_fact",
         replayable: true,

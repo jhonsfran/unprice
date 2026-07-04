@@ -1,15 +1,15 @@
 import type { Database } from "@unprice/db"
 import {
+  type PaymentProvider,
   getPlanVersionApiResponseSchema,
   paymentProviderSchema,
-  type PaymentProvider,
   workspaceSelectBase,
 } from "@unprice/db/validators"
-import { BaseError, Err, FetchError, Ok, type Result } from "@unprice/error"
+import { BaseError, Err, type FetchError, Ok, type Result } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
-import { UnPriceCustomerError } from "../../customers/errors"
+import type { UnPriceCustomerError } from "../../customers/errors"
 import {
   type GetCustomerCurrentAccessAnalytics,
   getCustomerCurrentAccess,
@@ -53,13 +53,9 @@ const getWorkspaceUpgradeOptionsErrorCodeSchema = z.enum([
   "WORKSPACE_BILLING_CURRENCY_NOT_FOUND",
 ])
 
-type GetWorkspaceUpgradeOptionsErrorCode = z.infer<
-  typeof getWorkspaceUpgradeOptionsErrorCodeSchema
->
+type GetWorkspaceUpgradeOptionsErrorCode = z.infer<typeof getWorkspaceUpgradeOptionsErrorCodeSchema>
 
-export type GetWorkspaceUpgradeOptionsInput = z.infer<
-  typeof getWorkspaceUpgradeOptionsInputSchema
->
+export type GetWorkspaceUpgradeOptionsInput = z.infer<typeof getWorkspaceUpgradeOptionsInputSchema>
 export type WorkspaceUpgradeOption = z.infer<typeof workspaceUpgradeOptionSchema>
 export type GetWorkspaceUpgradeOptionsOutput = z.infer<
   typeof getWorkspaceUpgradeOptionsOutputSchema
@@ -254,7 +250,9 @@ export async function getWorkspaceUpgradeOptions(
 
   const providerStates = new Map<PaymentProvider, ProviderState>()
 
-  for (const paymentProvider of new Set(planVersions.map((planVersion) => planVersion.paymentProvider))) {
+  for (const paymentProvider of new Set(
+    planVersions.map((planVersion) => planVersion.paymentProvider)
+  )) {
     const availabilityResult = await checkPaymentProviderAvailability(deps, {
       projectId: billingProjectId,
       paymentProvider,

@@ -10,18 +10,19 @@ export default async function OnboardingPage(props: {
   const { workspaceSlug } = props.params
   const session = await getSession()
   const onboardingCompleted = session?.user?.onboardingCompleted ?? false
+  const isDevelopment = process.env.NODE_ENV === "development"
 
-  if (onboardingCompleted) {
+  if (onboardingCompleted && !isDevelopment) {
     return redirect(`/${workspaceSlug}`)
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-8rem)] w-full max-w-screen-lg flex-col items-center">
+    <div className="mx-auto flex min-h-[calc(100vh-8rem)] w-full max-w-screen-lg flex-col items-center px-4">
       <OnboardingWrapper>
-        <div className="flex h-full w-full flex-col items-center justify-center overflow-x-hidden py-12">
+        <div className="flex w-full flex-1 flex-col items-center justify-center overflow-x-hidden py-10">
           <OnboardingUI />
         </div>
-        <div className="flex h-12 w-full shrink-0 items-center justify-center">
+        <div className="flex w-full shrink-0 items-center justify-center pb-8">
           <StepNavigator />
         </div>
       </OnboardingWrapper>

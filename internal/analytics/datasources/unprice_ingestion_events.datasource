@@ -22,6 +22,7 @@ SCHEMA >
     `parent_run_id` Nullable(String) `json:$.parent_run_id`,
     `workload_type` LowCardinality(Nullable(String)) `json:$.workload_type`,
     `workload_id` Nullable(String) `json:$.workload_id`,
+    `ingestion_mode` LowCardinality(Nullable(String)) `json:$.ingestion_mode`,
     `event_slug` LowCardinality(String) `json:$.event_slug`,
     `idempotency_key` String `json:$.idempotency_key`,
     `state` LowCardinality(String) `json:$.state`,
@@ -40,4 +41,4 @@ ENGINE ReplacingMergeTree
 ENGINE_PARTITION_KEY toYYYYMM(fromUnixTimestamp64Milli(handled_at, 'UTC'))
 ENGINE_SORTING_KEY project_id, customer_id, handled_at, canonical_audit_id
 ENGINE_VER created_at
-ENGINE_TTL toDateTime(fromUnixTimestamp64Milli(handled_at, 'UTC')) + INTERVAL 14 DAY
+ENGINE_TTL toDateTime(fromUnixTimestamp64Milli(handled_at, 'UTC')) + INTERVAL 60 DAY

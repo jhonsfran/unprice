@@ -88,6 +88,30 @@ export { createSubscription } from "./subscription/create"
 export { deriveActivationInputsFromPlan } from "./billing/derive-provision-inputs"
 export { settlePrepaidInvoiceToWallet } from "./billing/settle-invoice"
 export { duplicatePlanVersion } from "./plan-version/duplicate"
+export {
+  appliedPlanTemplateSchema,
+  applyPlanTemplate,
+  applyPlanTemplateInputSchema,
+  applyPlanTemplateOutputSchema,
+  applyPlanTemplateRequestSchema,
+  planTemplateKeySchema,
+} from "./plan-template/apply"
+export type {
+  ApplyPlanTemplateInput,
+  ApplyPlanTemplateOutput,
+  ApplyPlanTemplateRequest,
+} from "./plan-template/apply"
+export {
+  seedOnboardingEvidence,
+  seedOnboardingEvidenceInputSchema,
+  seedOnboardingEvidenceOutputSchema,
+  seedOnboardingEvidenceRequestSchema,
+} from "./onboarding/seed-evidence"
+export type {
+  SeedOnboardingEvidenceInput,
+  SeedOnboardingEvidenceOutput,
+  SeedOnboardingEvidenceRequest,
+} from "./onboarding/seed-evidence"
 export * from "./workspace"
 export { transferToWorkspace } from "./project/transfer-to-workspace"
 export { transferToPersonal } from "./project/transfer-to-personal"

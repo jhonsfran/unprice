@@ -1,52 +1,62 @@
 ---
-title: Pricing Overview
-description: "The philosophy and methodology behind Unprice pricing models."
+title: Pricing overview
+description: "How Unprice models request-path authorization, plan versions, and invoice evidence."
 ---
 
-Unprice is built on the core principle of **PriceOps**. Unlike traditional billing systems that treat pricing as a static configuration, Unprice treats pricing as a dynamic, iterative growth lever that should be decoupled from your application code.
+For usage-based products, pricing is a runtime decision and an evidence trail.
 
-## The PriceOps Methodology
+The important moment is not only the invoice. It is the paid action in your product: an API request,
+LLM call, workflow, data job, export, or tool run that can create cost before billing catches up.
 
-Unprice follows the **PriceOps** methodology—the practice of treating pricing as an agile product surface rather than a backend detail. It allows for:
+Unprice connects that action to one customer money path:
 
-- **Rapid Iteration**: Change pricing models, tiers, and limits without touching a single line of application code.
-- **Safety**: Immutable plan versions ensure that existing customers are never accidentally affected by pricing changes.
-- **Organizational Alignment**: Marketing and Growth teams can own the pricing strategy, while Engineering focuses on building features.
+```text
+paid action -> plan version -> pricing rule -> meter -> entitlement -> budget -> wallet -> invoice evidence
+```
 
-## Core Concepts
+## Core model
 
-To understand how Unprice handles pricing, you need to be familiar with three main components:
+| Concept | What it does | Why it matters |
+| --- | --- | --- |
+| Plan | Commercial package your team sells | Groups features into an offer |
+| Plan version | Published snapshot of pricing and entitlement rules | Keeps existing customers on the pricing they bought |
+| Feature | Sellable or gateable product capability | Gives your app a stable slug to check |
+| Meter | Rule that turns events into usage | Powers usage limits, spend, and invoice evidence |
+| Entitlement | Customer's right or limit for a feature | Lets your app check what the customer can do |
+| Budget | Customer or workload spend cap | Stops over-budget work before it runs |
+| Wallet credit | Spend balance held for a customer | Separates money/credits from entitlement grants |
+| Invoice evidence | Trail from decision to charge | Explains why a line was billed, denied, credited, or replayed |
 
-### 1. Features
-Features are the building blocks of your product. A feature could be anything from "API Requests" to "SSO Support" or "Project Storage". Each feature has a specific **type** that defines how it's priced.
+## Runtime calls
 
-### 2. Plans
-A Plan is a collection of features offered together as a package. A plan itself doesn't have a price; instead, the pricing is defined in its **Versions**.
+Use these calls inside your product:
 
-### 3. Plan Versions
-Plan Versions are immutable snapshots of a plan at a specific point in time. They define the specific costs, limits, and configurations for each feature. When you want to change your pricing, you create a new Plan Version and publish it.
+- `access.check` asks whether a customer can use a feature without changing state.
+- `usage.consume` synchronously applies known usage and returns the allow or deny decision.
+- `usage.record` asynchronously reports usage for metering and evidence.
+- `runs.start`, `runs.consume`, and `runs.end` reserve and consume a budget for multi-step work.
 
-## How Calculation Works
+Read [Choose the runtime call](/quickstart/choose-operation) before wiring production enforcement.
 
-Unprice automatically calculates the total price for a customer based on their subscribed Plan Version and their current usage. It handles:
+## PriceOps underneath
 
-- **Proration**: Automatically calculating partial costs when a customer upgrades, downgrades, or changes their plan mid-cycle.
-- **Multi-currency**: Native support for different currencies and rounding rules.
-- **Complex Models**: Seamlessly mixing flat fees, tiered consumption, and package-based bundles.
+PriceOps is the operating model behind Unprice: plans, plan versions, subscriptions, entitlements,
+meters, budgets, credits, usage evidence, and invoice evidence stay separate but connected.
+
+That separation is what lets you:
+
+- authorize customer spend before paid work runs
+- keep existing customers pinned to the plan version they bought
+- change packaging without rewriting product code
+- explain charges from plan, usage, wallet, ledger, and billing evidence
+
+## Next steps
 
 <CardGroup cols={2}>
-  <Card
-    title="Feature Types"
-    icon="list-check"
-    href="/concepts/pricing/feature-types"
-  >
-    Learn about the 4 core pricing types: Flat, Tier, Usage, and Package.
+  <Card title="Plans and versions" icon="copy" href="/concepts/pricing/plans">
+    Learn how plans and immutable versions keep pricing changes safe.
   </Card>
-  <Card
-    title="Plans & Versions"
-    icon="copy"
-    href="/concepts/pricing/plans"
-  >
-    Understand how to manage plans and iterate with versions.
+  <Card title="Usage metering" icon="gauge" href="/concepts/pricing/usage-metering">
+    Learn how events become period-scoped usage.
   </Card>
 </CardGroup>

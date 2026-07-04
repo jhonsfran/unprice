@@ -1,57 +1,71 @@
 ---
-title: Welcome to Unprice
-description: "PriceOps Infrastructure for SaaS."
+title: Authorize customer spend before paid work runs
+description: "Open-source customer money path for usage-based SaaS."
 mode: wide
 ---
 
-**Stop hardcoding your revenue.** Unprice is the open-source PriceOps infrastructure that decouples your pricing models, limits, and entitlements from your application code.
+The invoice is too late. The work already ran.
 
-## The 3-Second Value
-- **Decouple**: Move plans, tiers, and limits from code to a dynamic dashboard.
-- **Independence**: Launch new pricing experiments without a single JIRA ticket or deployment.
-- **Adaptive Models**: Built-in support for Usage-based, Tiered, and Hybrid pricing with automated capture.
+Unprice gives your app a customer money path for usage-based SaaS: check the plan version,
+entitlement, customer budget, and wallet credits before paid work runs, then keep the evidence that
+explains the charge, credit, denial, replay, or invoice line later.
 
-## What is Unprice?
-
-Unprice acts as an intelligent PriceOps layer between your App and payment providers (like Stripe). We handle the complexity of:
-1. **Usage Metering**: Aggregating consumption across any period or scope.
-2. **Entitlements**: Real-time verification of what a customer can actually do.
-3. **Adaptive Revenue**: Automated proration, invoicing, and cross-provider management.
-
-<Frame caption="Unprice architecture overview">
-  <img src="/images/unprice-overview.png" alt="Unprice architecture overview"/>
+<Frame caption="The request-to-invoice money path">
+  <img src="/images/money-path.svg" alt="Paid action enters the Unprice money path, gets checked against plan version, entitlement, budget, and wallet credits, then allows or denies before the work runs and keeps invoice evidence." />
 </Frame>
 
-## Why PriceOps?
+## The 5-second value
 
-Most SaaS billing is static and brittle. Changing a price requires engineering effort, testing, and deployment. Unprice follows the **PriceOps** methodology, allowing Growth teams to own the pricing strategy while Engineering focuses on the core product.
+- **Authorize before cost**: call Unprice in the request path before the paid action creates margin
+  damage.
+- **Keep pricing out of app branches**: plans, plan versions, features, meters, entitlements,
+  budgets, and wallet credits stay connected but separate.
+- **Explain after billing**: accepted usage carries evidence from the decision that allowed it to the
+  invoice line that bills it.
 
-<CardGroup cols={2}>
-  <Card
-    title="Quickstart"
-    icon="bolt-lightning"
-    href="/quickstart/onboarding-plan"
-  >
-    Go from zero to PriceOps in under 5 minutes.
-  </Card>
-  <Card
-    title="Core Concepts"
-    icon="book-open"
-    href="/concepts/pricing/overview"
-  >
-    Learn about PriceOps, Feature Types, and Usage Metering.
-  </Card>
-</CardGroup>
+## Start with one paid action
 
-## Join the community
-
-Join the Unprice community to ask questions, discuss best practices, and share tips.
+Pick the action that can burn a customer's credits, budget, or usage allowance: an LLM call, API
+request, data job, workflow, export, or tool run.
 
 <CardGroup cols={3}>
-  <Card title="Discord" icon="discord" href="https://unprice.com/discord" />
-  <Card
-    title="GitHub"
-    icon="github"
-    href="https://github.com/jhonsfran1165/unprice"
-  ></Card>
+  <Card title="1. Model the rule" icon="diagram-project" href="/quickstart/onboarding-plan">
+    Publish one plan version and map one customer to it.
+  </Card>
+  <Card title="2. Choose the runtime call" icon="code" href="/quickstart/choose-operation">
+    Pick `access.check`, `usage.consume`, `usage.record`, or `runs`.
+  </Card>
+  <Card title="3. Inspect the evidence" icon="file-invoice-dollar" href="/libraries/ts/sdk/wallet/get">
+    Follow wallet credits, holds, usage, and invoice evidence.
+  </Card>
 </CardGroup>
+
+## The runtime calls
+
+| If your app needs to... | Call | What it means |
+| --- | --- | --- |
+| Ask "is this customer commercially allowed?" without changing state | `access.check` | Read-only preflight, safe for shadow mode |
+| Enforce a known usage amount in the request path | `usage.consume` | Synchronous decision; deny when the limit or funds are exhausted |
+| Report usage for metering and invoice evidence without blocking | `usage.record` | Asynchronous ingestion; never a spend gate |
+| Reserve a budget before a multi-step workload runs | `runs.start` / `runs.consume` / `runs.end` | Budget envelope for a job, workflow, tool, agent, or custom run |
+
+## Why not just a counter?
+
+A counter can say usage is high. It cannot reliably prove which plan version applied, which credits
+were reserved, why a request was denied, or how accepted usage became an invoice line. Unprice keeps
+the customer spend decision and the invoice explanation on the same inspectable path.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt-lightning" href="/quickstart/onboarding-plan">
+    Put one paid action on the money path.
+  </Card>
+  <Card title="TypeScript SDK" icon="terminal" href="/libraries/ts/sdk/overview">
+    Install the SDK and call the public API with typed results.
+  </Card>
+</CardGroup>
+
+## Open and payment-provider aware
+
+Unprice owns the customer money path. Your payment provider still captures payment. Start on the
+built-in Sandbox, then connect your own Stripe account when you are ready. Stripe-first today,
+provider-extensible by design.

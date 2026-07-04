@@ -81,6 +81,7 @@ export async function buildIngestionReportingAuditRecord(params: {
     parentRunId: runContext.parentRunId,
     workloadType: runContext.workloadType,
     workloadId: runContext.workloadId,
+    ingestionMode: getMessageIngestionMode(message),
     status: outcome.state,
     rejectionReason: outcome.state === "rejected" ? outcome.rejectionReason : undefined,
     failureStage: failed ? outcome.failureStage : null,
@@ -124,6 +125,7 @@ export function buildIngestionAuditPayload(
     parent_run_id: runContext.parentRunId,
     workload_type: runContext.workloadType,
     workload_id: runContext.workloadId,
+    ingestion_mode: getMessageIngestionMode(message),
     request_id: message.requestId,
     idempotency_key: message.idempotencyKey,
     slug: message.slug,
@@ -175,4 +177,12 @@ function getMessageRunContext(message: IngestionQueueMessage): {
     workloadType: runContext?.workloadType ?? null,
     workloadId: runContext?.workloadId ?? null,
   }
+}
+
+function getMessageIngestionMode(message: IngestionQueueMessage): "async" | "sync" | "run" {
+  if (message.runContext?.runId) {
+    return "run"
+  }
+
+  return message.ingestionMode ?? "async"
 }

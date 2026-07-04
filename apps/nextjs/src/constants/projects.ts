@@ -71,18 +71,18 @@ export const PROJECT_SHORTCUTS: Shortcut[] = [
     name: "View All Plans",
     href: "plans",
     icon: Link,
-    featureSlug: "plans",
+    featureSlug: FEATURE_SLUGS.PLANS.SLUG,
   },
   {
     name: "New Subscription",
     href: "customers/subscriptions/new",
     icon: Link,
-    featureSlug: "subscriptions",
+    featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
   },
   {
     name: "View Budgeted Runs",
     href: "customers/runs",
     icon: Link,
-    featureSlug: "runs",
+    featureSlug: FEATURE_SLUGS.CUSTOMERS.SLUG,
   },
 ]

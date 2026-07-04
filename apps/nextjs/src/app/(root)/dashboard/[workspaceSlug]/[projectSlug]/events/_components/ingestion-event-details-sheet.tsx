@@ -10,7 +10,10 @@ import { CheckCircle2, Loader2, RotateCcw, TriangleAlert } from "lucide-react"
 import type { ReactNode } from "react"
 import { formatDate } from "~/lib/dates"
 import { useTRPC } from "~/trpc/client"
-import type { IngestionEventRow } from "./ingestion-events-table-schema"
+import {
+  type IngestionEventRow,
+  formatIngestionEventModeLabel,
+} from "./ingestion-events-table-schema"
 
 export function IngestionEventDetailsSheet({
   event,
@@ -97,8 +100,13 @@ export function IngestionEventDetailsSheet({
           <section className="grid gap-3 sm:grid-cols-2">
             <DetailItem label="Customer">{event.customerId}</DetailItem>
             <DetailItem label="Source">{event.sourceType}</DetailItem>
+            <DetailItem label="Ingestion mode">{formatIngestionEventModeLabel(event)}</DetailItem>
             <DetailItem label="Event ID">{event.eventId}</DetailItem>
             <DetailItem label="Source ID">{event.sourceId}</DetailItem>
+            {event.runId ? <DetailItem label="Run ID">{event.runId}</DetailItem> : null}
+            {event.workloadType || event.workloadId ? (
+              <DetailItem label="Workload">{formatWorkload(event)}</DetailItem>
+            ) : null}
             <DetailItem label="Handled">
               {formatDate(event.handledAt, undefined, "yyyy-MM-dd HH:mm:ss")}
             </DetailItem>
@@ -174,6 +182,14 @@ function DetailTerm({ label, value }: { label: string; value: string }) {
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return <h3 className="font-medium text-sm">{children}</h3>
+}
+
+function formatWorkload(event: IngestionEventRow): string {
+  if (event.workloadType && event.workloadId) {
+    return `${event.workloadType}:${event.workloadId}`
+  }
+
+  return event.workloadType ?? event.workloadId ?? "none"
 }
 
 function getIssueDetails(

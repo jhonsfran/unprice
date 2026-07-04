@@ -7,7 +7,7 @@
     "light": "#ffc53d",
     "dark": "#ffc53d"
   },
-  "favicon": "/favicon.ico",
+  "favicon": "/favicon.svg",
   "api": {
     "playground": {
       "display": "interactive"
@@ -21,12 +21,13 @@
           {
             "group": "Introduction",
             "icon": "home",
+            "root": "index",
             "pages": [
-              "index",
               {
                 "group": "Quickstart",
                 "pages": [
                   "quickstart/onboarding-plan",
+                  "quickstart/choose-operation",
                   "quickstart/onboarding-customer",
                   "quickstart/onboarding-entitlements"
                 ]
@@ -101,18 +102,57 @@
             "group": "TypeScript SDK",
             "pages": [
               "libraries/ts/sdk/overview",
-              "libraries/ts/sdk/usage/record",
-              "libraries/ts/sdk/usage/consume",
-              "libraries/ts/sdk/access/check",
-              "libraries/ts/sdk/access/list-entitlements",
-              "libraries/ts/sdk/plan-versions/list",
-              "libraries/ts/sdk/plan-versions/get",
-              "libraries/ts/sdk/payment-methods/list",
-              "libraries/ts/sdk/payment-methods/create",
-              "libraries/ts/sdk/ingestion-events/status",
-              "libraries/ts/sdk/ingestion-events/replay",
-              "libraries/ts/sdk/wallet/get",
-              "libraries/ts/sdk/usage/get"
+              {
+                "group": "Customers",
+                "pages": ["libraries/ts/sdk/customers/signup"]
+              },
+              {
+                "group": "Access",
+                "pages": [
+                  "libraries/ts/sdk/access/check",
+                  "libraries/ts/sdk/access/list-entitlements",
+                  "libraries/ts/sdk/access/update"
+                ]
+              },
+              {
+                "group": "Usage",
+                "pages": [
+                  "libraries/ts/sdk/usage/consume",
+                  "libraries/ts/sdk/usage/record",
+                  "libraries/ts/sdk/usage/get"
+                ]
+              },
+              {
+                "group": "Budgeted runs",
+                "pages": [
+                  "libraries/ts/sdk/runs/start",
+                  "libraries/ts/sdk/runs/consume",
+                  "libraries/ts/sdk/runs/end",
+                  "libraries/ts/sdk/runs/get"
+                ]
+              },
+              {
+                "group": "Plans",
+                "pages": [
+                  "libraries/ts/sdk/plan-versions/list",
+                  "libraries/ts/sdk/plan-versions/get"
+                ]
+              },
+              {
+                "group": "Payments",
+                "pages": [
+                  "libraries/ts/sdk/payment-methods/list",
+                  "libraries/ts/sdk/payment-methods/create",
+                  "libraries/ts/sdk/wallet/get"
+                ]
+              },
+              {
+                "group": "Events",
+                "pages": [
+                  "libraries/ts/sdk/ingestion-events/status",
+                  "libraries/ts/sdk/ingestion-events/replay"
+                ]
+              }
             ]
           }
         ]
@@ -139,8 +179,8 @@
     }
   },
   "logo": {
-    "light": "/logo/light.png",
-    "dark": "/logo/dark.png"
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
   },
   "navbar": {
     "links": [

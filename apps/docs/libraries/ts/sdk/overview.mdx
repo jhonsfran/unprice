@@ -1,10 +1,14 @@
 ---
 title: "Overview"
-description: "Typescript client for unprice"
+description: "TypeScript client for the Unprice public API."
 ---
 
+Use `@unprice/api` to put the customer money path inside your server request path: create or map a
+customer, check access, consume usage, reserve budgeted runs, inspect wallet credits, and explain
+usage or ingestion evidence.
 
-If you prefer a typed experience over calling http endpoints directly, you can use our sdk `@unprice/api`.
+The SDK returns typed results instead of throwing for expected API errors, so every request has an
+explicit `result` or `error` branch.
 
 ## Install
 
@@ -27,10 +31,10 @@ If you prefer a typed experience over calling http endpoints directly, you can u
   ```
 </CodeGroup>
 
-## Unprice Api key
+## Unprice API key
 
-When creating, revoking or updating resources, you will need your api key — you can create a new one in the [settings of your project](https://app.unprice.com).
-Afterwards you need to provide it to the client:
+Create a project API key in the [project settings](https://app.unprice.com), then provide it to the
+client from server-side code:
 
 ```ts
 import { Unprice } from "@unprice/api";
@@ -38,13 +42,54 @@ import { Unprice } from "@unprice/api";
 const unprice = new Unprice({ token: "<API_KEY>" });
 ```
 
-Always keep your api key safe and reset it `if` you suspect it has been compromised.
+Always keep your API key on the server and reset it if you suspect it has been compromised.
+
+## First runtime call
+
+For a read-only shadow check:
+
+```ts
+const { result, error } = await unprice.access.check({
+  customerId: "cus_1234567890",
+  featureSlug: "ai-messages"
+});
+
+if (error) {
+  throw new Error(error.message);
+}
+
+console.log(result.allowed);
+```
+
+For request-path enforcement when the usage amount is known:
+
+```ts
+const { result, error } = await unprice.usage.consume({
+  customerId: "cus_1234567890",
+  featureSlug: "ai-messages",
+  eventSlug: "completions",
+  idempotencyKey: "req_123",
+  properties: {
+    aiMessages: 1,
+    inputTokens: 1840,
+    outputTokens: 620
+  }
+});
+
+if (error) {
+  throw new Error(error.message);
+}
+
+if (!result.allowed) {
+  return new Response("Usage limit reached", { status: 429 });
+}
+```
+
+Read [Choose the runtime call](/quickstart/choose-operation) before wiring a production path.
 
 ## Response format
 
-Because forgetting to handle thrown errors properly in javascript is often forgotten, we have decided to explicitly return errors to be handled. Fortunately typescript helps us here and everything is typesafe.
-
-Every method returns either an `error` or a `result` field, never both and never none.
+Every method returns either an `error` or a `result` field, never both and never neither.
 
 <CodeGroup>
 ```ts Success
@@ -75,7 +120,8 @@ Every method returns either an `error` or a `result` field, never both and never
 
 ## Checking for errors
 
-To check for errors you use the `error` property, our errors are easy to read and provide a link to our documentation for more information.
+Check the `error` property before using `result`. API errors include a docs link and request ID for
+support lookup.
 
 ```ts
 import { Unprice } from "@unprice/api";
@@ -97,7 +143,6 @@ if (error) {
   return;
 }
 
-// return the payment methods
 return result
 ```
 
@@ -109,7 +154,7 @@ The constructor accepts some options to customize the behavior:
 
 ### Base Url
 
-Run all requests against your own instance of unprice hosted on your own infrastructure.
+Run all requests against your own Unprice instance.
 
 <ParamField body="baseUrl" type="string" default="https://api.unprice.dev">
 ```ts

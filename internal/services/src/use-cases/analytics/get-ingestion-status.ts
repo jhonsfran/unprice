@@ -108,6 +108,12 @@ export const getIngestionStatusOutputSchema = z.object({
       eventSlug: z.string(),
       sourceType: z.string(),
       sourceId: z.string(),
+      ingestionMode: z.enum(["async", "sync", "run"]).nullable(),
+      runId: z.string().nullable(),
+      traceId: z.string().nullable(),
+      parentRunId: z.string().nullable(),
+      workloadType: z.enum(["agent", "workflow", "job", "tool", "custom"]).nullable(),
+      workloadId: z.string().nullable(),
       state: z.enum(["processed", "rejected", "failed"]),
       rejectionReason: z.string().nullable(),
       failureStage: z.string().nullable(),
@@ -288,6 +294,12 @@ function mapRecentEventRow(
     eventSlug: row.event_slug,
     sourceType: row.source_type,
     sourceId: row.source_id,
+    ingestionMode: deriveIngestionMode(row),
+    runId: row.run_id ?? null,
+    traceId: row.trace_id ?? null,
+    parentRunId: row.parent_run_id ?? null,
+    workloadType: row.workload_type ?? null,
+    workloadId: row.workload_id ?? null,
     state: row.state,
     rejectionReason: row.rejection_reason,
     failureStage: row.failure_stage ?? null,
@@ -326,6 +338,12 @@ type FilterableIngestionRow = {
   event_slug?: string
   source_id?: string
   source_type?: string
+  ingestion_mode?: string | null
+  run_id?: string | null
+  trace_id?: string | null
+  parent_run_id?: string | null
+  workload_type?: string | null
+  workload_id?: string | null
   rejection_reason?: string | null
   state?: (typeof ingestionStates)[number]
 }
@@ -387,6 +405,12 @@ function matchesFilter(row: FilterableIngestionRow, filter: IngestionStatusFilte
     row.event_slug,
     row.source_type,
     row.source_id,
+    row.ingestion_mode ?? undefined,
+    row.run_id ?? undefined,
+    row.trace_id ?? undefined,
+    row.parent_run_id ?? undefined,
+    row.workload_type ?? undefined,
+    row.workload_id ?? undefined,
     row.rejection_reason ?? undefined,
   ].filter((value): value is string => typeof value === "string" && value.length > 0)
 
@@ -395,6 +419,14 @@ function matchesFilter(row: FilterableIngestionRow, filter: IngestionStatusFilte
   }
 
   return true
+}
+
+function deriveIngestionMode(row: IngestionRecentEventRow): "async" | "sync" | "run" | null {
+  if (row.run_id) {
+    return "run"
+  }
+
+  return row.ingestion_mode ?? null
 }
 
 function toTinybirdFilter(filter: IngestionStatusFilter): {

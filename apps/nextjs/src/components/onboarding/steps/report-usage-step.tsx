@@ -27,6 +27,8 @@ interface UsageReportResponse {
   rejectionReason?: string
 }
 
+const publicApiUrl = (path: string) => new URL(path, API_DOMAIN).toString()
+
 export function ReportUsageStep({ className }: React.ComponentProps<"div"> & StepComponentProps) {
   const { state, next } = useOnboarding()
   const [isLoading, setIsLoading] = useState(false)
@@ -56,13 +58,14 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
   const meteredFeatures = features.filter((f) => f.featureType === "usage")
   const selectedPlanFeature = meteredFeatures.find((f) => f.feature?.slug === selectedFeature)
   const selectedEventSlug = selectedPlanFeature?.meterConfig?.eventSlug ?? selectedFeature
+  const selectedAggregationField = selectedPlanFeature?.meterConfig?.aggregationField ?? "usage"
 
   // Auto-select first metered feature
   if (!selectedFeature && meteredFeatures.length > 0) {
     setSelectedFeature(meteredFeatures[0]?.feature?.slug ?? "")
   }
 
-  const curlCommand = `curl -X POST ${API_DOMAIN}v1/events/ingest/sync \\
+  const curlCommand = `curl -X POST ${publicApiUrl("v1/usage/consume")} \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -71,7 +74,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
     "customerId": "${customerId}",
     "featureSlug": "${selectedFeature}",
     "properties": {
-      "usage": ${usageAmount}
+      "${selectedAggregationField}": ${usageAmount}
     }
   }'`
 
@@ -91,7 +94,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
     setIsLoading(true)
 
     try {
-      const response = await fetch(`${API_DOMAIN}v1/events/ingest/sync`, {
+      const response = await fetch(publicApiUrl("v1/usage/consume"), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
@@ -103,7 +106,7 @@ export function ReportUsageStep({ className }: React.ComponentProps<"div"> & Ste
           customerId,
           featureSlug: selectedFeature,
           properties: {
-            usage: Number(usageAmount),
+            [selectedAggregationField]: Number(usageAmount),
           },
         }),
       })

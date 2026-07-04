@@ -1,4 +1,4 @@
-import { GalleryVerticalEnd } from "lucide-react"
+import { FolderKanban } from "lucide-react"
 import { useParams } from "next/navigation"
 
 import { type StepComponentProps, useOnboarding } from "@onboardjs/react"
@@ -14,15 +14,13 @@ export function ProjectStep({ className }: React.ComponentProps<"div"> & StepCom
     <div className={cn("flex max-w-md flex-col gap-6", className)}>
       <div className="flex flex-col gap-6">
         <div className="flex flex-col items-center gap-2">
-          {/* biome-ignore lint/a11y/useValidAnchor: <explanation> */}
-          <a href="#" className="flex flex-col items-center gap-2 font-medium">
-            <div className="flex size-8 animate-content items-center justify-center rounded-md delay-0!">
-              <GalleryVerticalEnd className="size-6" />
-            </div>
-          </a>
-          <h1 className="animate-content font-bold text-2xl delay-0!">Create a new Project</h1>
+          <div className="flex size-8 animate-content items-center justify-center rounded-md delay-0!">
+            <FolderKanban className="size-6" />
+          </div>
+          <h1 className="animate-content font-bold text-2xl delay-0!">Create a Sandbox project</h1>
           <div className="animate-content text-center text-sm delay-0!">
-            Projects are used to group your products and services.
+            This project holds the plan version, meter event, customer, and API key for the
+            walkthrough.
           </div>
         </div>
         <div className="animate-content delay-200!">
@@ -31,20 +29,20 @@ export function ProjectStep({ className }: React.ComponentProps<"div"> & StepCom
               state?.context.flowData?.project ?? {
                 defaultCurrency: "USD",
                 timezone: "UTC",
-                name: "Acme project",
-                url: "https://acme.com",
+                name: "Workflow API Sandbox",
+                url: "https://workflow.example.com",
               }
             }
             onSuccess={async (project) => {
               // Set cookies so onboarding API requests can resolve the active project context
               await updateContextCookies(workspaceSlug, project.slug)
 
-              updateContext({
+              await updateContext({
                 flowData: {
                   project,
                 },
               })
-              next()
+              await next()
             }}
           />
         </div>

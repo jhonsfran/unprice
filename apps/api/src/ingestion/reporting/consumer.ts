@@ -22,6 +22,7 @@ const textEncoder = new TextEncoder()
 
 const auditPayloadForIngestionEventSchema = z.object({
   id: z.string(),
+  ingestion_mode: z.enum(["async", "sync", "run"]).nullable().optional(),
   slug: z.string(),
   timestamp: z.number().int(),
 })
@@ -263,6 +264,7 @@ function buildIngestionEvent(
     parent_run_id: record.parentRunId,
     workload_type: record.workloadType,
     workload_id: record.workloadId,
+    ingestion_mode: record.runId ? "run" : (record.ingestionMode ?? payload.ingestion_mode ?? null),
     event_slug: payload.slug,
     idempotency_key: record.idempotencyKey,
     state: record.status,

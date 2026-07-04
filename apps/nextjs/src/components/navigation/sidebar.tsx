@@ -103,7 +103,7 @@ export async function Sidebar({
                 </li>
               ))}
             </ul>
-            <div>
+            <div className="space-y-2">
               <span className="font-medium text-background-solid text-xs leading-6">Shortcuts</span>
               <ul aria-label="shortcuts" className="space-y-0.5">
                 {filteredShortcuts.map((item) => (

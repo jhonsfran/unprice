@@ -68,7 +68,7 @@ describe("createAuditRecordPublisher", () => {
         payloadJson,
         auditPayloadJson: JSON.stringify({
           event_date: "2026-03-20",
-          schema_version: 4,
+          schema_version: 5,
           id: "evt_123",
           workspace_id: "ws_123",
           project_id: "proj_123",
@@ -83,6 +83,7 @@ describe("createAuditRecordPublisher", () => {
           parent_run_id: "brun_parent_123",
           workload_type: "agent",
           workload_id: "research-assistant",
+          ingestion_mode: "run",
           request_id: "req_123",
           idempotency_key: "idem_123",
           slug: "usage.recorded",
@@ -104,12 +105,13 @@ describe("createAuditRecordPublisher", () => {
 
     expect(send.mock.calls[0]?.[0]).toMatchObject([
       {
-        schema_version: 4,
+        schema_version: 5,
         run_id: "brun_123",
         trace_id: "trace_123",
         parent_run_id: "brun_parent_123",
         workload_type: "agent",
         workload_id: "research-assistant",
+        ingestion_mode: "run",
         state: "failed",
         failure_stage: "rating_fact",
         failure_reason: "raw_ingestion_queue_processing_failed",

@@ -1,26 +1,43 @@
 ---
 title: 'Billing'
-description: 'Handling payments, taxes, and invoicing.'
+description: 'Invoice and payment-provider evidence for the customer money path.'
 ---
 
-Unprice simplifies the complex world of billing by acting as an intelligent orchestration layer.
+Unprice connects request-path usage decisions to invoices and payment-provider records. It does not
+replace your payment provider, tax engine, accounting system, or revenue-recognition suite.
 
-## 1. Multi-Provider Support
-Unprice is designed to work with multiple payment providers. While Stripe is the primary integration, the architecture allows for switching or using multiple providers simultaneously.
+## 1. Payment-provider boundary
 
-## 2. Automated Billing Cycles
-- **Anniversary Billing**: Customers are billed on the same day they signed up each month.
-- **Calendar Billing**: All customers are billed on a specific day of the month (e.g., the 1st).
-- **One-time Charges**: Support for non-recurring fees and add-ons.
+Unprice owns the customer money path: plan versions, entitlements, usage, budgets, wallet credits,
+ledger captures, and invoice evidence. The payment provider still captures payment.
 
-## 3. Proration & Credits
-One of the most complex parts of billing is handled automatically by Unprice:
-- **Upgrades**: Credit is applied for the unused portion of the old plan towards the new plan.
-- **Credit Grants**: Issue credits that automatically get applied to future invoices.
+Stripe is supported today. The provider model is designed to extend without rewriting the product
+request path.
 
-## 4. Payment Methods
-Manage customer payment methods securely. Unprice stores the provider-specific references (like Stripe payment method IDs) so you never have to handle sensitive card data directly.
+## 2. Invoice evidence
 
-<Frame caption="Billing configuration and payment provider settings">
-  <img src="/images/billing-settings.png" alt="Billing Management"/>
-</Frame>
+Invoice lines should be explainable from the same path that allowed, denied, consumed, reserved, or
+captured usage. Evidence can include:
+
+- plan version
+- billing period
+- pricing rule
+- rated usage events when present
+- wallet movement
+- ledger captures
+- ingestion status and replay state
+
+## 3. Billing cycles and credits
+
+Unprice supports recurring billing periods and wallet credits. Keep these concepts separate:
+
+- Entitlement grants define what a customer can access or consume.
+- Wallet credits fund customer spend.
+- Ledger captures record reserved or consumed wallet funds.
+- Invoice evidence explains how usage and credits became a billed line.
+
+## 4. Payment methods
+
+Manage customer payment methods through the payment provider integration. Unprice stores
+provider-specific references so your app can connect customer money-path state to the provider that
+settles payment.

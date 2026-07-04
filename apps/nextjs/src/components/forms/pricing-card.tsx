@@ -1,3 +1,5 @@
+"use client"
+
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"

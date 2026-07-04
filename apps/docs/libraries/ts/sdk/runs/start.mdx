@@ -1,0 +1,93 @@
+---
+title: "Start budgeted run"
+description: "Start a budgeted run and reserve customer spend before a workload begins."
+---
+
+Use `runs.start` when a job, workflow, tool, agent, or custom workload needs a budget envelope
+before it starts. The customer remains the economic actor; the run is the workload label and spend
+reservation.
+
+<RequestExample>
+
+```ts
+// Reserve spend before the workload creates cost.
+const { result, error } = await unprice.runs.start({
+  customerId: "cus_1234567890",
+  budgetAmountMinor: 5000,
+  idempotencyKey: "run:req_123",
+  workloadType: "workflow",
+  workloadId: "wf_summary_123",
+  traceId: "trace_123"
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+// A running run means the budget reservation was accepted.
+console.log(result.runId);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "runId": "brun_123",
+  "status": "running",
+  "customerId": "cus_1234567890",
+  "budgetAmountMinor": 5000,
+  "consumedAmountMinor": 0,
+  "remainingAmountMinor": 5000,
+  "currency": "USD",
+  "workloadType": "workflow",
+  "workloadId": "wf_summary_123",
+  "traceId": "trace_123",
+  "parentRunId": null
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="customerId" type="string">
+    The customer ID. Required when the API key has no default customer binding.
+</ParamField>
+
+<ParamField body="budgetAmountMinor" type="number" required>
+    Budget in currency minor units. For USD, `5000` means `$50.00`.
+</ParamField>
+
+<ParamField body="idempotencyKey" type="string" required>
+    Logical key used to deduplicate the run start request.
+</ParamField>
+
+<ParamField body="workloadType" type='"agent" | "workflow" | "job" | "tool" | "custom"'>
+    Optional label for the kind of workload that will spend the budget.
+</ParamField>
+
+<ParamField body="workloadId" type="string">
+    Optional ID from your system for the workload.
+</ParamField>
+
+<ParamField body="traceId" type="string">
+    Optional trace ID for connecting the run to your logs or traces.
+</ParamField>
+
+<ParamField body="parentRunId" type="string">
+    Optional parent run ID for nested workloads.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+    Optional metadata stored with the run.
+</ParamField>
+
+<ParamField body="expiresAt" type="number">
+    Optional epoch-millisecond expiration timestamp.
+</ParamField>
+
+## Response
+
+Returns the started budget run. `remainingAmountMinor` is the amount still available for
+`runs.consume`.

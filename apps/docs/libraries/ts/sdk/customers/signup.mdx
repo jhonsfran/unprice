@@ -1,10 +1,10 @@
 ---
-title: "Sign Up"
-description: "Create a new customer account"
+title: "Sign up customer"
+description: "Create a customer and subscribe them to a plan version."
 ---
 
-SignUp is the most important method of the SDK because that is how you can seemssly onboard new users into your product.
-If you are used to used Stripe, the flow is pretty much the same.
+Use `customers.signUp` to create a customer and provision their subscription, entitlements, billing
+periods, and wallet from a published plan version.
 
 <Frame>
     <img src="/images/signup-flow.png"/>
@@ -13,12 +13,12 @@ If you are used to used Stripe, the flow is pretty much the same.
 <RequestExample>
 
 ```ts
-// subscribe to the lastest version of the plan PRO
+// Subscribe to the latest published version of the Pro plan.
 const { result, error } = await unprice.customers.signUp({
-  name: "John Doe",
-  email: "customer@example.com",
-  planSlug: "PRO",
-  externalId: "your_database_id",
+  name: "Acme Inc.",
+  email: "buyer@example.com",
+  planSlug: "pro",
+  externalId: "acct_123",
   successUrl: "https://example.com/dashboard",
   cancelUrl: "https://example.com/login"
 });
@@ -68,7 +68,7 @@ console.log(result);
 </ParamField>
 
 <ParamField body="planSlug" type="string">
-    The plan slug to sign up for. If provided, the system will intelligently pick the latest plan for that slug. Required if planVersionId is not provided
+    The plan slug to sign up for. If provided, Unprice uses the latest published version for that slug. Required if planVersionId is not provided
 </ParamField>
 
 <ParamField body="planVersionId" type="string">
@@ -112,7 +112,7 @@ console.log(result);
 </ParamField>
 
 <ParamField body="externalId" type="string">
-    An external ID to associate with the customer (e.g., user ID from your database)
+    An external ID to associate with the customer, such as an account ID from your database
 </ParamField>
 
 <ParamField body="successUrl" type="string" required>

@@ -231,6 +231,7 @@ function buildRunReportingMessage(
     timestamp: input.event.timestamp,
     properties: input.event.properties,
     source: input.source,
+    ingestionMode: "run",
     runContext: {
       runId: run.id,
       traceId: run.traceId,

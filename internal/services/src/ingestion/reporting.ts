@@ -1,7 +1,7 @@
 import { entitlementMeterFactSchemaV1 } from "@unprice/analytics"
 import { z } from "zod"
 import { INGESTION_FAILURE_STAGES } from "./interface"
-import type { IngestionQueueMessage } from "./message"
+import { type IngestionQueueMessage, ingestionModeSchema } from "./message"
 
 export const INGESTION_REPORTING_ENVELOPE_TARGET_BYTES = 96 * 1024
 
@@ -28,6 +28,7 @@ export const ingestionReportingAuditRecordSchema = z.object({
     .optional()
     .default(null),
   workloadId: z.string().nullable().optional().default(null),
+  ingestionMode: ingestionModeSchema.nullable().optional(),
   status: z.enum(["processed", "rejected", "failed"]),
   rejectionReason: z.string().optional(),
   failureStage: z.enum(INGESTION_FAILURE_STAGES).nullable(),

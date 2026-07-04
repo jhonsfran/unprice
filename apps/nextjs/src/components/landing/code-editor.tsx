@@ -20,7 +20,7 @@ export function CodeEditor({
   codeClassName?: string
   tokenClassName?: string
 }) {
-  const { theme } = useTheme()
+  const { resolvedTheme } = useTheme()
   const isMounted = useMounted()
 
   if (!isMounted) return null
@@ -29,7 +29,7 @@ export function CodeEditor({
     <Highlight
       code={codeBlock}
       language={language}
-      theme={theme === "dark" ? themes.nightOwl : themes.nightOwlLight}
+      theme={resolvedTheme === "dark" ? themes.nightOwl : themes.nightOwlLight}
     >
       {({ className: prismClassName, style, tokens, getLineProps, getTokenProps }) => {
         return (

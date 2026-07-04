@@ -162,6 +162,7 @@ export const registerIngestEventsSyncV1 = (app: App) => {
     const message = buildIngestionQueueMessage({
       body,
       customerId,
+      ingestionMode: "sync",
       projectId,
       receivedAt,
       requestId,

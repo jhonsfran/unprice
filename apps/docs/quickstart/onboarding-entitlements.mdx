@@ -1,150 +1,93 @@
 ---
-title: 'Use entitlements'
-description: 'Use entitlements, report usage and verify access'
+title: "Check access"
+description: "Use entitlements, record usage, and consume usage in the request path."
 ---
 
-## Overview
+Use this guide when you already have a customer mapped to a plan version and want to gate one
+feature in your app.
 
-This is why Unprice is really adaptive. Instead of thinking about plans inside your code, with Unprice you think about features.
-You map your application to validate specific features, this gives you the flexibility to change the packaging without affecting other customers.
+## Replace plan branches with feature checks
 
-Think about it as a feature flag with super powers.
-
-### What is an entitlement?
-
-Entitlements are the features a customer has access to. They can be billed or not, for instance if a customer
-is subscribe to a plan PRO with fetures "tokens" with a limit of 10K tokens per month, that is an entitlement that is billed.
-
+Without Unprice, pricing logic often leaks into product code:
 
 ```ts
-// without Unprice
-if (customer.plan === "PRO") { // <-- mapping to PRO plan means when the plan changes you have to change this
-  // let custor use tokens
-} else {
-  return "don't have access"
+if (customer.plan === "PRO") {
+  return runTokenGeneration();
 }
 
-// ----------------------------------------------------
+return new Response("Upgrade required", { status: 403 });
+```
 
-// with Unprice
-// Verify if the customer has access to the feature
+With Unprice, your code checks the feature slug. The customer's plan version and entitlement state
+stay outside the product branch.
+
+```ts
 const { result, error } = await unprice.access.check({
   customerId: customer.unpriceCustomerId,
-  featureSlug: "tokens" // map your feature code
+  featureSlug: "ai-messages"
 });
 
 if (error) {
-  // handle potential network or bad request error
-  // a link to our docs will be in the `error.docs` field
-  console.error(error.message);
-  return;
+  throw new Error(error.message);
 }
 
-if (result.allowed) {
-  // let custor use tokens
-  // because now the feature is tied to the customer itself and not the plan
-  // you can change the features of your customer without touching your code
-  continue
-} else {
-  return {
-    message: "don't have access",
-    deniedReason: result.deniedReason
-  }
+if (!result.allowed) {
+  return new Response("Feature unavailable", { status: 403 });
 }
 
-console.log(result);
+return runTokenGeneration();
 ```
 
-<AccordionGroup>
-  <Accordion title="Create API key">
-    Create API key for your project in [Unprice](https://app.unprice.dev)
-  </Accordion>
-  <Accordion title="Install SDK">
-    A plan represent the package of features that you are offering. Every plan can have multiple versions, which comes handy when you want iterate on it. More info [here](/libraries/ts/sdk/overview)
+## Report or enforce usage
 
-    <CodeGroup>
-      ```bash npm
-      npm install @unprice/api
-      ```
+Use `usage.record` when you only need async usage evidence:
 
-      ```bash pnpm
-      pnpm add @unprice/api
-      ```
+```ts
+await unprice.usage.record({
+  customerId: customer.unpriceCustomerId,
+  eventSlug: "completions",
+  idempotencyKey: request.id,
+  properties: {
+    aiMessages: 1,
+    aiGenerations: 2,
+    aiTools: 3,
+    inputTokens: 1840,
+    outputTokens: 620
+  }
+});
+```
 
-      ```bash yarn
-      yarn add @unprice/api
-      ```
+Use `usage.consume` when the request path must deny over-limit or over-budget usage:
 
-      ```bash bun
-      bun install @unprice/api
-      ```
-    </CodeGroup>
-  </Accordion>
-  <Accordion title="Verify features">
-    Verify checks if the customer has access to a feature, whether it is a flat feature or a usage-based one.
-    See more [here](/libraries/ts/sdk/access/check)
+```ts
+const { result, error } = await unprice.usage.consume({
+  customerId: customer.unpriceCustomerId,
+  featureSlug: "ai-messages",
+  eventSlug: "completions",
+  idempotencyKey: request.id,
+  properties: {
+    aiMessages: 1,
+    inputTokens: 1840,
+    outputTokens: 620
+  }
+});
 
-    ```ts
-    const { result, error } = await unprice.access.check({
-      customerId: "cus_1234567890",
-      featureSlug: "tokens"
-    });
+if (error) {
+  throw new Error(error.message);
+}
 
-    if (error) {
-      // handle potential network or bad request error
-      // a link to our docs will be in the `error.docs` field
-      console.error(error.message);
-      return;
-    }
+if (!result.allowed) {
+  return new Response("Usage limit reached", { status: 429 });
+}
+```
 
-    console.log(result);
-    ```
-  </Accordion>
-  <Accordion title="Report Usage">
-    Depending on the feature, you can report usage.
+## Next steps
 
-    ```ts
-    const { result, error } = await unprice.usage.consume({
-      idempotencyKey: "123e4567-e89b-12d3-a456-426614174000",
-      eventSlug: "tokens_used",
-      customerId: "cus_1234567890",
-      featureSlug: "tokens",
-      properties: {
-        usage: 30
-      }
-    });
-
-    if (error) {
-      // handle potential network or bad request error
-      // a link to our docs will be in the `error.docs` field
-      console.error(error.message);
-      return;
-    }
-
-    console.log(result);
-    ```
-
-  </Accordion>
-</AccordionGroup>
-
-
-### How to use entitlement - Tutorial
-
-<Frame>
-  <iframe
-    width="900"
-    height="500"
-    src="https://www.youtube.com/embed/4KzFe50RQkQ"
-    title="YouTube video player"
-    frameBorder="0"
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-    allowFullScreen
-  ></iframe>
-</Frame>
-
-
-## Next Steps
-
-You should get to know our [API reference](/api-reference/authentication) or the [Typescript SDK](/libraries/ts/sdk/overview) to start integrate with your product.
-
-You can also check out the [Features](/apis/features/ratelimiting) section for more information on how to use Unprice.
+<CardGroup cols={2}>
+  <Card title="Choose the runtime call" icon="code" href="/quickstart/choose-operation">
+    Compare `access.check`, `usage.record`, `usage.consume`, and budgeted runs.
+  </Card>
+  <Card title="Access check SDK" icon="shield-check" href="/libraries/ts/sdk/access/check">
+    See the full `access.check` request and response shape.
+  </Card>
+</CardGroup>

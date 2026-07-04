@@ -1,0 +1,182 @@
+---
+title: "Choose the runtime call"
+description: "Pick the Unprice API call that matches the paid action in your request path."
+---
+
+The runtime call depends on what your app needs to decide.
+
+Use this rule first:
+
+> `record` tells Unprice what happened. `consume` decides whether known usage may happen now.
+> `runs` reserve a budget before a workload starts. `access.check` asks without changing state.
+
+Use `eventSlug` for the broad event your app observed, such as `completions`. Use `featureSlug` for
+the specific product feature you are checking or consuming, such as `ai-messages`,
+`ai-generations`, or `ai-tools`.
+
+## Decision table
+
+| Use case | Call | Blocks paid work? | Mutates state? | Best for |
+| --- | --- | --- | --- | --- |
+| Compare Unprice against existing logic | `access.check` | No | No | Shadow mode, preflight UI, entitlement checks |
+| Enforce a known usage amount before work runs | `usage.consume` | Yes | Yes | API calls, exports, known-cost actions |
+| Report usage without blocking the request | `usage.record` | No | Yes, asynchronously | Background metering, invoice evidence, eventual analytics |
+| Reserve spend for multi-step work | `runs.start` / `runs.consume` / `runs.end` | Yes | Yes | Workflows, jobs, tools, agents, custom workloads |
+
+## `access.check`: ask without changing state
+
+Use `access.check` when you want to know whether a customer can use a feature, but you do not want
+to consume usage or reserve credits.
+
+```ts
+const { result, error } = await unprice.access.check({
+  customerId: "cus_1234567890",
+  featureSlug: "ai-messages"
+});
+
+if (error) {
+  throw new Error(error.message);
+}
+
+if (!result.allowed) {
+  return new Response("Feature unavailable", { status: 403 });
+}
+```
+
+Use it in shadow mode by logging `result.allowed` beside your current logic.
+
+## `usage.consume`: decide and apply now
+
+Use `usage.consume` when the request path needs a synchronous commercial decision and the usage
+amount is known before the work runs.
+
+```ts
+const { result, error } = await unprice.usage.consume({
+  customerId: "cus_1234567890",
+  featureSlug: "ai-messages",
+  eventSlug: "completions",
+  idempotencyKey: request.id,
+  properties: {
+    aiMessages: 1,
+    inputTokens: 1840,
+    outputTokens: 620
+  }
+});
+
+if (error) {
+  throw new Error(error.message);
+}
+
+if (!result.allowed) {
+  return new Response("Usage limit reached", { status: 429 });
+}
+```
+
+`usage.consume` is the enforcing path for simple known-cost actions. Retry the same logical request
+with the same `idempotencyKey`.
+
+## `usage.record`: report for evidence
+
+Use `usage.record` when the request should not wait for Unprice to decide. It queues the usage event
+for metering, analytics, and invoice evidence.
+
+```ts
+const { error } = await unprice.usage.record({
+  customerId: "cus_1234567890",
+  eventSlug: "completions",
+  idempotencyKey: request.id,
+  properties: {
+    aiMessages: 1,
+    aiGenerations: 2,
+    aiTools: 3,
+    inputTokens: 1840,
+    outputTokens: 620,
+    model: "gpt-4.1-mini"
+  }
+});
+
+if (error) {
+  console.error(error.message);
+}
+```
+
+`usage.record` never blocks over-budget work. Do not use it as a spend gate. One async event can
+carry several measured properties; meters decide which property applies to each feature.
+
+## `runs`: reserve a budget envelope
+
+Use budgeted runs when a paid action unfolds over multiple steps and can spend more than expected.
+The run labels the workload and reserves a budget before it starts.
+
+```ts
+// Reserve spend before the workload creates cost.
+const { result: run, error } = await unprice.runs.start({
+  customerId: "cus_1234567890",
+  budgetAmountMinor: 5000,
+  idempotencyKey: `run:${request.id}`,
+  workloadType: "workflow",
+  workloadId: "wf_summary_123"
+});
+
+if (error) {
+  throw new Error(error.message);
+}
+
+// Only start the paid work after the reservation is running.
+if (run.status !== "running") {
+  return new Response(`Run rejected: ${run.status}`, { status: 429 });
+}
+
+let finalStatus: "completed" | "failed" = "completed";
+
+try {
+  // Report each billable step against the running budget.
+  const { result: usage, error: consumeError } = await unprice.runs.consume({
+    runId: run.runId,
+    featureSlug: "ai-tools",
+    eventSlug: "completions",
+    idempotencyKey: `run:${request.id}:step:summary`,
+    properties: {
+      aiTools: 3,
+      inputTokens: 1840,
+      outputTokens: 620
+    }
+  });
+
+  if (consumeError) {
+    throw new Error(consumeError.message);
+  }
+
+  if (!usage.accepted) {
+    finalStatus = "failed";
+    return new Response(`Run rejected: ${usage.reason}`, { status: 429 });
+  }
+} catch (error) {
+  finalStatus = "failed";
+  throw error;
+} finally {
+  // Always close the run so unused reservation funds are released.
+  const { error: endError } = await unprice.runs.end({
+    runId: run.runId,
+    status: finalStatus
+  });
+
+  if (endError) {
+    console.error(endError.message);
+  }
+}
+```
+
+Call `runs.consume` as the workload spends and `runs.end` when it finishes. Unprice does not own the
+workload executor; it owns the budget reservation, spend decision, and evidence trail.
+
+## Shortcut
+
+<CardGroup cols={2}>
+  <Card title="Simple request path" icon="gauge" href="/libraries/ts/sdk/usage/consume">
+    Use `usage.consume` when one request maps to a known usage amount.
+  </Card>
+  <Card title="Multi-step workload" icon="route" href="/libraries/ts/sdk/runs/start">
+    Use `runs.start` when the workload needs a budget before it begins.
+  </Card>
+</CardGroup>

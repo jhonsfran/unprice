@@ -16,8 +16,8 @@ import { Faqs } from "../_components/faqs"
 import FooterSites from "../_components/footer"
 import { ForceRefreshOnPreview } from "../_components/force-revalidate"
 import type { MarketingPricingPlan } from "../_components/marketing-pricing-card"
-import { FeatureComparison } from "../_components/pricing-comparision"
 import { MarketingPricingTable } from "../_components/marketing-pricing-table"
+import { FeatureComparison } from "../_components/pricing-comparision"
 
 // check shadcn landing page for inspiration
 export const revalidate = 3600 // 1 hour

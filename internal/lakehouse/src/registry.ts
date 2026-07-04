@@ -69,7 +69,7 @@ export const lakehouseSourceSchemaRegistry = {
   events: {
     source: "events",
     firstVersion: 1,
-    currentVersion: 4,
+    currentVersion: 5,
     streamName: "lakehouse_events_stream",
     schemaFile: "events.json",
     sinkTable: "events",
@@ -205,6 +205,14 @@ export const lakehouseSourceSchemaRegistry = {
         addedInVersion: 4,
         defaultValue: null,
         description: "Optional workload identifier supplied for run attribution.",
+      },
+      {
+        name: "ingestion_mode",
+        type: "string",
+        required: false,
+        addedInVersion: 5,
+        defaultValue: null,
+        description: "Ingestion path for the event: async, sync, or run.",
       },
       {
         name: "request_id",

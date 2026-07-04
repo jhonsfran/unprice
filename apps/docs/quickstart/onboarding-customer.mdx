@@ -1,95 +1,91 @@
 ---
-title: 'First Customer'
-description: 'How to subscribe your first customer'
+title: "First customer"
+description: "Subscribe one customer to a published plan version."
 ---
 
-## Overview
+Create or map one customer before you enforce a paid action. The customer is the economic actor in
+Unprice: subscriptions, entitlements, budgets, wallets, usage, and invoices are tied to this ID.
 
-Once you create and published your first plan, you are ready to subscribe customers to it. Here is when the beauty of Unprice comes in. Because plans are inmutable, every customer you subscribe  never will have some side effect when there are new versions of the same plan.
+## When to use `customers.signUp`
 
-Customer subscribes to a specific plan versions, which is way you can iterate on the prices without affecting current customers.
+Use `customers.signUp` when Unprice should provision the customer money path from a plan version:
 
-You can grandfather customer from one version to another, or change the plan entirely as well.
+- customer record
+- subscription and active phase
+- entitlements from the published plan version
+- billing periods
+- wallet and initial credit policy when configured
+- checkout redirect when the plan needs payment-provider setup
 
-There are 2 main ways to create customer in Unprice. The recommended way is through our API or SDK. You can also use the [Dashboard](https://app.unprice.dev).
+## Install the SDK
 
-<AccordionGroup>
-  <Accordion title="Create API key">
-    Create API key for your project in [Unprice](https://app.unprice.dev)
-  </Accordion>
-  <Accordion title="Install SDK">
-    A plan represent the package of features that you are offering. Every plan can have multiple versions, which comes handy when you want iterate on it. More info [here](/libraries/ts/sdk/overview)
+<CodeGroup>
+```bash npm
+npm install @unprice/api
+```
 
-    <CodeGroup>
-      ```bash npm
-      npm install @unprice/api
-      ```
+```bash pnpm
+pnpm add @unprice/api
+```
+</CodeGroup>
 
-      ```bash pnpm
-      pnpm add @unprice/api
-      ```
+```ts
+import { Unprice } from "@unprice/api";
 
-      ```bash yarn
-      yarn add @unprice/api
-      ```
+const unprice = new Unprice({
+  token: process.env.UNPRICE_TOKEN
+});
+```
 
-      ```bash bun
-      bun install @unprice/api
-      ```
-    </CodeGroup>
-  </Accordion>
-  <Accordion title="Use sign up method">
-    SignUp method can be use to get the latest version of a plan and subscribe to it, or you can pass a specific plan version ID. More info [here](/libraries/ts/sdk/overview)
+## Sign up the customer
 
-    ```ts
-    // subscribe to the lastest version of the plan PRO
-    const { result, error } = await unprice.customers.signUp({
-      name: "John Doe",
-      email: "customer@example.com",
-      planSlug: "PRO",
-      externalId: "your_database_id",
-      successUrl: "https://example.com/dashboard",
-      cancelUrl: "https://example.com/login"
-    });
+```ts
+const { result, error } = await unprice.customers.signUp({
+  name: "Acme Inc.",
+  email: "buyer@example.com",
+  planSlug: "pro",
+  externalId: "acct_123",
+  successUrl: "https://yourapp.com/billing/success",
+  cancelUrl: "https://yourapp.com/billing/cancel"
+});
 
-    if (error) {
-      // handle potential network or bad request error
-      // a link to our docs will be in the `error.docs` field
-      console.error(error.message);
-      return;
-    }
+if (error) {
+  throw new Error(error.message);
+}
 
-    console.log(result);
-    ```
+await db.accounts.update({
+  where: { id: "acct_123" },
+  data: {
+    unpriceCustomerId: result.customerId
+  }
+});
+```
 
-    This is the flow of how it works.
+Use `planSlug` to sign up for the latest published version of a plan, or `planVersionId` to pin the
+customer to a specific published version.
 
-    <Frame>
-      <img src="/images/signup-flow.png"/>
-    </Frame>
-  </Accordion>
-  <Accordion title="Handle redirect">
-    The signUp flow if sucessful will response with the redirect URL and the customer ID.
-  </Accordion>
-</AccordionGroup>
-
-### How to create customers - Tutorial
-
-<Frame>
-  <iframe
-    width="900"
-    height="500"
-    src="https://www.youtube.com/embed/4KzFe50RQkQ"
-    title="YouTube video player"
-    frameBorder="0"
-    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-    allowFullScreen
-  ></iframe>
+<Frame caption="Customer signup flow">
+  <img src="/images/signup-flow.png" alt="Your app calls Unprice signUp, Unprice validates data, redirects to a payment provider when needed, then returns the Unprice customer ID."/>
 </Frame>
 
+## After signup
 
-## Next Steps
+Use the returned `customerId` in runtime calls:
 
-You should get to know our [API reference](/api-reference/authentication) or the [Typescript SDK](/libraries/ts/sdk/overview) to start integrate with your product.
+```ts
+const { result, error } = await unprice.access.check({
+  customerId: account.unpriceCustomerId,
+  featureSlug: "ai-generations"
+});
+```
 
-You can also check out the [Features](/apis/features/ratelimiting) section for more information on how to use Unprice.
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="One paid action" icon="bolt-lightning" href="/quickstart/onboarding-plan">
+    Put the first paid action on the money path.
+  </Card>
+  <Card title="Customer signup SDK" icon="user-plus" href="/libraries/ts/sdk/customers/signup">
+    See the full `customers.signUp` request and response shape.
+  </Card>
+</CardGroup>

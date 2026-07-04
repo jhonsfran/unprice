@@ -82,14 +82,70 @@ pipeline_records_per_pipeline_send =
   sum(reporting_pipeline_record_count) / max(count(reporting_pipeline_record_count > 0), 1)
 ```
 
-Alert when `reporting_retry_count` or `reporting_enqueue_failure_count` is non-zero over the
-same window.
+## Reliability Controls
+
+Queue consumers in production and preview use separate DLQs for raw ingestion and reporting
+delivery. They also use `retry_delay = 60` so transient Cloudflare, Durable Object, Pipeline, or
+Tinybird issues do not burn all retry attempts immediately.
+
+Rejected ingestion rows are business outcomes. They should be queryable in the Events UI, but they
+should not page an operator by default. Alert on failed delivery signals instead:
+
+- Cloudflare Queue backlog alert for `unprice-api-ingestion-dlq-prod`: fire when
+  `backlog_count > 0` for two consecutive checks.
+- Cloudflare Queue backlog alert for `unprice-api-ingestion-reporting-dlq-prod`: fire when
+  `backlog_count > 0` for two consecutive checks.
+- Axiom warning for raw queue retries:
+  `message = "ingestion queue group processing failed"`.
+- Axiom warning for reporting queue retries:
+  `message = "ingestion reporting queue batch will retry"`.
+- Axiom warning for Tinybird delivery failures:
+  `error_message` contains `Tinybird entitlement meter facts ingestion failed` or
+  `Tinybird ingestion events ingestion failed`.
+
+Cloudflare Queue metrics expose backlog fields (`backlog_count`, `backlog_bytes`,
+`oldest_message_timestamp_ms`) through the Queue metrics API. Use the prod DLQ queue IDs for the
+two backlog alerts. If queue IDs are not stable in the alerting tool, match by queue name and keep
+the policy names explicit.
+
+Recommended notification severity:
+
+```text
+DLQ backlog > 0:
+  page or high-priority Slack; this is possible silent data loss until recovered.
+
+Retry warnings without DLQ backlog:
+  low-priority Slack; this is early signal that retries are absorbing a transient issue.
+```
+
+## DLQ Recovery
+
+Do not add an automatic DLQ consumer yet. Recovery should be deliberate until failure modes are
+boring and well classified.
+
+1. Identify which DLQ has backlog.
+2. Check the matching Axiom service:
+   - `service = ingestion_queue` for `unprice-api-ingestion-dlq-prod`
+   - `service = ingestion_reporting_queue` for `unprice-api-ingestion-reporting-dlq-prod`
+3. Fix the root cause first: schema mismatch, Tinybird/Pipeline outage, Durable Object failure, or
+   malformed message.
+4. For reporting DLQ messages, requeue the original reporting envelope after the downstream sink is
+   healthy. Do not manually synthesize Tinybird status or meter fact rows.
+5. For raw ingestion DLQ messages, prefer the existing Events UI replay when the failed row is
+   visible and replayable. If no failed row exists because reporting also failed, inspect and
+   requeue the raw DLQ message only after the reporting path is healthy.
+6. After recovery, confirm DLQ backlog returns to zero and the Events UI shows processed, rejected,
+   or failed status rows for the affected time window.
 
 ## Failed Event Replay
 
 Replay uses Tinybird as the recovery index. The raw ingestion worker reports unexpected apply/rate
 failures through the reporting queue as `state=failed`, `replayable=true`, and no meter facts. The
 failed Tinybird row stores `payload_json` so replay does not wait for R2/Pipeline visibility.
+
+`unprice_ingestion_events` keeps 60 days of Tinybird visibility so operators have enough room to
+inspect failed and rejected customer-visible outcomes. Replay remains bounded by the 30-day
+ingestion event-age window; extending Tinybird retention does not make old events safe to requeue.
 
 The reporting queue remains the single writer for ingestion status rows. Rejected rows are business
 outcomes and are not replayable by default. Failed rows are system outcomes and can be replayed from

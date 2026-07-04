@@ -85,6 +85,7 @@ describe("ingestion reporting envelope builder", () => {
       sourceType: "api_key",
       sourceId: "key_123",
       sourceName: null,
+      ingestionMode: "async",
       rejectionReason: "WALLET_EMPTY",
       failureStage: null,
       failureReason: null,
@@ -104,6 +105,7 @@ describe("ingestion reporting envelope builder", () => {
       source_type: "api_key",
       source_id: "key_123",
       source_name: null,
+      ingestion_mode: "async",
       state: "rejected",
       rejection_reason: "WALLET_EMPTY",
       failure_stage: null,
@@ -193,9 +195,10 @@ describe("ingestion reporting envelope builder", () => {
       replayable: true,
       payloadJson: JSON.stringify(message),
     })
-    expect(ingestionQueueMessageSchema.parse(JSON.parse(failedRecord.payloadJson ?? ""))).toEqual(
-      message
-    )
+    expect(ingestionQueueMessageSchema.parse(JSON.parse(failedRecord.payloadJson ?? ""))).toEqual({
+      ...message,
+      ingestionMode: "async",
+    })
     const failedAuditPayload = JSON.parse(failedRecord.auditPayloadJson)
     expect(failedAuditPayload).not.toHaveProperty("rejection_reason")
     expect(failedAuditPayload).toMatchObject({
@@ -233,6 +236,7 @@ describe("ingestion reporting envelope builder", () => {
       parentRunId: "brun_parent_001",
       workloadType: "agent",
       workloadId: "research-assistant",
+      ingestionMode: "run",
       replayable: false,
       payloadJson: null,
     })
@@ -242,6 +246,7 @@ describe("ingestion reporting envelope builder", () => {
       parent_run_id: "brun_parent_001",
       workload_type: "agent",
       workload_id: "research-assistant",
+      ingestion_mode: "run",
     })
   })
 
@@ -268,6 +273,7 @@ describe("ingestion reporting envelope builder", () => {
       payloadJson: null,
       replayable: false,
       status: "rejected",
+      ingestionMode: "run",
     })
     expect(JSON.parse(record.auditPayloadJson)).toMatchObject({
       run_id: "brun_rejected_001",
@@ -275,6 +281,7 @@ describe("ingestion reporting envelope builder", () => {
       parent_run_id: "brun_parent_rejected_001",
       workload_type: "workflow",
       workload_id: "billing-audit",
+      ingestion_mode: "run",
     })
   })
 

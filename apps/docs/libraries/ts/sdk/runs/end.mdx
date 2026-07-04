@@ -1,0 +1,58 @@
+---
+title: "End budgeted run"
+description: "End a budgeted run and release unused reservation funds."
+---
+
+Use `runs.end` when the workload finishes. Ending the run releases unused reservation funds and
+locks the final run status.
+
+<RequestExample>
+
+```ts
+// Always close the run so unused reservation funds are released.
+const { result, error } = await unprice.runs.end({
+  runId: "brun_123",
+  status: "completed"
+});
+
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+console.log(result.status);
+```
+
+</RequestExample>
+
+<ResponseExample>
+```json
+{
+  "runId": "brun_123",
+  "status": "completed",
+  "customerId": "cus_1234567890",
+  "budgetAmountMinor": 5000,
+  "consumedAmountMinor": 1200,
+  "remainingAmountMinor": 3800,
+  "currency": "USD",
+  "workloadType": "workflow",
+  "workloadId": "wf_summary_123",
+  "traceId": "trace_123",
+  "parentRunId": null
+}
+```
+</ResponseExample>
+
+## Request
+
+<ParamField body="runId" type="string" required>
+    The budgeted run ID.
+</ParamField>
+
+<ParamField body="status" type='"completed" | "canceled" | "failed"'>
+    Final status for the run. Defaults to `completed`.
+</ParamField>
+
+## Response
+
+Returns the final budget run summary after unused reservation funds are released.

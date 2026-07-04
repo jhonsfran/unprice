@@ -25,15 +25,15 @@ export function ApiKeyStep({ className }: React.ComponentProps<"div"> & StepComp
         <div className="animate-content delay-200!">
           <CreateApiKeyForm
             isOnboarding={true}
-            onSuccess={(data) => {
-              updateContext({
+            onSuccess={async (data) => {
+              await updateContext({
                 flowData: {
                   apiKey: data,
                 },
               })
 
               // go to the next step
-              next()
+              await next()
             }}
             defaultValues={{
               name: "api-key-onboarding",

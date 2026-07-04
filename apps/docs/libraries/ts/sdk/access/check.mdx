@@ -1,6 +1,6 @@
 ---
-title: "Verify"
-description: "Check the current feature entitlement status for a customer"
+title: "Check access"
+description: "Resolve whether a feature is usable for a customer."
 ---
 
 <RequestExample>
@@ -8,7 +8,7 @@ description: "Check the current feature entitlement status for a customer"
 ```ts
 const { result, error } = await unprice.access.check({
   customerId: "cus_1234567890",
-  featureSlug: "tokens"
+  featureSlug: "ai-messages"
 });
 
 if (error) {
@@ -25,7 +25,7 @@ console.log(result);
 ```json
 {
   "allowed": true,
-  "featureSlug": "tokens",
+  "featureSlug": "ai-messages",
   "usage": 42,
   "limit": 100,
   "spending": {
@@ -45,7 +45,7 @@ console.log(result);
 </ParamField>
 
 <ParamField body="featureSlug" type="string" required>
-    The feature slug to verify.
+    The feature slug to check.
 </ParamField>
 
 <ParamField body="timestamp" type="number">
@@ -59,7 +59,7 @@ console.log(result);
 </ResponseField>
 
 <ResponseField name="featureSlug" type="string" required>
-    The feature slug that was verified.
+    The feature slug that was checked.
 </ResponseField>
 
 <ResponseField name="rejectionReason" type="string">

@@ -4,7 +4,7 @@ description: 'Securely authenticating with the Unprice API'
 ---
 
 
-Almost all Unprice API endpoints require authentication using an Api key. Api keys provide access to your Unprice resources.
+Almost all Unprice API endpoints require authentication using an API key. API keys provide access to your Unprice resources.
 
 ## Bearer Authentication
 
@@ -17,14 +17,14 @@ Authorization: Bearer unprice_live_1234567890
 Example request:
 
 ```bash
-curl -X GET "https://api.unprice.dev/v1/plans/versions/get/{planVersionId}" \
+curl -X GET "https://api.unprice.dev/v1/plan-versions/get/{planVersionId}" \
   -H "Authorization: Bearer unprice_live_1234567890" \
   -H "Content-Type: application/json"
 ```
 
 ## Security Best Practices
 
-Never expose your api key in client-side code or include it in public repositories. For frontend applications, always use a backend server to proxy requests to the Unprice API.
+Never expose your API key in client-side code or include it in public repositories. For frontend applications, always use a backend server to proxy requests to the Unprice API.
 
 ## Authentication Errors
 
@@ -37,7 +37,7 @@ If your authentication fails, you'll receive a 401 Unauthorized or 403 Forbidden
   },
   "error": {
     "title": "Unauthorized",
-    "detail": "The provided api key is invalid or has been revoked",
+    "detail": "The provided API key is invalid or has been revoked",
     "status": 401,
     "type": "https://unprice.dev/docs/errors/unauthorized"
   }
@@ -47,4 +47,4 @@ If your authentication fails, you'll receive a 401 Unauthorized or 403 Forbidden
 Common authentication issues include:
 - Missing the Authorization header
 - Invalid key format
-- Revoked or expired api key
+- Revoked or expired API key

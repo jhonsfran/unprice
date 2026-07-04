@@ -87,7 +87,7 @@ export function IngestionEventsPanel() {
         data={rows}
         getRowId={(row) => row.canonicalAuditId}
         filters={filterOptions}
-        searchPlaceholder="Search events, customers, sources, reasons"
+        searchPlaceholder="Search events, customers, sources, modes, reasons"
         searchValue={searchValue}
         onSearchValueChange={(value) => {
           void setFilters({ page: 1, search: value || null })

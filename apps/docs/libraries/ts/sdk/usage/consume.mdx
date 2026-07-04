@@ -1,6 +1,6 @@
 ---
-title: "Ingest Sync"
-description: "Synchronously verify and ingest one feature event"
+title: "Consume usage"
+description: "Synchronously apply usage and return the allow or deny decision."
 ---
 
 <RequestExample>
@@ -8,11 +8,14 @@ description: "Synchronously verify and ingest one feature event"
 ```ts
 const { result, error } = await unprice.usage.consume({
   idempotencyKey: "idem_123",
-  eventSlug: "tokens_used",
-  featureSlug: "tokens",
+  eventSlug: "completions",
+  featureSlug: "ai-messages",
   customerId: "cus_1234567890",
   properties: {
-    amount: 1
+    aiMessages: 1,
+    inputTokens: 1840,
+    outputTokens: 620,
+    model: "gpt-4.1-mini"
   }
 });
 
@@ -38,7 +41,7 @@ console.log(result);
 ## Request
 
 <ParamField body="featureSlug" type="string" required>
-    The feature slug to verify while ingesting.
+    The specific feature or entitlement to consume against, for example `ai-messages`.
 </ParamField>
 
 <ParamField body="idempotencyKey" type="string" required>
@@ -46,13 +49,15 @@ console.log(result);
 </ParamField>
 
 <ParamField body="eventSlug" type="string" required>
-    The event slug configured in Unprice.
+    The broad event kind configured in Unprice, for example `completions`.
 </ParamField>
 
 <ParamField body="properties" type="object" required>
-    Event properties used by meters.
+    Event properties used by meters. For `usage.consume`, the targeted feature's meter reads the
+    relevant field from this object.
 </ParamField>
 
 ## Response
 
-Returns whether the event was processed or rejected for the targeted feature.
+Returns whether the event was processed or rejected for the targeted feature. Use this when the
+request path needs an enforcing decision before paid work runs.

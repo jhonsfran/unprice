@@ -279,7 +279,7 @@ export function FilterDataTable<TData, TValue>({
             ) : null}
             {computedToolbarActions}
           </div>
-          <ScrollArea className={viewportClassName}>
+          <ScrollArea className={cn(viewportClassName, isWorkbench && "bg-background")}>
             <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
               <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
                 {table.getHeaderGroups().map((headerGroup) => (

@@ -169,6 +169,9 @@ patterns. Keep it cheap to load and useful.
   frontend replay can replace it before requeueing.
 - 2026-06-13: Ingestion replay uses Tinybird failed rows as the recovery index and `payload_json`
   as the immediate replay source; R2 remains write-once audit storage.
+- 2026-07-05: `unprice_ingestion_events` keeps 60 days in Tinybird for operator visibility, but
+  replay remains bounded by the 30-day ingestion event-age window unless idempotency retention is
+  widened too.
 - 2026-06-12: Ingestion event table pagination should use a composite Tinybird cursor
   (`handled_at`, `canonical_audit_id`); `handled_at` alone can skip rows when many events share a
   timestamp.
@@ -177,6 +180,14 @@ patterns. Keep it cheap to load and useful.
 
 ## Next.js And Dashboard
 
+- 2026-07-04: Onboarding step navigation must stay sequential even in development; avoid dev-only
+  `goToStep` bypasses or "continue anyway" buttons that advance after an incomplete step.
+- 2026-07-04: OnboardJS `updateContext` is async and persists before notifying state; await it
+  before enabling or performing step navigation that depends on newly written `flowData`.
+- 2026-07-04: tRPC router procedure keys cannot use reserved object names such as `apply`;
+  expose plan-template creation as `planVersions.applyTemplate` and keep client calls aligned.
+- 2026-07-04: Theme-sensitive visuals should use `resolvedTheme` from `next-themes`, not
+  `theme`; `theme` can be `"system"` while the rendered UI needs the actual light/dark palette.
 - 2026-07-04: Workspace signup should omit `planVersionId` when no pricing/session plan is
   selected; sending an empty string blocks the customer signup default-plan resolver.
 - 2026-07-04: Dashboard header full logos should use the `Logo` size prop, not Tailwind
@@ -610,3 +621,10 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
   RunBudgetDO pending capture buckets for the statement key before invoice totals are projected.
 - 2026-06-22: Ingestion billing-period context should expose only `pending` periods; allowing
   `invoiced` periods lets late events create wallet ledger captures after the invoice is frozen.
+- 2026-07-04: Browser/onboarding usage callers should use `POST /v1/usage/record` for async
+  evidence and `POST /v1/usage/consume` for synchronous checks; `/v1/events/ingest*` is stale.
+- 2026-07-04: Onboarding evidence setup should call the generated API SDK from a backend
+  use case exposed through tRPC; do not hardcode public API `fetch` URLs in onboarding UI.
+- 2026-07-04: For scheduled future subscription phases, pass request `now` into
+  `subscriptions.createPhase`; passing the future `startAt` makes the service activate the phase
+  immediately and can update subscription state before the effective boundary.
