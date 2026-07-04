@@ -126,6 +126,10 @@ function paymentMethodRequiredReason(paymentProvider: PaymentProvider): string {
   return "Add a payment method before changing to this plan."
 }
 
+function notFoundTargetPlanMessage(): string {
+  return "Target plan version was not found for this workspace billing project"
+}
+
 export async function changeWorkspacePlan(
   deps: WorkspaceChangePlanDeps,
   rawInput: WorkspaceChangePlanInput & {
@@ -270,7 +274,7 @@ export async function changeWorkspacePlan(
       return Err(
         new WorkspaceChangePlanError({
           code: "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT",
-          message: "Target plan version belongs to a different billing project",
+          message: notFoundTargetPlanMessage(),
           context: {
             workspaceId: rawInput.workspace.id,
             customerId,
@@ -284,7 +288,7 @@ export async function changeWorkspacePlan(
     return Err(
       new WorkspaceChangePlanError({
         code: "WORKSPACE_TARGET_PLAN_VERSION_NOT_FOUND",
-        message: "Target plan version was not found for this workspace billing project",
+        message: notFoundTargetPlanMessage(),
         context: {
           workspaceId: rawInput.workspace.id,
           customerId,
@@ -415,16 +419,25 @@ export async function changeWorkspacePlan(
     .transaction(async (tx) => {
       const services = deps.services
       const targetStartAt = input.whenToChange === "immediately" ? now + 1 : currentCycleEndAt
+      const billingPeriodsNow = targetStartAt
 
       if (input.whenToChange === "immediately") {
         const closeCurrentPhaseInput = {
           id: activePhase.id,
           projectId: billingProjectId,
           subscriptionId,
+          planVersionId: activePhase.planVersionId,
+          paymentProvider: activePhase.paymentProvider,
+          creditLinePolicy: activePhase.creditLinePolicy,
+          creditLineAmount: activePhase.creditLineAmount,
+          billingAnchor: activePhase.planVersion.billingConfig.billingAnchor,
+          trialUnits: 0,
+          paymentMethodId: null,
+          trialEndsAt: null,
           startAt: activePhase.startAt,
           endAt: now,
           items: [],
-        } as unknown as SubscriptionPhase
+        } as SubscriptionPhase
 
         const closeResult = await services.subscriptions.updatePhase({
           input: closeCurrentPhaseInput,
@@ -464,7 +477,7 @@ export async function changeWorkspacePlan(
       const periodsResult = await services.billing.generateBillingPeriods({
         projectId: billingProjectId,
         subscriptionId,
-        now,
+        now: billingPeriodsNow,
         db: tx,
       })
 

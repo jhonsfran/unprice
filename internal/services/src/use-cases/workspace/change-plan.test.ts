@@ -1,5 +1,5 @@
 import type { Database } from "@unprice/db"
-import { FetchError, Ok } from "@unprice/error"
+import { FetchError, Ok, SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { describe, expect, it, vi } from "vitest"
 
@@ -299,7 +299,9 @@ describe("changeWorkspacePlan", () => {
     expect((result.err as WorkspaceChangePlanError).code).toBe(
       "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT"
     )
-    expect(result.err?.message).toContain("different billing project")
+    expect(result.err?.message).toBe(
+      "Target plan version was not found for this workspace billing project"
+    )
   })
 
   it("closes the current phase and creates the new one at now + 1 for immediate changes", async () => {
@@ -339,7 +341,7 @@ describe("changeWorkspacePlan", () => {
     expect(generateBillingPeriods).toHaveBeenCalledWith({
       projectId: "proj_billing",
       subscriptionId: "sub_123",
-      now,
+      now: now + 1,
       db: tx,
     })
   })
@@ -347,7 +349,7 @@ describe("changeWorkspacePlan", () => {
   it("creates the new phase at the current cycle end for end-of-cycle changes", async () => {
     const now = Date.parse("2026-07-04T10:00:00.000Z")
     const currentCycleEndAt = now + 86_400_000
-    const { deps, tx, updatePhase, createPhase } = createDeps({
+    const { deps, tx, updatePhase, createPhase, generateBillingPeriods } = createDeps({
       now,
       currentCycleEndAt,
     })
@@ -371,5 +373,26 @@ describe("changeWorkspacePlan", () => {
       db: tx,
       now: currentCycleEndAt,
     })
+    expect(generateBillingPeriods).toHaveBeenCalledWith({
+      projectId: "proj_billing",
+      subscriptionId: "sub_123",
+      now: currentCycleEndAt,
+      db: tx,
+    })
+  })
+
+  it("returns the phase error and skips period generation when phase creation fails", async () => {
+    const phaseError = new SchemaError({
+      message: "phase create failed",
+    })
+    const { deps, updatePhase, createPhase, generateBillingPeriods } = createDeps()
+    createPhase.mockResolvedValue({ err: phaseError })
+
+    const result = await changeWorkspacePlan(deps as never, createInput("immediately"))
+
+    expect(result.err).toBe(phaseError)
+    expect(updatePhase).toHaveBeenCalled()
+    expect(createPhase).toHaveBeenCalled()
+    expect(generateBillingPeriods).not.toHaveBeenCalled()
   })
 })

@@ -74,15 +74,15 @@ describe("workspace changePlan mutation", () => {
     expect(error.message).toContain("Stripe is disabled")
   })
 
-  it("maps wrong-project target failures to precondition failed", () => {
+  it("maps wrong-project target failures the same way as not-found", () => {
     const error = changePlanErrorToTrpcError(
       new WorkspaceChangePlanError({
         code: "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT",
-        message: "Target plan version belongs to a different billing project",
+        message: "Target plan version was not found for this workspace billing project",
       })
     )
 
-    expect(error.code).toBe("PRECONDITION_FAILED")
+    expect(error.code).toBe("BAD_REQUEST")
   })
 
   it("maps expected service failures to precondition failed", () => {
@@ -94,6 +94,16 @@ describe("workspace changePlan mutation", () => {
 
     expect(error.code).toBe("PRECONDITION_FAILED")
     expect(error.message).toContain("Subscription must be active")
+  })
+
+  it("keeps generic fetch failures internal", () => {
+    const error = changePlanErrorToTrpcError(
+      Object.assign(new Error("database failed"), {
+        name: "FetchError",
+      })
+    )
+
+    expect(error.code).toBe("INTERNAL_SERVER_ERROR")
   })
 
   it("maps schema-like failures to bad request", () => {
