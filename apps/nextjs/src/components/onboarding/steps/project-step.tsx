@@ -35,13 +35,14 @@ export function ProjectStep({ className }: React.ComponentProps<"div"> & StepCom
             }
             onSuccess={async (project) => {
               // Set cookies so onboarding API requests can resolve the active project context
-              await updateContextCookies(workspaceSlug, project.slug)
-
-              await updateContext({
-                flowData: {
-                  project,
-                },
-              })
+              await Promise.all([
+                updateContextCookies(workspaceSlug, project.slug),
+                updateContext({
+                  flowData: {
+                    project,
+                  },
+                }),
+              ])
               await next()
             }}
           />

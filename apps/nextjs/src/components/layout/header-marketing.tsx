@@ -25,8 +25,8 @@ export default function HeaderMarketing() {
               href={`${APP_DOMAIN}`}
               className={cn(buttonVariants({ variant: "primary" }), "border-primary-solid")}
             >
-              Login
-              <ChevronRight className="ml-1 h-4 w-4" />
+              Start with one action
+              <ChevronRight data-icon="inline-end" />
             </Link>
           </div>
         </div>

@@ -1,5 +1,6 @@
 "use client"
 
+import { Badge } from "@unprice/ui/badge"
 import { m } from "framer-motion"
 import { MoneyPath } from "./money-path"
 
@@ -61,22 +62,26 @@ export function FeaturesApp() {
       aria-labelledby="request-path-title"
       className="mx-auto w-full max-w-6xl px-6 py-16"
     >
+      <m.div variants={itemVariants}>
+        <Badge variant="info" className="w-fit">
+          The mechanism
+        </Badge>
+      </m.div>
       <m.h2
         variants={itemVariants}
         id="request-path-title"
-        className="mt-2 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
+        className="mt-4 inline-block bg-clip-text py-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
-        Built for the request path
+        Customer spend authorization runs in the request path.
       </m.h2>
 
       <m.p
         variants={itemVariants}
         className="mt-6 text-justify text-background-text text-lg leading-7"
       >
-        PriceOps isn't only about strategy — it's about where the decision happens. Your
-        monetization layer should run where the cost is created: in the request path, before
-        expensive work executes. Unprice checks entitlement and budget, reserves credits, and
-        rejects over-budget work in line, then keeps the evidence to explain the invoice later.
+        Before the paid action runs, your app asks one money path which plan version applies,
+        whether the customer is entitled, whether the budget or wallet has room, and whether the
+        decision can explain the invoice line later.
       </m.p>
 
       <m.div variants={itemVariants} className="mt-12">

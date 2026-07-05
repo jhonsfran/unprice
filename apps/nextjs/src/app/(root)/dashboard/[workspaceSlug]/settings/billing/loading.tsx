@@ -25,7 +25,7 @@ export default function BillingPageLoading() {
             <Skeleton className="h-[360px] rounded-md border border-border/60" />
           </div>
         </section>
-        <UsageDashboardSkeleton mode="customer" showCustomerSummary={false} />
+      <UsageDashboardSkeleton mode="customer" display={{ showCustomerSummary: false }} />
       </div>
     </DashboardShell>
   )

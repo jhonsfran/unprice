@@ -2,6 +2,7 @@ import { CalendarIcon, FileTextIcon } from "lucide-react"
 import { BellIcon, Share2Icon } from "lucide-react"
 
 import { DOCS_DOMAIN } from "@unprice/config"
+import { Badge } from "@unprice/ui/badge"
 import { Calendar } from "@unprice/ui/calendar"
 import { cn } from "@unprice/ui/utils"
 import { AnimatedBeamDemo } from "./animated-beam-demo"
@@ -27,8 +28,8 @@ const files = [
 const features = [
   {
     Icon: FileTextIcon,
-    name: "Plan iteration",
-    description: "Version plans, migrate customers, and packaging features with PriceOps.",
+    name: "Versioned plans",
+    description: "Pin customers to the plan version they bought while new packaging ships safely.",
     href: `${DOCS_DOMAIN}/features/plans`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-1",
@@ -59,9 +60,9 @@ const features = [
   },
   {
     Icon: BellIcon,
-    name: "Any pricing model",
-    description: "Report usage, metering, usage-based pricing, etc.",
-    href: `${DOCS_DOMAIN}concepts/pricing/overview`,
+    name: "Right runtime call",
+    description: "Use record for evidence, consume for enforcement, and runs for reserved budgets.",
+    href: `${DOCS_DOMAIN}/concepts/pricing/overview`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-2",
     background: (
@@ -70,8 +71,9 @@ const features = [
   },
   {
     Icon: Share2Icon,
-    name: "Analytics",
-    description: "Track usage events and trace charges back to rated usage and ledger evidence.",
+    name: "Invoice evidence",
+    description:
+      "Trace charges back to pricing rules, rated usage, wallet movement, and ledger evidence.",
     href: `${DOCS_DOMAIN}/features/analytics`,
     cta: "Learn more",
     className: "col-span-3 lg:col-span-2",
@@ -81,8 +83,9 @@ const features = [
   },
   {
     Icon: CalendarIcon,
-    name: "Subscription",
-    description: "Manage subscriptions, cancel, pause, resume, with a simple API.",
+    name: "Provisioned entitlements",
+    description:
+      "Create the customer, subscription, billing period, wallet, and entitlements in one path.",
     className: "col-span-3 lg:col-span-1",
     href: `${DOCS_DOMAIN}/features/subscriptions`,
     cta: "Learn more",
@@ -99,11 +102,14 @@ const features = [
 export const Features = () => {
   return (
     <div className="mx-auto w-full max-w-6xl px-6 py-16">
+      <Badge variant="outline" className="w-fit">
+        Capabilities
+      </Badge>
       <h2
         id="capabilities-title"
-        className="mt-2 inline-block bg-clip-text py-2 pb-8 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
+        className="mt-4 inline-block bg-clip-text py-2 pb-8 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-6xl"
       >
-        One runtime for every pricing model
+        One runtime after the first action proves it.
       </h2>
       <BentoGrid>
         {features.map((feature, idx) => (

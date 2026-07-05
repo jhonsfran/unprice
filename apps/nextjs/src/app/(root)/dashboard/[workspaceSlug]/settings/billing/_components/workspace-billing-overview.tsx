@@ -72,10 +72,12 @@ export function WorkspaceBillingOverview({
         dateFormat={intervalFilter.dateFormat}
         mode="customer"
         isFetching={isFetching}
-        showCustomerSummary={false}
         title="Workspace usage evidence"
         subjectLabel="workspace"
-        showEmptyStateActions={false}
+        display={{
+          showCustomerSummary: false,
+          showEmptyStateActions: false,
+        }}
       />
     </div>
   )

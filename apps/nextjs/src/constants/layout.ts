@@ -38,7 +38,7 @@ export const navItems = [
 export const siteConfig: SiteConfig = {
   name: "unprice",
   description:
-    "Open-source PriceOps infrastructure for usage-based SaaS. Stop runaway usage before it runs.",
+    "Open-source customer money path for usage-based SaaS. Authorize customer spend before paid work runs.",
   links: {
     twitter: "https://github.com/jhonsfran1165/unprice",
     github: "https://github.com/jhonsfran1165/unprice",

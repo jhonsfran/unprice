@@ -59,7 +59,7 @@ export function PlanVersionPricingCard({
   const billingLabel = planVersion.billingConfig.name
   const actionElement = renderAction?.(action) ?? <PricingCardAction action={action} />
   const visibleFeatures = [...planVersion.planFeatures]
-    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .toSorted((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .filter((feature) => !feature.metadata?.hidden)
   const isInteractive = action.kind === "select" || action.kind === "publish"
   const isSelected = action.kind === "select" && action.selected
@@ -118,8 +118,10 @@ export function PlanVersionPricingCard({
               <li key={feature.id} className="flex w-full flex-col justify-start">
                 <PlanVersionFeatureListItem
                   feature={feature}
-                  withCalculator
-                  withQuantity
+                  displayOptions={{
+                    showCalculator: true,
+                    showQuantity: true,
+                  }}
                   className="font-medium text-background-text"
                 />
               </li>

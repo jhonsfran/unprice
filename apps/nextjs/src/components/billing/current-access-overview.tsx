@@ -5,6 +5,7 @@ import { Progress } from "@unprice/ui/progress"
 import { cn } from "@unprice/ui/utils"
 import { ArrowUpRight, CalendarRange, KeyRound } from "lucide-react"
 import type { ReactNode } from "react"
+import { useMemo } from "react"
 import { FreshnessIndicator } from "~/components/analytics/freshness-indicator"
 import { SectionIntro } from "~/components/layout/section-intro"
 import { SuperLink } from "~/components/super-link"
@@ -28,6 +29,70 @@ const LONG_DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
   day: "numeric",
   year: "numeric",
 })
+
+type DateFormatterBundle = {
+  shortDate: Intl.DateTimeFormat
+  longDate: Intl.DateTimeFormat
+  shortDateTime: Intl.DateTimeFormat
+  longDateTime: Intl.DateTimeFormat
+}
+
+const SHORT_DATE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+})
+
+const LONG_DATE_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+})
+
+function useDateFormatterBundle(timeZone?: string): DateFormatterBundle {
+  return useMemo(() => {
+    if (!timeZone) {
+      return {
+        shortDate: SHORT_DATE_FORMAT,
+        longDate: LONG_DATE_FORMAT,
+        shortDateTime: SHORT_DATE_TIME_FORMAT,
+        longDateTime: LONG_DATE_TIME_FORMAT,
+      }
+    }
+
+    return {
+      shortDate: new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        timeZone,
+      }),
+      longDate: new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone,
+      }),
+      shortDateTime: new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone,
+      }),
+      longDateTime: new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone,
+      }),
+    }
+  }, [timeZone])
+}
 
 export function CurrentAccessOverview({
   access,
@@ -56,6 +121,7 @@ export function CurrentAccessOverview({
   const activePhase = activePlan?.activePhase ?? null
   const walletAvailable = wallet.balances.purchased + wallet.balances.granted
   const walletHeld = wallet.balances.reserved
+  const dateFormatters = useDateFormatterBundle(activePlan?.timezone)
 
   return (
     <section className="flex flex-col gap-4">
@@ -97,6 +163,7 @@ export function CurrentAccessOverview({
                     <p className="text-muted-foreground text-sm">
                       {formatPeriod(activePlan.currentCycleStartAt, activePlan.currentCycleEndAt, {
                         billingConfig: activePhase?.planVersion.billingConfig,
+                        dateFormatters,
                         timezone: activePlan.timezone,
                       })}
                     </p>
@@ -182,6 +249,7 @@ export function CurrentAccessOverview({
                     entitlement={entitlement}
                     usageUnavailable={access.usageUnavailable}
                     timezone={activePlan?.timezone}
+                    dateFormatters={dateFormatters}
                     action={renderEntitlementAction?.(entitlement)}
                   />
                 ))}
@@ -216,18 +284,20 @@ function EntitlementUsageRow({
   entitlement,
   usageUnavailable,
   timezone,
+  dateFormatters,
   action,
 }: {
   entitlement: CurrentAccessEntitlement
   usageUnavailable: boolean
   timezone?: string
+  dateFormatters: DateFormatterBundle
   action?: ReactNode
 }) {
   const hasMeasuredUsage = entitlement.currentUsage !== null && !usageUnavailable
   const hasFiniteLimit = entitlement.limit !== null && entitlement.limit > 0
   const usagePeriodLabel =
     hasMeasuredUsage && entitlement.usagePeriods.length > 0
-      ? formatUsagePeriods(entitlement.usagePeriods, timezone)
+      ? formatUsagePeriods(entitlement.usagePeriods, dateFormatters, timezone)
       : null
 
   return (
@@ -332,23 +402,30 @@ function formatPeriod(
   options?: {
     billingConfig?: BillingConfig
     includeTime?: boolean
+    dateFormatters?: DateFormatterBundle
     timezone?: string
   }
 ): string {
   const includeTime = options?.includeTime ?? options?.billingConfig?.billingInterval === "minute"
-  const timeZone = options?.timezone
+  const formatters = options?.dateFormatters ?? {
+    shortDate: SHORT_DATE_FORMAT,
+    longDate: LONG_DATE_FORMAT,
+    shortDateTime: SHORT_DATE_TIME_FORMAT,
+    longDateTime: LONG_DATE_TIME_FORMAT,
+  }
   const startDate = new Date(start)
   const endDate = new Date(end)
 
   if (!includeTime) {
-    return `${formatShortDate(startDate, timeZone)} - ${formatLongDate(endDate, timeZone)}`
+    return `${formatShortDate(startDate, formatters)} - ${formatLongDate(endDate, formatters)}`
   }
 
-  return `${formatShortDateTime(startDate, timeZone)} - ${formatLongDateTime(endDate, timeZone)}`
+  return `${formatShortDateTime(startDate, formatters)} - ${formatLongDateTime(endDate, formatters)}`
 }
 
 function formatUsagePeriods(
   periods: CurrentAccessEntitlement["usagePeriods"],
+  dateFormatters: DateFormatterBundle,
   timezone?: string
 ): string | null {
   if (periods.length === 0) {
@@ -365,12 +442,13 @@ function formatUsagePeriods(
   }
 
   if (period.end >= Number.MAX_SAFE_INTEGER) {
-    return `Period since ${formatLongDate(new Date(period.start), timezone)}`
+    return `Period since ${formatLongDate(new Date(period.start), dateFormatters)}`
   }
 
   return `Period ${formatPeriod(period.start, period.end, {
     includeTime: period.end - period.start < 2 * 24 * 60 * 60 * 1000,
     timezone,
+    dateFormatters,
   })}`
 }
 
@@ -378,50 +456,20 @@ function formatDate(timestamp: number): string {
   return LONG_DATE_FORMAT.format(new Date(timestamp))
 }
 
-function formatShortDate(date: Date, timeZone?: string): string {
-  if (!timeZone) {
-    return SHORT_DATE_FORMAT.format(date)
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    timeZone,
-  }).format(date)
+function formatShortDate(date: Date, formatters: DateFormatterBundle): string {
+  return formatters.shortDate.format(date)
 }
 
-function formatLongDate(date: Date, timeZone?: string): string {
-  if (!timeZone) {
-    return LONG_DATE_FORMAT.format(date)
-  }
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone,
-  }).format(date)
+function formatLongDate(date: Date, formatters: DateFormatterBundle): string {
+  return formatters.longDate.format(date)
 }
 
-function formatShortDateTime(date: Date, timeZone?: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone,
-  }).format(date)
+function formatShortDateTime(date: Date, formatters: DateFormatterBundle): string {
+  return formatters.shortDateTime.format(date)
 }
 
-function formatLongDateTime(date: Date, timeZone?: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone,
-  }).format(date)
+function formatLongDateTime(date: Date, formatters: DateFormatterBundle): string {
+  return formatters.longDateTime.format(date)
 }
 
 function formatBillingCadence(config: BillingConfig): string {

@@ -1,20 +1,19 @@
 import { cn } from "@unprice/ui/utils"
 import {
-  ArrowRight,
   Ban,
   Check,
   CircleDollarSign,
   FileText,
   Gauge,
   type LucideIcon,
+  ReceiptText,
   ShieldCheck,
   Wallet,
   Zap,
 } from "lucide-react"
-import { Fragment } from "react"
 
-// The signature visual: the money path. request -> meter -> entitlement -> budget
-// -> wallet -> invoice, with the budget allow/deny decision as the hero moment.
+// The signature visual: the money path. Keep this literal and stateful; the brand
+// works when the buyer can see the commercial decision and the evidence trail.
 // Static and token-driven by design (see docs/brand/design-system-guidelines.md):
 // the brand's distinctiveness is legibility of real state, not decoration.
 type PathNode = {
@@ -28,13 +27,25 @@ type PathNode = {
 const nodes: PathNode[] = [
   {
     label: "Request",
-    fact: "POST /run",
+    fact: "POST /workflow",
     Icon: Zap,
     accent: "bg-info text-info-foreground",
   },
   {
+    label: "Plan version",
+    fact: "pro@v3",
+    Icon: ReceiptText,
+    accent: "bg-background-bgHover text-background-textContrast",
+  },
+  {
+    label: "Pricing rule",
+    fact: "$0.002/token",
+    Icon: FileText,
+    accent: "bg-background-bgHover text-background-textContrast",
+  },
+  {
     label: "Meter",
-    fact: "events.report",
+    fact: "tokens_used",
     Icon: Gauge,
     accent: "bg-background-bgHover text-background-textContrast",
   },
@@ -53,13 +64,19 @@ const nodes: PathNode[] = [
   },
   {
     label: "Wallet",
-    fact: "credits −1",
+    fact: "reserve -1 credit",
     Icon: Wallet,
     accent: "bg-background-bgHover text-background-textContrast",
   },
   {
+    label: "Ledger",
+    fact: "capture balanced",
+    Icon: ReceiptText,
+    accent: "bg-background-bgHover text-background-textContrast",
+  },
+  {
     label: "Invoice",
-    fact: "explained",
+    fact: "line explained",
     Icon: FileText,
     accent: "bg-success-solid text-white",
   },
@@ -75,16 +92,16 @@ export function MoneyPath({ className }: { className?: string }) {
         The money path
       </figcaption>
 
-      {/* The path */}
-      <div className="flex flex-col md:flex-row md:items-center">
-        {nodes.map((node, i) => (
-          <Fragment key={node.label}>
-            <div
-              className={cn(
-                "flex items-center gap-3 rounded-md border border-background-border bg-background-base p-3 md:flex-1",
-                node.hero && "border-primary-border ring-1 ring-primary/40"
-              )}
-            >
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-9">
+        {nodes.map((node, index) => (
+          <div
+            key={node.label}
+            className={cn(
+              "relative flex min-h-24 flex-col gap-3 rounded-md border border-background-border bg-background-base p-3",
+              node.hero && "border-primary-border ring-1 ring-primary/40"
+            )}
+          >
+            <div className="flex items-center justify-between gap-2">
               <span
                 className={cn(
                   "flex size-8 shrink-0 items-center justify-center rounded-md",
@@ -93,24 +110,18 @@ export function MoneyPath({ className }: { className?: string }) {
               >
                 <node.Icon aria-hidden className="size-4" />
               </span>
-              <span className="flex flex-col">
-                <span className="font-medium text-background-textContrast text-sm">
-                  {node.label}
-                </span>
-                <span className="font-mono text-[11px] text-background-text">{node.fact}</span>
+              <span className="font-mono text-[10px] text-background-text">
+                {String(index + 1).padStart(2, "0")}
               </span>
             </div>
-            {i < nodes.length - 1 && (
-              <ArrowRight
-                aria-hidden
-                className="mx-auto my-1 size-4 shrink-0 rotate-90 text-background-solid md:mx-1 md:my-0 md:rotate-0"
-              />
-            )}
-          </Fragment>
+            <span className="flex flex-col gap-1">
+              <span className="font-medium text-background-textContrast text-sm">{node.label}</span>
+              <span className="font-mono text-[11px] text-background-text">{node.fact}</span>
+            </span>
+          </div>
         ))}
       </div>
 
-      {/* The hero moment: the budget decision */}
       <div className="mt-6 grid gap-3 sm:grid-cols-2">
         <div className="flex items-start gap-3 rounded-md border border-success-border bg-success-bg/40 p-3">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-success-solid text-white">
@@ -137,8 +148,9 @@ export function MoneyPath({ className }: { className?: string }) {
       </div>
 
       <p className="mt-4 text-background-text text-sm leading-6">
-        The budget decision runs in the request path. Over-budget work is rejected before it
-        executes, and the same trail explains every invoice line later.
+        `access.check` is safe to run in shadow. `usage.consume` enforces in the request path.
+        `runs.*` reserves budget before multi-step work. `usage.record` reports evidence without
+        blocking.
       </p>
     </figure>
   )

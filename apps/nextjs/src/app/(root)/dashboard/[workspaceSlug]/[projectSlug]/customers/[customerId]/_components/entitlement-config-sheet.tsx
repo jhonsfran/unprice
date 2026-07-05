@@ -16,7 +16,7 @@ import {
 import { Skeleton } from "@unprice/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { AlertCircle, Settings } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import {
   useActiveFeature,
   useActivePlan,
@@ -50,18 +50,34 @@ export function EntitlementConfigSheet({
       },
       {
         enabled: isOpen && Boolean(planVersionId),
+        onSuccess: (queryData) => {
+          if (!isOpen || !queryData.planVersion) {
+            return
+          }
+
+          const planVersionData = queryData.planVersion
+          const planVersionFeature = planVersionData.planFeatures.find(
+            (feature) => feature.feature.slug === entitlement.featureSlug
+          )
+
+          if (!planVersionFeature) {
+            return
+          }
+
+          setPlanFeaturesList(planVersionData.planFeatures)
+          setActivePlan(planVersionData.plan)
+          setActivePlanVersion({
+            ...planVersionData,
+            planFeatures: planVersionData.planFeatures,
+            plan: planVersionData.plan,
+          })
+          setActiveFeature(planVersionFeature)
+        },
       }
     )
   )
 
   const planVersion = data?.planVersion ?? null
-  const planVersionFeature = useMemo(
-    () =>
-      planVersion?.planFeatures.find(
-        (feature) => feature.feature.slug === entitlement.featureSlug
-      ) ?? null,
-    [entitlement.featureSlug, planVersion]
-  )
   const activePlanVersion = useMemo(() => {
     if (!planVersion) {
       return null
@@ -71,31 +87,24 @@ export function EntitlementConfigSheet({
     return version
   }, [planVersion])
 
-  useEffect(() => {
-    if (!isOpen || !planVersion || !activePlanVersion || !planVersionFeature) {
-      return
-    }
-
-    setPlanFeaturesList(planVersion.planFeatures)
-    setActivePlan(planVersion.plan)
-    setActivePlanVersion(activePlanVersion)
-    setActiveFeature(planVersionFeature)
-  }, [
-    activePlanVersion,
-    isOpen,
-    planVersion,
-    planVersionFeature,
-    setActiveFeature,
-    setActivePlan,
-    setActivePlanVersion,
-    setPlanFeaturesList,
-  ])
+  const planVersionFeature = useMemo(
+    () =>
+      activePlanVersion?.id
+        ? planVersion?.planFeatures.find(
+            (feature) => feature.feature.slug === entitlement.featureSlug
+          ) ?? null
+        : null,
+    [activePlanVersion?.id, entitlement.featureSlug, planVersion]
+  )
 
   const handleOpenChange = (nextOpen: boolean) => {
     setIsOpen(nextOpen)
 
     if (!nextOpen) {
       setActiveFeature(null)
+      setActivePlanVersion(activePlanVersion)
+      setPlanFeaturesList(planVersion?.planFeatures ?? [])
+      setActivePlan(planVersion?.plan ?? null)
     }
   }
 

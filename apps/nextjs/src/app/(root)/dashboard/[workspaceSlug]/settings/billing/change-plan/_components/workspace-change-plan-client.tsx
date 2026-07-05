@@ -47,6 +47,12 @@ const PAYMENT_PROVIDER_LABELS: Record<PaymentProvider, string> = {
   stripe: "Stripe",
 }
 
+const BILLING_CYCLE_DATE_FORMAT = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+})
+
 export function WorkspaceChangePlanClient({
   workspaceSlug,
   upgradeOptions,
@@ -447,11 +453,7 @@ function getEndOfCycleDescription(currentCycleEndAt: number | null): string {
 }
 
 function formatDate(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(timestamp))
+  return BILLING_CYCLE_DATE_FORMAT.format(new Date(timestamp))
 }
 
 function formatPaymentProvider(paymentProvider: PaymentProvider): string {

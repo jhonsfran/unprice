@@ -1,7 +1,7 @@
 "use client"
 
 import { cn } from "@unprice/ui/utils"
-import { motion } from "framer-motion"
+import { domAnimation, LazyMotion, m } from "framer-motion"
 import type React from "react"
 import Balancer from "react-wrap-balancer"
 import { MarketingPricingCard, type MarketingPricingPlan } from "./marketing-pricing-card"
@@ -87,46 +87,48 @@ export function MarketingPricingTable({
   // }, [plans, popularPlan])
 
   return (
-    <motion.div
-      aria-labelledby="hero-title"
-      className={cn("flex flex-col items-center justify-center text-center", className)}
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
-    >
-      <motion.h1
-        id="hero-title"
-        className="inline-block bg-clip-text p-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-7xl"
-        variants={itemVariants}
+    <LazyMotion features={domAnimation} strict>
+      <m.div
+        aria-labelledby="hero-title"
+        className={cn("flex flex-col items-center justify-center text-center", className)}
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
       >
-        <Balancer>{title}</Balancer>
-      </motion.h1>
-      <motion.div
-        className="mt-6 max-w-2xl px-4 text-background-text text-lg md:px-0"
-        variants={itemVariants}
-      >
-        {subtitle}
-      </motion.div>
-      <motion.div
-        className="relative mx-auto mt-20 h-fit w-full max-w-6xl py-10 md:px-4"
-        variants={heroImageVariants}
-      >
-        <section
-          className={cn("grid gap-6", getGridClass(plans.length), {
-            "mx-auto justify-center md:max-w-sm": plans.length === 1,
-            "mx-auto justify-center md:max-w-2xl": plans.length === 2,
-          })}
+        <m.h1
+          id="hero-title"
+          className="inline-block bg-clip-text p-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-7xl"
+          variants={itemVariants}
         >
-          {plans.map((plan) => (
-            <MarketingPricingCard
-              key={plan.name}
-              plan={plan}
-              isPopular={plan.name === popularPlan}
-              isOnly={plans.length === 1}
-            />
-          ))}
-        </section>
-      </motion.div>
-    </motion.div>
+          <Balancer>{title}</Balancer>
+        </m.h1>
+        <m.div
+          className="mt-6 max-w-2xl px-4 text-background-text text-lg md:px-0"
+          variants={itemVariants}
+        >
+          {subtitle}
+        </m.div>
+        <m.div
+          className="relative mx-auto mt-20 h-fit w-full max-w-6xl py-10 md:px-4"
+          variants={heroImageVariants}
+        >
+          <section
+            className={cn("grid gap-6", getGridClass(plans.length), {
+              "mx-auto justify-center md:max-w-sm": plans.length === 1,
+              "mx-auto justify-center md:max-w-2xl": plans.length === 2,
+            })}
+          >
+            {plans.map((plan) => (
+              <MarketingPricingCard
+                key={plan.name}
+                plan={plan}
+                isPopular={plan.name === popularPlan}
+                isOnly={plans.length === 1}
+              />
+            ))}
+          </section>
+        </m.div>
+      </m.div>
+    </LazyMotion>
   )
 }

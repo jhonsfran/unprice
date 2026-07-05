@@ -27,14 +27,13 @@ export default function Cta() {
                 id="cta-title"
                 className="inline-block bg-clip-text p-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-6xl"
               >
-                Put a budget around the expensive action.
+                Authorize customer spend before paid work runs.
               </h3>
               <p className="mx-auto mt-4 max-w-2xl text-background-text text-lg">
                 <Balancer>
-                  Unprice is open-source PriceOps infrastructure for usage-based SaaS. Pick your
-                  most expensive action, put a real-time budget around it, and explain every invoice
-                  from the same money path. The core is open source — build on it, or help us shape
-                  it.
+                  Pick one paid action, run Unprice beside your current logic in shadow, prove the
+                  path on Sandbox, then enforce only when the evidence convinces you. The core is
+                  open source and your payments settle to your own Stripe account.
                 </Balancer>
               </p>
             </m.div>
@@ -45,8 +44,8 @@ export default function Cta() {
               transition={{ delay: 0.4, duration: 0.6 }}
             >
               <Link href={`${APP_DOMAIN}`} className={buttonVariants({ variant: "primary" })}>
-                Start pricing
-                <ChevronRight className="ml-1 h-4 w-4" />
+                Start with one paid action
+                <ChevronRight data-icon="inline-end" />
               </Link>
             </m.div>
             <m.p
@@ -60,7 +59,7 @@ export default function Cta() {
                 href="mailto:seb@unprice.dev"
                 className="font-semibold text-primary-textContrast hover:text-primary-textContrast/80"
               >
-                Talk to me
+                Map my paid action
               </a>
             </m.p>
           </div>

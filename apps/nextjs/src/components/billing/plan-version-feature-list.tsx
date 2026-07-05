@@ -15,23 +15,31 @@ import { cn } from "@unprice/ui/utils"
 import { useMemo, useState } from "react"
 import { useDebounce } from "~/hooks/use-debounce"
 
+export type PlanVersionFeatureListItemDisplayOptions = {
+  showCalculator?: boolean
+  showQuantity?: boolean
+  showCheckIcon?: boolean
+  showTitle?: boolean
+}
+
 export function PlanVersionFeatureListItem({
   feature,
-  withCalculator,
-  withQuantity,
+  displayOptions,
   onQuantityChange,
-  hideCheckIcon = false,
-  hideTitle = false,
   className,
 }: {
   feature: PlanVersionExtended["planFeatures"][number]
-  withCalculator?: boolean
-  withQuantity?: boolean
+  displayOptions?: PlanVersionFeatureListItemDisplayOptions
   onQuantityChange?: (quantity: number) => void
-  hideCheckIcon?: boolean
-  hideTitle?: boolean
   className?: string
 }) {
+  const {
+    showCalculator = false,
+    showQuantity = false,
+    showCheckIcon = true,
+    showTitle = true,
+  } = displayOptions ?? {}
+
   const defaultQuantity = feature.defaultQuantity ?? 1
   const [quantity, setQuantity] = useState<number>(defaultQuantity)
   const quantityDebounce = useDebounce(quantity, 100)
@@ -43,7 +51,7 @@ export function PlanVersionFeatureListItem({
         featureType: feature.featureType,
         quantity: quantityDebounce,
       }),
-    [quantityDebounce, feature.id]
+    [feature.config, feature.featureType, quantityDebounce]
   )
 
   if (err) {
@@ -97,7 +105,7 @@ export function PlanVersionFeatureListItem({
 
     case "tier": {
       const lastTier = feature.config?.tiers![feature.config.tiers!.length - 1]
-      displayFeature = withQuantity
+      displayFeature = showQuantity
         ? `${freeUnitsText} ${feature.feature.title}`
         : feature.feature.title
       calculatorParams.max = feature.limit ?? lastTier?.lastUnit ?? 100000
@@ -105,7 +113,7 @@ export function PlanVersionFeatureListItem({
     }
 
     case "usage": {
-      displayFeature = withQuantity
+      displayFeature = showQuantity
         ? `${freeUnitsText} ${feature.feature.title}`
         : feature.feature.title
       calculatorParams.max = feature.limit ?? 100000
@@ -119,23 +127,23 @@ export function PlanVersionFeatureListItem({
     }
 
     case "package": {
-      displayFeature = withQuantity
+      displayFeature = showQuantity
         ? `${freeUnitsText} ${feature.feature.title}`
         : feature.feature.title
       calculatorParams.max = feature.config?.units! * 10
       break
-    }
+  }
   }
 
   return (
     <div className="flex flex-row items-center gap-1">
-      {!hideCheckIcon && (
+      {showCheckIcon && (
         <div className="flex justify-start">
           <CheckIcon className="mr-1 h-5 w-5 text-success" />
         </div>
       )}
       <div className="flex w-full items-center gap-1">
-        {!hideTitle && (
+        {showTitle && (
           <span className={cn("font-light text-muted-foreground text-xs", className)}>
             {displayFeature}
           </span>
@@ -192,8 +200,11 @@ export function PlanVersionFeatureListItem({
                       </tr>
                     </thead>
                     <tbody>
-                      {feature.config?.tiers?.map((tier, index) => (
-                        <tr key={index.toString()} className="border-b last:border-b-0">
+                      {feature.config?.tiers?.map((tier) => (
+                        <tr
+                          key={`${tier.firstUnit}-${tier.lastUnit ?? "∞"}`}
+                          className="border-b last:border-b-0"
+                        >
                           <td className="py-1">
                             {tier.firstUnit} - {tier.lastUnit ?? feature.limit ?? "∞"}
                           </td>
@@ -225,7 +236,7 @@ export function PlanVersionFeatureListItem({
                 </div>
               )}
 
-              {withCalculator && ["usage", "tier", "package"].includes(feature.featureType) && (
+              {showCalculator && ["usage", "tier", "package"].includes(feature.featureType) && (
                 <div className="mb-2">
                   <Typography
                     variant="p"
@@ -266,8 +277,8 @@ const PriceCalculator = ({
 }) => {
   return (
     <div className="my-2 flex items-center">
-      <Slider
-        max={max}
+                    <Slider
+                      max={max}
         min={min}
         step={step}
         size="sm"

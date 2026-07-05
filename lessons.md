@@ -660,3 +660,9 @@ Related: [ADR-0002](docs/adr/ADR-0002-wallet-payment-provider-activation-guardra
 - 2026-07-04: For scheduled future subscription phases, pass request `now` into
   `subscriptions.createPhase`; passing the future `startAt` makes the service activate the phase
   immediately and can update subscription state before the effective boundary.
+- 2026-07-05: When running `apps/nextjs` with `SKIP_ENV_VALIDATION=true`, set
+  `NEXT_PUBLIC_APP_DOMAIN` explicitly to the dev host/port; otherwise middleware can treat
+  localhost requests as customer-site routes.
+- 2026-07-05: Before starting any frontend/dev server, check whether the app is already running
+  on its normal port; if a server is running, use it instead of starting another one, and ask the
+  user before launching an additional server.

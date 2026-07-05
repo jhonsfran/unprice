@@ -3,6 +3,7 @@
 import type {
   ColumnDef,
   ColumnFiltersState,
+  RowSelectionState,
   SortingState,
   Table as TanStackTable,
   VisibilityState,
@@ -133,7 +134,7 @@ export function FilterDataTable<TData, TValue>({
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>(
     initialColumnVisibility ?? {}
   )
-  const [rowSelection, setRowSelection] = React.useState({})
+  const [rowSelection, setRowSelection] = React.useState<RowSelectionState>({})
 
   const table = useReactTable({
     data,
@@ -145,10 +146,18 @@ export function FilterDataTable<TData, TValue>({
       columnVisibility,
       rowSelection,
     },
-    onColumnFiltersChange: setColumnFilters,
-    onSortingChange: setSorting,
-    onColumnVisibilityChange: setColumnVisibility,
-    onRowSelectionChange: setRowSelection,
+    onColumnFiltersChange: (updater) => {
+      setColumnFilters(updater)
+    },
+    onSortingChange: (updater) => {
+      setSorting(updater)
+    },
+    onColumnVisibilityChange: (updater) => {
+      setColumnVisibility(updater)
+    },
+    onRowSelectionChange: (updater) => {
+      setRowSelection(updater)
+    },
     enableRowSelection: true,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -161,17 +170,6 @@ export function FilterDataTable<TData, TValue>({
   const localSearchValue = searchColumnModel ? String(searchColumnModel.getFilterValue() ?? "") : ""
   const searchValue = controlledSearchValue ?? localSearchValue
   const canSearch = Boolean(searchColumnModel || onSearchValueChange)
-
-  React.useEffect(() => {
-    if (controlledSearchValue === undefined || !searchColumnModel) {
-      return
-    }
-
-    const currentValue = String(searchColumnModel.getFilterValue() ?? "")
-    if (currentValue !== controlledSearchValue) {
-      searchColumnModel.setFilterValue(controlledSearchValue)
-    }
-  }, [controlledSearchValue, searchColumnModel])
 
   const loadMoreRef = React.useRef<HTMLDivElement | null>(null)
   const loadMoreRequestedRef = React.useRef(false)
@@ -272,7 +270,13 @@ export function FilterDataTable<TData, TValue>({
                   value={searchValue}
                   onChange={(event) => {
                     const nextValue = event.target.value
-                    searchColumnModel?.setFilterValue(nextValue)
+                    if (!searchColumnModel) {
+                      return
+                    }
+                    const currentValue = String(searchColumnModel.getFilterValue() ?? "")
+                    if (currentValue !== nextValue) {
+                      searchColumnModel.setFilterValue(nextValue)
+                    }
                     onSearchValueChange?.(nextValue)
                   }}
                   placeholder={searchPlaceholder}

@@ -15,7 +15,13 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@unprice/ui/sheet"
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion"
+import {
+  AnimatePresence,
+  LazyMotion,
+  m,
+  domAnimation,
+  useReducedMotion,
+} from "framer-motion"
 import { Code, FileCode2, KeyRound } from "lucide-react"
 import Link from "next/link"
 import { SDKDemo, type SDKExampleParams, type method } from "~/components/landing/sdk-examples"
@@ -83,58 +89,62 @@ export function CodeApiSheet({
             </div>
           </div>
         </SheetHeader>
-        <AnimatePresence initial={false}>
-          {!apiToken && (
-            <motion.div
-              key="sdk-example-token-notice"
-              initial={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0, y: -4 }}
-              animate={shouldReduceMotion ? { opacity: 1 } : { height: "auto", opacity: 1, y: 0 }}
-              exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0, y: -4 }}
-              transition={{
-                duration: shouldReduceMotion ? 0.01 : 0.18,
-                ease: [0.25, 1, 0.5, 1],
-              }}
-              className="overflow-hidden"
-            >
-              <div className="flex flex-col items-start gap-3 px-1 py-1">
-                <p className="w-full text-muted-foreground text-sm leading-6">
-                  <span className="font-medium text-foreground">Runnable token.</span> Roll the
-                  reusable example key. It expires tonight and stays masked on screen.
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-8 shrink-0 gap-2 px-2.5"
-                  disabled={rollDefaultKey.isPending}
-                  onClick={() => rollDefaultKey.mutate()}
-                >
-                  {rollDefaultKey.isPending ? (
-                    <LoadingAnimation />
-                  ) : (
-                    <KeyRound className="h-3.5 w-3.5" />
-                  )}
-                  Roll example key
-                </Button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        <motion.div
-          layout={!shouldReduceMotion}
-          transition={{
-            duration: shouldReduceMotion ? 0.01 : 0.22,
-            ease: [0.25, 1, 0.5, 1],
-          }}
-        >
-          <SDKDemo
-            className="bg-background-base"
-            defaultMethod={defaultMethod}
-            exampleParams={resolvedExampleParams}
-            frameworks={["sdk", "fetch", "curl"]}
-            presentation="panel"
-            showBorderBeam={false}
-          />
-        </motion.div>
+        <LazyMotion features={domAnimation} strict>
+          <AnimatePresence initial={false}>
+            {!apiToken && (
+              <m.div
+                key="sdk-example-token-notice"
+                initial={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0, y: -4 }}
+                animate={
+                  shouldReduceMotion ? { opacity: 1 } : { height: "auto", opacity: 1, y: 0 }
+                }
+                exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0, y: -4 }}
+                transition={{
+                  duration: shouldReduceMotion ? 0.01 : 0.18,
+                  ease: [0.25, 1, 0.5, 1],
+                }}
+                className="overflow-hidden"
+              >
+                <div className="flex flex-col items-start gap-3 px-1 py-1">
+                  <p className="w-full text-muted-foreground text-sm leading-6">
+                    <span className="font-medium text-foreground">Runnable token.</span> Roll the
+                    reusable example key. It expires tonight and stays masked on screen.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-8 shrink-0 gap-2 px-2.5"
+                    disabled={rollDefaultKey.isPending}
+                    onClick={() => rollDefaultKey.mutate()}
+                  >
+                    {rollDefaultKey.isPending ? (
+                      <LoadingAnimation />
+                    ) : (
+                      <KeyRound className="h-3.5 w-3.5" />
+                    )}
+                    Roll example key
+                  </Button>
+                </div>
+              </m.div>
+            )}
+          </AnimatePresence>
+          <m.div
+            layout={!shouldReduceMotion}
+            transition={{
+              duration: shouldReduceMotion ? 0.01 : 0.22,
+              ease: [0.25, 1, 0.5, 1],
+            }}
+          >
+            <SDKDemo
+              className="bg-background-base"
+              defaultMethod={defaultMethod}
+              exampleParams={resolvedExampleParams}
+              frameworks={["sdk", "fetch", "curl"]}
+              presentation="panel"
+              showBorderBeam={false}
+            />
+          </m.div>
+        </LazyMotion>
         <SheetFooter className="border-background-border pt-4">
           <Link href={`${DOCS_DOMAIN}/api-reference`} target="_blank" className="w-full sm:w-auto">
             <Button

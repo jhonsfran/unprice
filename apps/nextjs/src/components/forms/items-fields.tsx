@@ -347,9 +347,10 @@ export default function ConfigItemsFormField<TFieldValues extends FormValues>({
                               )}
                               <PlanVersionFeatureListItem
                                 feature={feature}
-                                withCalculator
-                                hideCheckIcon
-                                withQuantity={false}
+                                displayOptions={{
+                                  showCalculator: true,
+                                  showCheckIcon: false,
+                                }}
                               />
                             </div>
                           </TableCell>

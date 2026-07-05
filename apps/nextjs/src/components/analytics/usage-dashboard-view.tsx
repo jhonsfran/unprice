@@ -40,14 +40,18 @@ type UsageDashboardMode = "project" | "customer"
 
 export function UsageDashboardSkeleton({
   mode = "project",
-  showCustomerSummary = mode === "customer",
-  showHeaderControls = true,
+  display = {
+    showCustomerSummary: mode === "customer",
+    showHeaderControls: true,
+  },
 }: {
   mode?: UsageDashboardMode
-  showCustomerSummary?: boolean
-  showHeaderControls?: boolean
+  display?: {
+    showCustomerSummary?: boolean
+    showHeaderControls?: boolean
+  }
 } = {}) {
-  const shouldShowCustomerSummary = mode === "customer" && showCustomerSummary
+  const { showCustomerSummary = mode === "customer", showHeaderControls = true } = display
 
   return (
     <section className="flex flex-col gap-4">
@@ -63,7 +67,7 @@ export function UsageDashboardSkeleton({
           </div>
         )}
       </div>
-      {shouldShowCustomerSummary && (
+      {showCustomerSummary && (
         <EvidenceMetricStrip className="md:grid-cols-4">
           {["features", "usage", "ledger", "invoices"].map((metric) => (
             <Skeleton key={metric} className="h-[104px] rounded-none" />
@@ -94,11 +98,13 @@ export function UsageDashboardView({
   invoiceCount,
   customerHref,
   usageExampleParams,
-  showCustomerSummary = mode === "customer",
-  showHeaderControls = true,
+  display = {
+    showCustomerSummary: mode === "customer",
+    showHeaderControls: true,
+    showEmptyStateActions: true,
+  },
   title,
   subjectLabel,
-  showEmptyStateActions = true,
 }: {
   data: UsageDashboardData
   intervalLabel: string
@@ -108,12 +114,20 @@ export function UsageDashboardView({
   invoiceCount?: number
   customerHref?: (customerId: string) => string
   usageExampleParams?: SDKExampleParams
-  showCustomerSummary?: boolean
-  showHeaderControls?: boolean
   title?: string
   subjectLabel?: string
-  showEmptyStateActions?: boolean
+  display?: {
+    showCustomerSummary?: boolean
+    showHeaderControls?: boolean
+    showEmptyStateActions?: boolean
+  }
 }) {
+  const {
+    showCustomerSummary = mode === "customer",
+    showHeaderControls = true,
+    showEmptyStateActions = true,
+  } = display
+
   // Hooks must be called unconditionally (before any early return)
   const chart = useMemo(
     () => buildChartData(data.timeseries, dateFormat),

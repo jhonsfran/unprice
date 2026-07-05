@@ -7,9 +7,15 @@ const Features = dynamic(() => import("~/components/landing/features").then((mod
 const FeaturesApp = dynamic(() =>
   import("~/components/landing/features-app").then((mod) => mod.FeaturesApp)
 )
-const Global = dynamic(() => import("~/components/landing/global").then((mod) => mod.Global))
-const LogoCloud = dynamic(() => import("~/components/landing/logo-cloud"))
-const PriceOpsSection = dynamic(() => import("~/components/landing/ami"))
+const OfferSection = dynamic(() =>
+  import("~/components/landing/offer").then((mod) => mod.OfferSection)
+)
+const ProblemSection = dynamic(() =>
+  import("~/components/landing/problem").then((mod) => mod.ProblemSection)
+)
+const TrustSection = dynamic(() =>
+  import("~/components/landing/trust").then((mod) => mod.TrustSection)
+)
 const CodeExample = dynamic(() => import("~/components/landing/code-example"))
 const Cta = dynamic(() => import("~/components/landing/cta"))
 
@@ -18,18 +24,17 @@ export default function Home() {
     <LazyMotionWrapper>
       <main className="flex flex-col overflow-hidden">
         <Hero />
+        <ProblemSection />
+        <FeaturesApp />
+        <OfferSection />
+        <TrustSection />
         <PricingHero
-          headline="Test out unprice now."
-          description="Report usage, watch hard limits block over-budget calls, and see events become one explainable invoice. This is the runtime, live."
+          headline="Click until the budget blocks the request."
+          description="This live model shows the moment Unprice stops over-budget work before it runs and keeps the response evidence visible."
           docsLinkText="Read the Docs"
         />
-        <PriceOpsSection />
-        {/* <Testimonials /> */}
         <Features />
-        <FeaturesApp />
-        <Global />
         <CodeExample />
-        <LogoCloud />
         <Cta />
       </main>
     </LazyMotionWrapper>

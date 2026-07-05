@@ -1,6 +1,7 @@
 "use client"
 
-import { APP_DOMAIN } from "@unprice/config"
+import { APP_DOMAIN, DOCS_DOMAIN } from "@unprice/config"
+import { Badge } from "@unprice/ui/badge"
 import { Button, buttonVariants } from "@unprice/ui/button"
 import { ChevronRight, GitHub } from "@unprice/ui/icons"
 import { m } from "framer-motion"
@@ -8,7 +9,7 @@ import { useTheme } from "next-themes"
 import Link from "next/link"
 import Balancer from "react-wrap-balancer"
 import { useMounted } from "~/hooks/use-mounted"
-import { HeroVideoDialog } from "./hero-video"
+import { MoneyPath } from "./money-path"
 import { WordRotate } from "./text-effects"
 
 const containerVariants = {
@@ -49,20 +50,37 @@ const heroImageVariants = {
   },
 }
 
+const proofItems = ["Shadow first", "Sandbox before money", "Your own Stripe", "AGPL-3.0 core"]
+
+const trustChecks = [
+  {
+    label: "Read-only shadow",
+    value: "access.check",
+  },
+  {
+    label: "No real processor",
+    value: "Sandbox",
+  },
+  {
+    label: "Funds stay yours",
+    value: "Own Stripe",
+  },
+]
+
 export default function Hero() {
-  const { theme } = useTheme()
+  const { resolvedTheme } = useTheme()
   const isMounted = useMounted()
 
   return (
     <m.section
       aria-labelledby="hero-title"
-      className="mt-20 flex min-h-screen flex-col items-center justify-center text-center"
+      className="relative mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-6xl flex-col items-center justify-start px-5 pt-12 pb-10 text-center sm:min-h-[calc(100vh-4rem)] sm:justify-center sm:px-6 sm:pt-20 sm:pb-16"
       variants={containerVariants}
       initial="hidden"
       animate="visible"
     >
       <m.div
-        className="mb-4 flex flex-wrap items-center justify-center gap-x-2 text-background-text text-lg sm:text-xl"
+        className="mb-3 flex flex-wrap items-center justify-center gap-x-2 text-background-text text-base sm:mb-4 sm:text-xl"
         variants={itemVariants}
       >
         Your product is smart, but your pricing is{" "}
@@ -70,47 +88,58 @@ export default function Hero() {
           <WordRotate
             className="italic"
             words={["hardcoded", "brittle", "static", "manual"]}
-            shadowColor={theme === "dark" ? "white" : "black"}
+            shadowColor={resolvedTheme === "dark" ? "white" : "black"}
           />
         )}
       </m.div>
       <m.h1
         id="hero-title"
-        className="inline-block bg-clip-text p-2 font-bold text-4xl text-background-textContrast tracking-tighter sm:text-6xl md:text-7xl"
+        className="inline-block max-w-5xl bg-clip-text p-2 font-bold text-4xl text-background-textContrast leading-[1.05] sm:text-6xl md:text-7xl"
         variants={itemVariants}
       >
-        <Balancer>Stop runaway usage before it runs.</Balancer>
+        <Balancer>Authorize customer spend before paid work runs.</Balancer>
       </m.h1>
       <m.p
-        className="mx-auto mt-6 max-w-2xl px-6 text-background-text text-lg"
+        className="mx-auto mt-4 max-w-3xl text-background-text text-base leading-7 sm:mt-6 sm:text-lg sm:leading-8"
         variants={itemVariants}
       >
-        <br />
-        <br />
-        <b>Open-source PriceOps infrastructure for usage-based SaaS.</b> Put a real-time budget
-        around your most expensive action, reject over-budget work in the request path, and explain
-        every invoice line from the same money path.
-        <br />
-        <br />
-        "Unprice" means un-hardcoding pricing: move plan logic, limits, and counters out of your app
-        into one inspectable runtime. Ship usage-based, tiered, or hybrid models from a single
-        integration.
-        <br />
-        <br />
-        <span className="text-sm italic opacity-70">
-          Bring your own payments. Stripe-first today, with a provider model designed to extend to
-          Paddle, Lemon Squeezy, and others.
-        </span>
+        <Balancer>
+          <span className="sm:hidden">
+            Start with one paid action in one afternoon: shadow it, prove it on Sandbox, then
+            enforce only when the evidence matches.
+          </span>
+          <span className="hidden sm:inline">
+            Unprice is the open-source customer money path for usage-based SaaS. Start with one paid
+            action in one afternoon: define the plan version, install the SDK, run the decision in
+            shadow, and prove the path on Sandbox before you enforce anything.
+          </span>
+        </Balancer>
       </m.p>
+
+      <m.div className="mt-5 flex flex-wrap justify-center gap-2 sm:mt-6" variants={itemVariants}>
+        {proofItems.map((item) => (
+          <Badge key={item} variant="outline">
+            {item}
+          </Badge>
+        ))}
+      </m.div>
+
       <m.div
-        className="my-14 flex w-full flex-col justify-center gap-3 px-6 align-middle sm:flex-row"
+        className="mt-6 flex w-full flex-col justify-center gap-3 align-middle sm:mt-10 sm:flex-row"
         variants={itemVariants}
       >
         <Link href={`${APP_DOMAIN}`} className={buttonVariants({ variant: "primary" })}>
-          Start pricing
-          <ChevronRight className="ml-1 h-4 w-4" />
+          Start with one paid action
+          <ChevronRight data-icon="inline-end" />
         </Link>
-        <Button asChild variant="link">
+        <Link
+          href={`${DOCS_DOMAIN}`}
+          className={buttonVariants({ variant: "outline" })}
+          target="_blank"
+        >
+          Explore the SDK
+        </Link>
+        <Button asChild variant="link" className="hidden sm:inline-flex">
           <Link
             href="https://github.com/jhonsfran1165/unprice"
             className="text-background-textContrast"
@@ -124,30 +153,40 @@ export default function Hero() {
         </Button>
       </m.div>
       <m.div
-        className="relative mx-auto my-20 h-fit w-full max-w-6xl px-6"
+        className="relative mx-auto mt-8 grid w-full gap-4 sm:mt-14 lg:grid-cols-[minmax(0,1fr)_20rem]"
         variants={heroImageVariants}
       >
-        <div className="relative">
-          <HeroVideoDialog
-            className="block dark:hidden"
-            animationStyle="from-center"
-            videoSrc="https://www.youtube.com/embed/vAirXo6FJDs"
-            thumbnailSrc="/unprice-light.png"
-            thumbnailAlt="Hero Video"
-          />
-          <HeroVideoDialog
-            className="hidden dark:block"
-            animationStyle="from-center"
-            videoSrc="https://www.youtube.com/embed/vAirXo6FJDs"
-            thumbnailSrc="/unprice-dark.png"
-            thumbnailAlt="Hero Video"
-          />
+        <div className="rounded-lg border border-background-border bg-background-bgSubtle p-4 text-left shadow-sm">
+          <MoneyPath />
         </div>
 
-        <div
-          className="-bottom-20 -mx-10 absolute inset-x-0 h-2/4 bg-gradient-to-t from-background-base via-background-base to-transparent lg:h-1/4"
-          aria-hidden="true"
-        />
+        <aside className="flex flex-col gap-3 rounded-lg border border-background-border bg-background-base p-4 text-left">
+          <div>
+            <p className="font-mono text-background-text text-xs uppercase tracking-widest">
+              Trust sequence
+            </p>
+            <h2 className="mt-2 font-semibold text-background-textContrast text-lg">
+              Nothing blocks traffic until the evidence convinces you.
+            </h2>
+          </div>
+          <div className="flex flex-col gap-3">
+            {trustChecks.map((check) => (
+              <div
+                key={check.label}
+                className="flex items-center justify-between gap-4 rounded-md border border-background-border bg-background-bgSubtle px-3 py-2"
+              >
+                <span className="text-background-text text-sm">{check.label}</span>
+                <span className="font-mono text-background-textContrast text-xs">
+                  {check.value}
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="text-background-text text-sm leading-6">
+            Start on the built-in Sandbox. When you go live, connect your own Stripe account;
+            Unprice never sits in your funds flow.
+          </p>
+        </aside>
       </m.div>
     </m.section>
   )

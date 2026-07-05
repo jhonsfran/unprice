@@ -55,16 +55,23 @@ export function CodeEditor({
                   </span>
                   <span className={cn("table-cell whitespace-pre-wrap break-words", codeClassName)}>
                     {line.map((token, j) => {
-                      const { key: tokenKey, ...tokenProps } = getTokenProps({
+                      const {
+                        key: tokenKey,
+                        className: tokenClassNameFromPrism,
+                        style: tokenStyle,
+                        children: tokenChildren,
+                      } = getTokenProps({
                         token,
                         key: j,
                       })
                       return (
                         <span
-                          key={j.toString()}
-                          {...tokenProps}
-                          className={cn(tokenProps.className, tokenClassName)}
-                        />
+                          key={tokenKey?.toString() ?? j.toString()}
+                          className={cn(tokenClassNameFromPrism, tokenClassName)}
+                          style={tokenStyle}
+                        >
+                          {tokenChildren}
+                        </span>
                       )
                     })}
                   </span>

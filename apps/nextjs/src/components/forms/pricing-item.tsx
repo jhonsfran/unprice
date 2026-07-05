@@ -9,14 +9,21 @@ export function PricingItem(props: {
   noTitle?: boolean
   className?: string
 }) {
+  const mode = props.withCalculator
+    ? props.withQuantity
+      ? { showCalculator: true, showQuantity: true }
+      : props.noCheckIcon
+        ? { showCalculator: true, showCheckIcon: false }
+        : { showCalculator: true }
+    : props.noTitle
+      ? { showTitle: false }
+      : undefined
+
   return (
     <PlanVersionFeatureListItem
       feature={props.feature}
-      withCalculator={props.withCalculator}
-      withQuantity={props.withQuantity}
+      displayOptions={mode}
       onQuantityChange={props.onQuantityChange}
-      hideCheckIcon={props.noCheckIcon}
-      hideTitle={props.noTitle}
       className={props.className}
     />
   )

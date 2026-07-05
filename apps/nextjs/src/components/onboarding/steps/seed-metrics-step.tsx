@@ -4,13 +4,21 @@ import { Button } from "@unprice/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@unprice/ui/card"
 import { cn } from "@unprice/ui/utils"
 import { AlertTriangle, CheckCircle2, Loader2 } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { useTRPC } from "~/trpc/client"
 
 type SeedStepKey = "apikey" | "customer" | "subscription" | "usage" | "verification"
 type SeedStepStatus = "pending" | "working" | "done" | "skipped" | "error"
 
 type SeedProgress = Record<SeedStepKey, SeedStepStatus>
+
+const SEED_STEPS: ReadonlyArray<{ key: SeedStepKey; label: string }> = [
+  { key: "apikey", label: "Create request-path API key" },
+  { key: "customer", label: "Create test customer" },
+  { key: "subscription", label: "Assign published plan version" },
+  { key: "usage", label: "Run budgeted workflow" },
+  { key: "verification", label: "Check customer access" },
+] as const
 
 const DEFAULT_PROGRESS: SeedProgress = {
   apikey: "pending",
@@ -65,7 +73,8 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
     setUsageSkipped(false)
   }
 
-  const markSeedFailed = async (message: string) => {
+  const markSeedFailed = useCallback(
+    async (message: string) => {
     setProgress({
       apikey: "error",
       customer: "error",
@@ -80,9 +89,12 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
         seedMetricsError: message,
       },
     })
+    },
+    [updateContext]
+  )
   }
 
-  const runSeed = async () => {
+  const runSeed = useCallback(async () => {
     resetState()
 
     if (!project?.slug || !planVersionId) {
@@ -127,7 +139,7 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
         error instanceof Error ? error.message : "Something went wrong while seeding"
       )
     }
-  }
+  }, [markSeedFailed, planVersionId, project?.slug, seedEvidence, updateContext])
 
   useEffect(() => {
     if (hasRunRef.current) return
@@ -135,15 +147,7 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
 
     hasRunRef.current = true
     void runSeed()
-  }, [project?.slug, planVersionId])
-
-  const steps = [
-    { key: "apikey", label: "Create request-path API key" },
-    { key: "customer", label: "Create test customer" },
-    { key: "subscription", label: "Assign published plan version" },
-    { key: "usage", label: "Run budgeted workflow" },
-    { key: "verification", label: "Check customer access" },
-  ] as const
+  }, [project?.slug, planVersionId, runSeed])
 
   const hasError = Object.values(progress).includes("error") || !!errorMessage
 

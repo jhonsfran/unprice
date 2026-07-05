@@ -25,6 +25,59 @@ const sizes = {
 const SIGNAL_ON_DARK = "#ffc53d"
 const SIGNAL_ON_LIGHT = "#ab6400"
 
+function IconMark({
+  px,
+  strokeColor,
+  value,
+}: {
+  px: number
+  strokeColor: string
+  value: string
+}) {
+  return (
+    <svg
+      width={px}
+      height={px}
+      viewBox="6 6 20 20"
+      className="shrink-0"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      role="img"
+      aria-label="Unprice logo"
+    >
+      {/* Bracket-U: short top serifs for a clear opening, arms joined across
+          the base into one continuous stroke, centered with even padding. */}
+      <path
+        d="M13.5 8.5 L9 8.5 L9 23.5 L23 23.5 L23 8.5 L18.5 8.5"
+        stroke={strokeColor}
+        strokeWidth="3"
+        strokeLinecap="butt"
+        strokeLinejoin="miter"
+        fill="none"
+      />
+      {/* The value gated within the U — cradled at optical center. */}
+      <circle cx="16" cy="15.1" r="3" fill={value} />
+    </svg>
+  )
+}
+
+function Wordmark({ text, color }: { text: number; color: string }) {
+  return (
+    <span
+      style={{
+        fontSize: `${text}px`,
+        color,
+        fontWeight: 600,
+        letterSpacing: "-0.04em",
+        lineHeight: 1,
+      }}
+      className="font-primary"
+    >
+      unprice
+    </span>
+  )
+}
+
 export default function UnpriceLogo({
   size = "md",
   variant = "full",
@@ -39,6 +92,7 @@ export default function UnpriceLogo({
 
   const ink = theme === "dark" ? "#fafafa" : "#0a0a0a"
   const signal = theme === "dark" ? SIGNAL_ON_DARK : SIGNAL_ON_LIGHT
+  const iconValue = monochrome ? ink : signal
 
   // The mark is a bracket-U gating a single value. The two brackets are joined at
   // the bottom into one continuous stroke — down the left arm, across the base, up
@@ -46,54 +100,10 @@ export default function UnpriceLogo({
   // that cradles/gates the value held inside. "Un-hardcode pricing," pulled into
   // one inspectable place. Color lands only on the element that changes a decision.
   // Mitered corners and flush top serifs keep it engineered and ownable.
-  const IconMark = () => {
-    const value = monochrome ? ink : signal
-    return (
-      <svg
-        width={px}
-        height={px}
-        viewBox="6 6 20 20"
-        className="shrink-0"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        role="img"
-        aria-label="Unprice logo"
-      >
-        {/* Bracket-U: short top serifs for a clear opening, arms joined across
-            the base into one continuous stroke, centered with even padding. */}
-        <path
-          d="M13.5 8.5 L9 8.5 L9 23.5 L23 23.5 L23 8.5 L18.5 8.5"
-          stroke={ink}
-          strokeWidth="3"
-          strokeLinecap="butt"
-          strokeLinejoin="miter"
-          fill="none"
-        />
-        {/* The value gated within the U — cradled at optical center. */}
-        <circle cx="16" cy="15.1" r="3" fill={value} />
-      </svg>
-    )
-  }
-
-  const Wordmark = () => (
-    <span
-      style={{
-        fontSize: `${text}px`,
-        color: ink,
-        fontWeight: 600,
-        letterSpacing: "-0.04em",
-        lineHeight: 1,
-      }}
-      className="font-primary"
-    >
-      unprice
-    </span>
-  )
-
   if (variant === "icon") {
     return (
       <div className={cn("inline-flex", className)}>
-        <IconMark />
+        <IconMark px={px} strokeColor={ink} value={iconValue} />
       </div>
     )
   }
@@ -101,15 +111,15 @@ export default function UnpriceLogo({
   if (variant === "wordmark") {
     return (
       <div className={cn("inline-flex", className)}>
-        <Wordmark />
+        <Wordmark text={text} color={ink} />
       </div>
     )
   }
 
   return (
     <div className={cn("inline-flex items-center", className)} style={{ gap: `${gap}px` }}>
-      <IconMark />
-      <Wordmark />
+      <IconMark px={px} strokeColor={ink} value={iconValue} />
+      <Wordmark text={text} color={ink} />
     </div>
   )
 }
