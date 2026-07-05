@@ -8,6 +8,7 @@ export const deleteProject = protectedProjectProcedure
     z.object({
       projectId: z.string().optional(),
       projectSlug: z.string().optional(),
+      workspaceSlug: z.string().optional(),
     })
   )
   .output(

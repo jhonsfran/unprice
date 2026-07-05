@@ -49,7 +49,7 @@ export default function HeaderTab({
           </Typography>
         )}
       </div>
-      <div className="flex w-full justify-start md:ml-auto md:w-auto md:justify-end">{action}</div>
+      <div className="my-2 flex w-full justify-end md:my-0 md:ml-auto md:w-auto">{action}</div>
     </div>
   )
 }

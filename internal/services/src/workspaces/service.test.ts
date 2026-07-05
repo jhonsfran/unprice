@@ -158,7 +158,6 @@ describe("WorkspaceService.listWorkspacesByUser", () => {
                 unPriceCustomerId: "cus_1",
                 isInternal: false,
                 isMain: false,
-                plan: "free",
               },
             },
             {
@@ -173,7 +172,6 @@ describe("WorkspaceService.listWorkspacesByUser", () => {
                 unPriceCustomerId: "cus_2",
                 isInternal: false,
                 isMain: false,
-                plan: "free",
               },
             },
             {
@@ -188,7 +186,6 @@ describe("WorkspaceService.listWorkspacesByUser", () => {
                 unPriceCustomerId: "",
                 isInternal: true,
                 isMain: true,
-                plan: "free",
               },
             },
           ]),

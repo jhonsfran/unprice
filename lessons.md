@@ -220,6 +220,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-05: Dashboard tRPC mutation failures should use the global MutationCache toast in
   `apps/nextjs/src/trpc/shared.ts`; local `onError` handlers should keep rollback/state side
   effects only, or they create duplicate error toasts.
+- 2026-07-05: Project danger-page mutations should pass the route `workspaceSlug` and `projectSlug`;
+  `protectedProjectProcedure` falls back to workspace/project cookies when inputs are absent.
 - 2026-07-03: Customer detail header actions are rendered by
   `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/[customerId]/layout.tsx`
   for every tab; for tab-specific header buttons, keep the header data load in the layout and put

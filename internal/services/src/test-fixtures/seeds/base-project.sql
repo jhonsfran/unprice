@@ -34,7 +34,6 @@ INSERT INTO "unprice_workspaces" (
   "created_by",
   "image_url",
   "unprice_customer_id",
-  "plan",
   "enabled"
 ) VALUES (
   'workspace_test',
@@ -48,7 +47,6 @@ INSERT INTO "unprice_workspaces" (
   'user_test_owner',
   NULL,
   'cus_test_owner',
-  'PRO',
   true
 ) ON CONFLICT DO NOTHING;
 

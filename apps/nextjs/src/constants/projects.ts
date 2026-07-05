@@ -1,12 +1,12 @@
 import { FEATURE_SLUGS } from "@unprice/config"
 import {
   Activity,
-  Calculator,
   Key,
+  Layers3,
   LayoutDashboard,
   Link,
+  PanelTop,
   Settings,
-  Sticker,
   Users,
 } from "lucide-react"
 import type { DashboardRoute, Shortcut } from "~/types"
@@ -25,7 +25,7 @@ export const PROJECT_NAV: DashboardRoute[] = [
   },
   {
     name: "Plans",
-    icon: Calculator,
+    icon: Layers3,
     href: "/plans",
     disabled: false,
     isNew: true,
@@ -33,7 +33,7 @@ export const PROJECT_NAV: DashboardRoute[] = [
   },
   {
     name: "Pages",
-    icon: Sticker,
+    icon: PanelTop,
     href: "/pages",
     featureSlug: FEATURE_SLUGS.PAGES.SLUG,
   },

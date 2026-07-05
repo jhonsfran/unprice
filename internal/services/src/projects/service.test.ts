@@ -103,7 +103,6 @@ describe("ProjectService listProjectsByWorkspace", () => {
           findFirst: vi.fn().mockResolvedValue({
             id: "ws_1",
             slug: "acme",
-            plan: "free",
             unPriceCustomerId: "cus_1",
             projects: [
               {

@@ -88,6 +88,7 @@ export function DeleteProject({
                 variant="destructive"
                 onClick={() => {
                   deleteProject.mutate({
+                    workspaceSlug: workspaceSlug,
                     projectSlug: projectSlug,
                   })
                 }}
