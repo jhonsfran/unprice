@@ -156,7 +156,6 @@ async function main() {
         isInternal: true,
         isMain: true,
         createdBy: userExists.id,
-        plan: "PRO",
       })
       .returning()
       .then((workspace) => workspace[0] ?? null)
@@ -170,7 +169,6 @@ async function main() {
         isInternal: true,
         enabled: true,
         isMain: true,
-        plan: "PRO",
       })
       .where(eq(schema.workspaces.id, workspaceId))
       .returning()

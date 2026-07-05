@@ -105,7 +105,6 @@ export const create = protectedProcedure
         isPersonal,
       },
       userId,
-      plan: subscription.planSlug,
     })
 
     if (err) {

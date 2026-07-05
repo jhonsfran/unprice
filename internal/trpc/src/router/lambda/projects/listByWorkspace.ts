@@ -14,10 +14,13 @@ export const listByWorkspace = protectedWorkspaceProcedure
           styles: z.object({
             backgroundImage: z.string(),
           }),
-          workspace: workspaceSelectBase.pick({
-            slug: true,
-            plan: true,
-          }),
+          workspace: workspaceSelectBase
+            .pick({
+              slug: true,
+            })
+            .extend({
+              currentPlanSlug: z.string().nullable(),
+            }),
         })
       ),
     })

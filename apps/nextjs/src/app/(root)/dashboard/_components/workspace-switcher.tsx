@@ -54,6 +54,8 @@ export function WorkspaceSwitcher({
     return <WorkspaceSwitcherSkeleton />
   }
 
+  const activePlanSlug = activeWorkspace.currentPlanSlug ?? "free"
+
   return (
     <Popover open={switcherOpen} onOpenChange={setSwitcherOpen}>
       <PopoverTrigger asChild>
@@ -85,9 +87,7 @@ export function WorkspaceSwitcher({
               })}
               variant={activeWorkspace.isMain ? "destructive" : "outline"}
             >
-              {activeWorkspace.isInternal
-                ? `${activeWorkspace.plan} - INTERNAL`
-                : activeWorkspace.plan}
+              {activeWorkspace.isInternal ? `${activePlanSlug} - INTERNAL` : activePlanSlug}
             </Badge>
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />

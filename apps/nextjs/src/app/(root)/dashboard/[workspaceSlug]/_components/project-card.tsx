@@ -38,7 +38,7 @@ export function ProjectCard(props: {
           <CardTitle className="flex items-center justify-between">
             <span className="whitespace-nowrap">{project.name}</span>
             <ProjectTierIndicator
-              tier={project.workspace.plan ?? "FREE"}
+              tier={project.workspace.currentPlanSlug ?? "free"}
               isInternal={project.isInternal}
             />
           </CardTitle>

@@ -69,7 +69,6 @@ describe("WorkspaceService.createWorkspaceRecord", () => {
           unPriceCustomerId: "cus_1",
         },
         userId: "user_1",
-        plan: "FREE",
       }
     )
 
@@ -87,6 +86,7 @@ describe("WorkspaceService.createWorkspaceRecord", () => {
         unPriceCustomerId: "cus_1",
       })
     )
+    expect(insertValues.mock.calls[0]?.[0]).not.toHaveProperty("plan")
     expect(insertValues).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: "user_1",
@@ -131,13 +131,98 @@ describe("WorkspaceService.createWorkspaceRecord", () => {
           unPriceCustomerId: "cus_1",
         },
         userId: "user_2",
-        plan: "FREE",
       }
     )
 
     expect(result.err).toBeUndefined()
     expect(result.val).toEqual({ state: "workspace_claim_conflict" })
     expect(tx.insert).not.toHaveBeenCalled()
+  })
+})
+
+describe("WorkspaceService.listWorkspacesByUser", () => {
+  it("uses active subscription plan slugs for workspace selector display", async () => {
+    const db = {
+      query: {
+        members: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              role: "OWNER",
+              userId: "user_1",
+              createdAtM: 1,
+              workspace: {
+                id: "ws_1",
+                slug: "acme",
+                name: "Acme",
+                enabled: true,
+                unPriceCustomerId: "cus_1",
+                isInternal: false,
+                isMain: false,
+                plan: "free",
+              },
+            },
+            {
+              role: "ADMIN",
+              userId: "user_1",
+              createdAtM: 2,
+              workspace: {
+                id: "ws_2",
+                slug: "beta",
+                name: "Beta",
+                enabled: true,
+                unPriceCustomerId: "cus_2",
+                isInternal: false,
+                isMain: false,
+                plan: "free",
+              },
+            },
+            {
+              role: "OWNER",
+              userId: "user_1",
+              createdAtM: 3,
+              workspace: {
+                id: "ws_3",
+                slug: "admin",
+                name: "Admin",
+                enabled: true,
+                unPriceCustomerId: "",
+                isInternal: true,
+                isMain: true,
+                plan: "free",
+              },
+            },
+          ]),
+        },
+        subscriptions: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              customerId: "cus_1",
+              planSlug: "pro",
+            },
+          ]),
+        },
+      },
+    } as unknown as Database
+
+    const result = await new WorkspaceService({ db, logger: createLogger() }).listWorkspacesByUser({
+      userId: "user_1",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toEqual([
+      expect.objectContaining({
+        id: "ws_1",
+        currentPlanSlug: "pro",
+      }),
+      expect.objectContaining({
+        id: "ws_2",
+        currentPlanSlug: null,
+      }),
+      expect.objectContaining({
+        id: "ws_3",
+        currentPlanSlug: "pro",
+      }),
+    ])
   })
 })
 

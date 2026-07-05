@@ -466,7 +466,8 @@ function UsageDashboardEmptyState({
             </EmptyPlaceholder.Icon>
             <EmptyPlaceholder.Title>No usage data yet</EmptyPlaceholder.Title>
             <EmptyPlaceholder.Description>
-              Usage evidence appears after your app records usage events for metered features.
+              Usage evidence appears after your app records usage events for metered features. Newly
+              reported usage might take some minutes to appear.
             </EmptyPlaceholder.Description>
             {showActions && (
               <EmptyPlaceholder.Action>

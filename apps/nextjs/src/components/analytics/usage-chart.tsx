@@ -41,7 +41,7 @@ export const UsageChartSkeleton = ({
         <EmptyPlaceholder.Description>
           {error
             ? error
-            : "Usage evidence appears after your app records usage events for metered features."}
+            : "Usage evidence appears after your app records usage events for metered features. Newly reported usage might take some minutes to appear."}
         </EmptyPlaceholder.Description>
         {!error && (
           <EmptyPlaceholder.Action>

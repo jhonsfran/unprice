@@ -17,7 +17,7 @@ export function CustomerTabs({ baseUrl }: { baseUrl: string }) {
 
   return (
     <TabNavigation>
-      <div className="flex items-center overflow-x-auto">
+      <div className="hide-scrollbar flex min-w-0 items-center overflow-x-auto">
         {tabs.map((tab) => {
           const href = `${baseUrl}${tab.href}`
           const active = tab.href === "" ? pathname === baseUrl : pathname.startsWith(href)

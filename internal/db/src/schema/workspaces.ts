@@ -29,9 +29,6 @@ export const workspaces = pgTableProject(
     // in Postgres 15.0+ NULLS NOT DISTINCT is available
     unPriceCustomerId: text("unprice_customer_id").notNull().unique("unprice_customer_id"),
 
-    // plan slug to show in the UI - this comes from unprice customer
-    plan: text("plan"),
-
     /**
      * if the workspace is disabled, all API requests will be rejected
      */

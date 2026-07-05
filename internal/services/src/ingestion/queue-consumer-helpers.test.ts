@@ -169,6 +169,7 @@ function createMessage(overrides: Partial<IngestionQueueMessage> = {}): Ingestio
     requestId: "req_123",
     receivedAt: TEST_NOW,
     idempotencyKey: "idem_123",
+    ingestionMode: "async",
     id: "evt_123",
     slug: "usage.recorded",
     timestamp: TEST_NOW,

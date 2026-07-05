@@ -79,12 +79,14 @@ export function SubscriptionPhaseRow({
             <Typography variant="h5">
               {index + 1}. {selectedPlanVersion.title} v{selectedPlanVersion.version} -{" "}
               {selectedPlanVersion.billingConfig.name}
+            </Typography>
+            <div className="mt-2 hidden items-center sm:flex">
               {phase.trialUnits && phase.trialUnits > 0 ? (
-                <Badge className="ml-2">
+                <Badge>
                   {phase.trialUnits} {trialUnitsMessage} trial
                 </Badge>
               ) : (
-                <Badge className="ml-2">no trial</Badge>
+                <Badge>no trial</Badge>
               )}
               <Badge className="ml-2" variant="secondary">
                 {phase.paymentProvider} provider
@@ -106,7 +108,7 @@ export function SubscriptionPhaseRow({
                   <span className="flex size-1.5 rounded-full bg-muted-foreground" />
                 </div>
               )}
-            </Typography>
+            </div>
             <Typography variant="p" affects="removePaddingMargin">
               from {formatDate(phase.startAt, timezone, "MMM dd, yyyy")} to{" "}
               {phase.endAt ? formatDate(phase.endAt, timezone, "MMM dd, yyyy") : "forever"}

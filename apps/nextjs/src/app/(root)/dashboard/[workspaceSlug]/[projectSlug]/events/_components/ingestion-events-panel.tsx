@@ -98,7 +98,7 @@ export function IngestionEventsPanel() {
           "Events appear after your app records or consumes usage. Clear filters to inspect existing evidence."
         }
         emptyState={
-          <EmptyPlaceholder className="min-h-[520px] border-none">
+          <EmptyPlaceholder className="min-h-[520px] border-none bg-transparent">
             <EmptyPlaceholder.Icon>
               <AlertTriangle className="h-8 w-8" />
             </EmptyPlaceholder.Icon>

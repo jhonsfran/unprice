@@ -5,13 +5,16 @@ import { Button } from "@unprice/ui/button"
 import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import { useParams, useRouter } from "next/navigation"
+import { useState } from "react"
 
 export function FinalStep({ className }: React.ComponentProps<"div">) {
-  const { updateContext, state } = useOnboarding()
+  const { next, state, updateContext } = useOnboarding()
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>()
+  const [isCompleting, setIsCompleting] = useState(false)
 
   const flowData = state?.context?.flowData as
     | {
+        done?: boolean
         seededMetrics?: boolean
         seedMetricsError?: string
         project?: { slug: string }
@@ -20,9 +23,10 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
       }
     | undefined
   const hasSeedEvidence = Boolean(flowData?.customer?.customerId && flowData?.subscription?.id)
+  const hasSeedFailure = flowData?.seededMetrics === false || Boolean(flowData?.seedMetricsError)
+  const completedFlow = Boolean(flowData?.done || state?.isCompleted)
   const seededMetrics =
-    flowData?.seededMetrics === true ||
-    (flowData?.seededMetrics !== false && !flowData?.seedMetricsError && hasSeedEvidence)
+    flowData?.seededMetrics === true || (!hasSeedFailure && (hasSeedEvidence || completedFlow))
 
   const router = useRouter()
   return (
@@ -39,24 +43,26 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
 
         <Button
           className="animate-button"
+          disabled={isCompleting}
           onClick={async () => {
+            if (isCompleting) return
+
+            setIsCompleting(true)
             const projectSlug = flowData?.project?.slug
 
-            // clear the flow data
-            await updateContext({
-              flowData: {
-                project: undefined,
-                customer: undefined,
-                subscription: undefined,
-                paymentProvider: undefined,
-                planVersionId: undefined,
-                apiKey: undefined,
-                templatePlansCreated: undefined,
-                seededMetrics: undefined,
-                seedMetricsError: undefined,
-                done: true,
-              },
-            })
+            try {
+              await updateContext({
+                flowData: {
+                  done: true,
+                  seededMetrics,
+                  seedMetricsError: seededMetrics ? undefined : flowData?.seedMetricsError,
+                },
+              })
+
+              await next()
+            } finally {
+              setIsCompleting(false)
+            }
 
             if (projectSlug) {
               router.push(`/${workspaceSlug}/${projectSlug}`)
@@ -67,7 +73,7 @@ export function FinalStep({ className }: React.ComponentProps<"div">) {
             router.refresh()
           }}
         >
-          Inspect project overview
+          {isCompleting ? "Opening project..." : "Inspect project overview"}
         </Button>
       </div>
     </div>

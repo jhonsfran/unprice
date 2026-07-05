@@ -94,3 +94,51 @@ describe("ProjectService createProjectRecord", () => {
     })
   })
 })
+
+describe("ProjectService listProjectsByWorkspace", () => {
+  it("uses the workspace billing subscription plan slug for project cards", async () => {
+    const db = {
+      query: {
+        workspaces: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "ws_1",
+            slug: "acme",
+            plan: "free",
+            unPriceCustomerId: "cus_1",
+            projects: [
+              {
+                id: "proj_1",
+                slug: "api",
+                name: "API",
+                workspaceId: "ws_1",
+              },
+            ],
+          }),
+        },
+        subscriptions: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              customerId: "cus_1",
+              planSlug: "pro",
+            },
+          ]),
+        },
+      },
+    } as unknown as Database
+
+    const result = await createProjectService(db).listProjectsByWorkspace({
+      workspaceId: "ws_1",
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val).toEqual([
+      expect.objectContaining({
+        id: "proj_1",
+        workspace: {
+          slug: "acme",
+          currentPlanSlug: "pro",
+        },
+      }),
+    ])
+  })
+})

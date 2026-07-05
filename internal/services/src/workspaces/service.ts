@@ -12,6 +12,7 @@ import type {
 import { Err, FetchError, Ok, type Result, wrapResult } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import type { z } from "zod"
+import { fallbackWorkspacePlanSlug, listCurrentPlanSlugsByCustomerId } from "./current-plan"
 import { canAssignWorkspaceRole } from "./roles"
 
 type WorkspaceInvite = z.infer<typeof invitesSelectBase>
@@ -19,6 +20,7 @@ type WorkspaceMember = z.infer<typeof listMembersSchema>
 type WorkspaceWithMembership = Workspace & {
   role: Member["role"]
   userId: User["id"]
+  currentPlanSlug: string | null
 }
 
 export class WorkspaceService {
@@ -95,11 +97,9 @@ export class WorkspaceService {
   public async createWorkspaceRecord({
     input,
     userId,
-    plan,
   }: {
     input: WorkspaceInsert
     userId: string
-    plan: Workspace["plan"]
   }): Promise<
     Result<
       | { state: "user_not_found" | "member_creation_failed" | "workspace_claim_conflict" }
@@ -168,7 +168,6 @@ export class WorkspaceService {
             isInternal: isInternal ?? false,
             createdBy: user.id,
             unPriceCustomerId,
-            plan,
           })
           .returning()
           .then((rows) => rows[0] ?? null)
@@ -661,13 +660,36 @@ export class WorkspaceService {
       return Err(err)
     }
 
-    const workspaces = val
-      .map((member) => ({
-        ...member.workspace,
-        role: member.role,
-        userId: member.userId,
-      }))
-      .filter((workspace) => workspace.enabled)
+    const enabledMemberships = val.filter((member) => member.workspace.enabled)
+
+    const { val: currentPlanSlugsByCustomerId, err: currentPlanErr } = await wrapResult(
+      listCurrentPlanSlugsByCustomerId({
+        db: this.db,
+        customerIds: enabledMemberships.map((member) => member.workspace.unPriceCustomerId),
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing current workspace plan slugs: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (currentPlanErr) {
+      this.logger.error(currentPlanErr, {
+        context: "error listing current workspace plan slugs",
+        userId,
+      })
+      return Err(currentPlanErr)
+    }
+
+    const workspaces = enabledMemberships.map((member) => ({
+      ...member.workspace,
+      role: member.role,
+      userId: member.userId,
+      currentPlanSlug:
+        currentPlanSlugsByCustomerId.get(member.workspace.unPriceCustomerId) ??
+        fallbackWorkspacePlanSlug(member.workspace),
+    }))
 
     return Ok(workspaces as WorkspaceWithMembership[])
   }

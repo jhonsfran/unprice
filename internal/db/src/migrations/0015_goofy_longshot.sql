@@ -1,0 +1,1 @@
+ALTER TABLE "unprice_workspaces" DROP COLUMN "plan";

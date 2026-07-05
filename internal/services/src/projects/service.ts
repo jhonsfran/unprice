@@ -16,6 +16,10 @@ import type { Metrics } from "../metrics"
 import { upsertManagedSandboxProviderConfig } from "../payment-provider/sandbox-config"
 import { cachedQuery } from "../utils/cached-query"
 import { toErrorContext } from "../utils/log-context"
+import {
+  fallbackWorkspacePlanSlug,
+  listCurrentPlanSlugsByCustomerId,
+} from "../workspaces/current-plan"
 import { UnPriceProjectError } from "./errors"
 
 export class ProjectService {
@@ -287,7 +291,10 @@ export class ProjectService {
   }: {
     workspaceId: string
   }): Promise<
-    Result<Array<Project & { workspace: Pick<Workspace, "slug" | "plan"> }>, FetchError>
+    Result<
+      Array<Project & { workspace: Pick<Workspace, "slug"> & { currentPlanSlug: string | null } }>,
+      FetchError
+    >
   > {
     const { val, err } = await wrapResult(
       this.db.query.workspaces.findFirst({
@@ -318,9 +325,30 @@ export class ProjectService {
     }
 
     const { projects, ...rest } = val
+    const { val: currentPlanSlugsByCustomerId, err: currentPlanErr } = await wrapResult(
+      listCurrentPlanSlugsByCustomerId({
+        db: this.db,
+        customerIds: [rest.unPriceCustomerId],
+      }),
+      (error) =>
+        new FetchError({
+          message: `error listing current workspace plan slug: ${error.message}`,
+          retry: false,
+        })
+    )
+
+    if (currentPlanErr) {
+      this.logger.error(currentPlanErr, {
+        context: "error listing current workspace plan slug",
+        workspaceId,
+      })
+      return Err(currentPlanErr)
+    }
+
     const workspace = {
       slug: rest.slug,
-      plan: rest.plan,
+      currentPlanSlug:
+        currentPlanSlugsByCustomerId.get(rest.unPriceCustomerId) ?? fallbackWorkspacePlanSlug(rest),
     }
 
     return Ok(

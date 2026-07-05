@@ -1,6 +1,6 @@
 "use client"
 
-import { useMutation } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { PaymentProvider } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
@@ -62,6 +62,7 @@ export function WorkspaceChangePlanClient({
 }) {
   const router = useRouter()
   const trpc = useTRPC()
+  const queryClient = useQueryClient()
   const billingUrl = `/${workspaceSlug}/settings/billing`
   const hasCurrentCycleEnd = upgradeOptions.currentCycleEndAt !== null
   const initialSelectablePlanId = useMemo(
@@ -101,7 +102,7 @@ export function WorkspaceChangePlanClient({
 
   const changePlan = useMutation(
     trpc.workspaces.changePlan.mutationOptions({
-      onSuccess: (result) => {
+      onSuccess: async (result) => {
         if (result.status === "requires_payment_method") {
           setPaymentSetup({
             paymentProvider: result.paymentProvider,
@@ -116,6 +117,17 @@ export function WorkspaceChangePlanClient({
               ? "Your workspace plan has been updated."
               : "Your workspace plan change is scheduled for the end of the current cycle.",
         })
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: trpc.workspaces.listWorkspacesByActiveUser.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.projects.listByActiveWorkspace.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.projects.listByWorkspace.queryKey({ workspaceSlug }),
+          }),
+        ])
         router.push(billingUrl)
         router.refresh()
       },

@@ -218,7 +218,7 @@ export function FilterDataTable<TData, TValue>({
     <div
       className={cn(
         "relative overflow-hidden rounded-md border bg-background",
-        isWorkbench && "border-border/60 bg-card/20"
+        isWorkbench && "border-border/60 bg-transparent"
       )}
     >
       <div
@@ -250,7 +250,10 @@ export function FilterDataTable<TData, TValue>({
           >
             Filters
           </div>
-          <ScrollArea className={viewportClassName}>
+          <ScrollArea
+            hideScrollBar={isWorkbench}
+            className={cn(viewportClassName, isWorkbench && "hide-scrollbar")}
+          >
             <FilterList table={table} filters={filters} presentation={presentation} />
           </ScrollArea>
         </aside>
@@ -279,11 +282,22 @@ export function FilterDataTable<TData, TValue>({
             ) : null}
             {computedToolbarActions}
           </div>
-          <ScrollArea className={cn(viewportClassName, isWorkbench && "bg-background")}>
+          <ScrollArea
+            hideScrollBar={isWorkbench}
+            className={cn(viewportClassName, isWorkbench && "hide-scrollbar bg-transparent")}
+          >
             <Table className="[&_td:first-child]:px-4 [&_th:first-child]:px-4">
-              <TableHeader className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
+              <TableHeader
+                className={cn(
+                  "sticky top-0 z-10 bg-background/95 backdrop-blur-sm",
+                  isWorkbench && "bg-background-base/95"
+                )}
+              >
                 {table.getHeaderGroups().map((headerGroup) => (
-                  <TableRow key={headerGroup.id}>
+                  <TableRow
+                    key={headerGroup.id}
+                    className={isWorkbench ? "bg-transparent hover:bg-transparent" : undefined}
+                  >
                     {headerGroup.headers.map((header) => {
                       const headerContent = header.isPlaceholder
                         ? null
@@ -318,7 +332,7 @@ export function FilterDataTable<TData, TValue>({
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow>
+                  <TableRow className={isWorkbench ? "bg-transparent" : undefined}>
                     <TableCell colSpan={columns.length} className="h-48 p-4 text-center">
                       {loadingState ?? (
                         <div className="flex items-center justify-center gap-2 text-muted-foreground text-sm">
@@ -333,7 +347,10 @@ export function FilterDataTable<TData, TValue>({
                     <TableRow
                       key={row.id}
                       data-state={row.getIsSelected() && "selected"}
-                      className={getRowClassName?.(row.original)}
+                      className={cn(
+                        isWorkbench && "bg-transparent",
+                        getRowClassName?.(row.original)
+                      )}
                     >
                       {row.getVisibleCells().map((cell) => (
                         <TableCell key={cell.id}>
@@ -343,7 +360,7 @@ export function FilterDataTable<TData, TValue>({
                     </TableRow>
                   ))
                 ) : (
-                  <TableRow>
+                  <TableRow className={isWorkbench ? "bg-transparent" : undefined}>
                     <TableCell colSpan={columns.length} className="h-48 p-4 text-center">
                       {emptyState ?? (
                         <div className="space-y-1">
@@ -359,7 +376,10 @@ export function FilterDataTable<TData, TValue>({
             {canLoadMore ? (
               <div
                 ref={loadMoreRef}
-                className="flex items-center justify-center border-t bg-background/80 px-4 py-3"
+                className={cn(
+                  "flex items-center justify-center border-t bg-background/80 px-4 py-3",
+                  isWorkbench && "bg-transparent"
+                )}
               >
                 <Button
                   type="button"
@@ -446,7 +466,10 @@ function MobileFilterDrawer<TData>({
           <DrawerTitle>Filters</DrawerTitle>
           <DrawerDescription>Narrow the visible rows without leaving this table.</DrawerDescription>
         </DrawerHeader>
-        <ScrollArea className="max-h-[60vh]">
+        <ScrollArea
+          hideScrollBar={presentation === "workbench"}
+          className={cn("max-h-[60vh]", presentation === "workbench" && "hide-scrollbar")}
+        >
           <FilterList table={table} filters={filters} presentation={presentation} />
         </ScrollArea>
       </DrawerContent>

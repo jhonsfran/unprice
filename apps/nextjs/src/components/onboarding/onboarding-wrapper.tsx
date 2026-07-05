@@ -28,13 +28,13 @@ export function OnboardingWrapper({ children }: PropsWithChildren) {
   return (
     <OnboardingProvider
       steps={steps}
-      onFlowComplete={() => {
+      onFlowComplete={async () => {
         if (isDevelopment) {
           console.info("Onboarding complete")
           return
         }
 
-        mutateSetOnboardingCompleted.mutate({ onboardingCompleted: true })
+        await mutateSetOnboardingCompleted.mutateAsync({ onboardingCompleted: true })
       }}
       debug={false}
       localStoragePersistence={

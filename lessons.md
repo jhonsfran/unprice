@@ -187,6 +187,8 @@ patterns. Keep it cheap to load and useful.
   `goToStep` bypasses or "continue anyway" buttons that advance after an incomplete step.
 - 2026-07-04: OnboardJS `updateContext` is async and persists before notifying state; await it
   before enabling or performing step navigation that depends on newly written `flowData`.
+- 2026-07-05: OnboardJS flows with a visible final step must still call `next()` from that step so
+  `onFlowComplete` persists the completed state; do not clear evidence flags before completion.
 - 2026-07-04: tRPC router procedure keys cannot use reserved object names such as `apply`;
   expose plan-template creation as `planVersions.applyTemplate` and keep client calls aligned.
 - 2026-07-04: Theme-sensitive visuals should use `resolvedTheme` from `next-themes`, not
@@ -231,6 +233,8 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-03: Workspace billing overview is self-reflective customer reporting; resolve
   `workspace.unPriceCustomerId` to the customer owning project before calling customer
   current-access, wallet, or usage-dashboard queries.
+- 2026-07-05: Workspace/project selector plan badges should use active subscription
+  `planSlug`/current-access state; do not reintroduce a workspace-owned plan display column.
 - 2026-07-03: Dialog forms rendered from inside another React form can still bubble submit events
   through the React tree even when Radix portals the dialog content; stop propagation on the dialog
   form submit when the inner action must not save the parent form.

@@ -12,6 +12,7 @@ export const listWorkspacesByActiveUser = protectedProcedure
         workspaceSelectBase.extend({
           role: z.string(),
           userId: z.string(),
+          currentPlanSlug: z.string().nullable(),
         })
       ),
     })
