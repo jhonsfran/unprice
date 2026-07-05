@@ -81,6 +81,19 @@ describe("workspace changePlan mutation", () => {
     expect(error.message).toContain("Stripe is disabled")
   })
 
+  it("keeps already-scheduled plan change failures customer-visible", () => {
+    const error = changePlanErrorToTrpcError(
+      new WorkspaceChangePlanError({
+        code: "WORKSPACE_PLAN_CHANGE_ALREADY_SCHEDULED",
+        message:
+          "A plan change is already scheduled. Contact support to modify it before choosing another plan.",
+      })
+    )
+
+    expect(error.code).toBe("PRECONDITION_FAILED")
+    expect(error.message).toContain("A plan change is already scheduled")
+  })
+
   it("maps wrong-project target failures the same way as not-found", () => {
     const error = changePlanErrorToTrpcError(
       new WorkspaceChangePlanError({
@@ -94,13 +107,37 @@ describe("workspace changePlan mutation", () => {
 
   it("maps expected service failures to precondition failed", () => {
     const error = changePlanErrorToTrpcError(
-      Object.assign(new Error("Subscription must be active to create a new phase"), {
+      Object.assign(
+        new Error("Subscription must be active to create a new phase. Please contact support."),
+        {
+          name: "UnPriceSubscriptionError",
+        }
+      )
+    )
+
+    expect(error.code).toBe("PRECONDITION_FAILED")
+    expect(error.message).toContain("Subscription must be active")
+  })
+
+  it("keeps unexpected subscription failures internal", () => {
+    const error = changePlanErrorToTrpcError(
+      Object.assign(new Error("database failed"), {
+        name: "UnPriceSubscriptionError",
+      })
+    )
+
+    expect(error.code).toBe("INTERNAL_SERVER_ERROR")
+  })
+
+  it("keeps phase overlap failures customer-visible", () => {
+    const error = changePlanErrorToTrpcError(
+      Object.assign(new Error("Phases overlap, there is already a phase in the same date range"), {
         name: "UnPriceSubscriptionError",
       })
     )
 
     expect(error.code).toBe("PRECONDITION_FAILED")
-    expect(error.message).toContain("Subscription must be active")
+    expect(error.message).toContain("Phases overlap")
   })
 
   it("keeps generic fetch failures internal", () => {

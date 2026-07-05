@@ -34,7 +34,11 @@ import { toErrorContext } from "../utils/log-context"
 import type { WalletService } from "../wallet"
 import { UnPriceSubscriptionError } from "./errors"
 import type { SubscriptionMachine } from "./machine"
-import type { SubscriptionRepository } from "./repository"
+import type {
+  SubscriptionFullData,
+  SubscriptionRepository,
+  SubscriptionWithPhases,
+} from "./repository"
 import type { SusbriptionMachineStatus } from "./types"
 import { withLockedMachine } from "./withLockedMachine"
 
@@ -46,6 +50,23 @@ interface PhaseGrantItemInput {
   featurePlanVersionId: string
   featureLimit: number | null
   overageStrategy: OverageStrategy
+}
+
+type PhaseUpdateData = Parameters<SubscriptionRepository["updatePhase"]>[0]["data"]
+
+type ReplacementSubscriptionItemValue = {
+  id: string
+  subscriptionPhaseId: string
+  projectId: string
+  featurePlanVersionId: string
+  units: number | null
+  subscriptionId: string
+}
+
+type FuturePhaseUpdatePlan = {
+  phaseUpdateData: PhaseUpdateData
+  replacementSubscriptionItemValues: ReplacementSubscriptionItemValue[]
+  replacementPhaseGrantItems: PhaseGrantItemInput[]
 }
 
 interface PhaseGrantTarget {
@@ -777,7 +798,7 @@ export class SubscriptionService {
     if (consecutivePhases.length !== orderedPhases.length) {
       return Err(
         new UnPriceSubscriptionError({
-          message: "Phases are not consecutive",
+          message: "Phases are not consecutive. There are other phases in the same date range.",
         })
       )
     }
@@ -1252,6 +1273,230 @@ export class SubscriptionService {
     return result
   }
 
+  private buildLockedPhaseUpdateData({
+    input,
+    phaseToUpdate,
+    startAt,
+    endAtToUse,
+  }: {
+    input: SubscriptionPhase
+    phaseToUpdate: SubscriptionWithPhases["phases"][number]
+    startAt: number
+    endAtToUse: number | undefined
+  }): PhaseUpdateData {
+    // Credit line policy is fixed once a phase is active or historical because wallet grants
+    // and billing periods may already have been created from the original policy.
+    const creditLinePolicyToUse = phaseToUpdate.creditLinePolicy ?? "uncapped"
+    const creditLineAmountToUse =
+      creditLinePolicyToUse === "uncapped" ? null : (phaseToUpdate.creditLineAmount ?? null)
+    const paymentMethodIdToUse =
+      input.paymentMethodId === undefined ? phaseToUpdate.paymentMethodId : input.paymentMethodId
+
+    return {
+      startAt,
+      endAt: endAtToUse ?? null,
+      paymentMethodId: paymentMethodIdToUse,
+      creditLinePolicy: creditLinePolicyToUse,
+      creditLineAmount: creditLineAmountToUse,
+    }
+  }
+
+  private async buildFuturePhaseUpdatePlan({
+    input,
+    subscriptionWithPhases,
+    subscriptionId,
+    projectId,
+    phaseId,
+    startAt,
+    endAtToUse,
+    config,
+    db,
+  }: {
+    input: SubscriptionPhase
+    subscriptionWithPhases: SubscriptionWithPhases
+    subscriptionId: string
+    projectId: string
+    phaseId: string
+    startAt: number
+    endAtToUse: number | undefined
+    config?: SubscriptionItemConfig[]
+    db?: Database
+  }): Promise<Result<FuturePhaseUpdatePlan, UnPriceSubscriptionError>> {
+    const versionData = await (db ?? this.db).query.versions.findFirst({
+      with: {
+        planFeatures: {
+          with: {
+            feature: true,
+          },
+        },
+        plan: true,
+        project: true,
+      },
+      where(fields, operators) {
+        return operators.and(
+          operators.eq(fields.id, input.planVersionId),
+          operators.eq(fields.projectId, projectId)
+        )
+      },
+    })
+
+    if (!versionData?.id) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Version not found. Please check the planVersionId",
+        })
+      )
+    }
+
+    if (versionData.status !== "published") {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Plan version is not published, only published versions can be subscribed to",
+        })
+      )
+    }
+
+    if (versionData.active !== true) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Plan version is not active, only active versions can be subscribed to",
+        })
+      )
+    }
+
+    if (!versionData.planFeatures || versionData.planFeatures.length === 0) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Plan version has no features",
+        })
+      )
+    }
+
+    const paymentProviderToUse = input.paymentProvider ?? versionData.paymentProvider
+    const creditLinePolicyToUse = input.creditLinePolicy ?? "uncapped"
+    const creditLineAmountToUse =
+      creditLinePolicyToUse === "uncapped" ? null : (input.creditLineAmount ?? null)
+    const trialUnitsToUse = input.trialUnits ?? versionData.trialUnits ?? 0
+    const billingAnchorToUse = getAnchor(
+      startAt,
+      versionData.billingConfig.billingInterval,
+      versionData.billingConfig.billingAnchor
+    )
+    const trialEndsAtToUse =
+      trialUnitsToUse > 0
+        ? calculateDateAt({
+            startDate: startAt,
+            config: {
+              interval: getTrialIntervalForBillingInterval(
+                versionData.billingConfig.billingInterval
+              ),
+              units: trialUnitsToUse,
+            },
+          })
+        : null
+    let paymentMethodIdToUse = input.paymentMethodId ?? null
+
+    if (
+      versionData.paymentMethodRequired &&
+      (!paymentMethodIdToUse || paymentMethodIdToUse === "")
+    ) {
+      const { err: paymentMethodErr, val: paymentMethod } =
+        await this.customerService.validatePaymentMethod({
+          customerId: subscriptionWithPhases.customerId,
+          projectId,
+          paymentProvider: paymentProviderToUse,
+          requiredPaymentMethod: true,
+        })
+
+      if (paymentMethodErr) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: paymentMethodErr.message,
+          })
+        )
+      }
+
+      paymentMethodIdToUse = paymentMethod.paymentMethodId
+
+      if (!paymentMethodIdToUse) {
+        return Err(
+          new UnPriceSubscriptionError({
+            message: "Payment method is required for this plan version",
+          })
+        )
+      }
+    }
+
+    let configItemsSubscription: SubscriptionItemConfig[]
+
+    if (config) {
+      configItemsSubscription = config
+    } else {
+      const defaultConfigResult = createDefaultSubscriptionConfig({
+        planVersion: versionData,
+      })
+
+      if (defaultConfigResult.err) {
+        this.logger.set({ error: toErrorContext(defaultConfigResult.err) })
+        return Err(
+          new UnPriceSubscriptionError({
+            message: defaultConfigResult.err.message,
+          })
+        )
+      }
+
+      configItemsSubscription = defaultConfigResult.val
+    }
+
+    const replacementSubscriptionItemValues = configItemsSubscription.map((item) => ({
+      id: newId("subscription_item"),
+      subscriptionPhaseId: phaseId,
+      projectId,
+      featurePlanVersionId: item.featurePlanId,
+      units: item.units ?? null,
+      subscriptionId,
+    }))
+
+    const replacementPhaseGrantItems = this.normalizePhaseGrantItems(
+      replacementSubscriptionItemValues.map((item) => {
+        const featurePlanVersion = versionData.planFeatures.find(
+          (planFeature) => planFeature.id === item.featurePlanVersionId
+        )
+
+        return {
+          id: item.id,
+          units: item.units,
+          featurePlanVersionId: item.featurePlanVersionId,
+          featurePlanVersion: featurePlanVersion
+            ? {
+                id: featurePlanVersion.id,
+                feature: { id: featurePlanVersion.feature.id },
+                limit: featurePlanVersion.limit ?? null,
+                metadata: featurePlanVersion.metadata ?? null,
+              }
+            : null,
+        }
+      })
+    )
+
+    return Ok({
+      replacementSubscriptionItemValues,
+      replacementPhaseGrantItems,
+      phaseUpdateData: {
+        startAt,
+        endAt: endAtToUse ?? null,
+        planVersionId: input.planVersionId,
+        paymentProvider: paymentProviderToUse,
+        paymentMethodId: paymentMethodIdToUse,
+        creditLinePolicy: creditLinePolicyToUse,
+        creditLineAmount: creditLineAmountToUse,
+        trialUnits: trialUnitsToUse,
+        trialEndsAt: trialEndsAtToUse,
+        billingAnchor: billingAnchorToUse ?? 0,
+      },
+    })
+  }
+
   public async updatePhase({
     input,
     subscriptionId,
@@ -1259,16 +1504,24 @@ export class SubscriptionService {
     db,
     now,
   }: {
-    input: SubscriptionPhase
+    input: SubscriptionPhase & { config?: SubscriptionItemConfig[] }
     subscriptionId: string
     projectId: string
     db?: Database
     now: number
   }): Promise<Result<SubscriptionPhase, UnPriceSubscriptionError | SchemaError>> {
-    const { startAt, endAt, items, id: phaseId } = input
+    const { startAt, endAt, items, id: phaseId, config } = input
     const repo = this.repoForDatabase(db)
 
     let endAtToUse = endAt ?? undefined
+
+    if (endAt !== null && endAt !== undefined && endAt < startAt) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "End date must be after the phase start date",
+        })
+      )
+    }
 
     // if the end date is in the past, set it to the current date
     if (endAt && endAt < now) {
@@ -1311,19 +1564,54 @@ export class SubscriptionService {
       )
     }
 
-    // Credit line policy is fixed once a phase is persisted because wallet grants
-    // and billing periods may already have been created from the original policy.
-    const creditLinePolicyToUse = phaseToUpdate.creditLinePolicy ?? "uncapped"
-    const creditLineAmountToUse =
-      creditLinePolicyToUse === "uncapped" ? null : (phaseToUpdate.creditLineAmount ?? null)
-    const paymentMethodIdToUse =
-      input.paymentMethodId === undefined ? phaseToUpdate.paymentMethodId : input.paymentMethodId
+    const isFuturePhase = phaseToUpdate.startAt > now
+
+    if (isFuturePhase && startAt <= now) {
+      return Err(
+        new UnPriceSubscriptionError({
+          message: "Future phases must start in the future",
+        })
+      )
+    }
+
+    let phaseUpdateData: PhaseUpdateData
+    let replacementSubscriptionItemValues: ReplacementSubscriptionItemValue[] | undefined
+    let replacementPhaseGrantItems: PhaseGrantItemInput[] | undefined
+
+    if (isFuturePhase) {
+      const futurePhaseUpdatePlan = await this.buildFuturePhaseUpdatePlan({
+        input,
+        subscriptionWithPhases,
+        subscriptionId,
+        projectId,
+        phaseId,
+        startAt,
+        endAtToUse,
+        config,
+        db,
+      })
+
+      if (futurePhaseUpdatePlan.err) {
+        return futurePhaseUpdatePlan
+      }
+
+      const futurePhaseUpdate = futurePhaseUpdatePlan.val
+      phaseUpdateData = futurePhaseUpdate.phaseUpdateData
+      replacementSubscriptionItemValues = futurePhaseUpdate.replacementSubscriptionItemValues
+      replacementPhaseGrantItems = futurePhaseUpdate.replacementPhaseGrantItems
+    } else {
+      phaseUpdateData = this.buildLockedPhaseUpdateData({
+        input,
+        phaseToUpdate,
+        startAt,
+        endAtToUse,
+      })
+    }
 
     // update the phase with the new dates
     const phase = {
       ...phaseToUpdate,
-      startAt,
-      endAt: endAtToUse ?? null,
+      ...phaseUpdateData,
     }
 
     const validatePhasesAction = this.validatePhasesAction({
@@ -1343,13 +1631,7 @@ export class SubscriptionService {
       const writeDb = txDb ?? db ?? this.db
       const subscriptionPhase = await txRepo.updatePhase({
         phaseId: input.id,
-        data: {
-          startAt: startAt,
-          endAt: endAtToUse ?? null,
-          paymentMethodId: paymentMethodIdToUse,
-          creditLinePolicy: creditLinePolicyToUse,
-          creditLineAmount: creditLineAmountToUse,
-        },
+        data: phaseUpdateData,
       })
 
       if (!subscriptionPhase) {
@@ -1360,33 +1642,47 @@ export class SubscriptionService {
         )
       }
 
-      // add items to the subscription if they are different from the current items
-      const itemsFromPhase =
-        subscriptionWithPhases.phases.find((p) => p.id === phaseId)?.items ?? []
+      let syncItems: PhaseGrantItemInput[]
 
-      // if the items units are different we need to add them
-      const itemsToChange = items?.filter((item) => {
-        const itemFromPhase = itemsFromPhase.find((i) => i.id === item.id)
-        return itemFromPhase?.units !== item.units
-      })
-
-      if (itemsToChange?.length) {
-        await txRepo.updateItemUnits({
+      if (replacementSubscriptionItemValues) {
+        await txRepo.replaceItemsForPhase({
+          phaseId,
           projectId,
-          updates: itemsToChange.map((item) => ({
-            id: item.id,
-            units: item.units ?? null,
-          })),
+          items: replacementSubscriptionItemValues,
         })
-      }
 
-      const updatedPhaseItems = itemsFromPhase.map((item) => {
-        const changedItem = itemsToChange?.find((candidate) => candidate.id === item.id)
-        return {
-          ...item,
-          units: changedItem?.units ?? item.units,
+        syncItems = replacementPhaseGrantItems ?? []
+      } else {
+        // add items to the subscription if they are different from the current items
+        const itemsFromPhase =
+          subscriptionWithPhases.phases.find((p) => p.id === phaseId)?.items ?? []
+
+        // if the items units are different we need to add them
+        const itemsToChange = items?.filter((item) => {
+          const itemFromPhase = itemsFromPhase.find((i) => i.id === item.id)
+          return itemFromPhase?.units !== item.units
+        })
+
+        if (itemsToChange?.length) {
+          await txRepo.updateItemUnits({
+            projectId,
+            updates: itemsToChange.map((item) => ({
+              id: item.id,
+              units: item.units ?? null,
+            })),
+          })
         }
-      })
+
+        const updatedPhaseItems = itemsFromPhase.map((item) => {
+          const changedItem = itemsToChange?.find((candidate) => candidate.id === item.id)
+          return {
+            ...item,
+            units: changedItem?.units ?? item.units,
+          }
+        })
+
+        syncItems = this.normalizePhaseGrantItems(updatedPhaseItems)
+      }
 
       const syncPhaseEntitlementsResult = await this.syncPhaseEntitlements({
         customerId: subscriptionWithPhases.customerId,
@@ -1397,7 +1693,7 @@ export class SubscriptionService {
           startAt: subscriptionPhase.startAt,
           endAt: subscriptionPhase.endAt,
         },
-        items: this.normalizePhaseGrantItems(updatedPhaseItems),
+        items: syncItems,
         db: writeDb,
         now,
       })
@@ -1416,7 +1712,7 @@ export class SubscriptionService {
           endAt: subscriptionPhase.endAt,
           trialEndsAt: subscriptionPhase.trialEndsAt,
         },
-        items: this.normalizePhaseGrantItems(updatedPhaseItems),
+        items: syncItems,
         db: writeDb,
         now,
       })
@@ -1720,7 +2016,7 @@ export class SubscriptionService {
   }: {
     subscriptionId: string
     projectId: string
-  }): Promise<Result<unknown | null, UnPriceSubscriptionError>> {
+  }): Promise<Result<SubscriptionFullData | null, UnPriceSubscriptionError>> {
     try {
       const subscriptionData = await this.repo.findSubscriptionFull({ subscriptionId, projectId })
       return Ok(subscriptionData ?? null)

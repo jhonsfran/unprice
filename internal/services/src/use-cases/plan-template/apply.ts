@@ -347,7 +347,10 @@ function resolveTemplate(template: z.infer<typeof planTemplateKeySchema>) {
 }
 
 function getTemplateVersionTags(templateKey: string, templatePlanKey: string) {
-  return [`${TEMPLATE_SOURCE_TAG_PREFIX}${templateKey}`, `${TEMPLATE_PLAN_TAG_PREFIX}${templatePlanKey}`]
+  return [
+    `${TEMPLATE_SOURCE_TAG_PREFIX}${templateKey}`,
+    `${TEMPLATE_PLAN_TAG_PREFIX}${templatePlanKey}`,
+  ]
 }
 
 function hasTemplateVersionTags(planVersion: PlanVersion, tags: string[]) {

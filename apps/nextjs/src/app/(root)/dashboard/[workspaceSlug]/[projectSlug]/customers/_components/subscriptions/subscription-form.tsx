@@ -11,7 +11,7 @@ import { CopyButton } from "~/components/copy-button"
 import TimeZoneFormField from "~/components/forms/timezone-field"
 import { SubmitButton } from "~/components/submit-button"
 import { formatDate } from "~/lib/dates"
-import { toast, toastAction } from "~/lib/toast"
+import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 import CustomerFormField from "./customer-field"
@@ -47,9 +47,6 @@ export function SubscriptionForm({
         router.refresh()
 
         router.push(`/${workspaceSlug}/${projectSlug}/customers/subscriptions/${subscription.id}`)
-      },
-      onError: (error) => {
-        toast.error(error.message)
       },
     })
   )
@@ -155,9 +152,11 @@ export function SubscriptionForm({
             subscriptionId={defaultValues.id ?? ""}
             timezone={defaultValues.timezone ?? selectedCustomer?.timezone ?? ""}
           />
+
+          <Separator className="my-4" />
         </div>
 
-        <div className="mt-8 flex justify-end gap-4">
+        <div className="flex justify-end gap-4">
           {isEdit && !isInactive && <SubscriptionCancelButton subscriptionId={defaultValues.id!} />}
 
           {!isEdit && !isInactive && (

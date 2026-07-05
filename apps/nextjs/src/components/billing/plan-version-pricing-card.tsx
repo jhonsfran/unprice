@@ -4,13 +4,26 @@ import { calculateFlatPricePlan, getTrialUnitLabel } from "@unprice/db/validator
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Badge } from "@unprice/ui/badge"
 import { Button } from "@unprice/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader } from "@unprice/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@unprice/ui/card"
+import { Separator } from "@unprice/ui/separator"
 import { cn } from "@unprice/ui/utils"
 import { PlanVersionFeatureListItem } from "~/components/billing/plan-version-feature-list"
 
 export type PlanVersionPricingCardAction =
   | { kind: "current"; label: "Current plan" }
-  | { kind: "select"; label: string; onSelect: () => void }
+  | {
+      kind: "select"
+      label: string
+      onSelect: () => void
+      selected?: boolean
+    }
   | { kind: "disabled"; label: string; reason: string }
   | { kind: "publish"; onPublish?: () => void }
 
@@ -45,27 +58,44 @@ export function PlanVersionPricingCard({
   })
   const billingLabel = planVersion.billingConfig.name
   const actionElement = renderAction?.(action) ?? <PricingCardAction action={action} />
+  const visibleFeatures = [...planVersion.planFeatures]
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .filter((feature) => !feature.metadata?.hidden)
+  const isInteractive = action.kind === "select" || action.kind === "publish"
+  const isSelected = action.kind === "select" && action.selected
+  const isEmphasized = highlight || isSelected
 
   return (
     <Card
-      className={cn("flex w-[300px] flex-col", highlight && "border-primary shadow-sm", className)}
+      className={cn(
+        "group flex h-full w-[300px] flex-col overflow-hidden border-border bg-card transition-[background-color,border-color,box-shadow] duration-200",
+        isInteractive && "hover:border-primary-borderHover hover:bg-background-bgSubtle",
+        isEmphasized && "border-primary-border shadow-sm",
+        className
+      )}
     >
-      <CardHeader className="gap-2 pb-4">
-        <div className="flex items-start justify-between gap-2">
-          <h2 className="font-semibold text-2xl leading-tight">{planVersion.plan.title}</h2>
-          {action.kind === "current" && <Badge variant="secondary">{action.label}</Badge>}
+      <CardHeader className="gap-5 p-6 pb-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-col gap-2">
+            <CardTitle className="truncate font-semibold text-2xl leading-tight">
+              {planVersion.plan.title}
+            </CardTitle>
+            {planVersion.description && (
+              <CardDescription className="line-clamp-2 text-sm leading-5">
+                {planVersion.description}
+              </CardDescription>
+            )}
+          </div>
+          <PricingCardStateBadge action={action} />
         </div>
-        {planVersion.description && (
-          <CardDescription className="line-clamp-2">{planVersion.description}</CardDescription>
-        )}
-      </CardHeader>
 
-      <CardContent className="flex flex-col gap-3 pb-6">
         {!planVersion.plan.enterprisePlan && (
           <div className="flex flex-col gap-1">
-            <div className="flex items-baseline gap-1.5">
-              <span className="font-extrabold text-4xl tracking-tight">{val.displayAmount}</span>
-              <span className="text-muted-foreground text-sm">/ {billingLabel}</span>
+            <div className="flex items-baseline gap-2">
+              <span className="font-extrabold text-4xl text-background-textContrast tracking-tight">
+                {val.displayAmount}
+              </span>
+              <span className="font-medium text-muted-foreground text-sm">/ {billingLabel}</span>
             </div>
             {trialUnits > 0 && (
               <p className="text-muted-foreground text-xs">
@@ -74,29 +104,47 @@ export function PlanVersionPricingCard({
             )}
           </div>
         )}
+      </CardHeader>
 
-        {actionElement}
-      </CardContent>
+      <CardContent className="flex flex-col gap-3 px-6 pb-6">{actionElement}</CardContent>
 
-      <CardFooter className="flex w-full flex-col border-t px-6 py-6">
+      <Separator />
+
+      <CardFooter className="flex w-full flex-col px-6 py-6">
         <div className="flex w-full flex-col gap-4">
-          <p className="font-semibold text-muted-foreground text-xs uppercase tracking-wider">
-            What's included
-          </p>
+          <p className="font-semibold text-background-text text-xs">Included in this plan</p>
           <ul className="flex w-full flex-col gap-3">
-            {[...planVersion.planFeatures]
-              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-              .filter((feature) => !feature.metadata?.hidden)
-              .map((feature) => (
-                <li key={feature.id} className="flex w-full flex-col justify-start">
-                  <PlanVersionFeatureListItem feature={feature} withCalculator withQuantity />
-                </li>
-              ))}
+            {visibleFeatures.map((feature) => (
+              <li key={feature.id} className="flex w-full flex-col justify-start">
+                <PlanVersionFeatureListItem
+                  feature={feature}
+                  withCalculator
+                  withQuantity
+                  className="font-medium text-background-text"
+                />
+              </li>
+            ))}
           </ul>
         </div>
       </CardFooter>
     </Card>
   )
+}
+
+function PricingCardStateBadge({ action }: { action: PlanVersionPricingCardAction }) {
+  if (action.kind === "current") {
+    return <Badge variant="secondary">{action.label}</Badge>
+  }
+
+  if (action.kind === "select" && action.selected) {
+    return <Badge variant="primary">Selected</Badge>
+  }
+
+  if (action.kind === "disabled") {
+    return <Badge variant="secondary">Unavailable</Badge>
+  }
+
+  return null
 }
 
 function PricingCardAction({ action }: { action: PlanVersionPricingCardAction }) {
@@ -115,8 +163,8 @@ function PricingCardAction({ action }: { action: PlanVersionPricingCardAction })
       )
     case "disabled":
       return (
-        <div className="flex flex-col gap-1">
-          <Button className="w-full" disabled>
+        <div className="flex flex-col gap-2">
+          <Button className="w-full" variant="outline" disabled>
             {action.label}
           </Button>
           <p className="text-muted-foreground text-xs">{action.reason}</p>
@@ -124,7 +172,7 @@ function PricingCardAction({ action }: { action: PlanVersionPricingCardAction })
       )
     case "current":
       return (
-        <Button className="w-full" disabled>
+        <Button className="w-full disabled:opacity-100" variant="outline" disabled>
           {action.label}
         </Button>
       )

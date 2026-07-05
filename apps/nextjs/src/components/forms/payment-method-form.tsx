@@ -13,9 +13,11 @@ type BasePaymentMethodButtonProps = {
   customerId: string
   successUrl: string
   cancelUrl: string
+  size?: ButtonProps["size"]
   paymentProvider: PaymentProvider
   hasPaymentMethods?: boolean
   isRefreshing?: boolean
+  isDisabled?: boolean
   variant?: ButtonProps["variant"]
   onProviderSessionStarted?: () => void
 }
@@ -37,9 +39,11 @@ export function PaymentMethodButton(props: PaymentMethodButtonProps) {
     customerId,
     successUrl,
     cancelUrl,
+    size,
     paymentProvider,
     hasPaymentMethods,
     isRefreshing,
+    isDisabled,
     variant,
     onProviderSessionStarted,
   } = props
@@ -78,9 +82,10 @@ export function PaymentMethodButton(props: PaymentMethodButtonProps) {
   return (
     <SubmitButton
       variant={variant ?? "default"}
-      size="sm"
-      className="w-56"
+      size={size ?? "sm"}
       onClick={() => {
+        if (isDisabled) return
+
         if (isSandbox) {
           toast.info("Sandbox payment provider", {
             description:
@@ -111,7 +116,7 @@ export function PaymentMethodButton(props: PaymentMethodButtonProps) {
         })
       }}
       isSubmitting={!isSandbox && createSessionPending}
-      isDisabled={!customerId || (!isSandbox && createSessionPending) || isRefreshing}
+      isDisabled={isDisabled || !customerId || (!isSandbox && createSessionPending) || isRefreshing}
       isLoading={!isSandbox && createSessionPending}
       label={
         isSandbox

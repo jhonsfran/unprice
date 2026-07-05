@@ -36,22 +36,51 @@ const UsageAreaChart = dynamic(
 
 type UsageDashboardData = RouterOutputs["analytics"]["getUsageDashboard"]
 type UsageDashboardFeature = UsageDashboardData["features"][number]
+type UsageDashboardMode = "project" | "customer"
 
-export function UsageDashboardSkeleton() {
+export function UsageDashboardSkeleton({
+  mode = "project",
+  showCustomerSummary = mode === "customer",
+  showHeaderControls = true,
+}: {
+  mode?: UsageDashboardMode
+  showCustomerSummary?: boolean
+  showHeaderControls?: boolean
+} = {}) {
+  const shouldShowCustomerSummary = mode === "customer" && showCustomerSummary
+
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2">
           <Skeleton className="h-5 w-52" />
           <Skeleton className="h-4 w-96 max-w-full" />
         </div>
-        <Skeleton className="h-4 w-48" />
+        {showHeaderControls && (
+          <div className="flex flex-col items-start gap-3 md:items-end">
+            {mode === "customer" && <Skeleton className="h-9 w-36 rounded-md" />}
+            <Skeleton className="h-4 w-48" />
+          </div>
+        )}
       </div>
-      <Skeleton className="h-[252px] w-full rounded-lg border border-border/60" />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Skeleton className="h-[190px] w-full rounded-lg border border-border/60" />
-        <Skeleton className="h-[320px] w-full rounded-lg border border-border/60" />
-      </div>
+      {shouldShowCustomerSummary && (
+        <EvidenceMetricStrip className="md:grid-cols-4">
+          {["features", "usage", "ledger", "invoices"].map((metric) => (
+            <Skeleton key={metric} className="h-[104px] rounded-none" />
+          ))}
+        </EvidenceMetricStrip>
+      )}
+      {mode === "project" ? (
+        <>
+          <Skeleton className="h-[252px] w-full rounded-lg border border-border/60" />
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Skeleton className="h-[190px] w-full rounded-lg border border-border/60" />
+            <Skeleton className="h-[320px] w-full rounded-lg border border-border/60" />
+          </div>
+        </>
+      ) : (
+        <Skeleton className="h-[520px] w-full rounded-lg border border-border/60" />
+      )}
     </section>
   )
 }
@@ -74,7 +103,7 @@ export function UsageDashboardView({
   data: UsageDashboardData
   intervalLabel: string
   dateFormat: string
-  mode: "project" | "customer"
+  mode: UsageDashboardMode
   isFetching: boolean
   invoiceCount?: number
   customerHref?: (customerId: string) => string

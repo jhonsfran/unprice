@@ -57,11 +57,6 @@ export function CodeApiSheet({
           }
         )
       },
-      onError: (error) => {
-        toast.error("Could not roll default key", {
-          description: error.message,
-        })
-      },
     })
   )
 

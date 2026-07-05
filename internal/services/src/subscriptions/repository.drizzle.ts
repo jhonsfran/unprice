@@ -38,6 +38,7 @@ import type {
   ListSubscriptionsResult,
   PhaseForBilling,
   PhaseWithItemsAndSubscription,
+  ReplaceItemsForPhaseInput,
   SubscriptionFullData,
   SubscriptionMachineData,
   SubscriptionRepository,
@@ -468,6 +469,25 @@ export class DrizzleSubscriptionRepository implements SubscriptionRepository {
   // ── Items ──────────────────────────────────────────────────────────────────
 
   async insertItems(input: InsertItemsInput): Promise<SubscriptionItem[]> {
+    const rows = await this.db.insert(subscriptionItems).values(input.items).returning()
+
+    return rows as SubscriptionItem[]
+  }
+
+  async replaceItemsForPhase(input: ReplaceItemsForPhaseInput): Promise<SubscriptionItem[]> {
+    await this.db
+      .delete(subscriptionItems)
+      .where(
+        and(
+          eq(subscriptionItems.subscriptionPhaseId, input.phaseId),
+          eq(subscriptionItems.projectId, input.projectId)
+        )
+      )
+
+    if (input.items.length === 0) {
+      return []
+    }
+
     const rows = await this.db.insert(subscriptionItems).values(input.items).returning()
 
     return rows as SubscriptionItem[]

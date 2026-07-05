@@ -3,28 +3,18 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   type InsertSubscriptionPhase,
+  type SubscriptionChangePlan,
   type SubscriptionPhase,
   getTrialUnitLabel,
-  subscriptionPhaseInsertSchema,
-  subscriptionPhaseSelectSchema,
 } from "@unprice/db/validators"
 import { fromLedgerAmount, fromLedgerMinor, toDecimal, toLedgerMinor } from "@unprice/money"
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@unprice/ui/form"
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
 import { Separator } from "@unprice/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
-import { useParams } from "next/navigation"
-import { useEffect, useState } from "react"
-import { z } from "zod"
+import { useParams, useRouter } from "next/navigation"
+import { useEffect, useRef, useState } from "react"
 import { PaymentProviderFormField } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/[planSlug]/_components/version-fields-form"
 import ConfigItemsFormField from "~/components/forms/items-fields"
 import PaymentMethodsFormField from "~/components/forms/payment-method-field"
@@ -32,48 +22,57 @@ import SelectPlanFormField from "~/components/forms/select-plan-field"
 import TrialUnitsFormField from "~/components/forms/trial-days-field"
 import { InputWithAddons } from "~/components/input-addons"
 import { SubmitButton } from "~/components/submit-button"
+import { formatDate } from "~/lib/dates"
 import { toastAction } from "~/lib/toast"
 import { useZodForm } from "~/lib/zod-form"
 import { useTRPC } from "~/trpc/client"
 import DurationFormField from "./duration-field"
+import {
+  createPhaseSchema,
+  editablePhaseSchema,
+  schedulePhaseSchema,
+} from "./subscription-phase-schemas"
+import type {
+  SubscriptionPhaseFormDefaultValues,
+  SubscriptionPhaseFormMode,
+  SubscriptionPhaseFormSubmitValue,
+} from "./subscription-phase-types"
 
 export function SubscriptionPhaseForm({
   setDialogOpen,
   defaultValues,
+  mode = "create",
+  isReadOnly = false,
   onSubmit,
 }: {
   setDialogOpen?: (open: boolean) => void
-  defaultValues: InsertSubscriptionPhase | Partial<SubscriptionPhase>
-  onSubmit: (data: InsertSubscriptionPhase | SubscriptionPhase) => void
+  defaultValues: SubscriptionPhaseFormDefaultValues
+  mode?: SubscriptionPhaseFormMode
+  isReadOnly?: boolean
+  onSubmit: (data: SubscriptionPhaseFormSubmitValue) => void
 }) {
   const trpc = useTRPC()
+  const router = useRouter()
   const params = useParams()
   const workspaceSlug = params.workspaceSlug as string
   const projectSlug = params.projectSlug as string
-  const editMode = defaultValues.id !== "" && defaultValues.id !== undefined
+  const isScheduleMode = mode === "schedule"
+  const isReadOnlyMode = isReadOnly || mode === "view"
+  const isFutureEditMode = mode === "edit"
+  const editMode = !isScheduleMode && defaultValues.id !== "" && defaultValues.id !== undefined
+  const persistedPhaseFieldsLocked = editMode && !isFutureEditMode
 
-  const formSchema = editMode
-    ? subscriptionPhaseSelectSchema
-    : subscriptionPhaseInsertSchema.superRefine((data, ctx) => {
-        if (data.paymentMethodRequired) {
-          if (!data.paymentMethodId) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: "Payment method is required for this phase",
-              path: ["paymentMethodId"],
-            })
-
-            return false
-          }
-
-          return true
-        }
-      })
+  const formSchema = isScheduleMode
+    ? schedulePhaseSchema
+    : editMode
+      ? editablePhaseSchema
+      : createPhaseSchema
 
   const form = useZodForm({
     schema: formSchema,
     defaultValues,
   })
+  const previousPlanVersionIdRef = useRef<string | undefined>(form.getValues("planVersionId"))
 
   const createPhase = useMutation(
     trpc.subscriptions.createPhase.mutationOptions({
@@ -91,7 +90,24 @@ export function SubscriptionPhaseForm({
     })
   )
 
-  const onSubmitForm = async (data: InsertSubscriptionPhase | Partial<SubscriptionPhase>) => {
+  const changePhasePlan = useMutation(
+    trpc.subscriptions.changePhasePlan.mutationOptions({
+      onSuccess: () => {
+        toastAction("success")
+      },
+    })
+  )
+
+  const onSubmitForm = async (
+    data: InsertSubscriptionPhase | Partial<SubscriptionPhase> | SubscriptionChangePlan
+  ) => {
+    if (isScheduleMode) {
+      await changePhasePlan.mutateAsync(data as SubscriptionChangePlan)
+      setDialogOpen?.(false)
+      router.refresh()
+      return
+    }
+
     // if subscription is not created yet no need to create phase
     if (!defaultValues.subscriptionId) {
       onSubmit(data as InsertSubscriptionPhase)
@@ -105,12 +121,15 @@ export function SubscriptionPhaseForm({
         id: defaultValues.id!,
       } as SubscriptionPhase)
 
-      onSubmit(phase)
+      onSubmit({
+        ...phase,
+        planVersion: defaultValues.planVersion,
+      } as SubscriptionPhaseFormSubmitValue)
       setDialogOpen?.(false)
     } else {
       const { phase } = await createPhase.mutateAsync(data as InsertSubscriptionPhase)
 
-      onSubmit(phase)
+      onSubmit(phase as SubscriptionPhaseFormSubmitValue)
       setDialogOpen?.(false)
     }
   }
@@ -119,22 +138,31 @@ export function SubscriptionPhaseForm({
   const { data: planVersions, isLoading } = useQuery(
     trpc.planVersions.listByActiveProject.queryOptions({
       onlyPublished: true,
-      onlyLatest: false,
+      onlyLatest: isScheduleMode,
     })
   )
 
   const selectedPlanVersionId = form.watch("planVersionId")
   const selectedPaymentProvider = form.watch("paymentProvider")
   const paymentMethodRequired = form.watch("paymentMethodRequired")
-  const selectedPlanVersion = planVersions?.planVersions.find(
-    (version) => version.id === selectedPlanVersionId
-  )
+  const selectedPlanVersion =
+    planVersions?.planVersions.find((version) => version.id === selectedPlanVersionId) ??
+    (defaultValues.planVersion?.id === selectedPlanVersionId
+      ? defaultValues.planVersion
+      : undefined)
   const selectedPlanVersionPaymentMethodRequired = selectedPlanVersion?.paymentMethodRequired
   const selectedPlanVersionPaymentProvider = selectedPlanVersion?.paymentProvider
   const selectedPlanVersionTrialUnits = selectedPlanVersion?.trialUnits
   const selectedCurrency = selectedPlanVersion?.currency ?? "USD"
   const creditLinePolicy = form.watch("creditLinePolicy")
-  const isCreditLinePolicyDisabled = editMode || !selectedPlanVersion
+  const whenToChange = form.watch("whenToChange")
+  const planVersionOptions = isScheduleMode
+    ? (planVersions?.planVersions.filter(
+        (version) => version.id !== defaultValues.currentPlanVersionId
+      ) ?? [])
+    : (planVersions?.planVersions ?? [])
+  const isCreditLinePolicyDisabled =
+    persistedPhaseFieldsLocked || isReadOnlyMode || !selectedPlanVersion
   const trialUnitLabel = selectedPlanVersion
     ? getTrialUnitLabel({
         billingInterval: selectedPlanVersion.billingConfig.billingInterval,
@@ -145,6 +173,13 @@ export function SubscriptionPhaseForm({
   // when plan is selected set defaults controlled by the plan version
   useEffect(() => {
     if (!selectedPlanVersionId || !selectedPlanVersionPaymentProvider) return
+
+    const planVersionChanged = previousPlanVersionIdRef.current !== selectedPlanVersionId
+    previousPlanVersionIdRef.current = selectedPlanVersionId
+
+    if (editMode && !planVersionChanged) {
+      return
+    }
 
     form.setValue("paymentMethodRequired", selectedPlanVersionPaymentMethodRequired ?? false)
     form.setValue("paymentProvider", selectedPlanVersionPaymentProvider)
@@ -164,8 +199,9 @@ export function SubscriptionPhaseForm({
       <form className="space-y-6">
         <SelectPlanFormField
           form={form}
-          isDisabled={editMode}
-          planVersions={planVersions?.planVersions ?? []}
+          isDisabled={persistedPhaseFieldsLocked || isReadOnlyMode}
+          planVersions={planVersionOptions}
+          selectedPlanVersionFallback={defaultValues.planVersion}
           isLoading={isLoading}
         />
 
@@ -233,8 +269,7 @@ export function SubscriptionPhaseForm({
                       <HelpCircle className="size-3.5 text-muted-foreground" />
                     </TooltipTrigger>
                     <TooltipContent side="right" className="max-w-[260px]">
-                      Leave empty to derive the cap from finite usage limits. Use 0 to allow no
-                      postpaid runway.
+                      {getCreditLineAmountHelpText(persistedPhaseFieldsLocked, creditLinePolicy)}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -246,13 +281,6 @@ export function SubscriptionPhaseForm({
                     disabled={isCreditLinePolicyDisabled || creditLinePolicy === "uncapped"}
                   />
                 </FormControl>
-                <FormDescription>
-                  {editMode
-                    ? "Saved phases keep their original usage credit policy."
-                    : creditLinePolicy === "uncapped"
-                      ? "Uncapped phases do not use a wallet credit amount."
-                      : "Empty derives from finite usage limits."}
-                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -260,11 +288,70 @@ export function SubscriptionPhaseForm({
         </div>
 
         <div className="flex flex-col items-center justify-start gap-4 lg:flex-row">
-          <DurationFormField form={form} startDisabled={editMode} className="w-full" />
+          {isScheduleMode ? (
+            <FormField
+              control={form.control}
+              name={"whenToChange"}
+              render={({ field }) => (
+                <FormItem className="flex w-full flex-col">
+                  <div className="flex items-center gap-1">
+                    <FormLabel>When to change</FormLabel>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <HelpCircle className="size-3.5 text-muted-foreground" />
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-[260px]">
+                        Choose when the new phase should become active.
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <Select onValueChange={field.onChange} value={field.value ?? "end_of_cycle"}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select timing" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {[
+                        {
+                          key: "end_of_cycle",
+                          label: `End of cycle (${formatDate(
+                            defaultValues.currentCycleEndAt ?? Date.now(),
+                            defaultValues.timezone ?? "UTC",
+                            "MMM d, hh:mm"
+                          )})`,
+                        },
+                        {
+                          key: "immediately",
+                          label: `Immediately (${formatDate(
+                            Date.now(),
+                            defaultValues.timezone ?? "UTC",
+                            "MMM d, hh:mm"
+                          )})`,
+                        },
+                      ].map((type) => (
+                        <SelectItem key={type.key} value={type.key} description={type.label}>
+                          {type.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          ) : (
+            <DurationFormField
+              form={form}
+              startDisabled={persistedPhaseFieldsLocked || isReadOnlyMode}
+              endDisabled={isReadOnlyMode}
+              className="w-full"
+            />
+          )}
 
           <TrialUnitsFormField
             form={form}
-            isDisabled={editMode || !selectedPlanVersion}
+            isDisabled={persistedPhaseFieldsLocked || isReadOnlyMode || !selectedPlanVersion}
             className="w-full"
             unitLabel={trialUnitLabel}
           />
@@ -274,6 +361,7 @@ export function SubscriptionPhaseForm({
           <PaymentMethodsFormField
             form={form}
             withSeparator
+            isDisabled={isReadOnlyMode}
             paymentProvider={selectedPaymentProvider}
             paymentProviderRequired={paymentMethodRequired}
           />
@@ -282,20 +370,32 @@ export function SubscriptionPhaseForm({
         <ConfigItemsFormField
           form={form}
           withSeparator
-          isDisabled={editMode}
-          planVersions={planVersions?.planVersions ?? []}
+          isDisabled={persistedPhaseFieldsLocked || isReadOnlyMode}
+          planVersions={planVersionOptions}
           isLoading={isLoading}
           withFeatureDetails
         />
 
-        <div className="mt-8 flex justify-end space-x-4">
-          <SubmitButton
-            onClick={() => form.handleSubmit(onSubmitForm)()}
-            isSubmitting={form.formState.isSubmitting}
-            isDisabled={form.formState.isSubmitting}
-            label={editMode ? "Update" : "Create"}
-          />
-        </div>
+        {!isReadOnlyMode && (
+          <div className="mt-8 flex justify-end gap-4">
+            <SubmitButton
+              onClick={() => form.handleSubmit(onSubmitForm)()}
+              isSubmitting={form.formState.isSubmitting}
+              isDisabled={form.formState.isSubmitting}
+              label={
+                isScheduleMode
+                  ? whenToChange === "immediately"
+                    ? "Change now"
+                    : "Add phase"
+                  : editMode
+                    ? "Update"
+                    : "Create"
+              }
+              withConfirmation={isScheduleMode}
+              confirmationMessage="Are you sure you want to add this phase? The current phase will be closed according to the selected timing."
+            />
+          </div>
+        )}
       </form>
     </Form>
   )
@@ -350,6 +450,18 @@ function CreditLineAmountInput({
       }}
     />
   )
+}
+
+function getCreditLineAmountHelpText(fieldsLocked: boolean, creditLinePolicy: unknown): string {
+  if (fieldsLocked) {
+    return "Saved phases keep their original usage credit policy."
+  }
+
+  if (creditLinePolicy === "uncapped") {
+    return "Uncapped phases do not use a wallet credit amount."
+  }
+
+  return "Leave empty to derive the cap from finite usage limits. Use 0 to allow no postpaid runway."
 }
 
 function normalizeCreditLineAmount(value: unknown): number | null {

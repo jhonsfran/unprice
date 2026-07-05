@@ -192,10 +192,6 @@ export function FeatureConfigForm({
           })
         }
       },
-      onError: (error) => {
-        console.error(error)
-        toastAction("error", error.message ?? "Failed to update feature")
-      },
     })
   )
 

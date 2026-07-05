@@ -19,6 +19,9 @@ patterns. Keep it cheap to load and useful.
 - 2026-07-03: In Codex, prefer targeted `corepack pnpm --filter <pkg> typecheck` over the
   root `pnpm typecheck` turbo path; the root path can invoke the runtime pnpm during package
   tasks and try to reinstall dependencies.
+- 2026-07-05: Destructive project deletion depends on project-owned FKs cascading. When adding an
+  explicit FK from a project-owned table to `unprice_projects`, include `ON DELETE CASCADE` or
+  `ProjectService.deleteProjectRecord` can fail after child rows exist.
 - Before adding a helper, utility, or repeated row shape, search the repo for an established
   pattern first; reuse or extract the canonical path instead of duplicating logic.
 - Whenever you are gonna work with the front end, please load the shadcn skill. And keep and follow the patterns for empty states, components, etc.
@@ -195,6 +198,26 @@ patterns. Keep it cheap to load and useful.
   the wordmark remains visible.
 - 2026-07-04: Centered ghost cards in dashboard forms need `w-full` alongside `max-w-*`; otherwise
   conditional form sections can make the flex item shrink-wrap different content widths.
+- 2026-07-05: Subscription phase history actions should derive from phase timing (`past`,
+  `active`, `future`); render historical rows from embedded phase data and only allow removal for
+  future phases.
+- 2026-07-05: Subscription phase scheduling belongs in `SubscriptionPhaseForm` as a form mode, not
+  a separate change-plan dialog; keep view/create/schedule in one sheet so provider, trial, usage
+  credit policy, payment method, and config stay visible together. The user-facing entry point is
+  still Add phase, not a separate row-level schedule action.
+- 2026-07-05: Future subscription phases are editable scheduled work. Use the edit sheet for safe
+  future-phase updates, keep active/past phase commercial fields locked, validate `endAt >= startAt`,
+  and only append another future phase after the current last future phase has an end date.
+- 2026-07-05: Workspace self-serve plan changes must reject subscriptions with a future phase; only
+  internal subscription phase editing should modify scheduled phase timelines.
+- 2026-07-05: tRPC redacts all 5xx messages in `error-format.ts`; map expected domain `Result`
+  errors to `BAD_REQUEST`, `PRECONDITION_FAILED`, or another 4xx code in the adapter when the
+  message should be customer-visible.
+- 2026-07-05: In the Next.js tRPC client, generate `unprice-request-id` with a lazy `headers`
+  function; a shared header object reuses one request id across unrelated mutations.
+- 2026-07-05: Dashboard tRPC mutation failures should use the global MutationCache toast in
+  `apps/nextjs/src/trpc/shared.ts`; local `onError` handlers should keep rollback/state side
+  effects only, or they create duplicate error toasts.
 - 2026-07-03: Customer detail header actions are rendered by
   `apps/nextjs/src/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/customers/[customerId]/layout.tsx`
   for every tab; for tab-specific header buttons, keep the header data load in the layout and put

@@ -230,7 +230,7 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                     <Calendar
                       mode="single"
                       selected={end}
-                      defaultMonth={end}
+                      defaultMonth={end ?? start}
                       onSelect={(date) => {
                         setEnd(date)
                         setIsOpenPopOverEnd(false)
@@ -279,7 +279,18 @@ export default function DurationFormField<TFieldValues extends FormValues>({
                         variant="ghost"
                         className="justify-start font-normal"
                         onClick={() => {
+                          if (!start) {
+                            toastAction("error", "Please select a start date first")
+                            return
+                          }
+
                           const now = Date.now()
+
+                          if (now < start.getTime()) {
+                            toastAction("error", "End date can't be before the start date")
+                            return
+                          }
+
                           setEnd(new Date(now))
                           field.onChange(now)
                           setIsOpenPopOverEnd(false)
@@ -417,6 +428,7 @@ export default function DurationFormField<TFieldValues extends FormValues>({
         />
       </div>
       {errors.startAt && <FormMessage>{getErrorMessage(errors, "startAt")}</FormMessage>}
+      {errors.endAt && <FormMessage>{getErrorMessage(errors, "endAt")}</FormMessage>}
     </div>
   )
 }

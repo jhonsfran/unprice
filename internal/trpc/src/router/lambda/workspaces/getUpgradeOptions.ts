@@ -9,6 +9,7 @@ import { protectedWorkspaceProcedure } from "#trpc"
 
 const getUpgradeOptionsInputSchema = z.object({
   workspaceSlug: z.string().optional(),
+  targetPlanVersionId: z.string().min(1).optional(),
 })
 
 export const getUpgradeOptions = protectedWorkspaceProcedure
@@ -20,6 +21,7 @@ export const getUpgradeOptions = protectedWorkspaceProcedure
         services: {
           customers: opts.ctx.services.customers,
           plans: opts.ctx.services.plans,
+          subscriptions: opts.ctx.services.subscriptions,
         },
         db: opts.ctx.db,
         analytics: opts.ctx.analytics,
@@ -27,6 +29,7 @@ export const getUpgradeOptions = protectedWorkspaceProcedure
       },
       {
         workspace: opts.ctx.workspace,
+        targetPlanVersionId: opts.input.targetPlanVersionId,
       }
     )
 

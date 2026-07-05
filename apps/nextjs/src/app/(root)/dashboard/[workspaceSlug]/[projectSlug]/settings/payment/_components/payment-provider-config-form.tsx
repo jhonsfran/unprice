@@ -523,9 +523,8 @@ export function PaymentProviderConfigForm({
         }
         router.refresh()
       },
-      onError: (error) => {
+      onError: () => {
         setEnabledOverride(null)
-        toastAction("error", error.message)
       },
     })
   )

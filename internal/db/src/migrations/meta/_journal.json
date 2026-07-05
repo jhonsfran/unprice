@@ -99,6 +99,13 @@
       "when": 1782004536485,
       "tag": "0013_lean_rockslide",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1783239588017,
+      "tag": "0014_motionless_omega_sentinel",
+      "breakpoints": true
     }
   ]
 }

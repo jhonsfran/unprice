@@ -9,6 +9,54 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
     expect(DEFAULT_GRANT_PRIORITY.subscription).toBe(10)
   })
 
+  it("rejects phase updates with an end date before the start date", async () => {
+    const service = new SubscriptionService({
+      db: {} as Database,
+      repo: {} as never,
+      logger: {
+        set: vi.fn(),
+        error: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as never,
+      analytics: {} as never,
+      waitUntil: vi.fn(),
+      cache: {} as never,
+      metrics: {} as never,
+      customerService: {} as never,
+      entitlementService: {} as never,
+      billingService: {} as never,
+      ratingService: {} as never,
+      ledgerService: {} as never,
+    })
+
+    const result = await service.updatePhase({
+      input: {
+        id: "phase_123",
+        subscriptionId: "sub_123",
+        projectId: "proj_123",
+        planVersionId: "version_123",
+        paymentProvider: "sandbox",
+        paymentMethodId: null,
+        creditLinePolicy: "uncapped",
+        creditLineAmount: null,
+        trialEndsAt: null,
+        trialUnits: 0,
+        billingAnchor: 1,
+        startAt: 2_000,
+        endAt: 1_999,
+        metadata: null,
+        items: [],
+      } as never,
+      subscriptionId: "sub_123",
+      projectId: "proj_123",
+      now: 1_000,
+    })
+
+    expect(result.err?.message).toBe("End date must be after the phase start date")
+  })
+
   it("resolves the provider default payment method while applying plan trial units", async () => {
     const now = Date.parse("2026-05-02T12:00:00.000Z")
     const startAt = Date.parse("2026-05-03T12:00:00.000Z")
@@ -754,6 +802,164 @@ describe("SubscriptionService entitlement grant provisioning contract", () => {
         creditLinePolicy: "uncapped",
         creditLineAmount: null,
       },
+    })
+  })
+
+  it("updates future phase plan settings and replaces its configured items", async () => {
+    const now = Date.parse("2026-05-02T12:00:00.000Z")
+    const startAt = Date.parse("2026-05-10T12:00:00.000Z")
+    const endAt = Date.parse("2026-06-10T12:00:00.000Z")
+    const projectId = "proj_123"
+    const customerId = "cus_123"
+    const subscriptionId = "sub_123"
+    const phaseId = "phase_future"
+    const featurePlanVersionId = "fpv_new"
+    const storedPhase = {
+      id: phaseId,
+      projectId,
+      subscriptionId,
+      planVersionId: "version_old",
+      paymentProvider: "sandbox",
+      paymentMethodId: null,
+      creditLinePolicy: "uncapped",
+      creditLineAmount: null,
+      trialEndsAt: null,
+      trialUnits: 0,
+      startAt,
+      endAt: null,
+      metadata: null,
+      billingAnchor: 1,
+      items: [],
+      createdAtM: now,
+      updatedAtM: now,
+    }
+    const updatePhase = vi.fn().mockImplementation(async ({ data }) => ({
+      ...storedPhase,
+      ...data,
+      updatedAtM: now,
+    }))
+    const replaceItemsForPhase = vi.fn().mockImplementation(async ({ items }) => items)
+    const db = {
+      query: {
+        versions: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "version_new",
+            status: "published",
+            active: true,
+            paymentMethodRequired: false,
+            paymentProvider: "sandbox",
+            trialUnits: 0,
+            billingConfig: {
+              name: "monthly",
+              billingInterval: "month",
+              billingIntervalCount: 1,
+              planType: "recurring",
+              billingAnchor: "dayOfCreation",
+            },
+            plan: { slug: "pro" },
+            planFeatures: [
+              {
+                id: featurePlanVersionId,
+                feature: { id: "feature_new" },
+                limit: 10,
+                metadata: { overageStrategy: "none" },
+              },
+            ],
+          }),
+        },
+      },
+    } as unknown as Database
+    const repo = {
+      findSubscriptionWithPhases: vi.fn().mockResolvedValue({
+        id: subscriptionId,
+        projectId,
+        customerId,
+        active: true,
+        status: "active",
+        phases: [storedPhase],
+      }),
+      withTransaction: vi.fn(async (callback) =>
+        callback(
+          {
+            updatePhase,
+            replaceItemsForPhase,
+          },
+          db
+        )
+      ),
+    }
+    const getPhaseOwnedEntitlements = vi.fn().mockResolvedValue(Ok([]))
+    const service = new SubscriptionService({
+      db,
+      repo: repo as never,
+      logger: {
+        set: vi.fn(),
+        error: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as never,
+      analytics: {} as never,
+      waitUntil: vi.fn(),
+      cache: {} as never,
+      metrics: {} as never,
+      customerService: {} as never,
+      entitlementService: {
+        getPhaseOwnedEntitlements,
+      } as never,
+      billingService: {} as never,
+      ratingService: {} as never,
+      ledgerService: {} as never,
+    })
+
+    const result = await service.updatePhase({
+      input: {
+        ...storedPhase,
+        planVersionId: "version_new",
+        creditLinePolicy: "capped",
+        creditLineAmount: 2_500,
+        trialUnits: 2,
+        endAt,
+        config: [
+          {
+            featurePlanId: featurePlanVersionId,
+            featureSlug: "api-requests",
+            units: 5,
+          },
+        ],
+      } as never,
+      subscriptionId,
+      projectId,
+      db,
+      now,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(updatePhase).toHaveBeenCalledWith({
+      phaseId,
+      data: expect.objectContaining({
+        startAt,
+        endAt,
+        planVersionId: "version_new",
+        paymentProvider: "sandbox",
+        creditLinePolicy: "capped",
+        creditLineAmount: 2_500,
+        trialUnits: 2,
+        trialEndsAt: Date.parse("2026-05-12T12:00:00.000Z"),
+      }),
+    })
+    expect(replaceItemsForPhase).toHaveBeenCalledWith({
+      phaseId,
+      projectId,
+      items: [
+        expect.objectContaining({
+          projectId,
+          subscriptionPhaseId: phaseId,
+          subscriptionId,
+          featurePlanVersionId,
+          units: 5,
+        }),
+      ],
     })
   })
 

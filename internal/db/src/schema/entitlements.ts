@@ -133,7 +133,7 @@ export const grants = pgTableProject(
       columns: [table.projectId],
       foreignColumns: [projects.id],
       name: "project_id_fkey",
-    }),
+    }).onDelete("cascade"),
   })
 )
 

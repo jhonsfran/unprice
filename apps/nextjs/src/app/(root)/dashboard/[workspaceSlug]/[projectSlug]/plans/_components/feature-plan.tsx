@@ -94,9 +94,6 @@ const FeaturePlan = forwardRef<ElementRef<"div">, FeaturePlanProps>((props, ref)
         router.refresh()
         toastAction("deleted")
       },
-      onError: (error) => {
-        toastAction("error", error.message ?? "Failed to remove feature")
-      },
     })
   )
 

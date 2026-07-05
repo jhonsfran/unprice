@@ -1,6 +1,7 @@
 import type { Database } from "@unprice/db"
 import {
   type PaymentProvider,
+  type PlanVersionApi,
   getPlanVersionApiResponseSchema,
   paymentProviderSchema,
   workspaceSelectBase,
@@ -10,11 +11,13 @@ import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { ServiceContext } from "../../context"
 import type { UnPriceCustomerError } from "../../customers/errors"
+import type { UnPriceSubscriptionError } from "../../subscriptions/errors"
 import {
   type GetCustomerCurrentAccessAnalytics,
   getCustomerCurrentAccess,
 } from "../customer/get-current-access"
 import { checkPaymentProviderAvailability } from "../payment-provider/availability"
+import { getScheduledPlanChangeUnavailableReason } from "./scheduled-plan-change"
 
 const workspaceBillingContextSchema = workspaceSelectBase.pick({
   id: true,
@@ -24,6 +27,7 @@ const workspaceBillingContextSchema = workspaceSelectBase.pick({
 
 export const getWorkspaceUpgradeOptionsInputSchema = z.object({
   workspace: workspaceBillingContextSchema,
+  targetPlanVersionId: z.string().min(1).optional(),
 })
 
 export const workspaceUpgradeOptionSchema = z.object({
@@ -99,10 +103,11 @@ const missingDefaultPaymentMethodMessages = new Set([
 ])
 
 export type GetWorkspaceUpgradeOptionsDeps = {
-  services: Pick<ServiceContext, "customers" | "plans">
+  services: Pick<ServiceContext, "customers" | "plans" | "subscriptions">
   db: Database
   analytics: GetCustomerCurrentAccessAnalytics
   logger: Logger
+  now?: () => number
 }
 
 function paymentMethodRequiredReason(paymentProvider: PaymentProvider): string {
@@ -125,7 +130,7 @@ export async function getWorkspaceUpgradeOptions(
 ): Promise<
   Result<
     GetWorkspaceUpgradeOptionsOutput,
-    GetWorkspaceUpgradeOptionsError | FetchError | UnPriceCustomerError
+    GetWorkspaceUpgradeOptionsError | FetchError | UnPriceCustomerError | UnPriceSubscriptionError
   >
 > {
   const input = getWorkspaceUpgradeOptionsInputSchema.parse(rawInput)
@@ -197,6 +202,7 @@ export async function getWorkspaceUpgradeOptions(
         db: deps.db,
         analytics: deps.analytics,
         logger: deps.logger,
+        now: deps.now,
       },
       {
         projectId: billingProjectId,
@@ -238,6 +244,38 @@ export async function getWorkspaceUpgradeOptions(
 
   const activePlan = accessResult.val.activePlan
   const currentPlanVersionId = activePlan?.activePhase?.planVersionId ?? null
+  const now = deps.now?.() ?? Date.now()
+  let scheduledPlanChangeReason: string | null = null
+
+  if (activePlan) {
+    const subscriptionResult = await deps.services.subscriptions.getSubscriptionById({
+      subscriptionId: activePlan.subscriptionId,
+      projectId: billingProjectId,
+    })
+
+    if (subscriptionResult.err) {
+      return Err(subscriptionResult.err)
+    }
+
+    if (!subscriptionResult.val) {
+      return Err(
+        new GetWorkspaceUpgradeOptionsError({
+          code: "WORKSPACE_BILLING_ACCESS_NOT_FOUND",
+          message: "Workspace billing access not found",
+          context: {
+            workspaceId: input.workspace.id,
+            customerId,
+            billingProjectId,
+          },
+        })
+      )
+    }
+
+    scheduledPlanChangeReason = getScheduledPlanChangeUnavailableReason(
+      subscriptionResult.val.phases,
+      now
+    )
+  }
 
   const planVersions =
     planVersionsResult.val?.filter(
@@ -247,52 +285,58 @@ export async function getWorkspaceUpgradeOptions(
         (!planVersion.archived || planVersion.id === currentPlanVersionId) &&
         planVersion.currency === customerCurrency
     ) ?? []
+  const visiblePlanVersions = selectVisiblePlanVersions(planVersions, {
+    currentPlanVersionId,
+    targetPlanVersionId: input.targetPlanVersionId,
+  })
 
   const providerStates = new Map<PaymentProvider, ProviderState>()
 
-  for (const paymentProvider of new Set(
-    planVersions.map((planVersion) => planVersion.paymentProvider)
-  )) {
-    const availabilityResult = await checkPaymentProviderAvailability(deps, {
-      projectId: billingProjectId,
-      paymentProvider,
-    })
-
-    if (availabilityResult.err) {
-      return Err(availabilityResult.err)
-    }
-
-    if (!availabilityResult.val.available) {
-      providerStates.set(paymentProvider, {
-        hasPaymentMethod: false,
-        unavailableReason: availabilityResult.val.message,
+  if (!scheduledPlanChangeReason) {
+    for (const paymentProvider of new Set(
+      visiblePlanVersions.map((planVersion) => planVersion.paymentProvider)
+    )) {
+      const availabilityResult = await checkPaymentProviderAvailability(deps, {
+        projectId: billingProjectId,
+        paymentProvider,
       })
-      continue
-    }
 
-    const paymentMethodValidationResult = await deps.services.customers.validatePaymentMethod({
-      customerId,
-      projectId: billingProjectId,
-      paymentProvider,
-      requiredPaymentMethod: true,
-    })
+      if (availabilityResult.err) {
+        return Err(availabilityResult.err)
+      }
 
-    if (paymentMethodValidationResult.err) {
-      if (isMissingDefaultPaymentMethodError(paymentMethodValidationResult.err)) {
+      if (!availabilityResult.val.available) {
         providerStates.set(paymentProvider, {
           hasPaymentMethod: false,
-          unavailableReason: null,
+          unavailableReason: availabilityResult.val.message,
         })
         continue
       }
 
-      return Err(paymentMethodValidationResult.err)
-    }
+      const paymentMethodValidationResult = await deps.services.customers.validatePaymentMethod({
+        customerId,
+        projectId: billingProjectId,
+        paymentProvider,
+        requiredPaymentMethod: true,
+      })
 
-    providerStates.set(paymentProvider, {
-      hasPaymentMethod: paymentMethodValidationResult.val.paymentMethodId !== null,
-      unavailableReason: null,
-    })
+      if (paymentMethodValidationResult.err) {
+        if (isMissingDefaultPaymentMethodError(paymentMethodValidationResult.err)) {
+          providerStates.set(paymentProvider, {
+            hasPaymentMethod: false,
+            unavailableReason: null,
+          })
+          continue
+        }
+
+        return Err(paymentMethodValidationResult.err)
+      }
+
+      providerStates.set(paymentProvider, {
+        hasPaymentMethod: paymentMethodValidationResult.val.paymentMethodId !== null,
+        unavailableReason: null,
+      })
+    }
   }
 
   const output = getWorkspaceUpgradeOptionsOutputSchema.parse({
@@ -302,7 +346,7 @@ export async function getWorkspaceUpgradeOptions(
     currentSubscriptionId: activePlan?.subscriptionId ?? null,
     currentPhaseId: activePlan?.activePhase?.id ?? null,
     currentCycleEndAt: activePlan?.currentCycleEndAt ?? null,
-    options: planVersions.map((planVersion) => {
+    options: visiblePlanVersions.map((planVersion) => {
       const providerState = providerStates.get(planVersion.paymentProvider) ?? {
         hasPaymentMethod: false,
         unavailableReason: "Payment provider status unavailable.",
@@ -313,11 +357,13 @@ export async function getWorkspaceUpgradeOptions(
 
       const unavailableReason = isCurrent
         ? "This is your current plan."
-        : providerState.unavailableReason
-          ? providerState.unavailableReason
-          : missingPaymentMethod
-            ? paymentMethodRequiredReason(planVersion.paymentProvider)
-            : null
+        : scheduledPlanChangeReason
+          ? scheduledPlanChangeReason
+          : providerState.unavailableReason
+            ? providerState.unavailableReason
+            : missingPaymentMethod
+              ? paymentMethodRequiredReason(planVersion.paymentProvider)
+              : null
 
       return {
         planVersion,
@@ -332,4 +378,68 @@ export async function getWorkspaceUpgradeOptions(
   })
 
   return Ok(output)
+}
+
+function selectVisiblePlanVersions(
+  planVersions: PlanVersionApi[],
+  opts: {
+    currentPlanVersionId: string | null
+    targetPlanVersionId?: string
+  }
+): PlanVersionApi[] {
+  const selectedByPlanId = new Map<string, PlanVersionApi>()
+
+  for (const planVersion of planVersions) {
+    const selected = selectedByPlanId.get(planVersion.planId)
+
+    if (!selected || shouldReplaceVisiblePlanVersion(selected, planVersion, opts)) {
+      selectedByPlanId.set(planVersion.planId, planVersion)
+    }
+  }
+
+  return Array.from(selectedByPlanId.values())
+}
+
+function shouldReplaceVisiblePlanVersion(
+  selected: PlanVersionApi,
+  candidate: PlanVersionApi,
+  opts: {
+    currentPlanVersionId: string | null
+    targetPlanVersionId?: string
+  }
+): boolean {
+  const selectedIsTarget = selected.id === opts.targetPlanVersionId
+  const candidateIsTarget = candidate.id === opts.targetPlanVersionId
+
+  if (selectedIsTarget !== candidateIsTarget) {
+    return candidateIsTarget
+  }
+
+  if (!selectedIsTarget && !candidateIsTarget) {
+    const selectedIsCurrent = selected.id === opts.currentPlanVersionId
+    const candidateIsCurrent = candidate.id === opts.currentPlanVersionId
+
+    if (selectedIsCurrent !== candidateIsCurrent) {
+      return candidateIsCurrent
+    }
+  }
+
+  return comparePlanVersionRecency(candidate, selected) > 0
+}
+
+function comparePlanVersionRecency(left: PlanVersionApi, right: PlanVersionApi): number {
+  if (left.latest !== right.latest) {
+    return left.latest ? 1 : -1
+  }
+
+  if (left.version !== right.version) {
+    return left.version - right.version
+  }
+
+  return (
+    (left.publishedAt ?? 0) - (right.publishedAt ?? 0) ||
+    left.updatedAtM - right.updatedAtM ||
+    left.createdAtM - right.createdAtM ||
+    left.id.localeCompare(right.id)
+  )
 }

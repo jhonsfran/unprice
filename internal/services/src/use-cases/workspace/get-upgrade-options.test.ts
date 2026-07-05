@@ -22,6 +22,7 @@ import {
   getWorkspaceUpgradeOptions,
   isMissingDefaultPaymentMethodError,
 } from "./get-upgrade-options"
+import { scheduledPlanChangeUnavailableReason } from "./scheduled-plan-change"
 
 const now = Date.parse("2026-07-04T10:00:00.000Z")
 
@@ -99,11 +100,36 @@ function createPlanVersion(overrides: Partial<PlanVersionApi> = {}): PlanVersion
   }
 }
 
-function createDeps(planVersions: PlanVersionApi[]) {
+function createDeps(
+  planVersions: PlanVersionApi[],
+  opts?: {
+    scheduledPhaseStartAt?: number
+  }
+) {
   const validatePaymentMethod = vi
     .fn()
     .mockResolvedValue(Ok({ paymentMethodId: "pm_default", requiredPaymentMethod: true }))
   const listPlanVersions = vi.fn().mockResolvedValue(Ok(planVersions))
+  const getSubscriptionById = vi.fn().mockResolvedValue(
+    Ok({
+      phases: [
+        {
+          id: "phase_current",
+          startAt: now - 1000,
+          endAt: null,
+        },
+        ...(opts?.scheduledPhaseStartAt
+          ? [
+              {
+                id: "phase_scheduled",
+                startAt: opts.scheduledPhaseStartAt,
+                endAt: null,
+              },
+            ]
+          : []),
+      ],
+    })
+  )
 
   getCustomerCurrentAccessMock.mockResolvedValue(
     Ok({
@@ -148,10 +174,15 @@ function createDeps(planVersions: PlanVersionApi[]) {
         plans: {
           listPlanVersions,
         },
+        subscriptions: {
+          getSubscriptionById,
+        },
       },
+      now: () => now,
     },
     listPlanVersions,
     validatePaymentMethod,
+    getSubscriptionById,
   }
 }
 
@@ -252,5 +283,148 @@ describe("getWorkspaceUpgradeOptions", () => {
       projectId: "proj_billing",
       paymentProvider: "sandbox",
     })
+  })
+
+  it("marks non-current plans unavailable when a future phase is already scheduled", async () => {
+    const currentPlanVersion = createPlanVersion({
+      id: "pv_current",
+      planId: "plan_current",
+      plan: createPlan("plan_current", "current"),
+    })
+    const selectablePlanVersion = createPlanVersion({
+      id: "pv_selectable",
+      planId: "plan_selectable",
+      plan: createPlan("plan_selectable", "selectable"),
+    })
+    const { deps, validatePaymentMethod } = createDeps(
+      [currentPlanVersion, selectablePlanVersion],
+      {
+        scheduledPhaseStartAt: now + 86_400_000,
+      }
+    )
+
+    const result = await getWorkspaceUpgradeOptions(deps as never, {
+      workspace: {
+        id: "ws_123",
+        slug: "acme",
+        unPriceCustomerId: "cus_workspace",
+      },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          planVersion: expect.objectContaining({ id: "pv_current" }),
+          isCurrent: true,
+          isAvailable: false,
+          unavailableReason: "This is your current plan.",
+        }),
+        expect.objectContaining({
+          planVersion: expect.objectContaining({ id: "pv_selectable" }),
+          isCurrent: false,
+          isAvailable: false,
+          unavailableReason: scheduledPlanChangeUnavailableReason,
+        }),
+      ])
+    )
+    expect(checkPaymentProviderAvailabilityMock).not.toHaveBeenCalled()
+    expect(validatePaymentMethod).not.toHaveBeenCalled()
+  })
+
+  it("returns one visible option per plan and keeps the current plan version by default", async () => {
+    const proPlan = createPlan("plan_pro", "pro")
+    const freePlan = createPlan("plan_free", "free")
+    const currentPlanVersion = createPlanVersion({
+      id: "pv_current",
+      planId: proPlan.id,
+      plan: proPlan,
+      latest: false,
+      version: 1,
+    })
+    const latestProPlanVersion = createPlanVersion({
+      id: "pv_pro_latest",
+      planId: proPlan.id,
+      plan: proPlan,
+      latest: true,
+      version: 2,
+    })
+    const olderFreePlanVersion = createPlanVersion({
+      id: "pv_free_v1",
+      planId: freePlan.id,
+      plan: freePlan,
+      latest: false,
+      version: 1,
+    })
+    const latestFreePlanVersion = createPlanVersion({
+      id: "pv_free_v2",
+      planId: freePlan.id,
+      plan: freePlan,
+      latest: true,
+      version: 2,
+    })
+    const { deps } = createDeps([
+      currentPlanVersion,
+      latestProPlanVersion,
+      olderFreePlanVersion,
+      latestFreePlanVersion,
+    ])
+
+    const result = await getWorkspaceUpgradeOptions(deps as never, {
+      workspace: {
+        id: "ws_123",
+        slug: "acme",
+        unPriceCustomerId: "cus_workspace",
+      },
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.options.map((option) => option.planVersion.id)).toEqual([
+      "pv_current",
+      "pv_free_v2",
+    ])
+    expect(result.val?.options[0]?.isCurrent).toBe(true)
+  })
+
+  it("uses a requested target plan version for that plan without duplicating the plan", async () => {
+    const proPlan = createPlan("plan_pro", "pro")
+    const freePlan = createPlan("plan_free", "free")
+    const currentPlanVersion = createPlanVersion({
+      id: "pv_current",
+      planId: proPlan.id,
+      plan: proPlan,
+      latest: true,
+      version: 1,
+    })
+    const targetFreePlanVersion = createPlanVersion({
+      id: "pv_free_v1",
+      planId: freePlan.id,
+      plan: freePlan,
+      latest: false,
+      version: 1,
+    })
+    const latestFreePlanVersion = createPlanVersion({
+      id: "pv_free_v2",
+      planId: freePlan.id,
+      plan: freePlan,
+      latest: true,
+      version: 2,
+    })
+    const { deps } = createDeps([currentPlanVersion, targetFreePlanVersion, latestFreePlanVersion])
+
+    const result = await getWorkspaceUpgradeOptions(deps as never, {
+      workspace: {
+        id: "ws_123",
+        slug: "acme",
+        unPriceCustomerId: "cus_workspace",
+      },
+      targetPlanVersionId: targetFreePlanVersion.id,
+    })
+
+    expect(result.err).toBeUndefined()
+    expect(result.val?.options.map((option) => option.planVersion.id)).toEqual([
+      "pv_current",
+      "pv_free_v1",
+    ])
   })
 })

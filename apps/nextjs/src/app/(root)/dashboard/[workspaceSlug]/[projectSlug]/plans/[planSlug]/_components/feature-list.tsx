@@ -65,11 +65,10 @@ export function FeatureList({ featuresPromise, planVersion }: FeatureListProps) 
         )
         toastAction("saved")
       },
-      onError: (error) => {
+      onError: () => {
         // rollback: drop entries that haven't been persisted (no id)
         setPlanFeaturesList((features) => features.filter((f) => Boolean(f.id)))
         setActiveFeature((current) => (current && !current.id ? null : current))
-        toastAction("error", error.message)
       },
     })
   )

@@ -261,6 +261,7 @@ export default function PaymentMethodsFormField<TFieldValues extends FormValues>
               scope="project"
               hasPaymentMethods={hasPaymentMethods}
               isRefreshing={shouldShowConfirmingState}
+              isDisabled={isDisabled}
               onProviderSessionStarted={() => {
                 setConfirmationTimedOut(false)
                 setAwaitingPaymentSetup(true)

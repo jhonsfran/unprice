@@ -20,6 +20,13 @@ import { useState } from "react"
 import type { FieldPath, FieldValues, UseFormReturn } from "react-hook-form"
 import { FilterScroll } from "~/components/filter-scroll"
 
+type PlanVersionOption =
+  RouterOutputs["planVersions"]["listByActiveProject"]["planVersions"][number]
+type SelectedPlanVersionFallback = Pick<
+  PlanVersionOption,
+  "id" | "plan" | "version" | "title" | "billingConfig"
+>
+
 interface FormValues extends FieldValues {
   planVersionId?: string
 }
@@ -28,17 +35,26 @@ export default function SelectPlanFormField<TFieldValues extends FormValues>({
   form,
   isDisabled,
   planVersions,
+  selectedPlanVersionFallback,
   isLoading,
 }: {
   form: UseFormReturn<TFieldValues>
   isDisabled?: boolean
-  planVersions: RouterOutputs["planVersions"]["listByActiveProject"]["planVersions"]
+  planVersions: PlanVersionOption[]
+  selectedPlanVersionFallback?: SelectedPlanVersionFallback
   isLoading?: boolean
 }) {
   const [switcherCustomerOpen, setSwitcherCustomerOpen] = useState(false)
   const selectedPlanVersionId = form.watch("planVersionId" as FieldPath<TFieldValues>)
 
-  const selectedPlanVersion = planVersions.find((version) => version.id === selectedPlanVersionId)
+  const selectedPlanVersionFromOptions = planVersions.find(
+    (version) => version.id === selectedPlanVersionId
+  )
+  const selectedPlanVersion =
+    selectedPlanVersionFromOptions ??
+    (selectedPlanVersionFallback?.id === selectedPlanVersionId
+      ? selectedPlanVersionFallback
+      : undefined)
 
   const noData = planVersions.length === 0 || planVersions.length === undefined
 

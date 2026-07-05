@@ -27,7 +27,15 @@ type CustomerMetricsPanelProps = {
 type EconomicSummary = RouterOutputs["customers"]["getEconomicSummary"]
 type UsageDashboardData = RouterOutputs["analytics"]["getUsageDashboard"]
 
-export { UsageDashboardSkeleton as CustomerMetricsPanelSkeleton }
+export function CustomerMetricsPanelSkeleton() {
+  return (
+    <UsageDashboardSkeleton
+      mode="customer"
+      showCustomerSummary={false}
+      showHeaderControls={false}
+    />
+  )
+}
 
 export function CustomerEvidenceSummarySkeleton() {
   return (

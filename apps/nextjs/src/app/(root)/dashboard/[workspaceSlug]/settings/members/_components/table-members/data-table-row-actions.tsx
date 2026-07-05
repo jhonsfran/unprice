@@ -123,7 +123,7 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
             Change role
           </DropdownMenuItem>
           <AlertDialogTrigger asChild>
-            <DropdownMenuItem className="text-destructive focus:bg-destructive focus:text-background">
+            <DropdownMenuItem className="text-danger-text focus:bg-danger-solid focus:text-danger-foreground">
               Delete member from workspace
             </DropdownMenuItem>
           </AlertDialogTrigger>
@@ -189,7 +189,6 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               onDelete()
             }}
             disabled={isPending}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             Remove {isPending && <LoadingAnimation className="ml-2" />}
           </AlertDialogAction>

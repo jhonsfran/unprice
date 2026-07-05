@@ -74,10 +74,10 @@ export const endingLinkClient = (opts?: {
   }
 }) =>
   ((runtime) => {
-    const headers = {
+    const headers = () => ({
       "unprice-request-id": newId("request"),
       "unprice-request-source": "app-react-query",
-    }
+    })
 
     const edgeLink = httpBatchStreamLink({
       headers,

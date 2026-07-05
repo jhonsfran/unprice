@@ -97,21 +97,22 @@ async function WorkspaceBillingCard({
       <BillingShell
         action={
           overview.paymentProvider ? (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Button asChild>
-                <SuperLink href={`/${workspaceSlug}/settings/billing/change-plan`}>
-                  Change plan
-                </SuperLink>
-              </Button>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
               <PaymentMethodButton
                 customerId={overview.customerId}
                 successUrl={`/${workspaceSlug}/settings/billing`}
                 cancelUrl={`/${workspaceSlug}/settings/billing`}
                 paymentProvider={overview.paymentProvider}
                 workspaceSlug={workspaceSlug}
-                variant="secondary"
+                variant="link"
+                size="default"
                 hasPaymentMethods
               />
+              <Button asChild>
+                <SuperLink href={`/${workspaceSlug}/settings/billing/change-plan`}>
+                  Change plan
+                </SuperLink>
+              </Button>
             </div>
           ) : null
         }

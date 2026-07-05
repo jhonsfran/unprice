@@ -4,7 +4,15 @@ import { useMutation } from "@tanstack/react-query"
 import type { PaymentProvider } from "@unprice/db/validators"
 import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Alert, AlertDescription, AlertTitle } from "@unprice/ui/alert"
-import { Button } from "@unprice/ui/button"
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@unprice/ui/alert-dialog"
 import { Tabs, TabsList, TabsTrigger } from "@unprice/ui/tabs"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
@@ -16,10 +24,15 @@ import { PaymentMethodButton } from "~/components/forms/payment-method-form"
 import { SubmitButton } from "~/components/submit-button"
 import { toast } from "~/lib/toast"
 import { useTRPC } from "~/trpc/client"
+import { getPlanGridClassName } from "./plan-grid"
 
 type UpgradeOptions = RouterOutputs["workspaces"]["getUpgradeOptions"]
 type UpgradeOption = UpgradeOptions["options"][number]
 type WhenToChange = "immediately" | "end_of_cycle"
+type PaymentMethodPrompt = {
+  paymentProvider: PaymentProvider
+  message: string
+}
 
 const TIMING_LABELS: Record<WhenToChange, string> = {
   immediately: "Immediately",
@@ -62,12 +75,10 @@ export function WorkspaceChangePlanClient({
     [initialTargetPlanVersionId, upgradeOptions.options]
   )
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(initialSelectablePlanId)
+  const [confirmOpen, setConfirmOpen] = useState(initialSelectablePlanId !== null)
   const [whenToChange, setWhenToChange] = useState<WhenToChange>("immediately")
   const effectiveWhenToChange = hasCurrentCycleEnd ? whenToChange : "immediately"
-  const [paymentSetup, setPaymentSetup] = useState<{
-    paymentProvider: PaymentProvider
-    message: string
-  } | null>(null)
+  const [paymentSetup, setPaymentSetup] = useState<PaymentMethodPrompt | null>(null)
 
   const selectedOption = useMemo(
     () => upgradeOptions.options.find((option) => option.planVersion.id === selectedPlanId) ?? null,
@@ -84,7 +95,7 @@ export function WorkspaceChangePlanClient({
     selectedOption && selectedNeedsPaymentMethod
       ? {
           paymentProvider: selectedOption.paymentProvider,
-          message: MISSING_PAYMENT_METHOD_MESSAGE,
+          message: selectedOption.unavailableReason ?? MISSING_PAYMENT_METHOD_MESSAGE,
         }
       : paymentSetup
 
@@ -108,17 +119,13 @@ export function WorkspaceChangePlanClient({
         router.push(billingUrl)
         router.refresh()
       },
-      onError: (error) => {
-        toast.error("Plan change failed", {
-          description: error.message,
-        })
-      },
     })
   )
 
   const handleSelectPlan = (option: UpgradeOption) => {
     setSelectedPlanId(option.planVersion.id)
     setPaymentSetup(null)
+    setConfirmOpen(true)
   }
 
   const handleSubmit = () => {
@@ -133,8 +140,19 @@ export function WorkspaceChangePlanClient({
     })
   }
 
+  const handleConfirmOpenChange = (open: boolean) => {
+    if (!open && changePlan.isPending) return
+
+    setConfirmOpen(open)
+
+    if (!open) {
+      setSelectedPlanId(null)
+      setPaymentSetup(null)
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8 pt-3 md:gap-10 md:pt-5">
       {showFeatureBlockContext && (
         <Alert variant="info">
           <AlertTitle>Upgrade for this feature</AlertTitle>
@@ -145,7 +163,7 @@ export function WorkspaceChangePlanClient({
       )}
 
       {upgradeOptions.options.length > 0 ? (
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <section className={getPlanGridClassName(upgradeOptions.options.length)}>
           {upgradeOptions.options.map((option) => {
             const selected = option.planVersion.id === selectedPlanId
 
@@ -169,27 +187,88 @@ export function WorkspaceChangePlanClient({
         </Alert>
       )}
 
-      {showReviewSection && selectedOption && (
-        <section className="rounded-md border border-border/60 bg-card/70">
-          <div className="flex flex-col gap-4 border-border/60 border-b px-4 py-4">
-            <div className="flex flex-col gap-1">
-              <h2 className="font-semibold text-base">Review plan change</h2>
-              <p className="text-muted-foreground text-sm">
-                Confirm the target plan and timing before applying this workspace billing change.
-              </p>
-            </div>
+      <PlanChangeConfirmationDialog
+        open={confirmOpen && showReviewSection}
+        onOpenChange={handleConfirmOpenChange}
+        selectedOption={selectedOption}
+        selectedNeedsPaymentMethod={selectedNeedsPaymentMethod}
+        paymentMethodPrompt={paymentMethodPrompt}
+        currentUrl={currentUrl}
+        workspaceSlug={workspaceSlug}
+        customerId={upgradeOptions.customerId}
+        hasCurrentCycleEnd={hasCurrentCycleEnd}
+        currentCycleEndAt={upgradeOptions.currentCycleEndAt}
+        effectiveWhenToChange={effectiveWhenToChange}
+        onWhenToChange={setWhenToChange}
+        onConfirm={handleSubmit}
+        isPending={changePlan.isPending}
+      />
+    </div>
+  )
+}
 
-            <dl className="grid gap-3 text-sm md:grid-cols-3">
-              <ReviewFact label="Selected plan" value={selectedOption.planVersion.plan.title} />
-              <ReviewFact
-                label="Payment provider"
-                value={formatPaymentProvider(selectedOption.paymentProvider)}
-              />
-              <ReviewFact label="Timing" value={TIMING_LABELS[effectiveWhenToChange]} />
-            </dl>
-          </div>
+function PlanChangeConfirmationDialog({
+  open,
+  onOpenChange,
+  selectedOption,
+  selectedNeedsPaymentMethod,
+  paymentMethodPrompt,
+  currentUrl,
+  workspaceSlug,
+  customerId,
+  hasCurrentCycleEnd,
+  currentCycleEndAt,
+  effectiveWhenToChange,
+  onWhenToChange,
+  onConfirm,
+  isPending,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  selectedOption: UpgradeOption | null
+  selectedNeedsPaymentMethod: boolean
+  paymentMethodPrompt: PaymentMethodPrompt | null
+  currentUrl: string
+  workspaceSlug: string
+  customerId: string
+  hasCurrentCycleEnd: boolean
+  currentCycleEndAt: number | null
+  effectiveWhenToChange: WhenToChange
+  onWhenToChange: (value: WhenToChange) => void
+  onConfirm: () => void
+  isPending: boolean
+}) {
+  if (!selectedOption) return null
 
-          <div className="flex flex-col gap-4 px-4 py-4">
+  const submitLabel = isPending
+    ? "Applying change"
+    : effectiveWhenToChange === "immediately"
+      ? "Change plan now"
+      : "Schedule change"
+
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent className="sm:max-w-[520px]">
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {paymentMethodPrompt
+              ? "Set up payment method"
+              : `Change to ${selectedOption.planVersion.plan.title}`}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {paymentMethodPrompt
+              ? "This plan needs a payment method before the change can be applied."
+              : "Confirm the target plan and timing before applying this workspace billing change."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+
+        <div className="flex flex-col gap-4">
+          <PlanChangeSummary
+            selectedOption={selectedOption}
+            effectiveWhenToChange={effectiveWhenToChange}
+          />
+
+          {!paymentMethodPrompt && (
             <div className="flex flex-col gap-2">
               <p className="font-medium text-sm">Change timing</p>
               <Tabs
@@ -197,10 +276,10 @@ export function WorkspaceChangePlanClient({
                 onValueChange={(value) => {
                   if (value === "end_of_cycle" && !hasCurrentCycleEnd) return
 
-                  setWhenToChange(value as WhenToChange)
+                  onWhenToChange(value as WhenToChange)
                 }}
               >
-                <TabsList variant="solid" className="grid w-full grid-cols-2 sm:w-auto">
+                <TabsList variant="solid" className="grid w-full grid-cols-2">
                   <TabsTrigger value="immediately">Immediately</TabsTrigger>
                   <TabsTrigger value="end_of_cycle" disabled={!hasCurrentCycleEnd}>
                     End of current cycle
@@ -210,7 +289,7 @@ export function WorkspaceChangePlanClient({
               <p className="text-muted-foreground text-xs">
                 {effectiveWhenToChange === "immediately"
                   ? "The plan changes now and the current phase closes immediately."
-                  : getEndOfCycleDescription(upgradeOptions.currentCycleEndAt)}
+                  : getEndOfCycleDescription(currentCycleEndAt)}
               </p>
               {!hasCurrentCycleEnd && (
                 <p className="text-muted-foreground text-xs">
@@ -219,60 +298,62 @@ export function WorkspaceChangePlanClient({
                 </p>
               )}
             </div>
+          )}
 
-            {paymentMethodPrompt && (
-              <Alert variant="info">
-                <AlertTitle>Payment method required</AlertTitle>
-                <AlertDescription>
-                  <div className="flex flex-col gap-3">
-                    <p>{paymentMethodPrompt.message}</p>
-                    <PaymentMethodButton
-                      customerId={upgradeOptions.customerId}
-                      successUrl={currentUrl}
-                      cancelUrl={currentUrl}
-                      paymentProvider={paymentMethodPrompt.paymentProvider}
-                      workspaceSlug={workspaceSlug}
-                      hasPaymentMethods={false}
-                    />
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
+          {paymentMethodPrompt && (
+            <Alert variant="info">
+              <AlertTitle>Payment method required</AlertTitle>
+              <AlertDescription>
+                <div className="flex flex-col gap-3">
+                  <p>{paymentMethodPrompt.message}</p>
+                  <PaymentMethodButton
+                    customerId={customerId}
+                    successUrl={currentUrl}
+                    cancelUrl={currentUrl}
+                    paymentProvider={paymentMethodPrompt.paymentProvider}
+                    workspaceSlug={workspaceSlug}
+                    hasPaymentMethods={false}
+                  />
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-              {!selectedNeedsPaymentMethod && (
-                <SubmitButton
-                  label={
-                    changePlan.isPending
-                      ? "Applying change"
-                      : effectiveWhenToChange === "immediately"
-                        ? "Change plan now"
-                        : "Schedule change"
-                  }
-                  onClick={handleSubmit}
-                  isSubmitting={changePlan.isPending}
-                  isLoading={changePlan.isPending}
-                  isDisabled={changePlan.isPending || !!paymentSetup}
-                  className="w-full sm:w-auto"
-                />
-              )}
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full sm:w-auto"
-                onClick={() => {
-                  setSelectedPlanId(null)
-                  setPaymentSetup(null)
-                }}
-                disabled={changePlan.isPending}
-              >
-                Clear selection
-              </Button>
-            </div>
-          </div>
-        </section>
-      )}
-    </div>
+        <AlertDialogFooter className="gap-2 sm:space-x-0">
+          <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
+          {!paymentMethodPrompt && (
+            <SubmitButton
+              label={submitLabel}
+              onClick={onConfirm}
+              isSubmitting={isPending}
+              isLoading={isPending}
+              isDisabled={isPending || selectedNeedsPaymentMethod}
+              className="w-full sm:w-auto"
+            />
+          )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
+function PlanChangeSummary({
+  selectedOption,
+  effectiveWhenToChange,
+}: {
+  selectedOption: UpgradeOption
+  effectiveWhenToChange: WhenToChange
+}) {
+  return (
+    <dl className="grid gap-2 rounded-md border bg-muted/30 p-3 text-sm">
+      <SummaryRow label="Selected plan" value={selectedOption.planVersion.plan.title} />
+      <SummaryRow
+        label="Payment provider"
+        value={formatPaymentProvider(selectedOption.paymentProvider)}
+      />
+      <SummaryRow label="Timing" value={TIMING_LABELS[effectiveWhenToChange]} />
+    </dl>
   )
 }
 
@@ -290,6 +371,7 @@ function getPlanAction(
       kind: "select",
       label: selected ? "Payment required" : "Set up payment",
       onSelect,
+      selected,
     }
   }
 
@@ -305,6 +387,7 @@ function getPlanAction(
     kind: "select",
     label: selected ? "Selected" : "Select plan",
     onSelect,
+    selected,
   }
 }
 
@@ -334,11 +417,11 @@ function getUnavailableReason(option: UpgradeOption): string {
   return "This plan is not available right now."
 }
 
-function ReviewFact({ label, value }: { label: string; value: string }) {
+function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border/60 bg-background px-3 py-2">
+    <div className="grid gap-1 sm:grid-cols-[140px_1fr] sm:items-center">
       <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className="mt-1 truncate font-medium text-sm">{value}</dd>
+      <dd className="truncate font-medium">{value}</dd>
     </div>
   )
 }

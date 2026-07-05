@@ -1,10 +1,13 @@
-import { TRPCError } from "@trpc/server"
-import { subscriptionPhaseSelectSchema } from "@unprice/db/validators"
+import {
+  subscriptionPhaseSelectSchema,
+  subscriptionPhaseUpdateSchema,
+} from "@unprice/db/validators"
 import { z } from "zod"
 import { protectedProjectProcedure } from "#trpc"
+import { updatePhaseErrorToTrpcError } from "./updatePhase-errors"
 
 export const updatePhase = protectedProjectProcedure
-  .input(subscriptionPhaseSelectSchema)
+  .input(subscriptionPhaseUpdateSchema)
   .output(z.object({ phase: subscriptionPhaseSelectSchema }))
   .mutation(async (opts) => {
     const projectId = opts.ctx.project.id
@@ -18,10 +21,7 @@ export const updatePhase = protectedProjectProcedure
     })
 
     if (err) {
-      throw new TRPCError({
-        code: "INTERNAL_SERVER_ERROR",
-        message: err.message,
-      })
+      throw updatePhaseErrorToTrpcError(err)
     }
 
     return {

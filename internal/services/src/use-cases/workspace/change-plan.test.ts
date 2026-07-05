@@ -20,6 +20,7 @@ vi.mock("../customer/get-current-access", async () => {
 })
 
 import { WorkspaceChangePlanError, changeWorkspacePlan } from "./change-plan"
+import { scheduledPlanChangeUnavailableReason } from "./scheduled-plan-change"
 
 function createLogger(): Logger {
   return {
@@ -38,6 +39,7 @@ function createDeps(overrides?: {
   currentCycleEndAt?: number
   activePhaseEndAt?: number | null
   activePhasePaymentMethodId?: string | null
+  scheduledPhaseStartAt?: number
   targetPlanVersion?: Partial<{
     id: string
     active: boolean
@@ -162,6 +164,57 @@ function createDeps(overrides?: {
       overrides?.validatePaymentMethodResult ??
         Ok({ paymentMethodId: "pm_123", requiredPaymentMethod: true })
     )
+  const getSubscriptionById = vi.fn().mockResolvedValue(
+    Ok({
+      id: "sub_123",
+      customerId: "cus_workspace",
+      projectId: "proj_billing",
+      active: true,
+      status: "active",
+      currentCycleStartAt: now - 1000,
+      currentCycleEndAt,
+      renewAt: currentCycleEndAt,
+      timezone: "UTC",
+      phases: [
+        {
+          id: "phase_current",
+          projectId: "proj_billing",
+          subscriptionId: "sub_123",
+          planVersionId: overrides?.currentPlanVersionId ?? "pv_current",
+          paymentProvider: "sandbox",
+          paymentMethodId: overrides?.activePhasePaymentMethodId ?? "pm_phase_current",
+          creditLinePolicy: "uncapped",
+          creditLineAmount: null,
+          trialUnits: 0,
+          trialEndsAt: null,
+          billingAnchor: 0,
+          metadata: null,
+          startAt: now - 1000,
+          endAt: overrides?.activePhaseEndAt ?? null,
+        },
+        ...(overrides?.scheduledPhaseStartAt
+          ? [
+              {
+                id: "phase_scheduled",
+                projectId: "proj_billing",
+                subscriptionId: "sub_123",
+                planVersionId: "pv_scheduled",
+                paymentProvider: "sandbox",
+                paymentMethodId: null,
+                creditLinePolicy: "uncapped" as const,
+                creditLineAmount: null,
+                trialUnits: 0,
+                trialEndsAt: null,
+                billingAnchor: 0,
+                metadata: null,
+                startAt: overrides.scheduledPhaseStartAt,
+                endAt: null,
+              },
+            ]
+          : []),
+      ],
+    })
+  )
   const updatePhase = vi.fn().mockResolvedValue(Ok({ id: "phase_current" }))
   const createPhase = vi.fn().mockResolvedValue(Ok({ id: "phase_new" }))
   const generateBillingPeriods = vi
@@ -184,6 +237,7 @@ function createDeps(overrides?: {
         getPlanVersionByIdRecord,
       },
       subscriptions: {
+        getSubscriptionById,
         updatePhase,
         createPhase,
       },
@@ -198,6 +252,7 @@ function createDeps(overrides?: {
     tx,
     now,
     validatePaymentMethod,
+    getSubscriptionById,
     updatePhase,
     createPhase,
     generateBillingPeriods,
@@ -231,6 +286,25 @@ describe("changeWorkspacePlan", () => {
     expect((result.err as WorkspaceChangePlanError).code).toBe(
       "WORKSPACE_TARGET_PLAN_VERSION_SAME_AS_CURRENT"
     )
+  })
+
+  it("rejects self-serve changes when another phase is already scheduled", async () => {
+    const { deps, getPlanVersionByIdRecord, updatePhase, createPhase, generateBillingPeriods } =
+      createDeps({
+        scheduledPhaseStartAt: Date.parse("2026-08-04T00:00:00.000Z"),
+      })
+
+    const result = await changeWorkspacePlan(deps as never, createInput("immediately"))
+
+    expect(result.err).toBeInstanceOf(WorkspaceChangePlanError)
+    expect((result.err as WorkspaceChangePlanError).code).toBe(
+      "WORKSPACE_PLAN_CHANGE_ALREADY_SCHEDULED"
+    )
+    expect(result.err?.message).toBe(scheduledPlanChangeUnavailableReason)
+    expect(getPlanVersionByIdRecord).toHaveBeenCalledTimes(1)
+    expect(updatePhase).not.toHaveBeenCalled()
+    expect(createPhase).not.toHaveBeenCalled()
+    expect(generateBillingPeriods).not.toHaveBeenCalled()
   })
 
   it("returns requires_payment_method when the target plan needs a default method", async () => {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { getPublicTrpcErrorMessage, isInternalTrpcError } from "./error-format"
+import {
+  INTERNAL_SERVER_ERROR_MESSAGE,
+  getPublicTrpcErrorMessage,
+  isInternalTrpcError,
+} from "./error-format"
 
 describe("tRPC error formatting", () => {
   it("uses a generic message for internal errors", () => {
@@ -8,7 +12,7 @@ describe("tRPC error formatting", () => {
         code: "INTERNAL_SERVER_ERROR",
         message: "database connection string rejected",
       })
-    ).toBe("Internal server error")
+    ).toBe(INTERNAL_SERVER_ERROR_MESSAGE)
   })
 
   it("keeps expected client error messages specific", () => {

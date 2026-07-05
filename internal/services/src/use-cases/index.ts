@@ -85,6 +85,15 @@ export type {
   ExplainChargeOutput,
 } from "./billing/explain-charge"
 export { createSubscription } from "./subscription/create"
+export {
+  SubscriptionChangePhasePlanError,
+  changeSubscriptionPhasePlan,
+  subscriptionChangePhasePlanOutputSchema,
+} from "./subscription/change-plan"
+export type {
+  SubscriptionChangePhasePlanDeps,
+  SubscriptionChangePhasePlanOutput,
+} from "./subscription/change-plan"
 export { deriveActivationInputsFromPlan } from "./billing/derive-provision-inputs"
 export { settlePrepaidInvoiceToWallet } from "./billing/settle-invoice"
 export { duplicatePlanVersion } from "./plan-version/duplicate"

@@ -1,12 +1,10 @@
 import type { Database } from "@unprice/db"
 import {
   type PaymentProvider,
-  type SubscriptionPhase,
-  getAnchor,
   paymentProviderSchema,
   subscriptionItemsConfigSchema,
 } from "@unprice/db/validators"
-import { BaseError, Err, FetchError, Ok, type Result, type SchemaError } from "@unprice/error"
+import { BaseError, Err, type FetchError, Ok, type Result, type SchemaError } from "@unprice/error"
 import type { Logger } from "@unprice/logs"
 import { z } from "zod"
 import type { UnPriceBillingError } from "../../billing/errors"
@@ -18,7 +16,12 @@ import {
   getCustomerCurrentAccess,
 } from "../customer/get-current-access"
 import { checkPaymentProviderAvailability } from "../payment-provider/availability"
+import {
+  SubscriptionChangePhasePlanError,
+  changeSubscriptionPhasePlan,
+} from "../subscription/change-plan"
 import { isMissingDefaultPaymentMethodError } from "./get-upgrade-options"
+import { scheduledPlanChangeUnavailableReason } from "./scheduled-plan-change"
 
 export const workspaceChangePlanInputSchema = z.object({
   workspaceSlug: z.string().optional(),
@@ -51,6 +54,7 @@ const workspaceChangePlanErrorCodeSchema = z.enum([
   "WORKSPACE_BILLING_CUSTOMER_NOT_FOUND",
   "WORKSPACE_BILLING_CURRENCY_NOT_FOUND",
   "WORKSPACE_BILLING_ACCESS_NOT_FOUND",
+  "WORKSPACE_PLAN_CHANGE_ALREADY_SCHEDULED",
   "WORKSPACE_TARGET_PLAN_VERSION_NOT_FOUND",
   "WORKSPACE_TARGET_PLAN_VERSION_WRONG_PROJECT",
   "WORKSPACE_TARGET_PLAN_VERSION_SAME_AS_CURRENT",
@@ -129,6 +133,69 @@ function paymentMethodRequiredReason(paymentProvider: PaymentProvider): string {
 
 function notFoundTargetPlanMessage(): string {
   return "Target plan version was not found for this workspace billing project"
+}
+
+function mapSubscriptionChangePlanError(
+  error: SubscriptionChangePhasePlanError,
+  context: {
+    billingProjectId: string
+    customerId: string
+    targetPlanVersionId: string
+    workspaceId: string
+  }
+): WorkspaceChangePlanError {
+  switch (error.code) {
+    case "SUBSCRIPTION_CHANGE_PLAN_ALREADY_SCHEDULED":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_PLAN_CHANGE_ALREADY_SCHEDULED",
+        message: scheduledPlanChangeUnavailableReason,
+        context,
+      })
+    case "SUBSCRIPTION_CHANGE_PLAN_SAME_PLAN_VERSION":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_TARGET_PLAN_VERSION_SAME_AS_CURRENT",
+        message: "Workspace is already subscribed to this plan",
+        context,
+      })
+    case "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_NOT_FOUND":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_TARGET_PLAN_VERSION_NOT_FOUND",
+        message: notFoundTargetPlanMessage(),
+        context,
+      })
+    case "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_INACTIVE":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_TARGET_PLAN_VERSION_INACTIVE",
+        message: error.message,
+        context,
+      })
+    case "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_UNPUBLISHED":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_TARGET_PLAN_VERSION_UNPUBLISHED",
+        message: error.message,
+        context,
+      })
+    case "SUBSCRIPTION_CHANGE_PLAN_TARGET_PLAN_ARCHIVED":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_TARGET_PLAN_VERSION_ARCHIVED",
+        message: error.message,
+        context,
+      })
+    case "SUBSCRIPTION_CHANGE_PLAN_PROVIDER_UNAVAILABLE":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_TARGET_PLAN_PROVIDER_UNAVAILABLE",
+        message: error.message,
+        context,
+      })
+    case "SUBSCRIPTION_CHANGE_PLAN_NOT_FOUND":
+    case "SUBSCRIPTION_CHANGE_PLAN_NOT_ACTIVE":
+    case "SUBSCRIPTION_CHANGE_PLAN_ACTIVE_PHASE_NOT_FOUND":
+      return new WorkspaceChangePlanError({
+        code: "WORKSPACE_BILLING_ACCESS_NOT_FOUND",
+        message: "Workspace billing access not found",
+        context,
+      })
+  }
 }
 
 export async function changeWorkspacePlan(
@@ -235,6 +302,8 @@ export async function changeWorkspacePlan(
       })
     )
   }
+
+  const subscriptionId = activePlan.subscriptionId
 
   if (activePhase.planVersionId === input.targetPlanVersionId) {
     return Err(
@@ -411,103 +480,45 @@ export async function changeWorkspacePlan(
     paymentMethodId = paymentMethodValidationResult.val.paymentMethodId
   }
 
-  const subscriptionId = activePlan.subscriptionId
   const currentCycleEndAt = activePlan.currentCycleEndAt
-  const now = deps.now?.() ?? Date.now()
-  let transactionError: WorkspaceChangePlanFailure | undefined
+  const changeResult = await changeSubscriptionPhasePlan(
+    {
+      services: {
+        billing: deps.services.billing,
+        plans: deps.services.plans,
+        subscriptions: deps.services.subscriptions,
+      },
+      db: deps.db,
+      logger: deps.logger,
+      now: deps.now,
+    },
+    {
+      id: subscriptionId,
+      projectId: billingProjectId,
+      planVersionId: input.targetPlanVersionId,
+      currentPlanVersionId: activePhase.planVersionId,
+      currentCycleEndAt,
+      timezone: activePlan.timezone,
+      whenToChange: input.whenToChange,
+      config: input.config,
+      paymentMethodId: paymentMethodId ?? undefined,
+      paymentMethodRequired: targetPlanVersion.paymentMethodRequired,
+    }
+  )
 
-  const transactionResult = await deps.db
-    .transaction(async (tx) => {
-      const services = deps.services
-      const targetStartAt = input.whenToChange === "immediately" ? now + 1 : currentCycleEndAt
-      const currentPhaseEndAt = input.whenToChange === "immediately" ? now : currentCycleEndAt - 1
-      const targetPhaseEvaluationNow = input.whenToChange === "immediately" ? targetStartAt : now
-      const billingPeriodsNow = input.whenToChange === "immediately" ? targetStartAt : now
-      const currentPhaseCreditLinePolicy: SubscriptionPhase["creditLinePolicy"] =
-        activePhase.creditLinePolicy === "capped" ? "capped" : "uncapped"
-      const currentPhaseBillingAnchor = getAnchor(
-        activePhase.startAt,
-        activePhase.planVersion.billingConfig.billingInterval,
-        activePhase.planVersion.billingConfig.billingAnchor
-      )
-      const closeCurrentPhaseInput: SubscriptionPhase = {
-        id: activePhase.id,
-        projectId: billingProjectId,
-        subscriptionId,
-        planVersionId: activePhase.planVersionId,
-        paymentProvider: activePhase.paymentProvider,
-        creditLinePolicy: currentPhaseCreditLinePolicy,
-        creditLineAmount: activePhase.creditLineAmount,
-        billingAnchor: currentPhaseBillingAnchor,
-        trialUnits: 0,
-        paymentMethodId: activePhase.paymentMethodId,
-        trialEndsAt: null,
-        startAt: activePhase.startAt,
-        endAt: currentPhaseEndAt,
-        items: [],
-      }
-
-      const closeResult = await services.subscriptions.updatePhase({
-        input: closeCurrentPhaseInput,
-        subscriptionId,
-        projectId: billingProjectId,
-        db: tx,
-        now,
-      })
-
-      if (closeResult.err) {
-        transactionError = closeResult.err
-        throw closeResult.err
-      }
-
-      const createResult = await services.subscriptions.createPhase({
-        input: {
-          subscriptionId,
+  if (changeResult.err) {
+    if (changeResult.err instanceof SubscriptionChangePhasePlanError) {
+      return Err(
+        mapSubscriptionChangePlanError(changeResult.err, {
+          workspaceId: rawInput.workspace.id,
           customerId,
-          planVersionId: input.targetPlanVersionId,
-          startAt: targetStartAt,
-          config: input.config,
-          paymentProvider: targetPlanVersion.paymentProvider,
-          paymentMethodId,
-          paymentMethodRequired: targetPlanVersion.paymentMethodRequired,
-        },
-        projectId: billingProjectId,
-        db: tx,
-        now: targetPhaseEvaluationNow,
-      })
-
-      if (createResult.err) {
-        transactionError = createResult.err
-        throw createResult.err
-      }
-
-      const periodsResult = await services.billing.generateBillingPeriods({
-        projectId: billingProjectId,
-        subscriptionId,
-        now: billingPeriodsNow,
-        db: tx,
-      })
-
-      if (periodsResult.err) {
-        transactionError = periodsResult.err
-        throw periodsResult.err
-      }
-
-      return createResult.val
-    })
-    .then((phase) => Ok(phase))
-    .catch((error) =>
-      Err(
-        transactionError ??
-          new FetchError({
-            message: error instanceof Error ? error.message : String(error),
-            retry: false,
-          })
+          billingProjectId,
+          targetPlanVersionId: input.targetPlanVersionId,
+        })
       )
-    )
+    }
 
-  if (transactionResult.err) {
-    return Err(transactionResult.err)
+    return Err(changeResult.err)
   }
 
   return Ok(
@@ -516,12 +527,12 @@ export async function changeWorkspacePlan(
         ? {
             status: "changed",
             subscriptionId,
-            phaseId: transactionResult.val.id,
+            phaseId: changeResult.val.phaseId,
           }
         : {
             status: "scheduled",
             subscriptionId,
-            phaseId: transactionResult.val.id,
+            phaseId: changeResult.val.phaseId,
             effectiveAt: currentCycleEndAt,
           }
     )

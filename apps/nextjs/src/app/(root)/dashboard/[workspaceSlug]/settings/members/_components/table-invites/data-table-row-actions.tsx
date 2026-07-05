@@ -224,7 +224,6 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
               onDelete()
             }}
             disabled={isPending}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
             {!isPending ? "Remove" : <LoadingAnimation />}
           </AlertDialogAction>

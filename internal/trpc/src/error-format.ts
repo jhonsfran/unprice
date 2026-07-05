@@ -1,6 +1,6 @@
 import { getHttpStatus } from "./utils/get-status"
 
-export const INTERNAL_SERVER_ERROR_MESSAGE = "Internal server error"
+export const INTERNAL_SERVER_ERROR_MESSAGE = "Internal server error, please contact support."
 
 export function isInternalTrpcError(code: string): boolean {
   return getHttpStatus(code) >= 500

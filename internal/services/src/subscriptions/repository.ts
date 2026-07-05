@@ -85,7 +85,16 @@ export interface UpdatePhaseInput {
   data: Partial<
     Pick<
       SubscriptionPhase,
-      "startAt" | "endAt" | "paymentMethodId" | "creditLinePolicy" | "creditLineAmount"
+      | "startAt"
+      | "endAt"
+      | "planVersionId"
+      | "paymentProvider"
+      | "paymentMethodId"
+      | "creditLinePolicy"
+      | "creditLineAmount"
+      | "trialEndsAt"
+      | "trialUnits"
+      | "billingAnchor"
     >
   >
 }
@@ -109,6 +118,11 @@ export interface InsertItemsInput {
     units: number | null
     subscriptionId: string
   }>
+}
+
+export interface ReplaceItemsForPhaseInput extends InsertItemsInput {
+  phaseId: string
+  projectId: string
 }
 
 export interface UpdateItemUnitsInput {
@@ -264,6 +278,8 @@ export interface SubscriptionRepository {
   // ── Items ──────────────────────────────────────────────────────────────
 
   insertItems(input: InsertItemsInput): Promise<SubscriptionItem[]>
+
+  replaceItemsForPhase(input: ReplaceItemsForPhaseInput): Promise<SubscriptionItem[]>
 
   /** Batch update item units using dynamic SQL CASE expression */
   updateItemUnits(input: UpdateItemUnitsInput): Promise<void>

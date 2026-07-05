@@ -6,6 +6,10 @@ import {
   changeWorkspacePlan,
 } from "@unprice/services/use-cases"
 import type { Context } from "#trpc"
+import {
+  isExpectedBillingPreconditionError,
+  isExpectedSubscriptionPreconditionError,
+} from "../subscriptions/updatePhase-errors"
 
 export type ChangePlanMutationCtx = Pick<Context, "analytics" | "db" | "logger" | "services"> & {
   verifyRole: (roles: WorkspaceRole[]) => void
@@ -73,33 +77,6 @@ function isCustomerPreconditionError(error: unknown): error is ErrorWithCode {
   )
 }
 
-function isSubscriptionPreconditionError(error: unknown): error is Error {
-  return (
-    error instanceof Error &&
-    error.name === "UnPriceSubscriptionError" &&
-    (error.message.startsWith("Subscription must be active to create a new phase") ||
-      error.message === "Subscription is not active" ||
-      error.message === "Subscription not found" ||
-      error.message === "Phase not found" ||
-      error.message === "End date is in the past" ||
-      error.message === "Version not found. Please check the planVersionId" ||
-      error.message ===
-        "Plan version is not published, only published versions can be subscribed to" ||
-      error.message === "Plan version is not active, only active versions can be subscribed to" ||
-      error.message ===
-        "There is already an active phase with the same plan version, you can't create a new phase with the same plan version" ||
-      error.message === "Phases are not consecutive")
-  )
-}
-
-function isBillingPreconditionError(error: unknown): error is Error {
-  return (
-    error instanceof Error &&
-    error.name === "UnPriceBillingError" &&
-    ["Subscription is not active"].includes(error.message)
-  )
-}
-
 export function changePlanErrorToTrpcError(error: unknown): TRPCError {
   if (error instanceof WorkspaceChangePlanError) {
     switch (error.code) {
@@ -110,6 +87,7 @@ export function changePlanErrorToTrpcError(error: unknown): TRPCError {
       case "WORKSPACE_BILLING_CUSTOMER_NOT_FOUND":
       case "WORKSPACE_BILLING_CURRENCY_NOT_FOUND":
       case "WORKSPACE_BILLING_ACCESS_NOT_FOUND":
+      case "WORKSPACE_PLAN_CHANGE_ALREADY_SCHEDULED":
       case "WORKSPACE_TARGET_PLAN_VERSION_SAME_AS_CURRENT":
       case "WORKSPACE_TARGET_PLAN_VERSION_INACTIVE":
       case "WORKSPACE_TARGET_PLAN_VERSION_UNPUBLISHED":
@@ -126,8 +104,8 @@ export function changePlanErrorToTrpcError(error: unknown): TRPCError {
 
   if (
     isCustomerPreconditionError(error) ||
-    isSubscriptionPreconditionError(error) ||
-    isBillingPreconditionError(error)
+    isExpectedSubscriptionPreconditionError(error) ||
+    isExpectedBillingPreconditionError(error)
   ) {
     return new TRPCError({ code: "PRECONDITION_FAILED", message: error.message })
   }

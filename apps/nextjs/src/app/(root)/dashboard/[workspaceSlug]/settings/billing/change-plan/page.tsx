@@ -17,9 +17,12 @@ export default async function ChangePlanPage({
   searchParams: SearchParams
 }) {
   const { workspaceSlug } = params
-  const upgradeOptions = await api.workspaces.getUpgradeOptions({ workspaceSlug })
   const parsedSearchParams = toUrlSearchParams(searchParams)
   const intent = parseWorkspaceUpgradeIntent(parsedSearchParams)
+  const upgradeOptions = await api.workspaces.getUpgradeOptions({
+    workspaceSlug,
+    targetPlanVersionId: intent?.targetPlanVersionId,
+  })
   const showFeatureBlockContext = parsedSearchParams.get("source") === "feature_block"
   const currentUrl = getCurrentChangePlanUrl(workspaceSlug, parsedSearchParams)
 
@@ -28,9 +31,9 @@ export default async function ChangePlanPage({
       header={
         <HeaderTab
           title="Change plan"
-          description="Choose the workspace plan and when the change should take effect."
+          description="Choose the workspace plan to change to."
           action={
-            <Button asChild variant="outline" size="sm">
+            <Button asChild variant="link">
               <SuperLink href={`/${workspaceSlug}/settings/billing`}>Back to billing</SuperLink>
             </Button>
           }

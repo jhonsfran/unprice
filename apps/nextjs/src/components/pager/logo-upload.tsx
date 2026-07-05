@@ -50,9 +50,6 @@ export function LogoUpload({ control, setValue, getValues }: LogoUploadProps) {
         setValue("logoType", data.page.logoType)
         toastAction("success", "Logo uploaded successfully")
       },
-      onError: () => {
-        toastAction("error", "Failed to upload logo")
-      },
     })
   )
 
@@ -83,7 +80,6 @@ export function LogoUpload({ control, setValue, getValues }: LogoUploadProps) {
       type: file.type,
     }).catch((e) => {
       console.error(e)
-      toastAction("error", "Failed to upload logo")
     })
   }
 

@@ -23,6 +23,7 @@ import type {
   ListSubscriptionsResult,
   PhaseForBilling,
   PhaseWithItemsAndSubscription,
+  ReplaceItemsForPhaseInput,
   SubscriptionFullData,
   SubscriptionMachineData,
   SubscriptionRepository,
@@ -354,6 +355,17 @@ export class InMemorySubscriptionRepository implements SubscriptionRepository {
       return si
     })
     return inserted
+  }
+
+  async replaceItemsForPhase(input: ReplaceItemsForPhaseInput): Promise<SubscriptionItem[]> {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const item = this.items[i]!
+      if (item.subscriptionPhaseId === input.phaseId && item.projectId === input.projectId) {
+        this.items.splice(i, 1)
+      }
+    }
+
+    return this.insertItems(input)
   }
 
   async updateItemUnits(input: UpdateItemUnitsInput): Promise<void> {
