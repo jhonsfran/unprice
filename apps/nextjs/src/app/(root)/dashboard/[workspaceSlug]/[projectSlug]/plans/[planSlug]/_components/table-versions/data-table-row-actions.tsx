@@ -93,8 +93,10 @@ export function DataTableRowActions<TData>({ row }: DataTableRowActionsProps<TDa
 
       <DialogContent className="max-h-screen overflow-y-scroll md:max-w-screen-md">
         <DialogHeader>
-          <DialogTitle>Plan Version Form</DialogTitle>
-          <DialogDescription>Modify the plan version details below.</DialogDescription>
+          <DialogTitle>Edit plan version</DialogTitle>
+          <DialogDescription>
+            Update the pricing, billing, and entitlement rules for customers pinned to this version.
+          </DialogDescription>
         </DialogHeader>
         <PlanVersionForm
           defaultValues={{

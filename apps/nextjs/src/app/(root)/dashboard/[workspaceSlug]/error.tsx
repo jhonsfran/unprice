@@ -4,7 +4,6 @@ import { Button } from "@unprice/ui/button"
 import { useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { logError } from "~/actions/log-error"
-import { BlurImage } from "~/components/blur-image"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
 
@@ -21,32 +20,27 @@ export default function ErrorPage({
     void logError(error)
   }, [error])
 
+  const description = error.message
+    ? `Refresh this view or go back. Details: ${error.message}`
+    : "Refresh this view or go back. The dashboard state could not be recovered."
+
   return (
     <DashboardShell>
       <div className="flex flex-col items-center justify-center">
-        <EmptyPlaceholder className="min-h-[800px] w-full space-y-10">
-          <EmptyPlaceholder.Title className="mt-0 p-10" variant="h1">
-            "Something went wrong"
+        <EmptyPlaceholder className="min-h-[520px] w-full">
+          <EmptyPlaceholder.Title className="mt-0" variant="h1">
+            Dashboard data could not load
           </EmptyPlaceholder.Title>
-          <EmptyPlaceholder.Icon>
-            <BlurImage
-              alt="missing site"
-              src="/app-launch.svg"
-              width={400}
-              height={400}
-              className="invert-0 filter dark:invert"
-            />
-          </EmptyPlaceholder.Icon>
-          <EmptyPlaceholder.Description className="mx-auto w-1/3 text-center">
-            {error.message}
+          <EmptyPlaceholder.Description className="mx-auto max-w-xl text-center">
+            {description}
           </EmptyPlaceholder.Description>
           <EmptyPlaceholder.Action>
-            <div className="mt-6 flex flex-row items-center justify-center gap-2">
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               <Button variant="primary" onClick={() => reset()}>
                 Try again
               </Button>
               <Button variant="default" onClick={() => router.back()}>
-                Back
+                Go back
               </Button>
             </div>
           </EmptyPlaceholder.Action>

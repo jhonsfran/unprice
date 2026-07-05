@@ -42,7 +42,7 @@ export function SubscriptionForm({
     trpc.subscriptions.create.mutationOptions({
       onSuccess: ({ subscription }) => {
         form.reset(subscription)
-        toastAction("saved")
+        toastAction("saved", "Subscription created")
         setDialogOpen?.(false)
         router.refresh()
 
@@ -165,7 +165,7 @@ export function SubscriptionForm({
               onClick={() => form.handleSubmit(onSubmitForm)()}
               isSubmitting={form.formState.isSubmitting}
               isDisabled={form.formState.isSubmitting}
-              label={"Create Subscription"}
+              label="Create subscription"
             />
           )}
         </div>

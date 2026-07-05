@@ -76,7 +76,7 @@ export function PlanVersionForm({
     trpc.planVersions.create.mutationOptions({
       onSuccess: ({ planVersion }) => {
         form.reset(planVersion)
-        toastAction("saved")
+        toastAction("saved", "Plan version created")
         setDialogOpen?.(false)
         router.refresh()
         router.push(`${params.planSlug}/${planVersion.id}`)
@@ -88,7 +88,7 @@ export function PlanVersionForm({
     trpc.planVersions.update.mutationOptions({
       onSuccess: ({ planVersion }) => {
         form.reset(planVersion)
-        toastAction("updated")
+        toastAction("updated", "Plan version saved")
         setDialogOpen?.(false)
 
         // Only needed when the form is inside a uncontrolled dialog - normally updates
@@ -108,7 +108,7 @@ export function PlanVersionForm({
   const deletePlanVersion = useMutation(
     trpc.planVersions.remove.mutationOptions({
       onSuccess: ({ planVersion }) => {
-        toastAction("deleted")
+        toastAction("deleted", "Plan version deleted")
         setDialogOpen?.(false)
         form.reset()
 
@@ -217,7 +217,7 @@ export function PlanVersionForm({
             onClick={() => form.handleSubmit(onSubmitForm)()}
             isSubmitting={form.formState.isSubmitting}
             isDisabled={form.formState.isSubmitting}
-            label={editMode ? "Update" : "Create"}
+            label={editMode ? "Save plan version" : "Create plan version"}
           />
         </div>
       </form>

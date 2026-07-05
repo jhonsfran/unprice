@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 
-import type { ProjectInsert } from "@unprice/db/validators"
+import type { Project, ProjectInsert } from "@unprice/db/validators"
 import {
   Dialog,
   DialogContent,
@@ -19,18 +19,22 @@ export function ProjectDialog({
   children,
 }: {
   label?: string
-  defaultValues?: ProjectInsert
+  defaultValues?: ProjectInsert | Project
   children?: React.ReactNode
 }) {
   const [dialogOpen, setDialogOpen] = useState(false)
+  const isEdit = Boolean(defaultValues?.id)
 
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-h-[80vh] overflow-y-scroll">
         <DialogHeader>
-          <DialogTitle>Project Form</DialogTitle>
-          <DialogDescription>Modify the project details below.</DialogDescription>
+          <DialogTitle>{isEdit ? "Edit project" : "Create project"}</DialogTitle>
+          <DialogDescription>
+            Projects group plans, customers, events, wallets, and invoice evidence in one money
+            path.
+          </DialogDescription>
         </DialogHeader>
 
         <ProjectForm

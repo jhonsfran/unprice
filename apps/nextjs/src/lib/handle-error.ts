@@ -3,7 +3,7 @@ import { z } from "zod"
 import { fromZodIssue } from "zod-validation-error"
 
 export function getErrorMessage(err: unknown) {
-  const unknownError = "Something went wrong, please try again later."
+  const unknownError = "The request could not be completed. Please try again."
 
   if (err instanceof z.ZodError) {
     const errors = err.issues.map((issue) => {

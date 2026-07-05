@@ -78,7 +78,7 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-[70px] items-center justify-between space-x-1 px-4 py-2">
-        <Typography variant="h4">Features on this version</Typography>
+        <Typography variant="h4">Plan-version features</Typography>
       </div>
       <Separator />
       <div className="bg-background/95 p-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -105,8 +105,8 @@ export function PlanFeatureList({ planVersion }: PlanFeatureListProps) {
                 </EmptyPlaceholder.Icon>
                 <EmptyPlaceholder.Title>No features yet</EmptyPlaceholder.Title>
                 <EmptyPlaceholder.Description>
-                  Pick a feature from the library on the left and click <strong>Add</strong> to
-                  attach it to this plan version.
+                  Pick a feature from the library, then configure its meter, entitlement, and
+                  billing behavior for this plan version.
                 </EmptyPlaceholder.Description>
               </EmptyPlaceholder>
             ) : (

@@ -30,7 +30,7 @@ export default async function EditSubscriptionPage({
         <Card variant="ghost" className="w-full p-0">
           <CardHeader className="px-0 pt-0">
             <CardTitle className="flex items-center justify-between font-primary font-semibold text-2xl text-foreground tracking-tight">
-              Edit Subscription
+              Edit subscription
               <CodeApiSheet defaultMethod="getSubscription">
                 <Button variant={"outline"}>
                   <Code className="mr-2 h-4 w-4" />
@@ -38,7 +38,10 @@ export default async function EditSubscriptionPage({
                 </Button>
               </CodeApiSheet>
             </CardTitle>
-            <CardDescription>Edit the subscription.</CardDescription>
+            <CardDescription>
+              Update the customer assignment, plan phases, billing period, wallet policy, and
+              invoice evidence path.
+            </CardDescription>
           </CardHeader>
           <CardContent className="w-full px-0 py-4">
             <SubscriptionForm defaultValues={subscription} />

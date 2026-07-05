@@ -23,15 +23,19 @@ export function FeatureDialog({
   children?: React.ReactNode
 }) {
   const [dialogOpen, setDialogOpen] = useState(false)
+  const isEdit = Boolean(defaultValues?.id)
 
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Feature Form</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit feature" : "Create feature"}</DialogTitle>
 
-          <DialogDescription>Modify the feature details below.</DialogDescription>
+          <DialogDescription>
+            Define the sellable or gateable capability that plan versions attach to meters,
+            entitlements, and limits.
+          </DialogDescription>
         </DialogHeader>
 
         <FeatureForm

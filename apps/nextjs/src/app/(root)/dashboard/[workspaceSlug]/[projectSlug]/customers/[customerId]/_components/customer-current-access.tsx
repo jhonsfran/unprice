@@ -52,7 +52,7 @@ export function CustomerCurrentAccess({
       isFetching={isFetching}
       billingPeriodAction={
         <Button asChild variant="ghost" size="sm">
-          <SuperLink href={subscriptionsHref}>Manage</SuperLink>
+          <SuperLink href={subscriptionsHref}>View subscriptions</SuperLink>
         </Button>
       }
       planAction={planVersionHref ? <PlanVersionButton href={planVersionHref} /> : null}

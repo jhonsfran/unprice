@@ -195,10 +195,10 @@ export function WorkspaceSwitcher({
                   <TooltipContent align="start" side="bottom" sideOffset={10} alignOffset={-5}>
                     <div className="flex max-w-[200px] flex-col gap-4 py-2">
                       <Typography variant="p" className="text-center">
-                        {"This feature is not available on your current plan"}
+                        Additional workspaces are not available on this plan.
                       </Typography>
                       <Button variant="primary" size="sm" className="mx-auto w-2/3">
-                        Upgrade
+                        Upgrade plan
                       </Button>
                     </div>
                   </TooltipContent>

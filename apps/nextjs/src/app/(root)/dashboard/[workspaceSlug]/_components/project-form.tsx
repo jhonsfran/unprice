@@ -53,7 +53,7 @@ export function ProjectForm(props: {
       onSuccess: async (data) => {
         const { project: newProject } = data
 
-        toastAction("success")
+        toastAction("updated", "Project saved")
 
         // invalidate the projects query
         await queryClient.invalidateQueries({
@@ -75,7 +75,7 @@ export function ProjectForm(props: {
       onSuccess: async (data) => {
         const { project: newProject } = data
 
-        toastAction("success")
+        toastAction("saved", "Project created")
 
         // invalidate the projects query
         await queryClient.invalidateQueries({
@@ -198,7 +198,7 @@ export function ProjectForm(props: {
             onClick={() => form.handleSubmit(onSubmit)()}
             isDisabled={form.formState.isSubmitting}
             isSubmitting={form.formState.isSubmitting}
-            label={editMode ? "Update" : "Create"}
+            label={editMode ? "Save project" : "Create project"}
           />
         </div>
       </form>

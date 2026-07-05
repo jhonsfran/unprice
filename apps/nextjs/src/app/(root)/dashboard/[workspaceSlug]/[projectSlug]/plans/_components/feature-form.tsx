@@ -71,7 +71,7 @@ export function FeatureForm({
         await queryClient.invalidateQueries({
           queryKey: trpc.features.searchBy.queryKey(),
         })
-        toastAction("saved")
+        toastAction("saved", "Feature created")
         setDialogOpen?.(false)
         router.refresh()
       },
@@ -85,7 +85,7 @@ export function FeatureForm({
         await queryClient.invalidateQueries({
           queryKey: trpc.features.searchBy.queryKey(),
         })
-        toastAction("updated")
+        toastAction("updated", "Feature saved")
 
         setDialogOpen?.(false)
         // Only needed when the form is inside a uncontrolled dialog - normally updates
@@ -108,7 +108,7 @@ export function FeatureForm({
         await queryClient.invalidateQueries({
           queryKey: trpc.features.searchBy.queryKey(),
         })
-        toastAction("deleted")
+        toastAction("deleted", "Feature deleted")
         form.reset()
       },
     })
@@ -142,7 +142,7 @@ export function FeatureForm({
                 name="title"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Title</FormLabel>
+                    <FormLabel>Feature title</FormLabel>
                     <FormControl>
                       <Input
                         {...field}
@@ -168,7 +168,7 @@ export function FeatureForm({
                 name="slug"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Slug</FormLabel>
+                    <FormLabel>Feature slug</FormLabel>
                     <FormControl>
                       <Input {...field} placeholder="custom-domains" readOnly disabled />
                     </FormControl>
@@ -184,9 +184,9 @@ export function FeatureForm({
             name="unitOfMeasure"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Unit of Measure</FormLabel>
+                <FormLabel>Unit of measure</FormLabel>
                 <FormDescription>
-                  Enter the unit of measurement for the feature, please use singular form.
+                  Singular unit used in usage, entitlement, and invoice evidence.
                 </FormDescription>
                 <FormControl>
                   <Input {...field} placeholder="domain" value={field.value} />
@@ -202,12 +202,14 @@ export function FeatureForm({
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Description</FormLabel>
-                <FormDescription>Enter a short description of the feature.</FormDescription>
+                <FormDescription>
+                  Short description of what customers receive or can use.
+                </FormDescription>
                 <FormControl>
                   <Textarea
                     {...field}
                     value={field.value ?? ""}
-                    placeholder="Grants the user the access to custom domains feature"
+                    placeholder="Grants customers access to custom domains."
                   />
                 </FormControl>
                 <FormMessage />
@@ -242,7 +244,7 @@ export function FeatureForm({
           <SubmitButton
             isSubmitting={form.formState.isSubmitting}
             isDisabled={form.formState.isSubmitting}
-            label={editMode ? "Update" : "Create"}
+            label={editMode ? "Save feature" : "Create feature"}
           />
         </div>
       </form>

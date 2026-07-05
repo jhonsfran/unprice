@@ -23,15 +23,19 @@ export function PlanDialog({
   children?: React.ReactNode
 }) {
   const [dialogOpen, setDialogOpen] = useState(false)
+  const isEdit = Boolean(defaultValues?.id)
 
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-h-screen overflow-y-scroll">
         <DialogHeader>
-          <DialogTitle>Plan Form</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit plan" : "Create plan"}</DialogTitle>
 
-          <DialogDescription>Modify the plan details below.</DialogDescription>
+          <DialogDescription>
+            Define the commercial package. Plan versions carry the features, meters, limits, and
+            billing behavior.
+          </DialogDescription>
         </DialogHeader>
 
         <PlanForm

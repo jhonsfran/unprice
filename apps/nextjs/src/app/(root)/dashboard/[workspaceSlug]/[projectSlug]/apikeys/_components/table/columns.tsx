@@ -54,7 +54,7 @@ export const columns: ColumnDef<ApiKey>[] = [
     header: ({ column }) => <DataTableColumnHeader column={column} title="Default customer" />,
     cell: ({ row }) => {
       if (!row.original.defaultCustomerId) {
-        return <span className="text-muted-foreground">Not configured</span>
+        return <span className="text-muted-foreground">No default customer</span>
       }
 
       return row.original.defaultCustomerId

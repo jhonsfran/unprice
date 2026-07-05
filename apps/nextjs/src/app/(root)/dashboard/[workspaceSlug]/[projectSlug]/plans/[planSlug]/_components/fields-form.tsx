@@ -709,7 +709,7 @@ export function TierFormField({
                 }}
               >
                 <Plus className="h-3 w-3" />
-                <span className="ml-2">add tier</span>
+                <span className="ml-2">Add tier</span>
               </Button>
             </div>
           </div>
@@ -721,7 +721,7 @@ export function TierFormField({
               <div className="grid gap-2">
                 <p className="self-center font-semibold text-sm">No tiers</p>
                 <p className="justify-center font-normal text-muted-foreground text-xs leading-snug">
-                  Something went wrong, please add the first tier.
+                  Add the first tier before saving this metered price.
                 </p>
                 <Button
                   variant="default"

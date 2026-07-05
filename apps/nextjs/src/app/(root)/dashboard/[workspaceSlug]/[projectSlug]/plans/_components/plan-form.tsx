@@ -65,7 +65,7 @@ export function PlanForm({
     trpc.plans.create.mutationOptions({
       onSuccess: ({ plan }) => {
         form.reset(plan)
-        toastAction("saved")
+        toastAction("saved", "Plan created")
         setDialogOpen?.(false)
         router.refresh()
         router.push(`plans/${plan.slug}`)
@@ -77,7 +77,7 @@ export function PlanForm({
     trpc.plans.update.mutationOptions({
       onSuccess: ({ plan }) => {
         form.reset(plan)
-        toastAction("updated")
+        toastAction("updated", "Plan saved")
         setDialogOpen?.(false)
 
         // Only needed when the form is inside a uncontrolled dialog - normally updates
@@ -97,7 +97,7 @@ export function PlanForm({
   const deletePlan = useMutation(
     trpc.plans.remove.mutationOptions({
       onSuccess: () => {
-        toastAction("deleted")
+        toastAction("deleted", "Plan deleted")
 
         setDialogOpen?.(false)
         // Only needed when the form is inside a uncontrolled dialog - normally updates
@@ -148,8 +148,11 @@ export function PlanForm({
             name="title"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Plan Title</FormLabel>
-                <FormDescription>The title is the display name of the plan.</FormDescription>
+                <FormLabel>Plan title</FormLabel>
+                <FormDescription>
+                  Display name for the commercial package shown in dashboard and hosted page
+                  contexts.
+                </FormDescription>
                 <FormControl>
                   <Input
                     {...field}
@@ -173,9 +176,9 @@ export function PlanForm({
             name="slug"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Plan Slug</FormLabel>
+                <FormLabel>Plan slug</FormLabel>
                 <FormDescription>
-                  The slug is a unique identifier for the plan and will be used for api calls.
+                  Stable identifier used by API calls and plan-version URLs.
                 </FormDescription>
                 <FormControl>
                   <Input {...field} placeholder="free" readOnly disabled />
@@ -194,7 +197,9 @@ export function PlanForm({
                 <FormControl>
                   <Textarea {...field} value={field.value ?? ""} />
                 </FormControl>
-                <FormDescription>Enter a short description of the plan.</FormDescription>
+                <FormDescription>
+                  Short description of the package customers can subscribe to.
+                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -208,8 +213,7 @@ export function PlanForm({
                 <div className="space-y-0.5">
                   <FormLabel className="text-base">Default plan</FormLabel>
                   <FormDescription>
-                    Mark this plan as the default so that new users are automatically assigned to
-                    it. Usually this is the free plan.
+                    Assign new customers to this plan when signup does not specify a plan version.
                   </FormDescription>
                 </div>
                 <FormControl>
@@ -227,7 +231,7 @@ export function PlanForm({
                 <div className="space-y-0.5">
                   <FormLabel className="text-base">Enterprise plan</FormLabel>
                   <FormDescription>
-                    Enterprises plans don't show prices information in the frontend.
+                    Hide public price details for plans that require a custom commercial agreement.
                   </FormDescription>
                 </div>
                 <FormControl>
@@ -255,7 +259,7 @@ export function PlanForm({
             onClick={() => form.handleSubmit(onSubmitForm)()}
             isSubmitting={form.formState.isSubmitting}
             isDisabled={form.formState.isSubmitting}
-            label={editMode ? "Update" : "Create"}
+            label={editMode ? "Save plan" : "Create plan"}
           />
         </div>
       </form>

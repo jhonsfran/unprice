@@ -51,7 +51,7 @@ export function CustomerForm({
     trpc.customers.create.mutationOptions({
       onSuccess: ({ customer }) => {
         form.reset(customer)
-        toastAction("saved")
+        toastAction("saved", "Customer created")
         setDialogOpen?.(false)
         router.refresh()
       },
@@ -62,7 +62,7 @@ export function CustomerForm({
     trpc.customers.update.mutationOptions({
       onSuccess: ({ customer }) => {
         form.reset(customer)
-        toastAction("updated")
+        toastAction("updated", "Customer saved")
         setDialogOpen?.(false)
 
         // Only needed when the form is inside a uncontrolled dialog - normally updates
@@ -313,7 +313,7 @@ export function CustomerForm({
             onClick={() => form.handleSubmit(onSubmitForm)()}
             isSubmitting={form.formState.isSubmitting}
             isDisabled={form.formState.isSubmitting}
-            label={editMode ? "Update" : "Create"}
+            label={editMode ? "Save customer" : "Create customer"}
           />
         </div>
       </form>

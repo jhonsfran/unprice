@@ -14,8 +14,11 @@ export default async function NewSubscriptionPage({
       <div className="flex flex-col items-center justify-center">
         <Card variant="ghost" className="w-full">
           <CardHeader>
-            <CardTitle>Create Subscription</CardTitle>
-            <CardDescription>Configure the subscription for the selected customer.</CardDescription>
+            <CardTitle>Create subscription</CardTitle>
+            <CardDescription>
+              Assign a customer to a plan version, billing period, wallet policy, and invoice
+              evidence path.
+            </CardDescription>
           </CardHeader>
           <CardContent className="py-4">
             <SubscriptionForm

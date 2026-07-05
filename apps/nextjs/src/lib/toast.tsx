@@ -6,14 +6,14 @@ type ToastType = "default" | "description" | "success" | "warning" | "info" | "e
 const config = {
   error: {
     type: "error",
-    title: "Something went wrong",
+    title: "Action could not be completed",
   },
   "error-contact": {
     type: "error",
-    title: "Something went wrong",
-    description: "Please try again",
+    title: "Action could not be completed",
+    description: "Try again or contact support if it keeps failing.",
     action: {
-      label: "Discord",
+      label: "Open Discord",
       onClick: () => window.open("/discord", "_blank")?.location,
     },
   },
@@ -22,11 +22,11 @@ const config = {
     title: "Slug is already taken",
     description: "Please select another slug. Every slug is unique.",
   },
-  success: { type: "success", title: "Success" },
-  deleted: { type: "success", title: "Deleted successfully" },
-  removed: { type: "success", title: "Removed successfully" },
-  saved: { type: "success", title: "Saved successfully" },
-  updated: { type: "success", title: "Updated successfully" },
+  success: { type: "success", title: "Change saved" },
+  deleted: { type: "success", title: "Record deleted" },
+  removed: { type: "success", title: "Record removed" },
+  saved: { type: "success", title: "Record saved" },
+  updated: { type: "success", title: "Record updated" },
   "test-error": {
     type: "error",
     title: "Connection Failed",
@@ -73,11 +73,11 @@ export function toastAction(
 
   if (options?.requestId) {
     props.action = {
-      label: "Copy Error",
+      label: "Copy request ID",
       onClick: async (event) => {
         event?.preventDefault?.() // keeps toast open if supported
         await navigator.clipboard.writeText(`Request ID: ${options.requestId}\n\n${message ?? ""}`)
-        toast.success("Error copied to clipboard")
+        toast.success("Request ID copied")
       },
     }
   }

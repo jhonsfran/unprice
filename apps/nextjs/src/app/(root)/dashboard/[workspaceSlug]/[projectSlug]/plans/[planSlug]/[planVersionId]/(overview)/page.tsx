@@ -66,7 +66,7 @@ export default async function OverviewVersionPage({
             <PlanFeatureList planVersion={planVersion} />
           </main>
 
-          {/* ── Right: customer preview + plan settings ─────────── */}
+          {/* ── Right: version preview + settings ─────────── */}
           <aside className="min-h-0 bg-muted/20 lg:rounded-r-lg">
             <div className="lg:sticky lg:top-4 lg:h-full lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
               <PlanWorkspaceRail planVersion={planVersion} />

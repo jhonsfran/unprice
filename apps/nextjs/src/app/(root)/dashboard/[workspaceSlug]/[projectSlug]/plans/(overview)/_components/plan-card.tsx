@@ -86,9 +86,12 @@ export function PlanCard(props: {
 
           <DialogContent className="max-h-screen overflow-y-scroll">
             <DialogHeader>
-              <DialogTitle>Plan Form</DialogTitle>
+              <DialogTitle>Edit plan</DialogTitle>
 
-              <DialogDescription>Modify the plan details below.</DialogDescription>
+              <DialogDescription>
+                Update the commercial package. Plan versions keep the versioned features, meters,
+                and billing behavior.
+              </DialogDescription>
             </DialogHeader>
             <PlanForm defaultValues={rest} />
           </DialogContent>

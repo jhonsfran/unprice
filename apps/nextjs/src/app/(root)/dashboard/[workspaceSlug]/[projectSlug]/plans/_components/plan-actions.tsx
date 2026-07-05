@@ -43,8 +43,11 @@ export function PlanActions({
       </DropdownMenu>
       <DialogContent className="max-h-screen overflow-y-scroll">
         <DialogHeader>
-          <DialogTitle>Plan Form</DialogTitle>
-          <DialogDescription>Modify the plan details below.</DialogDescription>
+          <DialogTitle>Edit plan</DialogTitle>
+          <DialogDescription>
+            Update the commercial package. Plan versions keep the versioned features, meters, and
+            billing behavior.
+          </DialogDescription>
         </DialogHeader>
         <PlanForm defaultValues={plan} />
       </DialogContent>

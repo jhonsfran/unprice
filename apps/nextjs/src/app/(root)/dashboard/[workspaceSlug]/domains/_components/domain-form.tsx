@@ -72,7 +72,7 @@ export function DomainForm({
     trpc.domains.create.mutationOptions({
       onSuccess: ({ domain }) => {
         form.reset(defaultValues)
-        toastAction("saved")
+        toastAction("saved", "Domain added")
         router.refresh()
         onSubmit?.(domain)
       },
@@ -83,7 +83,7 @@ export function DomainForm({
     trpc.domains.update.mutationOptions({
       onSuccess: ({ domain }) => {
         form.reset()
-        toastAction("updated")
+        toastAction("updated", "Domain saved")
         router.refresh()
         onSubmit?.(domain)
       },
@@ -97,7 +97,7 @@ export function DomainForm({
       if (!defaultValues.id) return
       await deleteDomain.mutateAsync({ id: defaultValues.id })
       form.reset()
-      toastAction("deleted")
+      toastAction("deleted", "Domain deleted")
       router.refresh()
     })
   }
@@ -148,7 +148,7 @@ export function DomainForm({
           <SubmitButton
             isSubmitting={form.formState.isSubmitting}
             isDisabled={submitDisabled}
-            label={editMode ? "Update" : "Create"}
+            label={editMode ? "Save domain" : "Add domain"}
           />
         </div>
       </form>

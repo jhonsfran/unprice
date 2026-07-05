@@ -43,8 +43,8 @@ export default async function DashboardOverview(props: {
     <DashboardShell
       header={
         <HeaderTab
-          title="Overview"
-          description="Health of your project"
+          title="Project money path"
+          description="Ingestion, usage, spend, denials, and failures for this project."
           action={<IntervalFilter className="ml-auto" />}
         />
       }

@@ -23,15 +23,18 @@ export function PlanVersionDialog({
   children?: React.ReactNode
 }) {
   const [dialogOpen, setDialogOpen] = useState(false)
+  const isEdit = Boolean(defaultValues?.id)
 
   return (
     <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
       <DialogContent className="max-h-screen overflow-y-scroll md:max-w-screen-md">
         <DialogHeader>
-          <DialogTitle>Plan version form</DialogTitle>
+          <DialogTitle>{isEdit ? "Edit plan version" : "Create plan version"}</DialogTitle>
 
-          <DialogDescription>Modify the plan version details below.</DialogDescription>
+          <DialogDescription>
+            Version the pricing, billing, and entitlement rules that customers can be pinned to.
+          </DialogDescription>
         </DialogHeader>
 
         <PlanVersionForm

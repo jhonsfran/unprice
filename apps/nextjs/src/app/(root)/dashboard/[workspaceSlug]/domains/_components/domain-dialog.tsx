@@ -30,7 +30,9 @@ export function DomainDialog({
         <DialogHeader>
           <DialogTitle>Domain for this workspace</DialogTitle>
 
-          <DialogDescription>Modify the domain details below.</DialogDescription>
+          <DialogDescription>
+            Add a hostname that can serve verified project pages after DNS checks pass.
+          </DialogDescription>
         </DialogHeader>
 
         <DomainForm

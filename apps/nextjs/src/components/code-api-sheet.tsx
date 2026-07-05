@@ -135,7 +135,7 @@ export function CodeApiSheet({
             showBorderBeam={false}
           />
         </motion.div>
-        <SheetFooter className="border-background-border border-t pt-4">
+        <SheetFooter className="border-background-border pt-4">
           <Link href={`${DOCS_DOMAIN}/api-reference`} target="_blank" className="w-full sm:w-auto">
             <Button
               variant="outline"

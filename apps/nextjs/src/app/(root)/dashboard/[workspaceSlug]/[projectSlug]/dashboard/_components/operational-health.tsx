@@ -107,7 +107,7 @@ export function OperationalHealth({ initialNow }: { initialNow: number }) {
     <IngestionHealthStrip
       status={data}
       isFetching={isFetching || isInitialPlaceholder}
-      title="Operational health"
+      title="Request-path health"
       description={`Ingestion health for the ${interval.label}. Rejections are business denials; failures need recovery.`}
       className={isInitialPlaceholder ? "animate-pulse" : undefined}
       presentation="section"

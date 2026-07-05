@@ -55,7 +55,7 @@ export default async function ProjectUsersPage(props: {
                 </Button>
               </CodeApiSheet>
               <CustomerDialog>
-                <Button>Customer</Button>
+                <Button>Create customer</Button>
               </CustomerDialog>
             </div>
           }
