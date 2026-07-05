@@ -21,8 +21,7 @@ const BLOCKED_FEATURE_COPY: Record<
   },
   [FEATURE_SLUGS.DOMAINS.SLUG]: {
     title: "Custom domains are not available on this workspace plan",
-    description:
-      "Upgrade to verify hostnames before they serve project pages for this workspace.",
+    description: "Upgrade to verify hostnames before they serve project pages for this workspace.",
   },
   [FEATURE_SLUGS.PAGES.SLUG]: {
     title: "Hosted pages are not available on this workspace plan",
@@ -31,8 +30,7 @@ const BLOCKED_FEATURE_COPY: Record<
   },
   [FEATURE_SLUGS.PLANS.SLUG]: {
     title: "Plans are not available on this workspace plan",
-    description:
-      "Upgrade to define plans, plan versions, meters, limits, and billing behavior.",
+    description: "Upgrade to define plans, plan versions, meters, limits, and billing behavior.",
   },
   [FEATURE_SLUGS.CUSTOMERS.SLUG]: {
     title: "Customers are not available on this workspace plan",

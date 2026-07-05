@@ -1,5 +1,5 @@
 import type * as DbSchema from "@unprice/db/schema"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 
 const BASE_NOW = Date.UTC(2026, 2, 19, 12, 0, 0)
 const DO_STARTUP_TEST_TIMEOUT_MS = 15_000
@@ -77,6 +77,19 @@ type FakeDurableObjectState = {
   }
 }
 
+type RunBudgetDOConstructor = new (
+  state: FakeDurableObjectState,
+  env: unknown
+) => {
+  startRun: (input: unknown) => Promise<unknown>
+  applySyncEvent: (input: unknown) => Promise<unknown>
+  endRun: (input: unknown) => Promise<unknown>
+  getRunStatus: (input: unknown) => Promise<unknown>
+  flushCaptures: () => Promise<void>
+  flushCapturesForInvoicing: (input: unknown) => Promise<unknown>
+  alarm: () => Promise<void>
+}
+
 const testState = {
   createReservation: vi.fn(),
   captureReservationUsage: vi.fn(),
@@ -95,6 +108,10 @@ const testState = {
 }
 
 describe("RunBudgetDO", () => {
+  beforeAll(async () => {
+    await loadRunBudgetDO()
+  }, DO_STARTUP_TEST_TIMEOUT_MS)
+
   beforeEach(() => {
     for (const fn of Object.values(testState.logger)) fn.mockReset()
     testState.createReservation.mockReset()
@@ -138,8 +155,8 @@ describe("RunBudgetDO", () => {
   })
 
   afterEach(() => {
-    vi.restoreAllMocks()
-    vi.resetModules()
+    const dateNow = Date.now as typeof Date.now & { mockRestore?: () => void }
+    dateNow.mockRestore?.()
   })
 
   it(
@@ -2207,7 +2224,11 @@ function buildFakeDrizzle() {
   return db
 }
 
+let runBudgetDOPromise: Promise<RunBudgetDOConstructor> | null = null
+
 async function loadRunBudgetDO() {
+  if (runBudgetDOPromise) return runBudgetDOPromise
+
   vi.doMock("cloudflare:workers", () => ({
     DurableObject: class {
       protected readonly ctx: FakeDurableObjectState
@@ -2268,22 +2289,11 @@ async function loadRunBudgetDO() {
     createDoLogger: vi.fn(() => testState.logger),
   }))
 
-  const module = (await import("./RunBudgetDO")) as {
-    RunBudgetDO: new (
-      state: FakeDurableObjectState,
-      env: unknown
-    ) => {
-      startRun: (input: unknown) => Promise<unknown>
-      applySyncEvent: (input: unknown) => Promise<unknown>
-      endRun: (input: unknown) => Promise<unknown>
-      getRunStatus: (input: unknown) => Promise<unknown>
-      flushCaptures: () => Promise<void>
-      flushCapturesForInvoicing: (input: unknown) => Promise<unknown>
-      alarm: () => Promise<void>
-    }
-  }
+  runBudgetDOPromise = import("./RunBudgetDO").then(
+    (module) => (module as { RunBudgetDO: RunBudgetDOConstructor }).RunBudgetDO
+  )
 
-  return module.RunBudgetDO
+  return runBudgetDOPromise
 }
 
 function createDurableObjectState(): FakeDurableObjectState {

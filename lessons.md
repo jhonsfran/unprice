@@ -114,6 +114,9 @@ patterns. Keep it cheap to load and useful.
   retry paths, not only the service adapter.
 - 2026-07-04: API Durable Object tests are integration-style under root Turbo concurrency; keep
   `apps/api/vitest.config.ts` on a 15s `testTimeout` instead of relying on Vitest's 5s default.
+- 2026-07-05: RunBudgetDO tests should cache the mocked DO module import in `beforeAll`; per-spec
+  `vi.resetModules()` makes Vite transform/import startup count against individual test timeouts
+  and can flake under Turbo contention.
 - 2026-05-08: Tiny-tools usage discovery reads `featurePlanVersion.meterConfig` from
   `entitlements.get`; `verify` is only for the decision.
 - 2026-05-11: Tier/package entitlements are static quantity limits from subscription grants; do

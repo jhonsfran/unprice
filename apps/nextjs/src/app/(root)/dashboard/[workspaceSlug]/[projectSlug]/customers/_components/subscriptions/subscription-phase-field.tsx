@@ -10,7 +10,7 @@ import { Typography } from "@unprice/ui/typography"
 import { cn } from "@unprice/ui/utils"
 import { motion } from "framer-motion"
 import { LayoutGrid } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { type FieldErrors, type UseFormReturn, useFieldArray } from "react-hook-form"
 import { EmptyPlaceholder } from "~/components/empty-placeholder"
 import { PropagationStopper } from "~/components/prevent-propagation"
@@ -125,18 +125,6 @@ export default function SubscriptionPhaseFormField({
       : undefined
   }
 
-  useEffect(() => {
-    if (selectedCustomer) {
-      setSelectedPhase({
-        ...defaultValuesPhase,
-        customerId: selectedCustomer,
-      })
-      setPhaseFormMode("create")
-
-      form.clearErrors("customerId")
-    }
-  }, [selectedCustomer])
-
   function openSchedulePhase() {
     if (!selectedCustomer) {
       form.setError("customerId", {
@@ -167,6 +155,7 @@ export default function SubscriptionPhaseFormField({
       creditLineAmount: null,
       trialUnits: 0,
     })
+    form.clearErrors("customerId")
     setPhaseFormMode("schedule")
     setDialogOpen(true)
   }
@@ -187,6 +176,7 @@ export default function SubscriptionPhaseFormField({
       subscriptionId,
       startAt: lastPhase.endAt + 1,
     })
+    form.clearErrors("customerId")
     setPhaseFormMode("create")
     setDialogOpen(true)
   }
@@ -364,6 +354,7 @@ export default function SubscriptionPhaseFormField({
                         if (lastPhase) {
                           setSelectedPhase({
                             ...defaultValuesPhase,
+                            customerId: selectedCustomer,
                             // Continue immediately after the previous phase ends.
                             startAt: startAt,
                           })
@@ -371,12 +362,17 @@ export default function SubscriptionPhaseFormField({
                         } else {
                           setSelectedPhase({
                             ...defaultValuesPhase,
+                            customerId: selectedCustomer,
                             startAt: startAt,
                           })
                           setPhaseFormMode("create")
                         }
                       } else {
-                        setSelectedPhase(defaultValuesPhase)
+                        setSelectedPhase({
+                          ...defaultValuesPhase,
+                          customerId: selectedCustomer,
+                        })
+                        form.clearErrors("customerId")
                         setPhaseFormMode("create")
                       }
 
@@ -412,6 +408,7 @@ export default function SubscriptionPhaseFormField({
                         return
                       }
 
+                      form.clearErrors("customerId")
                       setPhaseFormMode("create")
                       setDialogOpen(true)
                     }}

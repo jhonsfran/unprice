@@ -2,16 +2,21 @@
 
 import { useSelectedLayoutSegments } from "next/navigation"
 import type { ReactNode } from "react"
+import { CustomerEconomicHeader } from "./customer-economic-header"
+import { CustomerTabs } from "./customer-tabs"
 import { DashboardShell } from "~/components/layout/dashboard-shell"
+import type { RouterOutputs } from "@unprice/trpc/routes"
+
+type Customer = RouterOutputs["customers"]["getSubscriptions"]["customer"]
 
 export function CustomerDetailShell({
   children,
-  header,
-  tabs,
+  customer,
+  baseUrl,
 }: {
   children: ReactNode
-  header: ReactNode
-  tabs: ReactNode
+  customer: Customer
+  baseUrl: string
 }) {
   const segments = useSelectedLayoutSegments().filter((segment) => !segment.startsWith("("))
   const isInvoiceDetail = segments[0] === "invoices" && segments.length > 1
@@ -21,8 +26,8 @@ export function CustomerDetailShell({
   }
 
   return (
-    <DashboardShell header={header}>
-      {tabs}
+    <DashboardShell header={<CustomerEconomicHeader customer={customer} />}>
+      <CustomerTabs baseUrl={baseUrl} />
       {children}
     </DashboardShell>
   )

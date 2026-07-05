@@ -91,14 +91,16 @@ export function EntitlementConfigSheet({
     setPlanFeaturesList,
   ])
 
-  useEffect(() => {
-    if (!isOpen) {
+  const handleOpenChange = (nextOpen: boolean) => {
+    setIsOpen(nextOpen)
+
+    if (!nextOpen) {
       setActiveFeature(null)
     }
-  }, [isOpen, setActiveFeature])
+  }
 
   return (
-    <Sheet open={isOpen} onOpenChange={setIsOpen}>
+    <Sheet open={isOpen} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <SheetTrigger asChild>

@@ -185,7 +185,9 @@ export function DataTable<TData, TValue>({
                       <EmptyIcon className="size-8" />
                     </EmptyPlaceholder.Icon>
                     <EmptyPlaceholder.Title>
-                      {error ? "Table data could not be loaded" : (emptyState?.title ?? "No results")}
+                      {error
+                        ? "Table data could not be loaded"
+                        : (emptyState?.title ?? "No results")}
                     </EmptyPlaceholder.Title>
                     <EmptyPlaceholder.Description>
                       {error
