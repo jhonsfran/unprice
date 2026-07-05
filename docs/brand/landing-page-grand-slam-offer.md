@@ -272,7 +272,7 @@ money path while it's small.
 | "Record vs consume vs runs?" | `record` = async report (can exceed funds). `consume` = sync enforce (blocks over limit). `runs` = reserve a budget envelope before the work runs. Lead with the operation that matches the paid action: `access.check`, `consume`, or `runs`. |
 | "Will this replace my billing stack?" | No. Stripe-first today; Unprice sits between product usage and invoice evidence — not a tax, accounting, or payment-processor replacement. |
 | "Is this an AI agent platform?" | No. Budgeted runs are generic workload labels. Your app owns prompts, tools, jobs, and execution. |
-| "Is it safe? It's alpha." | The money-path core is open source — audit it, run it in shadow, prove it on sandbox, then enforce. The open core is the guarantee. |
+| "Is it safe enough for money logic?" | The money-path core is open source — audit it, run it in shadow, prove it on Sandbox, then enforce. The adoption sequence is the guarantee. |
 
 ---
 

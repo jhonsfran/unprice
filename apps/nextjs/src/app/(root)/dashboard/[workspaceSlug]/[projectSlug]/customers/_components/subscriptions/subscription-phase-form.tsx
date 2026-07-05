@@ -2,12 +2,17 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
+  type CreditLinePolicy,
   type InsertSubscriptionPhase,
+  type PaymentProvider,
   type SubscriptionChangePlan,
+  type SubscriptionItem,
+  type SubscriptionItemsConfig,
   type SubscriptionPhase,
   getTrialUnitLabel,
 } from "@unprice/db/validators"
 import { fromLedgerAmount, fromLedgerMinor, toDecimal, toLedgerMinor } from "@unprice/money"
+import type { RouterOutputs } from "@unprice/trpc/routes"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@unprice/ui/form"
 import { HelpCircle } from "@unprice/ui/icons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
@@ -15,7 +20,7 @@ import { Separator } from "@unprice/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@unprice/ui/tooltip"
 import { useParams, useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { type FieldValues, type UseFormReturn } from "react-hook-form"
+import type { FieldPath, FieldValues, PathValue, UseFormReturn } from "react-hook-form"
 import { PaymentProviderFormField } from "~/app/(root)/dashboard/[workspaceSlug]/[projectSlug]/plans/[planSlug]/_components/version-fields-form"
 import ConfigItemsFormField from "~/components/forms/items-fields"
 import PaymentMethodsFormField from "~/components/forms/payment-method-field"
@@ -38,6 +43,29 @@ import type {
   SubscriptionPhaseFormMode,
   SubscriptionPhaseFormSubmitValue,
 } from "./subscription-phase-types"
+
+type PlanVersionOptions = RouterOutputs["planVersions"]["listByActiveProject"]["planVersions"]
+type WhenToChangeOption = {
+  key: "end_of_cycle" | "immediately"
+  label: string
+}
+
+interface SubscriptionPhaseFieldValues extends FieldValues {
+  planVersionId: string
+  paymentProvider?: PaymentProvider
+  paymentMethodRequired?: boolean
+  paymentMethodId?: string | null
+  customerId?: string
+  creditLinePolicy?: CreditLinePolicy
+  creditLineAmount?: number | null
+  startAt: number
+  endAt?: number | null
+  trialUnits?: number
+  whenToChange?: string
+  config?: SubscriptionItemsConfig
+  items?: SubscriptionItem[]
+  timezone?: string
+}
 
 export function SubscriptionPhaseForm({
   setDialogOpen,
@@ -73,7 +101,7 @@ export function SubscriptionPhaseForm({
     schema: formSchema,
     defaultValues,
   })
-  const previousPlanVersionIdRef = useRef<string | undefined>(null)
+  const previousPlanVersionIdRef = useRef<string | undefined | null>(null)
   if (previousPlanVersionIdRef.current === null) {
     previousPlanVersionIdRef.current = form.getValues("planVersionId")
   }
@@ -148,19 +176,19 @@ export function SubscriptionPhaseForm({
   )
 
   const selectedPlanVersionId = form.watch("planVersionId")
-  const selectedPaymentProvider = form.watch("paymentProvider")
-  const paymentMethodRequired = form.watch("paymentMethodRequired")
+  const selectedPaymentProvider = form.watch("paymentProvider") as PaymentProvider | undefined
+  const paymentMethodRequired = form.watch("paymentMethodRequired") as boolean | undefined
   const selectedPlanVersion =
     planVersions?.planVersions.find((version) => version.id === selectedPlanVersionId) ??
     (defaultValues.planVersion?.id === selectedPlanVersionId
       ? defaultValues.planVersion
       : undefined)
   const selectedPlanVersionPaymentMethodRequired = selectedPlanVersion?.paymentMethodRequired
-  const selectedPlanVersionPaymentProvider = selectedPlanVersion?.paymentProvider
+  const selectedPlanVersionPaymentProvider = selectedPlanVersion?.paymentProvider ?? undefined
   const selectedPlanVersionTrialUnits = selectedPlanVersion?.trialUnits
   const selectedCurrency = selectedPlanVersion?.currency ?? "USD"
-  const creditLinePolicy = form.watch("creditLinePolicy")
-  const whenToChange = form.watch("whenToChange")
+  const creditLinePolicy = form.watch("creditLinePolicy") as CreditLinePolicy | undefined
+  const whenToChange = form.watch("whenToChange") as string | undefined
   const planVersionOptions = isScheduleMode
     ? (planVersions?.planVersions.filter(
         (version) => version.id !== defaultValues.currentPlanVersionId
@@ -218,108 +246,99 @@ export function SubscriptionPhaseForm({
         key: "immediately",
         label: `Immediately (${immediateLabel})`,
       },
-    ]
+    ] satisfies WhenToChangeOption[]
   }, [defaultValues.currentCycleEndAt, defaultValues.timezone, nowMs])
 
-  const formFieldBehavior = useMemo(
-    () => ({
-      isCreditLinePolicyDisabled,
-      isReadOnlyMode,
-      isScheduleMode,
-      persistedPhaseFieldsLocked,
-    }),
-    [isCreditLinePolicyDisabled, isReadOnlyMode, isScheduleMode, persistedPhaseFieldsLocked]
-  )
+  const paymentProviderValue = selectedPaymentProvider ?? selectedPlanVersionPaymentProvider
 
   return (
     <Form {...form}>
-      <SubscriptionPhaseFormFields
-        form={form}
-        formFieldBehavior={formFieldBehavior}
-        paymentProvider={selectedPaymentProvider}
-        selectedPlanVersionPaymentProvider={selectedPlanVersionPaymentProvider}
-        hasSelectedPlanVersion={Boolean(selectedPlanVersion)}
-        paymentMethodRequired={paymentMethodRequired}
-        creditLinePolicy={creditLinePolicy}
-        selectedCurrency={selectedCurrency}
-        whenToChange={whenToChange}
-        workspaceSlug={workspaceSlug}
-        projectSlug={projectSlug}
-        planVersionOptions={planVersionOptions}
-        isLoading={isLoading}
-        planVersion={defaultValues.planVersion}
-        trialUnitLabel={trialUnitLabel}
-        whenToChangeOptions={whenToChangeOptions}
-        formStateSubmitting={form.formState.isSubmitting}
-        editMode={editMode}
-        onSubmit={async () => form.handleSubmit(onSubmitForm)()}
-      />
+      <form className="space-y-6">
+        <PlanAndProviderFields
+          form={form}
+          persistedPhaseFieldsLocked={persistedPhaseFieldsLocked}
+          isReadOnlyMode={isReadOnlyMode}
+          workspaceSlug={workspaceSlug}
+          projectSlug={projectSlug}
+          planVersionOptions={planVersionOptions}
+          selectedPlanVersionFallback={defaultValues.planVersion}
+          isLoading={isLoading}
+        />
+
+        <Separator />
+
+        <UsageCreditFields
+          form={form}
+          isCreditLinePolicyDisabled={isCreditLinePolicyDisabled}
+          selectedCurrency={selectedCurrency}
+          persistedPhaseFieldsLocked={persistedPhaseFieldsLocked}
+          creditLinePolicy={creditLinePolicy}
+        />
+
+        <TimingAndTrialFields
+          form={form}
+          isScheduleMode={isScheduleMode}
+          persistedPhaseFieldsLocked={persistedPhaseFieldsLocked}
+          isReadOnlyMode={isReadOnlyMode}
+          hasSelectedPlanVersion={Boolean(selectedPlanVersion)}
+          trialUnitLabel={trialUnitLabel}
+          whenToChangeOptions={whenToChangeOptions}
+        />
+
+        <PaymentMethodSection
+          form={form}
+          isReadOnlyMode={isReadOnlyMode}
+          paymentMethodRequired={paymentMethodRequired}
+          paymentProvider={paymentProviderValue}
+        />
+
+        <ConfigItemsSection
+          form={form}
+          persistedPhaseFieldsLocked={persistedPhaseFieldsLocked}
+          isReadOnlyMode={isReadOnlyMode}
+          planVersionOptions={planVersionOptions}
+          isLoading={isLoading}
+        />
+
+        <SubscriptionPhaseFormActions
+          isReadOnlyMode={isReadOnlyMode}
+          isSubmitting={form.formState.isSubmitting}
+          isScheduleMode={isScheduleMode}
+          editMode={editMode}
+          whenToChange={whenToChange}
+          onSubmit={() => form.handleSubmit(onSubmitForm)()}
+        />
+      </form>
     </Form>
   )
 }
 
-type SubscriptionPhaseFormFieldBehavior = {
-  isCreditLinePolicyDisabled: boolean
-  isReadOnlyMode: boolean
-  isScheduleMode: boolean
-  persistedPhaseFieldsLocked: boolean
-}
-
-function SubscriptionPhaseFormFields({
+function PlanAndProviderFields<TFieldValues extends SubscriptionPhaseFieldValues>({
   form,
-  formFieldBehavior,
-  paymentMethodRequired,
-  creditLinePolicy,
-  selectedCurrency,
-  whenToChange,
+  persistedPhaseFieldsLocked,
+  isReadOnlyMode,
   workspaceSlug,
   projectSlug,
   planVersionOptions,
+  selectedPlanVersionFallback,
   isLoading,
-  planVersion,
-  trialUnitLabel,
-  whenToChangeOptions,
-  formStateSubmitting,
-  selectedPlanVersionPaymentProvider,
-  hasSelectedPlanVersion,
-  onSubmit,
-  editMode,
-  paymentProvider,
 }: {
-  form: UseFormReturn<FieldValues>
-  formFieldBehavior: SubscriptionPhaseFormFieldBehavior
-  paymentMethodRequired: boolean | undefined
-  creditLinePolicy: unknown
-  selectedCurrency: string
-  whenToChange: string | undefined
+  form: UseFormReturn<TFieldValues>
+  persistedPhaseFieldsLocked: boolean
+  isReadOnlyMode: boolean
   workspaceSlug: string
   projectSlug: string
-  planVersionOptions: Array<{ id: string }>
+  planVersionOptions: PlanVersionOptions
+  selectedPlanVersionFallback: SubscriptionPhaseFormDefaultValues["planVersion"]
   isLoading?: boolean
-  planVersion: SubscriptionPhaseFormDefaultValues["planVersion"]
-  trialUnitLabel: string
-  whenToChangeOptions: { key: string; label: string }[]
-  formStateSubmitting: boolean
-  selectedPlanVersionPaymentProvider: string | undefined
-  hasSelectedPlanVersion: boolean
-  paymentProvider: string | undefined
-  onSubmit: () => void
-  editMode: boolean
 }) {
-  const {
-    isCreditLinePolicyDisabled,
-    isReadOnlyMode,
-    isScheduleMode,
-    persistedPhaseFieldsLocked,
-  } = formFieldBehavior
-  const paymentProviderValue = paymentProvider ?? selectedPlanVersionPaymentProvider
   return (
-    <form className="space-y-6">
+    <>
       <SelectPlanFormField
         form={form}
         isDisabled={persistedPhaseFieldsLocked || isReadOnlyMode}
         planVersions={planVersionOptions}
-        selectedPlanVersionFallback={planVersion}
+        selectedPlanVersionFallback={selectedPlanVersionFallback}
         isLoading={isLoading}
       />
 
@@ -329,176 +348,276 @@ function SubscriptionPhaseFormFields({
         workspaceSlug={workspaceSlug}
         projectSlug={projectSlug}
       />
+    </>
+  )
+}
 
-      <Separator />
+function UsageCreditFields<TFieldValues extends SubscriptionPhaseFieldValues>({
+  form,
+  isCreditLinePolicyDisabled,
+  selectedCurrency,
+  persistedPhaseFieldsLocked,
+  creditLinePolicy,
+}: {
+  form: UseFormReturn<TFieldValues>
+  isCreditLinePolicyDisabled: boolean
+  selectedCurrency: string
+  persistedPhaseFieldsLocked: boolean
+  creditLinePolicy?: CreditLinePolicy
+}) {
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <FormField
+        control={form.control}
+        name={"creditLinePolicy" as FieldPath<TFieldValues>}
+        render={({ field }) => (
+          <FormItem className="flex w-full flex-col">
+            <div className="flex items-center gap-1">
+              <FormLabel>Usage credit policy</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[260px]">
+                  Capped reserves a finite usage runway. Uncapped lets priced usage continue and
+                  invoice at period end.
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <Select
+              onValueChange={(value) => {
+                field.onChange(value)
+                if (value === "uncapped") {
+                  form.setValue(
+                    "creditLineAmount" as FieldPath<TFieldValues>,
+                    null as PathValue<TFieldValues, FieldPath<TFieldValues>>
+                  )
+                }
+              }}
+              value={(field.value as CreditLinePolicy | undefined) ?? "uncapped"}
+              disabled={isCreditLinePolicyDisabled}
+            >
+              <FormControl>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select usage credit policy" />
+                </SelectTrigger>
+              </FormControl>
+              <SelectContent>
+                <SelectItem value="capped">Capped</SelectItem>
+                <SelectItem value="uncapped">Uncapped</SelectItem>
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <FormField
+        control={form.control}
+        name={"creditLineAmount" as FieldPath<TFieldValues>}
+        render={({ field }) => (
+          <FormItem className="flex w-full flex-col">
+            <div className="flex items-center gap-1">
+              <FormLabel>Usage credit amount</FormLabel>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <HelpCircle className="size-3.5 text-muted-foreground" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="max-w-[260px]">
+                  {getCreditLineAmountHelpText(persistedPhaseFieldsLocked, creditLinePolicy)}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            <FormControl>
+              <CreditLineAmountInput
+                value={field.value}
+                onChange={field.onChange}
+                currency={selectedCurrency}
+                disabled={isCreditLinePolicyDisabled || creditLinePolicy === "uncapped"}
+              />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    </div>
+  )
+}
+
+function TimingAndTrialFields<TFieldValues extends SubscriptionPhaseFieldValues>({
+  form,
+  isScheduleMode,
+  persistedPhaseFieldsLocked,
+  isReadOnlyMode,
+  hasSelectedPlanVersion,
+  trialUnitLabel,
+  whenToChangeOptions,
+}: {
+  form: UseFormReturn<TFieldValues>
+  isScheduleMode: boolean
+  persistedPhaseFieldsLocked: boolean
+  isReadOnlyMode: boolean
+  hasSelectedPlanVersion: boolean
+  trialUnitLabel: string
+  whenToChangeOptions: WhenToChangeOption[]
+}) {
+  return (
+    <div className="flex flex-col items-center justify-start gap-4 lg:flex-row">
+      {isScheduleMode ? (
         <FormField
           control={form.control}
-          name="creditLinePolicy"
+          name={"whenToChange" as FieldPath<TFieldValues>}
           render={({ field }) => (
             <FormItem className="flex w-full flex-col">
               <div className="flex items-center gap-1">
-                <FormLabel>Usage credit policy</FormLabel>
+                <FormLabel>When to change</FormLabel>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <HelpCircle className="size-3.5 text-muted-foreground" />
                   </TooltipTrigger>
                   <TooltipContent side="right" className="max-w-[260px]">
-                    Capped reserves a finite usage runway. Uncapped lets priced usage continue and
-                    invoice at period end.
+                    Choose when the new phase should become active.
                   </TooltipContent>
                 </Tooltip>
               </div>
               <Select
-                onValueChange={(value) => {
-                  field.onChange(value)
-                  if (value === "uncapped") {
-                    form.setValue("creditLineAmount", null)
-                  }
-                }}
-                value={field.value ?? "uncapped"}
-                disabled={isCreditLinePolicyDisabled}
+                onValueChange={field.onChange}
+                value={(field.value as string | undefined) ?? "end_of_cycle"}
               >
                 <FormControl>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select usage credit policy" />
+                    <SelectValue placeholder="Select timing" />
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  <SelectItem value="capped">Capped</SelectItem>
-                  <SelectItem value="uncapped">Uncapped</SelectItem>
+                  {whenToChangeOptions.map((type) => (
+                    <SelectItem key={type.key} value={type.key} description={type.label}>
+                      {type.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <FormMessage />
             </FormItem>
           )}
         />
-
-        <FormField
-          control={form.control}
-          name="creditLineAmount"
-          render={({ field }) => (
-            <FormItem className="flex w-full flex-col">
-              <div className="flex items-center gap-1">
-                <FormLabel>Usage credit amount</FormLabel>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <HelpCircle className="size-3.5 text-muted-foreground" />
-                  </TooltipTrigger>
-                  <TooltipContent side="right" className="max-w-[260px]">
-                    {getCreditLineAmountHelpText(persistedPhaseFieldsLocked, creditLinePolicy)}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              <FormControl>
-                <CreditLineAmountInput
-                  value={field.value}
-                  onChange={field.onChange}
-                  currency={selectedCurrency}
-                  disabled={isCreditLinePolicyDisabled || creditLinePolicy === "uncapped"}
-                />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-      </div>
-
-      <div className="flex flex-col items-center justify-start gap-4 lg:flex-row">
-        {isScheduleMode ? (
-          <FormField
-            control={form.control}
-            name={"whenToChange"}
-            render={({ field }) => (
-              <FormItem className="flex w-full flex-col">
-                <div className="flex items-center gap-1">
-                  <FormLabel>When to change</FormLabel>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="size-3.5 text-muted-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-[260px]">
-                      Choose when the new phase should become active.
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <Select onValueChange={field.onChange} value={field.value ?? "end_of_cycle"}>
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select timing" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    {whenToChangeOptions.map((type) => (
-                      <SelectItem key={type.key} value={type.key} description={type.label}>
-                        {type.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        ) : (
-          <DurationFormField
-            form={form}
-            startDisabled={persistedPhaseFieldsLocked || isReadOnlyMode}
-            endDisabled={isReadOnlyMode}
-            className="w-full"
-          />
-        )}
-
-        <TrialUnitsFormField
+      ) : (
+        <DurationFormField
           form={form}
-          isDisabled={persistedPhaseFieldsLocked || isReadOnlyMode || !hasSelectedPlanVersion}
+          startDisabled={persistedPhaseFieldsLocked || isReadOnlyMode}
+          endDisabled={isReadOnlyMode}
           className="w-full"
-          unitLabel={trialUnitLabel}
-        />
-      </div>
-
-      {paymentProviderValue && paymentMethodRequired && (
-        <PaymentMethodsFormField
-          form={form}
-          withSeparator
-          isDisabled={isReadOnlyMode}
-          paymentProvider={paymentProviderValue}
-          paymentProviderRequired={paymentMethodRequired}
         />
       )}
 
-        <ConfigItemsFormField
-          form={form}
-          withSeparator
-          isDisabled={persistedPhaseFieldsLocked || isReadOnlyMode}
-          planVersions={planVersionOptions}
-          isLoading={isLoading}
-          withFeatureDetails
-        />
-
-      {!isReadOnlyMode && (
-        <div className="mt-8 flex justify-end gap-4">
-          <SubmitButton
-            onClick={onSubmit}
-            isSubmitting={formStateSubmitting}
-            isDisabled={formStateSubmitting}
-            label={
-              isScheduleMode
-                ? whenToChange === "immediately"
-                  ? "Change now"
-                  : "Add phase"
-                : editMode
-                  ? "Update"
-                  : "Create"
-            }
-            withConfirmation={isScheduleMode}
-            confirmationMessage="Are you sure you want to add this phase? The current phase will be closed according to the selected timing."
-          />
-        </div>
-      )}
-    </form>
+      <TrialUnitsFormField
+        form={form}
+        isDisabled={persistedPhaseFieldsLocked || isReadOnlyMode || !hasSelectedPlanVersion}
+        className="w-full"
+        unitLabel={trialUnitLabel}
+      />
+    </div>
   )
+}
+
+function PaymentMethodSection<TFieldValues extends SubscriptionPhaseFieldValues>({
+  form,
+  isReadOnlyMode,
+  paymentMethodRequired,
+  paymentProvider,
+}: {
+  form: UseFormReturn<TFieldValues>
+  isReadOnlyMode: boolean
+  paymentMethodRequired?: boolean
+  paymentProvider?: PaymentProvider
+}) {
+  if (!paymentProvider || !paymentMethodRequired) {
+    return null
+  }
+
+  return (
+    <PaymentMethodsFormField
+      form={form}
+      withSeparator
+      isDisabled={isReadOnlyMode}
+      paymentProvider={paymentProvider}
+      paymentProviderRequired={paymentMethodRequired}
+    />
+  )
+}
+
+function ConfigItemsSection<TFieldValues extends SubscriptionPhaseFieldValues>({
+  form,
+  persistedPhaseFieldsLocked,
+  isReadOnlyMode,
+  planVersionOptions,
+  isLoading,
+}: {
+  form: UseFormReturn<TFieldValues>
+  persistedPhaseFieldsLocked: boolean
+  isReadOnlyMode: boolean
+  planVersionOptions: PlanVersionOptions
+  isLoading?: boolean
+}) {
+  return (
+    <ConfigItemsFormField
+      form={form}
+      withSeparator
+      isDisabled={persistedPhaseFieldsLocked || isReadOnlyMode}
+      planVersions={planVersionOptions}
+      isLoading={isLoading}
+      withFeatureDetails
+    />
+  )
+}
+
+function SubscriptionPhaseFormActions({
+  isReadOnlyMode,
+  isSubmitting,
+  isScheduleMode,
+  editMode,
+  whenToChange,
+  onSubmit,
+}: {
+  isReadOnlyMode: boolean
+  isSubmitting: boolean
+  isScheduleMode: boolean
+  editMode: boolean
+  whenToChange?: string
+  onSubmit: () => void
+}) {
+  if (isReadOnlyMode) {
+    return null
+  }
+
+  return (
+    <div className="mt-8 flex justify-end gap-4">
+      <SubmitButton
+        onClick={onSubmit}
+        isSubmitting={isSubmitting}
+        isDisabled={isSubmitting}
+        label={getSubmitLabel({ isScheduleMode, whenToChange, editMode })}
+        withConfirmation={isScheduleMode}
+        confirmationMessage="Are you sure you want to add this phase? The current phase will be closed according to the selected timing."
+      />
+    </div>
+  )
+}
+
+function getSubmitLabel({
+  isScheduleMode,
+  whenToChange,
+  editMode,
+}: {
+  isScheduleMode: boolean
+  whenToChange?: string
+  editMode: boolean
+}) {
+  if (isScheduleMode) {
+    return whenToChange === "immediately" ? "Change now" : "Add phase"
+  }
+
+  return editMode ? "Update" : "Create"
 }
 
 function CreditLineAmountInput({
@@ -552,7 +671,10 @@ function CreditLineAmountInput({
   )
 }
 
-function getCreditLineAmountHelpText(fieldsLocked: boolean, creditLinePolicy: unknown): string {
+function getCreditLineAmountHelpText(
+  fieldsLocked: boolean,
+  creditLinePolicy: CreditLinePolicy | undefined
+): string {
   if (fieldsLocked) {
     return "Saved phases keep their original usage credit policy."
   }

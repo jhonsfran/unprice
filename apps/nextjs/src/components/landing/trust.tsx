@@ -46,9 +46,9 @@ const objections = [
       "Gateways cap provider spend. Unprice governs what your customer is allowed to spend and connects that decision to invoice evidence.",
   },
   {
-    question: "Is alpha safe enough for money logic?",
+    question: "Is it safe enough for money logic?",
     answer:
-      "Do not trust it all at once. Read the source, run one request path in shadow, prove it on Sandbox, then enforce only when the evidence matches.",
+      "Do not adopt it all at once. Read the source, run one request path in shadow, prove it on Sandbox, then enforce only when the evidence matches.",
   },
 ]
 

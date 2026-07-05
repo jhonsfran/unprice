@@ -257,8 +257,8 @@ money logic lives) and signals confidence by inviting disqualification.
 Hormozi type: **risk removal by sequencing** — observe → simulate → enforce, with the buyer in control
 at every step.
 
-> Honesty note: Unprice is in **alpha**. Frame this as a design-partner advantage ("shape the runtime
-> while the core is still being shaped"), not as a hidden risk. The open core *is* the safety net.
+> Honesty note: Do not sell trust as a promise. Sell the sequence: inspect the open core, run one
+> request path in shadow, prove it on Sandbox, then enforce when the evidence matches.
 
 ---
 
@@ -279,10 +279,10 @@ No countdown timers. Urgency comes from the buyer's own traffic and from genuine
 > today; the invoice that explains it is weeks away. That gap is where margin leaks, trust burns, and
 > engineering turns into invoice support.
 
-**Design-partner window (true scarcity, used honestly):**
+**Implementation-partner window (true scarcity, used honestly):**
 
-> The core is open and still being shaped. Early teams get to influence the runtime money path while
-> it is still small — a window that closes as the surface stabilizes.
+> The core is open and the runtime money path is focused. Teams implementing real paid actions can
+> still influence the product surface while the system is small enough for direct collaboration.
 
 ---
 
@@ -301,7 +301,7 @@ No countdown timers. Urgency comes from the buyer's own traffic and from genuine
 | "Will switching disrupt my current billing logic?" | No — adopt it in shadow. `access.check` is read-only and `usage.record` is non-blocking, so you run Unprice's decisions next to your existing stack and provider, compare, and only cut over to enforcement (`usage.consume` / `runs`) when you trust it. |
 | "What's the difference between record, consume, and runs?" | `usage.record` reports usage asynchronously and never blocks (usage can exceed funds). `usage.consume` validates synchronously and blocks when funds/limit run out. `runs.*` reserves a budget envelope *before* a multi-step workload runs so it cannot overspend. Lead with the operation that matches the paid action: `access.check`, `consume`, or `runs`; record is for metering and evidence. |
 | "Is this an AI agent platform?" | No. Budgeted runs are generic workload labels. Your app still owns prompts, tools, jobs, traces, and execution. Unprice owns the budget, the credit reservation, and the evidence. |
-| "Is it safe enough for money decisions? It's alpha." | The money-path core is open source — audit it before you depend on it. Start with one request path, prove it, then expand. The open core is the guarantee, not a promise to trust. |
+| "Is it safe enough for money decisions?" | The money-path core is open source — audit it before you depend on it. Start with one request path, prove it in shadow and Sandbox, then expand. The adoption sequence is the guarantee, not a promise to trust. |
 | "My pricing is complex — hybrid subscription + usage + credits." | That is the design center: flat, tiered, package, usage, credit-based, and hybrid share one mental model; credits stay distinct from entitlement grants, and plan versions keep experiments contained. |
 | "What if I outgrow it / want to leave?" | You own the code and the data under AGPL-3.0. Version plans and migrate customers without rewriting product code. No lock-in by construction. |
 

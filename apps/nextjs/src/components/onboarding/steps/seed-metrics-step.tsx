@@ -75,24 +75,23 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
 
   const markSeedFailed = useCallback(
     async (message: string) => {
-    setProgress({
-      apikey: "error",
-      customer: "error",
-      subscription: "error",
-      usage: "error",
-      verification: "error",
-    })
-    setErrorMessage(message)
-    await updateContext({
-      flowData: {
-        seededMetrics: false,
-        seedMetricsError: message,
-      },
-    })
+      setProgress({
+        apikey: "error",
+        customer: "error",
+        subscription: "error",
+        usage: "error",
+        verification: "error",
+      })
+      setErrorMessage(message)
+      await updateContext({
+        flowData: {
+          seededMetrics: false,
+          seedMetricsError: message,
+        },
+      })
     },
     [updateContext]
   )
-  }
 
   const runSeed = useCallback(async () => {
     resetState()
@@ -169,7 +168,7 @@ export function SeedMetricsStep({ className }: React.ComponentProps<"div"> & Ste
           <CardTitle className="text-base">Evidence path</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          {steps.map((step) => {
+          {SEED_STEPS.map((step) => {
             const status = progress[step.key]
             return (
               <div key={step.key} className="flex items-center justify-between gap-4">

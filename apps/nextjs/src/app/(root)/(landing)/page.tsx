@@ -29,8 +29,8 @@ export default function Home() {
         <OfferSection />
         <TrustSection />
         <PricingHero
-          headline="Click until the budget blocks the request."
-          description="This live model shows the moment Unprice stops over-budget work before it runs and keeps the response evidence visible."
+          headline="Watch paid work stop before it creates cost."
+          description="Click a paid action against the plan. The model shows the allow/deny decision, remaining budget, and invoice evidence from the same money path."
           docsLinkText="Read the Docs"
         />
         <Features />

@@ -96,4 +96,5 @@ Unprice is built for performance and scale:
 
 ---
 
-*Unprice is currently in Alpha. We would love your feedback and feature suggestions.*
+*Unprice is open source. We welcome feedback, bug reports, and feature suggestions that make the
+customer money path clearer and safer to run.*

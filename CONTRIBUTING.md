@@ -3,9 +3,9 @@
 Unprice is the open-source customer money path for usage-based SaaS: authorize customer spend in
 the request path, explain it on the invoice, and own the money logic in open source.
 
-The project is in **alpha**. That is the best time to contribute: the runtime money path is still
-being shaped, and early contributors influence it while it is small. Bug reports, failing test
-cases, docs fixes, and integration feedback are as valuable as code.
+The project is open to focused contributions around the runtime money path. Bug reports, failing
+test cases, docs fixes, and integration feedback are as valuable as code because they improve the
+request-to-invoice path teams depend on.
 
 ## Ways To Contribute
 

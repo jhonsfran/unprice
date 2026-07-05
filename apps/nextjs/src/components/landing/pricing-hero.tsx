@@ -4,7 +4,9 @@ import { cn } from "@unprice/ui/utils"
 import { m } from "framer-motion"
 import {
   ArrowRight,
+  Ban,
   Check,
+  CheckCircle2,
   ChevronUp,
   CreditCard,
   FileText,
@@ -12,6 +14,7 @@ import {
   Receipt,
   RotateCcw,
   Settings,
+  ShieldCheck,
   X,
 } from "lucide-react"
 import type React from "react"
@@ -74,6 +77,37 @@ export function calculateFeatureCost(
   }
 
   return cost * effectiveMultiplier
+}
+
+const DEMO_PLAN_VERSION = "pro@v3"
+const DEMO_CUSTOMER = "acme-corp"
+
+function getRuntimeCall(feature: Feature) {
+  if (feature.id === "compute_min") return "runs.start"
+  if (feature.type === "flat") return "access.check"
+  return "usage.consume"
+}
+
+function getFeaturePricingLabel(feature: Feature) {
+  if (feature.type === "usage") return `$${feature.rate.toFixed(2)} / ${feature.unit}`
+  if (feature.type === "flat") return `$${feature.rate.toFixed(2)} fixed`
+  return "tiered pricing"
+}
+
+function getRemainingUsage(feature: Feature) {
+  return Math.max(0, feature.config.limit - feature.usage)
+}
+
+function getEvidenceTrail(feature: Feature) {
+  return [
+    { label: "Customer", value: DEMO_CUSTOMER },
+    { label: "Plan version", value: DEMO_PLAN_VERSION },
+    { label: "Pricing rule", value: getFeaturePricingLabel(feature) },
+    {
+      label: "Guardrail",
+      value: `${feature.config.limitType} limit · ${feature.config.limit} ${feature.unit}`,
+    },
+  ]
 }
 
 export interface PricingHeroProps {
@@ -246,7 +280,7 @@ function ParticleEffect({ particles }: { particles: Particle[] }) {
 }
 
 // ============================================
-// DASHBOARD PANEL (Per-feature config + Invoice button)
+// PLAN GUARDRAILS PANEL (Per-feature limits + invoice evidence button)
 // ============================================
 
 interface DashboardPanelProps {
@@ -292,7 +326,7 @@ function DashboardPanel({
         <div className="flex items-center gap-1.5">
           <Settings className="h-3 w-3 text-background-text" />
           <span className="font-bold text-[10px] text-background-textContrast uppercase tracking-widest">
-            Configuration
+            Plan guardrails
           </span>
         </div>
         <button
@@ -309,7 +343,7 @@ function DashboardPanel({
       <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto pr-1">
         <div className="mb-2 flex items-center justify-between px-0.5">
           <h3 className="font-bold text-[9px] text-background-text uppercase tracking-widest">
-            Features
+            Money path rules
           </h3>
           <button
             type="button"
@@ -497,7 +531,7 @@ function DashboardPanel({
           className="flex w-full items-center justify-center gap-2 rounded-md bg-primary py-2 font-bold font-mono text-[11px] text-primary-foreground shadow-sm transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Receipt className="h-3.5 w-3.5" />
-          Generate Invoice
+          Preview invoice evidence
         </button>
       </div>
     </div>
@@ -505,7 +539,7 @@ function DashboardPanel({
 }
 
 // ============================================
-// LIVE RESPONSE (richer JSON with breakdown)
+// DECISION PANEL (curated response + invoice evidence)
 // ============================================
 
 interface LiveResponseProps {
@@ -513,7 +547,6 @@ interface LiveResponseProps {
   activeFeatureId: string | null
   discountActive: boolean
   discountPercentage: number
-  latency: number | null
   limitedFeature: Feature | null
   isOpen: boolean
   onClose: () => void
@@ -712,11 +745,11 @@ function PricingPanel({ features, isOpen, onClose }: PricingPanelProps) {
         type="button"
         className="w-full rounded-lg bg-primary py-2.5 font-bold text-primary-foreground text-xs transition-opacity hover:opacity-90"
       >
-        Get Started with Pro
+        Start with one paid action
       </button>
 
       <p className="mt-3 text-center font-mono text-[9px] text-background-text">
-        No credit card required for 14 days
+        Sandbox first; connect your own Stripe when the path is proven.
       </p>
     </div>
   )
@@ -727,141 +760,201 @@ function LiveResponse({
   activeFeatureId,
   discountActive,
   discountPercentage,
-  latency,
   limitedFeature,
   isOpen,
   onClose,
   flashError,
 }: LiveResponseProps) {
   const activeFeature = features.find((f) => f.id === activeFeatureId)
+  const limitedFeatureState = limitedFeature
+    ? (features.find((feature) => feature.id === limitedFeature.id) ?? limitedFeature)
+    : null
+  const inspectedFeature = limitedFeatureState ?? activeFeature
 
   if (!isOpen) return null
 
-  // Show limit response when a feature is limited
-  if (limitedFeature) {
-    const isHard = limitedFeature.config.limitType === "hard"
-
-    return (
-      <div
-        className={cn(
-          "h-full rounded-lg border bg-background-base p-4 font-mono text-xs transition-all duration-100",
-          flashError
-            ? isHard
-              ? "border-danger-solid bg-danger-bgActive"
-              : "border-warning-solid bg-warning-bgActive"
-            : isHard
-              ? "border-danger-border"
-              : "border-warning-border"
-        )}
-      >
-        <div
-          className={cn(
-            "mb-3 flex items-center justify-between border-b pb-2",
-            isHard ? "border-danger-line" : "border-warning-line"
-          )}
-        >
-          <span
-            className={cn(
-              "font-bold text-[10px] uppercase tracking-wider",
-              isHard ? "text-danger-text" : "text-warning-text"
-            )}
-          >
-            {isHard ? "HTTP 429 Too Many Requests" : "HTTP 200 Warning"}
-          </span>
-          <div className="flex items-center gap-2">
-            {latency !== null && (
-              <span
-                className={cn("text-[10px]", isHard ? "text-danger-text" : "text-warning-text")}
-              >
-                {latency}ms
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-background-text hover:text-background-textContrast"
-              aria-label="Close"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-        <pre className="overflow-auto bg-transparent text-[11px] text-background-text leading-relaxed">
-          <code>
-            {`{
-  "allowed": ${isHard ? "false" : "true"},
-  "deniedReason": ${isHard ? '"LIMIT_EXCEEDED"' : "null"},
-  "usage": `}
-            <AnimatedCounter value={limitedFeature.usage} />
-            {`,
-  "cost": `}
-            <AnimatedCounter
-              value={calculateFeatureCost(limitedFeature, discountActive, discountPercentage)}
-              decimals={2}
-            />
-            {`,
-  "rate": "$${limitedFeature.rate.toFixed(2)} / ${limitedFeature.unit}",
-  "limit": ${limitedFeature.config.limit},
-  "remaining": 0,
-  "message": "${isHard ? "Limit exceeded" : "Usage threshold reached"}"
-}`}
-          </code>
-        </pre>
-      </div>
-    )
-  }
+  const isDenied = limitedFeatureState?.config.limitType === "hard"
+  const isWarning = limitedFeatureState?.config.limitType === "soft"
+  const remaining = inspectedFeature ? getRemainingUsage(inspectedFeature) : 0
+  const runtimeCall = inspectedFeature ? getRuntimeCall(inspectedFeature) : null
+  const decision = isDenied ? "deny" : inspectedFeature ? "allow" : "waiting"
+  const decisionTitle = isDenied
+    ? "Denied before work runs."
+    : isWarning
+      ? "Allowed with a spend warning."
+      : inspectedFeature
+        ? "Allowed before work runs."
+        : "Click a paid action to see the decision."
+  const decisionBody = isDenied
+    ? `The next ${inspectedFeature?.displayName ?? "request"} would exceed the customer's hard guardrail. No work runs, and no rejected usage is added to the invoice.`
+    : isWarning
+      ? "The request crossed a soft guardrail. Unprice keeps it allowed, marks the threshold, and preserves invoice evidence for review."
+      : inspectedFeature
+        ? `${inspectedFeature.displayName} is inside ${DEMO_CUSTOMER}'s plan guardrail. The same money path can explain the invoice line later.`
+        : "This demo is not showing every API field. It shows the commercial answer a request path needs before cost is created."
+  const evidenceTrail = inspectedFeature ? getEvidenceTrail(inspectedFeature) : []
 
   return (
-    <div className="h-full rounded-lg border border-background-border bg-background-base p-4 font-mono text-xs">
-      <div className="mb-3 flex items-center justify-between border-background-line border-b pb-2">
-        <span className="text-[10px] text-background-text uppercase tracking-wider">
-          response.json
-        </span>
-        <div className="flex items-center gap-2">
-          {latency !== null && <span className="text-[10px] text-success-text">{latency}ms</span>}
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-background-text hover:text-background-textContrast"
-            aria-label="Close"
+    <div
+      className={cn(
+        "flex h-full flex-col rounded-lg border bg-background-base p-4 text-xs transition-all duration-150",
+        isDenied
+          ? flashError
+            ? "border-danger-solid bg-danger-bgActive"
+            : "border-danger-border"
+          : isWarning
+            ? flashError
+              ? "border-warning-solid bg-warning-bgActive"
+              : "border-warning-border"
+            : "border-background-border"
+      )}
+    >
+      <div className="mb-4 flex items-start justify-between border-background-line border-b pb-3">
+        <div className="flex flex-col gap-1">
+          <span className="font-mono text-[10px] text-background-text uppercase tracking-wider">
+            Decision trail
+          </span>
+          <span
+            className={cn(
+              "w-fit rounded border px-2 py-0.5 font-mono font-semibold text-[10px] uppercase",
+              isDenied
+                ? "border-danger-border bg-danger-bg text-danger-text"
+                : isWarning
+                  ? "border-warning-border bg-warning-bg text-warning-text"
+                  : inspectedFeature
+                    ? "border-success-border bg-success-bg text-success-text"
+                    : "border-background-border bg-background-bgSubtle text-background-text"
+            )}
           >
-            <X className="h-3.5 w-3.5" />
-          </button>
+            {decision}
+          </span>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-1 text-background-text transition-colors hover:bg-background-bgHover hover:text-background-textContrast"
+          aria-label="Close decision trail"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       </div>
-      <pre className="overflow-auto bg-transparent text-[11px] text-background-text leading-relaxed">
-        <code>
-          {!activeFeature ? (
-            `{
-  "status": "waiting_for_event",
-  "message": "Click a feature to report usage"
-}`
-          ) : (
-            <>
-              {`{
-  "allowed": true,
-  "usage": `}
-              <AnimatedCounter value={activeFeature.usage} />
-              {`,
-  "cost": `}
-              <AnimatedCounter
-                value={calculateFeatureCost(activeFeature, discountActive, discountPercentage)}
-                decimals={2}
-              />
-              {`,
-  "rate": "$${activeFeature.rate.toFixed(2)} / ${activeFeature.unit}",
-  "limit": ${activeFeature.config.limit},
-  "remaining": `}
-              <AnimatedCounter
-                value={Math.max(0, activeFeature.config.limit - activeFeature.usage)}
-              />
-              {`,
-  "message": "Usage reported successfully"
-}`}
-            </>
-          )}
-        </code>
-      </pre>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
+        <div className="flex gap-3">
+          <span
+            className={cn(
+              "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md",
+              isDenied
+                ? "bg-danger-solid text-white"
+                : isWarning
+                  ? "bg-warning-solid text-white"
+                  : inspectedFeature
+                    ? "bg-success-solid text-white"
+                    : "bg-background-bgHover text-background-textContrast"
+            )}
+          >
+            {isDenied ? (
+              <Ban className="size-4" aria-hidden />
+            ) : inspectedFeature ? (
+              <CheckCircle2 className="size-4" aria-hidden />
+            ) : (
+              <ShieldCheck className="size-4" aria-hidden />
+            )}
+          </span>
+          <div>
+            <h3 className="font-semibold text-background-textContrast text-base leading-6">
+              {decisionTitle}
+            </h3>
+            <p className="mt-1 text-background-text text-sm leading-6">{decisionBody}</p>
+          </div>
+        </div>
+
+        {inspectedFeature ? (
+          <>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="rounded-md border border-background-border bg-background-bgSubtle p-3">
+                <p className="font-mono text-[9px] text-background-text uppercase">Call</p>
+                <p className="mt-1 break-words font-mono text-[11px] text-background-textContrast">
+                  {runtimeCall}
+                </p>
+              </div>
+              <div className="rounded-md border border-background-border bg-background-bgSubtle p-3">
+                <p className="font-mono text-[9px] text-background-text uppercase">Remaining</p>
+                <p className="mt-1 font-mono text-[11px] text-background-textContrast">
+                  <AnimatedCounter value={remaining} /> {inspectedFeature.unit}
+                </p>
+              </div>
+              <div className="rounded-md border border-background-border bg-background-bgSubtle p-3">
+                <p className="font-mono text-[9px] text-background-text uppercase">Invoice</p>
+                <p className="mt-1 font-mono text-[11px] text-background-textContrast">
+                  {isDenied ? "no charge" : "evidence ready"}
+                </p>
+              </div>
+            </div>
+
+            <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto rounded-md border border-background-border bg-background-bgSubtle p-3">
+              <p className="font-mono text-[10px] text-background-text uppercase tracking-wider">
+                Evidence kept with the decision
+              </p>
+              <div className="mt-3 space-y-2">
+                {evidenceTrail.map((item) => (
+                  <div key={item.label} className="flex items-start justify-between gap-4">
+                    <span className="text-background-text text-xs">{item.label}</span>
+                    <span className="max-w-[12rem] text-right font-mono text-[11px] text-background-textContrast">
+                      {item.value}
+                    </span>
+                  </div>
+                ))}
+                <div className="flex items-start justify-between gap-4 border-background-line border-t pt-2">
+                  <span className="text-background-text text-xs">Estimated accepted charge</span>
+                  <span className="font-mono text-[11px] text-background-textContrast">
+                    $
+                    <AnimatedCounter
+                      value={
+                        isDenied
+                          ? 0
+                          : calculateFeatureCost(
+                              inspectedFeature,
+                              discountActive,
+                              discountPercentage
+                            )
+                      }
+                      decimals={2}
+                    />
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-background-border bg-background-base p-3 font-mono text-[11px] text-background-text leading-5">
+              <span className="text-background-textContrast">decision</span>
+              {` = ${decision}`}
+              <br />
+              <span className="text-background-textContrast">reason</span>
+              {` = ${isDenied ? "LIMIT_EXCEEDED" : isWarning ? "SOFT_LIMIT_REACHED" : "within_budget"}`}
+              <br />
+              <span className="text-background-textContrast">next</span>
+              {` = ${isDenied ? "do not run work" : "run work, keep evidence"}`}
+            </div>
+          </>
+        ) : (
+          <div className="grid gap-3">
+            {[
+              "Resolve the customer's plan version.",
+              "Check entitlement, budget, credits, and meter rule.",
+              "Allow, warn, or deny before the paid work creates cost.",
+            ].map((item) => (
+              <div
+                key={item}
+                className="flex items-start gap-3 rounded-md border border-background-border bg-background-bgSubtle p-3"
+              >
+                <Check className="mt-0.5 size-4 shrink-0 text-success-text" aria-hidden />
+                <p className="text-background-text text-sm leading-6">{item}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -1019,8 +1112,8 @@ function FeatureRow({
 // ============================================
 
 export function PricingHero({
-  headline = "Put a budget around the expensive action.",
-  description = "Report usage and watch over-budget calls get blocked before they run.",
+  headline = "Watch paid work stop before it creates cost.",
+  description = "Click a paid action against the plan. The model shows the allow/deny decision, remaining budget, and invoice evidence from the same money path.",
   docsLinkText = "Read the Docs",
   accentColor,
   discountThreshold = 10,
@@ -1032,7 +1125,6 @@ export function PricingHero({
   const [particles, setParticles] = useState<Particle[]>([])
   const [pressedFeature, setPressedFeature] = useState<string | null>(null)
   const [activeFeature, setActiveFeature] = useState<string | null>(null)
-  const [latency, setLatency] = useState<number | null>(null)
   const [limitedFeatures, setLimitedFeatures] = useState<Set<string>>(new Set())
   const [currentLimitedFeature, setCurrentLimitedFeature] = useState<Feature | null>(null)
   const [shake, setShake] = useState(false)
@@ -1050,11 +1142,15 @@ export function PricingHero({
   )
 
   const anyLimited = limitedFeatures.size > 0
-  const dynamicHeadline = anyLimited ? "Limit Reached." : headline
+  const dynamicHeadline = anyLimited
+    ? currentLimitedFeature?.config.limitType === "hard"
+      ? "The request is blocked before work runs."
+      : "The spend warning appears before invoice time."
+    : headline
   const dynamicDescription = anyLimited
     ? currentLimitedFeature?.config.limitType === "hard"
-      ? `Hard limit of ${currentLimitedFeature.config.limit} ${currentLimitedFeature.unit} reached.`
-      : `Soft limit warning at ${currentLimitedFeature?.config.limit} ${currentLimitedFeature?.unit} triggered.`
+      ? `The hard guardrail stopped ${currentLimitedFeature.displayName} at ${currentLimitedFeature.config.limit} ${currentLimitedFeature.unit}.`
+      : `The soft guardrail flagged ${currentLimitedFeature?.displayName} at ${currentLimitedFeature?.config.limit} ${currentLimitedFeature?.unit}.`
     : description
 
   const handleFeatureConfigChange = useCallback(
@@ -1098,9 +1194,8 @@ export function PricingHero({
         // Feature limit reached
         setLimitedFeatures((prev) => new Set(prev).add(featureId))
         setCurrentLimitedFeature(feature)
-        setLatency(Math.floor(Math.random() * 10) + 3)
         setShake(true)
-        // Bug fix: Close dashboard and force open response when limit is reached
+        // Close guardrail editing and force open the decision trail when a limit is reached.
         setActivePanel("response")
         // Flash the error/warning
         setFlashError(true)
@@ -1128,9 +1223,6 @@ export function PricingHero({
           setCurrentLimitedFeature(null)
         }
       }
-
-      const simulatedLatency = Math.floor(Math.random() * 24) + 8
-      setLatency(simulatedLatency)
 
       setFeatures((prev) =>
         prev.map((f) => (f.id === featureId ? { ...f, usage: f.usage + 1 } : f))
@@ -1184,7 +1276,6 @@ export function PricingHero({
     setCurrentLimitedFeature(null)
     setFeatures(DEFAULT_FEATURES.map((f) => ({ ...f, usage: f.isBase ? 1 : 0 })))
     setTotalClicks(0)
-    setLatency(null)
     setActiveFeature(null)
   }, [])
 
@@ -1380,9 +1471,9 @@ export function PricingHero({
             <div className="border-background-border border-t p-4">
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <h3 className="font-semibold text-foreground text-sm">Total</h3>
+                  <h3 className="font-semibold text-foreground text-sm">Accepted spend</h3>
                   <p className="font-mono text-[10px] text-background-text">
-                    {totalClicks} events processed
+                    {totalClicks} paid actions accepted
                   </p>
                 </div>
                 <div className="text-right">
@@ -1401,8 +1492,8 @@ export function PricingHero({
               <div className="flex items-center justify-between font-mono text-[10px] text-background-text">
                 <span className={discountActive ? "text-success-text" : ""}>
                   {discountActive
-                    ? `${discountPercentage}% volume discount active`
-                    : `${Math.max(0, discountThreshold - totalClicks)} events to unlock discount`}
+                    ? `${discountPercentage}% volume pricing rule active`
+                    : `${Math.max(0, discountThreshold - totalClicks)} accepted actions until volume pricing`}
                 </span>
               </div>
             </div>
@@ -1432,7 +1523,7 @@ export function PricingHero({
                     ? "border-primary-border bg-primary-bg text-primary-text"
                     : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
                 )}
-                aria-label="Toggle response"
+                aria-label="Toggle decision trail"
                 aria-expanded={activePanel === "response"}
               >
                 <FileText className="h-4 w-4" />
@@ -1490,7 +1581,6 @@ export function PricingHero({
                 activeFeatureId={activeFeature}
                 discountActive={discountActive}
                 discountPercentage={discountPercentage}
-                latency={latency}
                 limitedFeature={currentLimitedFeature}
                 isOpen={true}
                 onClose={() => setActivePanel(null)}
