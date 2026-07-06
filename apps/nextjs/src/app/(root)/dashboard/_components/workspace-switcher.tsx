@@ -87,7 +87,9 @@ export function WorkspaceSwitcher({
               })}
               variant={activeWorkspace.isMain ? "destructive" : "outline"}
             >
-              {activeWorkspace.isInternal ? `${activePlanSlug} - INTERNAL` : activePlanSlug}
+              {activeWorkspace.isInternal
+                ? `${activePlanSlug.toUpperCase()} - INTER.`
+                : activePlanSlug.toUpperCase()}
             </Badge>
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />

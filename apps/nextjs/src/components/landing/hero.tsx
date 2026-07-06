@@ -1,6 +1,5 @@
-import { APP_DOMAIN, DOCS_DOMAIN } from "@unprice/config"
+import { APP_DOMAIN } from "@unprice/config"
 import { buttonVariants } from "@unprice/ui/button"
-import { GitHub } from "@unprice/ui/icons"
 import { ArrowRight } from "lucide-react"
 import { Link } from "next-view-transitions"
 import Balancer from "react-wrap-balancer"
@@ -10,7 +9,12 @@ import { MoneyPath } from "./money-path"
 // outcomes. Copy on the left states the wedge; the money path on the right
 // shows it. The only motion is the request dot walking the path.
 
-const heroFacts = ["AGPL-3.0 core", "your own Stripe", "never in your funds flow"]
+const heroFacts = [
+  { label: "License", value: "AGPL-3.0 open source" },
+  { label: "Access", value: "Free during early access" },
+  { label: "Payments", value: "Your Stripe account" },
+  { label: "Custody", value: "Funds stay with you" },
+]
 
 export default function Hero() {
   return (
@@ -27,9 +31,10 @@ export default function Hero() {
             <Balancer>Authorize customer spend before paid work runs.</Balancer>
           </h1>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            Unprice is the open-source customer money path for usage-based SaaS. Keep plans
-            versioned, entitlements separate, customer budgets in the request path, and invoice
-            evidence tied to the same decision that allowed or denied the work.
+            Sell credits and usage-based plans without eating over-budget customer work. Unprice is
+            the open-source customer money path for usage-based SaaS: plans stay versioned,
+            entitlements separate, customer budgets in the request path, and invoice evidence tied
+            to the same decision that allowed or denied the work.
           </p>
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -40,38 +45,18 @@ export default function Hero() {
               Start with one paid action
               <ArrowRight aria-hidden className="size-3.5" />
             </Link>
-            <Link
-              href="https://github.com/jhonsfran1165/unprice"
-              target="_blank"
-              className={buttonVariants({ variant: "outline", className: "gap-2" })}
-            >
-              <GitHub aria-hidden className="size-4" />
-              Star on GitHub
-            </Link>
-            <Link
-              href={`${DOCS_DOMAIN}`}
-              target="_blank"
-              className={buttonVariants({ variant: "ghost" })}
-            >
-              Explore the SDK
-            </Link>
           </div>
 
-          <ul className="mt-10 flex flex-wrap items-center gap-x-3 gap-y-2 border-background-border border-t pt-4">
-            {heroFacts.map((fact, index) => (
-              <li
-                key={fact}
-                className="flex items-center gap-x-3 font-mono text-[11px] text-background-text"
-              >
-                {index > 0 && (
-                  <span aria-hidden className="text-background-border">
-                    ·
-                  </span>
-                )}
-                {fact}
-              </li>
+          <dl className="mt-10 grid w-full max-w-xl grid-cols-2 gap-x-6 gap-y-4 border-background-border border-t pt-5">
+            {heroFacts.map((fact) => (
+              <div key={fact.label} className="min-w-0">
+                <dt className="text-background-text text-xs leading-5">{fact.label}</dt>
+                <dd className="mt-0.5 font-medium text-background-textContrast text-sm leading-5">
+                  {fact.value}
+                </dd>
+              </div>
             ))}
-          </ul>
+          </dl>
         </div>
 
         <div className="rounded-lg border border-background-border bg-background-bgSubtle p-4 sm:p-6">

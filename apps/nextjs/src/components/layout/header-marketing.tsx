@@ -10,23 +10,32 @@ export default function HeaderMarketing() {
   return (
     <header
       className={cn(
-        "sticky top-0 z-40 flex h-16 items-center border-b bg-background-base px-2 shadow-sm backdrop-blur-[2px] sm:px-12"
+        "sticky top-0 z-40 flex h-16 items-center border-b bg-background-base px-4 shadow-sm backdrop-blur-[2px] sm:px-12"
       )}
     >
-      <div className="flex h-14 w-full items-center space-x-8 sm:justify-between sm:space-x-0">
-        <div className="flex items-center justify-start">
-          <Logo size="md" />
+      <div className="flex h-14 w-full items-center justify-between gap-3">
+        <div className="flex shrink-0 items-center justify-start">
+          <div className="hidden min-[430px]:block">
+            <Logo size="md" />
+          </div>
+          <div className="min-[430px]:hidden">
+            <Logo size="lg" variant="icon" />
+          </div>
         </div>
 
-        <div className="flex flex-1 items-center justify-end space-x-2">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           <MainNav isMarketing={true} />
-          <div className="ml-auto flex items-center pl-8">
+          <div className="flex shrink-0 items-center lg:pl-8">
             <Link
               href={`${APP_DOMAIN}`}
-              className={cn(buttonVariants({ variant: "primary" }), "border-primary-solid")}
+              className={buttonVariants({
+                variant: "primary",
+                className: "h-9 gap-1.5 whitespace-nowrap px-2.5 text-xs sm:px-3 sm:text-sm",
+              })}
             >
-              Start with one action
-              <ChevronRight data-icon="inline-end" />
+              <span className="sm:hidden">Start action</span>
+              <span className="hidden sm:inline">Start with one action</span>
+              <ChevronRight data-icon="inline-end size-3.5" />
             </Link>
           </div>
         </div>

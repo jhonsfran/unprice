@@ -23,6 +23,7 @@
             "icon": "home",
             "root": "index",
             "pages": [
+              "concepts/how-unprice-works",
               {
                 "group": "Quickstart",
                 "pages": [

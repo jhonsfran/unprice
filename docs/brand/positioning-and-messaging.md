@@ -103,9 +103,13 @@ Authorize customer spend before paid work runs.
 
 ## Homepage Subheadline
 
-Unprice is the open-source customer money path for usage-based SaaS. Keep plans versioned,
-entitlements separate, customer budgets in the request path, and invoice evidence tied to the same
-decision that allowed or denied the work.
+Sell credits and usage-based plans without eating over-budget customer work. Unprice is the
+open-source customer money path for usage-based SaaS: plans stay versioned, entitlements separate,
+customer budgets in the request path, and invoice evidence tied to the same decision that allowed
+or denied the work.
+
+The subheadline leads with the loss-framed one-liner (the dream outcome in the buyer's money terms)
+and keeps the canonical enumeration second.
 
 Supporting capability line (secondary, not the hero): meter events, enforce entitlements, reserve
 customer credits, cap customer and workload spend, price flat, tiered, package, and usage features,
@@ -373,7 +377,10 @@ pricing page as its best demo of explainable, usage-aware pricing.
   billing volume (price flat or credit-based against the percentage), Lago gates needed features
   behind roughly $1,500/month (price under that cliff), Autumn is free for builders (open-core
   cloud convenience is the answer). Even "early access, starts at $X" beats silence — a pricing
-  company with no public pricing undermines its own authority.
+  company with no public pricing undermines its own authority. Interim answer shipped on the
+  homepage (2026-07): self-host free under AGPL-3.0, cloud free during early access with no card
+  at signup, commercial license by contact. Replace with real tiers when they are defined; every
+  claim there must stay code-backed.
 - Validate the lead phrase ("authorize customer spend", "prove every charge", or "budget the paid
   action") with real customer interviews before scaling spend. Recruit with the buyer's own words
   ("can you check a balance or enforce a spend cap before the request runs today?"), not Unprice

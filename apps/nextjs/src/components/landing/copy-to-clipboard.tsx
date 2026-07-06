@@ -36,13 +36,13 @@ export default function CopyToClipboard({
       size={size}
       variant={variant}
       onClick={copyToClipboard}
-      className={cn("select-none backdrop-blur-xl", className)}
+      className={cn("select-none", className)}
       aria-label={copied ? "Copied code" : "Copy code"}
     >
       {!copied ? (
-        <CopyIcon aria-hidden="true" className="size-4" />
+        <CopyIcon aria-hidden="true" className="size-3.5" />
       ) : (
-        <CheckIcon aria-hidden="true" className="size-4" />
+        <CheckIcon aria-hidden="true" className="size-3.5 text-success-text" />
       )}
       {label ? <span>{copied ? "Copied" : label}</span> : null}
     </Button>

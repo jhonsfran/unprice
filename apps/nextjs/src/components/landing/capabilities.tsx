@@ -154,11 +154,12 @@ export function CapabilitiesSection() {
           id="capabilities-title"
           className="mt-6 max-w-2xl font-primary font-semibold text-3xl text-background-textContrast tracking-tight sm:text-4xl"
         >
-          One runtime after the first action proves it.
+          One money path, shown as state.
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-          Everything below is the same money path the first paid action ran on — not separate
-          products. Plans, meters, budgets, wallets, and invoices stay separate but connected.
+          Plans, meters, budgets, wallets, and invoices are not separate products — they are
+          stations on one money path, separate but connected. Each capability below is real product
+          state, not a feature card.
         </p>
       </div>
 

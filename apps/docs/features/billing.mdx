@@ -11,8 +11,9 @@ replace your payment provider, tax engine, accounting system, or revenue-recogni
 Unprice owns the customer money path: plan versions, entitlements, usage, budgets, wallet credits,
 ledger captures, and invoice evidence. The payment provider still captures payment.
 
-Stripe is supported today. The provider model is designed to extend without rewriting the product
-request path.
+Stripe is the built-in production adapter today, and Sandbox is available for testing. The billing
+boundary is provider-interface based, so a self-hosted team can add another provider adapter without
+rewriting the product request path or moving pricing logic back into application code.
 
 ## 2. Invoice evidence
 

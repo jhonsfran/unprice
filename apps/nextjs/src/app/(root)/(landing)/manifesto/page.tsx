@@ -1,28 +1,34 @@
 import type { Metadata } from "next"
 import dynamic from "next/dynamic"
-import HeroManifest from "~/components/landing/hero-manifest"
 import { LazyMotionWrapper } from "~/components/landing/lazy-motion-wrapper"
+import ManifestoHero from "~/components/landing/manifesto-hero"
 
-const Belief = dynamic(() => import("~/components/landing/belief"))
-const PillarsPriceOps = dynamic(() => import("~/components/landing/pillarsAMI"))
-const MainfestoCopy = dynamic(() => import("~/components/landing/mainfesto-copy"))
+const MechanismSection = dynamic(() =>
+  import("~/components/landing/mechanism").then((mod) => mod.MechanismSection)
+)
+const ManifestoPriceOps = dynamic(() => import("~/components/landing/manifesto-priceops"))
+const CapabilitiesSection = dynamic(() =>
+  import("~/components/landing/capabilities").then((mod) => mod.CapabilitiesSection)
+)
+const ManifestoOwnership = dynamic(() => import("~/components/landing/manifesto-ownership"))
+const ManifestoBelief = dynamic(() => import("~/components/landing/manifesto-belief"))
 
 export const metadata: Metadata = {
   title: "Manifesto",
-  description: "Our vision for the future of pricing and revenue infrastructure.",
+  description:
+    "Pricing is a runtime decision. Why the customer money path belongs in the request path, in the open — and why it should be yours.",
 }
 
 export default function Manifesto() {
   return (
     <LazyMotionWrapper>
-      <main className="flex flex-col overflow-hidden pb-28">
-        <HeroManifest />
-
-        <div className="mx-auto flex w-full max-w-4xl flex-col overflow-hidden px-3">
-          <MainfestoCopy />
-          <PillarsPriceOps />
-          <Belief />
-        </div>
+      <main className="flex flex-col overflow-hidden">
+        <ManifestoHero />
+        <MechanismSection />
+        <ManifestoPriceOps />
+        <CapabilitiesSection />
+        <ManifestoOwnership />
+        <ManifestoBelief />
       </main>
     </LazyMotionWrapper>
   )

@@ -1,11 +1,28 @@
 "use client"
 
 import { API_DOMAIN } from "@unprice/config"
-import { BorderBeam } from "@unprice/ui/border-beam"
 import { Button } from "@unprice/ui/button"
 import { ScrollArea } from "@unprice/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@unprice/ui/tabs"
 import { cn } from "@unprice/ui/utils"
+import {
+  Activity,
+  ChartColumn,
+  CirclePlay,
+  CirclePlus,
+  CircleStop,
+  CreditCard,
+  Gauge,
+  Layers,
+  ListChecks,
+  type LucideIcon,
+  Receipt,
+  Repeat,
+  ShieldCheck,
+  UserPlus,
+  Wallet,
+  Zap,
+} from "lucide-react"
 import { useState } from "react"
 import { CodeEditor } from "./code-editor"
 import CopyToClipboard from "./copy-to-clipboard"
@@ -104,8 +121,9 @@ const unprice = new Unprice({
 const { result, error } = await unprice.customers.signUp({
   name: "Acme Inc.",
   email: "billing@acme.test",
-  creditLinePolicy: "capped",
-  creditLineAmountMinor: 10000,
+  // Optional: set a credit line to prevent over-usage.
+  // creditLinePolicy: "capped",
+  // creditLineAmountMinor: 10000, // capped spending to $100 for the billing period.
   successUrl: "http://your-app.com/dashboard",
   cancelUrl: "http://your-app.com/failed",
 })
@@ -675,8 +693,26 @@ const methodLabels: Record<method, string> = {
   explainCharge: "Explain charge",
 }
 
+const methodIcons: Record<method, LucideIcon> = {
+  checkAccess: ShieldCheck,
+  recordUsage: Activity,
+  consumeUsage: Gauge,
+  signUpCustomer: UserPlus,
+  listEntitlements: ListChecks,
+  getWalletBalance: Wallet,
+  getSubscription: Repeat,
+  getUsage: ChartColumn,
+  getPaymentMethods: CreditCard,
+  createPaymentMethod: CirclePlus,
+  listPlanVersions: Layers,
+  startBudgetedRun: CirclePlay,
+  applyRunUsage: Zap,
+  endBudgetedRun: CircleStop,
+  explainCharge: Receipt,
+}
+
 const frameworkLabels: Record<Framework, string> = {
-  sdk: "SDK TypeScript",
+  sdk: "TypeScript SDK",
   fetch: "Fetch API",
   curl: "cURL",
 }
@@ -860,6 +896,7 @@ if (!result.allowed) {
 
 function buildCheckAccessFetchExample(params?: SDKExampleParams) {
   return `${buildFetchPreamble(params)}
+
 await fetch(baseUrl + "/v1/access/check", {
   method: "POST",
   headers: {
@@ -901,6 +938,7 @@ function buildRecordUsageFetchExample(params?: SDKExampleParams) {
   const usage = getUsageExample(params)
 
   return `${buildFetchPreamble(params)}
+
 await fetch(baseUrl + "/v1/usage/record", {
   method: "POST",
   headers: {
@@ -949,6 +987,7 @@ function buildConsumeUsageFetchExample(params?: SDKExampleParams) {
   const usage = getUsageExample(params)
 
   return `${buildFetchPreamble(params)}
+
 await fetch(baseUrl + "/v1/usage/consume", {
   method: "POST",
   headers: {
@@ -991,6 +1030,7 @@ function buildListPlanVersionsFetchExample(
   apiToken?: string
 ) {
   return `${buildFetchPreamble({ apiToken })}
+
 const response = await fetch(baseUrl + "/v1/plan-versions/list", {
   method: "POST",
   headers: {
@@ -1281,22 +1321,17 @@ export function SDKDemo({
   methods: methodsProp,
   exampleParams,
   frameworks = DEFAULT_FRAMEWORKS,
-  showBorderBeam = true,
-  presentation = "marketing",
 }: {
   className?: string
   defaultMethod?: method
   methods?: method[]
   exampleParams?: SDKExampleParams
   frameworks?: Framework[]
-  showBorderBeam?: boolean
-  presentation?: "marketing" | "panel"
 }) {
   const [activeFramework, setActiveFramework] = useState<Framework>(frameworks[0] ?? "sdk")
   const [activeMethod, setActiveMethod] = useState<method>(
     defaultMethod ?? methodsProp?.[0] ?? "checkAccess"
   )
-  const isPanel = presentation === "panel"
 
   let methods = methodsProp ?? (Object.keys(codeExamples.sdk) as method[])
 
@@ -1307,14 +1342,11 @@ export function SDKDemo({
   const code = getCodeExample(activeFramework, activeMethod, exampleParams)
   const displayCode = getDisplayCode(code, exampleParams)
   const language = activeFramework === "curl" ? "bash" : "typescript"
-  const curlTokenClassName = activeFramework === "curl" ? "!text-success" : undefined
 
   return (
     <div
       className={cn(
-        isPanel
-          ? "relative flex w-full flex-col overflow-hidden rounded-lg border border-background-border bg-background shadow-none"
-          : "relative mx-auto mt-12 flex w-full max-w-6xl flex-col items-center justify-center rounded-2xl border bg-background shadow-primary-line shadow-sm ring-1 ring-background-line [box-shadow:0_0_0_1px_rgba(0,0,0,.03),0_2px_4px_rgba(0,0,0,.05),0_12px_24px_rgba(0,0,0,.05)]",
+        "relative flex w-full flex-col overflow-hidden rounded-lg border border-background-border bg-background-base",
         className
       )}
     >
@@ -1323,113 +1355,67 @@ export function SDKDemo({
         onValueChange={(value) => setActiveFramework(value as Framework)}
         className="w-full"
       >
-        <div
-          className={cn(
-            "border-background-border border-b",
-            isPanel
-              ? "flex h-12 items-stretch justify-between gap-3 bg-background-bgSubtle px-3"
-              : "pt-4"
-          )}
-        >
-          <TabsList variant="line" className={cn(isPanel && "h-full border-b-0")}>
+        <div className="flex h-12 items-stretch justify-between gap-3 border-background-border border-b bg-background-bgSubtle px-3">
+          <TabsList variant="line" className="h-full border-b-0">
             {frameworks.map((framework) => (
               <TabsTrigger
                 key={framework}
                 value={framework}
-                className={cn(
-                  isPanel ? "flex h-full items-center px-2.5 pt-0 pb-0 text-xs" : "px-5"
-                )}
+                className="flex h-full items-center px-2.5 pt-0 pb-0 text-xs"
               >
                 {frameworkLabels[framework]}
               </TabsTrigger>
             ))}
           </TabsList>
-          {isPanel && (
-            <CopyToClipboard
-              code={code}
-              label="Copy"
-              variant="outline"
-              size="sm"
-              className="h-7 shrink-0 gap-1.5 self-center border-background-border bg-background-base px-2 font-normal text-background-text text-xs shadow-none hover:bg-background-bgHover"
-            />
-          )}
+          <CopyToClipboard
+            code={code}
+            label="Copy"
+            variant="ghost"
+            size="sm"
+            className="h-7 min-w-[4.75rem] shrink-0 gap-1.5 self-center px-2 font-normal text-xs"
+          />
         </div>
         <TabsContent value={activeFramework} className="mt-0">
           <div className="flex flex-col md:flex-row">
             {methods.length > 1 && (
-              <div
-                className={cn(
-                  "w-full border-b md:border-r md:border-b-0",
-                  isPanel ? "bg-background-bgSubtle/60 md:w-48" : "md:w-52"
-                )}
-              >
-                <div
-                  className={cn(
-                    "hide-scrollbar flex gap-2 overflow-y-auto px-2 py-0 md:flex-col",
-                    isPanel ? "md:py-2" : "md:py-4"
-                  )}
-                >
-                  {methods.map((methodKey) => (
-                    <Button
-                      key={methodKey}
-                      variant="link"
-                      onClick={() => setActiveMethod(methodKey)}
-                      className={cn(
-                        "flex flex-col items-start whitespace-nowrap text-left transition-colors",
-                        isPanel && "h-8 rounded px-2 text-xs hover:bg-background-bgHover",
-                        activeMethod === methodKey
-                          ? "text-background-textContrast"
-                          : "text-background-text"
-                      )}
-                    >
-                      {methodLabels[methodKey]}
-                    </Button>
-                  ))}
+              <div className="w-full border-background-border border-b bg-background-bgSubtle md:w-48 md:border-r md:border-b-0">
+                <div className="hide-scrollbar flex gap-1 overflow-y-auto px-2 py-2 md:flex-col">
+                  {methods.map((methodKey) => {
+                    const isActive = activeMethod === methodKey
+                    const MethodIcon = methodIcons[methodKey]
+                    return (
+                      <Button
+                        key={methodKey}
+                        variant="ghost"
+                        aria-pressed={isActive}
+                        onClick={() => setActiveMethod(methodKey)}
+                        className={cn(
+                          "h-8 shrink-0 justify-start gap-2 whitespace-nowrap rounded-md px-2 text-left text-xs transition-colors",
+                          isActive
+                            ? "bg-background-bgActive font-medium text-background-textContrast"
+                            : "font-normal"
+                        )}
+                      >
+                        <MethodIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                        {methodLabels[methodKey]}
+                      </Button>
+                    )
+                  })}
                 </div>
               </div>
             )}
 
-            <div
-              className={cn(
-                isPanel
-                  ? "relative flex h-full w-full overflow-hidden bg-background-base font-mono text-[13px] text-background-text leading-6"
-                  : "relative flex h-full w-full overflow-hidden rounded-b-3xl rounded-br-3xl bg-background-base font-mono text-background-text text-sm md:rounded-none",
-                !isPanel && {
-                  "md:rounded-br-3xl": methods.length > 1,
-                  "md:rounded-b-3xl": methods.length === 1,
-                }
-              )}
-            >
-              {!isPanel && (
-                <div className="absolute top-3 right-3 z-10">
-                  <CopyToClipboard code={code} />
-                </div>
-              )}
+            <div className="relative flex h-full w-full overflow-hidden bg-background-base">
               <ScrollArea
                 hideScrollBar={true}
-                className={cn(
-                  "hide-scrollbar w-full",
-                  isPanel
-                    ? "[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-18rem)] [&>[data-radix-scroll-area-viewport]]:max-h-[37rem] [&>[data-radix-scroll-area-viewport]]:min-h-[24rem] sm:[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-16rem)]"
-                    : "[&>[data-radix-scroll-area-viewport]]:h-full md:[&>[data-radix-scroll-area-viewport]]:h-[35rem]",
-                  "[&>[data-radix-scroll-area-viewport]]:w-full"
-                )}
+                className="hide-scrollbar w-full [&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-18rem)] [&>[data-radix-scroll-area-viewport]]:max-h-[37rem] [&>[data-radix-scroll-area-viewport]]:min-h-[24rem] [&>[data-radix-scroll-area-viewport]]:w-full sm:[&>[data-radix-scroll-area-viewport]]:h-[calc(100vh-16rem)]"
               >
-                <CodeEditor
-                  codeBlock={displayCode}
-                  language={language}
-                  className={cn(isPanel && "px-3 py-4 text-[13px] leading-6")}
-                  codeClassName={cn(activeFramework === "curl" && "text-success")}
-                  lineNumberClassName={cn(isPanel && "w-8 pr-3 text-background-text/25")}
-                  tokenClassName={curlTokenClassName}
-                />
+                <CodeEditor codeBlock={displayCode} language={language} className="px-3 py-4" />
               </ScrollArea>
             </div>
           </div>
         </TabsContent>
       </Tabs>
-
-      {showBorderBeam && <BorderBeam duration={5} size={300} />}
     </div>
   )
 }

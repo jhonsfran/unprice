@@ -13,30 +13,61 @@ These three terms work together, but they are not interchangeable:
 
 | Term | What it is | What it answers |
 | :--- | :--- | :--- |
-| **Event** | An immutable record of activity sent from your application | "What happened?" |
+| **Event** | An immutable envelope of activity sent from your application | "What happened?" |
 | **Meter** | A period-scoped rule that aggregates usage events for a usage entitlement | "How much usage happened this billing period?" |
 | **Feature** | A customer-facing capability in your product | "What is the customer paying for or limited on?" |
 
 ### Events
 
-Events are the raw, granular data points your application sends to Unprice.
+Events are the raw activity envelopes your application sends to Unprice.
 
 - They are append-only records of activity.
 - They should describe what happened at the moment it happened.
-- They are the input to usage metering.
+- They can carry multiple measured properties from the same product action.
+- They are the input to one or more usage meters.
 
-Examples:
+Use `eventSlug` for the broad action your app observed, such as `completions`. Put the measurable
+facts inside `properties`. Each meter then chooses which property to aggregate.
 
-- `api.request_made`
-- `ai.tokens_generated`
-- `storage.snapshot_taken`
+For example, one `completions` event can describe a single customer request that made two LLM calls
+and used several billable dimensions:
+
+```ts
+await unprice.usage.record({
+  idempotencyKey: request.id,
+  customerId: "cus_1234567890",
+  eventSlug: "completions",
+  properties: {
+    aiMessages: 1,
+    llmCalls: 2,
+    inputTokens: 1840,
+    outputTokens: 620,
+    totalTokens: 2460,
+    toolCalls: 1,
+    model: "gpt-4.1-mini"
+  }
+});
+```
+
+That one event could feed several meters:
+
+| Feature | Meter reads | What it measures |
+| :--- | :--- | :--- |
+| `ai-messages` | `count` or `sum aiMessages` | One customer-visible message |
+| `llm-calls` | `sum llmCalls` | Two provider calls inside the same request |
+| `ai-token-usage` | `sum totalTokens` | Combined token usage for billing or analytics |
+| `ai-output-tokens` | `sum outputTokens` | Output-token usage when that dimension is priced separately |
+| `ai-tools` | `sum toolCalls` | Tool execution inside the same product action |
+
+The event is the envelope. The meters decide which fields matter for each usage entitlement.
 
 ### Meters
 
 Meters are the rules that turn a stream of events into a number for the current billing period.
 
 - A meter is only relevant for **usage entitlements**.
-- A meter decides how incoming events should be aggregated during the active billing cycle.
+- A meter chooses the matching `eventSlug`, the aggregation method, and, when needed, the
+  `aggregationField` inside the event properties.
 - The result is what Unprice uses for billing, limits, and reporting on usage-based features.
 
 Examples:
@@ -133,8 +164,10 @@ const { result, error } = await unprice.usage.consume({
   featureSlug: "ai-messages",
   properties: {
     aiMessages: 1,
+    llmCalls: 2,
     inputTokens: 1840,
     outputTokens: 620,
+    totalTokens: 2460,
     route: "/v1/chat/completions",
     method: "POST"
   }
@@ -149,7 +182,9 @@ if (!result?.allowed) {
 }
 ```
 
-If the feature is truly "one event equals one unit," configure the meter with `count`. If each event carries a variable amount, use `sum`.
+If the feature is truly "one event equals one unit," configure the meter with `count`. If the event
+is an envelope with measured fields, use `sum` with the field that belongs to that feature, such as
+`aiMessages`, `llmCalls`, `inputTokens`, `outputTokens`, `totalTokens`, or `toolCalls`.
 
 ### Stateful metrics
 

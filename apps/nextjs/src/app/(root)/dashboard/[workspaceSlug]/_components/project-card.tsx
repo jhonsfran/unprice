@@ -10,16 +10,14 @@ function ProjectTierIndicator(props: { tier: string; isInternal?: boolean }) {
         "ml-2 whitespace-nowrap rounded-md px-2 py-1 font-mono text-xs no-underline group-hover:no-underline",
         {
           danger: props.isInternal,
-          "bg-blue-100 dark:bg-blue-800":
-            props.tier.toLocaleUpperCase() === "PRO" && !props.isInternal,
+          "bg-blue-100 dark:bg-blue-800": props.tier.toUpperCase() === "PRO" && !props.isInternal,
           "bg-red-100 dark:bg-red-800":
-            props.tier.toLocaleUpperCase() === "ENTERPRISE" && !props.isInternal,
-          "bg-teal-100 dark:bg-teal-600":
-            props.tier.toLocaleUpperCase() === "FREE" && !props.isInternal,
+            props.tier.toUpperCase() === "ENTERPRISE" && !props.isInternal,
+          "bg-teal-100 dark:bg-teal-600": props.tier.toUpperCase() === "FREE" && !props.isInternal,
         }
       )}
     >
-      {`${props.tier.length > 4 ? `${props.tier.slice(0, 4)}.` : props.tier}`}{" "}
+      {`${props.tier.length > 4 ? `${props.tier.slice(0, 4).toUpperCase()}.` : props.tier.toUpperCase()}`}{" "}
       {props.isInternal && " - INTER."}
     </span>
   )
@@ -38,7 +36,7 @@ export function ProjectCard(props: {
           <CardTitle className="flex items-center justify-between">
             <span className="whitespace-nowrap">{project.name}</span>
             <ProjectTierIndicator
-              tier={project.workspace.currentPlanSlug ?? "free"}
+              tier={project.workspace.currentPlanSlug ?? "FREE"}
               isInternal={project.isInternal}
             />
           </CardTitle>

@@ -22,9 +22,8 @@ export default function Cta() {
         </h2>
         <p className="mt-5 max-w-2xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
           <Balancer>
-            Pick one paid action, run Unprice beside your current logic in shadow, prove the path on
-            Sandbox, then enforce only when the evidence convinces you. The core is open source and
-            your payments settle to your own Stripe account.
+            Pick one paid action, run the decision in shadow beside your current logic, and enforce
+            only when the evidence convinces you.
           </Balancer>
         </p>
 
@@ -54,15 +53,38 @@ export default function Cta() {
           </Link>
         </div>
 
-        <p className="mt-5 text-background-text text-sm">
-          Not sure where to start?{" "}
-          <a
-            href="mailto:seb@unprice.dev"
-            className="font-medium text-background-textContrast underline decoration-background-borderHover underline-offset-4 hover:decoration-background-textContrast"
-          >
-            Map my paid action
-          </a>
+        <p className="mt-4 font-mono text-[11px] text-background-text">
+          free during early access · no card · AGPL-3.0 core
         </p>
+
+        <div className="mt-40 w-full max-w-2xl rounded-lg border border-background-border bg-background-bgSubtle p-5 text-left sm:p-6">
+          <div className="flex items-baseline justify-between gap-4 border-background-border border-b pb-3">
+            <span className="font-mono text-background-text text-xs uppercase tracking-widest">
+              Map my paid action
+            </span>
+            <span className="hidden font-mono text-[10px] text-background-text sm:inline">
+              founder · replies personally
+            </span>
+          </div>
+          <p className="mt-3 text-background-text text-sm leading-6">
+            Not sure where to start? Tell me the action that burns margin when a customer runs it —
+            an LLM call, a workflow, an API job — and what stops it today, if anything. I&apos;ll
+            reply personally with a concrete first step: where to put the check, what to run in
+            shadow beside what you already have, and whether to block each request or cap the whole
+            job.
+            <span className="mt-2 block font-medium text-background-textContrast">
+              — Seb, founder of Unprice
+            </span>
+          </p>
+          <div className="my-6">
+            <a
+              href="mailto:seb@unprice.dev?subject=What%20runs%20when%20customers%20overspend%3F"
+              className={buttonVariants({ variant: "outline", className: "gap-1.5" })}
+            >
+              Email what runs
+            </a>
+          </div>
+        </div>
       </div>
     </section>
   )

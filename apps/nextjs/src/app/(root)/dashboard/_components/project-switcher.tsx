@@ -72,7 +72,9 @@ export function ProjectSwitcher() {
               })}
               variant={activeProject.isInternal ? "destructive" : "outline"}
             >
-              {activeProject.isInternal ? `${activePlanSlug} - INTERNAL` : activePlanSlug}
+              {activeProject.isInternal
+                ? `${activePlanSlug.toUpperCase()} - INTER.`
+                : activePlanSlug.toUpperCase()}
             </Badge>
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />

@@ -2,7 +2,8 @@
 
 import { cn } from "@unprice/ui/utils"
 import { Ban, Check } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
+import { AnimatedCounter } from "./animated-counter"
 
 // The signature visual: the money path, rendered as one request traced end to
 // end. The brand works when the buyer can see the commercial decision and the
@@ -12,9 +13,11 @@ import { useEffect, useRef } from "react"
 // settles and explains; the deny branch shows the same stations untouched, so
 // "rejected before any cost" is visible as the absence of state. Token-driven;
 // motion is the sanctioned request-path education: a dot walks the path in two
-// alternating passes (deny first, then allow), lighting each station title it
-// touches in the live-request `info` color. Removed under
-// prefers-reduced-motion, started only when scrolled into view.
+// alternating passes that share one budget — the first request is allowed and
+// its wallet reservation depletes the remaining budget to $0.00, so the next
+// identical request is denied. Station titles light in the live-request
+// `info` color as the dot passes. Removed under prefers-reduced-motion,
+// started only when scrolled into view.
 
 type Station = {
   id?: string
@@ -43,10 +46,14 @@ const ghostStations: Station[] = [
 
 // ---------------------------------------------------------------------------
 // Request-path choreography. The dot walks measured waypoints along the rail:
-// pass 1 ends rejected at the deny chip (before any cost), pass 2 settles
-// through wallet and ledger to the invoice. Highlights are driven from the
-// same clock so titles light exactly when the dot reaches their station.
+// pass 1 is allowed and settles through wallet and ledger to the invoice —
+// the reservation spends the remaining budget — so pass 2 arrives at a $0.00
+// budget and ends rejected at the deny chip, before any cost. Highlights and
+// the budget amount are driven from the same clock as the dot.
 // ---------------------------------------------------------------------------
+
+const BUDGET_START = 4.1
+const BUDGET_DEPLETED = 0
 
 const DOT_SIZE = 9
 const TRAVEL_SPEED = 0.5 // px per ms along the rail
@@ -65,6 +72,9 @@ type BuiltPass = {
   keyframes: Keyframe[]
   duration: number
   hits: { el: HTMLElement; at: number; until: number }[]
+  // Budget updates on the same clock: the wallet reservation counts the
+  // remaining budget down mid-pass; the next allow pass refills it.
+  sets: { at: number; value: number; depleted: boolean }[]
 }
 
 function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
@@ -106,6 +116,7 @@ function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
   const railX = requestPoint.x
   const pts: { x: number; y: number; o: number; t: number; s: number }[] = []
   const hits: BuiltPass["hits"] = []
+  const sets: BuiltPass["sets"] = []
   let t = 0
 
   const currentSize = () => pts[pts.length - 1]?.s ?? DOT_SIZE
@@ -131,6 +142,14 @@ function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
     const p = pts[pts.length - 1]
     if (p) jump(p.x, p.y, 0, FADE_MS)
   }
+  const setBudget = (value: number, depleted: boolean) => {
+    sets.push({ at: t, value, depleted })
+  }
+
+  // A fresh allow pass is a fresh billing period: the budget refills as the
+  // request spawns. A deny pass inherits the depleted budget of the pass
+  // before it — that is why it is denied.
+  setBudget(kind === "allow" ? BUDGET_START : BUDGET_DEPLETED, kind !== "allow")
 
   // Entry: the dot is emitted from the request station.
   pts.push({ x: requestPoint.x, y: requestPoint.y, o: 0, t: 0, s: requestPoint.size })
@@ -195,6 +214,9 @@ function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
         move(point.x, point.y, point.size)
       }
       hit(el)
+      // The reservation is the moment the money moves: the remaining budget
+      // drops to zero as the wallet reserves.
+      if (name === "wallet") setBudget(BUDGET_DEPLETED, true)
       dwell(STATION_DWELL)
     }
 
@@ -217,7 +239,7 @@ function buildPass(root: HTMLElement, kind: PassKind): BuiltPass | null {
     opacity: p.o,
     offset: Math.min(1, p.t / duration),
   }))
-  return { keyframes, duration, hits }
+  return { keyframes, duration, hits, sets }
 }
 
 function Leader() {
@@ -287,9 +309,11 @@ function PhaseMarker({ children }: { children: string }) {
   )
 }
 
-
 export function MoneyPath({ className }: { className?: string }) {
   const stageRef = useRef<HTMLDivElement>(null)
+  // The remaining budget is real state, told on the choreography's clock:
+  // the allow pass spends it to zero, the next period refills it.
+  const [budget, setBudget] = useState({ value: BUDGET_START, depleted: false })
 
   useEffect(() => {
     const root = stageRef.current
@@ -303,7 +327,11 @@ export function MoneyPath({ className }: { className?: string }) {
     let timer: ReturnType<typeof setTimeout> | undefined
     let anim: Animation | null = null
     let hits: BuiltPass["hits"] = []
-    let pass: PassKind = "deny"
+    let sets: BuiltPass["sets"] = []
+    let setIndex = 0
+    // Allow runs first and spends the budget; the deny that follows is its
+    // consequence — the same request against a depleted budget.
+    let pass: PassKind = "allow"
 
     const clearHits = () => {
       for (const h of hits) h.el.removeAttribute("data-mp-hit")
@@ -315,6 +343,11 @@ export function MoneyPath({ className }: { className?: string }) {
         for (const h of hits) {
           if (now >= h.at && now <= h.until) h.el.setAttribute("data-mp-hit", "true")
           else if (h.el.hasAttribute("data-mp-hit")) h.el.removeAttribute("data-mp-hit")
+        }
+        while (setIndex < sets.length && now >= (sets[setIndex]?.at ?? Number.POSITIVE_INFINITY)) {
+          const s = sets[setIndex]
+          if (s) setBudget({ value: s.value, depleted: s.depleted })
+          setIndex += 1
         }
       }
       raf = requestAnimationFrame(tick)
@@ -328,6 +361,8 @@ export function MoneyPath({ className }: { className?: string }) {
       pass = pass === "deny" ? "allow" : "deny"
       if (!built) return
       hits = built.hits
+      sets = built.sets
+      setIndex = 0
       anim = dot.animate(built.keyframes, {
         duration: built.duration,
         easing: "linear",
@@ -359,12 +394,13 @@ export function MoneyPath({ className }: { className?: string }) {
       if (timer) clearTimeout(timer)
       anim?.cancel()
       clearHits()
+      setBudget({ value: BUDGET_START, depleted: false })
     }
   }, [])
 
   return (
     <figure
-      aria-label="The money path: one request traced end to end. A request resolves its plan version, pricing rule, meter, and entitlement, then reaches the budget decision. Within budget, the request is allowed with a 200: the wallet reserves credits, the ledger captures the movement, and the invoice line is explained by the same decision. Over budget, the request is denied with a 429 before any cost exists: the wallet is untouched, the ledger has no entry, and the invoice has no line."
+      aria-label="The money path: one request traced end to end. A request resolves its plan version, pricing rule, meter, and entitlement, then reaches the budget decision. With $4.10 of budget remaining the request is allowed with a 200: the wallet reserves credits, the ledger captures the movement, and the invoice line is explained by the same decision. The reservation depletes the budget to $0.00, so the next identical request is denied with a 429 before any cost exists: the wallet is untouched, the ledger has no entry, and the invoice has no line."
       className={cn("mx-auto w-full max-w-3xl", className)}
     >
       <style>{`
@@ -383,7 +419,7 @@ export function MoneyPath({ className }: { className?: string }) {
           The money path
         </span>
         <span className="hidden font-mono text-[10px] text-background-text sm:inline">
-          one request · both outcomes
+          two requests · one budget
         </span>
       </figcaption>
 
@@ -429,29 +465,29 @@ export function MoneyPath({ className }: { className?: string }) {
               data-mp-rail-dot
               className="-translate-x-1/2 -translate-y-1/2 absolute top-1/2 left-2 block size-2.5"
             >
-              <span className="mp-beacon absolute inset-0 rounded-full bg-primary-text" />
-              <span className="absolute inset-0 rounded-full bg-primary-text" />
+              <span className="mp-beacon absolute inset-0 rounded-full bg-warning-text" />
+              <span className="absolute inset-0 rounded-full bg-warning-text" />
             </span>
-            <div className="relative rounded-sm border border-primary-line bg-primary-bgSubtle px-4 py-3">
+            <div className="relative rounded-sm border border-warning-line bg-warning-bgSubtle px-4 py-3 transition-colors duration-300 group-data-[mp-hit=true]:border-warning-border group-data-[mp-hit=true]:bg-warning-bg">
               <span
                 aria-hidden
-                className="-top-px -left-px absolute size-2.5 border-primary-text border-t-2 border-l-2"
+                className="-top-px -left-px absolute size-2.5 border-warning-text border-t-2 border-l-2"
               />
               <span
                 aria-hidden
-                className="-top-px -right-px absolute size-2.5 border-primary-text border-t-2 border-r-2"
+                className="-top-px -right-px absolute size-2.5 border-warning-text border-t-2 border-r-2"
               />
               <span
                 aria-hidden
-                className="-bottom-px -left-px absolute size-2.5 border-primary-text border-b-2 border-l-2"
+                className="-bottom-px -left-px absolute size-2.5 border-warning-text border-b-2 border-l-2"
               />
               <span
                 aria-hidden
-                className="-bottom-px -right-px absolute size-2.5 border-primary-text border-r-2 border-b-2"
+                className="-bottom-px -right-px absolute size-2.5 border-warning-text border-r-2 border-b-2"
               />
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="font-medium text-background-textContrast text-sm transition-colors duration-300 group-data-[mp-hit=true]:text-info-text">
+                  <p className="font-medium text-background-textContrast text-sm transition-colors duration-300">
                     Budget check
                   </p>
                   <p className="mt-0.5 text-background-text text-xs">
@@ -459,8 +495,14 @@ export function MoneyPath({ className }: { className?: string }) {
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="font-medium font-mono text-background-textContrast text-lg leading-6">
-                    $4.10
+                  <p
+                    data-mp-budget
+                    className={cn(
+                      "font-medium font-mono text-lg leading-6 transition-colors duration-300",
+                      budget.depleted ? "text-warning-text" : "text-background-textContrast"
+                    )}
+                  >
+                    <AnimatedCounter value={budget.value} prefix="$" decimals={2} duration={650} />
                   </p>
                   <p className="font-mono text-[10px] text-background-text uppercase tracking-widest">
                     remaining

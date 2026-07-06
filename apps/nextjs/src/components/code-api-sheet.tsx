@@ -15,13 +15,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@unprice/ui/sheet"
-import {
-  AnimatePresence,
-  LazyMotion,
-  m,
-  domAnimation,
-  useReducedMotion,
-} from "framer-motion"
+import { AnimatePresence, LazyMotion, domAnimation, m, useReducedMotion } from "framer-motion"
 import { Code, FileCode2, KeyRound } from "lucide-react"
 import Link from "next/link"
 import { SDKDemo, type SDKExampleParams, type method } from "~/components/landing/sdk-examples"
@@ -95,9 +89,7 @@ export function CodeApiSheet({
               <m.div
                 key="sdk-example-token-notice"
                 initial={shouldReduceMotion ? { opacity: 1 } : { height: 0, opacity: 0, y: -4 }}
-                animate={
-                  shouldReduceMotion ? { opacity: 1 } : { height: "auto", opacity: 1, y: 0 }
-                }
+                animate={shouldReduceMotion ? { opacity: 1 } : { height: "auto", opacity: 1, y: 0 }}
                 exit={shouldReduceMotion ? { opacity: 0 } : { height: 0, opacity: 0, y: -4 }}
                 transition={{
                   duration: shouldReduceMotion ? 0.01 : 0.18,
@@ -136,12 +128,9 @@ export function CodeApiSheet({
             }}
           >
             <SDKDemo
-              className="bg-background-base"
               defaultMethod={defaultMethod}
               exampleParams={resolvedExampleParams}
               frameworks={["sdk", "fetch", "curl"]}
-              presentation="panel"
-              showBorderBeam={false}
             />
           </m.div>
         </LazyMotion>

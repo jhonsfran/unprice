@@ -1,6 +1,11 @@
 "use client"
 
-import { cn } from "@unprice/ui/utils"
+import { Badge } from "@unprice/ui/badge"
+import { Button } from "@unprice/ui/button"
+import { Input } from "@unprice/ui/input"
+import { Label } from "@unprice/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@unprice/ui/select"
+import { cn, focusRing } from "@unprice/ui/utils"
 import { m } from "framer-motion"
 import {
   ArrowRight,
@@ -11,13 +16,17 @@ import {
   CreditCard,
   FileText,
   Lock,
+  type LucideIcon,
+  Plus,
   Receipt,
   RotateCcw,
   Settings,
   ShieldCheck,
+  X,
 } from "lucide-react"
 import type React from "react"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
+import { AnimatedCounter } from "./animated-counter"
 
 // ============================================
 // TYPES & CONFIGURATION
@@ -113,12 +122,19 @@ export interface PricingHeroProps {
   headline?: string
   description?: string
   docsLinkText?: string
-  onDocsClick?: () => void
-  accentColor?: string
   discountThreshold?: number
   discountPercentage?: number
   className?: string
 }
+
+type ActivePanel = "dashboard" | "response" | "invoice" | "pricing"
+
+const PANEL_VIEWS: { id: ActivePanel; label: string; icon: LucideIcon }[] = [
+  { id: "dashboard", label: "plan guardrails", icon: Settings },
+  { id: "response", label: "decision trail", icon: FileText },
+  { id: "invoice", label: "invoice", icon: Receipt },
+  { id: "pricing", label: "pricing card", icon: CreditCard },
+]
 
 interface Particle {
   id: number
@@ -207,53 +223,6 @@ const DEFAULT_FEATURES: Feature[] = [
 ]
 
 // ============================================
-// ANIMATED COUNTER
-// ============================================
-
-function AnimatedCounter({
-  value,
-  prefix = "",
-  decimals = 0,
-  className,
-}: {
-  value: number
-  prefix?: string
-  decimals?: number
-  className?: string
-}) {
-  const [displayValue, setDisplayValue] = useState(value)
-  const previousValue = useRef(value)
-
-  useEffect(() => {
-    if (value !== previousValue.current) {
-      const start = previousValue.current
-      const end = value
-      const duration = 150
-      const startTime = performance.now()
-
-      const animate = (currentTime: number) => {
-        const elapsed = currentTime - startTime
-        const progress = Math.min(elapsed / duration, 1)
-        const easeProgress = 1 - (1 - progress) ** 3
-        const current = start + (end - start) * easeProgress
-        setDisplayValue(current)
-        if (progress < 1) requestAnimationFrame(animate)
-      }
-
-      requestAnimationFrame(animate)
-      previousValue.current = value
-    }
-  }, [value])
-
-  return (
-    <span className={cn("font-mono tabular-nums", className)}>
-      {prefix}
-      {displayValue.toFixed(decimals)}
-    </span>
-  )
-}
-
-// ============================================
 // PARTICLE EFFECT
 // ============================================
 
@@ -287,8 +256,6 @@ interface DashboardPanelProps {
   onFeatureConfigChange: (featureId: string, config: Partial<FeatureConfig>) => void
   onAddFeature: (feature: Omit<Feature, "id" | "usage" | "config">) => void
   onGenerateInvoice: () => void
-  isOpen: boolean
-  disabled?: boolean
 }
 
 function DashboardPanel({
@@ -296,8 +263,6 @@ function DashboardPanel({
   onFeatureConfigChange,
   onAddFeature,
   onGenerateInvoice,
-  isOpen,
-  disabled,
 }: DashboardPanelProps) {
   const [isAdding, setIsAdding] = useState(false)
   const [newFeature, setNewFeature] = useState<Omit<Feature, "id" | "usage" | "config">>({
@@ -309,27 +274,25 @@ function DashboardPanel({
     tag: "NEW",
   })
 
-  if (!isOpen) return null
-
   return (
-    <div
-      className={cn(
-        "flex h-full flex-col rounded-lg border border-background-border bg-background-base p-4",
-        "transition-all duration-200",
-        disabled && "pointer-events-none opacity-40"
-      )}
-    >
+    <div className="flex h-full flex-col rounded-lg border border-background-border bg-background-base p-4">
       <div className="mb-1 flex shrink-0 items-baseline justify-between gap-4 border-background-line border-b pb-2.5">
         <span className="font-mono text-[10px] text-background-textContrast uppercase tracking-widest">
           Plan guardrails
         </span>
-        <button
-          type="button"
-          onClick={() => setIsAdding(!isAdding)}
-          className="font-mono text-[10px] text-primary-text transition-colors hover:text-primary-textContrast"
-        >
-          {isAdding ? "cancel" : "+ add feature"}
-        </button>
+        <Button onClick={() => setIsAdding(!isAdding)} variant="link" size="sm">
+          {isAdding ? (
+            <>
+              <X className="mr-1.5 size-3.5" />
+              <span className="font-mono">Cancel</span>
+            </>
+          ) : (
+            <>
+              <Plus className="mr-1.5 size-3.5" />
+              <span className="font-mono">Add feature</span>
+            </>
+          )}
+        </Button>
       </div>
       <p className="mb-3 font-mono text-[10px] text-background-text">
         hard denies with 429 · soft allows and warns
@@ -341,12 +304,16 @@ function DashboardPanel({
           <div className="mb-3 space-y-2 border-background-line border-b pb-3">
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
-                <span className="font-mono text-[9px] text-background-text uppercase tracking-widest">
+                <Label
+                  htmlFor="new-feature-name"
+                  className="font-mono text-[9px] text-background-text uppercase tracking-widest"
+                >
                   Name
-                </span>
-                <input
+                </Label>
+                <Input
+                  id="new-feature-name"
                   placeholder="e.g. storage"
-                  className="rounded-sm border border-background-border bg-background-bg px-2 py-1 text-[11px] focus:border-background-borderHover focus:outline-none"
+                  className="h-7 px-2 text-xs"
                   value={newFeature.displayName}
                   onChange={(e) =>
                     setNewFeature({
@@ -358,31 +325,44 @@ function DashboardPanel({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="font-mono text-[9px] text-background-text uppercase tracking-widest">
+                <Label
+                  htmlFor="new-feature-type"
+                  className="font-mono text-[9px] text-background-text uppercase tracking-widest"
+                >
                   Type
-                </span>
-                <select
-                  className="rounded-sm border border-background-border bg-background-bg px-2 py-1 text-[11px] focus:border-background-borderHover focus:outline-none"
+                </Label>
+                <Select
                   value={newFeature.type}
-                  onChange={(e) =>
-                    setNewFeature({ ...newFeature, type: e.target.value as FeatureType })
+                  onValueChange={(value) =>
+                    setNewFeature({ ...newFeature, type: value as FeatureType })
                   }
                 >
-                  <option value="usage">Usage</option>
-                  <option value="flat">Flat</option>
-                  <option value="tiered">Tiered</option>
-                </select>
+                  <SelectTrigger id="new-feature-type" className="h-7 px-2 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="usage">Usage</SelectItem>
+                    <SelectItem value="flat">Flat</SelectItem>
+                    <SelectItem value="tiered">Tiered</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="flex flex-col gap-1">
-                <span className="font-mono text-[9px] text-background-text uppercase tracking-widest">
+                <Label
+                  htmlFor="new-feature-rate"
+                  className="font-mono text-[9px] text-background-text uppercase tracking-widest"
+                >
                   Rate ($)
-                </span>
-                <input
+                </Label>
+                <Input
+                  id="new-feature-rate"
                   type="number"
+                  min="0"
+                  step="0.01"
                   placeholder="0.00"
-                  className="w-full rounded-sm border border-background-border bg-background-bg px-2 py-1 font-mono text-[11px] focus:border-background-borderHover focus:outline-none"
+                  className="h-7 px-2 font-mono text-xs"
                   value={newFeature.rate}
                   onChange={(e) =>
                     setNewFeature({ ...newFeature, rate: Number.parseFloat(e.target.value) || 0 })
@@ -390,36 +370,42 @@ function DashboardPanel({
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <span className="font-mono text-[9px] text-background-text uppercase tracking-widest">
+                <Label
+                  htmlFor="new-feature-unit"
+                  className="font-mono text-[9px] text-background-text uppercase tracking-widest"
+                >
                   Unit
-                </span>
-                <input
+                </Label>
+                <Input
+                  id="new-feature-unit"
                   placeholder="e.g. GB"
-                  className="rounded-sm border border-background-border bg-background-bg px-2 py-1 text-[11px] focus:border-background-borderHover focus:outline-none"
+                  className="h-7 px-2 text-xs"
                   value={newFeature.unit}
                   onChange={(e) => setNewFeature({ ...newFeature, unit: e.target.value })}
                 />
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                if (!newFeature.displayName) return
-                onAddFeature(newFeature)
-                setIsAdding(false)
-                setNewFeature({
-                  name: "",
-                  displayName: "",
-                  type: "usage",
-                  rate: 0,
-                  unit: "events",
-                  tag: "NEW",
-                })
-              }}
-              className="w-full rounded-sm bg-primary py-1.5 font-medium font-mono text-[11px] text-primary-foreground transition-opacity hover:opacity-90"
-            >
-              Add feature
-            </button>
+            <div className="flex justify-end">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  if (!newFeature.displayName) return
+                  onAddFeature(newFeature)
+                  setIsAdding(false)
+                  setNewFeature({
+                    name: "",
+                    displayName: "",
+                    type: "usage",
+                    rate: 0,
+                    unit: "events",
+                    tag: "NEW",
+                  })
+                }}
+              >
+                Add feature
+              </Button>
+            </div>
           </div>
         )}
 
@@ -433,38 +419,28 @@ function DashboardPanel({
                 {feature.displayName}
               </span>
 
-              <div className="flex shrink-0 items-center rounded-sm border border-background-border p-px">
-                <button
-                  type="button"
-                  onClick={() => onFeatureConfigChange(feature.id, { limitType: "hard" })}
-                  disabled={disabled}
-                  aria-pressed={feature.config.limitType === "hard"}
-                  className={cn(
-                    "rounded-[3px] px-1.5 py-0.5 font-mono text-[10px] transition-colors",
-                    feature.config.limitType === "hard"
-                      ? "bg-danger-solid text-white"
-                      : "text-background-text hover:text-background-textContrast"
-                  )}
-                >
-                  hard
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onFeatureConfigChange(feature.id, { limitType: "soft" })}
-                  disabled={disabled}
-                  aria-pressed={feature.config.limitType === "soft"}
-                  className={cn(
-                    "rounded-[3px] px-1.5 py-0.5 font-mono text-[10px] transition-colors",
-                    feature.config.limitType === "soft"
-                      ? "bg-warning-solid text-white"
-                      : "text-background-text hover:text-background-textContrast"
-                  )}
-                >
-                  soft
-                </button>
-              </div>
+              <fieldset className="flex shrink-0 items-center rounded-sm border border-background-border p-px">
+                <legend className="sr-only">{`${feature.displayName} limit type`}</legend>
+                {(["hard", "soft"] as const).map((limitType) => (
+                  <button
+                    key={limitType}
+                    type="button"
+                    onClick={() => onFeatureConfigChange(feature.id, { limitType })}
+                    aria-pressed={feature.config.limitType === limitType}
+                    className={cn(
+                      "rounded-[3px] px-1.5 py-0.5 font-mono text-[10px] transition-colors",
+                      focusRing,
+                      feature.config.limitType === limitType
+                        ? "bg-background-bgActive text-background-textContrast"
+                        : "text-background-text hover:text-background-textContrast"
+                    )}
+                  >
+                    {limitType}
+                  </button>
+                ))}
+              </fieldset>
 
-              <input
+              <Input
                 type="number"
                 value={feature.config.limit}
                 onChange={(e) => {
@@ -475,9 +451,9 @@ function DashboardPanel({
                 }}
                 min="0"
                 step="1"
-                disabled={disabled || feature.isBase}
+                disabled={feature.isBase}
                 aria-label={`${feature.displayName} limit`}
-                className="w-14 shrink-0 rounded-sm border border-background-border bg-background-bg px-1.5 py-0.5 text-right font-mono text-[11px] text-background-textContrast focus:border-background-borderHover focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-7 w-14 shrink-0 px-1.5 text-right font-mono text-[11px] text-background-textContrast"
               />
               <span className="w-14 shrink-0 truncate font-mono text-[10px] text-background-text">
                 {feature.unit}
@@ -489,15 +465,15 @@ function DashboardPanel({
 
       {/* Bill Customer Button - Sticky at bottom */}
       <div className="mt-auto shrink-0 pt-4">
-        <button
+        <Button
           type="button"
+          variant="primary"
+          size={"sm"}
           onClick={onGenerateInvoice}
-          disabled={disabled}
-          className="flex w-full items-center justify-center gap-2 rounded-md bg-primary py-2 font-medium font-mono text-[11px] text-primary-foreground transition-all hover:opacity-90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-36"
         >
-          <Receipt className="h-3.5 w-3.5" />
           Preview invoice evidence
-        </button>
+        </Button>
       </div>
     </div>
   )
@@ -513,7 +489,6 @@ interface LiveResponseProps {
   discountActive: boolean
   discountPercentage: number
   limitedFeature: Feature | null
-  isOpen: boolean
   flashError: boolean
 }
 
@@ -525,16 +500,13 @@ interface InvoicePanelProps {
   features: Feature[]
   discountActive: boolean
   discountPercentage: number
-  isOpen: boolean
 }
 
-function InvoicePanel({ features, discountActive, discountPercentage, isOpen }: InvoicePanelProps) {
+function InvoicePanel({ features, discountActive, discountPercentage }: InvoicePanelProps) {
   const totalBill = features.reduce(
     (sum, f) => sum + calculateFeatureCost(f, discountActive, discountPercentage),
     0
   )
-
-  if (!isOpen) return null
 
   const today = new Date().toLocaleDateString("en-US", {
     month: "short",
@@ -547,8 +519,8 @@ function InvoicePanel({ features, discountActive, discountPercentage, isOpen }: 
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="mb-1 flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-primary">
-              <Receipt className="h-3.5 w-3.5 text-primary-foreground" />
+            <div className="flex size-6 items-center justify-center rounded border border-primary-border bg-primary-bg">
+              <Receipt className="size-3.5 text-primary-text" aria-hidden />
             </div>
             <span className="font-bold text-background-textContrast text-sm uppercase tracking-tight">
               Invoice
@@ -635,18 +607,15 @@ function InvoicePanel({ features, discountActive, discountPercentage, isOpen }: 
 
 interface PricingPanelProps {
   features: Feature[]
-  isOpen: boolean
 }
 
-function PricingPanel({ features, isOpen }: PricingPanelProps) {
-  if (!isOpen) return null
-
+function PricingPanel({ features }: PricingPanelProps) {
   return (
     <div className="flex h-full flex-col rounded-lg border border-background-border bg-background-base p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <span className="rounded-full bg-primary-bg px-2.5 py-0.5 font-semibold text-[10px] text-primary-text uppercase tracking-wider">
+        <Badge variant="primary" className="text-[10px] uppercase tracking-wider">
           Pro Plan
-        </span>
+        </Badge>
       </div>
 
       <div className="mb-6">
@@ -679,12 +648,9 @@ function PricingPanel({ features, isOpen }: PricingPanelProps) {
         ))}
       </div>
 
-      <button
-        type="button"
-        className="w-full rounded-lg bg-primary py-2.5 font-bold text-primary-foreground text-xs transition-opacity hover:opacity-90"
-      >
+      <Button type="button" variant="primary" className="w-full">
         Start with one paid action
-      </button>
+      </Button>
 
       <p className="mt-3 text-center font-mono text-[9px] text-background-text">
         Sandbox first; connect your own Stripe when the path is proven.
@@ -699,7 +665,6 @@ function LiveResponse({
   discountActive,
   discountPercentage,
   limitedFeature,
-  isOpen,
   flashError,
 }: LiveResponseProps) {
   const activeFeature = features.find((f) => f.id === activeFeatureId)
@@ -707,8 +672,6 @@ function LiveResponse({
     ? (features.find((feature) => feature.id === limitedFeature.id) ?? limitedFeature)
     : null
   const inspectedFeature = limitedFeatureState ?? activeFeature
-
-  if (!isOpen) return null
 
   const isDenied = limitedFeatureState?.config.limitType === "hard"
   const isWarning = limitedFeatureState?.config.limitType === "soft"
@@ -747,7 +710,7 @@ function LiveResponse({
       )}
     >
       <div className="mb-4 flex items-start justify-between border-background-line border-b pb-3">
-        <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-center gap-2">
           <span className="font-mono text-[10px] text-background-text uppercase tracking-wider">
             Decision trail
           </span>
@@ -774,11 +737,11 @@ function LiveResponse({
             className={cn(
               "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md",
               isDenied
-                ? "bg-danger-solid text-white"
+                ? "bg-danger-solid text-danger-foreground"
                 : isWarning
-                  ? "bg-warning-solid text-white"
+                  ? "bg-warning-solid text-warning-foreground"
                   : inspectedFeature
-                    ? "bg-success-solid text-white"
+                    ? "bg-success-solid text-success-foreground"
                     : "bg-background-bgHover text-background-textContrast"
             )}
           >
@@ -898,19 +861,9 @@ interface FeatureRowProps {
   isPressed: boolean
   isActive: boolean
   isLimited: boolean
-  discountActive: boolean
-  discountPercentage: number
 }
 
-function FeatureRow({
-  feature,
-  onClick,
-  isPressed,
-  isActive,
-  isLimited,
-  discountActive,
-  discountPercentage,
-}: FeatureRowProps) {
+function FeatureRow({ feature, onClick, isPressed, isActive, isLimited }: FeatureRowProps) {
   const spendProgress = (feature.usage / feature.config.limit) * 100
 
   return (
@@ -919,8 +872,9 @@ function FeatureRow({
       onClick={(e) => onClick(e, feature.id)}
       disabled={isLimited && feature.config.limitType === "hard"}
       className={cn(
-        "flex w-full items-center justify-between rounded-lg p-3 transition-all duration-150",
+        "flex w-full items-center justify-between rounded-lg px-3 py-2 transition-all duration-150",
         "border border-background-border bg-background-base",
+        focusRing,
         !feature.isBase &&
           "hover:border-background-borderHover hover:bg-background-bgHover active:scale-[0.98]",
         feature.isBase && "cursor-default",
@@ -969,9 +923,6 @@ function FeatureRow({
                 {feature.type === "tiered" && (
                   <span className="text-background-text">Tiered pricing</span>
                 )}
-                {discountActive && (
-                  <span className="ml-1 text-primary-text">(-{discountPercentage}%)</span>
-                )}
               </>
             )}
           </div>
@@ -998,28 +949,30 @@ function FeatureRow({
         </div>
       </div>
       <div className="text-right">
-        <div className="font-mono font-semibold text-background-textContrast text-lg tabular-nums">
-          {feature.isBase ? (
-            <span>
-              $<AnimatedCounter value={feature.rate} decimals={2} />
-            </span>
-          ) : (
-            <AnimatedCounter value={feature.usage} />
-          )}
-        </div>
-        <div className="font-mono text-[10px] text-background-text">
-          {feature.isBase ? "per month" : feature.unit}
+        <div className="flex items-baseline justify-end gap-1">
+          <span className="font-mono font-semibold text-background-textContrast text-base tabular-nums">
+            {feature.isBase ? (
+              <span>
+                $<AnimatedCounter value={feature.rate} decimals={2} />
+              </span>
+            ) : (
+              <AnimatedCounter value={feature.usage} />
+            )}
+          </span>
+          <span className="font-mono text-[10px] text-background-text">
+            {feature.isBase ? "/mo" : feature.unit}
+          </span>
         </div>
         <div
           className={cn(
-            "mt-0.5 min-h-[14px] font-mono text-[9px] transition-opacity",
+            "min-h-[12px] font-mono text-[9px] transition-opacity",
             isLimited ? "opacity-100" : "opacity-0",
             feature.config.limitType === "hard" ? "text-danger-text" : "text-warning-text"
           )}
         >
           {feature.config.limitType === "hard" ? (
             <span className="flex items-center justify-end gap-1">
-              <Lock className="h-3 w-3" />
+              <Lock className="size-3" />
               <span>blocked</span>
             </span>
           ) : (
@@ -1039,7 +992,6 @@ export function PricingHero({
   headline = "Watch paid work stop before it creates cost.",
   description = "Click a paid action against the plan. The model shows the allow/deny decision, remaining budget, and invoice evidence from the same money path.",
   docsLinkText = "Read the Docs",
-  accentColor,
   discountThreshold = 10,
   discountPercentage = 20,
   className,
@@ -1053,7 +1005,6 @@ export function PricingHero({
   const [currentLimitedFeature, setCurrentLimitedFeature] = useState<Feature | null>(null)
   const [shake, setShake] = useState(false)
   const [flashError, setFlashError] = useState(false)
-  type ActivePanel = "dashboard" | "response" | "invoice" | "pricing"
   const [activePanel, setActivePanel] = useState<ActivePanel>("response")
   const containerRef = useRef<HTMLDivElement>(null)
   const responseRef = useRef<HTMLDivElement>(null)
@@ -1121,6 +1072,20 @@ export function PricingHero({
         setShake(true)
         // Close guardrail editing and force open the decision trail when a limit is reached.
         setActivePanel("response")
+        // On stacked (mobile) layouts the decision panel sits below the card;
+        // bring the deny/warn moment into view when a guardrail fires.
+        requestAnimationFrame(() => {
+          const panel = responseRef.current
+          if (!panel) return
+          if (panel.getBoundingClientRect().top > window.innerHeight * 0.6) {
+            panel.scrollIntoView({
+              behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+                ? "auto"
+                : "smooth",
+              block: "start",
+            })
+          }
+        })
         // Flash the error/warning
         setFlashError(true)
         setTimeout(() => setFlashError(false), 150)
@@ -1249,8 +1214,6 @@ export function PricingHero({
     setActivePanel("invoice")
   }, [])
 
-  const accentStyle = accentColor ? ({ "--accent-custom": accentColor } as React.CSSProperties) : {}
-
   return (
     <m.section
       variants={heroImageVariants}
@@ -1260,7 +1223,6 @@ export function PricingHero({
         "mx-auto my-24 flex w-full max-w-6xl items-center justify-center px-6",
         className
       )}
-      style={accentStyle}
       aria-labelledby="hero-headline"
     >
       <div className="w-full">
@@ -1284,19 +1246,20 @@ export function PricingHero({
           <p className="mb-3 font-mono text-background-text text-sm md:text-base">
             {dynamicDescription}
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              window.open("https://docs.unprice.dev", "_blank")
-            }}
-            className="group inline-flex items-center gap-1.5 font-mono text-background-text text-xs transition-colors hover:text-background-textContrast"
+          <Button
+            variant="link"
+            size="sm"
+            asChild
+            className="group h-auto gap-1.5 p-0 font-mono text-background-text text-xs"
           >
-            {docsLinkText}
-            <ArrowRight
-              className="h-3 w-3 transition-transform group-hover:translate-x-0.5"
-              aria-hidden="true"
-            />
-          </button>
+            <a href="https://docs.unprice.dev" target="_blank" rel="noreferrer">
+              {docsLinkText}
+              <ArrowRight
+                className="size-3 transition-transform group-hover:translate-x-0.5"
+                aria-hidden="true"
+              />
+            </a>
+          </Button>
         </header>
 
         {/* Main Content: Card + Side Panel */}
@@ -1320,26 +1283,22 @@ export function PricingHero({
             )}
           >
             {/* Plan Header */}
-            <div className="border-background-border border-b p-4">
+            <div className="border-background-border border-b px-4 py-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="font-semibold text-background-textContrast text-lg">Pro Plan</h2>
+                  <h2 className="font-semibold text-background-textContrast text-base">Pro Plan</h2>
                   <p className="font-mono text-[10px] text-background-text">Usage-based billing</p>
                 </div>
                 {discountActive && (
-                  <span className="rounded border border-primary-border bg-primary-bg px-2 py-1 font-mono text-[10px] text-primary-text">
+                  <Badge variant="primary" className="text-[10px]">
                     {discountPercentage}% volume pricing
-                  </span>
+                  </Badge>
                 )}
               </div>
             </div>
 
             {/* Features List */}
-            <div
-              className={cn(
-                "custom-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto p-4 transition-opacity duration-300"
-              )}
-            >
+            <div className="custom-scrollbar min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
               {features.map((feature) => (
                 <FeatureRow
                   key={feature.id}
@@ -1348,8 +1307,6 @@ export function PricingHero({
                   isPressed={pressedFeature === feature.id}
                   isActive={activeFeature === feature.id}
                   isLimited={limitedFeatures.has(feature.id)}
-                  discountActive={discountActive}
-                  discountPercentage={discountPercentage}
                 />
               ))}
             </div>
@@ -1363,35 +1320,27 @@ export function PricingHero({
             >
               <div
                 className={cn(
-                  "flex justify-center gap-2 border-t p-4",
+                  "flex justify-center gap-2 border-t p-3",
                   currentLimitedFeature?.config.limitType === "hard"
                     ? "border-danger-border"
                     : "border-warning-border",
                   shake && "animate-shake"
                 )}
               >
-                <button
-                  type="button"
-                  onClick={handleIncreaseLimit}
-                  className="flex items-center gap-1.5 rounded-lg bg-primary-solid px-4 py-2 font-mono text-primary-foreground text-xs transition-opacity hover:bg-primary-solidHover"
-                >
-                  <ChevronUp className="h-3.5 w-3.5" />
-                  Increase Limit
-                </button>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="flex items-center gap-1.5 rounded-lg border border-background-border bg-background-bg px-4 py-2 font-mono text-background-text text-xs transition-colors hover:bg-background-bgHover"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
+                <Button type="button" variant="primary" size="sm" onClick={handleIncreaseLimit}>
+                  <ChevronUp className="mr-1.5 size-3.5" aria-hidden />
+                  Increase limit
+                </Button>
+                <Button type="button" variant="default" size="sm" onClick={handleReset}>
+                  <RotateCcw className="mr-1.5 size-3.5" aria-hidden />
                   Reset
-                </button>
+                </Button>
               </div>
             </div>
 
             {/* Total Summary */}
-            <div className="border-background-border border-t p-4">
-              <div className="mb-2 flex items-center justify-between">
+            <div className="border-background-border border-t px-4 py-3">
+              <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold text-background-textContrast text-sm">
                     Accepted spend
@@ -1400,99 +1349,50 @@ export function PricingHero({
                     {totalClicks} paid actions accepted
                   </p>
                 </div>
-                <div className="text-right">
-                  <div
-                    className={cn(
-                      "font-bold font-mono text-2xl tabular-nums",
-                      "text-background-textContrast"
-                    )}
-                  >
-                    <AnimatedCounter value={currentSpend} prefix="$" decimals={2} />
-                  </div>
+                <div className="text-right font-bold font-mono text-background-textContrast text-xl tabular-nums">
+                  <AnimatedCounter value={currentSpend} prefix="$" decimals={2} />
                 </div>
               </div>
 
-              {/* Discount status */}
-              <div className="flex items-center justify-between font-mono text-[10px] text-background-text">
-                <span className={discountActive ? "text-primary-text" : ""}>
-                  {discountActive
-                    ? `${discountPercentage}% volume pricing rule active`
-                    : `${Math.max(0, discountThreshold - totalClicks)} accepted actions until volume pricing`}
-                </span>
-              </div>
+              {/* Volume pricing countdown; once active, the plan-header badge carries the state */}
+              {!discountActive && (
+                <p className="mt-1 font-mono text-[10px] text-background-text">
+                  {Math.max(0, discountThreshold - totalClicks)} accepted actions until volume
+                  pricing
+                </p>
+              )}
             </div>
 
-            {/* Footer with toggle icons */}
-            <div className="flex shrink-0 items-center justify-center gap-2 border-background-border border-t p-3">
-              <button
-                type="button"
-                onClick={() => setActivePanel("dashboard")}
-                className={cn(
-                  "rounded-lg border p-2 transition-colors",
-                  activePanel === "dashboard"
-                    ? "border-background-borderHover bg-background-bgActive text-background-textContrast"
-                    : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
-                )}
-                aria-label="Toggle dashboard"
-                aria-expanded={activePanel === "dashboard"}
-              >
-                <Settings className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePanel("response")}
-                className={cn(
-                  "rounded-lg border p-2 transition-colors",
-                  activePanel === "response"
-                    ? "border-background-borderHover bg-background-bgActive text-background-textContrast"
-                    : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
-                )}
-                aria-label="Toggle decision trail"
-                aria-expanded={activePanel === "response"}
-              >
-                <FileText className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePanel("invoice")}
-                className={cn(
-                  "rounded-lg border p-2 transition-colors",
-                  activePanel === "invoice"
-                    ? "border-background-borderHover bg-background-bgActive text-background-textContrast"
-                    : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
-                )}
-                aria-label="Toggle invoice"
-                aria-expanded={activePanel === "invoice"}
-              >
-                <Receipt className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setActivePanel("pricing")}
-                className={cn(
-                  "rounded-lg border p-2 transition-colors",
-                  activePanel === "pricing"
-                    ? "border-background-borderHover bg-background-bgActive text-background-textContrast"
-                    : "border-background-border bg-background-bg text-background-text hover:border-background-borderHover hover:text-background-textContrast"
-                )}
-                aria-label="Toggle pricing"
-                aria-expanded={activePanel === "pricing"}
-              >
-                <CreditCard className="h-4 w-4" />
-              </button>
+            {/* Footer with panel switcher */}
+            <div className="flex shrink-0 items-center justify-center gap-2 border-background-border border-t p-2">
+              {PANEL_VIEWS.map(({ id, label, icon: Icon }) => (
+                <Button
+                  key={id}
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setActivePanel(id)}
+                  aria-label={`Show ${label}`}
+                  aria-pressed={activePanel === id}
+                  className={cn(
+                    "text-background-text",
+                    activePanel === id && "bg-background-bgActive text-background-textContrast"
+                  )}
+                >
+                  <Icon className="size-4" aria-hidden />
+                </Button>
+              ))}
             </div>
           </div>
 
           {/* Side Panel (Dashboard or Response) - Right on desktop, below on mobile */}
-          <div ref={responseRef} className="flex-1 transition-all duration-300">
+          <div ref={responseRef} className="flex-1 scroll-mt-20 transition-all duration-300">
             {activePanel === "dashboard" && (
               <DashboardPanel
                 features={features}
                 onFeatureConfigChange={handleFeatureConfigChange}
                 onAddFeature={handleAddFeature}
                 onGenerateInvoice={handleGenerateInvoice}
-                isOpen={true}
-                disabled={false}
               />
             )}
             {activePanel === "response" && (
@@ -1502,7 +1402,6 @@ export function PricingHero({
                 discountActive={discountActive}
                 discountPercentage={discountPercentage}
                 limitedFeature={currentLimitedFeature}
-                isOpen={true}
                 flashError={flashError}
               />
             )}
@@ -1511,10 +1410,9 @@ export function PricingHero({
                 features={features}
                 discountActive={discountActive}
                 discountPercentage={discountPercentage}
-                isOpen={true}
               />
             )}
-            {activePanel === "pricing" && <PricingPanel features={features} isOpen={true} />}
+            {activePanel === "pricing" && <PricingPanel features={features} />}
           </div>
         </div>
       </div>
@@ -1537,6 +1435,15 @@ export function PricingHero({
         }
         :global(.animate-shake) {
           animation: shake 0.6s ease-in-out;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          :global(.animate-particle) {
+            animation: none;
+            opacity: 0;
+          }
+          :global(.animate-shake) {
+            animation: none;
+          }
         }
         :global(.custom-scrollbar::-webkit-scrollbar) {
           width: 4px;

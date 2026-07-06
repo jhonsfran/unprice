@@ -1,7 +1,3 @@
-import { APP_DOMAIN } from "@unprice/config"
-import { buttonVariants } from "@unprice/ui/button"
-import { ArrowRight } from "lucide-react"
-import { Link } from "next-view-transitions"
 import { LedgerRow, SectionShell } from "./station"
 import { StationHeader } from "./station-header"
 
@@ -125,16 +121,6 @@ export function AdoptionSection() {
             <p className="mt-2 text-background-text text-sm leading-6">{item.answer}</p>
           </div>
         ))}
-      </div>
-
-      <div className="mt-4">
-        <Link
-          href={`${APP_DOMAIN}`}
-          className={buttonVariants({ variant: "outline", className: "gap-1.5" })}
-        >
-          Start on Sandbox
-          <ArrowRight aria-hidden className="size-3.5" />
-        </Link>
       </div>
     </SectionShell>
   )

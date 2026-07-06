@@ -33,23 +33,16 @@ export function ProblemSection() {
             By invoice time, the paid work already ran.
           </h2>
           <p className="mt-5 max-w-xl text-background-text text-base leading-7 sm:text-lg sm:leading-8">
-            A customer triggers the expensive action. Your counter notices later. Your invoice
-            explains it weeks later. If the request should have been blocked, the cost is already
-            real; if the customer disputes it, engineering turns into invoice support.
+            A customer triggers the expensive action — a model call, an API job, a workflow run.
+            Your counter notices later. Your invoice explains it weeks later. If the request should
+            have been blocked, that cost is margin you already spent and can never bill; if the
+            customer disputes it, engineering turns into invoice support.
           </p>
-
-          <div className="mt-10 max-w-xl border-background-border border-t pt-6">
-            <h3 className="font-medium text-background-textContrast text-lg">
-              Your Redis counter is not a budget.
-            </h3>
-            <p className="mt-3 text-background-text text-sm leading-6">
-              A counter can say usage is high. It cannot prove which plan version applied, which
-              credits were reserved, why a request was denied, and how accepted usage became an
-              invoice line. The counter and the real cost live in different systems, so budgets
-              drift from spend — and every packaging change edits product code, billing scripts, and
-              reconciliation jobs at once.
-            </p>
-          </div>
+          <p className="mt-4 max-w-xl text-background-text text-sm leading-6">
+            Your Redis counter is not a budget: it can say usage is high, but it cannot prove which
+            plan version applied, which credits were reserved, or why a request was denied.
+            Sharpest where customers buy credits for AI, API, and workflow actions.
+          </p>
         </div>
 
         <figure
