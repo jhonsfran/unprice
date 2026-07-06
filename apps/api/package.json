@@ -13,6 +13,7 @@
     "dev:wrangler": "openlogs --name api --raw-only --no-history --out-dir '../../.openlogs' wrangler dev src/index.ts -e dev",
     "start": "wrangler dev -e dev",
     "test": "vitest run",
+    "test:workers": "vitest run --config vitest.workers.config.ts",
     "test:file": "vitest run \"$@\"",
     "gentypes": "wrangler types",
     "clean": "rm -rf .turbo node_modules dist .wrangler",
@@ -24,6 +25,7 @@
     "type-check:full": "pnpm exec wrangler types && pnpm exec tsc --noEmit"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.12.21",
     "@cloudflare/workers-types": "^4.20250121.0",
     "@types/node": "24.13.2",
     "@unprice/tsconfig": "workspace:^",
