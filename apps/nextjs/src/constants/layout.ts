@@ -40,7 +40,7 @@ export const siteConfig: SiteConfig = {
   description:
     "Open-source customer money path for usage-based SaaS. Authorize customer spend before paid work runs.",
   links: {
-    twitter: "https://github.com/jhonsfran1165/unprice",
+    twitter: "https://x.com/jhosef90",
     github: "https://github.com/jhonsfran1165/unprice",
     dashboard: "/",
   },

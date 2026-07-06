@@ -171,9 +171,15 @@ decoration.
 
 Implemented as a reusable component:
 [`apps/nextjs/src/components/landing/money-path.tsx`](/Users/jhonsfran/repos/unprice/apps/nextjs/src/components/landing/money-path.tsx)
-(`MoneyPath`), currently rendered in the "Built for the request path" section. It is static and
-token-driven (no decorative motion) and renders the allow/deny decision as two outcome states. Reuse
-this component rather than re-drawing the path; extend it for docs and empty states.
+(`MoneyPath`), currently rendered in the "Built for the request path" section. It is token-driven
+and renders one request traced end to end: receipt-style stations with monospace facts, the budget
+decision framed by the logo's bracket motif, and a literal fork — the allow branch settles and
+explains while the deny branch shows the same stations untouched (no wallet movement, no ledger
+entry, no invoice line). Motion is the sanctioned request-path education: a dot walks the path in
+two alternating passes (denied first, then allowed through to the invoice), lighting each station
+title it touches in the live-request `info` color; it starts only in view and is removed under
+`prefers-reduced-motion`. Reuse this component rather than re-drawing the path; extend it for docs
+and empty states.
 
 Recommended hero concept:
 

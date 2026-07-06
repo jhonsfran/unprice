@@ -77,11 +77,12 @@ export default function PillarsPriceOps() {
         id="benefits-title"
         className="inline-block py-2 font-bold text-4xl text-background-textContrast tracking-tighter md:text-6xl"
       >
-        The Solution: PriceOps
+        The Solution: One Customer Money Path
       </m.h2>
       <m.div variants={itemVariants} className="mt-6 text-justify text-lg">
-        Unprice is open-source <b>PriceOps infrastructure</b> for usage-based SaaS. It’s the runtime
-        layer that moves pricing out of your codebase and into the request path.
+        Unprice is the <b>open-source customer money path</b> for usage-based SaaS — the runtime
+        layer that moves pricing out of your codebase and into the request path. PriceOps is the
+        operating model behind it.
         <br />
         <br />
         <b>What is PriceOps?</b>

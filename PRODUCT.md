@@ -1,5 +1,8 @@
 # Product
 
+> Condensed register. The canonical product source of truth is
+> [`docs/brand/PRODUCT.md`](docs/brand/PRODUCT.md); keep this file in sync with it.
+
 ## Register
 
 product

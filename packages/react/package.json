@@ -1,5 +1,6 @@
 {
   "name": "@unprice/react",
+  "description": "React bindings for Unprice — the open-source customer money path for usage-based SaaS.",
   "version": "0.0.2",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

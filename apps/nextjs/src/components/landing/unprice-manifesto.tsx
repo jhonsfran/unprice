@@ -271,7 +271,7 @@ export function UnpriceManifesto() {
               transition={{ duration: 0.3, delay: 0.1 }}
               className="text-background-text text-sm"
             >
-              the PriceOps Infrastructure
+              the customer money path
             </m.div>
           </m.div>
 
@@ -518,7 +518,7 @@ export function UnpriceManifesto() {
           animate={{ opacity: animationPhase >= 3 ? 1 : 0 }}
           transition={{ duration: 0.2, delay: 0.2 }}
         >
-          <p className="text-sm">PriceOps infrastructure principles</p>
+          <p className="text-sm">PriceOps operating principles</p>
         </m.div>
       </div>
     </TooltipProvider>

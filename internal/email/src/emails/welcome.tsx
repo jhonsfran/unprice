@@ -25,7 +25,7 @@ const WelcomeEmail = ({
     <Html lang="en" dir="ltr">
       <Tailwind>
         <Head />
-        <Preview>Welcome to Unprice - Create your first adaptive pricing plan</Preview>
+        <Preview>Welcome to Unprice - authorize customer spend before paid work runs</Preview>
         <Body className="bg-[#191918] py-[40px] font-sans">
           <Container className="mx-auto max-w-[600px] rounded-[8px] bg-[#111110] px-[32px] py-[40px]">
             {/* Logo */}
@@ -44,32 +44,34 @@ const WelcomeEmail = ({
               </Heading>
 
               <Text className="mb-[24px] text-[#ffffff] text-[16px] leading-[24px]">
-                You've just broken free from the invisible chains of static pricing. No more rigid
-                tiers that stifle growth or endless engineering overhauls.
+                Unprice is the open-source customer money path for usage-based SaaS: authorize
+                customer spend before paid work runs, then explain every charge, credit, denial,
+                and invoice line from the same evidence trail.
               </Text>
 
               <Text className="mb-[32px] text-[#ffffff] text-[16px] leading-[24px]">
-                With Unprice, you can launch adaptive models like usage-based billing with our
-                simple TypeScript SDK—no rewrites required. Your pricing will scale seamlessly with
-                your product, unlocking millions in potential.
+                Start with one paid action. Define a plan version, install the TypeScript SDK, and
+                run the decision in shadow on the built-in Sandbox—nothing blocks your traffic
+                until the evidence convinces you.
               </Text>
 
-              <Text className="mb-[24px] font-semibold text-[#ffffff] text-[16px] leading-[24px]">
-                Ready to evolve from frustrated builder to revenue leader?
+              <Text className="mb-[24px] text-[#ffffff] text-[16px] leading-[24px]">
+                When you go live, connect your own Stripe account. Unprice never sits in your funds
+                flow.
               </Text>
 
               {/* CTA Button */}
               <Section className="mb-[32px] text-center">
                 <Button
-                  href="https://unprice.dev/dashboard/plans/new"
+                  href="https://app.unprice.dev"
                   className="box-border rounded-[8px] bg-[#ffc53d] px-[32px] py-[16px] font-semibold text-[#111110] text-[16px] no-underline"
                 >
-                  Create Your First Plan
+                  Start with one paid action
                 </Button>
               </Section>
 
               <Text className="text-center text-[#ffffff] text-[14px] leading-[20px]">
-                Questions? Simply reply to this email—we're here to help you succeed.
+                Questions? Reply to this email—we're here to help.
               </Text>
             </Section>
 
@@ -105,7 +107,7 @@ const WelcomeEmail = ({
               </Text>
 
               <Text className="m-0 text-center text-[#ffffff] text-[12px] leading-[16px]">
-                © 2025 Unprice, Inc.
+                © 2026 Unprice, Inc.
               </Text>
             </Section>
           </Container>

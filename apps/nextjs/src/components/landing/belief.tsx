@@ -81,7 +81,9 @@ export default function Belief() {
           </span>
           <br />
           <br />
-          <span className="font-bold italic">Unprice — open-source PriceOps infrastructure.</span>
+          <span className="font-bold italic">
+            Unprice — the open-source customer money path for usage-based SaaS.
+          </span>
         </p>
       </m.div>
       <m.div
@@ -91,7 +93,7 @@ export default function Belief() {
         transition={{ delay: 0.4, duration: 0.6 }}
       >
         <Link href={`${APP_DOMAIN}`} className={buttonVariants({ variant: "primary" })}>
-          Start pricing
+          Start with one paid action
           <ChevronRight className="ml-1 h-4 w-4" />
         </Link>
       </m.div>
