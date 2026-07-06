@@ -7,6 +7,7 @@
   "scripts": {
     "clean": "rm -rf .turbo node_modules",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "dev:trigger": "pnpm dlx trigger.dev@4.4.5 dev",
     "deploy:trigger-prod": "npx trigger.dev@4.4.5 deploy",
     "delete": "pnpm tsx src/delete.ts"
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@unprice/tsconfig": "workspace:*",
     "typescript": "^5.3.3",
-    "tsx": "^4.7.2"
+    "tsx": "^4.7.2",
+    "vitest": "^2.1.9"
   }
 }
